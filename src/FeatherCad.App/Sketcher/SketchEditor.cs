@@ -27,7 +27,8 @@ enum SnapKind { None, Point, Origin, Midpoint, OnLine, OnCircle, Center, ModelVe
 /// <summary>Model edge a snap refers to (projected into the sketch as reference geometry on click).</summary>
 sealed record ModelHit(Body Body, TopoEdge Edge, Vec3 Point);
 
-readonly record struct Snap(SnapKind Kind, Vec2 P, int Id = -1, bool H = false, bool V = false, int AlignId = -1, ModelHit? Model = null);
+readonly record struct Snap(SnapKind Kind, Vec2 P, int Id = -1, bool H = false, bool V = false, int AlignId = -1, ModelHit? Model = null,
+    Vec2? AlignX = null, Vec2? AlignY = null);
 
 /// <summary>
 /// Interactive 2D sketch editing on a plane: drawing tools with automatic relations (coincident,
@@ -663,7 +664,18 @@ public sealed class SketchEditor : IViewportMode
             }
         }
         if (modelEdge is { } me && !h && !v) return me;
-        return new Snap(SnapKind.None, pos, -1, h, v);
+        // inference lines: line up with the X or Y of sketch points / model vertices (no relation is added)
+        Vec2? ax = null, ay = null;
+        double bx = tol * 0.6, by = tol * 0.6;
+        foreach (var q in AlignmentPoints())
+        {
+            if (Vec2.Distance(q, m) < tol * 2) continue; // that would be a point snap
+            if (!v && Math.Abs(q.X - m.X) < bx) { bx = Math.Abs(q.X - m.X); ax = q; }
+            if (!h && Math.Abs(q.Y - m.Y) < by) { by = Math.Abs(q.Y - m.Y); ay = q; }
+        }
+        if (ax is { } qx) pos = new Vec2(qx.X, pos.Y);
+        if (ay is { } qy) pos = new Vec2(pos.X, qy.Y);
+        return new Snap(SnapKind.None, pos, -1, h, v, AlignX: ax, AlignY: ay);
     }
 
     /// <summary>
@@ -698,6 +710,30 @@ public sealed class SketchEditor : IViewportMode
             return new Snap(SnapKind.ModelEdge, c + (m - c) * (circ.r / dist), Model: new ModelHit(body, edge, edge.Midpoint));
         }
         return null;
+    }
+
+    List<Vec2>? _modelVertices;
+    Solid[]? _modelVerticesKey;
+
+    /// <summary>Sketch points plus projected model vertices (cached per model state) for inference lines.</summary>
+    IEnumerable<Vec2> AlignmentPoints()
+    {
+        foreach (var p in Sk.Points) yield return p.P;
+        var key = _vp.Bodies.Select(b => b.Solid).ToArray();
+        if (_modelVertices == null || _modelVerticesKey == null || key.Length != _modelVerticesKey.Length
+            || !key.Zip(_modelVerticesKey).All(z => ReferenceEquals(z.First, z.Second)))
+        {
+            var list = new List<Vec2>();
+            foreach (var b in _vp.Bodies)
+                foreach (var e in b.Solid.Topology.Edges)
+                {
+                    list.Add(Frame.ToLocal(e.Start));
+                    if (!e.Closed) list.Add(Frame.ToLocal(e.End));
+                }
+            foreach (var (_, _, c) in ModelCircles()) list.Add(c);
+            _modelVertices = list.Distinct().ToList(); _modelVerticesKey = key;
+        }
+        foreach (var q in _modelVertices) yield return q;
     }
 
     List<(Body body, TopoEdge edge, Vec2 center)>? _modelCircles;
@@ -1421,6 +1457,8 @@ public sealed class SketchEditor : IViewportMode
             if (_snap.Model is { } mh)
                 foreach (var seg in mh.Edge.Segs) g.Line(seg.A, seg.B, new Rgba(0.65f, 0.25f, 0.85f), top: true);
         }
+        if (_snap.AlignX is { } iax) g.Dashed(f.ToWorld(iax), f.ToWorld(m), new Rgba(0.35f, 0.55f, 0.95f), px * 4, top: true);
+        if (_snap.AlignY is { } iay) g.Dashed(f.ToWorld(iay), f.ToWorld(m), new Rgba(0.35f, 0.55f, 0.95f), px * 4, top: true);
         if (_clicks.Count == 0) return;
         void L(Vec2 a, Vec2 b, bool dashed = false) { if (dashed) g.Dashed(f.ToWorld(a), f.ToWorld(b), pc, px * 5, top: true); else g.Line(f.ToWorld(a), f.ToWorld(b), pc, top: true); }
         void Arc(Vec2 c, double r, double a0, double a1)
