@@ -15,7 +15,10 @@ natively on **Windows, Linux and macOS** with no browser, no Electron and no nat
 - **Fully parametric**: every feature is regenerated from the history; dimensions and feature values accept
   expressions and global variables (`W = 100`, `W/2 + 5`, `1in`, `sin(30)`).
 - **Fast**: incremental rebuilds (only features after the change are rebuilt), background rebuild thread so
-  the UI never blocks, live preview while editing, ~1 s cold start for the ReadyToRun build.
+  the UI never blocks, live preview while editing, ~1 s cold start for the ReadyToRun build. A 14-feature
+  shelled part (fillets, counterbored holes, pattern, shell, chamfer) rebuilds in ~85 ms; editing one of its
+  parameters takes 7–80 ms; tool solids and intermediate results are never meshed, and unchanged boolean
+  operands are reused from a cache. A rebuild-time budget test guards against regressions.
 - **Light**: ~3 MB of own code; the only dependencies are Avalonia and Silk.NET (OpenGL bindings).
 - **Exact geometry**: faces are true planes, cylinders, cones, spheres and tori with exact line, circle and
   B-spline edges — exported to STEP as analytic surfaces and displayed with smooth silhouettes.
@@ -26,7 +29,7 @@ natively on **Windows, Linux and macOS** with no browser, no Electron and no nat
 | Area | Commands |
 |---|---|
 | Sketch | Line, Centerline, Corner/Center Rectangle, Circle, Centerpoint/3-Point/Tangent Arc, Polygon, Straight Slot, Point, Trim, Convert Entities, Construction toggle |
-| Relations | Automatic (coincident, horizontal/vertical, midpoint, on-entity) plus Horizontal, Vertical, Parallel, Perpendicular, Collinear, Equal, Tangent, Concentric, Coincident, Midpoint, Symmetric, Fix |
+| Relations | Automatic while drawing (coincident, horizontal/vertical, midpoint, on-entity) — also to the **existing model**: model vertices (coincident), model edges (on edge), edge midpoints and hole/boss centers, all associative (they follow model changes); dashed inference lines to sketch points and model vertices. Plus Horizontal, Vertical, Parallel, Perpendicular, Collinear, Equal, Tangent, Concentric, Coincident, Midpoint, Symmetric, Fix |
 | Dimensions | Smart Dimension: length, horizontal/vertical/aligned distance, point–line, parallel lines, radius, diameter, angle; driven (reference) dims; expressions |
 | Solver | Numerical constraint solver with minimum-change dragging and degrees-of-freedom analysis (under / fully / over defined) |
 | Features | Extruded Boss/Base & Cut (Blind, Through All, Through All–Both, Mid Plane, two directions, merge result), Revolved Boss & Cut, Fillet, Chamfer, Hole Wizard (simple, counterbore, countersink, standard metric sizes, drill point), Shell, Linear Pattern (2 directions), Circular Pattern, Mirror, Reference Plane, Combine (add/subtract/common) |
@@ -39,7 +42,7 @@ natively on **Windows, Linux and macOS** with no browser, no Electron and no nat
 
 | Action | Input |
 |---|---|
-| Rotate | Middle mouse drag (or Alt + left drag) |
+| Rotate | Middle mouse drag (or Alt + left drag); middle double-click = zoom to fit |
 | Pan | Ctrl + middle drag, or right mouse drag |
 | Zoom | Mouse wheel (at cursor), Shift + middle drag |
 | Roll | Alt + middle drag |
@@ -47,8 +50,8 @@ natively on **Windows, Linux and macOS** with no browser, no Electron and no nat
 | View orientation | `Spacebar`, `Ctrl+1..7` (Front, Back, Left, Right, Top, Bottom, Isometric), `Ctrl+8` Normal To |
 | Rotate view | Arrow keys (15°), Shift + arrows (90°) |
 | Sketch tools | `L` Line, `R` Rectangle, `C` Circle, `A` Arc, `P` Point, `D` Smart Dimension, `T` Trim, `Esc` select/cancel |
-| PropertyManager | `Enter` = OK, `Esc` = Cancel |
-| Edit | `Ctrl+Z` / `Ctrl+Y`, `Delete`, `Ctrl+B` rebuild, `Ctrl+Q` force rebuild |
+| PropertyManager | `Enter` = OK (from any field), `Esc` = Cancel |
+| Edit | `Ctrl+Z` / `Ctrl+Y`, `Delete` (confirms, lists dependent features), `F2` rename, `Ctrl+B` rebuild, `Ctrl+Q` force rebuild |
 
 Typical workflow: select **Front Plane** → **Sketch** → draw → **Smart Dimension** (type values or `=expressions`)
 → **Exit Sketch** → **Extruded Boss/Base** (the sketch you just finished is picked up automatically) → OK.
@@ -81,7 +84,17 @@ dotnet run --project tests/FeatherCad.Tests -c Release
 ```
 The test runner checks kernel booleans (volumes, watertightness), blends, shell, revolve, exporters, the sketch
 solver and complete parametric parts (sketch → extrude → cut on face → fillet → hole → pattern → shell →
-equation change → save/load round trip).
+equation change → save/load round trip), plus a rebuild-time budget on two sample models.
+
+Performance tools:
+
+```bash
+# warm/cold rebuild, per-feature times, profile by stage, and the cost of editing each feature's parameter
+dotnet run --project tests/FeatherCad.Tests -c Release -- bench path/to/model.fcad 10
+# rebuild with one parameter changed, writing the boolean trace to %TEMP%/fc-repro-trace.txt
+dotnet run --project tests/FeatherCad.Tests -c Release -- repro path/to/model.fcad Fillet2 Radius 2.5
+```
+`Kernel.Prof` is a lightweight stage profiler (`using (Prof.Time("stage")) ...`, off by default).
 
 ## Architecture
 
