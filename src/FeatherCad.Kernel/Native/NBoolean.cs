@@ -12,7 +12,8 @@ public sealed class NBooleanException(string msg) : Exception(msg);
 public sealed class NBoolean
 {
     public static Action<string>? Trace;
-    static void T(string m) => Trace?.Invoke(m);
+    static readonly object _traceLock = new();
+    static void T(string m) { if (Trace != null) lock (_traceLock) Trace?.Invoke(m); }
     static string Dump(IEnumerable<NFace> fs) => string.Join(", ", fs.GroupBy(f => f.Tag.Name).Select(g => $"{g.Key}x{g.Count()}[{string.Join("/", g.Select(f => f.Loops.Count))}]"));
     readonly double _tol;      // geometric coincidence
     readonly double _onTol;    // "on the boundary" for UV/domain decisions
@@ -40,6 +41,16 @@ public sealed class NBoolean
         if (!(scale > 0) || hi.X < lo.X || hi.Y < lo.Y || hi.Z < lo.Z) scale = Math.Min(ba.Diagonal, bb.Diagonal);
         var nb = new NBoolean(scale);
         return nb.Execute(a.Clone(), b.Clone(), op);
+    }
+
+    /// <summary>Builds the missing face domains in parallel (all at the same sampling tolerance, so concurrent
+    /// edge sampling produces identical results), then caches them.</summary>
+    void PrepareDomains(IEnumerable<NFace> faces)
+    {
+        var todo = faces.Where(f => !_domains.ContainsKey(f)).Distinct(ReferenceEqualityComparer.Instance).Cast<NFace>().ToList();
+        var built = new NDomain[todo.Count];
+        Parallel.For(0, todo.Count, i => { built[i] = NDomain.Of(todo[i], _sampleTol * 500); built[i].InteriorPoint(); });
+        for (int i = 0; i < todo.Count; i++) _domains[todo[i]] = built[i];
     }
 
     NDomain Dom(NFace f)
@@ -76,26 +87,55 @@ public sealed class NBoolean
             foreach (var f in A.Faces) faceBoxA[f] = f.Bounds(_sampleTol * 500);
             foreach (var f in B.Faces) faceBoxB[f] = f.Bounds(_sampleTol * 500);
         }
+        // candidate face pairs; intersection curves are computed up front (traced ones in parallel: they are
+        // pure functions of the two faces), then section edges are assembled sequentially in pair order
+        var pairs = new List<(NFace fa, NFace fb, bool coincident)>();
         foreach (var fa in A.Faces)
             foreach (var fb in B.Faces)
+                if (faceBoxA[fa].Overlaps(faceBoxB[fb], _onTol))
+                    pairs.Add((fa, fb, fa.Surface.CoincidentWith(fb.Surface, _tol * 10)));
+        var pairCurves = new List<NCurve>[pairs.Count];
+        var toTrace = new List<int>();
+        using (Prof.Time("sec.analytic"))
+            for (int i = 0; i < pairs.Count; i++)
             {
-                if (!faceBoxA[fa].Overlaps(faceBoxB[fb], _onTol)) continue;
-                if (fa.Surface.CoincidentWith(fb.Surface, _tol * 10))
-                {
-                    using var _i = Prof.Time("sec.imprint");
-                    Imprint(fb, fa, AddSec);
-                    Imprint(fa, fb, AddSec);
-                    continue;
-                }
-                using (Prof.Time("sec.curves"))
-                    foreach (var e in SectionEdges(fa, fb)) { AddSec(fa, e); AddSec(fb, e); }
-                // boundary edges of one face lying on the other face's surface split that face
-                using (Prof.Time("sec.onsurface"))
-                {
-                    ImprintOnSurfaceEdges(fa, fb, AddSec);
-                    ImprintOnSurfaceEdges(fb, fa, AddSec);
-                }
+                if (pairs[i].coincident) continue;
+                var an = NIntersect.Analytic(pairs[i].fa.Surface, pairs[i].fb.Surface, _tol * 10);
+                if (an != null) pairCurves[i] = an; else toTrace.Add(i);
             }
+        using (Prof.Time("sec.trace"))
+        {
+            var traceTol = _sampleTol * 50;
+            // sample the traced faces' edges first, single-threaded: parallel tracing then only reads the caches
+            foreach (var i in toTrace) { NDomain.Of(pairs[i].fa, Math.Max(traceTol, 1e-3)); NDomain.Of(pairs[i].fb, Math.Max(traceTol, 1e-3)); }
+            Parallel.ForEach(toTrace, i =>
+            {
+                var (fa, fb, _) = pairs[i];
+                var c = NIntersect.Trace(fa, fb.Surface, traceTol).Cast<NCurve>().ToList();
+                // traced from the other side too (small faces)
+                if (c.Count == 0) c = NIntersect.Trace(fb, fa.Surface, traceTol).Cast<NCurve>().ToList();
+                pairCurves[i] = c;
+            });
+        }
+        for (int i = 0; i < pairs.Count; i++)
+        {
+            var (fa, fb, coincident) = pairs[i];
+            if (coincident)
+            {
+                using var _i = Prof.Time("sec.imprint");
+                Imprint(fb, fa, AddSec);
+                Imprint(fa, fb, AddSec);
+                continue;
+            }
+            using (Prof.Time("sec.curves"))
+                foreach (var e in SectionEdges(fa, fb, pairCurves[i])) { AddSec(fa, e); AddSec(fb, e); }
+            // boundary edges of one face lying on the other face's surface split that face
+            using (Prof.Time("sec.onsurface"))
+            {
+                ImprintOnSurfaceEdges(fa, fb, AddSec);
+                ImprintOnSurfaceEdges(fb, fa, AddSec);
+            }
+        }
 
         Lap("sections");
         // 5. split faces
@@ -282,26 +322,13 @@ public sealed class NBoolean
     // ------------------------------------------------------------------------------------------
     // section edges
 
-    IEnumerable<NEdge> SectionEdges(NFace fa, NFace fb)
+    IEnumerable<NEdge> SectionEdges(NFace fa, NFace fb, List<NCurve> curves)
     {
         var sa = fa.Surface; var sb = fb.Surface;
         // breakpoints: vertices of either face lying on both surfaces
         var bps = fa.Coedges.Concat(fb.Coedges).SelectMany(c => new[] { c.Start, c.End })
             .Distinct(ReferenceEqualityComparer.Instance).Cast<NVertex>()
             .Where(v => Math.Abs(sa.F_(v.P)) < _onTol && Math.Abs(sb.F_(v.P)) < _onTol).ToList();
-        List<NCurve>? analytic; List<NCurve> curves;
-        using (Prof.Time("sec.analytic")) analytic = NIntersect.Analytic(sa, sb, _tol * 10);
-        var tsw = System.Diagnostics.Stopwatch.StartNew();
-        using (Prof.Time("sec.trace"))
-        {
-            curves = analytic ?? NIntersect.Trace(fa, sb, _sampleTol * 50).Cast<NCurve>().ToList();
-            if (analytic == null && curves.Count == 0)
-            {
-                // traced from the other side too (small faces)
-                curves = NIntersect.Trace(fb, sa, _sampleTol * 50).Cast<NCurve>().ToList();
-            }
-        }
-        if (Prof.Enabled && analytic == null) Prof.Add($"trace {sa.Kind}x{sb.Kind} {(curves.Count > 0 ? "hit" : "miss")}", tsw.Elapsed.TotalMilliseconds);
         NDomain domA, domB;
         using (Prof.Time("sec.domains")) { domA = Dom(fa); domB = Dom(fb); }
         foreach (var c in curves)
@@ -635,10 +662,13 @@ public sealed class NBoolean
         var res = new Dictionary<NFace, State>(ReferenceEqualityComparer.Instance);
         var idx = new Dictionary<NFace, int>(ReferenceEqualityComparer.Instance);
         for (int i = 0; i < pieces.Count; i++) idx[pieces[i]] = i;
+        var plone = Prof.Time("cls.lone");
         var lone = new bool[pieces.Count];
         for (int i = 0; i < pieces.Count; i++)
             foreach (var g in other)
                 if (pieces[i].Surface.CoincidentWith(g.Surface, _tol * 10) && FBox(pieces[i]).Overlaps(FBox(g), _onTol)) { lone[i] = true; break; }
+        plone.Dispose();
+        var punion = Prof.Time("cls.union");
         var parent = Enumerable.Range(0, pieces.Count).ToArray();
         int Find(int x) { while (parent[x] != x) x = parent[x] = parent[parent[x]]; return x; }
         var users = new Dictionary<NEdge, List<int>>(ReferenceEqualityComparer.Instance);
@@ -654,9 +684,10 @@ public sealed class NBoolean
             if (lone[us[0]] || lone[us[1]]) continue;
             // the other body must not pass through the edge
             bool touches = false;
+            var eb = e.Bounds(_sampleTol * 500);
             foreach (var g in other)
             {
-                if (!FBox(g).Overlaps(e.Bounds(_sampleTol * 500), _onTol)) continue;
+                if (!FBox(g).Overlaps(eb, _onTol)) continue;
                 if (Math.Abs(g.Surface.F_(e.Mid)) < _onTol || Math.Abs(g.Surface.F_(e.V0.P)) < _onTol && Math.Abs(g.Surface.F_(e.V1.P)) < _onTol) { touches = true; break; }
             }
             if (touches) continue;
@@ -667,13 +698,29 @@ public sealed class NBoolean
             }
             parent[Find(us[0])] = Find(us[1]);
         }
-        var compState = new Dictionary<int, State>();
-        for (int i = 0; i < pieces.Count; i++)
+        // one representative per region; domains and boxes are built first (single-threaded), then the
+        // representatives are ray-classified in parallel (read-only from here on)
+        punion.Dispose();
+        var pprep = Prof.Time("cls.prep");
+        var reps = new Dictionary<int, int>();
+        for (int i = 0; i < pieces.Count; i++) reps.TryAdd(Find(i), i);
+        PrepareDomains(other.Concat(reps.Values.Select(i => pieces[i])));
+        foreach (var f in other) FBox(f);
+        foreach (var i in reps.Values) { FBox(pieces[i]); Dom(pieces[i]).InteriorPoint(); }
+        pprep.Dispose();
+        using var prays = Prof.Time("cls.rays");
+        var repList = reps.ToList();
+        var states = new State[repList.Count];
+        Exception? failure = null;
+        Parallel.For(0, repList.Count, k =>
         {
-            var r = Find(i);
-            if (!compState.TryGetValue(r, out var st)) compState[r] = st = Classify(pieces[i], other, otherBox);
-            res[pieces[i]] = st;
-        }
+            try { states[k] = Classify(pieces[repList[k].Value], other, otherBox); }
+            catch (Exception ex) { failure = ex; }
+        });
+        if (failure != null) throw failure;
+        var compState = new Dictionary<int, State>();
+        for (int k = 0; k < repList.Count; k++) compState[repList[k].Key] = states[k];
+        for (int i = 0; i < pieces.Count; i++) res[pieces[i]] = compState[Find(i)];
         if (Trace != null && Environment.GetEnvironmentVariable("FC_TRACE_COMP") != null)
             foreach (var g in Enumerable.Range(0, pieces.Count).GroupBy(Find).Where(g => g.Count() > 1))
                 T($"  component {compState[g.Key]} rep={pieces[g.Key].Tag.Name}@{Dom(pieces[g.Key]).InteriorPoint()}: " + string.Join(", ", g.Select(i => $"{pieces[i].Tag.Name}@{Dom(pieces[i]).InteriorPoint()}")));
