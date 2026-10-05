@@ -62,6 +62,9 @@ public static class StepWriter
     static string Pt(Vec3 p) => $"CARTESIAN_POINT('',({R(p.X)},{R(p.Y)},{R(p.Z)}))";
     static string Dir(Vec3 d) => $"DIRECTION('',({R(d.X)},{R(d.Y)},{R(d.Z)}))";
 
+    /// <summary>Why the last exact export fell back to facets (diagnostics).</summary>
+    public static Exception? LastError;
+
     public static void Write(Stream stream, IEnumerable<(string name, Solid solid)> bodies, string productName, double scale = 1.0, bool exact = true)
     {
         var c = new Ctx();
@@ -95,7 +98,7 @@ public static class StepWriter
                     var brep = ExactBrep.Build(s);
                     if (brep.Warnings.Count == 0) shells = WriteExact(c, brep, s);
                 }
-                catch { shells = null; }
+                catch (Exception ex) { LastError = ex; shells = null; }
             }
             shells ??= WriteSolid(c, s);
             foreach (var shell in shells)
@@ -148,6 +151,10 @@ public static class StepWriter
                     }
                 case CircleCurve ci:
                     geom = c.Add($"CIRCLE('',#{Axis2(c, ci.Center, ci.Axis, ci.RefDir)},{R(ci.Radius)})");
+                    break;
+                case EllipseCurve el:
+                    // e.g. mitered fillet corners (equal-radius cylinders meeting at an angle)
+                    geom = c.Add($"ELLIPSE('',#{Axis2(c, el.Center, el.Axis, el.XDir)},{R(el.Major)},{R(el.Minor)})");
                     break;
                 case BSplineCurve bs:
                     {

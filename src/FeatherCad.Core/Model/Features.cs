@@ -117,6 +117,8 @@ public sealed class FilletFeature : Feature
     public string Radius { get; set; } = "2";
     /// <summary>Also blend edges tangent-connected to the selected ones.</summary>
     public bool TangentPropagation { get; set; } = true;
+    /// <summary>A fillet running into neighbouring geometry is trimmed by it ("keep edge" overflow) instead of failing.</summary>
+    public bool Overflow { get; set; } = true;
 }
 
 public sealed class ChamferFeature : Feature
@@ -125,6 +127,8 @@ public sealed class ChamferFeature : Feature
     public List<EdgeRef> Edges { get; set; } = new();
     public string Distance { get; set; } = "1";
     public bool TangentPropagation { get; set; } = true;
+    /// <summary>A chamfer running into neighbouring geometry is trimmed by it instead of failing.</summary>
+    public bool Overflow { get; set; } = true;
 }
 
 public enum HoleType { Simple, Counterbore, Countersink }

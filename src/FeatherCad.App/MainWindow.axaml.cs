@@ -117,8 +117,22 @@ public partial class MainWindow : Window
             var st = pr.Status.GetValueOrDefault(_edit.Feature.Id);
             _page.Message = st?.Error ?? (st is { Warnings.Count: > 0 } ? string.Join("\n", st.Warnings) : _edit.Hint);
         }
+        UpdateProblemEdges();
         if (_firstRebuild) { _firstRebuild = false; }
         if (_fitAfterLoad && !Session.PreviewActive) { _fitAfterLoad = false; Viewport.StandardView("Trimetric", fit: true); }
+    }
+
+    /// <summary>
+    /// Red edges where a feature failed: the feature being edited (live preview), else the feature selected in
+    /// the tree.
+    /// </summary>
+    void UpdateProblemEdges()
+    {
+        FeatureStatus? st = null;
+        if (_edit != null && Session.PreviewActive) st = Session.PreviewResult?.Status.GetValueOrDefault(_edit.Feature.Id);
+        else if (Tree.SelectedId is { } id) st = Session.Result?.Status.GetValueOrDefault(id);
+        Viewport.ProblemEdges = st is { Ok: false } ? st.ProblemEdges : Array.Empty<Vec3[]>();
+        Viewport.Redraw();
     }
 
     static readonly IBrush StatusNormalBrush = new SolidColorBrush(Color.Parse("#FF6A778A"));
@@ -241,6 +255,7 @@ public partial class MainWindow : Window
 
     void OnTreeSelected(string? id)
     {
+        Avalonia.Threading.Dispatcher.UIThread.Post(UpdateProblemEdges); // after the tree selection settles
         if (id == null) return;
         if (_page?.ActiveBox != null && (_page.ActiveBox.Filter & SelFilter.Feature) != 0 && Session.Doc.Find(id) is { } feat)
         {

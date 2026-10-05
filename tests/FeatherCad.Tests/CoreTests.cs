@@ -154,30 +154,54 @@ static class CoreTests
             t.True(all.Contains("Fillet1") && all.Contains("Shell1") && all.Contains("Hole2"), "base feature: " + string.Join(",", all));
         });
 
-        t.Test("Fillet that does not fit: clear error, never a hang", () =>
+        t.Test("Fillets running into neighbouring geometry: overflow, clear errors, never a hang", () =>
         {
             var dir = AppContext.BaseDirectory;
             while (dir != null && !Directory.Exists(Path.Combine(dir, "samples"))) dir = Path.GetDirectoryName(dir);
-            var json = File.ReadAllText(Path.Combine(dir!, "tests", "FeatherCad.Tests", "models", "shelled-bracket.fcad"));
+            var models = Path.Combine(dir!, "tests", "FeatherCad.Tests", "models");
+            var json = File.ReadAllText(Path.Combine(models, "shelled-bracket.fcad"));
             // inside the shell: a 4 mm fillet around the boss foot runs past the 0.5 mm gap to the wall
-            Feature AddFillet(CadDocument d) => d.AddFeature(new FilletFeature { Radius = "4", Edges = { new EdgeRef { A = "F9.I.F2.End", B = "F9.I.F8.1.F7.0.R.CB", Hint = new Vec3(70, 2.5, 18) } } });
+            FilletFeature AddFillet(CadDocument d, bool overflow) => (FilletFeature)d.AddFeature(new FilletFeature
+            { Radius = "4", Overflow = overflow, Edges = { new EdgeRef { A = "F9.I.F2.End", B = "F9.I.F8.1.F7.0.R.CB", Hint = new Vec3(70, 2.5, 18) } } });
+
+            // overflow (default): trimmed by the wall, adds material, stays exact and closed
             var doc = CadDocument.FromJson(json);
-            var fil = AddFillet(doc);
-            var sw = Stopwatch.StartNew();
+            var before = KernelTests.Vex(new Regenerator().Rebuild(doc).State.Bodies[0].Solid);
+            var fil = AddFillet(doc, true);
             var r = new Regenerator().Rebuild(doc);
+            t.True(r.Status[fil.Id].Ok, "overflow fillet: " + r.Status[fil.Id].Error);
+            var body = r.State.Bodies[0].Solid;
+            t.True(body.Native != null && body.Topology.OpenHalfEdges == 0, "native, closed");
+            t.True(KernelTests.Vex(body) > before + 1, "material added");
+
+            // without overflow: a clear, fast error naming the edge (highlighted)
+            doc = CadDocument.FromJson(json);
+            fil = AddFillet(doc, false);
+            var sw = Stopwatch.StartNew();
+            r = new Regenerator().Rebuild(doc);
             t.True(!r.Status[fil.Id].Ok && r.Status[fil.Id].Error!.Contains("does not fit"), "fit error: " + r.Status[fil.Id].Error);
+            t.True(r.Status[fil.Id].ProblemEdges.Count > 0, "problem edges reported");
             t.True(sw.ElapsedMilliseconds < 3000, $"fast failure ({sw.ElapsedMilliseconds} ms)");
-            // and when such a case reaches the boolean anyway, the fallback is time-boxed
+
+            // the user's case: all inner floor edges (walls, corner, tube, both bosses) in one 2 mm fillet
+            doc = CadDocument.FromJson(File.ReadAllText(Path.Combine(models, "shelled-bracket-inner-fillet.fcad")));
+            r = new Regenerator().Rebuild(doc);
+            var last = doc.Features[^1];
+            t.True(r.Status[last.Id].Ok, "inner floor fillet: " + r.Status[last.Id].Error);
+            body = r.State.Bodies[0].Solid;
+            t.True(body.Native != null && body.Topology.OpenHalfEdges == 0, "inner floor fillet native, closed");
+            t.True(ExactBrep.Build(body).Warnings.Count == 0, "exact B-rep");
+
+            // and if a bad case reaches the boolean anyway, the fallback is time-boxed
             var (oldFit, oldBudget) = (NativeBlend.CheckFit, Csg.FallbackSeconds);
             NativeBlend.CheckFit = false; Csg.FallbackSeconds = 1;
             try
             {
                 doc = CadDocument.FromJson(json);
-                fil = AddFillet(doc);
+                fil = AddFillet(doc, false);
                 sw.Restart();
                 r = new Regenerator().Rebuild(doc);
                 t.True(sw.ElapsedMilliseconds < 8000, $"bounded failure ({sw.ElapsedMilliseconds} ms)");
-                Console.WriteLine($"      unchecked fillet: {(r.Status[fil.Id].Ok ? "ok" : r.Status[fil.Id].Error)} in {sw.ElapsedMilliseconds} ms");
             }
             finally { NativeBlend.CheckFit = oldFit; Csg.FallbackSeconds = oldBudget; }
         });

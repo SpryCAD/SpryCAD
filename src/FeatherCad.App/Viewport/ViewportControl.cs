@@ -65,6 +65,8 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
     public SelectionSet? Selection { get; set; }
     /// <summary>Extra highlighted items (e.g. preview of what a PM selection box holds).</summary>
     public IReadOnlyList<SelItem> Emphasis { get; set; } = Array.Empty<SelItem>();
+    /// <summary>Model edges (polylines) to show in red: where the feature being edited/selected failed.</summary>
+    public IReadOnlyList<Vec3[]> ProblemEdges { get; set; } = Array.Empty<Vec3[]>();
 
     public event Action<PointerInfo>? ContextRequested;
     public event Action? CameraChanged;
@@ -196,6 +198,9 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         DrawSketches(_dyn, hl);
         if (ShowOrigin) DrawOrigin(_dyn);
         Mode?.Draw(this, _dyn);
+        // edges a feature failed on (e.g. a fillet that does not fit), drawn on top in red
+        foreach (var pl in ProblemEdges)
+            for (int i = 0; i + 1 < pl.Length; i++) _dyn.Line(pl[i], pl[i + 1], new Rgba(0.9f, 0.1f, 0.1f), top: true);
 
         _r.SetupDepth(true, true);
         _r.DrawDynamic(_dyn.Tris, PrimitiveType.Triangles, vp);

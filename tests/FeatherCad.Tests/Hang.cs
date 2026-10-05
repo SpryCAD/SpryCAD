@@ -18,6 +18,7 @@ static class Hang
         var timeout = a.Length > 8 ? D(8) : 30;
         doc.AddFeature(new FilletFeature { Radius = a[7], Edges = { new EdgeRef { A = a[2], B = a[3], Hint = new Vec3(D(4), D(5), D(6)) } } });
         var sw = Stopwatch.StartNew();
+        NativeBlend.Debug = m => Console.WriteLine("    overflow: " + m);
         FeatherCad.Kernel.Native.NBoolean.Trace = m =>
         {
             if (m.StartsWith("[") || m.StartsWith("sections") || m.StartsWith("pieces")) Console.WriteLine($"{sw.ElapsedMilliseconds,7} ms  {(m.Length > 160 ? m[..160] : m)}");

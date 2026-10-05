@@ -158,6 +158,26 @@ public sealed class NBody
 
     public IEnumerable<NEdge> Edges => Faces.SelectMany(f => f.Coedges).Select(c => c.Edge).Distinct();
 
+    /// <summary>Connected components (shells joined through shared edges) as separate bodies sharing the faces.</summary>
+    public List<NBody> Lumps()
+    {
+        Link();
+        var idx = new Dictionary<NFace, int>(ReferenceEqualityComparer.Instance);
+        for (int i = 0; i < Faces.Count; i++) idx[Faces[i]] = i;
+        var parent = Enumerable.Range(0, Faces.Count).ToArray();
+        int Find(int x) { while (parent[x] != x) x = parent[x] = parent[parent[x]]; return x; }
+        foreach (var e in Edges)
+            for (int k = 1; k < e.Uses.Count; k++) parent[Find(idx[e.Uses[0].Face])] = Find(idx[e.Uses[k].Face]);
+        var groups = new Dictionary<int, NBody>();
+        for (int i = 0; i < Faces.Count; i++)
+        {
+            var r = Find(i);
+            if (!groups.TryGetValue(r, out var b)) groups[r] = b = new NBody();
+            b.Faces.Add(Faces[i]);
+        }
+        return groups.Values.ToList();
+    }
+
     ulong? _hash;
     /// <summary>Content hash (cached: bodies are not modified once built; operations work on clones).</summary>
     public ulong ContentHash => _hash ??= NHash.Of(this);

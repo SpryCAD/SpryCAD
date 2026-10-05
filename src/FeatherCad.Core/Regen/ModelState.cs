@@ -68,6 +68,8 @@ public sealed class FeatureStatus
     public string? Error { get; set; }
     public List<string> Warnings { get; } = new();
     public double Milliseconds { get; set; }
+    /// <summary>Model edges (polylines) the feature failed on, for highlighting.</summary>
+    public List<Vec3[]> ProblemEdges { get; } = new();
     public bool Ok => Error == null;
 }
 

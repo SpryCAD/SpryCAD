@@ -141,6 +141,9 @@ public static class NIntersect
         return new EdgeHits(merged, false);
     }
 
+    /// <summary>Report exact tangential touches (closed-form cases) as split points.</summary>
+    public static bool TouchesSurface = true;
+
     /// <summary>Upper bound of the arc length of the curve over [a, b].</summary>
     static double ArcBound(NCurve c, double a, double b)
     {
@@ -198,7 +201,12 @@ public static class NIntersect
             if (amp < 1e-15) return roots; // parallel (lying on the plane is handled by the caller)
             var phi = Math.Atan2(B, A);
             var x = -k / amp;
-            if (Math.Abs(x) > 1) return roots; // no crossing (tangential touches do not split the edge)
+            if (Math.Abs(x) > 1 || Math.Abs(Math.Abs(x) - 1) < 1e-12)
+            {
+                // touching the plane (see Quadratic): one exact point
+                if (TouchesSurface && Math.Abs(Math.Abs(k) - amp) < tol) roots.Add(x > 0 ? phi : phi + Math.PI);
+                return roots;
+            }
             var w = Math.Acos(x);
             roots.Add(phi + w);
             if (w > 1e-12) roots.Add(phi - w);
@@ -217,11 +225,16 @@ public static class NIntersect
             return r;
         }
         var disc = b * b - 4 * a * c;
-        if (disc < 0) return r; // no crossing (a tangential touch does not split the edge)
-        var sq = Math.Sqrt(disc);
-        // a double root (roots closer than tol: the curve only touches) is a touch, not a crossing;
-        // this keeps exact tangencies deterministic instead of depending on rounding of the discriminant
-        if (sq / Math.Abs(a) < tol) return r;
+        var sq = disc > 0 ? Math.Sqrt(disc) : 0;
+        // a double root (the curve only touches the surface): one exact point, whatever the rounding of the
+        // discriminant. Touch points matter when another face's boundary passes through them (two blends
+        // tangent to the same face whose tangent curves cross); vertex imprinting keeps both sides consistent.
+        if (disc < 0 || sq / Math.Abs(a) < tol)
+        {
+            var tt = -b / (2 * a);
+            if (TouchesSurface && Math.Abs(f(tt)) < tol) r.Add(tt);
+            return r;
+        }
         var q = -0.5 * (b + (b >= 0 ? sq : -sq));
         var t1 = q / a;
         r.Add(t1);

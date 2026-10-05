@@ -127,8 +127,8 @@ public sealed class Regenerator
                 case SketchFeature s: DoSketch(s); break;
                 case ExtrudeFeature e: DoExtrude(e); break;
                 case RevolveFeature r: DoRevolve(r); break;
-                case FilletFeature fi: DoBlend(fi.Edges, Positive(fi.Radius, "Radius"), true, fi.TangentPropagation); break;
-                case ChamferFeature ch: DoBlend(ch.Edges, Positive(ch.Distance, "Distance"), false, ch.TangentPropagation); break;
+                case FilletFeature fi: DoBlend(fi.Edges, Positive(fi.Radius, "Radius"), true, fi.TangentPropagation, fi.Overflow); break;
+                case ChamferFeature ch: DoBlend(ch.Edges, Positive(ch.Distance, "Distance"), false, ch.TangentPropagation, ch.Overflow); break;
                 case HoleFeature h: DoHole(h); break;
                 case ShellFeature sh: DoShell(sh); break;
                 case LinearPatternFeature lp: DoLinearPattern(lp); break;
@@ -276,10 +276,10 @@ public sealed class Regenerator
 
         // ---- fillet / chamfer ----
 
-        void DoBlend(List<EdgeRef> refs, double size, bool fillet, bool propagate)
+        void DoBlend(List<EdgeRef> refs, double size, bool fillet, bool propagate, bool overflow = true)
         {
             if (refs.Count == 0) throw new FeatureException("No edges selected.");
-            if (TryNativeBlend(refs, size, fillet, propagate)) return;
+            if (TryNativeBlend(refs, size, fillet, propagate, overflow)) return;
             var byBody = new Dictionary<string, List<TopoEdge>>();
             foreach (var r in refs)
             {
@@ -315,7 +315,7 @@ public sealed class Regenerator
         /// Fillet/chamfer on native bodies: edges resolved and tangent-chained on the exact B-rep, tools built
         /// from exact geometry. False (state untouched) when a body is not native or an edge is not found.
         /// </summary>
-        bool TryNativeBlend(List<EdgeRef> refs, double size, bool fillet, bool propagate)
+        bool TryNativeBlend(List<EdgeRef> refs, double size, bool fillet, bool propagate, bool overflow)
         {
             if (!Csg.UseNative || State.Bodies.Any(b => b.Solid.Native == null)) return false;
             var byBody = new Dictionary<string, List<Kernel.Native.NEdge>>();
@@ -333,11 +333,14 @@ public sealed class Regenerator
             {
                 if (!byBody.TryGetValue(b.Id, out var seeds)) { bodies.Add(b); continue; }
                 var edges = NativeBlend.Expand(b.Solid.Native!, seeds, propagate);
-                var r = NativeBlend.Apply(b.Solid, edges, size, fillet, f.Id, errors);
+                var r = NativeBlend.Apply(b.Solid, edges, size, fillet, f.Id, errors, overflow, status.ProblemEdges);
                 bodies.Add(new Body { Id = b.Id, Solid = r });
             }
-            if (errors.Count > 0 && errors.Count >= refs.Count) throw new FeatureException(errors[0]);
-            status.Warnings.AddRange(errors);
+            // all or nothing (as SolidWorks): a fillet that cannot be made on every edge fails as a whole,
+            // naming the edges (highlighted in the viewport) instead of silently skipping some
+            if (errors.Count > 0)
+                throw new FeatureException(errors.Count == 1 ? errors[0]
+                    : $"{errors.Count} edges cannot be {(fillet ? "filleted" : "chamfered")}: " + string.Join(" | ", errors));
             State = State.With(bodies);
             return true;
         }

@@ -17,6 +17,9 @@ public static class Csg
     /// <summary>Recent native boolean results by operand content (results are immutable, so they are shared).</summary>
     static readonly Lru<(ulong, ulong, BoolOp), Solid> Cache = new(512);
 
+    /// <summary>On this thread, a failed native boolean throws instead of falling back to the facet engine.</summary>
+    [ThreadStatic] public static bool NoFallback;
+
     /// <summary>Time budget of the facet-engine fallback after a failed native boolean.</summary>
     public static double FallbackSeconds = 4;
 
@@ -47,6 +50,7 @@ public static class Csg
             }
             catch (Exception ex) { LastFallbackReason = ex.Message; Native.NBoolean.Trace?.Invoke("[fallback] " + ex.Message); }
             Interlocked.Increment(ref NativeFallback);
+            if (NoFallback) throw new InvalidOperationException(LastFallbackReason ?? "boolean failed");
             // the facet engine is only a safety net here: bounded in time, so a hard case fails the feature
             // with a message instead of hanging the rebuild
             var reason = LastFallbackReason;

@@ -252,7 +252,9 @@ public sealed class NBoolean
                 foreach (var t in hits.Params)
                 {
                     var p = e.Curve.Eval(t);
-                    if (Dom(f).Classify(f.Surface.Project(p), _onTol) < 0) continue;
+                    // traced boundaries are splines fitted within _sampleTol * 5 of the exact curve: a point on
+                    // the true boundary may sit that far outside the spline
+                    if (Dom(f).Classify(f.Surface.Project(p), Math.Max(_onTol, _sampleTol * 12)) < 0) continue;
                     if (Vec3.Distance(p, e.V0.P) < _tol * 10 || Vec3.Distance(p, e.V1.P) < _tol * 10) continue;
                     var v = Snap(p);
                     if (!splits.TryGetValue(e, out var l)) splits[e] = l = new();
@@ -331,13 +333,20 @@ public sealed class NBoolean
             .Where(v => Math.Abs(sa.F_(v.P)) < _onTol && Math.Abs(sb.F_(v.P)) < _onTol).ToList();
         NDomain domA, domB;
         using (Prof.Time("sec.domains")) { domA = Dom(fa); domB = Dom(fb); }
+        var dbgPair = Trace != null && Environment.GetEnvironmentVariable("FC_TRACE_PAIR") is { } tp && (fa.Tag.Name + "|" + fb.Tag.Name).Contains(tp);
+        if (dbgPair) T($"  pair {fa.Tag.Name} x {fb.Tag.Name}: {curves.Count} curves ({string.Join(",", curves.Select(c => c.GetType().Name))}), breakpoints {string.Join(" ", bps.Select(v => v.P))}");
+        if (dbgPair) foreach (var c in curves.OfType<NPolyline>()) T($"    polyline {c.Pts[0]} .. {c.Pts[^1]} ({c.Pts.Length} pts, closed={c.IsClosed}), onTol={_onTol}, breakpoint distances {string.Join(" ", bps.Select(v => Vec3.Distance(c.Eval(c.Param(v.P)), v.P).ToString("0.######")))}");
         foreach (var c in curves)
         {
             var on = new List<(double t, NVertex v)>();
+            // traced curves are exact at their samples but can pass a singular point (two surfaces tangent
+            // there, e.g. crossing fillets) at up to the trace tolerance; the edge is pinned to the vertex anyway
+            // (breakpoints lie exactly on both surfaces, so a traced curve passing this close does go through them)
+            var onTol = c is NPolyline ? Math.Max(_onTol * 4, _sampleTol * 500) : _onTol * 4;
             foreach (var v in bps)
             {
                 var t = c.Param(v.P);
-                if (Vec3.Distance(c.Eval(t), v.P) < _onTol * 4) on.Add((t, v));
+                if (Vec3.Distance(c.Eval(t), v.P) < onTol) on.Add((t, v));
             }
             if (on.Count == 0)
             {
@@ -369,6 +378,7 @@ public sealed class NBoolean
                 int ca, cb;
                 // a tight tolerance: only curves really on a face boundary are dropped, thin slivers next to one are kept
                 using (Prof.Time("sec.midclass")) { ca = domA.Classify(sa.Project(mid), _tol * 10); cb = domB.Classify(sb.Project(mid), _tol * 10); }
+                if (dbgPair) T($"    interval {v0.P}->{v1.P} mid {mid} inA={ca} inB={cb}");
                 if (ca <= 0 || cb <= 0) continue;
                 NEdge ne;
                 using (Prof.Time("sec.makeedge")) ne = MakeEdge(c, t0, t1, v0, v1, sa, sb);

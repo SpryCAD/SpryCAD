@@ -1,0 +1,600 @@
+{
+  "format": "FeatherCAD",
+  "formatVersion": 1,
+  "units": "MMGS",
+  "equations": [
+    {
+      "name": "W",
+      "expr": "120"
+    }
+  ],
+  "features": [
+    {
+      "$type": "sketch",
+      "plane": {
+        "std": "Front"
+      },
+      "sketch": {
+        "points": [
+          {
+            "id": 0,
+            "x": 0,
+            "y": 0,
+            "fixed": true
+          },
+          {
+            "id": 1,
+            "x": 100,
+            "y": 0,
+            "fixed": false
+          },
+          {
+            "id": 2,
+            "x": 100,
+            "y": 60,
+            "fixed": false
+          },
+          {
+            "id": 3,
+            "x": 0,
+            "y": 60,
+            "fixed": false
+          }
+        ],
+        "entities": [
+          {
+            "$type": "line",
+            "p1": 0,
+            "p2": 1,
+            "id": 4,
+            "construction": false
+          },
+          {
+            "$type": "line",
+            "p1": 1,
+            "p2": 2,
+            "id": 5,
+            "construction": false
+          },
+          {
+            "$type": "line",
+            "p1": 2,
+            "p2": 3,
+            "id": 6,
+            "construction": false
+          },
+          {
+            "$type": "line",
+            "p1": 3,
+            "p2": 0,
+            "id": 7,
+            "construction": false
+          }
+        ],
+        "constraints": [
+          {
+            "id": 8,
+            "type": "Horizontal",
+            "refs": [
+              4
+            ],
+            "value": 0,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 9,
+            "type": "Horizontal",
+            "refs": [
+              6
+            ],
+            "value": 0,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 10,
+            "type": "Vertical",
+            "refs": [
+              5
+            ],
+            "value": 0,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 11,
+            "type": "Vertical",
+            "refs": [
+              7
+            ],
+            "value": 0,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 12,
+            "type": "Distance",
+            "refs": [
+              4
+            ],
+            "expr": "W",
+            "value": 100,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 13,
+            "type": "Distance",
+            "refs": [
+              5
+            ],
+            "expr": "60",
+            "value": 60,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          }
+        ],
+        "nextId": 14
+      },
+      "id": "F1",
+      "name": "Sketch1",
+      "suppressed": false
+    },
+    {
+      "$type": "extrude",
+      "sketchId": "F1",
+      "isCut": false,
+      "end": "Blind",
+      "depth": "20",
+      "reverse": false,
+      "merge": true,
+      "id": "F2",
+      "name": "Boss-Extrude1",
+      "suppressed": false
+    },
+    {
+      "$type": "sketch",
+      "plane": {
+        "face": {
+          "name": "F2.End",
+          "hint": [
+            50,
+            30,
+            20
+          ],
+          "normal": [
+            0,
+            0,
+            1
+          ]
+        }
+      },
+      "sketch": {
+        "points": [
+          {
+            "id": 0,
+            "x": 0,
+            "y": 0,
+            "fixed": true
+          },
+          {
+            "id": 1,
+            "x": 30,
+            "y": 30,
+            "fixed": false
+          }
+        ],
+        "entities": [
+          {
+            "$type": "circle",
+            "center": 1,
+            "r": 8,
+            "id": 2,
+            "construction": false
+          }
+        ],
+        "constraints": [],
+        "nextId": 3
+      },
+      "id": "F3",
+      "name": "Sketch2",
+      "suppressed": false
+    },
+    {
+      "$type": "extrude",
+      "sketchId": "F3",
+      "isCut": true,
+      "end": "ThroughAll",
+      "depth": "10",
+      "reverse": true,
+      "merge": true,
+      "id": "F4",
+      "name": "Cut-Extrude1",
+      "suppressed": false
+    },
+    {
+      "$type": "fillet",
+      "edges": [
+        {
+          "a": "F2.S.L5",
+          "b": "F2.S.L6",
+          "hint": [
+            100,
+            60,
+            10
+          ]
+        }
+      ],
+      "radius": "5",
+      "tangentPropagation": true,
+      "id": "F5",
+      "name": "Fillet1",
+      "suppressed": false
+    },
+    {
+      "$type": "sketch",
+      "plane": {
+        "face": {
+          "name": "F2.End",
+          "hint": [
+            50,
+            30,
+            20
+          ],
+          "normal": [
+            0,
+            0,
+            1
+          ]
+        }
+      },
+      "sketch": {
+        "points": [
+          {
+            "id": 0,
+            "x": 0,
+            "y": 0,
+            "fixed": true
+          },
+          {
+            "id": 1,
+            "x": 70,
+            "y": 30,
+            "fixed": false
+          }
+        ],
+        "entities": [
+          {
+            "$type": "point",
+            "p": 1,
+            "id": 2,
+            "construction": false
+          }
+        ],
+        "constraints": [],
+        "nextId": 3
+      },
+      "id": "F6",
+      "name": "Sketch3",
+      "suppressed": false
+    },
+    {
+      "$type": "hole",
+      "sketchId": "F6",
+      "type": "Counterbore",
+      "diameter": "6.6",
+      "depth": "10",
+      "throughAll": true,
+      "cbDiameter": "11",
+      "cbDepth": "6.5",
+      "csDiameter": "13",
+      "csAngle": "90",
+      "drillPoint": true,
+      "id": "F7",
+      "name": "Hole1",
+      "suppressed": false
+    },
+    {
+      "$type": "linearPattern",
+      "seeds": [
+        "F7"
+      ],
+      "direction": {
+        "axis": "Y"
+      },
+      "spacing": "-20",
+      "count": "2",
+      "reverse": false,
+      "spacing2": "20",
+      "count2": "1",
+      "reverse2": false,
+      "id": "F8",
+      "name": "LPattern1",
+      "suppressed": false
+    },
+    {
+      "$type": "shell",
+      "faces": [
+        {
+          "name": "F2.Start",
+          "hint": [
+            50,
+            30,
+            0
+          ],
+          "normal": [
+            -0,
+            -0,
+            -1
+          ]
+        }
+      ],
+      "thickness": "2",
+      "id": "F9",
+      "name": "Shell1",
+      "suppressed": false
+    },
+    {
+      "$type": "fillet",
+      "edges": [
+        {
+          "a": "F2.S.L6",
+          "b": "F2.Start",
+          "body": "F2",
+          "hint": [
+            57.5,
+            60,
+            0
+          ]
+        }
+      ],
+      "radius": "2",
+      "tangentPropagation": true,
+      "id": "F10",
+      "name": "Fillet2",
+      "suppressed": false
+    },
+    {
+      "$type": "chamfer",
+      "edges": [
+        {
+          "a": "F2.End",
+          "b": "F4.S.C2",
+          "body": "F2",
+          "hint": [
+            38,
+            30,
+            20
+          ]
+        }
+      ],
+      "distance": "1",
+      "tangentPropagation": true,
+      "id": "F14",
+      "name": "Chamfer1",
+      "suppressed": false
+    },
+    {
+      "$type": "fillet",
+      "edges": [
+        {
+          "a": "F2.End",
+          "b": "F2.S.L6",
+          "body": "F2",
+          "hint": [
+            57.5,
+            60,
+            20
+          ]
+        }
+      ],
+      "radius": "2",
+      "tangentPropagation": true,
+      "id": "F15",
+      "name": "Fillet3",
+      "suppressed": false
+    },
+    {
+      "$type": "sketch",
+      "plane": {
+        "face": {
+          "name": "F2.S.L7",
+          "body": "F2",
+          "hint": [
+            0,
+            36.93409531,
+            13.179616629
+          ],
+          "normal": [
+            -1,
+            0,
+            0
+          ]
+        }
+      },
+      "sketch": {
+        "points": [
+          {
+            "id": 0,
+            "x": 0,
+            "y": 0,
+            "fixed": true
+          },
+          {
+            "id": 1,
+            "x": 8.524529457092285,
+            "y": 37.12099075317383,
+            "fixed": false
+          },
+          {
+            "id": 3,
+            "x": 10,
+            "y": 15.357799530029297,
+            "fixed": false
+          }
+        ],
+        "entities": [
+          {
+            "$type": "point",
+            "p": 1,
+            "id": 2,
+            "construction": false
+          },
+          {
+            "$type": "point",
+            "p": 3,
+            "id": 4,
+            "construction": false
+          }
+        ],
+        "constraints": [],
+        "nextId": 5
+      },
+      "id": "F16",
+      "name": "Sketch5",
+      "suppressed": false
+    },
+    {
+      "$type": "hole",
+      "sketchId": "F16",
+      "type": "Counterbore",
+      "diameter": "4.5",
+      "depth": "10",
+      "throughAll": true,
+      "cbDiameter": "8",
+      "cbDepth": "4.4",
+      "csDiameter": "8.6",
+      "csAngle": "90",
+      "drillPoint": true,
+      "id": "F17",
+      "name": "Hole2",
+      "suppressed": false
+    },
+    {
+      "$type": "fillet",
+      "edges": [
+        {
+          "a": "F9.I.F2.End",
+          "b": "F9.I.F2.S.L4",
+          "body": "F2",
+          "hint": [
+            60,
+            2,
+            18
+          ]
+        },
+        {
+          "a": "F9.I.F2.End",
+          "b": "F9.I.F2.S.L7",
+          "body": "F2",
+          "hint": [
+            2,
+            30,
+            18
+          ]
+        },
+        {
+          "a": "F9.I.F2.End",
+          "b": "F9.I.F2.S.L6",
+          "body": "F2",
+          "hint": [
+            58.5,
+            58,
+            18
+          ]
+        },
+        {
+          "a": "F9.I.F2.End",
+          "b": "F9.I.F5.0.S.F",
+          "body": "F2",
+          "hint": [
+            117.120639559,
+            57.120639559,
+            18
+          ]
+        },
+        {
+          "a": "F9.I.F2.End",
+          "b": "F9.I.F2.S.L5",
+          "body": "F2",
+          "hint": [
+            118,
+            28.5,
+            18
+          ]
+        },
+        {
+          "a": "F9.I.F2.End",
+          "b": "F9.I.F4.S.C2",
+          "body": "F2",
+          "hint": [
+            40,
+            30,
+            18
+          ]
+        },
+        {
+          "a": "F9.I.F2.End",
+          "b": "F9.I.F7.0.R.CB",
+          "body": "F2",
+          "hint": [
+            62.5,
+            30,
+            18
+          ]
+        },
+        {
+          "a": "F9.I.F2.End",
+          "b": "F9.I.F8.1.F7.0.R.CB",
+          "body": "F2",
+          "hint": [
+            62.5,
+            10,
+            18
+          ]
+        }
+      ],
+      "radius": "2",
+      "tangentPropagation": true,
+      "id": "F18",
+      "name": "Fillet4",
+      "suppressed": false
+    }
+  ],
+  "nextFeatureId": 19,
+  "nameCounters": {
+    "Sketch": 5,
+    "Boss-Extrude": 3,
+    "Cut-Extrude": 1,
+    "Fillet": 4,
+    "Hole": 2,
+    "LPattern": 1,
+    "Shell": 1,
+    "Chamfer": 1
+  },
+  "color": [
+    0.74,
+    0.76,
+    0.8
+  ],
+  "activeCount": 15
+}
