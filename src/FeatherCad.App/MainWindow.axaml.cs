@@ -229,6 +229,8 @@ public partial class MainWindow : Window
             if (s == null) Tree.Select(null);
             else if (s.Kind is SelKind.Sketch or SelKind.Feature) Tree.Select(s.FeatureId);
             else if (s.Kind == SelKind.Plane) Tree.Select(s.FeatureId ?? s.Name);
+            // a picked face/edge shows which feature made it
+            Tree.Relate(s is { Kind: SelKind.Face or SelKind.Edge } ? s.OwningFeatureId : null);
         }
         Status(s == null ? "Ready" : Selection.Count == 1 ? s.Label(Session.Doc) + " selected" + Describe(s) : $"{Selection.Count} items selected");
         RefreshScene();

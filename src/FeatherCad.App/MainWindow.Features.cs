@@ -42,6 +42,7 @@ public partial class MainWindow
         page.Message = hint;
         Selection.Clear();
         ShowPage(page);
+        ShowConfirmCorner(CommitEdit, CancelEdit, "OK (Enter)", "Cancel (Esc)");
         FocusFirstField(page);
         SchedulePreview();
         Status($"{f.Name}: set the parameters, then click OK (Enter) or Esc to cancel.");
@@ -118,6 +119,7 @@ public partial class MainWindow
         });
         Session.EndPreview();
         ShowPage(null);
+        HideConfirmCorner();
         Status($"{f.Name} {(e.IsNew ? "created" : "updated")}.");
         RefreshScene();
     }
@@ -129,6 +131,7 @@ public partial class MainWindow
         _previewTimer.Stop();
         Session.EndPreview();
         ShowPage(null);
+        HideConfirmCorner();
         cancelled?.Invoke();
         RefreshScene();
         Status("Cancelled.");

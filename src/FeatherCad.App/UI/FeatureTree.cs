@@ -29,6 +29,16 @@ public sealed class FeatureTree : UserControl
 
     public string? SelectedId => _selectedId;
 
+    string? _relatedId;
+
+    /// <summary>Lightly highlights the feature owning the current graphics selection (does not select it).</summary>
+    public void Relate(string? id)
+    {
+        if (_relatedId != null && _rowById.TryGetValue(_relatedId, out var old)) old.Classes.Remove("related");
+        _relatedId = id;
+        if (id != null && _rowById.TryGetValue(id, out var b)) b.Classes.Add("related");
+    }
+
     public void Select(string? id)
     {
         if (_selectedId != null && _rowById.TryGetValue(_selectedId, out var old)) old.Classes.Remove("selected");
@@ -73,6 +83,7 @@ public sealed class FeatureTree : UserControl
         }
         if (active >= doc.Features.Count) AddRollbackBar();
         Select(_selectedId);
+        Relate(_relatedId);
     }
 
     /// <summary>Feature name; sketches get SolidWorks' "(-)" under-defined / "(+)" over-defined prefix.</summary>

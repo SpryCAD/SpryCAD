@@ -101,6 +101,10 @@
   <Style Selector="Border.treerow:pointerover">
     <Setter Property="Background" Value="#FFE8F1FC" />
   </Style>
+  <!-- the feature that owns the face/edge selected in the graphics area (not a tree selection) -->
+  <Style Selector="Border.treerow.related">
+    <Setter Property="Background" Value="#FFEAF2FD" />
+  </Style>
   <Style Selector="Border.treerow.selected">
     <Setter Property="Background" Value="#FFCDE2FA" />
   </Style>
