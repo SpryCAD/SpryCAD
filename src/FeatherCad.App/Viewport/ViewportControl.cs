@@ -659,6 +659,26 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         return best;
     }
 
+    /// <summary>Visible model vertex (edge end point) under the cursor.</summary>
+    public (Body body, TopoEdge edge, Vec3 point)? PickVertex(double x, double y, double radiusPx = 8)
+    {
+        var face = Pick(x, y, SelFilter.Face);
+        var (ro, rd) = Camera.Ray(x, y);
+        double faceDepth = face != null ? Vec3.Dot(face.Point - ro, rd) : double.MaxValue;
+        (Body, TopoEdge, Vec3)? best = null; double bestPx = radiusPx;
+        foreach (var b in Bodies)
+            foreach (var e in b.Solid.Topology.Edges)
+                foreach (var p in e.Closed ? new[] { e.Start } : new[] { e.Start, e.End })
+                {
+                    var s = Camera.Project(p);
+                    var d = Math.Sqrt((s.X - x) * (s.X - x) + (s.Y - y) * (s.Y - y));
+                    if (d >= bestPx) continue;
+                    if (Vec3.Dot(p - ro, rd) > faceDepth + Camera.PixelSize * 3 + 1e-4) continue;
+                    bestPx = d; best = (b, e, p);
+                }
+        return best;
+    }
+
     /// <summary>Face under the cursor (any filter), used e.g. for sketch-on-face inference.</summary>
     public (double t, SelItem? hit) RayFaces(double x, double y)
     {

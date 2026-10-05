@@ -14,6 +14,22 @@ public sealed class SkPoint
     public SkPoint Clone() => (SkPoint)MemberwiseClone();
 }
 
+/// <summary>
+/// Link from a sketch entity to model geometry (an edge or one of its end vertices). The entity is
+/// re-projected onto the sketch plane on every rebuild, so dimensions to model edges stay associative.
+/// </summary>
+public sealed class SkExternal
+{
+    public FeatherCad.Core.Model.EdgeRef Edge { get; set; } = new();
+    /// <summary>True: the end vertex of <see cref="Edge"/> nearest to <see cref="Hint"/>.</summary>
+    public bool Vertex { get; set; }
+    public Vec3 Hint { get; set; }
+
+    public bool SameAs(SkExternal o) =>
+        Vertex == o.Vertex && Vec3.Distance(Hint, o.Hint) < 1e-6 &&
+        ((Edge.A == o.Edge.A && Edge.B == o.Edge.B) || (Edge.A == o.Edge.B && Edge.B == o.Edge.A));
+}
+
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "$type")]
 [JsonDerivedType(typeof(SkLine), "line")]
 [JsonDerivedType(typeof(SkCircle), "circle")]
@@ -23,6 +39,9 @@ public abstract class SkEntity
 {
     public int Id { get; set; }
     public bool Construction { get; set; }
+    /// <summary>Reference to model geometry (fixed, not part of profiles).</summary>
+    public SkExternal? External { get; set; }
+    [JsonIgnore] public bool IsReference => External != null;
     public abstract IEnumerable<int> PointIds { get; }
     public abstract SkEntity Clone();
     public abstract void RemapPoint(int from, int to);
@@ -187,6 +206,16 @@ public sealed class Sketch
     }
 
     public void DeleteConstraint(int id) => Constraints.RemoveAll(c => c.Id == id);
+
+    /// <summary>Removes model-reference entities no constraint uses any more.</summary>
+    public void RemoveUnusedReferences()
+    {
+        foreach (var e in Entities.Where(e => e.IsReference).ToList())
+        {
+            var ids = new HashSet<int>(e.PointIds) { e.Id };
+            if (!Constraints.Any(c => c.Refs.Any(ids.Contains))) DeleteEntity(e.Id);
+        }
+    }
 
     /// <summary>Removes points not referenced by any entity (except the origin).</summary>
     public void Cleanup()

@@ -80,7 +80,11 @@ public static class SketchSolver
         }
         foreach (var e in sk.Entities)
         {
-            if (e is SkCircle c)
+            if (e is SkCircle rc && rc.IsReference)
+            {
+                s.RRefs[rc.Id] = new RRef(-1, rc.R); // model circle: radius is fixed
+            }
+            else if (e is SkCircle c)
             {
                 int ir = s.X.Count; s.X.Add(c.R);
                 s.RadiusVars[c.Id] = ir;

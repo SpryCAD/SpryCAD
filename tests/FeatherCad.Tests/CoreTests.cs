@@ -285,5 +285,45 @@ static class CoreTests
             var dir = Path.Combine(Path.GetTempPath(), "feathercad-tests");
             doc.Save(Path.Combine(dir, "corner.fcad"));
         });
+
+        t.Test("Sketch dimensions to model edges are associative", () =>
+        {
+            var doc = new CadDocument();
+            doc.Equations.Add(new Equation { Name = "W", Expr = "100" });
+            var s1 = doc.AddFeature(new SketchFeature { Plane = PlaneRef.Front, Sketch = Rect(100, 60, "W") });
+            var e1 = doc.AddFeature(new ExtrudeFeature { SketchId = s1.Id, Depth = "10" });
+            var regen = new Regenerator();
+            var r = regen.Rebuild(doc);
+            var body = r.State.Bodies[0];
+            var topFace = new FaceRef { Name = e1.Id + ".End", Hint = new Vec3(50, 30, 10), Normal = Vec3.UnitZ };
+            var frame = Resolver.ResolvePlane(new PlaneRef { Face = topFace }, r.State);
+            // right edge of the top face (x = W) and bottom edge (y = 0)
+            var right = body.Solid.Topology.Edges.First(e => e.IsLinear && Math.Abs(e.Start.X - 100) < 1e-9 && Math.Abs(e.End.X - 100) < 1e-9 && Math.Abs(e.Start.Z - 10) < 1e-9);
+            var bottom = body.Solid.Topology.Edges.First(e => e.IsLinear && Math.Abs(e.Start.Y) < 1e-9 && Math.Abs(e.End.Y) < 1e-9 && Math.Abs(e.Start.Z - 10) < 1e-9 && Math.Abs(e.End.Z - 10) < 1e-9);
+            var sk = new Sketch();
+            var hp = sk.AddPoint(new Vec2(80, 20)); sk.Add(new SkPointEntity { P = hp.Id });
+            var rl = (SkLine)SketchReferences.Create(sk, frame, right, body.Id, false, right.Midpoint)!;
+            var blE = SketchReferences.Create(sk, frame, bottom, body.Id, false, bottom.Midpoint);
+            t.True(blE is SkLine, $"bottom ref: {blE?.GetType().Name ?? "null"} edge {bottom.Start}->{bottom.End} {bottom.FaceA}/{bottom.FaceB} vs right {right.FaceA}/{right.FaceB}");
+            var bl = (SkLine)blE!;
+            var d1 = sk.AddConstraint(CType.Distance, hp.Id, rl.Id); SketchSolver.CaptureSign(sk, d1); d1.Expr = "15"; d1.Value = 15;
+            var d2 = sk.AddConstraint(CType.Distance, hp.Id, bl.Id); SketchSolver.CaptureSign(sk, d2); d2.Expr = "12"; d2.Value = 12;
+            var res = SketchSolver.Solve(sk);
+            t.Eq(res.Status, SketchStatus.FullyDefined);
+            var s2 = doc.AddFeature(new SketchFeature { Plane = new PlaneRef { Face = topFace }, Sketch = sk });
+            var h = doc.AddFeature(new HoleFeature { SketchId = s2.Id, Diameter = "6" });
+            r = regen.Rebuild(doc);
+            t.True(r.Status[h.Id].Ok, r.Status[h.Id].Error ?? "");
+            Vec3 HoleCenter(RegenResult rr) => rr.State.Bodies[0].Solid.Faces.First(f => f.Tag.Surface.Kind == SurfaceKind.Cylinder).Tag.Surface.Origin;
+            t.Near(HoleCenter(r).X, 85, 1e-6); t.Near(HoleCenter(r).Y, 12, 1e-6);
+            // the part grows: the hole follows the right edge
+            doc.Equations[0].Expr = "130";
+            r = regen.Rebuild(doc);
+            foreach (var f in doc.Features) t.True(r.Status[f.Id].Ok, $"{f.Name}: {r.Status[f.Id].Error}");
+            t.Near(HoleCenter(r).X, 115, 1e-6); t.Near(HoleCenter(r).Y, 12, 1e-6);
+            // round trip keeps the references
+            var doc2 = CadDocument.FromJson(doc.ToJson());
+            t.True(((SketchFeature)doc2.Find(s2.Id)!).Sketch.Entities.Count(e => e.IsReference) == 2, "references saved");
+        });
     }
 }

@@ -22,7 +22,7 @@ public enum SkRefKind { Point, Entity, Constraint }
 
 public readonly record struct SkRef(SkRefKind Kind, int Id);
 
-enum SnapKind { None, Point, Origin, Midpoint, OnLine, OnCircle, Center }
+enum SnapKind { None, Point, Origin, Midpoint, OnLine, OnCircle, Center, ModelVertex }
 
 readonly record struct Snap(SnapKind Kind, Vec2 P, int Id = -1, bool H = false, bool V = false, int AlignId = -1);
 
@@ -64,6 +64,7 @@ public sealed class SketchEditor : IViewportMode
     Point _downScreen; bool _down; bool _dragging; Vec2 _downSketch;
     Dictionary<int, Vec2>? _dragOrigins; int _dragCircle = -1; SkRef? _dragLabel;
     Rect? _boxSel;
+    Vec3? _hoverVertex;
     // smart dimension state
     readonly List<SkRef> _dimPicks = new();
     SkConstraint? _dimPreview;
@@ -74,6 +75,7 @@ public sealed class SketchEditor : IViewportMode
     public static readonly Rgba Over = new(0.9f, 0.1f, 0.1f);
     public static readonly Rgba Constr = new(0.35f, 0.45f, 0.6f);
     public static readonly Rgba DimColor = new(0.10f, 0.10f, 0.12f);
+    public static readonly Rgba RefColor = new(0.55f, 0.25f, 0.65f);
 
     public SketchEditor(ViewportControl vp, SketchFeature feature, Frame frame, Func<string, double?> lookup)
     {
@@ -117,6 +119,7 @@ public sealed class SketchEditor : IViewportMode
     {
         _clicks.Clear(); _clickSnaps.Clear(); _chainPoint = -1; _chainStartPoint = -1;
         _dimPicks.Clear(); _dimPreview = null;
+        Sk.RemoveUnusedReferences();
         CloseModifyBox(false);
         _vp.Redraw();
     }
@@ -184,6 +187,7 @@ public sealed class SketchEditor : IViewportMode
                     break;
             }
         }
+        Sk.RemoveUnusedReferences();
         Sk.Cleanup();
         Selected.Clear();
         Resolve();
@@ -400,8 +404,11 @@ public sealed class SketchEditor : IViewportMode
         return new Point(s.X, s.Y);
     }
 
+    Point? _lastScreen;
+
     public void PointerMove(ViewportControl vp, PointerInfo p)
     {
+        _lastScreen = new Point(p.X, p.Y);
         _mouse = SketchPos(p);
         if (_down && Tool == SketchTool.Select)
         {
@@ -413,8 +420,15 @@ public sealed class SketchEditor : IViewportMode
         {
             var h = HitTest(p.X, p.Y);
             if (h != _hover) { _hover = h; }
+            _hoverVertex = null;
             if (h == null && Tool == SketchTool.Select)
                 _vp.Hover = _vp.Pick(p.X, p.Y, SelFilter.Edge | SelFilter.Face);
+            else if (h == null && Tool == SketchTool.SmartDimension)
+            {
+                var v = _vp.PickVertex(p.X, p.Y);
+                _hoverVertex = v?.point;
+                _vp.Hover = v == null ? _vp.Pick(p.X, p.Y, SelFilter.Edge) : null;
+            }
             else _vp.Hover = null;
             if (Tool == SketchTool.SmartDimension) UpdateDimPreview();
         }
@@ -434,6 +448,7 @@ public sealed class SketchEditor : IViewportMode
 
     public void PointerDown(ViewportControl vp, PointerInfo p)
     {
+        _lastScreen = new Point(p.X, p.Y);
         _mouse = SketchPos(p);
         _down = true; _dragging = false;
         _downScreen = new Point(p.X, p.Y); _downSketch = _mouse;
@@ -595,6 +610,9 @@ public sealed class SketchEditor : IViewportMode
             if (d < bestD) { bestD = d; bestP = p; }
         }
         if (bestP != null) return new Snap(bestP.Id == Sketch.OriginId ? SnapKind.Origin : SnapKind.Point, bestP.P, bestP.Id);
+        // model vertices (part corners, arc ends) under the cursor
+        if (_lastScreen is { } scr && _vp.PickVertex(scr.X, scr.Y) is { } mv)
+            return new Snap(SnapKind.ModelVertex, Frame.ToLocal(mv.point));
         // midpoints
         foreach (var l in Sk.Entities.OfType<SkLine>())
         {
@@ -645,6 +663,9 @@ public sealed class SketchEditor : IViewportMode
             case SnapKind.Origin:
                 return s.Id;
         }
+        if (s.Kind == SnapKind.ModelVertex && _lastScreen is { } scr && _vp.PickVertex(scr.X, scr.Y) is { } mv &&
+            SketchReferences.Create(Sk, Frame, mv.edge, mv.body.Id, true, mv.point) is SkPointEntity rp)
+            return rp.P; // shares the fixed reference point: coincident with the model vertex
         var p = Sk.AddPoint(s.P);
         switch (s.Kind)
         {
@@ -1044,17 +1065,47 @@ public sealed class SketchEditor : IViewportMode
     {
         var h = HitTest(p.X, p.Y, includeDims: false);
         if (h != null && h.Value.Kind == SkRefKind.Entity && Sk.Entity(h.Value.Id) is SkPointEntity pe) h = new SkRef(SkRefKind.Point, pe.P);
-        if (_dimPreview != null && (h == null || _dimPicks.Count >= 2))
+        // model edges / vertices act as references when no sketch geometry is under the cursor
+        bool modelHit = h == null && _dimPicks.Count < 2 && ModelCandidate(p.X, p.Y) != null;
+        if (_dimPreview != null && ((h == null && !modelHit) || _dimPicks.Count >= 2))
         {
-            // place the dimension here
             PlaceDimension(SketchPos(p));
             return;
+        }
+        if (h == null && modelHit)
+        {
+            Snapshot();
+            h = CreateModelReference(p.X, p.Y);
+            Resolve();
         }
         if (h == null) return;
         if (h.Value.Kind == SkRefKind.Constraint) return;
         _dimPicks.Add(h.Value);
         UpdateDimPreview();
         _vp.Redraw();
+    }
+
+    /// <summary>Model vertex or edge under the cursor (vertices win).</summary>
+    (Body body, TopoEdge edge, bool vertex, Vec3 point)? ModelCandidate(double x, double y)
+    {
+        if (_vp.PickVertex(x, y) is { } v) return (v.body, v.edge, true, v.point);
+        var e = _vp.Pick(x, y, SelFilter.Edge);
+        if (e?.Edge == null) return null;
+        var body = _vp.Bodies.FirstOrDefault(b => b.Id == e.BodyId);
+        if (body == null || e.EdgeIndex < 0 || e.EdgeIndex >= body.Solid.Topology.Edges.Count) return null;
+        return (body, body.Solid.Topology.Edges[e.EdgeIndex], false, e.Point);
+    }
+
+    /// <summary>Projects the model edge/vertex under the cursor into the sketch as reference geometry.</summary>
+    SkRef? CreateModelReference(double x, double y)
+    {
+        if (ModelCandidate(x, y) is not { } m) return null;
+        var ent = SketchReferences.Create(Sk, Frame, m.edge, m.body.Id, m.vertex, m.point);
+        if (ent == null) { Message?.Invoke("That edge is seen end-on from this sketch plane."); return null; }
+        if (ent is SkPointEntity rp) return new SkRef(SkRefKind.Point, rp.P);
+        if (ent is SkCircle rc && Vec2.Distance(Sk.P(rc.Center), SketchPos(new PointerInfo(x, y, default, 0))) < rc.R * 0.25)
+            return new SkRef(SkRefKind.Point, rc.Center);
+        return new SkRef(SkRefKind.Entity, ent.Id);
     }
 
     void UpdateDimPreview()
@@ -1124,7 +1175,7 @@ public sealed class SketchEditor : IViewportMode
     {
         var c = BuildDim(at);
         _dimPicks.Clear(); _dimPreview = null;
-        if (c == null) return;
+        if (c == null) { Sk.RemoveUnusedReferences(); return; }
         Snapshot();
         c.Id = Sk.NewId();
         SketchSolver.CaptureSign(Sk, c);
@@ -1220,9 +1271,17 @@ public sealed class SketchEditor : IViewportMode
         g.Line(f.ToWorld(Sk.P(o)), f.ToWorld(Sk.P(o) + new Vec2(px * 25, 0)), oc, top: true);
         g.Line(f.ToWorld(Sk.P(o)), f.ToWorld(Sk.P(o) + new Vec2(0, px * 25)), oc, top: true);
 
+        if (_hoverVertex is { } hv) SketchDrawing.PointMark(g, Frame, Frame.ToLocal(hv), ViewportControl.HoverColor, px, 4.5);
         foreach (var e in Sk.Entities)
         {
             var c = ColorOf(e);
+            if (e.IsReference)
+            {
+                var rcol = c == Under || c == Full ? RefColor : c;
+                if (e is SkPointEntity rpe) { SketchDrawing.PointMark(g, f, Sk.P(rpe.P), rcol, px, 3); continue; }
+                foreach (var (a, b) in SketchDrawing.Segments2D(Sk, e)) g.Dashed(f.ToWorld(a), f.ToWorld(b), rcol, px * 3, top: true);
+                continue;
+            }
             if (e is SkPointEntity pe) { SketchDrawing.PointMark(g, f, Sk.P(pe.P), c, px, 3.5); continue; }
             foreach (var (a, b) in SketchDrawing.Segments2D(Sk, e))
             {
@@ -1578,7 +1637,8 @@ public sealed class SketchEditor : IViewportMode
             _glyphs.Add(gb);
         }
         // fixed points
-        foreach (var p in Sk.Points.Where(p => p.Fixed && p.Id != Sketch.OriginId))
+        var refPoints = Sk.Entities.Where(e => e.IsReference).SelectMany(e => e.PointIds).ToHashSet();
+        foreach (var p in Sk.Points.Where(p => p.Fixed && p.Id != Sketch.OriginId && !refPoints.Contains(p.Id)))
         {
             var s = Screen(p.P);
             var gb = new Border
