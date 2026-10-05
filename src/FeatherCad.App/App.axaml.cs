@@ -32,6 +32,8 @@ public partial class App : Application
             ShowError(e.Exception.Message);
         };
         AppDomain.CurrentDomain.UnhandledException += (_, e) => Log(e.ExceptionObject as Exception);
+        // compile the modeling code paths in the background so the first rebuild is fast
+        FeatherCad.Core.Regen.Warmup.Start();
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
             var w = new MainWindow();

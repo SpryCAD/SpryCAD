@@ -97,6 +97,14 @@ static class CoreTests
             t.Eq(regs[0].Holes.Count, 1);
         });
 
+        t.Test("Start-up warm-up model rebuilds cleanly", () =>
+        {
+            // the warm-up part must exercise the real paths without errors (else it warms nothing)
+            var r = Warmup.Run();
+            foreach (var st in r.Status.Values) t.True(st.Ok && st.Warnings.Count == 0, $"warm-up feature: {st.Error} {string.Join(";", st.Warnings)}");
+            t.True(r.State.Bodies.Count == 1 && r.State.Bodies[0].Solid.Native != null, "native warm-up body");
+        });
+
         t.Test("Performance budget: model rebuilds", () =>
         {
             // budgets are ~3-4x the measured warm rebuild time: they catch regressions, not machine noise
