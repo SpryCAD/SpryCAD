@@ -80,6 +80,12 @@ public static class NativeBlend
         Vec2 P(Vec3 v) => new(Vec3.Dot(v, x), Vec3.Dot(v, y));
         var loop = EdgeBlend.Profile2D(P(uA), P(uB), P(nA), P(nB), Vec2.Zero, size, fillet, convex);
         if (loop == null) return (null, convex);
+        var tl = TangentLength(P(uA), P(uB), size, fillet);
+        for (int i = 0; i <= 16; i++)
+        {
+            var q = E + t * (L * i / 16);
+            CheckFits(cA.Face, q + uA * tl, fillet); CheckFits(cB.Face, q + uB * tl, fillet);
+        }
         return (Builders.Extrude(new[] { new ProfileRegion(loop) }, lframe, 0, L, name), convex);
     }
 
@@ -109,6 +115,9 @@ public static class NativeBlend
         var prof = EdgeBlend.Profile2D(uP2, uC2, nP2, nC2, new Vec2(cs.R, h0), size, fillet, convex);
         if (prof == null) return (null, convex);
         if (prof.Verts.Any(v => v.P.X < -1e-9)) throw new InvalidOperationException("size too large for this edge");
+        var tlc = TangentLength(uP2, uC2, size, fillet);
+        var onPlane = new Vec2(cs.R, h0) + uP2 * tlc;   // (radius, height) of the tangent circle on the plane
+        var onCyl = new Vec2(cs.R, h0) + uC2 * tlc;     // ... and on the cylinder
 
         var refDir = cs.F.XDir; var yDir = Vec3.Cross(ax, refDir);
         double Ang(Vec3 p) { var r = p - cs.Origin; return Math.Atan2(Vec3.Dot(r, yDir), Vec3.Dot(r, refDir)); }
@@ -121,6 +130,14 @@ public static class NativeBlend
             if (Wrap(Ang(arc.Mid) - a0) > sweep) { a0 = Ang(arc.V1.P); sweep = Wrap(Ang(arc.V0.P) - a0); }
             ranges.Add((a0, sweep));
         }
+        foreach (var (a0, sweep) in ranges)
+            for (int i = 0; i <= 24; i++)
+            {
+                var a = a0 + sweep * i / 24;
+                var dir = refDir * Math.Cos(a) + yDir * Math.Sin(a);
+                CheckFits(cP.Face, cs.Origin + ax * onPlane.Y + dir * onPlane.X, fillet);
+                CheckFits(cC.Face, cs.Origin + ax * onCyl.Y + dir * onCyl.X, fillet);
+            }
         var tools = new List<Solid>();
         if (ranges.Sum(r => r.sweep) > 2 * Math.PI - 1e-6)
         {
@@ -137,6 +154,38 @@ public static class NativeBlend
             tools.Add(Builders.Revolve(new[] { new ProfileRegion(prof) }, pframe, Vec2.Zero, new Vec2(0, 1), sweep, ranges.Count == 1 ? name : $"{name}.{k++}"));
         }
         return (tools, convex);
+    }
+
+    /// <summary>Distance from the edge to where the fillet/chamfer meets each face (same formula as the profile).</summary>
+    static double TangentLength(Vec2 uA, Vec2 uB, double size, bool fillet)
+    {
+        if (!fillet) return size;
+        var theta = Math.Acos(Math.Clamp(Vec2.Dot(uA.Normalized, uB.Normalized), -1, 1));
+        return size / Math.Tan(theta / 2);
+    }
+
+    /// <summary>
+    /// The blend must end on the faces it blends (SolidWorks reports such fillets as not fitting): the tangent
+    /// point has to lie on the face, or on another face of the body on the same surface (seam-split halves).
+    /// </summary>
+    /// <summary>Verify that blends fit on their faces (off only for tests of the failure path).</summary>
+    public static bool CheckFit = true;
+
+    static void CheckFits(NFace face, Vec3 p, bool fillet)
+    {
+        if (!CheckFit) return;
+        const double tol = 1e-6;
+        if (Fits(face, p, tol)) return;
+        foreach (var c in face.Coedges)
+            foreach (var u in c.Edge.Uses)
+                if (!ReferenceEquals(u.Face, face) && u.Face.Surface.CoincidentWith(face.Surface, 1e-9) && Fits(u.Face, p, tol)) return;
+        throw new InvalidOperationException($"the {(fillet ? "fillet" : "chamfer")} does not fit: it runs past face {face.Tag.Name}. Use a smaller size.");
+    }
+
+    static bool Fits(NFace f, Vec3 p, double tol)
+    {
+        var dom = NDomain.Of(f, 1e-3);
+        return dom.Classify(f.Surface.Project(p), Math.Max(tol, 1e-4)) >= 0;
     }
 
     static bool SameCircle(NCircle a, NCircle b)

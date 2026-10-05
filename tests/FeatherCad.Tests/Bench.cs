@@ -104,7 +104,7 @@ static class Bench
         int before = Csg.NativeFallback;
         var r = new Regenerator().Rebuild(doc);
         FeatherCad.Kernel.Native.NBoolean.Trace = null;
-        foreach (var ff in doc.Features) Console.WriteLine($"  {ff.Name,-16} {r.Status[ff.Id].Milliseconds,8:0} ms {r.Status[ff.Id].Error}");
+        foreach (var ff in doc.Features) Console.WriteLine($"  {ff.Name,-16} {r.Status[ff.Id].Milliseconds,8:0} ms {r.Status[ff.Id].Error} {string.Join("; ", r.Status[ff.Id].Warnings)}");
         Console.WriteLine($"fallbacks: {Csg.NativeFallback - before}, last: {Csg.LastFallbackReason}");
         File.WriteAllLines(Path.Combine(Path.GetTempPath(), "fc-repro-trace.txt"), log);
         Console.WriteLine($"trace: {log.Count} lines -> %TEMP%/fc-repro-trace.txt");

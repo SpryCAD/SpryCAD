@@ -17,6 +17,9 @@ public static class Csg
     /// <summary>Recent native boolean results by operand content (results are immutable, so they are shared).</summary>
     static readonly Lru<(ulong, ulong, BoolOp), Solid> Cache = new(512);
 
+    /// <summary>Time budget of the facet-engine fallback after a failed native boolean.</summary>
+    public static double FallbackSeconds = 4;
+
     public static bool UseCache = Environment.GetEnvironmentVariable("FC_NOCACHE") == null;
 
     /// <summary>Drops cached boolean results (memory pressure, tests).</summary>
@@ -42,8 +45,16 @@ public static class Csg
                 Cache.Add(key, solid);
                 return solid;
             }
-            catch (Exception ex) { LastFallbackReason = ex.Message; }
+            catch (Exception ex) { LastFallbackReason = ex.Message; Native.NBoolean.Trace?.Invoke("[fallback] " + ex.Message); }
             Interlocked.Increment(ref NativeFallback);
+            // the facet engine is only a safety net here: bounded in time, so a hard case fails the feature
+            // with a message instead of hanging the rebuild
+            var reason = LastFallbackReason;
+            var old = BspNode.Deadline;
+            BspNode.Deadline = System.Diagnostics.Stopwatch.GetTimestamp() + (long)(FallbackSeconds * System.Diagnostics.Stopwatch.Frequency);
+            try { return RunFacets(a, b, op); }
+            catch (TimeoutException) { throw new InvalidOperationException($"the geometry could not be computed ({reason})"); }
+            finally { BspNode.Deadline = old; }
         }
         return RunFacets(a, b, op);
     }

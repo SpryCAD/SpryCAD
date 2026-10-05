@@ -141,8 +141,17 @@ internal sealed class BspNode
 
     [ThreadStatic] static int[]? _types;
 
+    /// <summary>
+    /// Deadline for the current thread's BSP work (Stopwatch ticks; 0 = none). BSP booleans on finely
+    /// tessellated curved models can explode; past the deadline the boolean throws instead of hanging.
+    /// </summary>
+    [ThreadStatic] public static long Deadline;
+    [ThreadStatic] static int _work;
+
     public static void Split(Plane plane, CsgPoly poly, List<CsgPoly> coFront, List<CsgPoly> coBack, List<CsgPoly> front, List<CsgPoly> back)
     {
+        if (Deadline != 0 && (++_work & 4095) == 0 && System.Diagnostics.Stopwatch.GetTimestamp() > Deadline)
+            throw new TimeoutException("the boolean operation did not converge");
         // Same plane object or numerically identical -> coplanar without touching vertices.
         if (ReferenceEquals(plane, poly.Plane) || (Math.Abs(plane.D - poly.Plane.D) < Eps && Vec3.Dot(plane.Normal, poly.Plane.Normal) > 1 - 1e-12))
         { coFront.Add(poly); return; }

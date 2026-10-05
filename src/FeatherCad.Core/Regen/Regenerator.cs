@@ -336,8 +336,8 @@ public sealed class Regenerator
                 var r = NativeBlend.Apply(b.Solid, edges, size, fillet, f.Id, errors);
                 bodies.Add(new Body { Id = b.Id, Solid = r });
             }
-            status.Warnings.AddRange(errors);
             if (errors.Count > 0 && errors.Count >= refs.Count) throw new FeatureException(errors[0]);
+            status.Warnings.AddRange(errors);
             State = State.With(bodies);
             return true;
         }

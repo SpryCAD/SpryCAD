@@ -154,6 +154,34 @@ static class CoreTests
             t.True(all.Contains("Fillet1") && all.Contains("Shell1") && all.Contains("Hole2"), "base feature: " + string.Join(",", all));
         });
 
+        t.Test("Fillet that does not fit: clear error, never a hang", () =>
+        {
+            var dir = AppContext.BaseDirectory;
+            while (dir != null && !Directory.Exists(Path.Combine(dir, "samples"))) dir = Path.GetDirectoryName(dir);
+            var json = File.ReadAllText(Path.Combine(dir!, "tests", "FeatherCad.Tests", "models", "shelled-bracket.fcad"));
+            // inside the shell: a 4 mm fillet around the boss foot runs past the 0.5 mm gap to the wall
+            Feature AddFillet(CadDocument d) => d.AddFeature(new FilletFeature { Radius = "4", Edges = { new EdgeRef { A = "F9.I.F2.End", B = "F9.I.F8.1.F7.0.R.CB", Hint = new Vec3(70, 2.5, 18) } } });
+            var doc = CadDocument.FromJson(json);
+            var fil = AddFillet(doc);
+            var sw = Stopwatch.StartNew();
+            var r = new Regenerator().Rebuild(doc);
+            t.True(!r.Status[fil.Id].Ok && r.Status[fil.Id].Error!.Contains("does not fit"), "fit error: " + r.Status[fil.Id].Error);
+            t.True(sw.ElapsedMilliseconds < 3000, $"fast failure ({sw.ElapsedMilliseconds} ms)");
+            // and when such a case reaches the boolean anyway, the fallback is time-boxed
+            var (oldFit, oldBudget) = (NativeBlend.CheckFit, Csg.FallbackSeconds);
+            NativeBlend.CheckFit = false; Csg.FallbackSeconds = 1;
+            try
+            {
+                doc = CadDocument.FromJson(json);
+                fil = AddFillet(doc);
+                sw.Restart();
+                r = new Regenerator().Rebuild(doc);
+                t.True(sw.ElapsedMilliseconds < 8000, $"bounded failure ({sw.ElapsedMilliseconds} ms)");
+                Console.WriteLine($"      unchecked fillet: {(r.Status[fil.Id].Ok ? "ok" : r.Status[fil.Id].Error)} in {sw.ElapsedMilliseconds} ms");
+            }
+            finally { NativeBlend.CheckFit = oldFit; Csg.FallbackSeconds = oldBudget; }
+        });
+
         t.Test("Start-up warm-up model rebuilds cleanly", () =>
         {
             // the warm-up part must exercise the real paths without errors (else it warms nothing)
