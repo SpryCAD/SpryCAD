@@ -54,13 +54,11 @@ public partial class MainWindow
         };
         page.OnCancel = () => { _pendingAfterSketch = null; _pendingTool = null; ShowPage(null); };
         page.OnOk = page.OnCancel;
-        _showPlanesTemp = true;
         ShowPage(page);
         Viewport.ShowPlanes = true;
         Viewport.Redraw();
         Status("Select a plane or planar face for the sketch.");
     }
-    bool _showPlanesTemp;
 
     bool TryPlaneOf(SelItem? sel, out PlaneRef? pr, out Frame frame)
     {
@@ -144,7 +142,6 @@ public partial class MainWindow
         HideConfirmCorner();
         ShowPage(null);
         StatusSketch.Text = "";
-        _showPlanesTemp = false;
         var pending = _pendingAfterSketch; _pendingAfterSketch = null;
         var hole = _pendingHole; _pendingHole = null;
         var id = ed.Feature.Id;

@@ -83,6 +83,19 @@ public static class Serialization
         Converters = { new JsonStringEnumConverter(), new Vec3Converter(), new Vec2Converter() },
         IncludeFields = false,
         NumberHandling = JsonNumberHandling.AllowNamedFloatingPointLiterals,
+        TypeInfoResolver = new System.Text.Json.Serialization.Metadata.DefaultJsonTypeInfoResolver
+        {
+            Modifiers =
+            {
+                // derived/computed properties never belong in the file
+                ti =>
+                {
+                    for (int i = ti.Properties.Count - 1; i >= 0; i--)
+                        if (ti.Properties[i].Set == null && ti.Properties[i].Name is "kind" or "consumes" or "pointIds" or "isDimension")
+                            ti.Properties.RemoveAt(i);
+                },
+            },
+        },
     };
 
     public static object CloneObject(object o, Type t)
