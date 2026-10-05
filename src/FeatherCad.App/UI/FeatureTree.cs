@@ -61,13 +61,31 @@ public sealed class FeatureTree : UserControl
             var status = result?.Status.GetValueOrDefault(f.Id);
             var rolledBack = i >= active;
             var children = f.Consumes.Where(c => !string.IsNullOrEmpty(c)).Select(doc.Find).OfType<Feature>().ToList();
-            AddRow(f.Id, f.Name, IconFor(f), 1, status, suppressed: f.Suppressed || rolledBack, hasChildren: children.Count > 0);
+            var shown = status;
+            if (children.Count > 0 && !_expanded.Contains(f.Id) && status is not { Ok: false })
+                foreach (var ch in children)
+                    if (result?.Status.GetValueOrDefault(ch.Id) is { Ok: false } cs)
+                        shown = new FeatureStatus { Error = $"{ch.Name}: {cs.Error}", Milliseconds = status?.Milliseconds ?? 0 };
+            AddRow(f.Id, Label(f, result), IconFor(f), 1, shown, suppressed: f.Suppressed || rolledBack, hasChildren: children.Count > 0);
             if (children.Count > 0 && _expanded.Contains(f.Id))
                 foreach (var ch in children)
-                    AddRow(ch.Id, ch.Name, IconFor(ch), 2, result?.Status.GetValueOrDefault(ch.Id), suppressed: ch.Suppressed || rolledBack);
+                    AddRow(ch.Id, Label(ch, result), IconFor(ch), 2, result?.Status.GetValueOrDefault(ch.Id), suppressed: ch.Suppressed || rolledBack);
         }
         if (active >= doc.Features.Count) AddRollbackBar();
         Select(_selectedId);
+    }
+
+    /// <summary>Feature name; sketches get SolidWorks' "(-)" under-defined / "(+)" over-defined prefix.</summary>
+    static string Label(Feature f, RegenResult? result)
+    {
+        if (f is SketchFeature && result?.State.Sketches.GetValueOrDefault(f.Id)?.Solve is { } sr)
+            return sr.Status switch
+            {
+                Core.Sketching.SketchStatus.UnderDefined => "(-) " + f.Name,
+                Core.Sketching.SketchStatus.OverDefined or Core.Sketching.SketchStatus.Failed => "(+) " + f.Name,
+                _ => f.Name,
+            };
+        return f.Name;
     }
 
     static string IconFor(Feature f) => f switch
@@ -145,6 +163,8 @@ public sealed class FeatureTree : UserControl
         if (status != null && status.Milliseconds > 200) sp.Children.Add(new TextBlock { Text = $"{status.Milliseconds:0} ms", Foreground = Brushes.Gray, FontSize = 10, VerticalAlignment = VerticalAlignment.Center });
 
         var row = new Border { Classes = { "treerow" }, Child = sp, Tag = id };
+        if (status is { Ok: false }) ToolTip.SetTip(row, status.Error);
+        else if (status is { Warnings.Count: > 0 }) ToolTip.SetTip(row, string.Join("\n", status.Warnings));
         row.PointerPressed += (_, e) =>
         {
             var pt = e.GetCurrentPoint(row);

@@ -88,6 +88,20 @@ public partial class MainWindow
     void CommitEdit()
     {
         if (_edit == null) return;
+        // do not commit what the user did not type, or a feature the preview already showed to fail
+        if (_page?.FirstInvalidField is { } bad)
+        {
+            _page.Message = $"\u2716 \"{bad}\" has an invalid value.";
+            Status($"Fix \"{bad}\" first (or Esc to cancel).");
+            return;
+        }
+        if (!_previewTimer.IsEnabled && !Session.Busy && Session.PreviewResult is { } pr
+            && pr.Status.TryGetValue(_edit.Feature.Id, out var pst) && pst.Error != null)
+        {
+            if (_page != null) _page.Message = "\u2716 " + pst.Error;
+            Status($"{_edit.Feature.Name} cannot be created: {pst.Error}");
+            return;
+        }
         _edit.BeforeCommit?.Invoke();
         var e = _edit;
         _edit = null;

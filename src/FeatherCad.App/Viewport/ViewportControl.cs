@@ -446,6 +446,9 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         _navLast = pt.Position;
         if (props.IsMiddleButtonPressed)
         {
+            // middle double-click: zoom to fit (SolidWorks)
+            if (e.ClickCount == 2) { ZoomToFit(); e.Handled = true; return; }
+            _zoomAnchor = pt.Position;
             _nav = (e.KeyModifiers & KeyModifiers.Control) != 0 ? Nav.Pan
                  : (e.KeyModifiers & KeyModifiers.Shift) != 0 ? Nav.Zoom
                  : (e.KeyModifiers & KeyModifiers.Alt) != 0 ? Nav.Roll
@@ -477,6 +480,8 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         }
     }
 
+    Point _zoomAnchor;
+
     Vector3 ComputePivot(Point p)
     {
         var b = SceneBounds();
@@ -502,7 +507,7 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
             {
                 case Nav.Rotate: Camera.Orbit(dx, dy, _pivot); break;
                 case Nav.Pan: Camera.Pan(dx, dy); break;
-                case Nav.Zoom: Camera.ZoomAt(MathF.Exp(dy * 0.01f), (float)Bounds.Width / 2, (float)Bounds.Height / 2); break;
+                case Nav.Zoom: Camera.ZoomAt(MathF.Exp(dy * 0.01f), (float)_zoomAnchor.X, (float)_zoomAnchor.Y); break; // about the press point
                 case Nav.Roll: Camera.Roll(dx * 0.01f); break;
             }
             _navLast = pos;

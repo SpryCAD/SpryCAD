@@ -53,6 +53,13 @@ public sealed class DocumentSession
         RequestRebuild();
     }
 
+    /// <summary>Marks the document as having unsaved changes (e.g. recovered from an autosave).</summary>
+    public void MarkDirty()
+    {
+        Dirty = true;
+        DocumentChanged?.Invoke();
+    }
+
     public void Save(string path)
     {
         Doc.Save(path);
@@ -82,6 +89,9 @@ public sealed class DocumentSession
         mutate();
         EndChange();
     }
+
+    /// <summary>A rebuild or preview is running or queued.</summary>
+    public bool Busy { get { lock (_lock) return _running; } }
 
     public bool CanUndo => _undo.Count > 0;
     public bool CanRedo => _redo.Count > 0;

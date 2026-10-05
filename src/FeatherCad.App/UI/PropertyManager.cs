@@ -62,6 +62,10 @@ public sealed class PmPage
     public event Action? Changed;
     public Action? OnOk { get; set; }
     public Action? OnCancel { get; set; }
+
+    readonly Dictionary<TextBox, string> _invalid = new();
+    /// <summary>Label of the first field holding an invalid value (OK must not commit the last valid one silently).</summary>
+    public string? FirstInvalidField => _invalid.Count == 0 ? null : _invalid.Values.First();
     public List<PmSelectionBox> Boxes { get; } = new();
     public PmSelectionBox? ActiveBox { get; private set; }
     public event Action? ActiveBoxChanged;
@@ -141,6 +145,7 @@ public sealed class PmPage
     {
         unit ??= LengthUnit;
         var tb = new TextBox { Text = get(), MinWidth = 90, HorizontalAlignment = HorizontalAlignment.Stretch };
+        void MarkInvalid(bool bad) { if (bad) _invalid[tb] = label; else _invalid.Remove(tb); }
         var unitLbl = new TextBlock { Text = unit, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(4, 0, 0, 0), Foreground = Brushes.Gray, FontSize = 11 };
         var dp = new DockPanel();
         DockPanel.SetDock(unitLbl, Dock.Right);
@@ -150,6 +155,7 @@ public sealed class PmPage
             var t = tb.Text ?? "";
             if (optional && string.IsNullOrWhiteSpace(t))
             {
+                MarkInvalid(false);
                 tb.BorderBrush = null; ToolTip.SetTip(tb, null);
                 set("");
                 Changed?.Invoke();
@@ -157,6 +163,7 @@ public sealed class PmPage
             }
             if (Expr.TryEval(t, Lookup, out var v, out var err))
             {
+                MarkInvalid(false);
                 tb.BorderBrush = null;
                 ToolTip.SetTip(tb, double.TryParse(t, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out _) ? null : $"= {Expr.Format(v)}");
                 set(t.Trim());
@@ -164,6 +171,7 @@ public sealed class PmPage
             }
             else
             {
+                MarkInvalid(true);
                 tb.BorderBrush = Brushes.Red;
                 ToolTip.SetTip(tb, err);
             }

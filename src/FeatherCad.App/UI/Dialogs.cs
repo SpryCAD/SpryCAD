@@ -162,24 +162,27 @@ public static class Dialogs
         var density = 7.85e-6; // steel, kg/mm^3
         var tb = new TextBlock { FontFamily = new FontFamily("Consolas, Menlo, monospace"), FontSize = 12 };
         var dens = new TextBox { Text = "7850", Width = 90 };
+        // geometry once; only the mass is recomputed while the density is typed
+        double vol = 0, area = 0; var c = Vec3.Zero; var bb = Box3.Empty;
+        foreach (var b in bodies)
+        {
+            // the refined display mesh follows the exact surfaces, so its volume is near exact
+            var v = b.Mesh.Volume; vol += v; area += b.Solid.SurfaceArea();
+            c += b.Solid.Centroid() * v; bb.Add(b.Solid.Bounds);
+        }
+        if (Math.Abs(vol) > 1e-12) c /= vol;
+        var ips = owner.Session.Doc.Units == UnitSystem.IPS;
+        var u = ips ? "in" : "mm";
+        var mm3 = ips ? 25.4 * 25.4 * 25.4 : 1.0; // model volume unit -> mm³ (density is per mm³)
         void Update()
         {
             if (double.TryParse(dens.Text, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var d)) density = d * 1e-9;
             if (bodies.Count == 0) { tb.Text = "No solid bodies."; return; }
-            double vol = 0, area = 0; var c = Vec3.Zero; var bb = Box3.Empty;
-            foreach (var b in bodies)
-            {
-                // the refined display mesh follows the exact surfaces, so its volume is near exact
-                var v = b.Mesh.Volume; vol += v; area += b.Solid.SurfaceArea();
-                c += b.Solid.Centroid() * v; bb.Add(b.Solid.Bounds);
-            }
-            if (Math.Abs(vol) > 1e-12) c /= vol;
-            var u = owner.Session.Doc.Units == UnitSystem.IPS ? "in" : "mm";
             tb.Text =
                 $"Bodies:            {bodies.Count}\n" +
                 $"Volume:            {vol:0.###} {u}³\n" +
                 $"Surface area:      {area:0.###} {u}²\n" +
-                $"Mass:              {vol * density:0.#####} kg\n" +
+                $"Mass:              {vol * mm3 * density:0.#####} kg\n" +
                 $"Center of mass:    X {c.X:0.###}  Y {c.Y:0.###}  Z {c.Z:0.###}\n" +
                 $"Bounding box:      {bb.Size.X:0.###} × {bb.Size.Y:0.###} × {bb.Size.Z:0.###} {u}\n" +
                 $"Faces (facets):    {bodies.Sum(b => b.Solid.Faces.Count)}\n" +

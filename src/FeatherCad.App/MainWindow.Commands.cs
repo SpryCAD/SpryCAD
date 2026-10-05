@@ -40,6 +40,30 @@ public partial class MainWindow
         return m;
     }
 
+    /// <summary>File > Recent Files, refreshed each time it opens.</summary>
+    MenuItem RecentMenu()
+    {
+        var m = new MenuItem { Header = "Recent _Files" };
+        void Fill()
+        {
+            m.Items.Clear();
+            var files = RecentFiles.Load();
+            if (files.Count == 0) { m.Items.Add(new MenuItem { Header = "(none)", IsEnabled = false }); return; }
+            int n = 1;
+            foreach (var path in files)
+            {
+                var p = path;
+                var item = new MenuItem { Header = $"_{n++} {Path.GetFileName(p)}" };
+                ToolTip.SetTip(item, p);
+                item.Click += async (_, _) => { if (await ConfirmDiscard()) OpenFile(p); };
+                m.Items.Add(item);
+            }
+        }
+        Fill();
+        m.SubmenuOpened += (_, _) => Fill();
+        return m;
+    }
+
     void BuildMenu()
     {
         MainMenu.Items.Add(Sub("_File",
@@ -47,6 +71,7 @@ public partial class MainWindow
             Item("_Open...", () => _ = OpenFileDialog(), "Ctrl+O", "open"),
             Item("_Save", () => _ = Save(), "Ctrl+S", "save"),
             Item("Save _As...", () => _ = SaveAs(), "Ctrl+Shift+S"),
+            RecentMenu(),
             "-",
             Item("Export _STEP...", () => _ = Export("step"), null, "export"),
             Item("Export S_TL...", () => _ = Export("stl"), null, "export"),
@@ -525,6 +550,7 @@ public partial class MainWindow
         {
             LeaveModes();
             Session.Load(path);
+            if (!path.EndsWith("autosave" + CadDocument.FileExtension, StringComparison.OrdinalIgnoreCase)) RecentFiles.Add(path);
             Status("Opened " + path);
             _fitAfterLoad = true;
         }
@@ -536,7 +562,7 @@ public partial class MainWindow
     {
         if (!await ResolvePendingEdit()) return false;
         if (Session.FilePath == null) return await SaveAs();
-        try { Session.Save(Session.FilePath); Status("Saved " + Session.FilePath); return true; }
+        try { Session.Save(Session.FilePath); RecentFiles.Add(Session.FilePath); Status("Saved " + Session.FilePath); return true; }
         catch (Exception ex) { await Dialogs.Message(this, "Save failed", ex.Message); return false; }
     }
 
@@ -552,7 +578,7 @@ public partial class MainWindow
         });
         var path = f?.TryGetLocalPath();
         if (path == null) return false;
-        try { Session.Save(path); Status("Saved " + path); return true; }
+        try { Session.Save(path); RecentFiles.Add(path); Status("Saved " + path); return true; }
         catch (Exception ex) { await Dialogs.Message(this, "Save failed", ex.Message); return false; }
     }
 
@@ -577,10 +603,17 @@ public partial class MainWindow
         {
             // documents in IPS store inches; exports are written in millimetres
             var scale = Session.Doc.Units == UnitSystem.IPS ? 25.4 : 1.0;
-            using var fs = File.Create(path);
-            if (kind == "step") StepWriter.Write(fs, r.State.Bodies.Select(b => (b.Id, b.Solid)), baseName, scale);
-            else StlWriter.Write(fs, r.State.Bodies.Select(b => b.Solid), scale);
-            Status("Exported " + path);
+            var bodies = r.State.Bodies.ToList();
+            Status($"Exporting {Path.GetFileName(path)}...");
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            // written off the UI thread: the exact B-rep / tessellation of big parts takes a moment
+            await Task.Run(() =>
+            {
+                using var fs = File.Create(path);
+                if (kind == "step") StepWriter.Write(fs, bodies.Select(b => (b.Id, b.Solid)), baseName, scale);
+                else StlWriter.Write(fs, bodies.Select(b => b.Solid), scale);
+            });
+            Status($"Exported {path} ({sw.ElapsedMilliseconds} ms)");
         }
         catch (Exception ex) { await Dialogs.Message(this, "Export failed", ex.Message); }
     }
@@ -591,6 +624,9 @@ public partial class MainWindow
         if (!File.Exists(p)) { Status("No autosave found."); return; }
         OpenFile(p);
         Session.FilePath = null;
+        // recovered work is not saved anywhere yet: closing it must prompt
+        Session.MarkDirty();
+        Status("Recovered the autosave: use Save As to keep it.");
     }
 
     // ------------------------------------------------------------------------------------------
