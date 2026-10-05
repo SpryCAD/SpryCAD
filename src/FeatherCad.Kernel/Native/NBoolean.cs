@@ -32,7 +32,12 @@ public sealed class NBoolean
     public static NBody Run(NBody a, NBody b, BoolOp op)
     {
         var ba = a.Bounds; var bb = b.Bounds;
-        var scale = Math.Max(ba.Diagonal, bb.Diagonal);
+        // tolerances follow the region where the operands meet: a long through-all tool must not
+        // loosen them for the (small) part it actually cuts
+        var lo = new Vec3(Math.Max(ba.Min.X, bb.Min.X), Math.Max(ba.Min.Y, bb.Min.Y), Math.Max(ba.Min.Z, bb.Min.Z));
+        var hi = new Vec3(Math.Min(ba.Max.X, bb.Max.X), Math.Min(ba.Max.Y, bb.Max.Y), Math.Min(ba.Max.Z, bb.Max.Z));
+        var scale = (hi - lo).Length;
+        if (!(scale > 0) || hi.X < lo.X || hi.Y < lo.Y || hi.Z < lo.Z) scale = Math.Min(ba.Diagonal, bb.Diagonal);
         var nb = new NBoolean(scale);
         return nb.Execute(a.Clone(), b.Clone(), op);
     }
@@ -94,9 +99,11 @@ public sealed class NBoolean
         // 6-7. classify and select
         var boxA = A.Bounds; var boxB = B.Bounds;
         var result = new NBody();
+        var statesA = ClassifyAll(piecesA, piecesB, boxB, sections);
+        var statesB = ClassifyAll(piecesB, piecesA, boxA, sections);
         foreach (var f in piecesA)
         {
-            var st = Classify(f, piecesB, boxB);
+            var st = statesA[f];
             if (Trace != null) T($"A {f.Tag.Name} loops={f.Loops.Count} pt={Dom(f).InteriorPoint()} -> {st}");
             bool keep = op switch
             {
@@ -108,7 +115,7 @@ public sealed class NBoolean
         }
         foreach (var f in piecesB)
         {
-            var st = Classify(f, piecesA, boxA);
+            var st = statesB[f];
             if (Trace != null) T($"B {f.Tag.Name} loops={f.Loops.Count} pt={Dom(f).InteriorPoint()} -> {st}");
             bool keep = op switch
             {
@@ -256,11 +263,12 @@ public sealed class NBoolean
             }
             if (on.Count == 0)
             {
-                // a curve entirely inside both faces would need a closed edge: seam splitting prevents this
+                // a closed curve entirely inside both faces (e.g. a small hole grazing a bigger one): it touches
+                // no existing edge, so give it two vertices of its own; it becomes an inner loop / a new face
                 var probe = c is NPolyline pl ? pl.Eval(pl.Total * 0.37) : c.Eval(0);
-                if (domA.Classify(sa.Project(probe), _onTol) > 0 && domB.Classify(sb.Project(probe), _onTol) > 0)
-                    throw new NBooleanException("closed section curve without vertices");
-                continue;
+                if (!c.Periodic || domA.Classify(sa.Project(probe), _onTol) <= 0 || domB.Classify(sb.Project(probe), _onTol) <= 0) continue;
+                on.Add((0, Snap(c.Eval(0))));
+                on.Add((c.Period / 2, Snap(c.Eval(c.Period / 2))));
             }
             bool periodic = c.Periodic;
             double period = c.Period;
@@ -357,6 +365,7 @@ public sealed class NBoolean
             bool on = true;
             for (int i = 0; i <= 8 && on; i++) if (Math.Abs(dst.Surface.F_(e.At(i / 8.0))) > _tol * 10) on = false;
             if (!on) continue;
+            _blockers.Add(e);
             dom ??= Dom(dst);
             if (dom.Classify(dst.Surface.Project(e.Mid), _onTol) > 0) add(dst, e);
         }
@@ -541,21 +550,117 @@ public sealed class NBoolean
     // ------------------------------------------------------------------------------------------
     // classification
 
-    static readonly Vec3[] RayDirs =
+    static readonly Vec3[] RayDirs = MakeRayDirs(32);
+
+    /// <summary>Well spread, irrational directions (golden spiral) so rays rarely hit edges or graze faces.</summary>
+    static Vec3[] MakeRayDirs(int n)
     {
-        new Vec3(0.5773, 0.5821, 0.5726).Normalized, new Vec3(-0.3123, 0.8312, 0.4598).Normalized,
-        new Vec3(0.7071, -0.4002, 0.5831).Normalized, new Vec3(-0.6219, -0.5117, -0.5930).Normalized,
-        new Vec3(0.1279, 0.2318, -0.9643).Normalized, new Vec3(0.9113, 0.3011, -0.2810).Normalized,
-    };
+        var res = new Vec3[n];
+        var golden = Math.PI * (3 - Math.Sqrt(5));
+        for (int i = 0; i < n; i++)
+        {
+            var y = 1 - (i + 0.5) / n * 2;
+            var r = Math.Sqrt(1 - y * y);
+            var th = golden * i + 0.1234567;
+            res[i] = new Vec3(Math.Cos(th) * r, y, Math.Sin(th) * r).Normalized;
+        }
+        return res;
+    }
+
+    readonly Dictionary<NFace, Box3> _fbox = new(ReferenceEqualityComparer.Instance);
+    readonly HashSet<NEdge> _blockers = new(ReferenceEqualityComparer.Instance);
+
+    /// <summary>
+    /// Classifies pieces by connected regions: pieces sharing an edge that does not touch the other body
+    /// (not a section/imprint edge, not lying on its surfaces) have the same state, so only one ray test
+    /// per region is needed. Pieces on surfaces coincident with the other body are classified alone.
+    /// </summary>
+    Dictionary<NFace, State> ClassifyAll(List<NFace> pieces, List<NFace> other, Box3 otherBox, Dictionary<NFace, List<NEdge>> sections)
+    {
+        foreach (var l in sections.Values) foreach (var e in l) _blockers.Add(e);
+        var res = new Dictionary<NFace, State>(ReferenceEqualityComparer.Instance);
+        var idx = new Dictionary<NFace, int>(ReferenceEqualityComparer.Instance);
+        for (int i = 0; i < pieces.Count; i++) idx[pieces[i]] = i;
+        var lone = new bool[pieces.Count];
+        for (int i = 0; i < pieces.Count; i++)
+            foreach (var g in other)
+                if (pieces[i].Surface.CoincidentWith(g.Surface, _tol * 10) && FBox(pieces[i]).Overlaps(FBox(g), _onTol)) { lone[i] = true; break; }
+        var parent = Enumerable.Range(0, pieces.Count).ToArray();
+        int Find(int x) { while (parent[x] != x) x = parent[x] = parent[parent[x]]; return x; }
+        var users = new Dictionary<NEdge, List<int>>(ReferenceEqualityComparer.Instance);
+        for (int i = 0; i < pieces.Count; i++)
+            foreach (var c in pieces[i].Coedges)
+            {
+                if (!users.TryGetValue(c.Edge, out var l)) users[c.Edge] = l = new();
+                l.Add(i);
+            }
+        foreach (var (e, us) in users)
+        {
+            if (us.Count != 2 || _blockers.Contains(e)) continue;
+            if (lone[us[0]] || lone[us[1]]) continue;
+            // the other body must not pass through the edge
+            bool touches = false;
+            foreach (var g in other)
+            {
+                if (!FBox(g).Overlaps(e.Bounds(_sampleTol * 500), _onTol)) continue;
+                if (Math.Abs(g.Surface.F_(e.Mid)) < _onTol || Math.Abs(g.Surface.F_(e.V0.P)) < _onTol && Math.Abs(g.Surface.F_(e.V1.P)) < _onTol) { touches = true; break; }
+            }
+            if (touches) continue;
+            parent[Find(us[0])] = Find(us[1]);
+        }
+        var compState = new Dictionary<int, State>();
+        for (int i = 0; i < pieces.Count; i++)
+        {
+            var r = Find(i);
+            if (!compState.TryGetValue(r, out var st)) compState[r] = st = Classify(pieces[i], other, otherBox);
+            res[pieces[i]] = st;
+        }
+        return res;
+    }
+    Box3 FBox(NFace f)
+    {
+        if (_fbox.TryGetValue(f, out var b)) return b;
+        var d = Dom(f);
+        b = Box3.Empty;
+        foreach (var l in d.Loops3) foreach (var p in l) b.Add(p);
+        if (f.Surface.Kind != SurfaceKind.Plane) foreach (var p in d.InteriorSamples(4)) b.Add(p);
+        var pad = _sampleTol * 500;
+        b.Add(b.Min - new Vec3(pad, pad, pad)); b.Add(b.Max + new Vec3(pad, pad, pad));
+        _fbox[f] = b;
+        return b;
+    }
+
+    static bool RayHitsBox(Vec3 o, Vec3 d, Box3 b, double pad)
+    {
+        double tmin = 0, tmax = double.PositiveInfinity;
+        for (int i = 0; i < 3; i++)
+        {
+            var oi = o[i]; var di = d[i]; var mn = b.Min[i] - pad; var mx = b.Max[i] + pad;
+            if (Math.Abs(di) < 1e-15) { if (oi < mn || oi > mx) return false; continue; }
+            var t1 = (mn - oi) / di; var t2 = (mx - oi) / di;
+            if (t1 > t2) (t1, t2) = (t2, t1);
+            tmin = Math.Max(tmin, t1); tmax = Math.Min(tmax, t2);
+            if (tmin > tmax) return false;
+        }
+        return true;
+    }
 
     State Classify(NFace f, List<NFace> other, Box3 otherBox)
     {
+        var fb = FBox(f);
+        if (!fb.Overlaps(otherBox, _onTol)) return State.Out;
         var p = Dom(f).InteriorPoint();
+        return ClassifyPoint(f, p, other, otherBox);
+    }
+
+    State ClassifyPoint(NFace f, Vec3 p, List<NFace> other, Box3 otherBox)
+    {
         if (!otherBox.Overlaps(new Box3 { Min = p, Max = p }, _onTol)) return State.Out;
         var nf = f.Surface.Normal(p) * (f.Sense ? 1 : -1);
         // on another face?
         foreach (var g in other)
         {
+            if (!FBox(g).Overlaps(new Box3 { Min = p, Max = p }, _onTol)) continue;
             if (Math.Abs(g.Surface.F_(p)) > _onTol) continue;
             if (Dom(g).Classify(g.Surface.Project(p), _onTol) < 0) continue;
             var ng = g.Surface.Normal(p) * (g.Sense ? 1 : -1);
@@ -566,19 +671,18 @@ public sealed class NBoolean
             int count = 0; bool ok = true;
             foreach (var g in other)
             {
+                if (!RayHitsBox(p, d, FBox(g), _onTol * 4)) continue;
                 foreach (var t in g.Surface.RayHits(p, d))
                 {
-                    if (t <= _onTol) { if (t > -_onTol) { ok = false; } continue; }
+                    if (t < -_onTol) continue;
                     var q = p + d * t;
                     var c = Dom(g).Classify(q, _onTol * 4);
-                    if (c == 0) { ok = false; break; }
-                    if (c > 0)
-                    {
-                        // grazing hits are ambiguous
-                        var n = g.Surface.Normal(q);
-                        if (Math.Abs(Vec3.Dot(n, d)) < 1e-4) { ok = false; break; }
-                        count++;
-                    }
+                    if (c < 0) continue;                 // the surface, but outside this face
+                    if (c == 0 || t <= _onTol) { ok = false; break; } // on an edge, or starting on the face
+                    // grazing hits are ambiguous
+                    var n = g.Surface.Normal(q);
+                    if (Math.Abs(Vec3.Dot(n, d)) < 1e-3) { ok = false; break; }
+                    count++;
                 }
                 if (!ok) break;
             }
@@ -603,8 +707,31 @@ public sealed class NBoolean
     /// <summary>Replaces geometrically identical edges (from the two operands) by one edge.</summary>
     void Sew(NBody body)
     {
+        WeldVertices(body);
         body.Link();
         var single = body.Edges.Where(e => e.Uses.Count == 1).ToList();
+        // partially overlapping open edges (one split where the other is not): split at each other's vertices
+        var openVerts = single.SelectMany(e => new[] { e.V0, e.V1 }).Distinct(ReferenceEqualityComparer.Instance).Cast<NVertex>().ToList();
+        var splits = new Dictionary<NEdge, List<(double t, NVertex v)>>(ReferenceEqualityComparer.Instance);
+        foreach (var e in single)
+        {
+            var box = e.Bounds(_sampleTol * 500);
+            foreach (var v in openVerts)
+            {
+                if (ReferenceEquals(v, e.V0) || ReferenceEquals(v, e.V1) || !box.Contains(v.P, _onTol)) continue;
+                var t = e.Curve.Param(v.P, e.Curve.Periodic ? 0.5 * (e.T0 + e.T1) : null);
+                if (t <= Math.Min(e.T0, e.T1) + 1e-9 || t >= Math.Max(e.T0, e.T1) - 1e-9) continue;
+                if (Vec3.Distance(e.Curve.Eval(t), v.P) > _tol * 10) continue;
+                if (!splits.TryGetValue(e, out var l)) splits[e] = l = new();
+                l.Add((t, v));
+            }
+        }
+        if (splits.Count > 0)
+        {
+            ApplySplits(body, splits);
+            body.Link();
+            single = body.Edges.Where(e => e.Uses.Count == 1).ToList();
+        }
         var byEnds = new Dictionary<(NVertex, NVertex), List<NEdge>>();
         (NVertex, NVertex) Key(NEdge e) => System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(e.V0) <= System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(e.V1) ? (e.V0, e.V1) : (e.V1, e.V0);
         foreach (var e in single)
@@ -637,6 +764,35 @@ public sealed class NBoolean
                     var c = lp.Coedges[i];
                     if (replace.TryGetValue(c.Edge, out var r)) lp.Coedges[i] = new NCoedge(r.with_, r.flip ? !c.Forward : c.Forward);
                 }
+    }
+
+    /// <summary>Replaces coincident vertex objects by one representative (grid hashed).</summary>
+    void WeldVertices(NBody body)
+    {
+        var cell = _tol * 20;
+        var grid = new Dictionary<(long, long, long), List<NVertex>>();
+        var rep = new Dictionary<NVertex, NVertex>(ReferenceEqualityComparer.Instance);
+        (long, long, long) K(Vec3 p, int dx, int dy, int dz) => ((long)Math.Floor(p.X / cell) + dx, (long)Math.Floor(p.Y / cell) + dy, (long)Math.Floor(p.Z / cell) + dz);
+        foreach (var e in body.Edges)
+            foreach (var v in new[] { e.V0, e.V1 })
+            {
+                if (rep.ContainsKey(v)) continue;
+                NVertex? found = null;
+                for (int dx = -1; dx <= 1 && found == null; dx++)
+                    for (int dy = -1; dy <= 1 && found == null; dy++)
+                        for (int dz = -1; dz <= 1 && found == null; dz++)
+                            if (grid.TryGetValue(K(v.P, dx, dy, dz), out var l))
+                                found = l.FirstOrDefault(w => Vec3.Distance(w.P, v.P) < _tol * 10);
+                if (found != null) { rep[v] = found; continue; }
+                rep[v] = v;
+                var k = K(v.P, 0, 0, 0);
+                if (!grid.TryGetValue(k, out var lst)) grid[k] = lst = new();
+                lst.Add(v);
+            }
+        foreach (var e in body.Edges.ToList())
+        {
+            e.V0 = rep[e.V0]; e.V1 = rep[e.V1];
+        }
     }
 
     /// <summary>Merges adjacent faces lying on the same surface with the same orientation.</summary>

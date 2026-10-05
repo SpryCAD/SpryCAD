@@ -9,7 +9,36 @@ public static class Csg
     public static Solid Subtract(Solid a, Solid b) => Run(a, b, BoolOp.Subtract);
     public static Solid Intersect(Solid a, Solid b) => Run(a, b, BoolOp.Intersect);
 
+    /// <summary>Use exact native booleans when both operands carry a native B-rep.</summary>
+    public static bool UseNative = true;
+    /// <summary>Counters for diagnostics: native successes and fallbacks (with the last reason).</summary>
+    public static int NativeOk, NativeFallback;
+    public static string? LastFallbackReason;
+
     public static Solid Run(Solid a, Solid b, BoolOp op)
+    {
+        if (UseNative && a.Native != null && b.Native != null && !a.IsEmpty && !b.IsEmpty)
+        {
+            if (!a.Bounds.Overlaps(b.Bounds, 1e-6))
+                return op switch { BoolOp.Union => Solid.Combine(new[] { a, b }), BoolOp.Subtract => a, _ => Solid.Empty };
+            try
+            {
+                var nb = Native.NBoolean.Run(a.Native, b.Native, op);
+                var solid = Native.NTess.ToSolid(nb);
+                if (solid.IsEmpty || solid.Topology.OpenHalfEdges == 0)
+                {
+                    Interlocked.Increment(ref NativeOk);
+                    return solid;
+                }
+                LastFallbackReason = "tessellation not watertight";
+            }
+            catch (Exception ex) { LastFallbackReason = ex.Message; }
+            Interlocked.Increment(ref NativeFallback);
+        }
+        return RunFacets(a, b, op);
+    }
+
+    public static Solid RunFacets(Solid a, Solid b, BoolOp op)
     {
         if (a.IsEmpty) return op == BoolOp.Union ? b : Solid.Empty;
         if (b.IsEmpty) return op == BoolOp.Intersect ? Solid.Empty : a;

@@ -97,6 +97,44 @@ static class CoreTests
             t.Eq(regs[0].Holes.Count, 1);
         });
 
+        t.Test("Samples rebuild watertight", () =>
+        {
+            var dir = AppContext.BaseDirectory;
+            while (dir != null && !Directory.Exists(Path.Combine(dir, "samples"))) dir = Path.GetDirectoryName(dir);
+            t.True(dir != null, "samples folder");
+            foreach (var file in Directory.GetFiles(Path.Combine(dir!, "samples"), "*.fcad"))
+            {
+                var doc = CadDocument.FromJson(File.ReadAllText(file));
+                if (Environment.GetEnvironmentVariable("FC_TRACE") != null) FeatherCad.Kernel.Native.NBoolean.Trace = m => Console.WriteLine("T " + m);
+                var r = new Regenerator().Rebuild(doc);
+                FeatherCad.Kernel.Native.NBoolean.Trace = null;
+                for (int i = 0; i < r.States.Count; i++)
+                    foreach (var b in r.States[i].Bodies)
+                        Console.WriteLine($"        after {doc.Features[i].Name}: open={b.Solid.Topology.OpenHalfEdges} native={b.Solid.Native != null}");
+                foreach (var f in doc.Features) t.True(r.Status[f.Id].Ok, $"{Path.GetFileName(file)} {f.Name}: {r.Status[f.Id].Error}");
+                foreach (var b in r.State.Bodies)
+                {
+                    Console.WriteLine($"      {Path.GetFileName(file)}: open={b.Solid.Topology.OpenHalfEdges} native={b.Solid.Native != null} vol={b.Solid.Volume():0.###} ({Csg.LastFallbackReason})");
+                    t.Eq(b.Solid.Topology.OpenHalfEdges, 0);
+                }
+                foreach (var b in r.State.Bodies)
+                {
+                    if (Environment.GetEnvironmentVariable("FC_DUMP") != null && b.Solid.Native != null)
+                        foreach (var f in b.Solid.Native.Faces)
+                        {
+                            var bx = f.Bounds();
+                            Console.WriteLine($"        {f.Tag.Name} {f.Surface.Kind} R={f.Surface.R:0.###} axis={f.Surface.Axis} o={f.Surface.Origin} sense={f.Sense} box={bx.Min}-{bx.Max} loops={string.Join("/", f.Loops.Select(l => l.Coedges.Count))}");
+                        }
+                    var brep = ExactBrep.Build(b.Solid);
+                    t.True(brep.Warnings.Count == 0, $"{Path.GetFileName(file)} exact: {string.Join("; ", brep.Warnings)}");
+                }
+                var outDir = Path.Combine(Path.GetTempPath(), "feathercad-tests");
+                Directory.CreateDirectory(outDir);
+                using (var fs = File.Create(Path.Combine(outDir, Path.GetFileNameWithoutExtension(file) + ".step")))
+                    StepWriter.Write(fs, r.State.Bodies.Select(b => (b.Id, b.Solid)), Path.GetFileNameWithoutExtension(file), 1.0);
+            }
+        });
+
         t.Test("Part: extrude, cut on face, fillet, hole, pattern, shell", () =>
         {
             var doc = new CadDocument();
@@ -117,9 +155,7 @@ static class CoreTests
             var cut = doc.AddFeature(new ExtrudeFeature { SketchId = s2.Id, IsCut = true, End = EndCondition.ThroughAll, Reverse = true });
             r = regen.Rebuild(doc);
             t.True(r.Status[cut.Id].Ok, r.Status[cut.Id].Error ?? "");
-            var n8 = SurfaceDef.SegmentsFor(8);
-            var vol = 100 * 60 * 20 - 0.5 * n8 * 64 * Math.Sin(2 * Math.PI / n8) * 20;
-            t.Near(r.State.Bodies[0].Solid.Volume(), vol, 1e-3);
+            t.Near(KernelTests.Vex(r.State.Bodies[0].Solid), 100 * 60 * 20 - Math.PI * 64 * 20, 1.5);
 
             // fillet a vertical edge
             var edge = r.State.Bodies[0].Solid.Topology.Edges.First(e => e.IsLinear && Math.Abs(e.Start.X - 100) < 1e-6 && Math.Abs(e.Start.Y - 60) < 1e-6);
@@ -145,6 +181,7 @@ static class CoreTests
             r = regen.Rebuild(doc);
             t.True(r.Status[sh.Id].Ok, r.Status[sh.Id].Error ?? "");
             t.Eq(r.State.Bodies[0].Solid.Topology.OpenHalfEdges, 0);
+            t.True(r.State.Bodies[0].Solid.Native != null, "shell is native: " + Csg.LastFallbackReason);
             Console.WriteLine($"      full rebuild {ms1} ms, rebuilt {r.Rebuilt} feature(s) incrementally in {r.Milliseconds:0} ms");
 
             // change equation -> parametric update

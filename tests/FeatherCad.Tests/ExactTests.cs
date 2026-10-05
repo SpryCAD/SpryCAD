@@ -130,11 +130,20 @@ static class ExactTests
                 var box = Builders.Box(Vec3.Zero, new Vec3(60, 40, 20));
                 var errs = new List<string>();
                 var corner = box.Topology.Edges.First(e => e.IsLinear && Math.Abs(e.Start.X - 60) < 1e-9 && Math.Abs(e.Start.Y - 40) < 1e-9);
+                Csg.NativeFallback = 0;
                 var rounded = EdgeBlend.Apply(box, new[] { corner }, 8, true, "R", errs);
+                Console.WriteLine($"      after corner fillet: native fallbacks {Csg.NativeFallback} {Csg.LastFallbackReason}");
                 t.Eq(errs.Count, 0);
                 var topEdges = rounded.Topology.Edges.Where(e => e.FaceA == "Box.End" || e.FaceB == "Box.End").ToList();
                 t.Eq(topEdges.Count, 5); // 4 lines + the corner arc
+                var log = new List<string>();
+                if (fillet) FeatherCad.Kernel.Native.NBoolean.Trace = m => log.Add(m);
                 var r = EdgeBlend.Apply(rounded, topEdges, 2, fillet, "T", errs);
+                FeatherCad.Kernel.Native.NBoolean.Trace = null;
+                // print the trace of the failing operation (from its 'edge splits' line to the failure)
+                var lastStart = log.FindLastIndex(l => l.Contains("edge splits"));
+                if (lastStart >= 0 && Csg.NativeFallback > 0) foreach (var l in log.Skip(lastStart)) Console.WriteLine("        " + l);
+                Console.WriteLine($"      after top blend: native fallbacks {Csg.NativeFallback} {Csg.LastFallbackReason}");
                 t.Eq(errs.Count, 0);
                 t.Eq(r.Topology.OpenHalfEdges, 0);
                 var removed = rounded.Volume() - r.Volume();

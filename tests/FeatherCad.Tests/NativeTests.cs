@@ -97,7 +97,6 @@ static class NativeBoolTests
         {
             var plate = NativeTests.Box(new Vec3(0, 0, 0), new Vec3(100, 50, 20), "P");
             var cyl = NativeTests.Cyl(new Vec3(50, 25, -5), Vec3.UnitZ, 10, 30, "H");
-            NBoolean.Trace = m => Console.WriteLine("        " + m);
             NBody r;
             try { r = NBoolean.Run(plate, cyl, BoolOp.Subtract); } finally { NBoolean.Trace = null; }
             NativeTests.Check(t, r, 100000 - Math.PI * 100 * 20, 8.0);
@@ -122,7 +121,6 @@ static class NativeBoolTests
         {
             var a = NativeTests.Cyl(new Vec3(-40, 0, 0), Vec3.UnitX, 10, 80, "A");
             var b = NativeTests.Cyl(new Vec3(0, -40, 0), Vec3.UnitY, 6, 80, "B");
-            NBoolean.Trace = m => Console.WriteLine("        " + m);
             var sw = System.Diagnostics.Stopwatch.StartNew();
             var u = NBoolean.Run(a, b, BoolOp.Union);
             NBoolean.Trace = null;
@@ -188,7 +186,6 @@ static class NativeRevolveTests
             var plate = NativeTests.Box(new Vec3(-30, -30, -10), new Vec3(30, 30, 0), "P");
             var prof = Poly((0, 0.001), (6.5, 0.001), (3.3, -3.2), (3.3, -20), (0, -20));
             var tool = NBuild.Revolve(new[] { prof }, Frame.Front, Vec2.Zero, new Vec2(0, 1), 2 * Math.PI, "H");
-            NBoolean.Trace = m => Console.WriteLine("        " + m);
             try { var r = NBoolean.Run(plate, tool, BoolOp.Subtract); NativeTests.Check(t, r, null); }
             finally { NBoolean.Trace = null; }
         });
@@ -201,7 +198,6 @@ static class NativeRevolveTests
             var prof = Poly((0, -0.001), (6.5, -0.001), (3.3, 3.2), (3.3, 20), (0, 20));
             var tool = NBuild.Revolve(new[] { prof }, Frame.Top, Vec2.Zero, new Vec2(0, 1), 2 * Math.PI, "H");
             NativeTests.Check(t, tool, null);
-            NBoolean.Trace = m => Console.WriteLine("        " + m);
             NBody r;
             try { r = NBoolean.Run(plate, tool, BoolOp.Subtract); } finally { NBoolean.Trace = null; }
             t.Eq(r.Validate(), null);
@@ -213,7 +209,6 @@ static class NativeRevolveTests
         {
             var plate = NativeTests.Box(new Vec3(-30, -30, -10), new Vec3(30, 30, 0), "P");
             var ball = Sphere(8, "B").Transformed(Transform.Translation(new Vec3(10, 10, 0)));
-            NBoolean.Trace = m => Console.WriteLine("        " + m);
             NBody dimple;
             try { dimple = NBoolean.Run(plate, ball, BoolOp.Subtract); } finally { NBoolean.Trace = null; }
             NativeTests.Check(t, dimple, 36000 - 2.0 / 3 * Math.PI * 512, 8);
@@ -222,7 +217,6 @@ static class NativeRevolveTests
         t.Test("Native bool: torus ring union", () =>
         {
             var plate = NativeTests.Box(new Vec3(-30, -30, -10), new Vec3(30, 30, 0), "P");
-            NBoolean.Trace = m => Console.WriteLine("        " + m);
             var ring = NBuild.Revolve(new[] { new ProfileRegion(ProfileLoop.Circle(new Vec2(15, 0), 4, "T")) }, Frame.Top, Vec2.Zero, new Vec2(0, 1), 2 * Math.PI, "T");
             NBody u;
             try { u = NBoolean.Run(plate, ring, BoolOp.Union); } finally { NBoolean.Trace = null; }

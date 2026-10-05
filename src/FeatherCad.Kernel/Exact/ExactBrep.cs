@@ -43,12 +43,22 @@ public sealed class ExactBrep
     public List<ExactEdge> Edges { get; } = new();
     public List<ExactFace> Faces { get; } = new();
     public int LumpCount { get; private set; }
+    internal void SetLumpCount(int n) => LumpCount = n;
     public List<string> Warnings { get; } = new();
 
     public int Count(SurfaceKind k) => Faces.Count(f => f.Surface.Kind == k);
 
     public static ExactBrep Build(Solid solid)
     {
+        if (solid.Native != null)
+        {
+            try
+            {
+                var nb = ExactBrepFactory.FromNative(solid.Native);
+                if (nb.Warnings.Count == 0) return nb;
+            }
+            catch (Exception) { /* fall back to reconstruction from facets */ }
+        }
         var b = new ExactBrep();
         if (solid.IsEmpty) return b;
         var topo = solid.Topology;

@@ -165,7 +165,7 @@ public static class StepWriter
         foreach (var f in b.Faces)
         {
             if (f.Loops.Count == 0) continue;
-            int surf = WriteSurface(c, f, s);
+            int surf = WriteSurface(c, f, b);
             // planar faces: the loop enclosing the largest area is the outer bound
             int outer = -1;
             if (f.Surface.Kind == SurfaceKind.Plane)
@@ -205,7 +205,10 @@ public static class StepWriter
         return Math.Abs(Vec3.Dot(sum, n)) / 2;
     }
 
-    static int WriteSurface(Ctx c, ExactFace f, Solid s)
+    static IEnumerable<Vec3> BoundaryPoints(ExactFace f, ExactBrep b)
+        => f.Loops.SelectMany(l => l.Edges).SelectMany(x => b.Edges[x.Item1].Points);
+
+    static int WriteSurface(Ctx c, ExactFace f, ExactBrep b)
     {
         var d = f.Surface.Def;
         switch (f.Surface.Kind)
@@ -213,7 +216,7 @@ public static class StepWriter
             case SurfaceKind.Plane:
                 {
                     var pl = f.Surface.Plane!;
-                    var anchor = pl.Project(s.Faces[f.Facets[0]].Outer[0]);
+                    var anchor = pl.Project(BoundaryPoints(f, b).First());
                     return c.Add($"PLANE('',#{Axis2(c, anchor, pl.Normal, pl.Normal.AnyPerpendicular())})");
                 }
             case SurfaceKind.Cylinder:
@@ -227,7 +230,7 @@ public static class StepWriter
                     // place the cone's reference circle inside the face so its radius is positive
                     var ax = d.Axis.Normalized;
                     double hmax = double.MinValue;
-                    foreach (var fi in f.Facets) foreach (var p in s.Faces[fi].Outer) hmax = Math.Max(hmax, Vec3.Dot(p - d.Origin, ax));
+                    foreach (var p in BoundaryPoints(f, b)) hmax = Math.Max(hmax, Vec3.Dot(p - d.Origin, ax));
                     var r = d.Radius + hmax * Math.Tan(d.Param2);
                     if (r < 1e-9) { hmax += 1; r = d.Radius + hmax * Math.Tan(d.Param2); }
                     return c.Add($"CONICAL_SURFACE('',#{Axis2(c, d.Origin + ax * hmax, ax, d.RefDir)},{R(r)},{R(d.Param2)})");

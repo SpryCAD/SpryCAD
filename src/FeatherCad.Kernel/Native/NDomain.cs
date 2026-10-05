@@ -164,23 +164,47 @@ public sealed class NDomain
         return a / 2;
     }
 
-    /// <summary>A point well inside the face (centroid of the largest triangle of its domain).</summary>
+    Vec3? _interior;
+
+    /// <summary>
+    /// A point deep inside the face: among triangle centroids and their sub-points, the one farthest
+    /// from the boundary (so classification is not confused by nearby or tangent faces).
+    /// </summary>
     public Vec3 InteriorPoint()
     {
-        var idx = Triangulator.Triangulate(Loops);
+        if (_interior is { } cached) return cached;
         var all = Loops.SelectMany(l => l).ToArray();
-        double best = -1; Vec2 c = all.Length > 0 ? all[0] : default;
-        for (int i = 0; i + 2 < idx.Count; i += 3)
+        var cands = new List<Vec2>();
+        // a coarse grid first (cheap even for faces with many holes)
+        for (int i = 1; i < 7; i++)
+            for (int j = 1; j < 7; j++)
+            {
+                var q = new Vec2(UMin + (UMax - UMin) * i / 7, VMin + (VMax - VMin) * j / 7);
+                if (ContainsUV(q)) cands.Add(q);
+            }
+        if (cands.Count < 6)
         {
-            var a = all[idx[i]]; var b = all[idx[i + 1]]; var d = all[idx[i + 2]];
-            var area = Math.Abs(Vec2.Cross(b - a, d - a));
-            // prefer large, well-shaped triangles
-            var per = (b - a).Length + (d - b).Length + (a - d).Length;
-            var q = per > 0 ? area / (per * per) : 0;
-            var score = area * (0.25 + q);
-            if (score > best) { best = score; c = (a + b + d) / 3; }
+            // thin or oddly shaped domain: use triangle centroids
+            var idx = Triangulator.Triangulate(Loops);
+            for (int i = 0; i + 2 < idx.Count; i += 3)
+            {
+                var a = all[idx[i]]; var b = all[idx[i + 1]]; var d = all[idx[i + 2]];
+                var c = (a + b + d) / 3;
+                cands.Add(c);
+                cands.Add((c + a) / 2); cands.Add((c + b) / 2); cands.Add((c + d) / 2);
+            }
         }
-        return Eval(c);
+        if (cands.Count > 48) cands = cands.Where((_, k) => k % (cands.Count / 48 + 1) == 0).ToList();
+        Vec3 best = all.Length > 0 ? Eval(all[0]) : Vec3.Zero; double bestD = -1;
+        foreach (var c in cands)
+        {
+            if (!ContainsUV(c)) continue;
+            var p = Eval(c);
+            var d = BoundaryDistance(p);
+            if (d > bestD) { bestD = d; best = p; }
+        }
+        _interior = best;
+        return best;
     }
 
     /// <summary>Points on the surface inside the domain's UV box (for bounds).</summary>

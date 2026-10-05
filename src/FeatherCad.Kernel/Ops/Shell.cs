@@ -10,6 +10,16 @@ public static class ShellOp
     public static Solid Apply(Solid body, ISet<string> openFaces, double thickness, string prefix)
     {
         if (thickness <= 0) throw new ArgumentException("Thickness must be greater than zero.");
+        if (Csg.UseNative && body.Native != null)
+        {
+            try
+            {
+                var solid = Native.NTess.ToSolid(Native.NShell.Apply(body.Native, openFaces, thickness, prefix));
+                if (!solid.IsEmpty && solid.Topology.OpenHalfEdges == 0) return solid;
+                Csg.LastFallbackReason = "shell tessellation not watertight";
+            }
+            catch (Exception ex) { Csg.LastFallbackReason = ex.Message; }
+        }
         var topo = body.Topology;
         int nv = topo.Vertices.Count;
         var offPlanes = new Plane[body.Faces.Count];

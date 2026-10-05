@@ -146,6 +146,21 @@ public static class NIntersect
         if (b.Kind == SurfaceKind.Plane && a.Kind == SurfaceKind.Cylinder) return PlaneCylinder(b.Plane!, a, tol);
         if (a.Kind == SurfaceKind.Cylinder && b.Kind == SurfaceKind.Cylinder && Math.Abs(Math.Abs(Vec3.Dot(a.Axis, b.Axis)) - 1) < 1e-10)
             return ParallelCylinders(a, b, tol);
+        if (a.Kind == SurfaceKind.Cylinder && b.Kind == SurfaceKind.Cylinder && Math.Abs(a.R - b.R) < tol)
+        {
+            // equal radii with intersecting axes (e.g. mitered fillet corners): two ellipses in the bisector planes
+            var p = AxisIntersection(a, b, tol);
+            if (p != null)
+            {
+                var res = new List<NCurve>();
+                foreach (var n in new[] { a.Axis + b.Axis, a.Axis - b.Axis })
+                {
+                    if (n.Length < 1e-9) continue;
+                    res.AddRange(PlaneCylinder(Plane.FromPointNormal(p.Value, n.Normalized), a, tol));
+                }
+                return res;
+            }
+        }
         return null;
     }
 
@@ -164,6 +179,18 @@ public static class NIntersect
         if (b.IsRevolution && b.Kind != SurfaceKind.Sphere) yield return (b.Origin, b.Axis);
         if (a.Kind == SurfaceKind.Sphere && b.IsRevolution) yield return (b.Origin, b.Axis);
         if (b.Kind == SurfaceKind.Sphere && a.IsRevolution) yield return (a.Origin, a.Axis);
+    }
+
+    /// <summary>Intersection point of two (non-parallel) axis lines, if they meet.</summary>
+    static Vec3? AxisIntersection(NSurface a, NSurface b, double tol)
+    {
+        var d1 = a.Axis; var d2 = b.Axis; var w = a.Origin - b.Origin;
+        var bb = Vec3.Dot(d1, d2); var den = 1 - bb * bb;
+        if (den < 1e-12) return null;
+        var d = Vec3.Dot(d1, w); var e = Vec3.Dot(d2, w);
+        var s = (bb * e - d) / den; var t = (e - bb * d) / den;
+        var p1 = a.Origin + d1 * s; var p2 = b.Origin + d2 * t;
+        return Vec3.Distance(p1, p2) < tol ? (p1 + p2) * 0.5 : null;
     }
 
     static List<NCurve> PlanePlane(Plane p, Plane q)

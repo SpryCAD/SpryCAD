@@ -7,7 +7,25 @@ public static class Builders
     /// Extrudes profile regions (in <paramref name="frame"/> coordinates) along the frame normal from
     /// offset z0 to z1 (z0 &lt; z1). Faces are named prefix.Start, prefix.End and prefix.S.&lt;segment name&gt;.
     /// </summary>
+    /// <summary>Use the exact native kernel for builders (falls back to facets if it fails).</summary>
+    public static bool UseNative = true;
+
     public static Solid Extrude(IEnumerable<ProfileRegion> regions, Frame frame, double z0, double z1, string prefix)
+    {
+        var regs = regions.ToList();
+        if (UseNative)
+        {
+            try
+            {
+                var nb = Native.NBuild.Extrude(regs, frame, z0, z1, prefix);
+                if (nb.Validate() == null) return Native.NTess.ToSolid(nb);
+            }
+            catch (Exception) { /* fall back to the facet builder */ }
+        }
+        return ExtrudeFacets(regs, frame, z0, z1, prefix);
+    }
+
+    public static Solid ExtrudeFacets(IEnumerable<ProfileRegion> regions, Frame frame, double z0, double z1, string prefix)
     {
         if (z1 < z0) (z0, z1) = (z1, z0);
         if (z1 - z0 < 1e-9) return Solid.Empty;
@@ -79,6 +97,27 @@ public static class Builders
     /// Angle in radians (full revolution if &gt;= 2π). Faces named prefix.R.&lt;segment&gt;, prefix.Start/End.
     /// </summary>
     public static Solid Revolve(IEnumerable<ProfileRegion> regions, Frame frame, Vec2 axisPoint, Vec2 axisDir, double angle, string prefix, int segmentsOverride = 0,
+        IReadOnlyList<double>? stepAngles = null)
+    {
+        var regs = regions.ToList();
+        if (UseNative)
+        {
+            try
+            {
+                var nb = Native.NBuild.Revolve(regs, frame, axisPoint, axisDir, angle, prefix);
+                if (nb.Validate() == null)
+                {
+                    var solid = Native.NTess.ToSolid(nb);
+                    if (solid.Volume() < 0) solid = solid.Flipped();
+                    return solid;
+                }
+            }
+            catch (Exception) { /* fall back */ }
+        }
+        return RevolveFacets(regs, frame, axisPoint, axisDir, angle, prefix, segmentsOverride, stepAngles);
+    }
+
+    public static Solid RevolveFacets(IEnumerable<ProfileRegion> regions, Frame frame, Vec2 axisPoint, Vec2 axisDir, double angle, string prefix, int segmentsOverride = 0,
         IReadOnlyList<double>? stepAngles = null)
     {
         var regs = regions.Select(r => r.Normalized()).ToList();

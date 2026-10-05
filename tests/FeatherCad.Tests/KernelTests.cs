@@ -7,6 +7,9 @@ static class KernelTests
 {
     static double PolyCircleArea(double r, int n) => 0.5 * n * r * r * Math.Sin(2 * Math.PI / n);
 
+    /// <summary>Volume of the exact geometry (fine tessellation of the native B-rep when present).</summary>
+    internal static double Vex(Solid s) => s.Native != null ? FeatherCad.Kernel.Native.NTess.ToSolid(s.Native, 2e-4).Volume() : s.Volume();
+
     public static void Run(TestRunner t)
     {
         t.Test("Box volume & watertight", () =>
@@ -23,7 +26,7 @@ static class KernelTests
             var n = SurfaceDef.SegmentsFor(10);
             var c = Builders.Cylinder(new Vec3(50, 25, -5), Vec3.UnitZ, 10, 30, "H");
             var r = Csg.Subtract(b, c);
-            t.Near(r.Volume(), 100000 - PolyCircleArea(10, n) * 20, 1e-4);
+            t.Near(Vex(r), 100000 - Math.PI * 100 * 20, 1.5);
             t.Eq(r.Topology.OpenHalfEdges, 0);
             // top face should be a single face with one hole
             var top = r.Faces.Where(f => f.Tag.Name == "Box.End").ToList();
@@ -83,8 +86,8 @@ static class KernelTests
             var errs = new List<string>();
             var r = EdgeBlend.Apply(b, new[] { e }, 5, true, "F", errs);
             t.Eq(errs.Count, 0);
-            var removed = 100000 - r.Volume();
-            t.Near(removed, (25 - 6 * 0.5 * 25 * Math.Sin(Math.PI / 12)) * 100, 1e-3); // 24-segment faceted arc
+            var removed = 100000 - Vex(r);
+            t.Near(removed, (25 - Math.PI * 25 / 4) * 100, 1.0);
             t.Eq(r.Topology.OpenHalfEdges, 0);
         });
 
@@ -113,9 +116,9 @@ static class KernelTests
             var r2 = EdgeBlend.Apply(r, new[] { rim }, 2, false, "C", errs);
             t.Eq(errs.Count, 0);
             t.Eq(r2.Topology.OpenHalfEdges, 0);
-            var removed = r.Volume() - r2.Volume();
-            // countersink ring: ~ 2*pi*(R + d/3) * d^2/2
-            t.Near(removed, 2 * Math.PI * (10 + 2.0 / 3) * 2, 2.5);
+            var removed = Vex(r) - Vex(r2);
+            // countersink ring (Pappus): 2*pi*(R + d/3) * d^2/2
+            t.Near(removed, 2 * Math.PI * (10 + 2.0 / 3) * 2, 0.1);
             var r3 = EdgeBlend.Apply(r, new[] { rim }, 2, true, "F", errs);
             t.Eq(errs.Count, 0);
             t.Eq(r3.Topology.OpenHalfEdges, 0);
@@ -126,10 +129,10 @@ static class KernelTests
             var loop = ProfileLoop.Polygon(new[] { new Vec2(0, 0), new Vec2(10, 0), new Vec2(10, 20), new Vec2(0, 20) }, "L");
             var s = Builders.Revolve(new[] { new ProfileRegion(loop) }, Frame.Front, Vec2.Zero, new Vec2(0, 1), 2 * Math.PI, "R");
             var n = SurfaceDef.SegmentsFor(10);
-            t.Near(s.Volume(), PolyCircleArea(10, n) * 20, 1e-4);
+            t.Near(Vex(s), Math.PI * 100 * 20, 1.5);
             t.Eq(s.Topology.OpenHalfEdges, 0);
             var half = Builders.Revolve(new[] { new ProfileRegion(loop) }, Frame.Front, Vec2.Zero, new Vec2(0, 1), Math.PI, "R");
-            t.Near(half.Volume(), PolyCircleArea(10, n) * 10, 1e-3);
+            t.Near(Vex(half), Math.PI * 100 * 10, 1.0);
             t.Eq(half.Topology.OpenHalfEdges, 0);
             // ring (not touching axis), reversed axis direction
             var ring = ProfileLoop.Polygon(new[] { new Vec2(-5, 0), new Vec2(-5, 10), new Vec2(-10, 10), new Vec2(-10, 0) }, "Q");
@@ -171,11 +174,19 @@ static class KernelTests
                 for (int j = 0; j < 8; j++)
                     tools.Add(Builders.Cylinder(new Vec3(15 + i * 24, 15 + j * 24, -1), Vec3.UnitZ, 5, 12, $"H{i}_{j}", Vec3.UnitX));
             var tool = Csg.UnionAll(tools);
+            var msU = sw.ElapsedMilliseconds; sw.Restart();
             var r = Csg.Subtract(b, tool);
-            var ms = sw.ElapsedMilliseconds;
+            FeatherCad.Kernel.Native.NBoolean.Trace = null;
+            var ms = sw.ElapsedMilliseconds; sw.Restart();
+            var tessMs = r.Faces.Count;
+            Console.WriteLine($"      union {msU} ms, subtract {ms} ms (first run, includes JIT)");
+            var sw2 = Stopwatch.StartNew();
+            var tool2 = Csg.UnionAll(tools);
+            var r2 = Csg.Subtract(b, tool2);
+            Console.WriteLine($"      warm: union+subtract {sw2.ElapsedMilliseconds} ms (native ok {Csg.NativeOk}, fallbacks {Csg.NativeFallback})");
             t.Eq(r.Topology.OpenHalfEdges, 0);
             var n = SurfaceDef.SegmentsFor(5);
-            t.Near(r.Volume(), 200 * 200 * 10 - 64 * PolyCircleArea(5, n) * 10, 1e-2);
+            t.Near(Vex(r), 200 * 200 * 10 - 64 * Math.PI * 25 * 10, 25);
             Console.WriteLine($"      64 holes: {ms} ms, {r.Faces.Count} faces");
         });
 

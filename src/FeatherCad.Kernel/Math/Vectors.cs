@@ -77,6 +77,8 @@ public struct Box3
     public readonly Vec3 Center => (Min + Max) * 0.5;
     public readonly Vec3 Size => IsEmpty ? Vec3.Zero : Max - Min;
     public readonly double Diagonal => IsEmpty ? 0 : (Max - Min).Length;
+    public readonly bool Contains(Vec3 p, double tol = 0) =>
+        p.X >= Min.X - tol && p.X <= Max.X + tol && p.Y >= Min.Y - tol && p.Y <= Max.Y + tol && p.Z >= Min.Z - tol && p.Z <= Max.Z + tol;
     public readonly bool Overlaps(Box3 o, double tol = 0) =>
         !(o.Min.X > Max.X + tol || o.Max.X < Min.X - tol ||
           o.Min.Y > Max.Y + tol || o.Max.Y < Min.Y - tol ||
