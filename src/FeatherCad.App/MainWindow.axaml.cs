@@ -34,6 +34,9 @@ public partial class MainWindow : Window
         Instance = this;
         _modelMode = new ModelMode(Selection);
         Viewport.Mode = _modelMode;
+        UserSettings.Load();
+        Viewport.ReverseWheel = UserSettings.ReverseWheel;
+        Viewport.Camera.Perspective = UserSettings.Perspective;
         Viewport.Overlay = Overlay;
         Viewport.Selection = Selection;
         Viewport.ContextRequested += OnViewportContext;

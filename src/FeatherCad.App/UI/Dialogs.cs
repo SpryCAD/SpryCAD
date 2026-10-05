@@ -103,9 +103,21 @@ public static class Dialogs
         var rows = session.Doc.Equations.Select(e => new Equation { Name = e.Name, Expr = e.Expr }).ToList();
         var list = new StackPanel { Spacing = 3 };
         var info = new TextBlock { FontSize = 11, Foreground = Brushes.DimGray, TextWrapping = TextWrapping.Wrap, Text = "Global variables usable in any dimension or feature value, e.g. W = 100, H = W/2. Trig functions use degrees; units like 1in are converted to mm." };
+        var valueCells = new List<(Equation row, TextBlock cell)>();
+        // re-evaluate in place (rebuilding the rows would steal focus while tabbing between fields)
+        void UpdateValues()
+        {
+            var (vals, errs) = Regenerator.EvaluateEquations(new CadDocument { Equations = rows });
+            foreach (var (r, cell) in valueCells)
+            {
+                cell.Text = vals.TryGetValue(r.Name, out var val) ? Expr.Format(val) : errs.GetValueOrDefault(r.Name) ?? "";
+                cell.Foreground = errs.ContainsKey(r.Name) ? Brushes.Red : Brushes.Black;
+            }
+        }
         void Refresh()
         {
             list.Children.Clear();
+            valueCells.Clear();
             var header = new Grid { ColumnDefinitions = new ColumnDefinitions("140,*,90,30") };
             header.Children.Add(new TextBlock { Text = "Name", FontWeight = FontWeight.SemiBold });
             var h2 = new TextBlock { Text = "Value / Equation", FontWeight = FontWeight.SemiBold }; Grid.SetColumn(h2, 1); header.Children.Add(h2);
@@ -127,8 +139,9 @@ public static class Dialogs
                 };
                 var del = new Button { Content = "✖", Padding = new Thickness(4, 0) };
                 var rr = r;
-                n.LostFocus += (_, _) => { rr.Name = n.Text?.Trim() ?? ""; Refresh(); };
-                e.LostFocus += (_, _) => { rr.Expr = e.Text?.Trim() ?? "0"; Refresh(); };
+                valueCells.Add((rr, v));
+                n.TextChanged += (_, _) => { rr.Name = n.Text?.Trim() ?? ""; UpdateValues(); };
+                e.TextChanged += (_, _) => { rr.Expr = e.Text?.Trim() ?? "0"; UpdateValues(); };
                 del.Click += (_, _) => { rows.Remove(rr); Refresh(); };
                 Grid.SetColumn(e, 1); Grid.SetColumn(v, 2); Grid.SetColumn(del, 3);
                 g.Children.Add(n); g.Children.Add(e); g.Children.Add(v); g.Children.Add(del);
@@ -222,15 +235,17 @@ public static class Dialogs
         var w = MakeWindow("Options", sp, 420);
         ok.Click += (_, _) =>
         {
+            // view preferences belong to the user, not the document: remembered, no undo step, not "modified"
             owner.Viewport.ReverseWheel = wheel.IsChecked == true;
             owner.Viewport.Camera.Perspective = persp.IsChecked == true;
+            Session.UserSettings.ReverseWheel = owner.Viewport.ReverseWheel;
+            Session.UserSettings.Perspective = owner.Viewport.Camera.Perspective;
+            Session.UserSettings.Save();
             var newUnits = units.SelectedIndex == 1 ? UnitSystem.IPS : UnitSystem.MMGS;
             var parts = (color.Text ?? "").Split(',').Select(p => double.TryParse(p.Trim(), out var v) ? Math.Clamp(v / 255, 0, 1) : -1).ToArray();
-            s.Change(() =>
-            {
-                s.Doc.Units = newUnits;
-                if (parts.Length == 3 && parts.All(p => p >= 0)) s.Doc.Color = parts;
-            });
+            var newColor = parts.Length == 3 && parts.All(p => p >= 0) ? parts : s.Doc.Color;
+            if (newUnits != s.Doc.Units || !newColor.SequenceEqual(s.Doc.Color))
+                s.Change(() => { s.Doc.Units = newUnits; s.Doc.Color = newColor; });
             owner.Viewport.Redraw();
             w.Close();
         };

@@ -415,8 +415,9 @@ public partial class MainWindow
     {
         var page = new PmPage("Hole Specification", "hole");
         var t = page.Section("Hole Type");
+        Action syncSections = () => { };
         page.Combo(t, "Type", new List<(HoleType, string)> { (HoleType.Simple, "Simple (drilled)"), (HoleType.Counterbore, "Counterbore"), (HoleType.Countersink, "Countersink") },
-            () => f.Type, v => { f.Type = v; });
+            () => f.Type, v => { f.Type = v; syncSections(); });
         var std = page.Section("Size");
         var sizes = new List<(string, string)>
         {
@@ -425,7 +426,9 @@ public partial class MainWindow
             ("M8", "M8 clearance (9)"), ("M10", "M10 clearance (11)"), ("M12", "M12 clearance (13.5)"),
         };
         TextBox? dia = null, cbd = null, cbdp = null, csd = null;
-        page.Combo(std, "Standard", sizes, () => "custom", v =>
+        // shows the standard size matching the current diameter (editing an M6 hole shows M6, not Custom)
+        string CurrentStd() => sizes.Skip(1).FirstOrDefault(s => s.Item2.Contains($"({f.Diameter})")).Item1 ?? "custom";
+        page.Combo(std, "Standard", sizes, CurrentStd, v =>
         {
             var spec = v switch
             {
@@ -440,8 +443,10 @@ public partial class MainWindow
         });
         dia = page.Number(std, "Diameter", () => f.Diameter, v => f.Diameter = v, "hole");
         var end = page.Section("End Condition");
-        page.Check(end, "Through All", () => f.ThroughAll, v => f.ThroughAll = v);
-        page.Number(end, "Depth", () => f.Depth, v => f.Depth = v, "dimension");
+        TextBox? depth = null;
+        page.Check(end, "Through All", () => f.ThroughAll, v => { f.ThroughAll = v; if (depth != null) depth.IsEnabled = !v; });
+        depth = page.Number(end, "Depth", () => f.Depth, v => f.Depth = v, "dimension");
+        depth.IsEnabled = !f.ThroughAll;
         page.Check(end, "Drill point (118°)", () => f.DrillPoint, v => f.DrillPoint = v);
         var cb = page.Section("Counterbore");
         cbd = page.Number(cb, "C'bore dia.", () => f.CbDiameter, v => f.CbDiameter = v);
@@ -449,6 +454,13 @@ public partial class MainWindow
         var cs = page.Section("Countersink");
         csd = page.Number(cs, "C'sink dia.", () => f.CsDiameter, v => f.CsDiameter = v);
         page.Number(cs, "C'sink angle", () => f.CsAngle, v => f.CsAngle = v, null, "°");
+        // only the section of the chosen hole type is shown
+        syncSections = () =>
+        {
+            if (cb.Parent is Control cbs) cbs.IsVisible = f.Type == HoleType.Counterbore;
+            if (cs.Parent is Control css) css.IsVisible = f.Type == HoleType.Countersink;
+        };
+        syncSections();
         var pos = page.Section("Positions");
         page.ButtonRow(pos, "Edit hole positions…", () =>
         {
