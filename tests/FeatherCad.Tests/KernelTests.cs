@@ -124,7 +124,24 @@ static class KernelTests
             t.Eq(r3.Topology.OpenHalfEdges, 0);
         });
 
-        t.Test("Revolve rectangle = cylinder", () =>
+        t.Test("Revolve orientation: any sweep sign, loop direction and axis side", () =>
+        {
+            var sq = ProfileLoop.Polygon(new[] { new Vec2(2, 0), new Vec2(5, 0), new Vec2(5, 3), new Vec2(2, 3) }, "L");
+            var expect = Math.PI / 2 / 2 * (25 - 4) * 3; // quarter sweep of an annulus
+            foreach (var rev in new[] { false, true })
+                foreach (var side in new[] { 1.0, -1.0 })
+                    foreach (var dir in new[] { new Vec2(0, 1), new Vec2(0, -1) })
+                        foreach (var ang in new[] { Math.PI / 2, -Math.PI / 2 })
+                        {
+                            var loop = side > 0 ? sq : ProfileLoop.Polygon(sq.Points.Select(p => new Vec2(-p.X, p.Y)).ToArray(), "L");
+                            if (rev) loop = loop.Reversed();
+                            var s = Builders.Revolve(new[] { new ProfileRegion(loop) }, Frame.Front, Vec2.Zero, dir, ang, "R");
+                            t.True(s.Native != null, "native revolve");
+                            t.Near(Vex(s), expect, 0.05);
+                        }
+        });
+
+                t.Test("Revolve rectangle = cylinder", () =>
         {
             var loop = ProfileLoop.Polygon(new[] { new Vec2(0, 0), new Vec2(10, 0), new Vec2(10, 20), new Vec2(0, 20) }, "L");
             var s = Builders.Revolve(new[] { new ProfileRegion(loop) }, Frame.Front, Vec2.Zero, new Vec2(0, 1), 2 * Math.PI, "R");

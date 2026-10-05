@@ -331,44 +331,70 @@ public static class NIntersect
         double du = dom.UMax - dom.UMin, dv = dom.VMax - dom.VMin;
         double mu = du * 0.02 + 1e-9, mv = dv * 0.02 + 1e-9;
         double u0 = dom.UMin - mu, u1 = dom.UMax + mu, v0 = dom.VMin - mv, v1 = dom.VMax + mv;
-        int nu = 96, nv = 96;
-        var g = new double[nu + 1, nv + 1];
+        const int nu = 96, nv = 96, block = 8;
         Vec2 UV(int i, int j) => new(u0 + (u1 - u0) * i / nu, v0 + (v1 - v0) * j / nv);
-        for (int i = 0; i <= nu; i++)
-            for (int j = 0; j <= nv; j++)
+        // fine grid values are computed on demand: only blocks that may contain the curve are visited
+        var g = new double[nu + 1, nv + 1];
+        var have = new bool[nu + 1, nv + 1];
+        double G(int i, int j)
+        {
+            if (have[i, j]) return g[i, j];
+            var v = sb.F_(dom.Eval(UV(i, j)));
+            have[i, j] = true;
+            return g[i, j] = v == 0 ? 1e-300 : v;
+        }
+        var pg = Prof.Time("trace.grid");
+        // a block can hold a zero only if |F(centre)| ≤ its 3D radius (F_ grows no faster than distance)
+        int nb = nu / block;
+        var active = new bool[nb, nb];
+        for (int bi = 0; bi < nb; bi++)
+            for (int bj = 0; bj < nb; bj++)
             {
-                var v = sb.F_(dom.Eval(UV(i, j)));
-                g[i, j] = v == 0 ? 1e-300 : v;
+                int i0 = bi * block, j0 = bj * block, i1 = i0 + block, j1 = j0 + block;
+                var c = dom.Eval(Vec2.Lerp(UV(i0, j0), UV(i1, j1), 0.5));
+                double r = 0;
+                foreach (var (ii, jj) in new[] { (i0, j0), (i1, j0), (i0, j1), (i1, j1), ((i0 + i1) / 2, j0), ((i0 + i1) / 2, j1), (i0, (j0 + j1) / 2), (i1, (j0 + j1) / 2) })
+                    r = Math.Max(r, Vec3.Distance(c, dom.Eval(UV(ii, jj))));
+                active[bi, bj] = Math.Abs(sb.F_(c)) <= r * 1.25 + 1e-9;
             }
+        pg.Dispose();
+        var pm = Prof.Time("trace.march");
         // marching squares: crossing points on cell edges, keyed so neighbours share them
         var edgePts = new Dictionary<(int, int, int), Vec2>(); // (i, j, dir 0=u,1=v)
-        Vec2? Cross(int i, int j, int dir)
+        bool Cross(int i, int j, int dir)
         {
             var key = (i, j, dir);
-            if (edgePts.TryGetValue(key, out var p)) return p;
-            double a = g[i, j], b = dir == 0 ? g[i + 1, j] : g[i, j + 1];
-            if (a * b > 0) return null;
+            if (edgePts.ContainsKey(key)) return true;
+            double a = G(i, j), b = dir == 0 ? G(i + 1, j) : G(i, j + 1);
+            if (a * b > 0) return false;
             var t = a / (a - b);
             var pa = UV(i, j); var pb = dir == 0 ? UV(i + 1, j) : UV(i, j + 1);
-            p = Vec2.Lerp(pa, pb, t);
-            edgePts[key] = p;
-            return p;
+            edgePts[key] = Vec2.Lerp(pa, pb, t);
+            return true;
         }
         var segs = new List<((int, int, int) a, (int, int, int) b)>();
-        for (int i = 0; i < nu; i++)
-            for (int j = 0; j < nv; j++)
+        Span<(int, int, int)> keys = stackalloc (int, int, int)[4];
+        for (int bi = 0; bi < nb; bi++)
+            for (int bj = 0; bj < nb; bj++)
             {
-                var keys = new List<(int, int, int)>();
-                foreach (var k in new[] { (i, j, 0), (i + 1, j, 1), (i, j + 1, 0), (i, j, 1) })
-                    if (Cross(k.Item1, k.Item2, k.Item3) != null) keys.Add(k);
-                if (keys.Count == 2) segs.Add((keys[0], keys[1]));
-                else if (keys.Count == 4)
-                {
-                    // saddle: decide by the centre value
-                    var c = sb.F_(dom.Eval(Vec2.Lerp(UV(i, j), UV(i + 1, j + 1), 0.5)));
-                    if (c * g[i, j] > 0) { segs.Add((keys[0], keys[1])); segs.Add((keys[2], keys[3])); }
-                    else { segs.Add((keys[0], keys[3])); segs.Add((keys[1], keys[2])); }
-                }
+                if (!active[bi, bj]) continue;
+                for (int i = bi * block; i < (bi + 1) * block; i++)
+                    for (int j = bj * block; j < (bj + 1) * block; j++)
+                    {
+                        int n = 0;
+                        if (Cross(i, j, 0)) keys[n++] = (i, j, 0);
+                        if (Cross(i + 1, j, 1)) keys[n++] = (i + 1, j, 1);
+                        if (Cross(i, j + 1, 0)) keys[n++] = (i, j + 1, 0);
+                        if (Cross(i, j, 1)) keys[n++] = (i, j, 1);
+                        if (n == 2) segs.Add((keys[0], keys[1]));
+                        else if (n == 4)
+                        {
+                            // saddle: decide by the centre value
+                            var c = sb.F_(dom.Eval(Vec2.Lerp(UV(i, j), UV(i + 1, j + 1), 0.5)));
+                            if (c * G(i, j) > 0) { segs.Add((keys[0], keys[1])); segs.Add((keys[2], keys[3])); }
+                            else { segs.Add((keys[0], keys[3])); segs.Add((keys[1], keys[2])); }
+                        }
+                    }
             }
         // chain segments
         var adj = new Dictionary<(int, int, int), List<(int, int, int)>>();
@@ -377,6 +403,8 @@ public static class NIntersect
             if (!adj.TryGetValue(a, out var la)) adj[a] = la = new(); la.Add(b);
             if (!adj.TryGetValue(b, out var lb)) adj[b] = lb = new(); lb.Add(a);
         }
+        pm.Dispose();
+        using var pp = Prof.Time("trace.project");
         var used = new HashSet<((int, int, int), (int, int, int))>();
         var result = new List<NPolyline>();
         bool Use((int, int, int) a, (int, int, int) b) => used.Add((a, b)) & used.Add((b, a));
@@ -399,7 +427,7 @@ public static class NIntersect
                 }
                 bool closed = chain.Count > 3 && chain[0] == chain[^1];
                 var pts = new List<Vec3>();
-                foreach (var k in chain) pts.Add(ExactSurface.ProjectToIntersection(sa.Exact, sb.Exact, dom.Eval(edgePts[k])));
+                foreach (var k in chain) pts.Add(NSurface.ProjectToIntersection(sa, sb, dom.Eval(edgePts[k])));
                 if (closed) pts.RemoveAt(pts.Count - 1);
                 pts = Densify(pts, closed, sa, sb, tol);
                 if (pts.Count >= 2) result.Add(new NPolyline(pts, closed));
@@ -426,7 +454,7 @@ public static class NIntersect
         void Sub(Vec3 p, Vec3 q, int depth)
         {
             if (depth > 6) return;
-            var m = ExactSurface.ProjectToIntersection(a.Exact, b.Exact, (p + q) * 0.5);
+            var m = NSurface.ProjectToIntersection(a, b, (p + q) * 0.5);
             if (Vec3.Distance(m, (p + q) * 0.5) < tol * 0.25 && depth > 0) return;
             if (Vec3.Distance(p, q) < tol) return;
             Sub(p, m, depth + 1);

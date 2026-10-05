@@ -14,7 +14,9 @@ public sealed class NEdge
     public double T0, T1;
     public NVertex V0, V1;
     public readonly List<NCoedge> Uses = new();
-    List<Vec3>? _samples; double _sampleTol;
+    // one immutable reference so concurrent readers never see points from one tolerance with another tolerance
+    sealed record SampleCache(List<Vec3> Points, double Tol);
+    SampleCache? _samples;
 
     public NEdge(NCurve c, double t0, double t1, NVertex v0, NVertex v1)
     {
@@ -32,7 +34,8 @@ public sealed class NEdge
     /// <summary>Points from V0 to V1 within the chord tolerance (end points are exactly the vertices).</summary>
     public List<Vec3> Samples(double tol)
     {
-        if (_samples != null && _sampleTol <= tol * 1.0001) return _samples;
+        var cached = _samples;
+        if (cached != null && cached.Tol <= tol * 1.0001) return cached.Points;
         if (Curve is NSpline or NPolyline)
         {
             // adaptive: bisect until the chord error is below tol
@@ -47,7 +50,7 @@ public sealed class NEdge
             }
             Sub(T0, T1, V0.P, V1.P, 0);
             res[^1] = V1.P;
-            _samples = res; _sampleTol = tol;
+            _samples = new SampleCache(res, tol);
             return res;
         }
         int n = Curve is NLine ? 1 : Math.Max(Curve.Samples(T0, T1, tol), 1);
@@ -55,11 +58,38 @@ public sealed class NEdge
         var pts = new List<Vec3>(n + 1);
         for (int i = 0; i <= n; i++) pts.Add(Curve.Eval(T0 + (T1 - T0) * i / n));
         pts[0] = V0.P; pts[^1] = V1.P;
-        _samples = pts; _sampleTol = tol;
+        _samples = new SampleCache(pts, tol);
         return pts;
     }
 
     public void InvalidateSamples() => _samples = null;
+
+    /// <summary>Exact bounds for lines/circles/ellipses (endpoints plus axis extremes inside the range).</summary>
+    public Box3 TightBounds()
+    {
+        var b = Box3.Empty;
+        b.Add(V0.P); b.Add(V1.P);
+        Vec3 x, y; Vec3 c;
+        switch (Curve)
+        {
+            case NLine: return b;
+            case NCircle ci: c = ci.C; x = ci.X * ci.R; y = ci.Y * ci.R; break;
+            case NEllipse el: c = el.C; x = el.X * el.A; y = el.Y * el.B; break;
+            default: foreach (var p in Samples(1e-4)) b.Add(p); return b;
+        }
+        // p(t) = c + x cos t + y sin t: coordinate k is extreme at t = atan2(y_k, x_k) (+π)
+        double lo = Math.Min(T0, T1), hi = Math.Max(T0, T1);
+        for (int k = 0; k < 3; k++)
+        {
+            var t0 = Math.Atan2(k == 0 ? y.X : k == 1 ? y.Y : y.Z, k == 0 ? x.X : k == 1 ? x.Y : x.Z);
+            for (int s = -3; s <= 3; s++)
+            {
+                var t = t0 + s * Math.PI;
+                if (t > lo && t < hi) b.Add(Curve.Eval(t));
+            }
+        }
+        return b;
+    }
 
     public Box3 Bounds(double tol = 1e-3)
     {
@@ -132,6 +162,24 @@ public sealed class NBody
     public Box3 Bounds
     {
         get { var b = Box3.Empty; foreach (var f in Faces) b.Add(f.Bounds()); return b; }
+    }
+
+    /// <summary>
+    /// Tight bounds: ruled faces (planes, cylinders, cones) reach their extremes on the boundary, so edge
+    /// bounds are exact for them; spheres and tori also add surface samples inside the face.
+    /// </summary>
+    public Box3 TightBounds()
+    {
+        var b = Box3.Empty;
+        foreach (var e in Edges) b.Add(e.TightBounds());
+        foreach (var f in Faces)
+            if (f.Surface.Kind is SurfaceKind.Sphere or SurfaceKind.Torus)
+            {
+                var dom = NDomain.Of(f, 1e-4);
+                foreach (var q in dom.InteriorSamples(12))
+                    if (dom.ContainsUV(dom.Map(q))) b.Add(q);
+            }
+        return b;
     }
 
     /// <summary>Connects coedges to their faces and edges (call after building or editing).</summary>

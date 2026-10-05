@@ -15,6 +15,8 @@
     <TieredPGO>true</TieredPGO>
     <ServerGarbageCollector>false</ServerGarbageCollector>
     <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
+      <!-- geometry code is hot from the first rebuild: skip unoptimized tier-0 JIT (ReadyToRun code is still used) -->
+    <TieredCompilationQuickJit>false</TieredCompilationQuickJit>
   </PropertyGroup>
 
   <ItemGroup>

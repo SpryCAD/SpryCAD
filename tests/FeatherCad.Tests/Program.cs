@@ -37,6 +37,11 @@ static class Program
 {
     static int Main(string[] args)
     {
+        if (args.Length > 1 && args[0] == "bench")
+        {
+            Bench.Run(args[1], args.Length > 2 ? int.Parse(args[2]) : 5);
+            return 0;
+        }
         var filter = args.Length > 0 ? args[0] : null;
         var t = new TestRunner(filter);
         int result = 0;

@@ -46,7 +46,7 @@ public sealed class Regenerator
                 try
                 {
                     var ctx = new Ctx(doc, state.Copy(), lookup, st, f);
-                    ctx.Execute();
+                    using (Prof.Time("feature." + f.GetType().Name)) ctx.Execute();
                     state = ctx.State;
                 }
                 catch (FeatureException ex) { st.Error = ex.Message; }
@@ -216,9 +216,19 @@ public sealed class Regenerator
                     { var s = Vec2.Cross(dir, v.P - a); minS = Math.Min(minS, s); maxS = Math.Max(maxS, s); }
             if (minS < -1e-6 && maxS > 1e-6) throw new FeatureException("The profile crosses the axis of revolution.");
             var tool = Builders.Revolve(regions, sk.Frame, a, dir, Math.Min(ang, 2 * Math.PI), f.Id);
-            if (tool.Volume() < 0) tool = tool.Flipped();
+            if (tool.Native == null && tool.Volume() < 0) tool = tool.Flipped(); // native revolves are oriented by construction
             ApplyTool(tool, r.IsCut, r.Merge);
             State.Tools[f.Id] = new ToolInfo(tool, r.IsCut, r.Merge);
+        }
+
+        /// <summary>Whether a boolean changed the body (native: topology counts, so no tessellation is needed).</summary>
+        static bool Changed(Solid before, Solid after)
+        {
+            if (before.Native != null && after.Native != null)
+                return before.Native.Faces.Count != after.Native.Faces.Count
+                    || before.Native.Edges.Count() != after.Native.Edges.Count()
+                    || !before.Bounds.Equals(after.Bounds);
+            return after.Faces.Count != before.Faces.Count || after.Volume() < before.Volume() - 1e-9;
         }
 
         /// <summary>Adds (fuses) or removes (cuts) a tool solid from the bodies.</summary>
@@ -233,7 +243,7 @@ public sealed class Regenerator
                 {
                     if (!b.Solid.Bounds.Overlaps(tool.Bounds, 1e-6)) { bodies.Add(b); continue; }
                     var r = Csg.Subtract(b.Solid, tool);
-                    if (r.Faces.Count != b.Solid.Faces.Count || r.Volume() < b.Solid.Volume() - 1e-9) any = true;
+                    if (Changed(b.Solid, r)) any = true;
                     if (!r.IsEmpty) bodies.Add(new Body { Id = b.Id, Solid = r });
                 }
                 if (State.Bodies.Count == 0) throw new FeatureException("There is no body to cut.");
@@ -269,6 +279,7 @@ public sealed class Regenerator
         void DoBlend(List<EdgeRef> refs, double size, bool fillet, bool propagate)
         {
             if (refs.Count == 0) throw new FeatureException("No edges selected.");
+            if (TryNativeBlend(refs, size, fillet, propagate)) return;
             var byBody = new Dictionary<string, List<TopoEdge>>();
             foreach (var r in refs)
             {
@@ -298,6 +309,37 @@ public sealed class Regenerator
             status.Warnings.AddRange(errors);
             if (errors.Count > 0 && errors.Count >= refs.Count) throw new FeatureException(errors[0]);
             State = State.With(bodies);
+        }
+
+        /// <summary>
+        /// Fillet/chamfer on native bodies: edges resolved and tangent-chained on the exact B-rep, tools built
+        /// from exact geometry. False (state untouched) when a body is not native or an edge is not found.
+        /// </summary>
+        bool TryNativeBlend(List<EdgeRef> refs, double size, bool fillet, bool propagate)
+        {
+            if (!Csg.UseNative || State.Bodies.Any(b => b.Solid.Native == null)) return false;
+            var byBody = new Dictionary<string, List<Kernel.Native.NEdge>>();
+            foreach (var r in refs)
+            {
+                var hit = Resolver.ResolveNativeEdge(r, State);
+                if (hit == null) return false;
+                var (b, e) = hit.Value;
+                if (!byBody.TryGetValue(b.Id, out var l)) byBody[b.Id] = l = new();
+                if (!l.Contains(e)) l.Add(e);
+            }
+            var bodies = new List<Body>();
+            var errors = new List<string>();
+            foreach (var b in State.Bodies)
+            {
+                if (!byBody.TryGetValue(b.Id, out var seeds)) { bodies.Add(b); continue; }
+                var edges = NativeBlend.Expand(b.Solid.Native!, seeds, propagate);
+                var r = NativeBlend.Apply(b.Solid, edges, size, fillet, f.Id, errors);
+                bodies.Add(new Body { Id = b.Id, Solid = r });
+            }
+            status.Warnings.AddRange(errors);
+            if (errors.Count > 0 && errors.Count >= refs.Count) throw new FeatureException(errors[0]);
+            State = State.With(bodies);
+            return true;
         }
 
         /// <summary>Edges connected to the seeds through smooth (tangent) vertices.</summary>
@@ -396,7 +438,7 @@ public sealed class Regenerator
                 var frame = new Frame(origin, x, drill, Vec3.Cross(x, drill));
                 var tool = Builders.Revolve(new[] { new ProfileRegion(prof) }, frame, Vec2.Zero, new Vec2(0, 1), 2 * Math.PI, $"{f.Id}.{k++}",
                     SurfaceDef.SegmentsFor(r));
-                if (tool.Volume() < 0) tool = tool.Flipped();
+                if (tool.Native == null && tool.Volume() < 0) tool = tool.Flipped(); // native revolves are oriented by construction
                 tools.Add(tool);
             }
             var all = Csg.UnionAll(tools);

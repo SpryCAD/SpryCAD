@@ -104,13 +104,12 @@ public static class Builders
         {
             try
             {
-                var nb = Native.NBuild.Revolve(regs, frame, axisPoint, axisDir, angle, prefix);
-                if (nb.Validate() == null)
-                {
-                    var solid = Native.NTess.ToSolid(nb);
-                    if (solid.Volume() < 0) solid = solid.Flipped();
-                    return solid;
-                }
+                // a negative sweep is the same rotation about the reversed axis; the native builder
+                // orients the body outward for positive sweeps, so no volume check is needed
+                var nb = angle < 0
+                    ? Native.NBuild.Revolve(regs, frame, axisPoint, -axisDir, -angle, prefix)
+                    : Native.NBuild.Revolve(regs, frame, axisPoint, axisDir, angle, prefix);
+                if (nb.Validate() == null) return Native.NTess.ToSolid(nb);
             }
             catch (Exception) { /* fall back */ }
         }

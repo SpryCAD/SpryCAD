@@ -26,11 +26,55 @@ public static class Resolver
         }
         if (r.Face != null)
         {
+            if (NativePlane(r.Face, st) is { } np) return Frame.FromPlane(np);
             var (_, face) = ResolveFace(r.Face, st);
             if (face.Tag.Surface.IsCurved) throw new FeatureException("Selected face is not planar.");
             return Frame.FromPlane(face.Plane);
         }
         throw new FeatureException("No plane selected.");
+    }
+
+    /// <summary>
+    /// Outward plane of a named planar face, looked up on the native B-rep (no tessellation). Null when the
+    /// bodies are not native or no planar face of that name exists (the facet lookup then decides).
+    /// </summary>
+    static Plane? NativePlane(FaceRef r, ModelState st)
+    {
+        if (NativeFace(r, st) is not { } hit || hit.face.Surface.Kind != SurfaceKind.Plane) return null;
+        return hit.face.Sense ? hit.face.Surface.Plane! : hit.face.Surface.Plane!.Flipped();
+    }
+
+    /// <summary>
+    /// Native face by name nearest the hint, else a planar face with the reference normal through the hint.
+    /// Null when the bodies are not native or nothing matches.
+    /// </summary>
+    static (Body body, Kernel.Native.NFace face)? NativeFace(FaceRef r, ModelState st)
+    {
+        var bodies = OrderBodies(st, r.Body).ToList();
+        if (bodies.Count == 0 || bodies.Any(b => b.Solid.Native == null)) return null;
+        foreach (var byName in new[] { true, false })
+        {
+            if (!byName && r.Normal.LengthSq < 0.5) break;
+            Body? bb = null; Kernel.Native.NFace? best = null; double bestD = double.MaxValue;
+            foreach (var b in bodies)
+                foreach (var f in b.Solid.Native!.Faces)
+                {
+                    if (byName ? f.Tag.Name != r.Name : f.Surface.Kind != SurfaceKind.Plane) continue;
+                    var box = f.Bounds();
+                    double d;
+                    if (f.Surface.Kind == SurfaceKind.Plane)
+                    {
+                        var pl = f.Sense ? f.Surface.Plane! : f.Surface.Plane!.Flipped();
+                        if (!byName && (Vec3.Dot(pl.Normal, r.Normal) < 0.9999 || Math.Abs(pl.Distance(r.Hint)) > 1e-3)) continue;
+                        var proj = pl.Project(r.Hint);
+                        d = Math.Abs(pl.Distance(r.Hint)) + Vec3.Max(Vec3.Max(box.Min - proj, proj - box.Max), Vec3.Zero).Length;
+                    }
+                    else d = Math.Abs(f.Surface.F_(r.Hint)) + Vec3.Max(Vec3.Max(box.Min - r.Hint, r.Hint - box.Max), Vec3.Zero).Length;
+                    if (d < bestD) { bestD = d; best = f; bb = b; }
+                }
+            if (best != null) return (bb!, best);
+        }
+        return null;
     }
 
     public static (Body body, Face face) ResolveFace(FaceRef r, ModelState st)
@@ -63,6 +107,7 @@ public static class Resolver
     /// <summary>All faces (facets) sharing the referenced face's name in its body.</summary>
     public static (Body body, string name) ResolveFaceName(FaceRef r, ModelState st)
     {
+        if (NativeFace(r, st) is { } hit) return (hit.body, hit.face.Tag.Name);
         var (b, f) = ResolveFace(r, st);
         return (b, f.Tag.Name);
     }
@@ -105,6 +150,46 @@ public static class Resolver
             }
         if (best != null) return (bb!, best);
         throw new FeatureException($"Edge between '{r.A}' and '{r.B}' could not be found.");
+    }
+
+    /// <summary>
+    /// Edge between faces named A and B nearest the hint, on the native B-rep (no tessellation). Null when the
+    /// body is not native or nothing matches (the facet lookup then decides).
+    /// </summary>
+    public static (Body body, Kernel.Native.NEdge edge)? ResolveNativeEdge(EdgeRef r, ModelState st)
+    {
+        var bodies = OrderBodies(st, r.Body).ToList();
+        if (bodies.Any(b => b.Solid.Native == null)) return null;
+        // 1) an edge between the named faces, nearest the hint; 2) any edge through the hint point
+        foreach (var named in new[] { true, false })
+        {
+            Body? bb = null; Kernel.Native.NEdge? best = null; double bestD = named ? double.MaxValue : 1e-3;
+            foreach (var b in bodies)
+            {
+                var nb = b.Solid.Native!;
+                nb.Link();
+                foreach (var e in nb.Edges)
+                {
+                    if (e.Uses.Count != 2) continue;
+                    if (named)
+                    {
+                        var fa = e.Uses[0].Face.Tag.Name; var fb = e.Uses[1].Face.Tag.Name;
+                        if (!((fa == r.A && fb == r.B) || (fa == r.B && fb == r.A))) continue;
+                    }
+                    var d = DistanceToPolyline(e.Samples(1e-3), r.Hint);
+                    if (d < bestD) { bestD = d; bb = b; best = e; }
+                }
+            }
+            if (best != null) return (bb!, best);
+        }
+        return null;
+    }
+
+    static double DistanceToPolyline(List<Vec3> pts, Vec3 p)
+    {
+        double best = double.MaxValue;
+        for (int i = 0; i + 1 < pts.Count; i++) best = Math.Min(best, DistanceToSegment(p, pts[i], pts[i + 1]));
+        return pts.Count == 1 ? Vec3.Distance(pts[0], p) : best;
     }
 
     public static double DistanceToEdge(TopoEdge e, Vec3 p)

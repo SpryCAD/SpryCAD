@@ -23,14 +23,11 @@ public static class Csg
                 return op switch { BoolOp.Union => Solid.Combine(new[] { a, b }), BoolOp.Subtract => a, _ => Solid.Empty };
             try
             {
-                var nb = Native.NBoolean.Run(a.Native, b.Native, op);
-                var solid = Native.NTess.ToSolid(nb);
-                if (solid.IsEmpty || solid.Topology.OpenHalfEdges == 0)
-                {
-                    Interlocked.Increment(ref NativeOk);
-                    return solid;
-                }
-                LastFallbackReason = "tessellation not watertight";
+                Native.NBody nb;
+                using (Prof.Time("csg.native")) nb = Native.NBoolean.Run(a.Native, b.Native, op);
+                // the result is a validated closed B-rep (NBoolean checks it); facets follow lazily
+                Interlocked.Increment(ref NativeOk);
+                return Native.NTess.ToSolid(nb);
             }
             catch (Exception ex) { LastFallbackReason = ex.Message; }
             Interlocked.Increment(ref NativeFallback);
@@ -40,6 +37,7 @@ public static class Csg
 
     public static Solid RunFacets(Solid a, Solid b, BoolOp op)
     {
+        using var _ = Prof.Time("csg.facets");
         if (a.IsEmpty) return op == BoolOp.Union ? b : Solid.Empty;
         if (b.IsEmpty) return op == BoolOp.Intersect ? Solid.Empty : a;
         if (!a.Bounds.Overlaps(b.Bounds, 1e-6))

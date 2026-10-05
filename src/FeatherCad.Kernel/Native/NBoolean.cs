@@ -51,7 +51,7 @@ public sealed class NBoolean
     NBody Execute(NBody A, NBody B, BoolOp op)
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();
-        void Lap(string what) { T($"[{sw.ElapsedMilliseconds} ms] {what}"); sw.Restart(); }
+        void Lap(string what) { if (Prof.Enabled) Prof.Add("bool." + what, sw.Elapsed.TotalMilliseconds); T($"[{sw.ElapsedMilliseconds} ms] {what}"); sw.Restart(); }
         MergeVertices(A, B);
         A.Link(); B.Link();
 
@@ -68,22 +68,32 @@ public sealed class NBoolean
         // 3-4. section edges per face pair, imprints for coincident faces
         var sections = new Dictionary<NFace, List<NEdge>>(ReferenceEqualityComparer.Instance);
         void AddSec(NFace f, NEdge e) { if (!sections.TryGetValue(f, out var l)) sections[f] = l = new(); if (!l.Contains(e)) l.Add(e); }
-        var faceBoxA = A.Faces.ToDictionary(f => f, f => f.Bounds(_sampleTol * 500), ReferenceEqualityComparer.Instance);
-        var faceBoxB = B.Faces.ToDictionary(f => f, f => f.Bounds(_sampleTol * 500), ReferenceEqualityComparer.Instance);
+        var faceBoxA = new Dictionary<NFace, Box3>(ReferenceEqualityComparer.Instance);
+        var faceBoxB = new Dictionary<NFace, Box3>(ReferenceEqualityComparer.Instance);
+        using (Prof.Time("sec.boxes"))
+        {
+            foreach (var f in A.Faces) faceBoxA[f] = f.Bounds(_sampleTol * 500);
+            foreach (var f in B.Faces) faceBoxB[f] = f.Bounds(_sampleTol * 500);
+        }
         foreach (var fa in A.Faces)
             foreach (var fb in B.Faces)
             {
                 if (!faceBoxA[fa].Overlaps(faceBoxB[fb], _onTol)) continue;
                 if (fa.Surface.CoincidentWith(fb.Surface, _tol * 10))
                 {
+                    using var _i = Prof.Time("sec.imprint");
                     Imprint(fb, fa, AddSec);
                     Imprint(fa, fb, AddSec);
                     continue;
                 }
-                foreach (var e in SectionEdges(fa, fb)) { AddSec(fa, e); AddSec(fb, e); }
+                using (Prof.Time("sec.curves"))
+                    foreach (var e in SectionEdges(fa, fb)) { AddSec(fa, e); AddSec(fb, e); }
                 // boundary edges of one face lying on the other face's surface split that face
-                ImprintOnSurfaceEdges(fa, fb, AddSec);
-                ImprintOnSurfaceEdges(fb, fa, AddSec);
+                using (Prof.Time("sec.onsurface"))
+                {
+                    ImprintOnSurfaceEdges(fa, fb, AddSec);
+                    ImprintOnSurfaceEdges(fb, fa, AddSec);
+                }
             }
 
         Lap("sections");
@@ -245,14 +255,21 @@ public sealed class NBoolean
         var bps = fa.Coedges.Concat(fb.Coedges).SelectMany(c => new[] { c.Start, c.End })
             .Distinct(ReferenceEqualityComparer.Instance).Cast<NVertex>()
             .Where(v => Math.Abs(sa.F_(v.P)) < _onTol && Math.Abs(sb.F_(v.P)) < _onTol).ToList();
-        var analytic = NIntersect.Analytic(sa, sb, _tol * 10);
-        List<NCurve> curves = analytic ?? NIntersect.Trace(fa, sb, _sampleTol * 50).Cast<NCurve>().ToList();
-        if (analytic == null && curves.Count == 0)
+        List<NCurve>? analytic; List<NCurve> curves;
+        using (Prof.Time("sec.analytic")) analytic = NIntersect.Analytic(sa, sb, _tol * 10);
+        var tsw = System.Diagnostics.Stopwatch.StartNew();
+        using (Prof.Time("sec.trace"))
         {
-            // traced from the other side too (small faces)
-            curves = NIntersect.Trace(fb, sa, _sampleTol * 50).Cast<NCurve>().ToList();
+            curves = analytic ?? NIntersect.Trace(fa, sb, _sampleTol * 50).Cast<NCurve>().ToList();
+            if (analytic == null && curves.Count == 0)
+            {
+                // traced from the other side too (small faces)
+                curves = NIntersect.Trace(fb, sa, _sampleTol * 50).Cast<NCurve>().ToList();
+            }
         }
-        var domA = Dom(fa); var domB = Dom(fb);
+        if (Prof.Enabled && analytic == null) Prof.Add($"trace {sa.Kind}x{sb.Kind} {(curves.Count > 0 ? "hit" : "miss")}", tsw.Elapsed.TotalMilliseconds);
+        NDomain domA, domB;
+        using (Prof.Time("sec.domains")) { domA = Dom(fa); domB = Dom(fb); }
         foreach (var c in curves)
         {
             var on = new List<(double t, NVertex v)>();
@@ -288,10 +305,12 @@ public sealed class NBoolean
                 if (periodic && t1 <= t0) t1 += period;
                 if (t1 - t0 < 1e-12) continue;
                 var mid = c.Eval(0.5 * (t0 + t1));
-                var ca = domA.Classify(sa.Project(mid), _onTol);
-                var cb = domB.Classify(sb.Project(mid), _onTol);
+                int ca, cb;
+                using (Prof.Time("sec.midclass")) { ca = domA.Classify(sa.Project(mid), _onTol); cb = domB.Classify(sb.Project(mid), _onTol); }
                 if (ca <= 0 || cb <= 0) continue;
-                yield return MakeEdge(c, t0, t1, v0, v1, sa, sb);
+                NEdge ne;
+                using (Prof.Time("sec.makeedge")) ne = MakeEdge(c, t0, t1, v0, v1, sa, sb);
+                yield return ne;
             }
         }
     }

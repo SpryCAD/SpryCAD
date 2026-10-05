@@ -136,13 +136,62 @@ public sealed class NSurface
         return 0;
     }
 
+    /// <summary>Analytic gradient of <see cref="F_"/> (unit length except for the cone's cos scaling).</summary>
     public Vec3 Grad(Vec3 p)
     {
-        const double h = 1e-7;
-        return new Vec3(
-            F_(p + new Vec3(h, 0, 0)) - F_(p - new Vec3(h, 0, 0)),
-            F_(p + new Vec3(0, h, 0)) - F_(p - new Vec3(0, h, 0)),
-            F_(p + new Vec3(0, 0, h)) - F_(p - new Vec3(0, 0, h))) / (2 * h);
+        if (Kind == SurfaceKind.Plane) return F.Normal;
+        var l = F.ToLocal3(p);
+        var rr = Math.Sqrt(l.X * l.X + l.Y * l.Y);
+        // radial unit (arbitrary on the axis)
+        var radial = rr > 1e-300 ? (F.XDir * l.X + F.YDir * l.Y) / rr : F.XDir;
+        switch (Kind)
+        {
+            case SurfaceKind.Cylinder: return radial;
+            case SurfaceKind.Sphere:
+                {
+                    var d = p - F.Origin; var len = d.Length;
+                    return len > 1e-300 ? d / len : F.Normal;
+                }
+            case SurfaceKind.Cone: return radial * Math.Cos(R2) - F.Normal * Math.Sin(R2);
+            case SurfaceKind.Torus:
+                {
+                    var dr = rr - R; var len = Math.Sqrt(dr * dr + l.Z * l.Z);
+                    return len > 1e-300 ? (radial * dr + F.Normal * l.Z) / len : radial;
+                }
+        }
+        return F.Normal;
+    }
+
+    /// <summary>
+    /// Nearest point of A ∩ B to p by minimum-norm Gauss-Newton on (F_a, F_b) = 0; near-tangent pairs fall back
+    /// to alternating projection steps.
+    /// </summary>
+    public static Vec3 ProjectToIntersection(NSurface a, NSurface b, Vec3 p, double tol = 1e-12)
+    {
+        var q = p;
+        for (int it = 0; it < 40; it++)
+        {
+            var fa = a.F_(q); var fb = b.F_(q);
+            if (Math.Abs(fa) < tol && Math.Abs(fb) < tol) return q;
+            var na = a.Grad(q); var nb = b.Grad(q);
+            double g11 = Vec3.Dot(na, na), g12 = Vec3.Dot(na, nb), g22 = Vec3.Dot(nb, nb);
+            var det = g11 * g22 - g12 * g12;
+            Vec3 step;
+            if (det > 1e-10 * g11 * g22)
+            {
+                var y1 = (g22 * fa - g12 * fb) / det; var y2 = (g11 * fb - g12 * fa) / det;
+                step = na * y1 + nb * y2;
+            }
+            else
+            {
+                // tangent: project onto each in turn
+                q = b.Project(a.Project(q));
+                continue;
+            }
+            q -= step;
+            if (step.LengthSq < tol * tol) break;
+        }
+        return q;
     }
 
     /// <summary>(∂u × ∂v) orientation vs. natural normal: +1 for every kind (by construction of the parameterization).</summary>

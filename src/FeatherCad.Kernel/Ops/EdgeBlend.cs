@@ -116,7 +116,7 @@ public static class EdgeBlend
     /// Cross-section of the blend tool around corner point E: uA/uB run along the two faces
     /// (into the faces), nA/nB are the outward face normals.
     /// </summary>
-    static ProfileLoop? Profile2D(Vec2 uA, Vec2 uB, Vec2 nA, Vec2 nB, Vec2 E, double size, bool fillet, bool convex)
+    internal static ProfileLoop? Profile2D(Vec2 uA, Vec2 uB, Vec2 nA, Vec2 nB, Vec2 E, double size, bool fillet, bool convex)
     {
         uA = uA.Normalized; uB = uB.Normalized;
         var cosT = Math.Clamp(Vec2.Dot(uA, uB), -1, 1);

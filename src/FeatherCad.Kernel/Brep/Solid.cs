@@ -77,16 +77,41 @@ public sealed class Face
 /// </summary>
 public sealed class Solid
 {
-    public List<Face> Faces { get; }
+    List<Face>? _faces;
+    readonly Func<List<Face>>? _tessellate;
+    readonly object _lock = new();
 
-    public Solid(List<Face> faces) { Faces = faces; }
+    /// <summary>Planar facets. For native solids they are tessellated on first access (intermediate results never are).</summary>
+    public List<Face> Faces
+    {
+        get
+        {
+            if (_faces != null) return _faces;
+            lock (_lock)
+            {
+                if (_faces == null)
+                {
+                    using (Prof.Time("solid.tessellate")) _faces = _tessellate!();
+                }
+                return _faces;
+            }
+        }
+    }
+
+    public Solid(List<Face> faces) { _faces = faces; }
+
+    /// <summary>A solid backed by a native B-rep, tessellated lazily by <paramref name="tessellate"/>.</summary>
+    public Solid(Native.NBody native, Func<List<Face>> tessellate) { Native = native; _tessellate = tessellate; }
+
+    /// <summary>Whether the facets have been computed (diagnostics).</summary>
+    public bool IsTessellated => _faces != null;
 
     /// <summary>Exact native B-rep this solid was tessellated from (null for solids from the facet engine).</summary>
     public Native.NBody? Native { get; init; }
 
     public static readonly Solid Empty = new(new List<Face>());
 
-    public bool IsEmpty => Faces.Count == 0;
+    public bool IsEmpty => _faces == null && Native != null ? Native.Faces.Count == 0 : Faces.Count == 0;
 
     Box3? _bounds;
     public Box3 Bounds
@@ -94,6 +119,7 @@ public sealed class Solid
         get
         {
             if (_bounds is { } b) return b;
+            if (_faces == null && Native != null) return (_bounds = Native.TightBounds()).Value;
             var bb = Box3.Empty;
             foreach (var f in Faces) foreach (var l in f.Loops) foreach (var p in l) bb.Add(p);
             _bounds = bb;
@@ -103,6 +129,7 @@ public sealed class Solid
 
     public Solid Transformed(in Transform t, string? prefix = null)
     {
+        if (Native != null && _faces == null) return Kernel.Native.NTess.ToSolid(Native.Transformed(t, prefix));
         var faces = new List<Face>(Faces.Count);
         foreach (var f in Faces) faces.Add(f.Transformed(t, prefix));
         return new Solid(faces) { Native = Native?.Transformed(t, prefix) };
@@ -110,6 +137,7 @@ public sealed class Solid
 
     public Solid Flipped()
     {
+        if (Native != null && _faces == null) return Kernel.Native.NTess.ToSolid(Native.Flipped());
         var faces = new List<Face>(Faces.Count);
         foreach (var f in Faces) faces.Add(f.Flipped());
         return new Solid(faces) { Native = Native?.Flipped() };
@@ -118,6 +146,13 @@ public sealed class Solid
     public static Solid Combine(IEnumerable<Solid> solids)
     {
         var list = solids.ToList();
+        if (list.Count > 0 && list.All(s => s.Native != null))
+        {
+            var body = new Native.NBody();
+            foreach (var s in list) body.Faces.AddRange(s.Native!.Clone().Faces);
+            body.Link();
+            return Kernel.Native.NTess.ToSolid(body);
+        }
         var faces = new List<Face>();
         foreach (var s in list) faces.AddRange(s.Faces);
         Native.NBody? nb = null;

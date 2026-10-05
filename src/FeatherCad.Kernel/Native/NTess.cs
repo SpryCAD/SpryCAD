@@ -9,11 +9,24 @@ public static class NTess
 {
     public const double DefaultTol = 0.02;
 
-    public static Solid ToSolid(NBody body, double tol = DefaultTol)
+    /// <summary>A solid backed by the body; its facets are tessellated on first use.</summary>
+    public static Solid ToSolid(NBody body, double tol = DefaultTol) => new(body, () => Facets(body, tol));
+
+    public static List<Face> Facets(NBody body, double tol = DefaultTol)
     {
+        // shared edges are sampled once up front, so neighbouring faces use identical boundary points;
+        // faces are then independent and tessellate in parallel
+        foreach (var e in body.Edges) e.Samples(tol);
+        var perFace = new List<Face>[body.Faces.Count];
+        Parallel.For(0, body.Faces.Count, i =>
+        {
+            var l = new List<Face>();
+            Tessellate(body.Faces[i], tol, l);
+            perFace[i] = l;
+        });
         var faces = new List<Face>();
-        foreach (var f in body.Faces) Tessellate(f, tol, faces);
-        return new Solid(faces) { Native = body };
+        foreach (var l in perFace) faces.AddRange(l);
+        return faces;
     }
 
     static void Tessellate(NFace f, double tol, List<Face> outFaces)

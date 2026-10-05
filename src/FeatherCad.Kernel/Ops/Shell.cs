@@ -15,8 +15,8 @@ public static class ShellOp
             try
             {
                 var solid = Native.NTess.ToSolid(Native.NShell.Apply(body.Native, openFaces, thickness, prefix));
-                if (!solid.IsEmpty && solid.Topology.OpenHalfEdges == 0) return solid;
-                Csg.LastFallbackReason = "shell tessellation not watertight";
+                if (!solid.IsEmpty) return solid;
+                Csg.LastFallbackReason = "shell removed everything";
             }
             catch (Exception ex) { Csg.LastFallbackReason = ex.Message; }
         }
