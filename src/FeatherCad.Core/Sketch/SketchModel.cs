@@ -114,6 +114,9 @@ public sealed class SkConstraint
     public double Value { get; set; }
     /// <summary>Orientation sign captured at creation for signed dimensions/tangency variants.</summary>
     public int Sign { get; set; } = 1;
+    /// <summary>Angle dimensions: bit 0/1 reverse the direction of the first/second line so the measured
+    /// angle is the sector the dimension was placed in.</summary>
+    public int Flip { get; set; }
     /// <summary>Reference (driven) dimension: displays the value but does not constrain.</summary>
     public bool Driven { get; set; }
     /// <summary>Dimension label offset in sketch coordinates relative to the anchor.</summary>

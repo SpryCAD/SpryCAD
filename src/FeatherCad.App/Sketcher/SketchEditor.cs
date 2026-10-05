@@ -1156,6 +1156,12 @@ public sealed class SketchEditor : IViewportMode
         if (c == null) return null;
         var anchor = DimAnchor(c);
         c.LabelX = mouse.X - anchor.X; c.LabelY = mouse.Y - anchor.Y;
+        if (c.Type == CType.Angle)
+        {
+            // measure the sector the dimension is being placed in
+            var (a1, b1) = LinePts(c.Refs[0]); var (a2, b2) = LinePts(c.Refs[1]);
+            c.Flip = SketchSolver.ChooseAngleFlip(b1 - a1, b2 - a2, mouse - anchor);
+        }
         c.Value = SketchSolver.Measure(Sk, c);
         return c;
     }
@@ -1538,11 +1544,8 @@ public sealed class SketchEditor : IViewportMode
                     {
                         var (a1, b1) = LinePts(c.Refs[0]); var (a2, b2) = LinePts(c.Refs[1]);
                         var rr = Math.Max((label - anchor).Length, px * 10);
-                        var d1 = (b1 - a1).Normalized; var d2 = (b2 - a2).Normalized;
-                        // orient the rays toward the label quadrant
-                        var lu = (label - anchor).Normalized;
-                        if (Vec2.Dot(d1, lu) < 0 && Vec2.Dot(-d1, lu) > Vec2.Dot(d1, lu)) d1 = -d1;
-                        if (Vec2.Dot(d2, lu) < 0 && Vec2.Dot(-d2, lu) > Vec2.Dot(d2, lu)) d2 = -d2;
+                        var (r1, r2) = SketchSolver.AngleRays(Sk, c);
+                        var d1 = r1.Normalized; var d2 = r2.Normalized;
                         var ang0 = d1.Angle; var ang1 = d2.Angle;
                         var sweep = ang1 - ang0; while (sweep > Math.PI) sweep -= 2 * Math.PI; while (sweep < -Math.PI) sweep += 2 * Math.PI;
                         int n = 24; Vec2? prev = null;

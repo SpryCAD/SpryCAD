@@ -109,7 +109,7 @@ public sealed class FaceTag
         Name = name; Surface = surface; Seq = Interlocked.Increment(ref _seq);
     }
 
-    FaceTag(string name, SurfaceDef surface, long seq) { Name = name; Surface = surface; Seq = seq; }
+    internal FaceTag(string name, SurfaceDef surface, long seq) { Name = name; Surface = surface; Seq = seq; }
 
     public FaceTag WithName(string name) => new(name, Surface, Seq);
     public FaceTag Transformed(in Transform t, string? prefix)

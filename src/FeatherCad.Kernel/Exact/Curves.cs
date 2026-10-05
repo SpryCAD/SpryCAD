@@ -178,3 +178,24 @@ public sealed record BSplineCurve(int Degree, Vec3[] Poles, double[] Knots) : Ex
         return x;
     }
 }
+
+/// <summary>Ellipse: Center + Major cos t * XDir + Minor sin t * (Axis × XDir), counter-clockwise about Axis.</summary>
+public sealed record EllipseCurve(Vec3 Center, Vec3 Axis, Vec3 XDir, double Major, double Minor) : ExactCurve
+{
+    public Vec3 At(double t) => Center + XDir * (Major * Math.Cos(t)) + Vec3.Cross(Axis, XDir) * (Minor * Math.Sin(t));
+    public double AngleOf(Vec3 p)
+    {
+        var y = Vec3.Cross(Axis, XDir); var d = p - Center;
+        return Math.Atan2(Vec3.Dot(d, y) / Minor, Vec3.Dot(d, XDir) / Major);
+    }
+    public override IEnumerable<Vec3> Sample(Vec3 from, Vec3 to, bool closed, double chordTol)
+    {
+        var a0 = AngleOf(from); var a1 = AngleOf(to);
+        var sweep = a1 - a0; while (sweep <= 1e-12) sweep += 2 * Math.PI;
+        if (closed) sweep = 2 * Math.PI;
+        int n = Math.Clamp((int)Math.Ceiling(sweep / 0.05), 4, 720);
+        yield return from;
+        for (int i = 1; i < n; i++) yield return At(a0 + sweep * i / n);
+        yield return closed ? from : to;
+    }
+}

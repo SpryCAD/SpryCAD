@@ -309,9 +309,10 @@ public static class SketchSolver
                 {
                     var (a1, b1) = Line(s, r[0]); var (a2, b2) = Line(s, r[1]);
                     var target = c.Sign * c.Value * Math.PI / 180;
+                    double f1 = (c.Flip & 1) != 0 ? -1 : 1, f2 = (c.Flip & 2) != 0 ? -1 : 1;
                     AddEq(s, id, x =>
                     {
-                        var d1 = b1.Get(x) - a1.Get(x); var d2 = b2.Get(x) - a2.Get(x);
+                        var d1 = (b1.Get(x) - a1.Get(x)) * f1; var d2 = (b2.Get(x) - a2.Get(x)) * f2;
                         return Wrap(Math.Atan2(Vec2.Cross(d1, d2), Vec2.Dot(d1, d2)) - target);
                     }, a1, b1, a2, b2);
                     break;
@@ -575,6 +576,32 @@ public static class SketchSolver
 
     // ---- measurement helpers used when creating dimensions -------------------------------------
 
+    /// <summary>Directions of the two lines of an angle dimension, after applying its flips.</summary>
+    public static (Vec2 d1, Vec2 d2) AngleRays(Sketch sk, SkConstraint c)
+    {
+        var l1 = (SkLine)sk.Entity(c.Refs[0])!; var l2 = (SkLine)sk.Entity(c.Refs[1])!;
+        var d1 = sk.P(l1.P2) - sk.P(l1.P1); var d2 = sk.P(l2.P2) - sk.P(l2.P1);
+        if ((c.Flip & 1) != 0) d1 = -d1;
+        if ((c.Flip & 2) != 0) d2 = -d2;
+        return (d1, d2);
+    }
+
+    /// <summary>Chooses the flips so the angle measured is the sector containing <paramref name="towards"/> (seen from the vertex).</summary>
+    public static int ChooseAngleFlip(Vec2 d1, Vec2 d2, Vec2 towards)
+    {
+        var u = towards.Normalized;
+        int best = 0; double bestScore = double.NegativeInfinity;
+        for (int flip = 0; flip < 4; flip++)
+        {
+            var r1 = ((flip & 1) != 0 ? -d1 : d1).Normalized; var r2 = ((flip & 2) != 0 ? -d2 : d2).Normalized;
+            // u lies inside the sector when it is on the same side of each ray as the other ray
+            var inside = Math.Sign(Vec2.Cross(r1, u)) == Math.Sign(Vec2.Cross(r1, r2)) && Math.Sign(Vec2.Cross(r2, u)) == Math.Sign(Vec2.Cross(r2, r1));
+            var score = (inside ? 10 : 0) + Vec2.Dot(r1, u) + Vec2.Dot(r2, u);
+            if (score > bestScore) { bestScore = score; best = flip; }
+        }
+        return best;
+    }
+
     public static double Measure(Sketch sk, SkConstraint c)
     {
         var r = c.Refs;
@@ -609,8 +636,7 @@ public static class SketchSolver
             case CType.Diameter: return 2 * sk.Radius(sk.Entity(r[0])!);
             case CType.Angle:
                 {
-                    var (a1, b1) = L(r[0]); var (a2, b2) = L(r[1]);
-                    var d1 = b1 - a1; var d2 = b2 - a2;
+                    var (d1, d2) = AngleRays(sk, c);
                     return Math.Abs(Math.Atan2(Vec2.Cross(d1, d2), Vec2.Dot(d1, d2))) * 180 / Math.PI;
                 }
         }
@@ -651,8 +677,8 @@ public static class SketchSolver
                 }
             case CType.Angle:
                 {
-                    var (a1, b1) = L(r[0]); var (a2, b2) = L(r[1]);
-                    c.Sign = Sg(Vec2.Cross(b1 - a1, b2 - a2));
+                    var (d1, d2) = AngleRays(sk, c);
+                    c.Sign = Sg(Vec2.Cross(d1, d2));
                     break;
                 }
             case CType.Tangent:

@@ -325,5 +325,28 @@ static class CoreTests
             var doc2 = CadDocument.FromJson(doc.ToJson());
             t.True(((SketchFeature)doc2.Find(s2.Id)!).Sketch.Entities.Count(e => e.IsReference) == 2, "references saved");
         });
+
+        t.Test("Angle dimension measures the sector it is placed in", () =>
+        {
+            // like the reported case: top line runs right from the vertex, the diagonal is stored pointing back to it
+            var sk = new Sketch();
+            var v = sk.AddPoint(new Vec2(0, 10)); v.Fixed = true;
+            var a = sk.AddPoint(new Vec2(40, 10)); a.Fixed = true;
+            var d = sk.AddPoint(new Vec2(40, -14.6));
+            var top = sk.Add(new SkLine { P1 = v.Id, P2 = a.Id });
+            var diag = sk.Add(new SkLine { P1 = d.Id, P2 = v.Id });
+            var c = new SkConstraint { Id = sk.NewId(), Type = CType.Angle, Refs = new[] { top.Id, diag.Id } };
+            c.Flip = SketchSolver.ChooseAngleFlip(sk.P(a.Id) - sk.P(v.Id), sk.P(v.Id) - sk.P(d.Id), new Vec2(15, -3)); // label inside the acute sector
+            var measured = SketchSolver.Measure(sk, c);
+            t.Near(measured, Math.Atan2(24.6, 40) * 180 / Math.PI, 1e-6); // ~31.6, not ~148.4
+            SketchSolver.CaptureSign(sk, c);
+            c.Value = 45;
+            sk.Constraints.Add(c);
+            sk.AddConstraint(CType.Vertical, a.Id, d.Id);
+            var r = SketchSolver.Solve(sk);
+            t.True(r.Converged, "solved");
+            t.Near(SketchSolver.Measure(sk, c), 45, 1e-6);
+            t.Near(sk.P(d.Id).Y, 10 - 40, 1e-6); // diagonal now at 45 degrees below the top line
+        });
     }
 }
