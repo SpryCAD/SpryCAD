@@ -37,6 +37,7 @@ static class Program
 {
     static int Main(string[] args)
     {
+        if (args.Length > 4 && args[0] == "repro") { Bench.Repro(args[1], args[2], args[3], args[4]); return 0; }
         if (args.Length > 1 && args[0] == "bench")
         {
             Bench.Run(args[1], args.Length > 2 ? int.Parse(args[2]) : 5);

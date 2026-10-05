@@ -441,7 +441,8 @@ public sealed class Regenerator
                 if (tool.Native == null && tool.Volume() < 0) tool = tool.Flipped(); // native revolves are oriented by construction
                 tools.Add(tool);
             }
-            var all = Csg.UnionAll(tools);
+            Solid all;
+            using (Prof.Time("hole.toolunion")) all = Csg.UnionAll(tools);
             ApplyTool(all, cut: true, merge: true);
             State.Tools[f.Id] = new ToolInfo(all, true, true);
         }

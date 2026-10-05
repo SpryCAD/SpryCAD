@@ -157,6 +157,10 @@ public sealed class NBody
     public readonly List<NFace> Faces = new();
 
     public IEnumerable<NEdge> Edges => Faces.SelectMany(f => f.Coedges).Select(c => c.Edge).Distinct();
+
+    ulong? _hash;
+    /// <summary>Content hash (cached: bodies are not modified once built; operations work on clones).</summary>
+    public ulong ContentHash => _hash ??= NHash.Of(this);
     public IEnumerable<NVertex> Vertices => Edges.SelectMany(e => new[] { e.V0, e.V1 }).Distinct();
 
     public Box3 Bounds

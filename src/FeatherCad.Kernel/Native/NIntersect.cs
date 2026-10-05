@@ -65,56 +65,168 @@ public static class NIntersect
 
     public sealed record EdgeHits(List<double> Params, bool OnSurface);
 
-    /// <summary>Parameters where the edge meets the surface (sign changes and tangential touches).</summary>
+    /// <summary>
+    /// Parameters where the edge crosses the surface, plus end points lying on it; pure tangential touches are
+    /// not reported (they do not split the edge; contact there is resolved by the face pair). Lines against planes and
+    /// quadrics and circles against planes are solved in closed form; other pairs use guaranteed root isolation
+    /// (F_ grows no faster than distance, so an interval of arc length L holds a root only if |f(a)|+|f(b)| ≤ L).
+    /// </summary>
     public static EdgeHits EdgeSurface(NEdge e, NSurface s, double tol)
     {
         var c = e.Curve;
         double F(double t) => s.F_(c.Eval(t));
+        double lo = Math.Min(e.T0, e.T1), hi = Math.Max(e.T0, e.T1);
         var res = new List<double>();
-        if (c is NLine && s.Kind == SurfaceKind.Plane)
-        {
-            double f0 = F(e.T0), f1 = F(e.T1);
-            if (Math.Abs(f0) < tol && Math.Abs(f1) < tol) return new EdgeHits(res, true);
-            if (Math.Abs(f0) < tol) res.Add(e.T0);
-            if (Math.Abs(f1) < tol) res.Add(e.T1);
-            if (f0 * f1 < 0 && Math.Abs(f0) >= tol && Math.Abs(f1) >= tol) res.Add(e.T0 + (e.T1 - e.T0) * f0 / (f0 - f1));
-            return new EdgeHits(res, false);
-        }
-        int n = c is NLine ? 32 : Math.Clamp(e.Samples(tol * 50).Count * 4, 32, 2048);
-        var ts = new double[n + 1]; var fs = new double[n + 1];
+        // the face-splitting stage relies on edges having been sampled at this tolerance first (the sample
+        // cache keeps the first sampling that is fine enough); keep that order until the cache is per-tolerance
+        e.Samples(tol * 50);
+
+        // edge lying on the surface
+        const int probe = 16;
         bool allOn = true;
-        for (int i = 0; i <= n; i++)
-        {
-            ts[i] = e.T0 + (e.T1 - e.T0) * i / n;
-            fs[i] = F(ts[i]);
-            if (Math.Abs(fs[i]) > tol) allOn = false;
-        }
+        for (int i = 0; i <= probe && allOn; i++) if (Math.Abs(F(lo + (hi - lo) * i / probe)) > tol) allOn = false;
         if (allOn) return new EdgeHits(res, true);
-        if (Math.Abs(fs[0]) < tol) res.Add(e.T0);
-        if (Math.Abs(fs[n]) < tol) res.Add(e.T1);
-        for (int i = 0; i < n; i++)
+
+        if (Math.Abs(F(e.T0)) < tol) res.Add(e.T0);
+        if (Math.Abs(F(e.T1)) < tol) res.Add(e.T1);
+        var exact = AnalyticRoots(c, s, tol);
+        if (exact != null)
         {
-            double a = fs[i], b = fs[i + 1];
-            if (Math.Abs(a) < tol && i > 0) continue; // already handled as a near-zero sample below
-            if (a * b < 0 && Math.Abs(b) >= tol)
+            foreach (var t0 in exact)
             {
-                var t = Roots.Bisect(F, ts[i], ts[i + 1]);
-                res.Add(t);
+                var t = t0;
+                if (c.Periodic) { while (t < lo - 1e-12) t += c.Period; while (t > hi + 1e-12) t -= c.Period; }
+                if (t >= lo - 1e-12 && t <= hi + 1e-12) res.Add(Math.Clamp(t, lo, hi));
             }
         }
-        // near-zero interior samples: either a crossing landing on a sample or a tangential touch
-        for (int i = 1; i < n; i++)
+        else
         {
-            if (Math.Abs(fs[i]) >= tol * 50) continue;
-            if (Math.Abs(fs[i]) > Math.Abs(fs[i - 1]) || Math.Abs(fs[i]) > Math.Abs(fs[i + 1])) continue;
-            var t = Roots.MinAbs(F, ts[i - 1], ts[i + 1]);
-            if (Math.Abs(F(t)) < tol && !res.Any(r => Math.Abs(r - t) < (e.T1 - e.T0) * 1e-6)) res.Add(t);
+            double total = ArcBound(c, lo, hi);
+            double minL = Math.Max(total * 1e-5, tol * 10);
+            void Iso(double ta, double tb, double fa, double fb, int depth)
+            {
+                var L = ArcBound(c, ta, tb);
+                if (Math.Abs(fa) + Math.Abs(fb) > L * 1.001 + tol) return; // no root possible here
+                if (depth >= 48 || L < minL)
+                {
+                    // crossings only: pure tangential touches do not split edges (see the summary)
+                    if (fa * fb < 0) res.Add(Roots.Bisect(F, ta, tb));
+                    return;
+                }
+                var m = 0.5 * (ta + tb); var fm = F(m);
+                Iso(ta, m, fa, fm, depth + 1);
+                Iso(m, tb, fm, fb, depth + 1);
+            }
+            // start from a few segments so the arc bound of curved edges stays tight
+            const int n = 8; double prevT = lo, prevF = F(lo);
+            for (int i = 1; i <= n; i++)
+            {
+                var t = lo + (hi - lo) * i / n; var f = F(t);
+                Iso(prevT, t, prevF, f, 0);
+                prevT = t; prevF = f;
+            }
         }
         res.Sort();
-        // merge duplicates
+        // merge duplicates; an end point lying on the surface absorbs crossings right next to it (no micro edges)
+        bool startOn = Math.Abs(F(e.T0)) < tol, endOn = Math.Abs(F(e.T1)) < tol;
+        Vec3 p0 = e.V0.P, p1 = e.V1.P;
         var merged = new List<double>();
-        foreach (var t in res) if (merged.Count == 0 || Vec3.Distance(c.Eval(t), c.Eval(merged[^1])) > tol) merged.Add(t);
+        foreach (var t in res)
+        {
+            var p = c.Eval(t);
+            bool isEnd = t == e.T0 || t == e.T1;
+            if (!isEnd && ((startOn && Vec3.Distance(p, p0) < tol * 100) || (endOn && Vec3.Distance(p, p1) < tol * 100))) continue;
+            if (merged.Count == 0 || Vec3.Distance(p, c.Eval(merged[^1])) > tol) merged.Add(t);
+        }
         return new EdgeHits(merged, false);
+    }
+
+    /// <summary>Upper bound of the arc length of the curve over [a, b].</summary>
+    static double ArcBound(NCurve c, double a, double b)
+    {
+        var d = Math.Abs(b - a);
+        switch (c)
+        {
+            case NLine: return d;
+            case NCircle ci: return ci.R * d;
+            case NEllipse el: return Math.Max(el.A, el.B) * d;
+            default:
+                {
+                    // splines/polylines: chord sum of samples with a safety factor
+                    double l = 0; var p = c.Eval(a);
+                    for (int i = 1; i <= 8; i++) { var q = c.Eval(a + (b - a) * i / 8); l += Vec3.Distance(p, q); p = q; }
+                    return l * 1.5 + 1e-12;
+                }
+        }
+    }
+
+    /// <summary>All parameters where the (unbounded) curve meets the surface, or null without a closed form.</summary>
+    static List<double>? AnalyticRoots(NCurve c, NSurface s, double tol)
+    {
+        if (c is NLine ln)
+        {
+            var l0 = s.F.ToLocal3(ln.P);
+            var d = new Vec3(Vec3.Dot(ln.D, s.F.XDir), Vec3.Dot(ln.D, s.F.YDir), Vec3.Dot(ln.D, s.F.Normal));
+            double F(double t) => s.F_(ln.Eval(t));
+            switch (s.Kind)
+            {
+                case SurfaceKind.Plane:
+                    return Math.Abs(d.Z) < 1e-15 ? new List<double>() : new List<double> { -l0.Z / d.Z };
+                case SurfaceKind.Cylinder:
+                    return Quadratic(d.X * d.X + d.Y * d.Y, 2 * (l0.X * d.X + l0.Y * d.Y), l0.X * l0.X + l0.Y * l0.Y - s.R * s.R, F, tol);
+                case SurfaceKind.Sphere:
+                    return Quadratic(1, 2 * (l0.X * d.X + l0.Y * d.Y + l0.Z * d.Z), l0.X * l0.X + l0.Y * l0.Y + l0.Z * l0.Z - s.R * s.R, F, tol);
+                case SurfaceKind.Cone:
+                    {
+                        var k = Math.Tan(s.R2); var r0 = s.R + l0.Z * k;
+                        var roots = Quadratic(d.X * d.X + d.Y * d.Y - d.Z * d.Z * k * k,
+                            2 * (l0.X * d.X + l0.Y * d.Y) - 2 * r0 * d.Z * k,
+                            l0.X * l0.X + l0.Y * l0.Y - r0 * r0, F, tol);
+                        // keep the nappe the cone surface lives on (radius ≥ 0)
+                        return roots.Where(t => s.R + (l0.Z + d.Z * t) * k >= -tol).ToList();
+                    }
+                default: return null;
+            }
+        }
+        if (c is NCircle ci && s.Kind == SurfaceKind.Plane)
+        {
+            var pl = s.Plane!;
+            double k = Vec3.Dot(pl.Normal, ci.C) - pl.D;
+            double A = ci.R * Vec3.Dot(pl.Normal, ci.X), B = ci.R * Vec3.Dot(pl.Normal, ci.Y);
+            var amp = Math.Sqrt(A * A + B * B);
+            var roots = new List<double>();
+            if (amp < 1e-15) return roots; // parallel (lying on the plane is handled by the caller)
+            var phi = Math.Atan2(B, A);
+            var x = -k / amp;
+            if (Math.Abs(x) > 1) return roots; // no crossing (tangential touches do not split the edge)
+            var w = Math.Acos(x);
+            roots.Add(phi + w);
+            if (w > 1e-12) roots.Add(phi - w);
+            return roots;
+        }
+        return null;
+    }
+
+    /// <summary>Real roots of a t² + b t + c (touches within tol included), via the stable formula.</summary>
+    static List<double> Quadratic(double a, double b, double c, Func<double, double> f, double tol)
+    {
+        var r = new List<double>();
+        if (Math.Abs(a) < 1e-14)
+        {
+            if (Math.Abs(b) > 1e-300) r.Add(-c / b);
+            return r;
+        }
+        var disc = b * b - 4 * a * c;
+        if (disc < 0) return r; // no crossing (a tangential touch does not split the edge)
+        var sq = Math.Sqrt(disc);
+        // a double root (roots closer than tol: the curve only touches) is a touch, not a crossing;
+        // this keeps exact tangencies deterministic instead of depending on rounding of the discriminant
+        if (sq / Math.Abs(a) < tol) return r;
+        var q = -0.5 * (b + (b >= 0 ? sq : -sq));
+        var t1 = q / a;
+        r.Add(t1);
+        if (Math.Abs(q) > 1e-300) { var t2 = c / q; if (Math.Abs(t2 - t1) > 1e-15 * Math.Max(1, Math.Abs(t1))) r.Add(t2); }
+        return r;
     }
 
     // ------------------------------------------------------------------------------------------

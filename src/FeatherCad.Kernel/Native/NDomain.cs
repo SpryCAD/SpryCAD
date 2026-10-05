@@ -152,8 +152,27 @@ public sealed class NDomain
     /// <summary>+1 inside, 0 on the boundary (within onTol), -1 outside. p is assumed to lie on the surface.</summary>
     public int Classify(Vec3 p, double onTol)
     {
-        if (BoundaryDistance(p) < onTol) return 0;
+        var bd = BoundaryDistance(p);
+        if (bd < onTol) return 0;
+        // within the chord error of the sampled boundary: decide on the exact edge curves (a point on a
+        // true arc can lie outside its polyline)
+        if (bd < _tol * 2 + onTol && ExactBoundaryDistance(p) < onTol) return 0;
         return ContainsUV(Map(p)) ? 1 : -1;
+    }
+
+    /// <summary>Distance from p to the face's exact boundary curves.</summary>
+    public double ExactBoundaryDistance(Vec3 p)
+    {
+        double best = double.MaxValue;
+        foreach (var c in Face.Coedges)
+        {
+            var e = c.Edge;
+            double lo = Math.Min(e.T0, e.T1), hi = Math.Max(e.T0, e.T1);
+            var t = e.Curve.Param(p, e.Curve.Periodic ? 0.5 * (lo + hi) : null);
+            var q = t < lo ? e.Curve.Eval(lo) : t > hi ? e.Curve.Eval(hi) : e.Curve.Eval(t);
+            best = Math.Min(best, Math.Min(Vec3.Distance(p, q), Math.Min(Vec3.Distance(p, e.V0.P), Vec3.Distance(p, e.V1.P))));
+        }
+        return best;
     }
 
     public double SignedArea()

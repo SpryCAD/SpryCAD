@@ -60,6 +60,7 @@ public sealed class NBoolean
         var splits = new Dictionary<NEdge, List<(double t, NVertex v)>>(ReferenceEqualityComparer.Instance);
         FindEdgeSplits(A, B, splits, onSurface);
         FindEdgeSplits(B, A, splits, onSurface);
+        ImprintSplitVertices(A, B, splits);
         Lap("edge splits");
         ApplySplits(A, splits); ApplySplits(B, splits);
         _domains.Clear();
@@ -99,6 +100,13 @@ public sealed class NBoolean
         Lap("sections");
         // 5. split faces
         if (Trace != null) T($"sections: {string.Join(", ", sections.Select(kv => kv.Key.Tag.Name + ":" + kv.Value.Count))}");
+        if (Trace != null && Environment.GetEnvironmentVariable("FC_TRACE_FACE") is { } tf)
+            foreach (var (f, l) in sections)
+                if (f.Tag.Name.Contains(tf))
+                {
+                    T($"  face {f.Tag.Name} boundary: " + string.Join(" ", f.Coedges.Select(c => $"[{c.Start.P}->{c.End.P} {c.Edge.Curve.GetType().Name[1..]}]")));
+                    foreach (var e in l) T($"    sec {e.V0.P}->{e.V1.P} {e.Curve.GetType().Name[1..]} mid {e.Mid}");
+                }
         var piecesA = SplitFaces(A, sections);
         var piecesB = SplitFaces(B, sections);
         Lap("split faces");
@@ -198,6 +206,8 @@ public sealed class NBoolean
             {
                 if (!eb.Overlaps(box, _onTol)) continue;
                 var hits = NIntersect.EdgeSurface(e, f.Surface, _tol);
+                if (Trace != null && Environment.GetEnvironmentVariable("FC_TRACE_EDGE") is { } te && e.Mid.ToString().Contains(te))
+                    T($"    edge {e.V0.P}->{e.V1.P} x {f.Tag.Name} ({f.Surface.Kind}): on={hits.OnSurface} hits {string.Join(" ", hits.Params.Select(t => $"{e.Curve.Eval(t)}/cls{Dom(f).Classify(f.Surface.Project(e.Curve.Eval(t)), _onTol)}"))}");
                 if (hits.OnSurface) { onSurface.Add((e, f)); continue; }
                 foreach (var t in hits.Params)
                 {
@@ -208,6 +218,30 @@ public sealed class NBoolean
                     if (!splits.TryGetValue(e, out var l)) splits[e] = l = new();
                     if (!l.Any(x => ReferenceEquals(x.Item2, v))) l.Add((t, v));
                 }
+            }
+        }
+    }
+
+    /// <summary>
+    /// A split vertex also splits every other edge it lies on (e.g. a tool edge crossing a wall plane right
+    /// where the wall's own edge only touches the tool tangentially, which reports no crossing).
+    /// </summary>
+    void ImprintSplitVertices(NBody A, NBody B, Dictionary<NEdge, List<(double t, NVertex v)>> splits)
+    {
+        var verts = splits.Values.SelectMany(l => l.Select(x => x.v)).Distinct(ReferenceEqualityComparer.Instance).Cast<NVertex>().ToList();
+        if (verts.Count == 0) return;
+        foreach (var e in A.Edges.Concat(B.Edges))
+        {
+            var box = e.Bounds(_sampleTol * 500);
+            foreach (var v in verts)
+            {
+                if (ReferenceEquals(v, e.V0) || ReferenceEquals(v, e.V1) || !box.Contains(v.P, _onTol)) continue;
+                if (Vec3.Distance(v.P, e.V0.P) < _tol * 10 || Vec3.Distance(v.P, e.V1.P) < _tol * 10) continue;
+                double lo = Math.Min(e.T0, e.T1), hi = Math.Max(e.T0, e.T1);
+                var t = e.Curve.Param(v.P, e.Curve.Periodic ? 0.5 * (lo + hi) : null);
+                if (t <= lo || t >= hi || Vec3.Distance(e.Curve.Eval(t), v.P) > _tol * 10) continue;
+                if (!splits.TryGetValue(e, out var l)) splits[e] = l = new();
+                if (!l.Any(x => ReferenceEquals(x.v, v))) l.Add((t, v));
             }
         }
     }
@@ -306,7 +340,8 @@ public sealed class NBoolean
                 if (t1 - t0 < 1e-12) continue;
                 var mid = c.Eval(0.5 * (t0 + t1));
                 int ca, cb;
-                using (Prof.Time("sec.midclass")) { ca = domA.Classify(sa.Project(mid), _onTol); cb = domB.Classify(sb.Project(mid), _onTol); }
+                // a tight tolerance: only curves really on a face boundary are dropped, thin slivers next to one are kept
+                using (Prof.Time("sec.midclass")) { ca = domA.Classify(sa.Project(mid), _tol * 10); cb = domB.Classify(sb.Project(mid), _tol * 10); }
                 if (ca <= 0 || cb <= 0) continue;
                 NEdge ne;
                 using (Prof.Time("sec.makeedge")) ne = MakeEdge(c, t0, t1, v0, v1, sa, sb);
@@ -625,6 +660,11 @@ public sealed class NBoolean
                 if (Math.Abs(g.Surface.F_(e.Mid)) < _onTol || Math.Abs(g.Surface.F_(e.V0.P)) < _onTol && Math.Abs(g.Surface.F_(e.V1.P)) < _onTol) { touches = true; break; }
             }
             if (touches) continue;
+            if (Trace != null && Environment.GetEnvironmentVariable("FC_TRACE_COMP") != null)
+            {
+                var s0 = Classify(pieces[us[0]], other, otherBox); var s1 = Classify(pieces[us[1]], other, otherBox);
+                if (s0 != s1) T($"  LEAK via edge {e.Curve.GetType().Name} {e.V0.P}->{e.V1.P} mid {e.Mid}: {pieces[us[0]].Tag.Name}={s0} / {pieces[us[1]].Tag.Name}={s1}");
+            }
             parent[Find(us[0])] = Find(us[1]);
         }
         var compState = new Dictionary<int, State>();
@@ -634,6 +674,9 @@ public sealed class NBoolean
             if (!compState.TryGetValue(r, out var st)) compState[r] = st = Classify(pieces[i], other, otherBox);
             res[pieces[i]] = st;
         }
+        if (Trace != null && Environment.GetEnvironmentVariable("FC_TRACE_COMP") != null)
+            foreach (var g in Enumerable.Range(0, pieces.Count).GroupBy(Find).Where(g => g.Count() > 1))
+                T($"  component {compState[g.Key]} rep={pieces[g.Key].Tag.Name}@{Dom(pieces[g.Key]).InteriorPoint()}: " + string.Join(", ", g.Select(i => $"{pieces[i].Tag.Name}@{Dom(pieces[i]).InteriorPoint()}")));
         return res;
     }
     Box3 FBox(NFace f)
@@ -667,8 +710,10 @@ public sealed class NBoolean
     State Classify(NFace f, List<NFace> other, Box3 otherBox)
     {
         var fb = FBox(f);
-        if (!fb.Overlaps(otherBox, _onTol)) return State.Out;
+        var dbg = Trace != null && Environment.GetEnvironmentVariable("FC_TRACE_RAY") is { } tr && f.Tag.Name.Contains(tr);
+        if (!fb.Overlaps(otherBox, _onTol)) { if (dbg) T($"    {f.Tag.Name} box {fb.Min}-{fb.Max} outside other {otherBox.Min}-{otherBox.Max}"); return State.Out; }
         var p = Dom(f).InteriorPoint();
+        if (dbg) T($"    {f.Tag.Name} interior point {p} box {fb.Min}-{fb.Max}");
         return ClassifyPoint(f, p, other, otherBox);
     }
 
@@ -685,9 +730,11 @@ public sealed class NBoolean
             var ng = g.Surface.Normal(p) * (g.Sense ? 1 : -1);
             return Vec3.Dot(nf, ng) > 0 ? State.OnSame : State.OnOpposite;
         }
+        var dbg = Trace != null && Environment.GetEnvironmentVariable("FC_TRACE_RAY") is { } tr && f.Tag.Name.Contains(tr);
         foreach (var d in RayDirs)
         {
             int count = 0; bool ok = true;
+            List<string>? hits = dbg ? new() : null;
             foreach (var g in other)
             {
                 if (!RayHitsBox(p, d, FBox(g), _onTol * 4)) continue;
@@ -702,10 +749,15 @@ public sealed class NBoolean
                     var n = g.Surface.Normal(q);
                     if (Math.Abs(Vec3.Dot(n, d)) < 1e-3) { ok = false; break; }
                     count++;
+                    hits?.Add($"{g.Tag.Name}@{t:0.###}{q}");
                 }
                 if (!ok) break;
             }
-            if (ok) return count % 2 == 1 ? State.In : State.Out;
+            if (ok)
+            {
+                if (dbg) T($"    ray from {p} dir {d}: {count} hits {string.Join(" ", hits!)}");
+                return count % 2 == 1 ? State.In : State.Out;
+            }
         }
         throw new NBooleanException("classification failed");
     }

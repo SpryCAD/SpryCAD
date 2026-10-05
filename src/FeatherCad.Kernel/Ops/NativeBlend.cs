@@ -44,8 +44,17 @@ public static class NativeBlend
             catch (Exception ex) { errors.Add($"Edge {fa.Tag.Name} / {fb.Tag.Name}: {ex.Message}"); }
         }
         var result = body;
-        if (cutTools.Count > 0) result = Csg.Subtract(result, Csg.UnionAll(cutTools));
-        if (addTools.Count > 0) result = Csg.Union(result, Csg.UnionAll(addTools));
+        Solid? cu = null, au = null;
+        using (Prof.Time("blend.toolunion"))
+        {
+            if (cutTools.Count > 0) cu = Csg.UnionAll(cutTools);
+            if (addTools.Count > 0) au = Csg.UnionAll(addTools);
+        }
+        using (Prof.Time("blend.apply"))
+        {
+            if (cu != null) result = Csg.Subtract(result, cu);
+            if (au != null) result = Csg.Union(result, au);
+        }
         return result;
     }
 

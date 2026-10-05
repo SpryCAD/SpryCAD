@@ -12,7 +12,15 @@ public static class Csg
     /// <summary>Use exact native booleans when both operands carry a native B-rep.</summary>
     public static bool UseNative = true;
     /// <summary>Counters for diagnostics: native successes and fallbacks (with the last reason).</summary>
-    public static int NativeOk, NativeFallback;
+    public static int NativeOk, NativeFallback, CacheHits;
+
+    /// <summary>Recent native boolean results by operand content (results are immutable, so they are shared).</summary>
+    static readonly Lru<(ulong, ulong, BoolOp), Solid> Cache = new(512);
+
+    public static bool UseCache = Environment.GetEnvironmentVariable("FC_NOCACHE") == null;
+
+    /// <summary>Drops cached boolean results (memory pressure, tests).</summary>
+    public static void ClearCache() => Cache.Clear();
     public static string? LastFallbackReason;
 
     public static Solid Run(Solid a, Solid b, BoolOp op)
@@ -21,13 +29,18 @@ public static class Csg
         {
             if (!a.Bounds.Overlaps(b.Bounds, 1e-6))
                 return op switch { BoolOp.Union => Solid.Combine(new[] { a, b }), BoolOp.Subtract => a, _ => Solid.Empty };
+            // identical operands (e.g. unchanged tools after an upstream edit) reuse the earlier result
+            var key = (a.Native.ContentHash, b.Native.ContentHash, op);
+            if (UseCache && Cache.TryGet(key, out var hit)) { Interlocked.Increment(ref CacheHits); return hit; }
             try
             {
                 Native.NBody nb;
                 using (Prof.Time("csg.native")) nb = Native.NBoolean.Run(a.Native, b.Native, op);
                 // the result is a validated closed B-rep (NBoolean checks it); facets follow lazily
                 Interlocked.Increment(ref NativeOk);
-                return Native.NTess.ToSolid(nb);
+                var solid = Native.NTess.ToSolid(nb);
+                Cache.Add(key, solid);
+                return solid;
             }
             catch (Exception ex) { LastFallbackReason = ex.Message; }
             Interlocked.Increment(ref NativeFallback);
