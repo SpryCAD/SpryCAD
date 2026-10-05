@@ -183,5 +183,72 @@ static class CoreTests
             t.Near(v, Math.PI * (400 - 100) * 20, 60);
             t.Eq(r.State.Bodies[0].Solid.Topology.OpenHalfEdges, 0);
         });
+
+        t.Test("Mirror, circular pattern, plane, combine", () =>
+        {
+            var doc = new CadDocument();
+            // base plate 100x60x10
+            var s1 = doc.AddFeature(new SketchFeature { Plane = PlaneRef.Front, Sketch = Rect(100, 60) });
+            var e1 = doc.AddFeature(new ExtrudeFeature { SketchId = s1.Id, Depth = "10" });
+            // boss: 10x10 square at (10,10) extruded 5 on top face
+            var top = new FaceRef { Name = e1.Id + ".End", Hint = new Vec3(50, 30, 10), Normal = Vec3.UnitZ };
+            var sk = Rect(10, 10);
+            foreach (var p in sk.Points) if (p.Id != Sketch.OriginId) { p.X += 10; p.Y += 10; }
+            // free the rectangle from the origin: rebuild it unattached
+            var sq = new Sketch();
+            var a = sq.AddPoint(new Vec2(10, 10)); var b = sq.AddPoint(new Vec2(20, 10)); var c = sq.AddPoint(new Vec2(20, 20)); var d = sq.AddPoint(new Vec2(10, 20));
+            sq.Add(new SkLine { P1 = a.Id, P2 = b.Id }); sq.Add(new SkLine { P1 = b.Id, P2 = c.Id }); sq.Add(new SkLine { P1 = c.Id, P2 = d.Id }); sq.Add(new SkLine { P1 = d.Id, P2 = a.Id });
+            var s2 = doc.AddFeature(new SketchFeature { Plane = new PlaneRef { Face = top }, Sketch = sq });
+            var boss = doc.AddFeature(new ExtrudeFeature { SketchId = s2.Id, Depth = "5" });
+            // mirror about a reference plane at x = 50 (Right plane offset 50)
+            var pl = doc.AddFeature(new PlaneFeature { Base = PlaneRef.Right, Offset = "50" });
+            var mir = doc.AddFeature(new MirrorFeature { Seeds = { boss.Id }, Plane = new PlaneRef { Feature = pl.Id } });
+            var r = new Regenerator().Rebuild(doc);
+            foreach (var f in doc.Features) t.True(r.Status[f.Id].Ok, $"{f.Name}: {r.Status[f.Id].Error}");
+            t.Near(r.State.Bodies[0].Solid.Volume(), 60000 + 2 * 500, 1e-6);
+            t.Eq(r.State.Bodies[0].Solid.Topology.OpenHalfEdges, 0);
+
+            // circular pattern of the boss around the Z axis through (50,30): use an axis via a cylinder hole
+            var hs = new Sketch(); var hc = hs.AddPoint(new Vec2(50, 30)); hs.Add(new SkCircle { Center = hc.Id, R = 5 });
+            var s3 = doc.AddFeature(new SketchFeature { Plane = new PlaneRef { Face = top }, Sketch = hs });
+            var cut = doc.AddFeature(new ExtrudeFeature { SketchId = s3.Id, IsCut = true, End = EndCondition.ThroughAll, Reverse = true });
+            r = new Regenerator().Rebuild(doc);
+            t.True(r.Status[cut.Id].Ok, r.Status[cut.Id].Error ?? "");
+            var cylName = r.State.Bodies[0].Solid.Faces.First(f => f.Tag.Surface.Kind == SurfaceKind.Cylinder).Tag.Name;
+            var cp = doc.AddFeature(new CircularPatternFeature { Seeds = { boss.Id }, Axis = new DirRef { Face = new FaceRef { Name = cylName, Hint = new Vec3(55, 30, 5) } }, Count = "4" });
+            r = new Regenerator().Rebuild(doc);
+            t.True(r.Status[cp.Id].Ok, r.Status[cp.Id].Error ?? "");
+            t.Eq(r.State.Bodies[0].Solid.Topology.OpenHalfEdges, 0);
+
+            // separate body + combine subtract
+            var s4 = doc.AddFeature(new SketchFeature { Plane = PlaneRef.Front, Sketch = Rect(20, 20) });
+            var e4 = doc.AddFeature(new ExtrudeFeature { SketchId = s4.Id, Depth = "30", Merge = false });
+            r = new Regenerator().Rebuild(doc);
+            t.Eq(r.State.Bodies.Count, 2);
+            var before = r.State.Bodies[0].Solid.Volume();
+            var comb = doc.AddFeature(new CombineFeature { Op = CombineOp.Subtract, MainBody = r.State.Bodies[0].Id, ToolBodies = { e4.Id } });
+            r = new Regenerator().Rebuild(doc);
+            t.True(r.Status[comb.Id].Ok, r.Status[comb.Id].Error ?? "");
+            t.Eq(r.State.Bodies.Count, 1);
+            t.Near(r.State.Bodies[0].Solid.Volume(), before - 20 * 20 * 10 - 500, 1e-6); // tool also removes the boss inside it
+        });
+
+        t.Test("Chamfer hole rim via document", () =>
+        {
+            var doc = new CadDocument();
+            var s1 = doc.AddFeature(new SketchFeature { Plane = PlaneRef.Top, Sketch = Rect(50, 50) });
+            var e1 = doc.AddFeature(new ExtrudeFeature { SketchId = s1.Id, Depth = "12" });
+            var top = new FaceRef { Name = e1.Id + ".End", Hint = new Vec3(25, 12, -25), Normal = Vec3.UnitY };
+            var hs = new Sketch(); var hp = hs.AddPoint(new Vec2(25, 25)); hs.Add(new SkPointEntity { P = hp.Id });
+            var s2 = doc.AddFeature(new SketchFeature { Plane = new PlaneRef { Face = top }, Sketch = hs });
+            var h = doc.AddFeature(new HoleFeature { SketchId = s2.Id, Diameter = "10", ThroughAll = true });
+            var r = new Regenerator().Rebuild(doc);
+            t.True(r.Status[h.Id].Ok, r.Status[h.Id].Error ?? "");
+            var rim = r.State.Bodies[0].Solid.Topology.Edges.First(e => e.Closed && (e.FaceA == e1.Id + ".End" || e.FaceB == e1.Id + ".End"));
+            var ch = doc.AddFeature(new ChamferFeature { Distance = "1", Edges = { new EdgeRef { A = rim.FaceA, B = rim.FaceB, Hint = rim.Midpoint } } });
+            r = new Regenerator().Rebuild(doc);
+            t.True(r.Status[ch.Id].Ok, r.Status[ch.Id].Error ?? "");
+            t.Eq(r.State.Bodies[0].Solid.Topology.OpenHalfEdges, 0);
+        });
     }
 }

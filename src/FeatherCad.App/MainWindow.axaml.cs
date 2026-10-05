@@ -85,7 +85,9 @@ public partial class MainWindow : Window
         RebuildTree();
         var r = Session.Result;
         if (r != null)
-            StatusRebuild.Text = Session.PreviewActive ? "Preview" : $"Rebuild {r.Milliseconds:0} ms ({r.Rebuilt} feature{(r.Rebuilt == 1 ? "" : "s")})";
+            StatusRebuild.Text = Session.PreviewActive ? "Preview"
+                : r.Rebuilt == 0 ? "Up to date"
+                : $"Rebuilt {r.Rebuilt} feature{(r.Rebuilt == 1 ? "" : "s")} in {r.Milliseconds:0} ms";
         if (_page != null && _edit != null && Session.PreviewActive && Session.PreviewResult is { } pr)
         {
             var st = pr.Status.GetValueOrDefault(_edit.Feature.Id);

@@ -19,6 +19,8 @@ public partial class MainWindow
         public bool OverlayPreview;
         public string? Hint;
         public Action? BeforeCommit;
+        /// <summary>Extra cleanup when the edit is cancelled (e.g. remove the Hole Wizard position sketch).</summary>
+        public Action? OnCancelled;
     }
 
     EditContext? _edit;
@@ -93,10 +95,12 @@ public partial class MainWindow
 
     void CancelEdit()
     {
+        var cancelled = _edit?.OnCancelled;
         _edit = null;
         _previewTimer.Stop();
         Session.EndPreview();
         ShowPage(null);
+        cancelled?.Invoke();
         RefreshScene();
         Status("Cancelled.");
     }
@@ -419,6 +423,15 @@ public partial class MainWindow
             EditFeature(f.SketchId);
         }, "sketch");
         BeginEdit(f, isNew, page, overlay: false);
+        if (isNew && _edit != null)
+        {
+            // the position sketch was committed just before this page opened: cancelling removes it
+            var sketchId = f.SketchId;
+            _edit.OnCancelled = () =>
+            {
+                if (Session.Doc.Find(sketchId) is SketchFeature && !Session.Doc.ConsumersOf(sketchId).Any()) Session.Undo();
+            };
+        }
     }
 
     // ------------------------------------------------------------------------------------------
