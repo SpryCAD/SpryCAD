@@ -22,9 +22,12 @@ public enum SkRefKind { Point, Entity, Constraint }
 
 public readonly record struct SkRef(SkRefKind Kind, int Id);
 
-enum SnapKind { None, Point, Origin, Midpoint, OnLine, OnCircle, Center, ModelVertex }
+enum SnapKind { None, Point, Origin, Midpoint, OnLine, OnCircle, Center, ModelVertex, ModelEdge, ModelMidpoint, ModelCenter }
 
-readonly record struct Snap(SnapKind Kind, Vec2 P, int Id = -1, bool H = false, bool V = false, int AlignId = -1);
+/// <summary>Model edge a snap refers to (projected into the sketch as reference geometry on click).</summary>
+sealed record ModelHit(Body Body, TopoEdge Edge, Vec3 Point);
+
+readonly record struct Snap(SnapKind Kind, Vec2 P, int Id = -1, bool H = false, bool V = false, int AlignId = -1, ModelHit? Model = null);
 
 /// <summary>
 /// Interactive 2D sketch editing on a plane: drawing tools with automatic relations (coincident,
@@ -435,6 +438,7 @@ public sealed class SketchEditor : IViewportMode
         else
         {
             _snap = FindSnap(_mouse, _clicks.Count > 0 ? _clicks[^1] : null);
+            UpdateSnapLabel();
             if (Tool == SketchTool.CenterArc && _clicks.Count == 2)
             {
                 var c = _clicks[0];
@@ -613,12 +617,18 @@ public sealed class SketchEditor : IViewportMode
         // model vertices (part corners, arc ends) under the cursor
         if (_lastScreen is { } scr && _vp.PickVertex(scr.X, scr.Y) is { } mv)
             return new Snap(SnapKind.ModelVertex, Frame.ToLocal(mv.point));
+        // centers of model circles in planes parallel to the sketch (hole and boss rims, arcs)
+        foreach (var mc in ModelCircles())
+            if (Vec2.Distance(mc.center, m) < tol) return new Snap(SnapKind.ModelCenter, mc.center, Model: new ModelHit(mc.body, mc.edge, mc.edge.Start));
         // midpoints
         foreach (var l in Sk.Entities.OfType<SkLine>())
         {
             var mid = (Sk.P(l.P1) + Sk.P(l.P2)) * 0.5;
             if (Vec2.Distance(mid, m) < tol) return new Snap(SnapKind.Midpoint, mid, l.Id);
         }
+        // model edge under the cursor: its midpoint, or a point on it
+        var modelEdge = ModelEdgeSnap(m, tol);
+        if (modelEdge is { Kind: SnapKind.ModelMidpoint }) return modelEdge.Value;
         // horizontal / vertical inference relative to the previous point
         bool h = false, v = false;
         var pos = m;
@@ -652,7 +662,62 @@ public sealed class SketchEditor : IViewportMode
                     return new Snap(SnapKind.OnCircle, c + (m - c) * (r / dist), e.Id);
             }
         }
+        if (modelEdge is { } me && !h && !v) return me;
         return new Snap(SnapKind.None, pos, -1, h, v);
+    }
+
+    /// <summary>
+    /// Snap to the model edge under the cursor (projected into the sketch plane): its midpoint (lines) or the
+    /// nearest point on it (lines and circles parallel to the sketch). Null when no usable edge is hovered.
+    /// </summary>
+    Snap? ModelEdgeSnap(Vec2 m, double tol)
+    {
+        if (_lastScreen is not { } scr) return null;
+        var hit = _vp.Pick(scr.X, scr.Y, SelFilter.Edge);
+        if (hit?.Edge == null) return null;
+        var body = _vp.Bodies.FirstOrDefault(b => b.Id == hit.BodyId);
+        if (body == null || hit.EdgeIndex < 0 || hit.EdgeIndex >= body.Solid.Topology.Edges.Count) return null;
+        var edge = body.Solid.Topology.Edges[hit.EdgeIndex];
+        if (edge.IsLinear)
+        {
+            var a = Frame.ToLocal(edge.Start); var b = Frame.ToLocal(edge.End);
+            var d = b - a; var len2 = d.LengthSq;
+            if (len2 < 1e-12) return null; // seen end-on
+            var mid = (a + b) * 0.5;
+            if (Vec2.Distance(mid, m) < tol) return new Snap(SnapKind.ModelMidpoint, mid, Model: new ModelHit(body, edge, (edge.Start + edge.End) * 0.5));
+            var t = Math.Clamp(Vec2.Dot(m - a, d) / len2, 0, 1);
+            var proj = a + d * t;
+            if (Vec2.Distance(proj, m) > tol * 1.5) return null;
+            return new Snap(SnapKind.ModelEdge, proj, Model: new ModelHit(body, edge, edge.Start + (edge.End - edge.Start) * t));
+        }
+        if (SketchReferences.CircleOf(edge, Frame) is { } circ)
+        {
+            var c = Frame.ToLocal(circ.center);
+            var dist = (m - c).Length;
+            if (dist < 1e-9 || Math.Abs(dist - circ.r) > tol * 1.5) return null;
+            return new Snap(SnapKind.ModelEdge, c + (m - c) * (circ.r / dist), Model: new ModelHit(body, edge, edge.Midpoint));
+        }
+        return null;
+    }
+
+    List<(Body body, TopoEdge edge, Vec2 center)>? _modelCircles;
+    Solid[]? _modelCirclesKey;
+
+    /// <summary>Circular model edges parallel to the sketch plane with their projected centers (cached per model state).</summary>
+    List<(Body body, TopoEdge edge, Vec2 center)> ModelCircles()
+    {
+        var bodies = _vp.Bodies;
+        // keyed by the solids themselves (rebuilds produce new solids; the body list may be reused)
+        var key = bodies.Select(b => b.Solid).ToArray();
+        if (_modelCircles != null && _modelCirclesKey != null && key.Length == _modelCirclesKey.Length
+            && key.Zip(_modelCirclesKey).All(z => ReferenceEquals(z.First, z.Second))) return _modelCircles;
+        var list = new List<(Body, TopoEdge, Vec2)>();
+        foreach (var b in bodies)
+            foreach (var e in b.Solid.Topology.Edges)
+                if (!e.IsLinear && SketchReferences.CircleOf(e, Frame) is { } circ)
+                    list.Add((b, e, Frame.ToLocal(circ.center)));
+        _modelCircles = list; _modelCirclesKey = key;
+        return list;
     }
 
     int ResolvePoint(Snap s)
@@ -666,6 +731,17 @@ public sealed class SketchEditor : IViewportMode
         if (s.Kind == SnapKind.ModelVertex && _lastScreen is { } scr && _vp.PickVertex(scr.X, scr.Y) is { } mv &&
             SketchReferences.Create(Sk, Frame, mv.edge, mv.body.Id, true, mv.point) is SkPointEntity rp)
             return rp.P; // shares the fixed reference point: coincident with the model vertex
+        if (s.Model is { } mh && s.Kind is SnapKind.ModelEdge or SnapKind.ModelMidpoint or SnapKind.ModelCenter)
+        {
+            // associative relation to the model: the edge becomes reference geometry, the point is tied to it
+            var ent = SketchReferences.Create(Sk, Frame, mh.Edge, mh.Body.Id, false, mh.Point);
+            if (s.Kind == SnapKind.ModelCenter && ent is SkCircle rc) return rc.Center;
+            var mp = Sk.AddPoint(s.P);
+            if (s.Kind == SnapKind.ModelMidpoint && ent is SkLine ml) Sk.AddConstraint(CType.Midpoint, mp.Id, ml.Id);
+            else if (ent is SkLine el) Sk.AddConstraint(CType.PointOnLine, mp.Id, el.Id);
+            else if (ent is SkCircle ec) Sk.AddConstraint(CType.PointOnCircle, mp.Id, ec.Id);
+            return mp.Id;
+        }
         var p = Sk.AddPoint(s.P);
         switch (s.Kind)
         {
@@ -1330,7 +1406,14 @@ public sealed class SketchEditor : IViewportMode
         var pc = new Rgba(0.95f, 0.55f, 0.1f);
         var m = _snap.P;
         // snap marker
-        if (_snap.Kind != SnapKind.None) SketchDrawing.PointMark(g, f, m, new Rgba(1f, 0.6f, 0f), px, 4);
+        if (_snap.Kind != SnapKind.None)
+        {
+            bool model = _snap.Kind is SnapKind.ModelVertex or SnapKind.ModelEdge or SnapKind.ModelMidpoint or SnapKind.ModelCenter;
+            SketchDrawing.PointMark(g, f, m, model ? new Rgba(0.65f, 0.25f, 0.85f) : new Rgba(1f, 0.6f, 0f), px, 4);
+            // highlight the model edge the relation will refer to
+            if (_snap.Model is { } mh)
+                foreach (var seg in mh.Edge.Segs) g.Line(seg.A, seg.B, new Rgba(0.65f, 0.25f, 0.85f), top: true);
+        }
         if (_clicks.Count == 0) return;
         void L(Vec2 a, Vec2 b, bool dashed = false) { if (dashed) g.Dashed(f.ToWorld(a), f.ToWorld(b), pc, px * 5, top: true); else g.Line(f.ToWorld(a), f.ToWorld(b), pc, top: true); }
         void Arc(Vec2 c, double r, double a0, double a1)
@@ -1570,6 +1653,32 @@ public sealed class SketchEditor : IViewportMode
     readonly Dictionary<int, Border> _labels = new();
     readonly List<Border> _glyphs = new();
     Border? _previewLabel;
+    Border? _snapLabel;
+
+    /// <summary>Name of the relation the current snap will create (shown next to the cursor).</summary>
+    static string? SnapText(Snap s) => s.Kind switch
+    {
+        SnapKind.Point or SnapKind.Origin => "Coincident",
+        SnapKind.ModelVertex => "Coincident (model)",
+        SnapKind.Midpoint => "Midpoint",
+        SnapKind.ModelMidpoint => "Midpoint (model edge)",
+        SnapKind.OnLine => "On line",
+        SnapKind.OnCircle => "On circle",
+        SnapKind.ModelEdge => "On edge (model)",
+        SnapKind.ModelCenter => "Center (model)",
+        _ => s.H ? "Horizontal" : s.V ? "Vertical" : null,
+    };
+
+    /// <summary>Updates only the cursor-side snap label (cheap enough for every mouse move).</summary>
+    void UpdateSnapLabel()
+    {
+        if (Overlay == null) return;
+        var text = Tool is SketchTool.Select or SketchTool.SmartDimension or SketchTool.Trim ? null : SnapText(_snap);
+        if (text == null) { if (_snapLabel != null) _snapLabel.IsVisible = false; return; }
+        if (_snapLabel == null) { _snapLabel = MakeLabel(); Overlay.Children.Add(_snapLabel); }
+        SetLabel(_snapLabel, text, Brushes.DarkMagenta, _snap.P + new Vec2(Px * 40, -Px * 18));
+        _snapLabel.IsVisible = true;
+    }
 
     public void UpdateOverlay(ViewportControl vp)
     {
@@ -1733,6 +1842,7 @@ public sealed class SketchEditor : IViewportMode
         foreach (var b in _labels.Values) Overlay.Children.Remove(b);
         foreach (var g in _glyphs) Overlay.Children.Remove(g);
         if (_previewLabel != null) Overlay.Children.Remove(_previewLabel);
-        _labels.Clear(); _glyphs.Clear(); _previewLabel = null;
+        if (_snapLabel != null) Overlay.Children.Remove(_snapLabel);
+        _labels.Clear(); _glyphs.Clear(); _previewLabel = null; _snapLabel = null;
     }
 }

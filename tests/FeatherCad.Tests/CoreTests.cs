@@ -97,6 +97,49 @@ static class CoreTests
             t.Eq(regs[0].Holes.Count, 1);
         });
 
+        t.Test("Sketch relations to model geometry are associative (midpoint of edge, model center)", () =>
+        {
+            var doc = new CadDocument();
+            doc.Equations.Add(new Equation { Name = "W", Expr = "100" });
+            var s1 = doc.AddFeature(new SketchFeature { Plane = PlaneRef.Front, Sketch = Rect(100, 60, "W") });
+            var e1 = doc.AddFeature(new ExtrudeFeature { SketchId = s1.Id, Depth = "20" });
+            var regen = new Regenerator();
+            var r = regen.Rebuild(doc);
+            var body = r.State.Bodies[0];
+            var top = new FaceRef { Name = e1.Id + ".End", Hint = new Vec3(50, 30, 20), Normal = Vec3.UnitZ };
+            var frame = Resolver.ResolvePlane(new PlaneRef { Face = top }, r.State);
+
+            // what the sketcher does when a point is placed on the midpoint of the model's back top edge
+            var backEdge = body.Solid.Topology.Edges.First(e => e.IsLinear && Math.Abs(e.Start.Y - 60) < 1e-9 && Math.Abs(e.End.Y - 60) < 1e-9
+                && Math.Abs(e.Start.Z - 20) < 1e-9 && Math.Abs(e.End.Z - 20) < 1e-9);
+            var sk = new Sketch();
+            var refLine = (SkLine)SketchReferences.Create(sk, frame, backEdge, body.Id, false, backEdge.Midpoint)!;
+            var c = sk.AddPoint(frame.ToLocal(backEdge.Midpoint) + new Vec2(0.3, -0.2));
+            sk.AddConstraint(CType.Midpoint, c.Id, refLine.Id);
+            sk.Add(new SkCircle { Center = c.Id, R = 5 });
+            sk.RemoveUnusedReferences();
+            t.True(sk.Entities.Contains(refLine), "reference kept by its relation");
+            var s2 = doc.AddFeature(new SketchFeature { Plane = new PlaneRef { Face = top }, Sketch = sk });
+            r = regen.Rebuild(doc);
+            t.True(r.Status[s2.Id].Ok, r.Status[s2.Id].Error ?? "");
+            var res = r.State.Sketches[s2.Id];
+            t.Near(Vec3.Distance(res.Frame.ToWorld(res.Sketch.P(c.Id)), new Vec3(50, 60, 20)), 0, 1e-6);
+
+            // the model changes: the relation follows it
+            doc.Equations[0].Expr = "120";
+            r = regen.Rebuild(doc);
+            res = r.State.Sketches[s2.Id];
+            t.Near(Vec3.Distance(res.Frame.ToWorld(res.Sketch.P(c.Id)), new Vec3(60, 60, 20)), 0, 1e-6);
+
+            // a reference whose point is shared by sketch geometry (snapped to a model center/vertex) is kept
+            var sk2 = new Sketch();
+            var vtx = (SkPointEntity)SketchReferences.Create(sk2, frame, backEdge, body.Id, true, backEdge.Start)!;
+            var q = sk2.AddPoint(new Vec2(10, 10));
+            sk2.Add(new SkLine { P1 = vtx.P, P2 = q.Id });
+            sk2.RemoveUnusedReferences();
+            t.True(sk2.Entities.Contains(vtx), "shared-point reference kept");
+        });
+
         t.Test("Start-up warm-up model rebuilds cleanly", () =>
         {
             // the warm-up part must exercise the real paths without errors (else it warms nothing)

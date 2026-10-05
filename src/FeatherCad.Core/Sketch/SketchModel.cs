@@ -216,7 +216,10 @@ public sealed class Sketch
         foreach (var e in Entities.Where(e => e.IsReference).ToList())
         {
             var ids = new HashSet<int>(e.PointIds) { e.Id };
-            if (!Constraints.Any(c => c.Refs.Any(ids.Contains))) DeleteEntity(e.Id);
+            if (Constraints.Any(c => c.Refs.Any(ids.Contains))) continue;
+            // sketch geometry sharing a reference point (snapped to a model vertex or circle center) keeps it
+            if (Entities.Any(o => !o.IsReference && o.PointIds.Any(ids.Contains))) continue;
+            DeleteEntity(e.Id);
         }
     }
 
