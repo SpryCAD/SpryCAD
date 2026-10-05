@@ -1,3 +1,4 @@
+using Avalonia.VisualTree;
 using Avalonia.Controls;
 using FeatherCad.App.Session;
 using FeatherCad.App.UI;
@@ -31,6 +32,7 @@ public partial class MainWindow
     void BeginEdit(Feature f, bool isNew, PmPage page, bool overlay, string? hint = null)
     {
         if (_sketch != null) ExitSketch(true);
+        if (_edit != null) CancelEdit(); // starting another command cancels the one in progress
         _edit = new EditContext { Feature = f, IsNew = isNew, OverlayPreview = overlay, Hint = hint };
         if (string.IsNullOrEmpty(f.Id)) f.Id = Session.Doc.NewId();
         if (string.IsNullOrEmpty(f.Name)) f.Name = Session.Doc.NewName(f.Kind);
@@ -40,8 +42,21 @@ public partial class MainWindow
         page.Message = hint;
         Selection.Clear();
         ShowPage(page);
+        FocusFirstField(page);
         SchedulePreview();
-        Status($"{f.Name}: set the parameters, then click OK (Enter).");
+        Status($"{f.Name}: set the parameters, then click OK (Enter) or Esc to cancel.");
+    }
+
+    /// <summary>Focuses and selects the first text field of a page (type a value, Enter = OK).</summary>
+    static void FocusFirstField(PmPage page)
+    {
+        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            var tb = page.View.GetVisualDescendants().OfType<TextBox>().FirstOrDefault(t => t.IsEffectivelyVisible && t.IsEnabled && !t.IsReadOnly);
+            if (tb == null) return;
+            tb.Focus();
+            tb.SelectAll();
+        }, Avalonia.Threading.DispatcherPriority.Loaded);
     }
 
     void SchedulePreview()

@@ -559,8 +559,10 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         double bestT = double.MaxValue; SelItem? best = null;
         const double edgePx = 6, sketchPx = 6;
 
-        // faces
-        if (Style != DisplayStyle.Wireframe)
+        // faces (memoized: hover, vertex and edge picks at the same cursor share the ray test)
+        var faceKey = (ro, rd, Bodies, Style);
+        if (_faceMemo is { } fm && fm.key.Equals(faceKey)) { best = fm.hit; bestT = fm.t; }
+        else if (Style != DisplayStyle.Wireframe)
             foreach (var b in Bodies)
             {
                 var m = b.Mesh;
@@ -583,6 +585,7 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
                     }
                 }
             }
+        _faceMemo = (faceKey, best, bestT);
         var faceHit = best;
         var faceDepth = bestT;
         if ((filter & (SelFilter.Face | SelFilter.PlanarFace | SelFilter.Body | SelFilter.Feature)) == 0) best = null;
@@ -613,8 +616,12 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
             {
                 var m = b.Mesh;
                 var topo = b.Solid.Topology;
-                foreach (var er in m.Edges)
+                var boxes = EdgeBoxes(m);
+                for (int k = 0; k < m.Edges.Count; k++)
                 {
+                    var er = m.Edges[k];
+                    // skip edges whose projected bounds are farther than the best distance so far
+                    if (ScreenRectDistance(boxes[k], x, y) >= bestPx) continue;
                     for (int i = er.VertexStart; i < er.VertexStart + er.VertexCount; i += 2)
                     {
                         var a = E(m, i); var c = E(m, i + 1);
@@ -699,6 +706,39 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
     }
 
     static Vec3 P(DisplayMesh m, int i) => new(m.Positions[i * 3], m.Positions[i * 3 + 1], m.Positions[i * 3 + 2]);
+    ((Vec3, Vec3, IReadOnlyList<Body>, DisplayStyle) key, SelItem? hit, double t)? _faceMemo;
+    static readonly System.Runtime.CompilerServices.ConditionalWeakTable<DisplayMesh, Box3[]> _edgeBoxes = new();
+
+    /// <summary>3D bounds of each display edge (cached per mesh).</summary>
+    static Box3[] EdgeBoxes(DisplayMesh m) => _edgeBoxes.GetValue(m, mm =>
+    {
+        var res = new Box3[mm.Edges.Count];
+        for (int k = 0; k < mm.Edges.Count; k++)
+        {
+            var b = Box3.Empty;
+            var er = mm.Edges[k];
+            for (int i = er.VertexStart; i < er.VertexStart + er.VertexCount; i++) b.Add(E(mm, i));
+            res[k] = b;
+        }
+        return res;
+    });
+
+    /// <summary>Screen distance from (x, y) to the projected bounding rectangle of a 3D box (0 inside).</summary>
+    double ScreenRectDistance(Box3 b, double x, double y)
+    {
+        double x0 = double.MaxValue, y0 = double.MaxValue, x1 = double.MinValue, y1 = double.MinValue;
+        for (int c = 0; c < 8; c++)
+        {
+            var p = new Vec3((c & 1) == 0 ? b.Min.X : b.Max.X, (c & 2) == 0 ? b.Min.Y : b.Max.Y, (c & 4) == 0 ? b.Min.Z : b.Max.Z);
+            // a corner behind the eye (perspective) projects mirrored: do not cull that edge
+            if (Camera.DepthOf(p) <= 0) return 0;
+            var s = Camera.Project(p);
+            x0 = Math.Min(x0, s.X); x1 = Math.Max(x1, s.X); y0 = Math.Min(y0, s.Y); y1 = Math.Max(y1, s.Y);
+        }
+        var dx = Math.Max(0, Math.Max(x0 - x, x - x1)); var dy = Math.Max(0, Math.Max(y0 - y, y - y1));
+        return Math.Sqrt(dx * dx + dy * dy);
+    }
+
     static Vec3 E(DisplayMesh m, int i) => new(m.EdgeLines[i * 3], m.EdgeLines[i * 3 + 1], m.EdgeLines[i * 3 + 2]);
 
     static bool RayBox(Vec3 o, Vec3 d, Box3 b)

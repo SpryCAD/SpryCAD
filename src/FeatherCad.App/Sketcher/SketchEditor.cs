@@ -1315,16 +1315,23 @@ public sealed class SketchEditor : IViewportMode
         _modifyBox = null; _modifyTarget = null;
         Overlay?.Children.Remove(tb);
         if (!apply) return;
-        var text = tb.Text?.Trim();
-        if (string.IsNullOrEmpty(text) || text == c.Expr) return;
-        if (!Expr.TryEval(text, Lookup, out var v, out var err)) { Message?.Invoke("Invalid value: " + err); return; }
-        if (v <= 0 && c.Type != CType.Angle && c.Type != CType.HDistance && c.Type != CType.VDistance) { Message?.Invoke("Value must be greater than zero."); return; }
+        SetDimensionValue(c, tb.Text);
+        _vp.Focus();
+    }
+
+    /// <summary>Applies a typed value/expression to a dimension (one undo step). False when invalid or unchanged.</summary>
+    public bool SetDimensionValue(SkConstraint c, string? text)
+    {
+        text = text?.Trim();
+        if (string.IsNullOrEmpty(text) || text == c.Expr) return false;
+        if (!Expr.TryEval(text, Lookup, out var v, out var err)) { Message?.Invoke("Invalid value: " + err); return false; }
+        if (v <= 0 && c.Type != CType.Angle && c.Type != CType.HDistance && c.Type != CType.VDistance) { Message?.Invoke("Value must be greater than zero."); return false; }
         Snapshot();
         c.Expr = text; c.Value = v;
         Resolve();
         if (Status.Status == SketchStatus.OverDefined) Message?.Invoke("The sketch cannot be solved with that value.");
         _vp.Redraw();
-        _vp.Focus();
+        return true;
     }
 
     public bool IsEditingDimension => _modifyBox != null;

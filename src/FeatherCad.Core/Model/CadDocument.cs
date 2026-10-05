@@ -53,6 +53,33 @@ public sealed class CadDocument
 
     public int ActiveCount => Math.Clamp(RollbackIndex ?? Features.Count, 0, Features.Count);
 
+    /// <summary>
+    /// Features that refer to any of the given ones, directly or through other dependents: sketch/sketch-plane,
+    /// face, edge and plane references, pattern seeds, model references in sketches. Found by looking for the
+    /// ids in each feature's serialized definition, so new reference kinds are covered automatically.
+    /// </summary>
+    public List<Feature> DependentsOf(IEnumerable<string> ids)
+    {
+        var gone = new HashSet<string>(ids);
+        var result = new List<Feature>();
+        bool grew = true;
+        while (grew)
+        {
+            grew = false;
+            foreach (var f in Features)
+            {
+                if (gone.Contains(f.Id)) continue;
+                var json = JsonSerializer.Serialize(f, typeof(Feature), Serialization.Options);
+                // "F7" as a whole value (sketchId, seeds) or "F7.…" as a face/edge name prefix ("F17" does not match)
+                if (gone.Any(id => json.Contains($"\"{id}\"") || json.Contains($"\"{id}.")))
+                {
+                    gone.Add(f.Id); result.Add(f); grew = true;
+                }
+            }
+        }
+        return result;
+    }
+
     /// <summary>Features that consume the given one (e.g. the extrude using a sketch).</summary>
     public IEnumerable<Feature> ConsumersOf(string id) => Features.Where(f => f.Consumes.Contains(id) ||
         (f is LinearPatternFeature lp && lp.Seeds.Contains(id)) ||

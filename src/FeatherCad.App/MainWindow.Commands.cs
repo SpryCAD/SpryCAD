@@ -120,20 +120,31 @@ public partial class MainWindow
             Item("_About FeatherCAD", () => _ = Dialogs.About(this))));
     }
 
+    Button? _undoButton, _redoButton;
+
+    /// <summary>Greys out Undo/Redo when there is nothing to undo/redo (sketch mode keeps its own stack).</summary>
+    void UpdateUndoButtons()
+    {
+        if (_undoButton == null || _redoButton == null) return;
+        _undoButton.IsEnabled = _sketch != null || Session.CanUndo;
+        _redoButton.IsEnabled = _sketch != null || Session.CanRedo;
+    }
+
     void BuildQuickAccess()
     {
-        void B(string icon, string tip, Action a)
+        Button B(string icon, string tip, Action a)
         {
             var b = new Button { Classes = { "tb" }, Content = Icons.Make(icon, 18) };
             ToolTip.SetTip(b, tip);
             b.Click += (_, _) => a();
             QuickAccess.Children.Add(b);
+            return b;
         }
         B("new", "New (Ctrl+N)", () => _ = NewFile());
         B("open", "Open (Ctrl+O)", () => _ = OpenFileDialog());
         B("save", "Save (Ctrl+S)", () => _ = Save());
-        B("undo", "Undo (Ctrl+Z)", Undo);
-        B("redo", "Redo (Ctrl+Y)", Redo);
+        _undoButton = B("undo", "Undo (Ctrl+Z)", Undo);
+        _redoButton = B("redo", "Redo (Ctrl+Y)", Redo);
         B("rebuild", "Rebuild (Ctrl+B)", () => Session.RequestRebuild());
         B("options", "Options", () => _ = Dialogs.Options(this));
     }
@@ -219,21 +230,54 @@ public partial class MainWindow
         sp.Children.Add(Icons.Make(icon, 26));
         sp.Children.Add(new TextBlock { Text = label });
         var b = new Button { Classes = { "cmd" }, Content = sp };
-        ToolTip.SetTip(b, label.Replace('\n', ' '));
+        var name = label.Replace('\n', ' ');
+        var key = tool is { } st && SketchToolKeys.TryGetValue(st, out var k) ? $" ({k})" : "";
+        ToolTip.SetTip(b, CommandHelp.TryGetValue(name, out var help) ? $"{name}{key}\n{help}" : name + key);
         b.Click += (_, _) => click();
         if (tool != null) _toolButtons[tool.Value] = b;
         CommandBar.Children.Add(b);
     }
 
+    static readonly Dictionary<SketchTool, string> SketchToolKeys = new()
+    {
+        [SketchTool.Line] = "L", [SketchTool.Rectangle] = "R", [SketchTool.Circle] = "C", [SketchTool.CenterArc] = "A",
+        [SketchTool.SmartDimension] = "D", [SketchTool.Point] = "P", [SketchTool.Trim] = "T",
+    };
+
+    /// <summary>One-line descriptions shown under the command name in toolbar tooltips.</summary>
+    static readonly Dictionary<string, string> CommandHelp = new()
+    {
+        ["Extruded Boss/Base"] = "Extends a sketch profile to add material.",
+        ["Extruded Cut"] = "Extends a sketch profile to remove material.",
+        ["Revolved Boss/Base"] = "Revolves a sketch profile about a centerline to add material.",
+        ["Revolved Cut"] = "Revolves a sketch profile about a centerline to remove material.",
+        ["Hole Wizard"] = "Simple, counterbored or countersunk holes placed on a face.",
+        ["Fillet"] = "Rounds the selected edges (tangent edges are included).",
+        ["Chamfer"] = "Bevels the selected edges.",
+        ["Shell"] = "Hollows the part, leaving the selected faces open.",
+        ["Linear Pattern"] = "Copies features along one or two directions.",
+        ["Circular Pattern"] = "Copies features around an axis.",
+        ["Mirror"] = "Mirrors features about a plane or planar face.",
+        ["Reference Plane"] = "Creates a plane offset from a plane or planar face.",
+        ["Combine"] = "Adds, subtracts or intersects bodies.",
+        ["Sketch"] = "Starts a sketch on the selected plane or planar face.",
+        ["Smart Dimension"] = "Dimensions sketch entities and model edges/vertices.",
+        ["Line"] = "Sketches lines. Snapping adds relations, also to model edges, midpoints and centers.",
+        ["Convert Entities"] = "Projects the selected model edges into the sketch.",
+        ["Trim Entities"] = "Trims sketch entities at their intersections.",
+        ["Construction Geometry"] = "Toggles the selected sketch entities to construction.",
+        ["Mass Properties"] = "Volume, mass, surface area and center of mass.",
+        ["Equations"] = "Global variables that drive dimensions.",
+    };
+
     void Sep() => CommandBar.Children.Add(new Border { Width = 1, Background = new SolidColorBrush(Color.FromRgb(210, 216, 225)), Margin = new Thickness(4, 6) });
 
     void UpdateToolButtons()
     {
+        // tool buttons stay enabled: picking a sketch tool outside a sketch starts one (then pick a plane/face)
         foreach (var (t, b) in _toolButtons)
-        {
-            b.IsEnabled = _sketch != null;
             if (_sketch != null && _sketch.Tool == t) b.Classes.Add("active"); else b.Classes.Remove("active");
-        }
+        UpdateUndoButtons();
     }
 
     // ------------------------------------------------------------------------------------------
@@ -345,7 +389,7 @@ public partial class MainWindow
             menu.Items.Add(Item("Smart Dimension", () => SetSketchTool(SketchTool.SmartDimension), "D", "dimension"));
             menu.Items.Add(new Separator());
             menu.Items.Add(Item("Exit Sketch", () => ExitSketch(true), null, "exitsketch"));
-            menu.Items.Add(Item("Discard Changes", () => ExitSketch(false), null, "cancel"));
+            menu.Items.Add(Item("Discard Changes", DiscardSketch, null, "cancel"));
         }
         else
         {
@@ -405,7 +449,7 @@ public partial class MainWindow
             if (f is HoleFeature hf) menu.Items.Add(Item("Edit Hole Positions", () => EditFeature(hf.SketchId), null, "sketch"));
             menu.Items.Add(new Separator());
             menu.Items.Add(Item(f.Suppressed ? "Unsuppress" : "Suppress", () => SetSuppressed(!f.Suppressed)));
-            menu.Items.Add(Item("Rename", () => _ = RenameFeature(f)));
+            menu.Items.Add(Item("Rename", () => _ = RenameFeature(f), "F2"));
             menu.Items.Add(Item("Roll Back", () => RollbackTo(id, false), null, "rollback"));
             menu.Items.Add(Item("Delete", DeleteSelected));
         }
@@ -418,8 +462,35 @@ public partial class MainWindow
 
     static readonly FilePickerFileType FcadType = new("FeatherCAD Part") { Patterns = new[] { "*.fcad" } };
 
+    /// <summary>A sketch or feature edit that is not in the document yet.</summary>
+    bool HasPendingEdit => (_sketch != null && (_sketch.Modified || _sketchIsNew)) || _edit != null;
+
+    /// <summary>
+    /// Before saving/closing/opening: keep (Yes) or discard (No) the sketch or feature being edited, or abort
+    /// (Cancel). Returns false to abort.
+    /// </summary>
+    async Task<bool> ResolvePendingEdit()
+    {
+        if (!HasPendingEdit) return true;
+        var what = _sketch != null ? _sketch.Feature.Name : _edit!.Feature.Name;
+        var r = await Dialogs.YesNoCancel(this, "FeatherCAD", $"{what} is still being edited. Keep the changes?", "Keep", "Discard");
+        if (r == null) return false;
+        if (_sketch != null) ExitSketch(r == true);
+        else if (r == true) CommitEdit(); else CancelEdit();
+        return true;
+    }
+
+    /// <summary>Discard the sketch being edited, asking first when it has changes.</summary>
+    async void DiscardSketch()
+    {
+        if (_sketch == null) return;
+        if (_sketch.Modified && !await Dialogs.YesNo(this, "Discard Changes", $"Discard the changes to {_sketch.Feature.Name}?", "Discard", "Keep Editing")) return;
+        ExitSketch(false);
+    }
+
     async Task<bool> ConfirmDiscard()
     {
+        if (!await ResolvePendingEdit()) return false;
         if (!Session.Dirty) return true;
         var r = await Dialogs.YesNoCancel(this, "FeatherCAD", $"Save changes to {Session.Title.TrimEnd(' ', '*')}?");
         if (r == null) return false;
@@ -463,6 +534,7 @@ public partial class MainWindow
 
     async Task<bool> Save()
     {
+        if (!await ResolvePendingEdit()) return false;
         if (Session.FilePath == null) return await SaveAs();
         try { Session.Save(Session.FilePath); Status("Saved " + Session.FilePath); return true; }
         catch (Exception ex) { await Dialogs.Message(this, "Save failed", ex.Message); return false; }
@@ -470,6 +542,7 @@ public partial class MainWindow
 
     async Task<bool> SaveAs()
     {
+        if (!await ResolvePendingEdit()) return false;
         var f = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
         {
             Title = "Save Part As",
@@ -537,7 +610,9 @@ public partial class MainWindow
         Session.Redo();
     }
 
-    void DeleteSelected()
+    void DeleteSelected() => _ = DeleteSelectedAsync();
+
+    async Task DeleteSelectedAsync()
     {
         var id = Tree.SelectedId;
         var f = id != null ? Session.Doc.Find(id) : null;
@@ -548,9 +623,20 @@ public partial class MainWindow
         // also delete the absorbed sketch of the feature (like SolidWorks "Delete absorbed features")
         foreach (var c in f.Consumes)
             if (Session.Doc.Find(c) is SketchFeature sk && Session.Doc.ConsumersOf(sk.Id).All(x => x.Id == f.Id)) victims.Add(sk);
+        // confirm, listing what goes and what depends on it (as SolidWorks' Confirm Delete)
+        var deps = Session.Doc.DependentsOf(victims.Select(v => v.Id));
+        var text = $"Delete {string.Join(", ", victims.Select(v => v.Name))}?";
+        if (deps.Count > 0)
+        {
+            text += $"\n\nThese features depend on it and will fail without it:\n  {string.Join(", ", deps.Select(d => d.Name))}";
+            var r = await Dialogs.YesNoCancel(this, "Confirm Delete", text, "Delete", "Delete with children");
+            if (r == null) return;
+            if (r == false) victims.AddRange(deps);
+        }
+        else if (!await Dialogs.YesNo(this, "Confirm Delete", text, "Delete", "Cancel")) return;
         Session.Change(() => { foreach (var v in victims) Session.Doc.Features.Remove(v); FixRollback(); });
         Selection.Clear();
-        Status($"Deleted {string.Join(", ", victims.Select(v => v.Name))}");
+        Status($"Deleted {string.Join(", ", victims.Select(v => v.Name))} (Ctrl+Z to undo)");
     }
 
     void FixRollback()

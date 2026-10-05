@@ -98,7 +98,7 @@ public partial class MainWindow
         Viewport.Mode = _sketch;
         Viewport.Hover = null;
         ShowTab("Sketch");
-        ShowConfirmCorner(() => ExitSketch(true), () => ExitSketch(false), "Exit Sketch", "Discard changes");
+        ShowConfirmCorner(() => ExitSketch(true), DiscardSketch, "Exit Sketch", "Discard changes");
         BuildSketchPage();
         if (isNew) Viewport.NormalTo(frame);
         if (pointsOnly) _sketch.SetTool(SketchTool.Point);
@@ -182,7 +182,7 @@ public partial class MainWindow
     {
         if (_sketch == null) return;
         var ed = _sketch;
-        var page = new PmPage(ed.PointsOnly ? "Hole Positions" : "Sketch", "sketch") { OnOk = () => ExitSketch(true), OnCancel = () => ExitSketch(false) };
+        var page = new PmPage(ed.PointsOnly ? "Hole Positions" : "Sketch", "sketch") { OnOk = () => ExitSketch(true), OnCancel = DiscardSketch };
         if (ed.Selected.Count == 0)
         {
             var s = page.Section("Status");
@@ -281,7 +281,11 @@ public partial class MainWindow
                 if (r.Kind == SkRefKind.Constraint && ed.Sk.Constraint(r.Id) is { IsDimension: true } dim)
                 {
                     var par = page.Section("Dimension");
-                    page.Number(par, "Value", () => dim.Expr ?? Expr.Format(dim.Value), v => { }, null, dim.Type == CType.Angle ? "°" : "mm");
+                    // applied on Enter / leaving the field (not per keystroke: "1" on the way to "12" would re-solve)
+                    var vb = page.Number(par, "Value", () => dim.Expr ?? Expr.Format(dim.Value), _ => { }, null, dim.Type == CType.Angle ? "°" : UnitLabel);
+                    void Apply() { if (ed.SetDimensionValue(dim, vb.Text)) { ed.UpdateOverlay(Viewport); OnSketchChanged(); } }
+                    vb.KeyDown += (_, e) => { if (e.Key == Avalonia.Input.Key.Enter) { Apply(); e.Handled = true; } };
+                    vb.LostFocus += (_, _) => Apply();
                     page.ButtonRow(par, "Edit value…", () => ed.OpenModifyBox(dim));
                     page.Check(par, "Driven (reference)", () => dim.Driven, v => { dim.Driven = v; ed.Resolve(); Viewport.Redraw(); });
                 }

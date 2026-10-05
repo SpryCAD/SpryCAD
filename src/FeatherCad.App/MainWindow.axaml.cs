@@ -81,13 +81,34 @@ public partial class MainWindow : Window
 
     void OnRebuilt()
     {
+        UpdateUndoButtons();
         RefreshScene();
         RebuildTree();
         var r = Session.Result;
         if (r != null)
-            StatusRebuild.Text = Session.PreviewActive ? "Preview"
+        {
+            // failures must not hide behind "Rebuilt N features": name the first problem, count the rest
+            var bad = Session.Doc.Features.Where(f => !f.Suppressed && r.Status.TryGetValue(f.Id, out var st) && !st.Ok).ToList();
+            var warned = Session.Doc.Features.Count(f => r.Status.TryGetValue(f.Id, out var st) && st.Ok && st.Warnings.Count > 0);
+            var text = Session.PreviewActive ? "Preview"
                 : r.Rebuilt == 0 ? "Up to date"
                 : $"Rebuilt {r.Rebuilt} feature{(r.Rebuilt == 1 ? "" : "s")} in {r.Milliseconds:0} ms";
+            if (!Session.PreviewActive && bad.Count > 0)
+            {
+                text = $"✖ {bad[0].Name}: {r.Status[bad[0].Id].Error}" + (bad.Count > 1 ? $"  (+{bad.Count - 1} more error{(bad.Count > 2 ? "s" : "")})" : "");
+                StatusRebuild.Foreground = Brushes.Firebrick;
+            }
+            else if (!Session.PreviewActive && warned > 0)
+            {
+                text += $"  ⚠ {warned} warning{(warned == 1 ? "" : "s")}";
+                StatusRebuild.Foreground = Brushes.DarkGoldenrod;
+            }
+            else StatusRebuild.Foreground = StatusNormalBrush;
+            StatusRebuild.Text = text;
+            ToolTip.SetTip(StatusRebuild, bad.Count + warned == 0 ? null : string.Join(Environment.NewLine,
+                Session.Doc.Features.Where(f => r.Status.TryGetValue(f.Id, out var st) && (!st.Ok || st.Warnings.Count > 0))
+                    .Select(f => $"{f.Name}: {r.Status[f.Id].Error ?? string.Join("; ", r.Status[f.Id].Warnings)}")));
+        }
         if (_page != null && _edit != null && Session.PreviewActive && Session.PreviewResult is { } pr)
         {
             var st = pr.Status.GetValueOrDefault(_edit.Feature.Id);
@@ -97,10 +118,14 @@ public partial class MainWindow : Window
         if (_fitAfterLoad && !Session.PreviewActive) { _fitAfterLoad = false; Viewport.StandardView("Trimetric", fit: true); }
     }
 
+    static readonly IBrush StatusNormalBrush = new SolidColorBrush(Color.Parse("#FF6A778A"));
+
     void OnDocumentChanged()
     {
         Title = "FeatherCAD - " + Session.Title;
         StatusUnits.Text = Session.Doc.Units.ToString();
+        PmPage.LengthUnit = UnitLabel;
+        UpdateUndoButtons();
         Viewport.PartColor = new Rgba((float)Session.Doc.Color[0], (float)Session.Doc.Color[1], (float)Session.Doc.Color[2]);
         RebuildTree();
     }
@@ -275,6 +300,8 @@ public partial class MainWindow : Window
         var shift = e.KeyModifiers.HasFlag(KeyModifiers.Shift);
         var alt = e.KeyModifiers.HasFlag(KeyModifiers.Alt);
         var inText = e.Source is TextBox;
+        // keys typed into an input control (combo, check box, button, list) are that control's, not view shortcuts
+        var inControl = inText || e.Source is ComboBox or ComboBoxItem or CheckBox or Button or ListBox or ListBoxItem or Slider or MenuItem;
         if (ctrl)
         {
             bool handled = true;
@@ -304,20 +331,36 @@ public partial class MainWindow : Window
             e.Handled = handled;
             return;
         }
-        if (inText) return;
+        // PropertyManager: Enter = OK (from any field), Esc = cancel the page, as in SolidWorks
+        if (_page != null && _sketch == null)
+        {
+            if (e.Key == Key.Escape)
+            {
+                if (_edit != null) CancelEdit(); else _page.OnCancel?.Invoke();
+                e.Handled = true; return;
+            }
+            if (e.Key == Key.Enter && _edit != null && !(e.Source is TextBox { AcceptsReturn: true }))
+            {
+                // let a text field commit its value first (it parses on change), then accept the page
+                Avalonia.Threading.Dispatcher.UIThread.Post(() => _page?.OnOk?.Invoke());
+                e.Handled = true; return;
+            }
+        }
+        if (inControl) return;
         if (_sketch != null && _sketch.IsEditingDimension) return;
         if (_sketch != null && _sketch.KeyDown(Viewport, e.Key, e.KeyModifiers)) { e.Handled = true; return; }
         switch (e.Key)
         {
             case Key.Escape:
-                if (_page != null && _edit != null) { CancelEdit(); e.Handled = true; }
-                else if (_sketch == null) { Selection.Clear(); e.Handled = true; }
-                break;
-            case Key.Enter:
-                if (_page != null && _edit != null) { _page.OnOk?.Invoke(); e.Handled = true; }
+                if (_sketch == null) { Selection.Clear(); e.Handled = true; }
                 break;
             case Key.Delete:
                 if (_sketch == null && _page == null) { DeleteSelected(); e.Handled = true; }
+                break;
+            case Key.F2:
+                // rename the feature selected in the tree (or owning the selected face)
+                if (_sketch == null && _page == null && Session.Doc.Find(Tree.SelectedId ?? Selection.First?.FeatureId ?? "") is { } rf)
+                { _ = RenameFeature(rf); e.Handled = true; }
                 break;
             case Key.F:
                 Viewport.ZoomToFit(); e.Handled = true;
@@ -336,6 +379,9 @@ public partial class MainWindow : Window
     // status / helpers
 
     public void Status(string text) => StatusText.Text = text;
+
+    /// <summary>Length unit label of the document ("mm" or "in").</summary>
+    string UnitLabel => Session.Doc.Units == UnitSystem.IPS ? "in" : "mm";
 
     void ShowPage(PmPage? page)
     {
@@ -408,11 +454,15 @@ public partial class MainWindow : Window
 
     async void OnClosing(object? sender, WindowClosingEventArgs e)
     {
-        if (!Session.Dirty || _closeConfirmed) return;
+        if ((!Session.Dirty && !HasPendingEdit) || _closeConfirmed) return;
         e.Cancel = true;
-        var r = await Dialogs.YesNoCancel(this, "FeatherCAD", $"Save changes to {Session.Title.TrimEnd(' ', '*')}?");
-        if (r == null) return;
-        if (r == true && !await Save()) return;
+        if (!await ResolvePendingEdit()) return;
+        if (Session.Dirty)
+        {
+            var r = await Dialogs.YesNoCancel(this, "FeatherCAD", $"Save changes to {Session.Title.TrimEnd(' ', '*')}?");
+            if (r == null) return;
+            if (r == true && !await Save()) return;
+        }
         _closeConfirmed = true;
         Close();
     }

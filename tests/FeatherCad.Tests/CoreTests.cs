@@ -140,6 +140,20 @@ static class CoreTests
             t.True(sk2.Entities.Contains(vtx), "shared-point reference kept");
         });
 
+        t.Test("Delete: dependents found through any reference", () =>
+        {
+            var dir = AppContext.BaseDirectory;
+            while (dir != null && !Directory.Exists(Path.Combine(dir, "samples"))) dir = Path.GetDirectoryName(dir);
+            var doc = CadDocument.FromJson(File.ReadAllText(Path.Combine(dir!, "tests", "FeatherCad.Tests", "models", "shelled-bracket.fcad")));
+            string Id(string name) => doc.Features.First(f => f.Name == name).Id;
+            var deps = doc.DependentsOf(new[] { Id("Hole1") }).Select(f => f.Name).ToList();
+            t.True(deps.Contains("LPattern1"), "pattern of the hole: " + string.Join(",", deps));
+            t.True(!deps.Contains("Hole2") && !deps.Contains("Fillet1"), "unrelated features: " + string.Join(",", deps));
+            t.Eq(doc.DependentsOf(new[] { Id("Hole2") }).Count, 0);
+            var all = doc.DependentsOf(new[] { Id("Boss-Extrude1") }).Select(f => f.Name).ToList();
+            t.True(all.Contains("Fillet1") && all.Contains("Shell1") && all.Contains("Hole2"), "base feature: " + string.Join(",", all));
+        });
+
         t.Test("Start-up warm-up model rebuilds cleanly", () =>
         {
             // the warm-up part must exercise the real paths without errors (else it warms nothing)

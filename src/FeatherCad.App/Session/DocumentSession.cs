@@ -26,7 +26,8 @@ public sealed class DocumentSession
     readonly List<string> _redo = new();
     readonly Regenerator _regen = new();
     readonly object _lock = new();
-    CadDocument? _pendingDoc; bool _pendingIsPreview;
+    // separate slots: a live-preview request must never replace a pending real rebuild
+    CadDocument? _pendingReal, _pendingPreview;
     bool _running;
 
     public static CadDocument NewDocument() => new();
@@ -138,7 +139,7 @@ public sealed class DocumentSession
     {
         lock (_lock)
         {
-            _pendingDoc = snapshot; _pendingIsPreview = preview;
+            if (preview) _pendingPreview = snapshot; else _pendingReal = snapshot;
             if (preview) PreviewActive = true;
             if (_running) return;
             _running = true;
@@ -155,8 +156,10 @@ public sealed class DocumentSession
             CadDocument doc; bool preview;
             lock (_lock)
             {
-                if (_pendingDoc == null) { _running = false; break; }
-                doc = _pendingDoc; preview = _pendingIsPreview; _pendingDoc = null;
+                // the real model first: the tree, status and selection depend on it
+                if (_pendingReal != null) { doc = _pendingReal; preview = false; _pendingReal = null; }
+                else if (_pendingPreview != null) { doc = _pendingPreview; preview = true; _pendingPreview = null; }
+                else { _running = false; break; }
             }
             RegenResult r;
             try
@@ -172,7 +175,7 @@ public sealed class DocumentSession
                 continue;
             }
             bool stale;
-            lock (_lock) stale = _pendingDoc != null && _pendingIsPreview == preview;
+            lock (_lock) stale = (preview ? _pendingPreview : _pendingReal) != null;
             if (stale) continue; // a newer request is waiting; skip publishing this one
             Dispatcher.UIThread.Post(() =>
             {

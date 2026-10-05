@@ -134,8 +134,12 @@ public sealed class PmPage
     }
 
     /// <summary>Numeric field that accepts expressions; shows the evaluated value as a tooltip.</summary>
-    public TextBox Number(StackPanel s, string label, Func<string> get, Action<string> set, string? icon = null, string unit = "mm", bool optional = false)
+    /// <summary>Length unit shown next to numeric fields (the document's units).</summary>
+    public static string LengthUnit { get; set; } = "mm";
+
+    public TextBox Number(StackPanel s, string label, Func<string> get, Action<string> set, string? icon = null, string? unit = null, bool optional = false)
     {
+        unit ??= LengthUnit;
         var tb = new TextBox { Text = get(), MinWidth = 90, HorizontalAlignment = HorizontalAlignment.Stretch };
         var unitLbl = new TextBlock { Text = unit, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(4, 0, 0, 0), Foreground = Brushes.Gray, FontSize = 11 };
         var dp = new DockPanel();

@@ -44,11 +44,11 @@ public static class Dialogs
     }
 
     /// <summary>Returns true (yes), false (no) or null (cancel).</summary>
-    public static async Task<bool?> YesNoCancel(Window owner, string title, string text)
+    public static async Task<bool?> YesNoCancel(Window owner, string title, string text, string yesText = "Save", string noText = "Don't Save")
     {
         bool? result = null;
-        var yes = new Button { Content = "Save", IsDefault = true };
-        var no = new Button { Content = "Don't Save" };
+        var yes = new Button { Content = yesText, IsDefault = true };
+        var no = new Button { Content = noText };
         var cancel = new Button { Content = "Cancel", IsCancel = true };
         var sp = new StackPanel();
         sp.Children.Add(new TextBlock { Text = text, TextWrapping = TextWrapping.Wrap });
@@ -57,6 +57,22 @@ public static class Dialogs
         yes.Click += (_, _) => { result = true; w.Close(); };
         no.Click += (_, _) => { result = false; w.Close(); };
         cancel.Click += (_, _) => { result = null; w.Close(); };
+        await w.ShowDialog(owner);
+        return result;
+    }
+
+    /// <summary>Two-button question; true for the first button.</summary>
+    public static async Task<bool> YesNo(Window owner, string title, string text, string yesText = "OK", string noText = "Cancel")
+    {
+        bool result = false;
+        var yes = new Button { Content = yesText, IsDefault = true };
+        var no = new Button { Content = noText, IsCancel = true };
+        var sp = new StackPanel();
+        sp.Children.Add(new TextBlock { Text = text, TextWrapping = TextWrapping.Wrap });
+        sp.Children.Add(Buttons(yes, no));
+        var w = MakeWindow(title, sp);
+        yes.Click += (_, _) => { result = true; w.Close(); };
+        no.Click += (_, _) => w.Close();
         await w.ShowDialog(owner);
         return result;
     }
