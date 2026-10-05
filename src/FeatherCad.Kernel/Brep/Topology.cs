@@ -68,7 +68,20 @@ public sealed class Topology
 
     public static Topology Build(Solid s)
     {
+        // native tessellations normally share every boundary sample between neighbouring faces (no
+        // T-junctions): try without the costly T-junction pass and redo with it if anything stayed open
+        if (s.Native != null)
+        {
+            var quick = Build(s, resolveTJunctions: false);
+            if (quick.OpenHalfEdges == 0) return quick;
+        }
+        return Build(s, resolveTJunctions: true);
+    }
+
+    static Topology Build(Solid s, bool resolveTJunctions)
+    {
         var t = new Topology();
+        var pw = Prof.Time("topo.weld");
         var welder = new VertexWelder(FaceMerger.WeldTol * 10);
         var raw = new List<List<int[]>>();
         foreach (var f in s.Faces)
@@ -83,7 +96,9 @@ public sealed class Topology
             raw.Add(fl);
         }
         t.Vertices.AddRange(welder.Points);
-        var segIndex = new SegmentVertexIndex(t.Vertices, welder.Tolerance);
+        pw.Dispose();
+        var ptj = Prof.Time("topo.tjunctions");
+        var segIndex = resolveTJunctions ? new SegmentVertexIndex(t.Vertices, welder.Tolerance) : null;
         var between = new List<int>();
         foreach (var fl in raw)
         {
@@ -96,6 +111,7 @@ public sealed class Topology
                     int a = ids[i], b = ids[(i + 1) % ids.Length];
                     if (a == b) continue;
                     l.Add(a);
+                    if (segIndex == null) continue;
                     segIndex.Between(a, b, between);
                     l.AddRange(between);
                 }
@@ -104,6 +120,8 @@ public sealed class Topology
             t.FaceLoops.Add(outLoops);
         }
 
+        ptj.Dispose();
+        using var prest = Prof.Time("topo.edges");
         // half-edge map
         var owner = new Dictionary<(int, int), int>(); // -> face index
         for (int fi = 0; fi < t.FaceLoops.Count; fi++)

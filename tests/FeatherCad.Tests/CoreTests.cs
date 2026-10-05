@@ -209,6 +209,9 @@ static class CoreTests
                 {
                     Console.WriteLine($"      {Path.GetFileName(file)}: open={b.Solid.Topology.OpenHalfEdges} native={b.Solid.Native != null} vol={b.Solid.Volume():0.###} ({Csg.LastFallbackReason})");
                     t.Eq(b.Solid.Topology.OpenHalfEdges, 0);
+                    // the display mesh (also used for mass properties) must enclose the same volume
+                    var vMesh = b.Mesh.Volume; var vExact = KernelTests.Vex(b.Solid);
+                    t.True(Math.Abs(vMesh - vExact) < 2e-3 * Math.Abs(vExact), $"display mesh volume {vMesh} vs {vExact}");
                 }
                 foreach (var b in r.State.Bodies)
                 {

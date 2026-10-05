@@ -14,7 +14,18 @@ public sealed class VertexWelder
 
     (long, long, long) Key(Vec3 p) => ((long)Math.Floor(p.X / _cell), (long)Math.Floor(p.Y / _cell), (long)Math.Floor(p.Z / _cell));
 
+    // most repeats are bit-identical copies (shared facet vertices): one lookup instead of 27 grid probes
+    readonly Dictionary<(double, double, double), int> _exact = new();
+
     public int Add(Vec3 p)
+    {
+        if (_exact.TryGetValue((p.X, p.Y, p.Z), out var hit)) return hit;
+        var r = AddNear(p);
+        _exact[(p.X, p.Y, p.Z)] = r;
+        return r;
+    }
+
+    int AddNear(Vec3 p)
     {
         var (kx, ky, kz) = Key(p);
         for (long x = kx - 1; x <= kx + 1; x++)

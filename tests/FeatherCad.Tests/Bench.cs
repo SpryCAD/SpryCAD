@@ -14,6 +14,7 @@ static class Bench
         Console.WriteLine($"bench {Path.GetFileName(file)}");
         var times = new List<double>();
         var tessTimes = new List<double>();
+        var meshTimes = new List<double>();
         Dictionary<string, List<double>> perFeature = new();
         for (int i = 0; i < runs + 1; i++)
         {
@@ -27,6 +28,9 @@ static class Bench
             var tsw = Stopwatch.StartNew();
             int facets = r.State.Bodies.Sum(b => b.Solid.Faces.Count); // what the viewport needs
             tessTimes.Add(tsw.Elapsed.TotalMilliseconds);
+            var msw = Stopwatch.StartNew();
+            using (Prof.Time("display.mesh")) foreach (var b in r.State.Bodies) _ = b.Mesh; // display mesh (GPU buffers source)
+            meshTimes.Add(msw.Elapsed.TotalMilliseconds);
             if (i == 0) { Console.WriteLine($"  cold: {ms:0} ms"); continue; }
             times.Add(ms);
             if (Environment.GetEnvironmentVariable("FC_RUNS") != null) Console.WriteLine($"    run {i}: {ms:0.0} ms");
@@ -37,7 +41,7 @@ static class Bench
             }
             if (i == runs)
             {
-                Console.WriteLine($"  warm full rebuild: median {Median(times):0.0} ms (min {times.Min():0.0}), + display tessellation median {Median(tessTimes):0.0} ms");
+                Console.WriteLine($"  warm full rebuild: median {Median(times):0.0} ms (min {times.Min():0.0}), + display tessellation median {Median(tessTimes):0.0} ms + display mesh {Median(meshTimes):0.0} ms");
                 foreach (var (name, l) in perFeature) Console.WriteLine($"    {name,-20} {Median(l),8:0.0} ms");
                 Console.WriteLine("  profile (last run):");
                 foreach (var (name, pms, calls) in Prof.Results()) Console.WriteLine($"    {name,-24} {pms,8:0.0} ms  x{calls}");

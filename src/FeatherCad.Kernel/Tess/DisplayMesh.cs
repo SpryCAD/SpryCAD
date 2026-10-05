@@ -61,7 +61,10 @@ public sealed class DisplayMesh
     public static DisplayMesh Build(Solid solid)
     {
         var m = new DisplayMesh();
+        var ptopo = Prof.Time("mesh.topology");
         var topo = solid.Topology;
+        ptopo.Dispose();
+        var ptri = Prof.Time("mesh.triangulate");
         int nf = solid.Faces.Count;
         var scale = Math.Max(1, solid.Bounds.Diagonal);
         var tol = Math.Max(1e-4, scale * 2.5e-4);
@@ -81,23 +84,37 @@ public sealed class DisplayMesh
 
         // base triangles (indices into topology vertices) per facet
         var pts = new List<Vec3>(topo.Vertices);
-        var tris = new List<(int a, int b, int c, int face)>();
-        for (int fi = 0; fi < nf; fi++)
+        // facets are independent: triangulate in parallel, then concatenate in facet order (deterministic)
+        var perFacet = new List<(int a, int b, int c, int face)>[nf];
+        Parallel.For(0, nf, fi =>
         {
             var loops = topo.FaceLoops[fi];
-            var loops2 = new List<Vec2[]>();
-            var ids = new List<int>();
-            var n = solid.Faces[fi].Plane.Normal;
-            var u = n.AnyPerpendicular(); var v = Vec3.Cross(n, u);
-            foreach (var l in loops)
+            var local = new List<(int, int, int, int)>();
+            if (loops.Count == 1 && loops[0].Length == 3)
             {
-                loops2.Add(l.Select(i => new Vec2(Vec3.Dot(pts[i], u), Vec3.Dot(pts[i], v))).ToArray());
-                ids.AddRange(l);
+                var l = loops[0];
+                local.Add((l[0], l[1], l[2], fi)); // already a triangle (most facets of curved faces)
             }
-            var idx = Triangulator.Triangulate(loops2);
-            for (int k = 0; k < idx.Count; k += 3) tris.Add((ids[idx[k]], ids[idx[k + 1]], ids[idx[k + 2]], fi));
-        }
+            else
+            {
+                var loops2 = new List<Vec2[]>();
+                var ids = new List<int>();
+                var n = solid.Faces[fi].Plane.Normal;
+                var u = n.AnyPerpendicular(); var v = Vec3.Cross(n, u);
+                foreach (var l in loops)
+                {
+                    loops2.Add(l.Select(i => new Vec2(Vec3.Dot(pts[i], u), Vec3.Dot(pts[i], v))).ToArray());
+                    ids.AddRange(l);
+                }
+                var idx = Triangulator.Triangulate(loops2);
+                for (int k = 0; k < idx.Count; k += 3) local.Add((ids[idx[k]], ids[idx[k + 1]], ids[idx[k + 2]], fi));
+            }
+            perFacet[fi] = local;
+        });
+        var tris = new List<(int a, int b, int c, int face)>();
+        foreach (var l in perFacet) tris.AddRange(l);
 
+        ptri.Dispose();
         // which facets use each edge
         Dictionary<(int, int), List<int>> EdgeFaces(List<(int a, int b, int c, int face)> ts)
         {
@@ -112,7 +129,9 @@ public sealed class DisplayMesh
             return map;
         }
 
-        bool anyCurved = surf.Any(s => s != null);
+        // native solids are already tessellated against their exact surfaces (adaptive, finer than this
+        // tolerance): re-refining would only re-project every curved edge to find nothing to split
+        bool anyCurved = solid.Native == null && surf.Any(s => s != null);
         var refiner = new Refiner(pts, (_, _) => (null, null), tol);
         // boundary edges between faces: remember their exact surfaces for edge-line refinement
         for (int level = 0; anyCurved && level < MaxLevels; level++)
@@ -166,6 +185,7 @@ public sealed class DisplayMesh
         }
 
         // ---- emit, ordered by face name so each UI face is contiguous
+        using var pemit = Prof.Time("mesh.emit");
         var pos = new List<float>(); var nrm = new List<float>(); var idxOut = new List<int>();
         var byFacet = tris.GroupBy(t => t.face).ToDictionary(g => g.Key, g => g.ToList());
         var order = Enumerable.Range(0, nf).OrderBy(i => solid.Faces[i].Tag.Name, StringComparer.Ordinal).ToList();
