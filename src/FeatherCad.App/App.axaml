@@ -1,0 +1,9 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="FeatherCad.App.App"
+             RequestedThemeVariant="Light">
+  <Application.Styles>
+    <FluentTheme DensityStyle="Compact" />
+    <StyleInclude Source="avares://FeatherCAD/UI/Styles.axaml" />
+  </Application.Styles>
+</Application>

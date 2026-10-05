@@ -1,0 +1,116 @@
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+  <!-- CommandManager large buttons -->
+  <Style Selector="Button.cmd">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="BorderBrush" Value="Transparent" />
+    <Setter Property="Padding" Value="5,3" />
+    <Setter Property="Margin" Value="1,0" />
+    <Setter Property="MinWidth" Value="54" />
+    <Setter Property="VerticalAlignment" Value="Stretch" />
+    <Setter Property="CornerRadius" Value="3" />
+  </Style>
+  <Style Selector="Button.cmd:pointerover /template/ ContentPresenter">
+    <Setter Property="Background" Value="#FFE3EEFB" />
+    <Setter Property="BorderBrush" Value="#FF9EC3EE" />
+  </Style>
+  <Style Selector="Button.cmd.active /template/ ContentPresenter">
+    <Setter Property="Background" Value="#FFCFE2F8" />
+    <Setter Property="BorderBrush" Value="#FF5C9AE0" />
+  </Style>
+  <Style Selector="Button.cmd TextBlock">
+    <Setter Property="FontSize" Value="11" />
+    <Setter Property="TextAlignment" Value="Center" />
+    <Setter Property="Foreground" Value="#FF283548" />
+  </Style>
+  <Style Selector="Button.cmd:disabled TextBlock">
+    <Setter Property="Foreground" Value="#FFA0A8B4" />
+  </Style>
+
+  <!-- small toolbar buttons -->
+  <Style Selector="Button.tb">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="BorderBrush" Value="Transparent" />
+    <Setter Property="Padding" Value="3" />
+    <Setter Property="Margin" Value="1" />
+    <Setter Property="CornerRadius" Value="3" />
+  </Style>
+  <Style Selector="Button.tb:pointerover /template/ ContentPresenter">
+    <Setter Property="Background" Value="#FFE3EEFB" />
+    <Setter Property="BorderBrush" Value="#FF9EC3EE" />
+  </Style>
+  <Style Selector="Button.tb.active /template/ ContentPresenter">
+    <Setter Property="Background" Value="#FFCFE2F8" />
+    <Setter Property="BorderBrush" Value="#FF5C9AE0" />
+  </Style>
+
+  <!-- CommandManager tabs -->
+  <Style Selector="ToggleButton.tab">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="0,0,0,2" />
+    <Setter Property="BorderBrush" Value="Transparent" />
+    <Setter Property="Padding" Value="12,3" />
+    <Setter Property="CornerRadius" Value="0" />
+    <Setter Property="FontSize" Value="12" />
+  </Style>
+  <Style Selector="ToggleButton.tab:checked /template/ ContentPresenter">
+    <Setter Property="Background" Value="#FFFFFFFF" />
+    <Setter Property="BorderBrush" Value="#FF2F7BD6" />
+    <Setter Property="Foreground" Value="#FF1D4E8F" />
+  </Style>
+
+  <!-- PropertyManager -->
+  <Style Selector="Border.pmsection">
+    <Setter Property="Background" Value="#FFFFFFFF" />
+    <Setter Property="BorderBrush" Value="#FFC9D3E0" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="3" />
+    <Setter Property="Margin" Value="4,3" />
+    <Setter Property="Padding" Value="6,4" />
+  </Style>
+  <Style Selector="TextBlock.pmheader">
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="Foreground" Value="#FF1D3557" />
+    <Setter Property="Margin" Value="0,0,0,4" />
+  </Style>
+  <Style Selector="ListBox.selbox">
+    <Setter Property="MinHeight" Value="44" />
+    <Setter Property="MaxHeight" Value="140" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="BorderBrush" Value="#FFB0BCCC" />
+    <Setter Property="Background" Value="#FFF7F9FC" />
+  </Style>
+  <Style Selector="ListBox.selbox.activebox">
+    <Setter Property="Background" Value="#FFFFE4F0" />
+    <Setter Property="BorderBrush" Value="#FFE07AA8" />
+  </Style>
+  <Style Selector="ListBox.selbox ListBoxItem">
+    <Setter Property="Padding" Value="4,1" />
+    <Setter Property="MinHeight" Value="20" />
+  </Style>
+
+  <!-- Feature tree -->
+  <Style Selector="Border.treerow">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Padding" Value="2,1" />
+    <Setter Property="CornerRadius" Value="2" />
+  </Style>
+  <Style Selector="Border.treerow:pointerover">
+    <Setter Property="Background" Value="#FFE8F1FC" />
+  </Style>
+  <Style Selector="Border.treerow.selected">
+    <Setter Property="Background" Value="#FFCDE2FA" />
+  </Style>
+
+  <!-- heads-up toolbar -->
+  <Style Selector="Border.hud">
+    <Setter Property="Background" Value="#E6FFFFFF" />
+    <Setter Property="BorderBrush" Value="#FFC4CEDB" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="4" />
+    <Setter Property="Padding" Value="2" />
+  </Style>
+</Styles>
