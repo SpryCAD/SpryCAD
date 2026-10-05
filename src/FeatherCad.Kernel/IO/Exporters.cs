@@ -39,8 +39,9 @@ public static class StlWriter
 }
 
 /// <summary>
-/// STEP AP214 export as MANIFOLD_SOLID_BREP with planar ADVANCED_FACEs. Curved faces are written
-/// as their exact planar facets for now (analytic surfaces are kept in the model for a later upgrade).
+/// STEP AP214 export as MANIFOLD_SOLID_BREP. By default faces are written with their exact analytic
+/// surfaces (PLANE, CYLINDRICAL_, CONICAL_, SPHERICAL_, TOROIDAL_SURFACE) bounded by exact LINE, CIRCLE and
+/// B_SPLINE_CURVE_WITH_KNOTS edges. If the exact reconstruction fails the faceted form is written instead.
 /// </summary>
 public static class StepWriter
 {
@@ -61,7 +62,7 @@ public static class StepWriter
     static string Pt(Vec3 p) => $"CARTESIAN_POINT('',({R(p.X)},{R(p.Y)},{R(p.Z)}))";
     static string Dir(Vec3 d) => $"DIRECTION('',({R(d.X)},{R(d.Y)},{R(d.Z)}))";
 
-    public static void Write(Stream stream, IEnumerable<(string name, Solid solid)> bodies, string productName, double scale = 1.0)
+    public static void Write(Stream stream, IEnumerable<(string name, Solid solid)> bodies, string productName, double scale = 1.0, bool exact = true)
     {
         var c = new Ctx();
         var appCtx = c.Add("APPLICATION_CONTEXT('core data for automotive mechanical design processes')");
@@ -86,7 +87,18 @@ public static class StepWriter
         foreach (var (name, solid) in bodies)
         {
             var s = Math.Abs(scale - 1) > 1e-15 ? solid.Transformed(Transform.Scale(scale)) : solid;
-            foreach (var shell in WriteSolid(c, s))
+            List<int>? shells = null;
+            if (exact)
+            {
+                try
+                {
+                    var brep = ExactBrep.Build(s);
+                    if (brep.Warnings.Count == 0) shells = WriteExact(c, brep, s);
+                }
+                catch { shells = null; }
+            }
+            shells ??= WriteSolid(c, s);
+            foreach (var shell in shells)
                 items.Add(c.Add($"MANIFOLD_SOLID_BREP('{Esc(name)}',#{shell})"));
         }
         var rep = c.Add($"ADVANCED_BREP_SHAPE_REPRESENTATION('{safe}',({string.Join(",", items.Select(i => "#" + i))}),#{geomCtx})");
@@ -104,6 +116,126 @@ public static class StepWriter
     }
 
     static string Esc(string s) => s.Replace("'", "''");
+
+    static int Axis2(Ctx c, Vec3 origin, Vec3 z, Vec3 x)
+    {
+        z = z.Normalized;
+        x = (x - z * Vec3.Dot(x, z));
+        if (x.Length < 1e-9) x = z.AnyPerpendicular();
+        x = x.Normalized;
+        var o = c.Add(Pt(origin)); var dz = c.Add(Dir(z)); var dx = c.Add(Dir(x));
+        return c.Add($"AXIS2_PLACEMENT_3D('',#{o},#{dz},#{dx})");
+    }
+
+    /// <summary>Writes an exact B-rep. Returns one closed shell id per lump.</summary>
+    static List<int> WriteExact(Ctx c, ExactBrep b, Solid s)
+    {
+        var vtx = new int[b.Vertices.Count];
+        for (int i = 0; i < vtx.Length; i++) vtx[i] = c.Add($"VERTEX_POINT('',#{c.Add(Pt(b.Vertices[i]))})");
+
+        var edgeIds = new int[b.Edges.Count];
+        foreach (var e in b.Edges)
+        {
+            int geom;
+            switch (e.Curve)
+            {
+                case LineCurve l:
+                    {
+                        var len = Math.Max(Vec3.Distance(b.Vertices[e.V0], b.Vertices[e.V1]), 1e-9);
+                        var vec = c.Add($"VECTOR('',#{c.Add(Dir(l.Dir))},{R(len)})");
+                        geom = c.Add($"LINE('',#{c.Add(Pt(b.Vertices[e.V0]))},#{vec})");
+                        break;
+                    }
+                case CircleCurve ci:
+                    geom = c.Add($"CIRCLE('',#{Axis2(c, ci.Center, ci.Axis, ci.RefDir)},{R(ci.Radius)})");
+                    break;
+                case BSplineCurve bs:
+                    {
+                        var poles = string.Join(",", bs.Poles.Select(p => "#" + c.Add(Pt(p))));
+                        var (vals, mults) = bs.KnotVector();
+                        geom = c.Add($"B_SPLINE_CURVE_WITH_KNOTS('',{bs.Degree},({poles}),.UNSPECIFIED.,.F.,.F.,({string.Join(",", mults)}),({string.Join(",", vals.Select(R))}),.UNSPECIFIED.)");
+                        break;
+                    }
+                default: throw new InvalidOperationException("unknown curve");
+            }
+            edgeIds[e.Index] = c.Add($"EDGE_CURVE('',#{vtx[e.V0]},#{vtx[e.V1]},#{geom},.T.)");
+        }
+
+        var facesByLump = new Dictionary<int, List<int>>();
+        foreach (var f in b.Faces)
+        {
+            if (f.Loops.Count == 0) continue;
+            int surf = WriteSurface(c, f, s);
+            // planar faces: the loop enclosing the largest area is the outer bound
+            int outer = -1;
+            if (f.Surface.Kind == SurfaceKind.Plane)
+            {
+                double best = double.NegativeInfinity;
+                for (int li = 0; li < f.Loops.Count; li++)
+                {
+                    var area = LoopArea(b, f.Loops[li], f.Surface.Plane!.Normal);
+                    if (area > best) { best = area; outer = li; }
+                }
+            }
+            var bounds = new List<int>();
+            for (int li = 0; li < f.Loops.Count; li++)
+            {
+                var oes = f.Loops[li].Edges.Select(x => c.Add($"ORIENTED_EDGE('',*,*,#{edgeIds[x.Edge]},{(x.Forward ? ".T." : ".F.")})")).ToList();
+                var loop = c.Add($"EDGE_LOOP('',({string.Join(",", oes.Select(i => "#" + i))}))");
+                bounds.Add(c.Add(li == outer ? $"FACE_OUTER_BOUND('',#{loop},.T.)" : $"FACE_BOUND('',#{loop},.T.)"));
+            }
+            var face = c.Add($"ADVANCED_FACE('{Esc(f.Name)}',({string.Join(",", bounds.Select(i => "#" + i))}),#{surf},{(f.SameSense ? ".T." : ".F.")})");
+            if (!facesByLump.TryGetValue(f.Lump, out var list)) facesByLump[f.Lump] = list = new List<int>();
+            list.Add(face);
+        }
+        return facesByLump.Values.Select(fs => c.Add($"CLOSED_SHELL('',({string.Join(",", fs.Select(i => "#" + i))}))")).ToList();
+    }
+
+    static double LoopArea(ExactBrep b, ExactLoop loop, Vec3 n)
+    {
+        var pts = new List<Vec3>();
+        foreach (var (ei, fwd) in loop.Edges)
+        {
+            var e = b.Edges[ei];
+            var p = fwd ? e.Points : Enumerable.Reverse(e.Points).ToList();
+            pts.AddRange(p.Take(p.Count - 1));
+        }
+        var sum = Vec3.Zero;
+        for (int i = 0; i < pts.Count; i++) sum += Vec3.Cross(pts[i], pts[(i + 1) % pts.Count]);
+        return Math.Abs(Vec3.Dot(sum, n)) / 2;
+    }
+
+    static int WriteSurface(Ctx c, ExactFace f, Solid s)
+    {
+        var d = f.Surface.Def;
+        switch (f.Surface.Kind)
+        {
+            case SurfaceKind.Plane:
+                {
+                    var pl = f.Surface.Plane!;
+                    var anchor = pl.Project(s.Faces[f.Facets[0]].Outer[0]);
+                    return c.Add($"PLANE('',#{Axis2(c, anchor, pl.Normal, pl.Normal.AnyPerpendicular())})");
+                }
+            case SurfaceKind.Cylinder:
+                return c.Add($"CYLINDRICAL_SURFACE('',#{Axis2(c, d.Origin, d.Axis, d.RefDir)},{R(d.Radius)})");
+            case SurfaceKind.Sphere:
+                return c.Add($"SPHERICAL_SURFACE('',#{Axis2(c, d.Origin, d.Axis, d.RefDir)},{R(d.Radius)})");
+            case SurfaceKind.Torus:
+                return c.Add($"TOROIDAL_SURFACE('',#{Axis2(c, d.Origin, d.Axis, d.RefDir)},{R(d.Radius)},{R(d.Param2)})");
+            case SurfaceKind.Cone:
+                {
+                    // place the cone's reference circle inside the face so its radius is positive
+                    var ax = d.Axis.Normalized;
+                    double hmax = double.MinValue;
+                    foreach (var fi in f.Facets) foreach (var p in s.Faces[fi].Outer) hmax = Math.Max(hmax, Vec3.Dot(p - d.Origin, ax));
+                    var r = d.Radius + hmax * Math.Tan(d.Param2);
+                    if (r < 1e-9) { hmax += 1; r = d.Radius + hmax * Math.Tan(d.Param2); }
+                    return c.Add($"CONICAL_SURFACE('',#{Axis2(c, d.Origin + ax * hmax, ax, d.RefDir)},{R(r)},{R(d.Param2)})");
+                }
+        }
+        throw new InvalidOperationException("unknown surface");
+    }
+
 
     /// <summary>Writes the closed shells of a solid (one per connected lump). Returns shell ids.</summary>
     static List<int> WriteSolid(Ctx c, Solid s)

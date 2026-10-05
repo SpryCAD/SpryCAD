@@ -271,7 +271,7 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         {
             var (it, c) = h.Items[i];
             if (it.Kind is SelKind.Face or SelKind.Feature or SelKind.Body)
-                h.Items[i] = (it, it == Hover ? Mix(PartColor, new Rgba(1f, 0.78f, 0.45f), 0.55f) : Mix(PartColor, c, 0.55f));
+                h.Items[i] = (it, it == Hover ? Mix(PartColor, new Rgba(1f, 0.8f, 0.5f), 0.35f) : Mix(PartColor, c, 0.55f));
         }
         return h;
     }

@@ -76,10 +76,40 @@ public static class EdgeBlend
         if (prof == null) return (null, convex);
         if (prof.Verts.Any(v => v.P.X < -1e-9)) throw new InvalidOperationException("size too large for this edge");
         var refDir = cs.RefDir.LengthSq > 0.5 ? cs.RefDir : ax.AnyPerpendicular();
-        var frame = new Frame(cs.Origin, refDir, ax, Vec3.Cross(refDir, ax));
+        refDir = (refDir - ax * Vec3.Dot(refDir, ax)).Normalized;
         int segs = cs.Segments > 0 ? cs.Segments : SurfaceDef.SegmentsFor(cs.Radius);
-        var tool = Builders.Revolve(new[] { new ProfileRegion(prof) }, frame, Vec2.Zero, new Vec2(0, 1), 2 * Math.PI, name, segs);
-        return (tool, convex);
+        if (e.Closed)
+        {
+            var frame = new Frame(cs.Origin, refDir, ax, Vec3.Cross(refDir, ax));
+            return (Builders.Revolve(new[] { new ProfileRegion(prof) }, frame, Vec2.Zero, new Vec2(0, 1), 2 * Math.PI, name, segs), convex);
+        }
+
+        // partial arc (e.g. the rounded corner of a filleted box): sweep only over the arc, with
+        // rotation steps on the cylinder's own facet angles so the tool lines up exactly
+        var yDir = Vec3.Cross(ax, refDir);
+        double Ang(Vec3 p) { var r = p - cs.Origin; return Math.Atan2(Vec3.Dot(r, yDir), Vec3.Dot(r, refDir)); }
+        double Wrap(double a) { a %= 2 * Math.PI; return a < 0 ? a + 2 * Math.PI : a; }
+        var p0 = e.Start; var p1 = e.End;
+        var d01 = Ang(s.B) - Ang(s.A);
+        while (d01 > Math.PI) d01 -= 2 * Math.PI; while (d01 < -Math.PI) d01 += 2 * Math.PI;
+        if (d01 < 0) (p0, p1) = (p1, p0);
+        var a0 = Ang(p0);
+        var sweep = Wrap(Ang(p1) - a0);
+        if (sweep < 1e-6) return (null, convex);
+        var step = 2 * Math.PI / segs;
+        var angles = new List<double> { 0 };
+        for (int k = 0; k < segs; k++)
+        {
+            var ra = Wrap(k * step - a0);
+            if (ra > step * 0.05 && ra < sweep - step * 0.05) angles.Add(ra);
+        }
+        angles.Sort();
+        angles.Add(sweep);
+        var startDir = refDir * Math.Cos(a0) + yDir * Math.Sin(a0);
+        var pframe = new Frame(cs.Origin, startDir, ax, Vec3.Cross(startDir, ax));
+        var partial = Builders.Revolve(new[] { new ProfileRegion(prof) }, pframe, Vec2.Zero, new Vec2(0, 1), sweep, name, segs, angles);
+        if (partial.Volume() < 0) partial = partial.Flipped();
+        return (partial, convex);
     }
 
     /// <summary>

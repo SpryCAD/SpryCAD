@@ -17,6 +17,8 @@ natively on **Windows, Linux and macOS** with no browser, no Electron and no nat
 - **Fast**: incremental rebuilds (only features after the change are rebuilt), background rebuild thread so
   the UI never blocks, live preview while editing, ~1 s cold start for the ReadyToRun build.
 - **Light**: ~3 MB of own code; the only dependencies are Avalonia and Silk.NET (OpenGL bindings).
+- **Exact geometry**: faces are true planes, cylinders, cones, spheres and tori with exact line, circle and
+  B-spline edges — exported to STEP as analytic surfaces and displayed with smooth silhouettes.
 - **Open formats**: native `.fcad` files are readable, diffable JSON; export to **STEP AP214** and **binary STL**.
 
 ## Features
@@ -30,7 +32,7 @@ natively on **Windows, Linux and macOS** with no browser, no Electron and no nat
 | Features | Extruded Boss/Base & Cut (Blind, Through All, Through All–Both, Mid Plane, two directions, merge result), Revolved Boss & Cut, Fillet, Chamfer, Hole Wizard (simple, counterbore, countersink, standard metric sizes, drill point), Shell, Linear Pattern (2 directions), Circular Pattern, Mirror, Reference Plane, Combine (add/subtract/common) |
 | Booleans | Union, subtract, intersect between bodies; multi-body parts |
 | Tools | Equations / global variables, Mass Properties (volume, area, mass, center of mass, bounding box), Options (units MMGS/IPS, part color, wheel direction, perspective) |
-| Files | `.fcad` open/save, autosave + recovery, STEP and STL export |
+| Files | `.fcad` open/save, autosave + recovery, exact STEP (analytic surfaces) and STL export |
 | View | Standard views (animated), Normal To, zoom to fit, Shaded With Edges / Shaded / Hidden Lines Visible / Wireframe, perspective, planes toggle |
 
 ## Controls (SolidWorks defaults)
@@ -116,6 +118,14 @@ FeatherCAD uses its own **boundary-representation** kernel written for speed and
   stored as fine planar facets *that remember their exact surface* (axis, radius…). That exact data already
   drives smooth shading, hole/boss rim chamfers and fillets and pattern axes, and it is what a future exact
   NURBS/analytic surface back end will use — files will upgrade without changes.
+- **Exact B-rep layer** (`Kernel/Exact`). After every operation the facets of each analytic surface are merged
+  back into one exact face (`ExactBrep`). Boundaries are recognized as exact lines and circles; general
+  intersection curves (e.g. two crossing pipes) become cubic B-splines interpolated through points projected
+  onto *both* exact surfaces. Vertices are projected onto all their incident surfaces. This exact B-rep drives
+  STEP export (PLANE, CYLINDRICAL/CONICAL/SPHERICAL/TOROIDAL_SURFACE, LINE, CIRCLE, B_SPLINE_CURVE_WITH_KNOTS),
+  display refinement (curved faces are subdivided adaptively onto their true surface, crack-free) and the
+  face/edge readouts in the status bar. Exported files are verified with OpenCascade's B-rep checker
+  (valid closed solids, exact volumes).
 - **Persistent naming.** Faces are named from the feature and sketch entity that created them
   (`F3.S.L7` = side face of extrude F3 from sketch line 7). References to faces/edges use these names plus a
   geometric hint, so fillets and sketches-on-faces survive parameter changes.
@@ -139,10 +149,13 @@ dimension expressions). Example:
 
 ## Current limitations / roadmap
 
-- Curved faces are exact in the model but tessellated in geometry (default chord tolerance ~0.05 mm), so STEP
-  export writes them as planar facets. **Next:** exact analytic + NURBS surfaces in booleans and STEP.
-- Fillet/chamfer support straight edges between planar faces and circular edges of holes/bosses; corners where
-  three blended edges meet are mitered rather than rolled-ball blended.
+- Booleans run on the exact-plane facet representation and the exact B-rep is rebuilt afterwards. Results
+  are exact for planes, cylinders, cones, spheres and tori and their line/circle intersections; general
+  intersection curves are B-spline fits (within ~1e-3 mm of both surfaces). **Next:** native analytic
+  surface/surface booleans so the facet stage is no longer needed, and NURBS faces (lofts/sweeps).
+- Fillet/chamfer support straight edges between planar faces and circular edges (full rims or partial arcs,
+  e.g. around a rounded corner) between a plane and a perpendicular cylinder, with tangent propagation;
+  corners where three blended edges meet are mitered rather than rolled-ball blended.
 - Shell offsets faces by moving vertices; walls that would touch or self-intersect (e.g. holes closer than twice
   the thickness) can fail.
 - Sketch profiles use the union of closed regions; crossing lines must be split with Trim first.

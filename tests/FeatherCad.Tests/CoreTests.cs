@@ -250,5 +250,40 @@ static class CoreTests
             t.True(r.Status[ch.Id].Ok, r.Status[ch.Id].Error ?? "");
             t.Eq(r.State.Bodies[0].Solid.Topology.OpenHalfEdges, 0);
         });
+
+        t.Test("Document: rounded corner then top fillets (user scenario)", () =>
+        {
+            var doc = new CadDocument();
+            var s1 = doc.AddFeature(new SketchFeature { Plane = PlaneRef.Top, Sketch = Rect(80, 60) });
+            var e1 = doc.AddFeature(new ExtrudeFeature { SketchId = s1.Id, Depth = "30" });
+            var regen = new Regenerator();
+            var r = regen.Rebuild(doc);
+            var body = r.State.Bodies[0].Solid;
+            // vertical edge (parallel to Y) at the far corner
+            var vert = body.Topology.Edges.First(e => e.IsLinear && Math.Abs((e.End - e.Start).Normalized.Y) > 0.99 && e.Start.X > 79);
+            var f1 = doc.AddFeature(new FilletFeature { Radius = "10", Edges = { new EdgeRef { A = vert.FaceA, B = vert.FaceB, Hint = vert.Midpoint } } });
+            r = regen.Rebuild(doc);
+            t.True(r.Status[f1.Id].Ok, r.Status[f1.Id].Error ?? "");
+            var top = e1.Id + ".End";
+            var edges = r.State.Bodies[0].Solid.Topology.Edges.Where(e => e.FaceA == top || e.FaceB == top)
+                .Select(e => new EdgeRef { A = e.FaceA, B = e.FaceB, Hint = e.Midpoint }).ToList();
+            var preTopo = r.State.Bodies[0].Solid.Topology;
+            var f2 = doc.AddFeature(new FilletFeature { Radius = "3", Edges = edges });
+            r = regen.Rebuild(doc);
+            t.True(r.Status[f2.Id].Ok, r.Status[f2.Id].Error ?? "");
+            t.Eq(r.State.Bodies[0].Solid.Topology.OpenHalfEdges, 0);
+            var full = r.State.Bodies[0].Solid.Volume();
+            // tangent propagation: one straight edge next to the corner pulls in the arc and the next line
+            // the 70 mm top edge shortened by the corner round
+            var one = edges.First(er => preTopo.EdgesBetween(er.A, er.B).Any(te => te.IsLinear && Math.Abs(te.Length - 70) < 1e-6));
+            var f3 = (FilletFeature)f2.Clone(); f3.Edges = new() { one };
+            var doc2 = doc.Clone(); doc2.Features[^1] = f3;
+            var r2 = new Regenerator().Rebuild(doc2);
+            t.True(r2.Status[f3.Id].Ok, r2.Status[f3.Id].Error ?? "");
+            t.True(r2.State.Bodies[0].Solid.Faces.Any(f => f.Tag.Surface.Kind == SurfaceKind.Torus), "propagated through the rounded corner");
+            t.True(r2.State.Bodies[0].Solid.Volume() > full, "fewer edges than the full selection");
+            var dir = Path.Combine(Path.GetTempPath(), "feathercad-tests");
+            doc.Save(Path.Combine(dir, "corner.fcad"));
+        });
     }
 }

@@ -115,6 +115,8 @@ public sealed class FilletFeature : Feature
     public override string Kind => "Fillet";
     public List<EdgeRef> Edges { get; set; } = new();
     public string Radius { get; set; } = "2";
+    /// <summary>Also blend edges tangent-connected to the selected ones.</summary>
+    public bool TangentPropagation { get; set; } = true;
 }
 
 public sealed class ChamferFeature : Feature
@@ -122,6 +124,7 @@ public sealed class ChamferFeature : Feature
     public override string Kind => "Chamfer";
     public List<EdgeRef> Edges { get; set; } = new();
     public string Distance { get; set; } = "1";
+    public bool TangentPropagation { get; set; } = true;
 }
 
 public enum HoleType { Simple, Counterbore, Countersink }

@@ -339,7 +339,9 @@ public partial class MainWindow
         var p = page.Section(fillet ? "Fillet Parameters" : "Chamfer Parameters");
         if (fillet) page.Number(p, "Radius", () => ((FilletFeature)f).Radius, v => ((FilletFeature)f).Radius = v, "fillet");
         else page.Number(p, "Distance", () => ((ChamferFeature)f).Distance, v => ((ChamferFeature)f).Distance = v, "chamfer");
-        page.Info(p, "Supported: straight edges between planar faces, and circular edges of holes/bosses.");
+        if (fillet) page.Check(p, "Tangent propagation", () => ((FilletFeature)f).TangentPropagation, v => ((FilletFeature)f).TangentPropagation = v);
+        else page.Check(p, "Tangent propagation", () => ((ChamferFeature)f).TangentPropagation, v => ((ChamferFeature)f).TangentPropagation = v);
+        page.Info(p, "Supported: straight edges between planar faces, and circular edges (full or partial arcs) where a plane meets a cylinder.");
         BeginEdit(f, isNew, page, overlay: true, hint: edges.Count == 0 ? "Select edges in the graphics area." : null);
     }
 

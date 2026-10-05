@@ -127,8 +127,8 @@ public sealed class Regenerator
                 case SketchFeature s: DoSketch(s); break;
                 case ExtrudeFeature e: DoExtrude(e); break;
                 case RevolveFeature r: DoRevolve(r); break;
-                case FilletFeature fi: DoBlend(fi.Edges, Positive(fi.Radius, "Radius"), true); break;
-                case ChamferFeature ch: DoBlend(ch.Edges, Positive(ch.Distance, "Distance"), false); break;
+                case FilletFeature fi: DoBlend(fi.Edges, Positive(fi.Radius, "Radius"), true, fi.TangentPropagation); break;
+                case ChamferFeature ch: DoBlend(ch.Edges, Positive(ch.Distance, "Distance"), false, ch.TangentPropagation); break;
                 case HoleFeature h: DoHole(h); break;
                 case ShellFeature sh: DoShell(sh); break;
                 case LinearPatternFeature lp: DoLinearPattern(lp); break;
@@ -265,7 +265,7 @@ public sealed class Regenerator
 
         // ---- fillet / chamfer ----
 
-        void DoBlend(List<EdgeRef> refs, double size, bool fillet)
+        void DoBlend(List<EdgeRef> refs, double size, bool fillet, bool propagate)
         {
             if (refs.Count == 0) throw new FeatureException("No edges selected.");
             var byBody = new Dictionary<string, List<TopoEdge>>();
@@ -280,6 +280,12 @@ public sealed class Regenerator
                 catch (FeatureException ex) { status.Warnings.Add(ex.Message); }
             }
             if (byBody.Count == 0) throw new FeatureException("None of the selected edges could be found.");
+            if (propagate)
+                foreach (var (bid, list) in byBody)
+                {
+                    var topo = State.FindBody(bid)!.Solid.Topology;
+                    foreach (var e in TangentChain(topo, list)) if (!list.Contains(e)) list.Add(e);
+                }
             var bodies = new List<Body>();
             var errors = new List<string>();
             foreach (var b in State.Bodies)
@@ -291,6 +297,41 @@ public sealed class Regenerator
             status.Warnings.AddRange(errors);
             if (errors.Count > 0 && errors.Count >= refs.Count) throw new FeatureException(errors[0]);
             State = State.With(bodies);
+        }
+
+        /// <summary>Edges connected to the seeds through smooth (tangent) vertices.</summary>
+        static IEnumerable<TopoEdge> TangentChain(Topology topo, List<TopoEdge> seeds)
+        {
+            const double cosTol = 0.97; // ~14°: facet chords at arc ends deviate from the true tangent
+            static (Vec3 p, Vec3 dir) EndOf(TopoEdge e, bool atStart) => atStart
+                ? (e.Start, -(e.Segs[0].B - e.Segs[0].A).Normalized)
+                : (e.End, (e.Segs[^1].B - e.Segs[^1].A).Normalized);
+            var result = new HashSet<TopoEdge>(seeds);
+            var queue = new Queue<TopoEdge>(seeds);
+            while (queue.Count > 0)
+            {
+                var e = queue.Dequeue();
+                if (e.Closed) continue;
+                foreach (var atStart in new[] { true, false })
+                {
+                    var (p, dirOut) = EndOf(e, atStart);
+                    foreach (var o in topo.Edges)
+                    {
+                        if (result.Contains(o) || o.Closed) continue;
+                        foreach (var oStart in new[] { true, false })
+                        {
+                            var (q, oDirOut) = EndOf(o, oStart);
+                            // continuing through the vertex: the other edge leaves where this one arrives
+                            if (Vec3.Distance(p, q) < 1e-6 && Vec3.Dot(dirOut, -oDirOut) > cosTol)
+                            {
+                                result.Add(o); queue.Enqueue(o);
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            return result;
         }
 
         // ---- hole wizard ----

@@ -162,6 +162,31 @@ public partial class MainWindow : Window
         Viewport.Redraw();
     }
 
+    /// <summary>Exact geometry of a selected face/edge for the status bar (like SolidWorks).</summary>
+    string Describe(SelItem s)
+    {
+        var body = Viewport.Bodies.FirstOrDefault(b => b.Id == s.BodyId);
+        if (body == null) return "";
+        if (s.Kind == SelKind.Face)
+        {
+            var face = body.Solid.Faces.FirstOrDefault(f => f.Tag.Name == s.Name);
+            if (face == null) return "";
+            var es = face.Tag.Surface.IsCurved ? new ExactSurface(face.Tag.Surface) : new ExactSurface(SurfaceDef.PlaneDef, face.Plane);
+            var area = body.Solid.Faces.Where(f => f.Tag.Name == s.Name).Sum(f => f.Area());
+            return $"  —  {es.Describe()}, area ≈ {area:0.##}";
+        }
+        if (s.Kind == SelKind.Edge && s.EdgeIndex >= 0 && s.EdgeIndex < body.Solid.Topology.Edges.Count)
+        {
+            var e = body.Solid.Topology.Edges[s.EdgeIndex];
+            if (e.IsLinear) return $"  —  Line, length {e.Length:0.###}";
+            var surfs = new[] { e.FaceA, e.FaceB }.Select(n => body.Solid.Faces.FirstOrDefault(f => f.Tag.Name == n)?.Tag.Surface).ToList();
+            var cyl = surfs.FirstOrDefault(x => x is { Kind: SurfaceKind.Cylinder or SurfaceKind.Cone or SurfaceKind.Torus });
+            if (cyl != null && cyl.Kind == SurfaceKind.Cylinder) return $"  —  {(e.Closed ? "Circle" : "Arc")} Ø{2 * cyl.Radius:0.###}";
+            return "  —  Curve";
+        }
+        return "";
+    }
+
     static ModelState StateBefore(RegenResult r, int index)
     {
         if (index <= 0 || r.States.Count == 0) return ModelState.Initial();
@@ -180,7 +205,7 @@ public partial class MainWindow : Window
             else if (s.Kind is SelKind.Sketch or SelKind.Feature) Tree.Select(s.FeatureId);
             else if (s.Kind == SelKind.Plane) Tree.Select(s.FeatureId ?? s.Name);
         }
-        Status(s == null ? "Ready" : Selection.Count == 1 ? s.Label(Session.Doc) + " selected" : $"{Selection.Count} items selected");
+        Status(s == null ? "Ready" : Selection.Count == 1 ? s.Label(Session.Doc) + " selected" + Describe(s) : $"{Selection.Count} items selected");
         RefreshScene();
     }
 

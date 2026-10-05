@@ -78,7 +78,8 @@ public static class Builders
     /// The axis passes through <paramref name="axisPoint"/> with direction <paramref name="axisDir"/> (sketch coords).
     /// Angle in radians (full revolution if &gt;= 2π). Faces named prefix.R.&lt;segment&gt;, prefix.Start/End.
     /// </summary>
-    public static Solid Revolve(IEnumerable<ProfileRegion> regions, Frame frame, Vec2 axisPoint, Vec2 axisDir, double angle, string prefix, int segmentsOverride = 0)
+    public static Solid Revolve(IEnumerable<ProfileRegion> regions, Frame frame, Vec2 axisPoint, Vec2 axisDir, double angle, string prefix, int segmentsOverride = 0,
+        IReadOnlyList<double>? stepAngles = null)
     {
         var regs = regions.Select(r => r.Normalized()).ToList();
         if (regs.Count == 0) return Solid.Empty;
@@ -95,8 +96,18 @@ public static class Builders
                     maxR = Math.Max(maxR, Math.Abs(Vec2.Cross(ad, v.P - axisPoint)));
         int fullSegs = segmentsOverride > 0 ? segmentsOverride : SurfaceDef.SegmentsFor(maxR);
         int steps = full ? fullSegs : Math.Max(1, (int)Math.Ceiling(fullSegs * angle / (2 * Math.PI)));
-        var rots = new Transform[steps + 1];
-        for (int k = 0; k <= steps; k++) rots[k] = Transform.Rotation(O, A, angle * k / steps);
+        Transform[] rots;
+        if (stepAngles != null && !full && stepAngles.Count >= 2)
+        {
+            // explicit rotation angles (0 .. angle), used to line facets up with an existing surface
+            steps = stepAngles.Count - 1;
+            rots = stepAngles.Select(a => Transform.Rotation(O, A, a)).ToArray();
+        }
+        else
+        {
+            rots = new Transform[steps + 1];
+            for (int k = 0; k <= steps; k++) rots[k] = Transform.Rotation(O, A, angle * k / steps);
+        }
         // the side of the axis the profile is on determines how the sketch normal relates to rotation
         var sampleP = frame.ToWorld(regs[0].Outer.Verts[0].P);
         foreach (var r in regs) foreach (var v in r.Outer.Verts)

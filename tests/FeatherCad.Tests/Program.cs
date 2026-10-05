@@ -44,6 +44,8 @@ static class Program
         {
             Console.WriteLine("Kernel");
             KernelTests.Run(t);
+            Console.WriteLine("Exact");
+            ExactTests.Run(t);
             Console.WriteLine("Core");
             CoreTests.Run(t);
             Console.WriteLine($"\n{t.Passed} passed, {t.Failed} failed");
