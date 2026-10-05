@@ -207,6 +207,7 @@ static class CoreTests
                 for (int i = 0; i < 6; i++)
                 {
                     var doc = CadDocument.FromJson(json);
+                    Csg.ClearCache(); // measure the computation, not boolean cache hits
                     var sw = Stopwatch.StartNew();
                     var r = new Regenerator().Rebuild(doc);
                     var ms = sw.Elapsed.TotalMilliseconds;
