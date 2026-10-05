@@ -97,6 +97,34 @@ static class CoreTests
             t.Eq(regs[0].Holes.Count, 1);
         });
 
+        t.Test("Performance budget: model rebuilds", () =>
+        {
+            // budgets are ~3-4x the measured warm rebuild time: they catch regressions, not machine noise
+            var dir = AppContext.BaseDirectory;
+            while (dir != null && !Directory.Exists(Path.Combine(dir, "samples"))) dir = Path.GetDirectoryName(dir);
+            var cases = new (string file, double budgetMs)[]
+            {
+                (Path.Combine(dir!, "samples", "bracket.fcad"), 120),
+                (Path.Combine(dir!, "tests", "FeatherCad.Tests", "models", "shelled-bracket.fcad"), 400),
+            };
+            foreach (var (file, budget) in cases)
+            {
+                var json = File.ReadAllText(file);
+                double best = double.MaxValue;
+                for (int i = 0; i < 6; i++)
+                {
+                    var doc = CadDocument.FromJson(json);
+                    var sw = Stopwatch.StartNew();
+                    var r = new Regenerator().Rebuild(doc);
+                    var ms = sw.Elapsed.TotalMilliseconds;
+                    if (i >= 2) best = Math.Min(best, ms);
+                    t.True(r.Status.Values.All(st => st.Ok), "rebuild ok");
+                }
+                Console.WriteLine($"      {Path.GetFileName(file)}: {best:0.0} ms (budget {budget} ms)");
+                t.True(best < budget, $"{Path.GetFileName(file)} rebuild {best:0.0} ms exceeds budget {budget} ms");
+            }
+        });
+
         t.Test("Samples rebuild watertight", () =>
         {
             var dir = AppContext.BaseDirectory;
