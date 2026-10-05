@@ -33,7 +33,24 @@ public sealed class NEdge
     public List<Vec3> Samples(double tol)
     {
         if (_samples != null && _sampleTol <= tol * 1.0001) return _samples;
-        int n = Curve is NLine ? 1 : Math.Max(Curve.Samples(T0, T1, tol), Curve is NSpline ? 2 : 1);
+        if (Curve is NSpline or NPolyline)
+        {
+            // adaptive: bisect until the chord error is below tol
+            var res = new List<Vec3> { V0.P };
+            void Sub(double a, double b, Vec3 pa, Vec3 pb, int depth)
+            {
+                var m = 0.5 * (a + b);
+                var pm = Curve.Eval(m);
+                if (depth >= 3 && (depth > 12 || Vec3.Distance(pm, (pa + pb) * 0.5) < tol)) { res.Add(pb); return; }
+                Sub(a, m, pa, pm, depth + 1);
+                Sub(m, b, pm, pb, depth + 1);
+            }
+            Sub(T0, T1, V0.P, V1.P, 0);
+            res[^1] = V1.P;
+            _samples = res; _sampleTol = tol;
+            return res;
+        }
+        int n = Curve is NLine ? 1 : Math.Max(Curve.Samples(T0, T1, tol), 1);
         if (Curve is NCircle ci) n = Math.Max(n, (int)Math.Ceiling((T1 - T0) / (2 * Math.PI) * SurfaceDef.SegmentsFor(ci.R)));
         var pts = new List<Vec3>(n + 1);
         for (int i = 0; i <= n; i++) pts.Add(Curve.Eval(T0 + (T1 - T0) * i / n));
@@ -82,8 +99,11 @@ public sealed class NFace
     public bool Sense;
     public FaceTag Tag;
     public readonly List<NLoop> Loops = new();
+    /// <summary>A point inside the face (or its parent face). Fixes the unwrap of periodic parameters:
+    /// a face bounded only by seams (e.g. a half sphere) is otherwise ambiguous in UV.</summary>
+    public Vec3? Anchor;
 
-    public NFace(NSurface s, bool sense, FaceTag tag) { Surface = s; Sense = sense; Tag = tag; }
+    public NFace(NSurface s, bool sense, FaceTag tag, Vec3? anchor = null) { Surface = s; Sense = sense; Tag = tag; Anchor = anchor; }
 
     public IEnumerable<NCoedge> Coedges => Loops.SelectMany(l => l.Coedges);
 
@@ -140,8 +160,8 @@ public sealed class NBody
         }
         foreach (var e in Edges)
         {
-            if (e.Uses.Count != 2) return $"edge used {e.Uses.Count} times";
-            if (e.Uses[0].Forward == e.Uses[1].Forward) return "edge used twice in the same direction";
+            if (e.Uses.Count != 2) return $"edge used {e.Uses.Count} times ({e.Curve.GetType().Name} {e.V0.P}->{e.V1.P} on {string.Join(",", e.Uses.Select(u => u.Face.Tag.Name))})";
+            if (e.Uses[0].Forward == e.Uses[1].Forward) return $"edge used twice in the same direction ({e.Curve.GetType().Name} {e.V0.P}->{e.V1.P} on {e.Uses[0].Face.Tag.Name}/{e.Uses[0].Face.Sense}, {e.Uses[1].Face.Tag.Name}/{e.Uses[1].Face.Sense})";
         }
         return null;
     }
@@ -187,7 +207,7 @@ public sealed class NBody
                 tmap[f.Tag] = tag = ReferenceEquals(s, f.Surface) && prefix == null ? f.Tag
                     : new FaceTag(prefix == null ? f.Tag.Name : prefix + f.Tag.Name, s.Kind == SurfaceKind.Plane ? SurfaceDef.PlaneDef : s.Def, f.Tag.Seq);
             }
-            var nf = new NFace(s, f.Sense, tag);
+            var nf = new NFace(s, f.Sense, tag, f.Anchor is { } an ? point(an) : null);
             foreach (var l in f.Loops)
             {
                 var nl = new NLoop();

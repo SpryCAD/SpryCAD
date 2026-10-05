@@ -81,6 +81,9 @@ public sealed class Solid
 
     public Solid(List<Face> faces) { Faces = faces; }
 
+    /// <summary>Exact native B-rep this solid was tessellated from (null for solids from the facet engine).</summary>
+    public Native.NBody? Native { get; init; }
+
     public static readonly Solid Empty = new(new List<Face>());
 
     public bool IsEmpty => Faces.Count == 0;
@@ -102,21 +105,29 @@ public sealed class Solid
     {
         var faces = new List<Face>(Faces.Count);
         foreach (var f in Faces) faces.Add(f.Transformed(t, prefix));
-        return new Solid(faces);
+        return new Solid(faces) { Native = Native?.Transformed(t, prefix) };
     }
 
     public Solid Flipped()
     {
         var faces = new List<Face>(Faces.Count);
         foreach (var f in Faces) faces.Add(f.Flipped());
-        return new Solid(faces);
+        return new Solid(faces) { Native = Native?.Flipped() };
     }
 
     public static Solid Combine(IEnumerable<Solid> solids)
     {
+        var list = solids.ToList();
         var faces = new List<Face>();
-        foreach (var s in solids) faces.AddRange(s.Faces);
-        return new Solid(faces);
+        foreach (var s in list) faces.AddRange(s.Faces);
+        Native.NBody? nb = null;
+        if (list.Count > 0 && list.All(s => s.Native != null))
+        {
+            nb = new Native.NBody();
+            foreach (var s in list) nb.Faces.AddRange(s.Native!.Clone().Faces);
+            nb.Link();
+        }
+        return new Solid(faces) { Native = nb };
     }
 
     Topology? _topo;

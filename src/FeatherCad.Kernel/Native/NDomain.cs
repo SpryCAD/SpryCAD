@@ -12,6 +12,7 @@ public sealed class NDomain
     public List<Vec3[]> Loops3 { get; } = new();
     public double VSign { get; }
     public double URef { get; private set; }
+    public double VRef { get; private set; }
     public double UMin { get; private set; } = double.MaxValue;
     public double UMax { get; private set; } = double.MinValue;
     public double VMin { get; private set; } = double.MaxValue;
@@ -24,19 +25,30 @@ public sealed class NDomain
         VSign = f.Sense ? 1 : -1;
         var s = f.Surface;
         bool first = true;
+        double anchorU = double.NaN, anchorV = double.NaN;
+        if (f.Anchor is { } an && s.PeriodicU)
+        {
+            var q = s.UV(an);
+            anchorU = q.X; if (s.PeriodicV) anchorV = q.Y;
+        }
         foreach (var loop in f.Loops)
         {
             var pts3 = new List<Vec3>(); var uv = new List<Vec2>();
-            double hint = first ? double.NaN : URef;
+            double hint = first ? anchorU : URef;
+            (Vec3 p, Vec2 uv)? pendingPole = null;
+            double vhint = first ? anchorV : VRef;
             foreach (var c in loop.Coedges)
             {
                 var p = c.Points(tol);
                 var cuv = new Vec2[p.Count];
                 for (int i = 0; i < p.Count; i++)
                 {
-                    var q = s.UV(p[i], hint);
+                    // faces are patches within ±π of their anchor: wrap against it (continuous unwrapping
+                    // fails at poles, where θ legitimately jumps)
+                    var q = double.IsNaN(anchorU) ? s.UV(p[i], hint, vhint) : s.UV(p[i], anchorU, double.IsNaN(anchorV) ? vhint : anchorV);
                     cuv[i] = new Vec2(q.X, q.Y * VSign);
                     if (!double.IsNaN(q.X)) hint = q.X;
+                    vhint = q.Y;
                 }
                 // poles / apexes: θ is undefined there, take it from the neighbouring sample of the same edge
                 for (int i = 0; i < p.Count; i++)
@@ -45,10 +57,30 @@ public sealed class NDomain
                         var j = i == 0 ? 1 : i - 1;
                         cuv[i] = new Vec2(cuv[j].X, cuv[i].Y);
                     }
+                if (pendingPole is { } pp && cuv.Length > 0 && s.IsPole(p[0]))
+                {
+                    // previous coedge ended at the pole at u0, this one leaves it at u1: insert pole samples between
+                    var u0 = pp.uv.X; var u1 = cuv[0].X;
+                    int steps = (int)Math.Ceiling(Math.Abs(u1 - u0) / (Math.PI / 24));
+                    for (int k = 1; k < steps; k++) { pts3.Add(pp.p); uv.Add(new Vec2(u0 + (u1 - u0) * k / steps, pp.uv.Y)); }
+                }
+                pendingPole = null;
                 for (int i = 0; i < p.Count - 1; i++) { pts3.Add(p[i]); uv.Add(cuv[i]); }
+                // the end point of this coedge (start of the next) arrives at a pole with a different u:
+                // the pole is a segment in UV, so walk along it in small steps (all mapping to the pole)
+                if (p.Count > 0 && s.IsPole(p[^1]))
+                {
+                    pendingPole = (p[^1], cuv[^1]);
+                }
                 if (cuv.Length > 0) hint = cuv[^1].X;
             }
-            if (first && uv.Count > 0) URef = uv[0].X;
+            if (pendingPole is { } lp && uv.Count > 0 && s.IsPole(pts3[0]))
+            {
+                var u0 = lp.uv.X; var u1 = uv[0].X;
+                int steps = (int)Math.Ceiling(Math.Abs(u1 - u0) / (Math.PI / 24));
+                for (int k = 1; k < steps; k++) { pts3.Add(lp.p); uv.Add(new Vec2(u0 + (u1 - u0) * k / steps, lp.uv.Y)); }
+            }
+            if (first && uv.Count > 0) { URef = uv[0].X; VRef = uv[0].Y * VSign; }
             if (!first && s.PeriodicU && uv.Count > 0)
             {
                 // shift the hole into the range of the outer loop
@@ -64,8 +96,19 @@ public sealed class NDomain
             Loops.Add(uv.ToArray()); Loops3.Add(pts3.ToArray());
             first = false;
         }
-        if (s.PeriodicU && UMax - UMin > 2 * Math.PI + 1e-6)
-            throw new InvalidOperationException($"face {f.Tag.Name} wraps around its surface");
+        if (s.PeriodicU)
+        {
+            // a face that wraps around (a band) shows up as a jump of more than π between neighbours
+            bool wraps = UMax - UMin > 2 * Math.PI - 1e-9;
+            foreach (var l in Loops)
+                for (int i = 0; i < l.Length && !wraps; i++)
+                    if (Math.Abs(l[(i + 1) % l.Length].X - l[i].X) > Math.PI) wraps = true;
+            if (!wraps && s.PeriodicV)
+                foreach (var l in Loops)
+                    for (int i = 0; i < l.Length && !wraps; i++)
+                        if (Math.Abs(l[(i + 1) % l.Length].Y - l[i].Y) > Math.PI) wraps = true;
+            if (wraps) throw new InvalidOperationException($"face {f.Tag.Name} wraps around its surface");
+        }
     }
 
     public static NDomain Of(NFace f, double tol = 1e-3) => new(f, tol);
@@ -73,7 +116,7 @@ public sealed class NDomain
     /// <summary>UV' coordinates of a 3D point (u wrapped into this domain's range).</summary>
     public Vec2 Map(Vec3 p)
     {
-        var q = Face.Surface.UV(p, (UMin + UMax) / 2);
+        var q = Face.Surface.UV(p, (UMin + UMax) / 2, (VMin + VMax) / 2 * VSign);
         return new Vec2(q.X, q.Y * VSign);
     }
 

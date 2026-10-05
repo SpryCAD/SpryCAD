@@ -45,7 +45,9 @@ public sealed class NSurface
     // ---------------------------------------------------------------------------------------
     // parameterization
 
-    public Vec2 UV(Vec3 p, double uHint = double.NaN)
+    public bool PeriodicV => Kind == SurfaceKind.Torus;
+
+    public Vec2 UV(Vec3 p, double uHint = double.NaN, double vHint = double.NaN)
     {
         var l = F.ToLocal3(p);
         switch (Kind)
@@ -62,7 +64,8 @@ public sealed class NSurface
             case SurfaceKind.Torus:
                 {
                     var r = Math.Sqrt(l.X * l.X + l.Y * l.Y);
-                    return new Vec2(Theta(l, uHint), Math.Atan2(l.Z, r - R));
+                    var phi = Math.Atan2(l.Z, r - R);
+                    return new Vec2(Theta(l, uHint), double.IsNaN(vHint) ? phi : NCurve.Wrap(phi, vHint));
                 }
         }
         return default;

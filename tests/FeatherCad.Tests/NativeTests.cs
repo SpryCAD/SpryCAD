@@ -1,0 +1,233 @@
+using FeatherCad.Kernel;
+using FeatherCad.Kernel.Native;
+
+namespace FeatherCad.Tests;
+
+static class NativeTests
+{
+    public static ProfileRegion RectRegion(double x0, double y0, double x1, double y1) =>
+        new(ProfileLoop.Polygon(new[] { new Vec2(x0, y0), new Vec2(x1, y0), new Vec2(x1, y1), new Vec2(x0, y1) }, "E"));
+
+    public static NBody Box(Vec3 min, Vec3 max, string prefix = "Box")
+    {
+        var frame = new Frame(new Vec3(0, 0, min.Z), Vec3.UnitX, Vec3.UnitY, Vec3.UnitZ);
+        return NBuild.Extrude(new[] { RectRegion(min.X, min.Y, max.X, max.Y) }, frame, 0, max.Z - min.Z, prefix);
+    }
+
+    public static NBody Cyl(Vec3 baseCenter, Vec3 axis, double r, double h, string prefix)
+    {
+        var n = axis.Normalized; var x = n.AnyPerpendicular();
+        if (Math.Abs(n.Z) > 0.9) x = Vec3.UnitX;
+        var frame = new Frame(baseCenter, x, Vec3.Cross(n, x), n);
+        return NBuild.Extrude(new[] { new ProfileRegion(ProfileLoop.Circle(Vec2.Zero, r, "C")) }, frame, 0, h, prefix);
+    }
+
+    public static void Check(TestRunner t, NBody b, double? volume = null, double volTol = 0.5)
+    {
+        t.Eq(b.Validate(), null);
+        var s = NTess.ToSolid(b, 0.005);
+        t.Eq(s.Topology.OpenHalfEdges, 0);
+        if (volume is { } v) t.Near(s.Volume(), v, volTol);
+    }
+
+    public static void Run(TestRunner t)
+    {
+        t.Test("Native: tessellation speed", () =>
+        {
+            var cyl = Cyl(new Vec3(10, 10, 0), Vec3.UnitZ, 10, 20, "C");
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            var s = NTess.ToSolid(cyl, 0.005);
+            var tTess = sw.ElapsedMilliseconds; sw.Restart();
+            var open = s.Topology.OpenHalfEdges;
+            var tTopo = sw.ElapsedMilliseconds; sw.Restart();
+            var v = cyl.Validate();
+            Console.WriteLine($"      tess {tTess} ms ({s.Faces.Count} facets), topology {tTopo} ms, validate {sw.ElapsedMilliseconds} ms");
+        });
+
+        t.Test("Native: extruded box and cylinder", () =>
+        {
+            var box = Box(Vec3.Zero, new Vec3(100, 50, 20));
+            t.Eq(box.Faces.Count, 6);
+            Check(t, box, 100000, 1e-6);
+            var cyl = Cyl(new Vec3(10, 10, 0), Vec3.UnitZ, 10, 20, "C");
+            t.Eq(cyl.Faces.Count, 4); // seam-split side + 2 caps
+            Check(t, cyl, Math.PI * 100 * 20, 6.0);
+            // region with a round hole
+            var outer = ProfileLoop.Polygon(new[] { new Vec2(0, 0), new Vec2(60, 0), new Vec2(60, 40), new Vec2(0, 40) }, "E");
+            var hole = ProfileLoop.Circle(new Vec2(30, 20), 8, "H");
+            var plate = NBuild.Extrude(new[] { new ProfileRegion(outer, new[] { hole }) }, Frame.Front, 0, 10, "P");
+            Check(t, plate, 60 * 40 * 10 - Math.PI * 64 * 10, 6.0);
+            // transformed copy stays valid
+            Check(t, plate.Transformed(Transform.Rotation(Vec3.Zero, new Vec3(1, 2, 3), 0.7)), 60 * 40 * 10 - Math.PI * 64 * 10, 6.0);
+            Check(t, plate.Transformed(Transform.Mirror(Plane.FromPointNormal(Vec3.Zero, Vec3.UnitX))), 60 * 40 * 10 - Math.PI * 64 * 10, 6.0);
+        });
+    }
+}
+
+static class NativeBoolTests
+{
+    static double Vol(NBody b) => NTess.ToSolid(b, 0.002).Volume();
+
+    public static void Run(TestRunner t)
+    {
+        t.Test("Native bool: overlapping boxes", () =>
+        {
+            var a = NativeTests.Box(new Vec3(0, 0, 0), new Vec3(10, 10, 10), "A");
+            var b = NativeTests.Box(new Vec3(5, 5, 5), new Vec3(15, 15, 15), "B");
+            var u = NBoolean.Run(a, b, BoolOp.Union); NativeTests.Check(t, u, 1875, 1e-6);
+            var i = NBoolean.Run(a, b, BoolOp.Intersect); NativeTests.Check(t, i, 125, 1e-6);
+            var s = NBoolean.Run(a, b, BoolOp.Subtract); NativeTests.Check(t, s, 875, 1e-6);
+            t.Eq(i.Faces.Count, 6);
+        });
+
+        t.Test("Native bool: stacked and flush boxes (coincident faces)", () =>
+        {
+            var a = NativeTests.Box(new Vec3(0, 0, 0), new Vec3(10, 10, 10), "A");
+            var b = NativeTests.Box(new Vec3(0, 0, 10), new Vec3(10, 10, 20), "B");
+            var u = NBoolean.Run(a, b, BoolOp.Union);
+            NativeTests.Check(t, u, 2000, 1e-6);
+            t.Eq(u.Faces.Count, 6);
+            var c = NativeTests.Box(new Vec3(0, 5, 10), new Vec3(10, 15, 15), "C"); // flush side, overhanging
+            var big = NativeTests.Box(new Vec3(0, 0, 0), new Vec3(20, 20, 10), "Big");
+            var u2 = NBoolean.Run(big, c, BoolOp.Union);
+            NativeTests.Check(t, u2, 4000 + 500, 1e-6);
+        });
+
+        t.Test("Native bool: plate minus cylinder (hole)", () =>
+        {
+            var plate = NativeTests.Box(new Vec3(0, 0, 0), new Vec3(100, 50, 20), "P");
+            var cyl = NativeTests.Cyl(new Vec3(50, 25, -5), Vec3.UnitZ, 10, 30, "H");
+            NBoolean.Trace = m => Console.WriteLine("        " + m);
+            NBody r;
+            try { r = NBoolean.Run(plate, cyl, BoolOp.Subtract); } finally { NBoolean.Trace = null; }
+            NativeTests.Check(t, r, 100000 - Math.PI * 100 * 20, 8.0);
+            t.Eq(r.Faces.Count(f => f.Surface.Kind == SurfaceKind.Cylinder), 2); // seam-split hole wall
+        });
+
+        t.Test("Native bool: boss and oblique cut (ellipse)", () =>
+        {
+            var plate = NativeTests.Box(new Vec3(0, 0, 0), new Vec3(60, 60, 10), "P");
+            var boss = NativeTests.Cyl(new Vec3(30, 30, 5), Vec3.UnitZ, 12, 20, "C");
+            var u = NBoolean.Run(plate, boss, BoolOp.Union);
+            NativeTests.Check(t, u, 36000 + Math.PI * 144 * 15, 8.0);
+            // tilted cylinder through the plate: elliptical section edges on both planar faces
+            var tilt = NativeTests.Cyl(new Vec3(30, 0, -30), new Vec3(0, 1, 1), 6, 100, "T");
+            var r = NBoolean.Run(plate, tilt, BoolOp.Subtract);
+            t.Eq(r.Validate(), null);
+            t.True(r.Edges.Any(e => e.Curve is NEllipse), "elliptical edges");
+            NativeTests.Check(t, r, 36000 - Math.PI * 36 * 10 * Math.Sqrt(2), 8.0);
+        });
+
+        t.Test("Native bool: crossing pipes (traced intersection)", () =>
+        {
+            var a = NativeTests.Cyl(new Vec3(-40, 0, 0), Vec3.UnitX, 10, 80, "A");
+            var b = NativeTests.Cyl(new Vec3(0, -40, 0), Vec3.UnitY, 6, 80, "B");
+            NBoolean.Trace = m => Console.WriteLine("        " + m);
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            var u = NBoolean.Run(a, b, BoolOp.Union);
+            NBoolean.Trace = null;
+            Console.WriteLine($"        union {sw.ElapsedMilliseconds} ms");
+            t.Eq(u.Validate(), null);
+            t.True(u.Edges.Any(e => e.Curve is NSpline), "spline section edges");
+            // exact volume of the union: V(A) + V(B) - V(A∩B); the intersection volume of r=6 inside r=10 crossing
+            sw.Restart();
+            var inter = NBoolean.Run(a, b, BoolOp.Intersect);
+            Console.WriteLine($"        intersect {sw.ElapsedMilliseconds} ms"); sw.Restart();
+            var ts = NTess.ToSolid(inter, 0.002);
+            Console.WriteLine($"        tess {sw.ElapsedMilliseconds} ms, {ts.Faces.Count} facets"); sw.Restart();
+            var vi = ts.Volume();
+            Console.WriteLine($"        volume {sw.ElapsedMilliseconds} ms"); sw.Restart();
+            var us = NTess.ToSolid(u, 0.005); var open = us.Topology.OpenHalfEdges;
+            Console.WriteLine($"        union tess+topo {sw.ElapsedMilliseconds} ms, {us.Faces.Count} facets, open {open}");
+            foreach (var f in u.Faces)
+            {
+                var one = new NBody(); one.Faces.Add(f);
+                var cnt = NTess.ToSolid(one, 0.005).Faces.Count;
+                var dom = NDomain.Of(f, 0.005);
+                Console.WriteLine($"          {f.Tag.Name} {f.Surface.Kind} facets={cnt} boundaryPts={dom.Loops.Sum(l => l.Length)} edges={string.Join(",", f.Coedges.Select(c => c.Edge.Curve.GetType().Name[1..] + c.Edge.Samples(0.005).Count))}");
+            }
+            NativeTests.Check(t, u, Math.PI * 100 * 80 + Math.PI * 36 * 80 - vi, 30.0);
+        });
+    }
+}
+
+static class NativeRevolveTests
+{
+    static ProfileRegion Poly(params (double x, double y)[] p) => new(ProfileLoop.Polygon(p.Select(q => new Vec2(q.x, q.y)), "L"));
+
+    public static NBody Sphere(double r, string prefix = "S")
+    {
+        var loop = new ProfileLoop();
+        loop.AddArc(Vec2.Zero, r, -Math.PI / 2, Math.PI / 2, true, "Arc");
+        loop.Verts.Add(new ProfileVertex(new Vec2(0, r), "Axis"));
+        return NBuild.Revolve(new[] { new ProfileRegion(loop) }, Frame.Front, Vec2.Zero, new Vec2(0, 1), 2 * Math.PI, prefix);
+    }
+
+    public static void Run(TestRunner t)
+    {
+        t.Test("Native revolve: cylinder, cone, sphere, torus, partial", () =>
+        {
+            var cyl = NBuild.Revolve(new[] { Poly((0, 0), (10, 0), (10, 20), (0, 20)) }, Frame.Front, Vec2.Zero, new Vec2(0, 1), 2 * Math.PI, "R");
+            NativeTests.Check(t, cyl, Math.PI * 100 * 20, 6);
+            var cone = NBuild.Revolve(new[] { Poly((0, 0), (10, 0), (0, 15)) }, Frame.Front, Vec2.Zero, new Vec2(0, 1), 2 * Math.PI, "K");
+            NativeTests.Check(t, cone, Math.PI * 100 * 15 / 3, 6);
+            t.True(cone.Faces.Any(f => f.Surface.Kind == SurfaceKind.Cone), "cone face");
+            var sph = Sphere(10);
+            NativeTests.Check(t, sph, 4.0 / 3 * Math.PI * 1000, 8);
+            t.Eq(sph.Faces.Count, 2);
+            var ring = NBuild.Revolve(new[] { new ProfileRegion(ProfileLoop.Circle(new Vec2(20, 0), 5, "T")) }, Frame.Front, Vec2.Zero, new Vec2(0, 1), 2 * Math.PI, "T");
+            NativeTests.Check(t, ring, 2 * Math.PI * 20 * Math.PI * 25, 10);
+            var quarter = NBuild.Revolve(new[] { Poly((5, 0), (10, 0), (10, 20), (5, 20)) }, Frame.Front, Vec2.Zero, new Vec2(0, 1), Math.PI / 2, "Q");
+            NativeTests.Check(t, quarter, Math.PI * (100 - 25) * 20 / 4, 3);
+            var big = NBuild.Revolve(new[] { Poly((5, 0), (10, 0), (10, 20), (5, 20)) }, Frame.Front, Vec2.Zero, new Vec2(0, -1), 1.5 * Math.PI, "Q3");
+            NativeTests.Check(t, big, Math.PI * (100 - 25) * 20 * 0.75, 6);
+        });
+
+        t.Test("Native bool: tool axis lying in a face (degenerate)", () =>
+        {
+            var plate = NativeTests.Box(new Vec3(-30, -30, -10), new Vec3(30, 30, 0), "P");
+            var prof = Poly((0, 0.001), (6.5, 0.001), (3.3, -3.2), (3.3, -20), (0, -20));
+            var tool = NBuild.Revolve(new[] { prof }, Frame.Front, Vec2.Zero, new Vec2(0, 1), 2 * Math.PI, "H");
+            NBoolean.Trace = m => Console.WriteLine("        " + m);
+            try { var r = NBoolean.Run(plate, tool, BoolOp.Subtract); NativeTests.Check(t, r, null); }
+            finally { NBoolean.Trace = null; }
+        });
+
+        t.Test("Native bool: countersunk hole, sphere cut, torus union", () =>
+        {
+            var plate = NativeTests.Box(new Vec3(-30, -30, -10), new Vec3(30, 30, 0), "P");
+            // countersink drill profile revolved about -Z through the origin: (r, depth)
+            // Frame.Top: sketch y = world -Z, so positive y is depth below the top face
+            var prof = Poly((0, -0.001), (6.5, -0.001), (3.3, 3.2), (3.3, 20), (0, 20));
+            var tool = NBuild.Revolve(new[] { prof }, Frame.Top, Vec2.Zero, new Vec2(0, 1), 2 * Math.PI, "H");
+            NativeTests.Check(t, tool, null);
+            NBoolean.Trace = m => Console.WriteLine("        " + m);
+            NBody r;
+            try { r = NBoolean.Run(plate, tool, BoolOp.Subtract); } finally { NBoolean.Trace = null; }
+            t.Eq(r.Validate(), null);
+            t.True(r.Faces.Any(f => f.Surface.Kind == SurfaceKind.Cone), "countersink cone");
+            NativeTests.Check(t, r, null);
+        });
+
+        t.Test("Native bool: sphere dimple (seams in the cut plane)", () =>
+        {
+            var plate = NativeTests.Box(new Vec3(-30, -30, -10), new Vec3(30, 30, 0), "P");
+            var ball = Sphere(8, "B").Transformed(Transform.Translation(new Vec3(10, 10, 0)));
+            NBoolean.Trace = m => Console.WriteLine("        " + m);
+            NBody dimple;
+            try { dimple = NBoolean.Run(plate, ball, BoolOp.Subtract); } finally { NBoolean.Trace = null; }
+            NativeTests.Check(t, dimple, 36000 - 2.0 / 3 * Math.PI * 512, 8);
+        });
+
+        t.Test("Native bool: torus ring union", () =>
+        {
+            var plate = NativeTests.Box(new Vec3(-30, -30, -10), new Vec3(30, 30, 0), "P");
+            NBoolean.Trace = m => Console.WriteLine("        " + m);
+            var ring = NBuild.Revolve(new[] { new ProfileRegion(ProfileLoop.Circle(new Vec2(15, 0), 4, "T")) }, Frame.Top, Vec2.Zero, new Vec2(0, 1), 2 * Math.PI, "T");
+            NBody u;
+            try { u = NBoolean.Run(plate, ring, BoolOp.Union); } finally { NBoolean.Trace = null; }
+            t.Eq(u.Validate(), null);
+            NativeTests.Check(t, u, 36000 + 2 * Math.PI * 15 * Math.PI * 16 / 2, 20);
+        });
+    }
+}

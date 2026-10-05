@@ -46,6 +46,10 @@ static class Program
             KernelTests.Run(t);
             Console.WriteLine("Exact");
             ExactTests.Run(t);
+            Console.WriteLine("Native");
+            NativeTests.Run(t);
+            NativeBoolTests.Run(t);
+            NativeRevolveTests.Run(t);
             Console.WriteLine("Core");
             CoreTests.Run(t);
             Console.WriteLine($"\n{t.Passed} passed, {t.Failed} failed");
