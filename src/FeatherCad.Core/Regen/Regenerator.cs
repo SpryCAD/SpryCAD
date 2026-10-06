@@ -373,10 +373,12 @@ public sealed class Regenerator
             var bodies = new List<Body>();
             var errors = new List<string>();
             var applied = new List<(Solid tool, bool cut)>();
+            var blended = new List<Vec3[]>(); double blendedLength = 0;
             foreach (var b in State.Bodies)
             {
                 if (!byBody.TryGetValue(b.Id, out var seeds)) { bodies.Add(b); continue; }
                 var edges = NativeBlend.Expand(b.Solid.Native!, seeds, propagate);
+                blended.AddRange(edges.Select(EdgePoints)); blendedLength += edges.Sum(TrueLength);
                 var r = NativeBlend.Apply(b.Solid, edges, size, fillet, f.Id, errors, overflow, status.ProblemEdges, applied, chamfer);
                 bodies.Add(new Body { Id = b.Id, Solid = r });
             }
@@ -385,7 +387,10 @@ public sealed class Regenerator
             if (errors.Count == 0 && byBody.Count == 1 && applied.Count > 0 && applied.All(t => t.cut == applied[0].cut))
             {
                 var tools = applied.Select(t => t.tool).ToList();
-                State.Tools[f.Id] = new ToolInfo(() => tools.Count == 1 ? tools[0] : Csg.UnionAll(tools), applied[0].cut, true);
+                State.Tools[f.Id] = new ToolInfo(() => tools.Count == 1 ? tools[0] : Csg.UnionAll(tools), applied[0].cut, true)
+                {
+                    Blend = new BlendSpec(refs.Select(r => r.Clone()).ToList(), size, fillet, propagate, overflow, chamfer, blended, blendedLength),
+                };
             }
             // all or nothing (as SolidWorks): a fillet that cannot be made on every edge fails as a whole,
             // naming the edges (highlighted in the viewport) instead of silently skipping some
@@ -537,10 +542,22 @@ public sealed class Regenerator
                     throw new FeatureException("Only extrude, revolve, hole, fillet, chamfer, pattern and mirror features can be patterned.");
                 var copies = new List<Solid>();
                 for (int i = 0; i < transforms.Count; i++)
+                {
+                    // a blend whose instance edges are not the seed's edges moved is solved again there
+                    if (tool.Blend is { } bs && InstanceEdges(bs, seeds, transforms[i], i) is { } inst && !inst.same)
+                    {
+                        everything.AddRange(ReapplyBlend(bs, inst.body, inst.edges, i, seedId));
+                        continue;
+                    }
                     copies.Add(tool.Tool.Transformed(transforms[i], $"{f.Id}.{i + 1}."));
-                var all = Csg.UnionAll(copies);
-                ApplyTool(all, tool.IsCut, true);
-                everything.Add(tool.Tool); everything.Add(all);
+                }
+                everything.Add(tool.Tool);
+                if (copies.Count > 0)
+                {
+                    var all = Csg.UnionAll(copies);
+                    ApplyTool(all, tool.IsCut, true);
+                    everything.Add(all);
+                }
                 if (cutKind == null) cutKind = tool.IsCut; else if (cutKind != tool.IsCut) mixed = true;
             }
             // the pattern/mirror as a whole (seeds + copies) can itself be patterned or mirrored
@@ -555,6 +572,83 @@ public sealed class Regenerator
                     catch (InvalidOperationException ex) { throw new FeatureException("This pattern cannot be patterned or mirrored again: " + ex.Message); }
                     finally { Csg.NoFallback = old; }
                 }, isCut, true);
+        }
+
+        /// <summary>
+        /// The edges a blend seed resolves to on pattern instance i (its references renamed to the instance's faces,
+        /// hints moved, tangent chains as for the seed), and whether they are the seed's edges moved. Null when the
+        /// references do not resolve (the tool is copied then, as before).
+        /// </summary>
+        (Body body, List<Kernel.Native.NEdge> edges, bool same)? InstanceEdges(BlendSpec bs, IEnumerable<string> seeds, Transform t, int i)
+        {
+            if (!Csg.UseNative || State.Bodies.Any(b => b.Solid.Native == null)) return null;
+            var seedIds = seeds.ToList();
+            string Map(string name) => seedIds.Any(s => name.StartsWith(s + ".")) ? $"{f.Id}.{i + 1}." + name : name;
+            Body? body = null;
+            var found = new List<Kernel.Native.NEdge>();
+            foreach (var r in bs.Refs)
+            {
+                var hit = Resolver.ResolveNativeEdge(new EdgeRef { A = Map(r.A), B = Map(r.B), Body = r.Body, Hint = t.Point(r.Hint) }, State);
+                if (hit == null)
+                {
+                    if (Environment.GetEnvironmentVariable("FC_PATDBG") != null) Console.WriteLine($"  instance {i + 2}: {Map(r.A)} / {Map(r.B)} not found");
+                    return null;
+                }
+                if (body != null && hit.Value.body.Id != body.Id) return null;
+                body = hit.Value.body;
+                if (!found.Contains(hit.Value.edge)) found.Add(hit.Value.edge);
+            }
+            if (body == null) return null;
+            var edges = NativeBlend.Expand(body.Solid.Native!, found, bs.Propagate);
+            // the same curves (however the faces split them into edges): points of the moved seed edges lie on the
+            // instance's edges and the other way round
+            // traced edges are fitted curves: the same intersection traced on two instances differs by the fit tolerance
+            var tol = 1e-5 * Math.Max(1, body.Solid.Native!.Bounds.Diagonal);
+            var want = bs.Edges.SelectMany(w => w).Select(p => t.Point(p)).ToList();
+            static double Dist(Kernel.Native.NEdge e, Vec3 p)
+            {
+                double lo = Math.Min(e.T0, e.T1), hi = Math.Max(e.T0, e.T1);
+                var u = e.Curve.Param(p, e.Curve.Periodic ? 0.5 * (lo + hi) : null);
+                for (int k = 0; k < 6; k++)
+                {
+                    var d = e.Curve.Deriv(u); var dd = Vec3.Dot(d, d);
+                    if (!(dd > 1e-300)) break;
+                    u -= Vec3.Dot(e.Curve.Eval(u) - p, d) / dd;
+                }
+                if (e.Curve.Periodic) { while (u < lo - 1e-9) u += e.Curve.Period; while (u > hi + 1e-9) u -= e.Curve.Period; }
+                return Math.Min(Vec3.Distance(e.Curve.Eval(Math.Clamp(u, lo, hi)), p), Math.Min(Vec3.Distance(e.V0.P, p), Vec3.Distance(e.V1.P, p)));
+            }
+            var lw = bs.Length; var le = edges.Sum(TrueLength);
+            bool same = want.All(p => edges.Any(e => Dist(e, p) < tol)) && Math.Abs(le - lw) <= 1e-4 * Math.Max(lw, 1e-9);
+            if (Environment.GetEnvironmentVariable("FC_PATDBG") != null)
+                Console.WriteLine($"  instance {i + 2}: {edges.Count} edges (seed {bs.Edges.Count}), worst point {want.Max(p => edges.Min(e => Dist(e, p))):g3} tol {tol:g3}, length {le:0.####} vs {lw:0.####} -> {(same ? "copy" : "solve")}");
+            return (body, edges, same);
+        }
+
+        static double TrueLength(Kernel.Native.NEdge e)
+        {
+            var q = e.Samples(1e-5);
+            double l = 0; for (int k = 1; k < q.Count; k++) l += Vec3.Distance(q[k - 1], q[k]);
+            return l;
+        }
+
+        static Vec3[] EdgePoints(Kernel.Native.NEdge e) => Enumerable.Range(0, 9).Select(k => k == 0 ? e.V0.P : k == 8 ? e.V1.P : e.At(k / 8.0)).ToArray();
+
+        /// <summary>Solves a patterned blend on instance i's own edges; returns the tools it applied.</summary>
+        List<Solid> ReapplyBlend(BlendSpec bs, Body body, List<Kernel.Native.NEdge> edges, int i, string seedId)
+        {
+            var errors = new List<string>();
+            var applied = new List<(Solid tool, bool cut)>();
+            var r = NativeBlend.Apply(body.Solid, edges, bs.Size, bs.Fillet, $"{f.Id}.{i + 1}.{seedId}", errors, bs.Overflow, status.ProblemEdges, applied, bs.Chamfer);
+            // one instance whose own geometry cannot take the blend (e.g. it lands where the radius folds over itself)
+            // does not fail the whole pattern: that instance is left without it and named in a warning
+            if (errors.Count > 0)
+            {
+                status.Warnings.Add($"Instance {i + 2} is not {(bs.Fillet ? "filleted" : "chamfered")}: {errors[0]}");
+                return new List<Solid>();
+            }
+            State = State.With(State.Bodies.Select(b => b.Id == body.Id ? new Body { Id = b.Id, Solid = r } : b).ToList());
+            return applied.Select(a => a.tool).ToList();
         }
 
         void DoLinearPattern(LinearPatternFeature lp)

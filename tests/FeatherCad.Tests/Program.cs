@@ -38,7 +38,7 @@ static class Program
     static int Main(string[] args)
     {
         if (Environment.GetEnvironmentVariable("FC_TOPO") != null) FeatherCad.Kernel.Topology.Debug = Console.WriteLine;
-        if (Environment.GetEnvironmentVariable("FC_BLEND") != null) FeatherCad.Kernel.NativeBlend.Debug = Console.WriteLine;
+        if (Environment.GetEnvironmentVariable("FC_BLEND") != null) { FeatherCad.Kernel.NativeBlend.Debug = Console.WriteLine; FeatherCad.Kernel.RollingBall.Debug = Console.WriteLine; }
         if (Environment.GetEnvironmentVariable("FC_BOOL") != null) FeatherCad.Kernel.Native.NBoolean.Trace = Console.WriteLine;
         if (Environment.GetEnvironmentVariable("FC_SHELL") != null) FeatherCad.Kernel.Native.NShell.Debug = Console.WriteLine;
         if (args.Length > 7 && args[0] == "fillet") return Hang.Run(args);
@@ -92,7 +92,7 @@ static class Program
         if (args.Length > 0 && args[0] == "demos") return Demos.Write(args.Length > 1 ? args[1] : Path.Combine(Path.GetTempPath(), "fc-demos"));
         if (args.Length > 1 && args[0] == "containerize") return Demos.Containerize(args.Skip(1));
         if (args.Length > 2 && args[0] == "validate") return Validate.Run(args[1], args[2]);
-        if (args.Length > 4 && args[0] == "repro") { Bench.Repro(args[1], args[2], args[3], args[4]); return 0; }
+        if (args.Length > 4 && args[0] == "repro") { Bench.Repro(args[1], args[2..]); return 0; }
         if (args.Length > 1 && args[0] == "localbench") return LocalBench.Run(args[1], args.Length > 2 ? int.Parse(args[2]) : 5);
         if (args.Length > 1 && args[0] == "bench")
         {

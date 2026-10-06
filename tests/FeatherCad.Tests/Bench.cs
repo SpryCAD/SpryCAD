@@ -104,15 +104,29 @@ static class Bench
     /// <c>-- repro file.fcad FeatureName Prop value</c>: rebuilds with one parameter changed and the boolean trace
     /// of the failing (fallback) operations written to stdout.
     /// </summary>
-    public static void Repro(string file, string feature, string prop, string value)
+    public static void Repro(string file, params string[] edits)
     {
         var doc = CadDocument.Load(file);
-        var f = doc.Features.First(x => x.Name == feature);
-        f.GetType().GetProperty(prop)!.SetValue(f, value);
+        // edits: (feature, property, value) triples; feature "=" sets the equation named by property
+        for (int i = 0; i + 2 < edits.Length; i += 3)
+        {
+            var (feature, prop, value) = (edits[i], edits[i + 1], edits[i + 2]);
+            if (feature == "=") { doc.Equations.First(e => e.Name == prop).Expr = value; continue; }
+            var f = doc.Features.First(x => x.Name == feature);
+            var pi = f.GetType().GetProperty(prop)!;
+            pi.SetValue(f, Convert.ChangeType(value, pi.PropertyType, System.Globalization.CultureInfo.InvariantCulture));
+        }
         var log = new List<string>();
         FeatherCad.Kernel.Native.NBoolean.Trace = m => log.Add(m);
         int before = Csg.NativeFallback;
+        bool prof = Environment.GetEnvironmentVariable("FC_PROF") != null;
+        if (prof) { Prof.Reset(); Prof.Enabled = true; }
         var r = new Regenerator().Rebuild(doc);
+        if (prof)
+        {
+            Prof.Enabled = false;
+            foreach (var (name, pms, calls) in Prof.Results().Take(30)) Console.WriteLine($"      {name,-24} {pms,8:0.0} ms  x{calls}");
+        }
         FeatherCad.Kernel.Native.NBoolean.Trace = null;
         foreach (var ff in doc.Features) Console.WriteLine($"  {ff.Name,-16} {r.Status[ff.Id].Milliseconds,8:0} ms {r.Status[ff.Id].Error} {string.Join("; ", r.Status[ff.Id].Warnings)}");
         Console.WriteLine($"fallbacks: {Csg.NativeFallback - before}, last: {Csg.LastFallbackReason}");

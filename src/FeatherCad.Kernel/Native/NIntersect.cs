@@ -85,7 +85,7 @@ public static class NIntersect
         // sections within 50 tol of the exact intersection)
         const int probe = 16;
         bool allOn = true;
-        var onTol = c is NSpline or NPolyline ? tol * 100 : tol;
+        var onTol = c is NSpline or NPolyline ? Math.Max(tol * 100, c is NSpline ns ? ns.FitTol * 2 : 0) : tol;
         for (int i = 0; i <= probe && allOn; i++) if (Math.Abs(F(lo + (hi - lo) * i / probe)) > onTol) allOn = false;
         if (allOn) return new EdgeHits(res, true);
 
@@ -104,7 +104,9 @@ public static class NIntersect
         else
         {
             double total = ArcBound(c, lo, hi);
-            double minL = Math.Max(total * 1e-5, tol * 10);
+            // leaves no shorter than this: two roots closer together are a tangential touch, which does not split
+            // edges anyway, and an edge running alongside a surface would otherwise be subdivided into 1e5 pieces
+            double minL = Math.Max(total * 1e-5, tol * 1000);
             void Iso(double ta, double tb, double fa, double fb, int depth)
             {
                 var L = ArcBound(c, ta, tb);

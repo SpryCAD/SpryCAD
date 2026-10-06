@@ -14,6 +14,27 @@ public sealed class NBoolean
     public static Action<string>? Trace;
     static readonly object _traceLock = new();
     static void T(string m) { if (Trace != null) lock (_traceLock) Trace?.Invoke(m); }
+    bool RollsOn(NSurface blend, NSurface s) => blend.Spine is { } sp
+        && (sp.SupportA is { } a && (ReferenceEquals(a, s) || a.CoincidentWith(s, _tol * 10)) || sp.SupportB is { } b && (ReferenceEquals(b, s) || b.CoincidentWith(s, _tol * 10)));
+
+    /// <summary>
+    /// Two pieces of one fillet (pipes of the same radius whose spines join at a node with the same tangent): they
+    /// meet tangentially along the arc at the joint and nearly coincide around it, so there is nothing to trace.
+    /// </summary>
+    bool Continues(NSurface a, NSurface b)
+    {
+        if (a.Spine is not { } sa || b.Spine is not { } sb || Math.Abs(a.R - b.R) > _tol * 10) return false;
+        // the joint is a node of both spines (spines run a little past their joints)
+        for (int i = 0; i < sa.P.Length; i++)
+            for (int j = 0; j < sb.P.Length; j++)
+                if (Vec3.Distance(sa.P[i], sb.P[j]) < _tol * 10 && Math.Abs(Vec3.Dot(sa.D[i], sb.D[j])) > 1 - 1e-8) return true;
+        return false;
+    }
+
+    /// <summary>How far a fitted curve may be from the exact one (0 for exact curves).</summary>
+    static double FitTol(NCurve c) => c is NSpline ns ? ns.FitTol : 0;
+
+    static int Id(object o) => System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(o) % 100000;
     static string Dump(IEnumerable<NFace> fs) => string.Join(", ", fs.GroupBy(f => f.Tag.Name).Select(g => $"{g.Key}x{g.Count()}[{string.Join("/", g.Select(f => f.Loops.Count))}]"));
     readonly double _tol;      // geometric coincidence
     readonly double _onTol;    // "on the boundary" for UV/domain decisions
@@ -176,6 +197,10 @@ public sealed class NBoolean
             for (int i = 0; i < pairs.Count; i++)
             {
                 if (pairs[i].coincident) continue;
+                // a blend and the surface its ball rolls on touch along the contact curve, which is an edge of the
+                // blend face (imprinted as an edge lying on the other face): tracing that tangency is slow and noisy
+                if (RollsOn(pairs[i].fa.Surface, pairs[i].fb.Surface) || RollsOn(pairs[i].fb.Surface, pairs[i].fa.Surface)
+                    || Continues(pairs[i].fa.Surface, pairs[i].fb.Surface)) { pairCurves[i] = new(); continue; }
                 var an = NIntersect.Analytic(pairs[i].fa.Surface, pairs[i].fb.Surface, _tol * 10);
                 if (an != null) pairCurves[i] = an; else toTrace.Add(i);
             }
@@ -187,11 +212,14 @@ public sealed class NBoolean
             Parallel.ForEach(toTrace, i =>
             {
                 var (fa, fb, _) = pairs[i];
+                var swt = System.Diagnostics.Stopwatch.StartNew();
                 List<NCurve> c; using (Prof.Time(Prof.Enabled ? $"tr.{fa.Surface.Kind}x{fb.Surface.Kind}" : "")) c = NIntersect.Trace(fa, fb.Surface, traceTol).Cast<NCurve>().ToList();
                 if (Prof.Enabled && c.Count == 0) Prof.Add($"tr.empty.{fa.Surface.Kind}x{fb.Surface.Kind}", 0);
                 // traced from the other side too (small faces)
                 if (c.Count == 0) c = NIntersect.Trace(fb, fa.Surface, traceTol).Cast<NCurve>().ToList();
                 pairCurves[i] = c;
+                if (Trace != null && Environment.GetEnvironmentVariable("FC_TRACE_SLOW") != null)
+                    T($"  trace {fa.Tag.Name}({fa.Surface.Kind}) x {fb.Tag.Name}({fb.Surface.Kind}): {c.Count} curves, {string.Join(" ", c.Select(x => x is NPolyline pl ? pl.Pts.Length + "pts" : x.GetType().Name))} in {swt.ElapsedMilliseconds} ms");
             });
         }
         for (int i = 0; i < pairs.Count; i++)
@@ -221,11 +249,14 @@ public sealed class NBoolean
             foreach (var (f, l) in sections)
                 if (f.Tag.Name.Contains(tf))
                 {
-                    T($"  face {f.Tag.Name} boundary: " + string.Join(" ", f.Coedges.Select(c => $"[{c.Start.P}->{c.End.P} {c.Edge.Curve.GetType().Name[1..]}]")));
-                    foreach (var e in l) T($"    sec {e.V0.P}->{e.V1.P} {e.Curve.GetType().Name[1..]} mid {e.Mid}");
+                    T($"  face {f.Tag.Name} boundary: " + string.Join(" ", f.Coedges.Select(c => $"[{c.Start.P}#{Id(c.Start)}->{c.End.P}#{Id(c.End)} {c.Edge.Curve.GetType().Name[1..]}]")));
+                    foreach (var e in l) T($"    sec {e.V0.P}#{Id(e.V0)}->{e.V1.P}#{Id(e.V1)} {e.Curve.GetType().Name[1..]} mid {e.Mid}");
                 }
         var piecesA = SplitFaces(A, sections);
         var piecesB = SplitFaces(B, sections);
+        if (Trace != null && Environment.GetEnvironmentVariable("FC_TRACE_FACE") is { } tf2)
+            foreach (var pc in piecesA.Concat(piecesB).Where(f => f.Tag.Name.Contains(tf2)))
+                T($"  piece {pc.Tag.Name}: " + string.Join(" | ", pc.Loops.Select(l => string.Join(" ", l.Coedges.Select(c => $"{c.Start.P}")))));
         Lap("split faces");
         if (Trace != null) T($"pieces A: {Dump(piecesA)}");
         if (Trace != null) T($"pieces B: {Dump(piecesB)}");
@@ -338,6 +369,8 @@ public sealed class NBoolean
     {
         foreach (var v in _pool) if (Vec3.Distance(v.P, p) < _tol * 10) return v;
         var nv = new NVertex(p);
+        if (Trace != null && Environment.GetEnvironmentVariable("FC_TRACE_SNAP") is { } ts && p.ToString().Contains(ts))
+            T($"  new vertex {p}#{Id(nv)}: nearest pool vertex at {_pool.Min(v => Vec3.Distance(v.P, p)):g3}; " + string.Join(" / ", Environment.StackTrace.Split((char)10).Skip(2).Take(3).Select(x => x.Trim())));
         _pool.Add(nv);
         return nv;
     }
@@ -348,6 +381,8 @@ public sealed class NBoolean
     void FindEdgeSplits(NBody X, NBody Y, Dictionary<NEdge, List<(double, NVertex)>> splits, List<(NEdge, NFace)> onSurface)
     {
         List<(NFace f, Box3 box)> fboxes; using (Prof.Time("split.fboxes")) fboxes = ActiveFaces(Y).Select(f => (f, box: f.Bounds(_sampleTol * 500))).ToList();
+        List<NVertex>? yVerts = null;
+        var grazeNear = Math.Max(_onTol * 200, 1e3 * _tol);
         foreach (var e in NearEdges(ActiveFaces(X)))
         {
             var eb = e.Bounds(_sampleTol * 500);
@@ -365,12 +400,30 @@ public sealed class NBoolean
                     // the true boundary may sit that far outside the spline
                     if (Dom(f).Classify(f.Surface.Project(p), Math.Max(_onTol, _sampleTol * 12)) < 0) continue;
                     if (Vec3.Distance(p, e.V0.P) < _tol * 10 || Vec3.Distance(p, e.V1.P) < _tol * 10) continue;
-                    var v = Snap(p);
-                    if (!splits.TryGetValue(e, out var l)) splits[e] = l = new();
-                    if (!l.Any(x => ReferenceEquals(x.Item2, v))) l.Add((t, v));
                     // the edge runs along the surface here (e.g. a seam crossing a fillet's contact line): the hit is a
-                    // double root, accurate only to about the square root of the solver tolerance
-                    if (Math.Abs(Vec3.Dot(e.Curve.Deriv(t).Normalized, f.Surface.Normal(p))) < 0.05) _grazing.Add(v);
+                    // double root, accurate only to about the square root of the solver tolerance. Where a vertex of the
+                    // other body lies on the edge close by (the end of a blend's contact line on it), that is the point.
+                    bool grazing = Math.Abs(Vec3.Dot(e.Curve.Deriv(t).Normalized, f.Surface.Normal(p))) < 0.05;
+                    NVertex? w = null; double tw = t;
+                    // a grazing touch this close to an end of the edge is that end
+                    if (grazing && (Vec3.Distance(p, e.V0.P) < grazeNear || Vec3.Distance(p, e.V1.P) < grazeNear)) continue;
+                    if (grazing)
+                    {
+                        yVerts ??= VerticesOf(NearEdges(ActiveFaces(Y)));
+                        foreach (var y in yVerts)
+                        {
+                            if (Vec3.Distance(y.P, p) > grazeNear || ReferenceEquals(y, e.V0) || ReferenceEquals(y, e.V1)) continue;
+                            var ty = Refine(e.Curve, y.P, t);
+                            if (Vec3.Distance(e.Curve.Eval(ty), y.P) > _tol * 10) continue;
+                            if (w == null || Vec3.Distance(y.P, p) < Vec3.Distance(w.P, p)) { w = y; tw = ty; }
+                        }
+                    }
+                    var v = w ?? Snap(p);
+                    var ts = w != null ? tw : t;
+                    if (Vec3.Distance(v.P, e.V0.P) < _tol * 10 || Vec3.Distance(v.P, e.V1.P) < _tol * 10) continue;
+                    if (!splits.TryGetValue(e, out var l)) splits[e] = l = new();
+                    if (!l.Any(x => ReferenceEquals(x.Item2, v))) l.Add((ts, v));
+                    if (grazing && w == null) _grazing.Add(v);
                 }
             }
         }
@@ -397,22 +450,35 @@ public sealed class NBoolean
             {
                 var g = c.Edge;
                 if (ReferenceEquals(g, e) || !eb.Overlaps(g.Bounds(_sampleTol * 500), _onTol)) continue;
-                foreach (var (te, tg, p, reach) in Crossings(e, g))
+                foreach (var (te0, tg0, p, reach) in Crossings(e, g))
                 {
-                    if (Near(p, e) || Near(p, g)) continue;
-                    var v = Snap(p);
-                    foreach (var (edge, t) in new[] { (e, te), (g, tg) })
+                    if (Near(p, e) && Near(p, g)) continue;
+                    // a crossing at (or within the boundary tolerance of) an end of one edge: that end vertex splits the
+                    // other edge (a fresh vertex a few microns away would leave the two bodies' boundaries apart)
+                    var end = new[] { e.V0, e.V1, g.V0, g.V1 }.Where(w => Vec3.Distance(w.P, p) < _onTol).MinBy(w => Vec3.Distance(w.P, p));
+                    var v = end ?? Snap(p);
+                    var targets = new List<(NEdge edge, double t)>();
+                    foreach (var (edge, t) in new[] { (e, te0), (g, tg0) })
+                        if (!ReferenceEquals(edge.V0, v) && !ReferenceEquals(edge.V1, v)) targets.Add((edge, end == null ? t : ParamOn(edge, v.P, t)));
+                    foreach (var (edge, t) in targets)
                     {
                         if (!splits.TryGetValue(edge, out var l)) splits[edge] = l = new();
                         // grazing splits of this edge close to the crossing were the same point, computed badly
                         l.RemoveAll(x => !ReferenceEquals(x.v, v) && _grazing.Contains(x.v) && Vec3.Distance(x.v.P, p) < near + reach);
                         if (!l.Any(x => ReferenceEquals(x.v, v))) l.Add((t, v));
                     }
-                    if (Trace != null) T($"  on-surface crossing {p} reach {reach:g3}: {e.Curve.GetType().Name}{e.Mid} x {g.Curve.GetType().Name}{g.Mid} on {f.Tag.Name}; splits now {string.Join(" ", splits[e].Select(x => x.v.P))} | {string.Join(" ", splits[g].Select(x => x.v.P))}");
+                    if (Trace != null) T($"  on-surface crossing {p} reach {reach:g3}: {e.Curve.GetType().Name}{e.Mid} x {g.Curve.GetType().Name}{g.Mid} on {f.Tag.Name}; splits now {string.Join(" ", splits.GetValueOrDefault(e)?.Select(x => x.v.P) ?? [])} | {string.Join(" ", splits.GetValueOrDefault(g)?.Select(x => x.v.P) ?? [])}");
                 }
             }
         }
         bool Near(Vec3 p, NEdge x) => Vec3.Distance(p, x.V0.P) < _tol * 10 || Vec3.Distance(p, x.V1.P) < _tol * 10;
+        static double ParamOn(NEdge x, Vec3 p, double hint)
+        {
+            double lo = Math.Min(x.T0, x.T1), hi = Math.Max(x.T0, x.T1);
+            var t = Refine(x.Curve, p, x.Curve.Param(p, hint));
+            if (x.Curve.Periodic) { while (t < lo - 1e-9) t += x.Curve.Period; while (t > hi + 1e-9) t -= x.Curve.Period; }
+            return Math.Clamp(t, lo, hi);
+        }
     }
 
     readonly Dictionary<(NEdge, NEdge), List<(double, double, Vec3, double)>> _crossings = new();
@@ -481,8 +547,11 @@ public sealed class NBoolean
                 // the closest point
                 int k1 = k;
                 while (k1 + 1 < keys.Count && keys[k1 + 1] == keys[k1] + 1 && best[keys[k1 + 1]].d < coincident) k1++;
-                bool local = best.TryGetValue(i - 1, out var before) && before.d >= coincident
-                    && best.TryGetValue(keys[k1] + 1, out var after) && after.d >= coincident;
+                // at an end of the edge the run is an overlap only if that end lies on the other edge (else the edges
+                // cross in the last segment)
+                bool Away(int seg, bool atStart) => atStart ? seg == 1 && DistTo(pa[0], pb) >= coincident : seg == pa.Count - 1 && DistTo(pa[^1], pb) >= coincident;
+                bool local = (best.TryGetValue(i - 1, out var before) ? before.d >= coincident : Away(i, true))
+                    && (best.TryGetValue(keys[k1] + 1, out var after) ? after.d >= coincident : Away(keys[k1], false));
                 if (local)
                     for (int x = k; x <= k1; x++)
                     {
@@ -497,7 +566,7 @@ public sealed class NBoolean
             seeds.Add(i);
         }
         if (Trace != null && Environment.GetEnvironmentVariable("FC_TRACE_CROSS") is { } tc && (a.Mid.ToString().Contains(tc) || b.Mid.ToString().Contains(tc)))
-            T($"    cross {a.Curve.GetType().Name}{a.V0.P}->{a.V1.P} x {b.Curve.GetType().Name}{b.V0.P}->{b.V1.P}: segs {sa.Count}x{sb.Count} coinc {coincident:g3} tol {_tol:g3} seeds {string.Join(",", seeds)}");
+            T($"    cross {a.Curve.GetType().Name}{a.V0.P}->{a.V1.P} x {b.Curve.GetType().Name}{b.V0.P}->{b.V1.P}: segs {sa.Count}x{sb.Count} coinc {coincident:g3} gap {gap:g3} best {string.Join(" ", best.OrderBy(x => x.Key).Select(x => $"{x.Key}:{x.Value.d:g3}"))} seeds {string.Join(",", seeds)}");
         foreach (var i in seeds)
             {
                 var (j, s, u, d) = best[i];
@@ -550,6 +619,27 @@ public sealed class NBoolean
         return res;
     }
 
+    static double DistTo(Vec3 p, List<Vec3> poly)
+    {
+        double best = double.MaxValue;
+        for (int i = 1; i < poly.Count; i++) best = Math.Min(best, SegSeg(p, p, poly[i - 1], poly[i]).d);
+        return best;
+    }
+
+    /// <summary>Newton steps on |c(t) - p|^2 from t (curve parameters from projections can be a little off).</summary>
+    static double Refine(NCurve c, Vec3 p, double t)
+    {
+        for (int i = 0; i < 8; i++)
+        {
+            var d = c.Deriv(t); var dd = Vec3.Dot(d, d);
+            if (!(dd > 1e-300)) break;
+            var step = Vec3.Dot(c.Eval(t) - p, d) / dd;
+            t -= step;
+            if (Math.Abs(step) < 1e-15 * Math.Max(1, Math.Abs(t))) break;
+        }
+        return t;
+    }
+
     static (double s, double u, double d) SegSeg(Vec3 p0, Vec3 p1, Vec3 q0, Vec3 q1)
     {
         Vec3 d1 = p1 - p0, d2 = q1 - q0, r = p0 - q0;
@@ -598,9 +688,16 @@ public sealed class NBoolean
                 if (ReferenceEquals(v, e.V0) || ReferenceEquals(v, e.V1) || !box.Contains(v.P, _onTol)) continue;
                 if (Vec3.Distance(v.P, e.V0.P) < _tol * 10 || Vec3.Distance(v.P, e.V1.P) < _tol * 10) continue;
                 double lo = Math.Min(e.T0, e.T1), hi = Math.Max(e.T0, e.T1);
-                var t = e.Curve.Param(v.P, e.Curve.Periodic ? 0.5 * (lo + hi) : null);
+                var t = Refine(e.Curve, v.P, e.Curve.Param(v.P, e.Curve.Periodic ? 0.5 * (lo + hi) : null));
                 if (t <= lo || t >= hi || Vec3.Distance(e.Curve.Eval(t), v.P) > _tol * 10) continue;
                 if (!splits.TryGetValue(e, out var l)) splits[e] = l = new();
+                // an exact vertex of the other body supersedes grazing hits of this edge around it (an edge lying on a
+                // face, touching the blend next to it where the blend's boundary ends)
+                if (!_grazing.Contains(v))
+                {
+                    var near = Math.Max(_onTol * 200, 1e3 * _tol);
+                    l.RemoveAll(x => !ReferenceEquals(x.v, v) && _grazing.Contains(x.v) && Vec3.Distance(x.v.P, v.P) < near);
+                }
                 if (!l.Any(x => ReferenceEquals(x.v, v))) l.Add((t, v));
             }
         }
@@ -716,7 +813,8 @@ public sealed class NBoolean
             pts[0] = v0.P; pts[^1] = v1.P;
             var spline = FitSpline(pts, _sampleTol * 5);
             if (spline == null) return new NEdge(new NLine(v0.P, v1.P - v0.P), 0, Vec3.Distance(v0.P, v1.P), v0, v1);
-            return new NEdge(new NSpline(spline), 0, 1, v0, v1);
+            // the fit is checked at the exact points; between them it may stray a little further
+            return new NEdge(new NSpline(spline) { FitTol = _sampleTol * 5 * 2 }, 0, 1, v0, v1);
         }
         return new NEdge(c, t0, t1, v0, v1);
     }
@@ -773,7 +871,8 @@ public sealed class NBoolean
         {
             var e = c.Edge;
             bool on = true;
-            for (int i = 0; i <= 8 && on; i++) if (Math.Abs(dst.Surface.F_(e.At(i / 8.0))) > _tol * 10) on = false;
+            var onTol = Math.Max(_tol * 10, e.Curve is NSpline ns ? ns.FitTol * 2 : 0);
+            for (int i = 0; i <= 8 && on; i++) if (Math.Abs(dst.Surface.F_(e.At(i / 8.0))) > onTol) on = false;
             if (!on) continue;
             _blockers.Add(e);
             dom ??= Dom(dst);
@@ -820,7 +919,11 @@ public sealed class NBoolean
     {
         var dom = Dom(f);
         var boundaryEdges = new HashSet<NEdge>(f.Coedges.Select(c => c.Edge), ReferenceEqualityComparer.Instance);
-        secs = secs.Where(e => !boundaryEdges.Contains(e)).ToList();
+        // a section that is a boundary edge, or a copy of one from the other body (same ends, same curve; sewn to it
+        // later), does not split the face
+        bool Copy(NEdge e) => f.Coedges.Any(c => (ReferenceEquals(c.Edge.V0, e.V0) && ReferenceEquals(c.Edge.V1, e.V1) || ReferenceEquals(c.Edge.V0, e.V1) && ReferenceEquals(c.Edge.V1, e.V0))
+            && !e.Closed && Vec3.Distance(c.Edge.Mid, e.Mid) < Math.Max(_onTol * 4, Math.Max(FitTol(e.Curve), FitTol(c.Edge.Curve)) * 4));
+        secs = secs.Where(e => !boundaryEdges.Contains(e) && !Copy(e)).ToList();
         // prune dangling section edges (an end not connected to anything else)
         var vertexDeg = new Dictionary<NVertex, int>(ReferenceEqualityComparer.Instance);
         void Inc(NVertex v) => vertexDeg[v] = vertexDeg.GetValueOrDefault(v) + 1;
@@ -836,6 +939,8 @@ public sealed class NBoolean
                     secs.Remove(e); vertexDeg[e.V0]--; vertexDeg[e.V1]--; pruned = true;
                 }
         }
+        if (Trace != null && Environment.GetEnvironmentVariable("FC_TRACE_FACE") is { } tfs && f.Tag.Name.Contains(tfs))
+            T($"  split {f.Tag.Name}: {secs.Count} sections after filtering: " + string.Join(" ", secs.Select(e => $"[{e.V0.P}#{Id(e.V0)}->{e.V1.P}#{Id(e.V1)} {e.Curve.GetType().Name[1..]} mid-gap {f.Coedges.Where(c => ReferenceEquals(c.Edge.V0, e.V0) || ReferenceEquals(c.Edge.V1, e.V0)).Select(c => Vec3.Distance(c.Edge.Mid, e.Mid)).DefaultIfEmpty(-1).Min():g3} fit {(e.Curve is NSpline ns2 ? ns2.FitTol : 0):g3} vs {f.Coedges.Select(c => c.Edge.Curve).OfType<NSpline>().Select(x => x.FitTol).DefaultIfEmpty(0).Max():g3} same curve {f.Coedges.Any(c => ReferenceEquals(c.Edge.Curve, e.Curve))}]")));
         if (secs.Count == 0) { yield return f; yield break; }
 
         var hes = new List<HalfEdge>();

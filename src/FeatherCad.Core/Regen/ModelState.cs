@@ -31,7 +31,17 @@ public sealed class ToolInfo
     public Solid Tool => _tool.Value;
     public bool IsCut { get; }
     public bool Merge { get; }
+    /// <summary>For fillets/chamfers: how to solve the blend again on a pattern instance whose geometry differs.</summary>
+    public BlendSpec? Blend { get; init; }
 }
+
+/// <summary>
+/// A blend as specified (edge references, size, options) and the edges it was made on (start, middle and end
+/// point of each): a pattern copies the tool where an instance's edges are the seed's edges moved, and solves the
+/// blend again where they are not (e.g. a groove patterned onto a fillet: the fillet on its rim runs differently).
+/// </summary>
+public sealed record BlendSpec(List<FeatherCad.Core.Model.EdgeRef> Refs, double Size, bool Fillet, bool Propagate, bool Overflow,
+    FeatherCad.Kernel.ChamferSize? Chamfer, List<FeatherCad.Kernel.Vec3[]> Edges, double Length);
 
 /// <summary>Immutable model state after a feature.</summary>
 public sealed class ModelState

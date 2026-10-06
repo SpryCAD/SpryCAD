@@ -136,6 +136,28 @@ static class NativeBoolTests
             t.True(!st.Ok && st.Error!.Contains("360"), st.Error ?? "accepted");
         });
 
+        t.Test("Native blend: a groove's rim fillet running onto another fillet", () =>
+        {
+            // a grip groove moved onto a spoke's fillet: its rim edges run from the rim onto the spoke fillet (and the
+            // spoke) across tangent face boundaries; the ball rolls from face to face in one tool. 3 degrees: the edge
+            // dips into the fillet while the ball stays on the rim (an island); 9: the ball crosses onto the fillet
+            // after the edge has passed further vertices
+            var dir = AppContext.BaseDirectory;
+            while (dir != null && !Directory.Exists(Path.Combine(dir, "samples"))) dir = Path.GetDirectoryName(dir);
+            var file = Path.Combine(dir!, "samples", "demos", "spoked-handwheel.fcad");
+            foreach (var a in new[] { "3", "9" })
+            {
+                var doc = CadDocument.Load(file);
+                doc.Equations.First(e => e.Name == "GripA").Expr = a;
+                foreach (var f in doc.Features.Where(f => f.Name is "Grips" or "Keyway")) f.Suppressed = true;
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                var r = new Regenerator().Rebuild(doc);
+                foreach (var f in doc.Features.Where(f => !f.Suppressed))
+                    t.True(r.Status[f.Id].Ok && r.Status[f.Id].Warnings.Count == 0, $"GripA {a}: {f.Name}: {r.Status[f.Id].Error} {string.Join(";", r.Status[f.Id].Warnings)}");
+                Console.WriteLine($"      GripA {a}: {sw.ElapsedMilliseconds} ms");
+            }
+        });
+
         t.Test("Native bool: overlapping boxes", () =>
         {
             var a = NativeTests.Box(new Vec3(0, 0, 0), new Vec3(10, 10, 10), "A");

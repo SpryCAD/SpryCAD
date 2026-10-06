@@ -55,12 +55,27 @@ public static class NativeBlend
                     : e.Curve is NCircle ? ArcTools(group, size, fillet, name, ch, RefIsFirst) : LineTool(e, size, fillet, name, ch, RefIsFirst);
                 if (tools == null && fillet)
                 {
-                    // any other pair of faces: rolling ball along the chain of edges this edge belongs to
-                    foreach (var o in Chain(e, edges)) if (!group.Contains(o)) { group.Add(o); done.Add(o); }
-                    var rb = RollingBall.Build(group, size, name, OnFaces);
+                    // any other pair of faces: rolling ball along the chain of edges this edge belongs to; first across
+                    // faces meeting tangentially (one tool, the ball rolls from face to face), else between the same
+                    // two surfaces only (separate tools, trimmed where they run past their faces)
+                    RollingBall.Result? rb = null;
+                    var tangent = TangentChain(e, edges, done);
+                    if (tangent.Count > Chain(e, edges).Count)
+                    {
+                        var r2 = RollingBall.Build(tangent, size, name, OnFaces);
+                        Debug?.Invoke($"tangent chain {name}: {tangent.Count} edges -> {r2.Error ?? (r2.Fits ? "fits" : "overflows")}");
+                        if (r2.Error == null) { rb = r2; foreach (var o in tangent) if (!group.Contains(o)) { group.Add(o); done.Add(o); } }
+                    }
+                    if (rb == null)
+                    {
+                        foreach (var o in Chain(e, edges)) if (!group.Contains(o)) { group.Add(o); done.Add(o); }
+                        rb = RollingBall.Build(group, size, name, OnFaces);
+                    }
                     if (rb.Error != null) { Fail(rb.Error); continue; }
                     (tools, convex, fits) = (new List<Solid> { rb.Tool! }, rb.Convex, rb.Fits);
                 }
+                if (Debug != null)
+                    Debug($"blend {name}: {string.Join(", ", group.Select(g => $"{g.Curve.GetType().Name}{g.V0.P}->{g.V1.P} [{string.Join("|", g.Uses.Select(u => u.Face.Tag.Name + ":" + u.Face.Surface.Kind))}]"))} -> tools={tools?.Count} fits={fits}");
                 if (tools == null) { Fail("unsupported edge geometry."); continue; }
                 if (!fits)
                 {
@@ -132,6 +147,39 @@ public static class NativeBlend
                 if (!res.Contains(o) && (ReferenceEquals(o.V0, c.V0) || ReferenceEquals(o.V0, c.V1) || ReferenceEquals(o.V1, c.V0) || ReferenceEquals(o.V1, c.V1))
                     && RollingBall.SameSurfaces(e, o))
                     res.Add(o);
+        }
+        return res;
+    }
+
+    /// <summary>
+    /// The selected edges connected to e end to end where one side stays on the same surface and the faces on the
+    /// other side meet tangentially at the shared vertex (or are the same surface).
+    /// </summary>
+    static List<NEdge> TangentChain(NEdge e, IReadOnlyList<NEdge> selected, HashSet<NEdge> done)
+    {
+        static bool Same(NSurface x, NSurface y) => ReferenceEquals(x, y) || x.CoincidentWith(y, 1e-9);
+        var res = new List<NEdge> { e };
+        for (int i = 0; i < res.Count; i++)
+        {
+            var c = res[i];
+            foreach (var o in selected)
+            {
+                if (res.Contains(o) || done.Contains(o) || o.Uses.Count != 2 || c.Uses.Count != 2) continue;
+                NVertex? v = ReferenceEquals(o.V0, c.V0) || ReferenceEquals(o.V0, c.V1) ? o.V0 : ReferenceEquals(o.V1, c.V0) || ReferenceEquals(o.V1, c.V1) ? o.V1 : null;
+                if (v == null) continue;
+                if (RollingBall.SameSurfaces(c, o)) { res.Add(o); continue; }
+                bool joined = false;
+                foreach (var ca in c.Uses.Select(u => u.Face))
+                    foreach (var oa in o.Uses.Select(u => u.Face))
+                    {
+                        if (joined || !Same(ca.Surface, oa.Surface) || ca.Sense != oa.Sense) continue;
+                        var cb = c.Uses.Select(u => u.Face).First(f => !ReferenceEquals(f, ca));
+                        var ob = o.Uses.Select(u => u.Face).First(f => !ReferenceEquals(f, oa));
+                        if (Same(cb.Surface, ca.Surface) || Same(ob.Surface, oa.Surface)) continue;
+                        joined = Vec3.Dot(Outward(cb, v.P), Outward(ob, v.P)) > 1 - 1e-4;
+                    }
+                if (joined) res.Add(o);
+            }
         }
         return res;
     }

@@ -129,6 +129,9 @@ public sealed class NEllipse : NCurve
 public sealed class NSpline : NCurve
 {
     public BSplineCurve S { get; }
+    /// <summary>How far the spline may be from the exact curve it was fitted to (0: exact, e.g. imported). Tests for an
+    /// edge lying on a surface allow this much: a later boolean may work at a finer tolerance than the one that fitted it.</summary>
+    public double FitTol { get; init; }
     readonly Vec3[] _samples; // dense samples for closest-point seeding
     public NSpline(BSplineCurve s)
     {
@@ -159,7 +162,7 @@ public sealed class NSpline : NCurve
     {
         var poles = new Vec3[S.Poles.Length];
         for (int i = 0; i < poles.Length; i++) poles[i] = t.Point(S.Poles[i]);
-        return new NSpline(new BSplineCurve(S.Degree, poles, S.Knots));
+        return new NSpline(new BSplineCurve(S.Degree, poles, S.Knots)) { FitTol = FitTol };
     }
     public override int Samples(double t0, double t1, double tol) => Math.Clamp((int)Math.Ceiling(Math.Abs(t1 - t0) * S.Poles.Length * 3), 2, 600);
     public override ExactCurve ToExact() => S;
