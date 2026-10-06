@@ -1,7 +1,8 @@
 # Builds the Windows installer and the Linux packages (tar.gz and .deb).
 #   - Run by hand (Actions > Packages > Run workflow): the packages are attached to the run as artifacts.
-#   - Push a version tag (git tag v0.2.0 && git push origin v0.2.0): the same, plus a draft GitHub release with
-#     the packages attached, to review and publish by hand.
+#   - Push a version tag (git tag v0.2.0 && git push origin v0.2.0): the same, plus a published GitHub release with
+#     the packages attached (a tag with a suffix, v0.2.0-beta, is marked a pre-release). Pushing the tag again
+#     (moved to another commit) replaces the release's packages.
 # The version always comes from git (the build scripts): on a tag v0.2.0 it is 0.2.0, three commits later 0.2.0-dev.3.
 # The checkouts fetch the full history so the tags are there to describe.
 name: Packages
@@ -79,9 +80,17 @@ jobs:
         with:
           path: packages
           merge-multiple: true
-      - name: Draft release
+      - name: Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" packages/* --repo "$GITHUB_REPOSITORY" --draft --generate-notes \
-            --title "FeatherCAD ${GITHUB_REF_NAME#v}"
+          tag="$GITHUB_REF_NAME"
+          pre=false; case "$tag" in *-*) pre=true ;; esac
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            # the tag was pushed again: same release, current packages, published (it may be an older draft)
+            gh release upload "$tag" packages/* --repo "$GITHUB_REPOSITORY" --clobber
+            gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft=false --prerelease=$pre
+          else
+            gh release create "$tag" packages/* --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes \
+              --prerelease=$pre --title "FeatherCAD ${tag#v}"
+          fi
