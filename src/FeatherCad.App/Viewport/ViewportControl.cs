@@ -232,6 +232,7 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         Mode?.Draw(this, _dyn);
         DrawPointAndSegmentHighlights(_dyn, hl);
         if (_nav == Nav.Rotate) DrawPivot(_dyn, _pivot);
+        else if (Spinning) DrawPivot(_dyn, _spinPivot);
         else if (_pinnedPivot is { } pin) DrawPivot(_dyn, pin);
         // edges a feature failed on (e.g. a fillet that does not fit), drawn on top in red
         foreach (var pl in ProblemEdges)
@@ -251,7 +252,7 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         DrawTriad(w, h);
         _r.EndFrame(fb);
 
-        if (_animating) RequestNextFrameRendering();
+        if (_animating || Spinning) RequestNextFrameRendering();
     }
 
     void UpdateSceneRadius()
@@ -436,8 +437,45 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         RequestNextFrameRendering();
     }
 
+    // continuous spin (an arrow key held down): degrees per second about the view's up and right axes
+    float _spinYaw, _spinPitch;
+    Vector3 _spinPivot;
+    readonly Stopwatch _spinClock = new();
+    bool Spinning => _spinYaw != 0 || _spinPitch != 0;
+
+    /// <summary>
+    /// Spins the view steadily (degrees per second, signs as <see cref="Rotate"/>) about the rotation center
+    /// until set back to zero; frame-timed, so it stays smooth whatever the key repeat rate.
+    /// </summary>
+    public void SetSpin(float yawPerSec, float pitchPerSec)
+    {
+        if (!Spinning && (yawPerSec != 0 || pitchPerSec != 0))
+        {
+            _spinPivot = ComputePivot();
+            _spinClock.Restart();
+            _animating = false; // takes over from a step still animating
+        }
+        _spinYaw = yawPerSec; _spinPitch = pitchPerSec;
+        RequestNextFrameRendering();
+    }
+
+    void StepSpin()
+    {
+        if (!Spinning) return;
+        var dt = (float)_spinClock.Elapsed.TotalSeconds;
+        _spinClock.Restart();
+        dt = MathF.Min(dt, 0.1f); // a stalled frame must not jump
+        var qy = Quaternion.CreateFromAxisAngle(Camera.Up, _spinYaw * dt * MathF.PI / 180);
+        var qx = Quaternion.CreateFromAxisAngle(Camera.Right, _spinPitch * dt * MathF.PI / 180);
+        var q = Quaternion.Normalize(qy * qx);
+        Camera.Target = _spinPivot + Vector3.Transform(Camera.Target - _spinPivot, q);
+        Camera.Rotation = Quaternion.Normalize(q * Camera.Rotation);
+        Dispatcher.UIThread.Post(() => { Mode?.UpdateOverlay(this); CameraChanged?.Invoke(); });
+    }
+
     void StepAnimation()
     {
+        StepSpin();
         if (!_animating) return;
         var t = (float)Math.Min(1, _animClock.Elapsed.TotalMilliseconds / AnimMs);
         var e = t < 0.5f ? 2 * t * t : 1 - MathF.Pow(-2 * t + 2, 2) / 2;

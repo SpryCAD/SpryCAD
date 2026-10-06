@@ -81,6 +81,8 @@ public partial class MainWindow : Window
         BuildPanelTabs();
 
         AddHandler(KeyDownEvent, OnWindowKeyDown, RoutingStrategies.Tunnel);
+        AddHandler(KeyUpEvent, OnWindowKeyUp, RoutingStrategies.Tunnel);
+        Deactivated += (_, _) => StopArrowSpin();
         Closing += OnClosing;
         Opened += (_, _) =>
         {
@@ -404,11 +406,53 @@ public partial class MainWindow : Window
             case Key.Space:
                 _viewSelector.Toggle(); e.Handled = true;
                 break;
-            case Key.Left: Viewport.Rotate(alt ? 0 : shift ? -90 : -15, 0); if (alt) { Viewport.Camera.Roll(-0.26f); Viewport.Redraw(); } e.Handled = true; break;
-            case Key.Right: Viewport.Rotate(alt ? 0 : shift ? 90 : 15, 0); if (alt) { Viewport.Camera.Roll(0.26f); Viewport.Redraw(); } e.Handled = true; break;
-            case Key.Up: Viewport.Rotate(0, shift ? -90 : -15); e.Handled = true; break;
-            case Key.Down: Viewport.Rotate(0, shift ? 90 : 15); e.Handled = true; break;
+            case Key.Left when alt: Viewport.Camera.Roll(-0.26f); Viewport.Redraw(); e.Handled = true; break;
+            case Key.Right when alt: Viewport.Camera.Roll(0.26f); Viewport.Redraw(); e.Handled = true; break;
+            case Key.Left or Key.Right or Key.Up or Key.Down: ArrowDown(e.Key, shift); e.Handled = true; break;
         }
+    }
+
+    // arrow keys: those held down, and those held long enough to repeat (spinning)
+    readonly HashSet<Key> _arrowsDown = new(), _arrowsSpinning = new();
+    bool _spinFast;
+
+    static (int yaw, int pitch) ArrowDir(Key k) => k switch { Key.Left => (-1, 0), Key.Right => (1, 0), Key.Up => (0, -1), _ => (0, 1) };
+
+    /// <summary>
+    /// A tap rotates a 15° (Shift: 90°) step. Held down, once the key repeats, the view spins steadily until it is
+    /// released (stepping on every repeat was jerky: each one restarted the step animation midway).
+    /// </summary>
+    void ArrowDown(Key k, bool shift)
+    {
+        if (_arrowsDown.Add(k))
+        {
+            var (yaw, pitch) = ArrowDir(k);
+            var step = shift ? 90 : 15;
+            Viewport.Rotate(yaw * step, pitch * step);
+            return;
+        }
+        _spinFast = shift;
+        if (_arrowsSpinning.Add(k)) UpdateArrowSpin();
+    }
+
+    void UpdateArrowSpin()
+    {
+        float yaw = 0, pitch = 0;
+        foreach (var k in _arrowsSpinning) { var (y, p) = ArrowDir(k); yaw += y; pitch += p; }
+        var rate = _spinFast ? 180f : 60f; // degrees per second
+        Viewport.SetSpin(yaw * rate, pitch * rate);
+    }
+
+    void OnWindowKeyUp(object? sender, KeyEventArgs e)
+    {
+        if (_arrowsDown.Remove(e.Key) && _arrowsSpinning.Remove(e.Key)) UpdateArrowSpin();
+    }
+
+    /// <summary>Stops an arrow-key spin whose key-up will never arrive (the window lost focus).</summary>
+    void StopArrowSpin()
+    {
+        _arrowsDown.Clear(); _arrowsSpinning.Clear();
+        Viewport.SetSpin(0, 0);
     }
 
     // ------------------------------------------------------------------------------------------

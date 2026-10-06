@@ -137,7 +137,8 @@ public sealed class ViewSelector : Grid
         /// <summary>The view direction under the cursor (a face, edge or corner direction), highlighted.</summary>
         public Vector3? Hover;
 
-        record struct Tile(Vector3 Dir, Point[] Poly, bool Face, string? Name);
+        /// <summary>A clickable region: a facet of the cube, or a panel standing for a face the cube hides.</summary>
+        record struct Tile(Vector3 Dir, Point[] Poly, bool Face, string? Name, bool Panel = false);
 
         /// <summary>
         /// Where the cube goes: centered on the model, big enough that the model sits well inside it whatever its
@@ -172,6 +173,26 @@ public sealed class ViewSelector : Grid
                 if (Vector3.Dot(dir, toEye) <= 1e-6f * toEye.Length()) continue;
                 var face = FaceNames.TryGetValue(dir, out var name);
                 tiles.Add(new Tile(dir, poly.Select(P).ToArray(), face, name));
+            }
+            // faces the cube hides (seen edge-on or facing away): flat panels just outside it, on the side each
+            // face points to (as SolidWorks), so e.g. Front is one click away while looking at Left. The face
+            // straight behind points away from the viewer, to no side, and gets none.
+            var c2 = P(Vector3.Zero);
+            var outline = Shape.SelectMany(s => s.poly).Select(P).ToList();
+            var size = Math.Max(outline.Max(q => q.X) - outline.Min(q => q.X), outline.Max(q => q.Y) - outline.Min(q => q.Y));
+            const double Thick = 22, Gap = 10;
+            foreach (var (n, name) in FaceNames)
+            {
+                var toEye = cam.Perspective ? cam.Eye - (center + n * half) : cam.Back;
+                if (Vector3.Dot(n, Vector3.Normalize(toEye)) > 0.2f) continue; // clearly visible on the cube
+                var d = new Avalonia.Vector(Vector3.Dot(n, cam.Right), -Vector3.Dot(n, cam.Up));
+                if (d.Length < 0.3) continue;
+                d /= d.Length;
+                var reach = outline.Max(q => (q.X - c2.X) * d.X + (q.Y - c2.Y) * d.Y);
+                var mid = c2 + d * (reach + Gap + Thick / 2);
+                var along = new Avalonia.Vector(-d.Y, d.X) * (size * 0.32);
+                var across = d * (Thick / 2);
+                tiles.Add(new Tile(n, new[] { mid - along - across, mid + along - across, mid + along + across, mid - along + across }, true, name, Panel: true));
             }
             return tiles;
         }
@@ -219,7 +240,12 @@ public sealed class ViewSelector : Grid
                     // only where the face is big enough on screen to hold its name
                     var wPx = t.Poly.Max(q => q.X) - t.Poly.Min(q => q.X);
                     var hPx = t.Poly.Max(q => q.Y) - t.Poly.Min(q => q.Y);
-                    if (wPx > ft.Width + 4 && hPx > ft.Height) ctx.DrawText(ft, new Point(c.X - ft.Width / 2, c.Y - ft.Height / 2));
+                    var at = new Point(c.X - ft.Width / 2, c.Y - ft.Height / 2);
+                    if (wPx > ft.Width + 4 && hPx > ft.Height) ctx.DrawText(ft, at);
+                    else if (t.Panel && hPx > ft.Width + 4 && wPx > ft.Height)
+                        // an upright panel (to the side of the cube): the name reads bottom to top
+                        using (ctx.PushTransform(Matrix.CreateTranslation(-c.X, -c.Y) * Matrix.CreateRotation(-Math.PI / 2) * Matrix.CreateTranslation(c.X, c.Y)))
+                            ctx.DrawText(ft, at);
                 }
             }
         }
