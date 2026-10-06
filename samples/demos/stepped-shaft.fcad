@@ -73,37 +73,37 @@
             "fixed": false
           },
           {
-            "id": 4,
+            "id": 2,
             "x": 40,
             "y": 15,
             "fixed": false
           },
           {
-            "id": 7,
+            "id": 3,
             "x": 40,
             "y": 21,
             "fixed": false
           },
           {
-            "id": 10,
+            "id": 4,
             "x": 110,
             "y": 21,
             "fixed": false
           },
           {
-            "id": 13,
+            "id": 5,
             "x": 110,
             "y": 12.5,
             "fixed": false
           },
           {
-            "id": 16,
+            "id": 6,
             "x": 145,
             "y": 12.5,
             "fixed": false
           },
           {
-            "id": 19,
+            "id": 7,
             "x": 145,
             "y": 0,
             "fixed": false
@@ -114,68 +114,66 @@
             "$type": "line",
             "p1": 0,
             "p2": 1,
-            "id": 22,
+            "id": 8,
             "construction": false
           },
           {
             "$type": "line",
             "p1": 1,
+            "p2": 2,
+            "id": 9,
+            "construction": false
+          },
+          {
+            "$type": "line",
+            "p1": 2,
+            "p2": 3,
+            "id": 10,
+            "construction": false
+          },
+          {
+            "$type": "line",
+            "p1": 3,
             "p2": 4,
-            "id": 23,
+            "id": 11,
             "construction": false
           },
           {
             "$type": "line",
             "p1": 4,
+            "p2": 5,
+            "id": 12,
+            "construction": false
+          },
+          {
+            "$type": "line",
+            "p1": 5,
+            "p2": 6,
+            "id": 13,
+            "construction": false
+          },
+          {
+            "$type": "line",
+            "p1": 6,
             "p2": 7,
-            "id": 24,
+            "id": 14,
             "construction": false
           },
           {
             "$type": "line",
             "p1": 7,
-            "p2": 10,
-            "id": 25,
-            "construction": false
-          },
-          {
-            "$type": "line",
-            "p1": 10,
-            "p2": 13,
-            "id": 26,
-            "construction": false
-          },
-          {
-            "$type": "line",
-            "p1": 13,
-            "p2": 16,
-            "id": 27,
-            "construction": false
-          },
-          {
-            "$type": "line",
-            "p1": 16,
-            "p2": 19,
-            "id": 28,
-            "construction": false
-          },
-          {
-            "$type": "line",
-            "p1": 19,
             "p2": 0,
-            "id": 29,
+            "id": 15,
             "construction": false
           }
         ],
         "constraints": [
           {
-            "id": 2,
-            "type": "HDistance",
+            "id": 16,
+            "type": "Vertical",
             "refs": [
-              0,
-              1
+              8
             ],
-            "expr": "0",
             "value": 0,
             "sign": 1,
             "flip": 0,
@@ -184,149 +182,12 @@
             "labelY": 0
           },
           {
-            "id": 3,
-            "type": "VDistance",
-            "refs": [
-              0,
-              1
-            ],
-            "expr": "D1/2",
-            "value": 15,
-            "sign": 1,
-            "flip": 0,
-            "driven": false,
-            "labelX": 0,
-            "labelY": 0
-          },
-          {
-            "id": 5,
-            "type": "HDistance",
-            "refs": [
-              0,
-              4
-            ],
-            "expr": "L1",
-            "value": 40,
-            "sign": 1,
-            "flip": 0,
-            "driven": false,
-            "labelX": 0,
-            "labelY": 0
-          },
-          {
-            "id": 6,
-            "type": "VDistance",
-            "refs": [
-              0,
-              4
-            ],
-            "expr": "D1/2",
-            "value": 15,
-            "sign": 1,
-            "flip": 0,
-            "driven": false,
-            "labelX": 0,
-            "labelY": 0
-          },
-          {
-            "id": 8,
-            "type": "HDistance",
-            "refs": [
-              0,
-              7
-            ],
-            "expr": "L1",
-            "value": 40,
-            "sign": 1,
-            "flip": 0,
-            "driven": false,
-            "labelX": 0,
-            "labelY": 0
-          },
-          {
-            "id": 9,
-            "type": "VDistance",
-            "refs": [
-              0,
-              7
-            ],
-            "expr": "D2/2",
-            "value": 21,
-            "sign": 1,
-            "flip": 0,
-            "driven": false,
-            "labelX": 0,
-            "labelY": 0
-          },
-          {
-            "id": 11,
-            "type": "HDistance",
-            "refs": [
-              0,
-              10
-            ],
-            "expr": "L1\u002BL2",
-            "value": 110,
-            "sign": 1,
-            "flip": 0,
-            "driven": false,
-            "labelX": 0,
-            "labelY": 0
-          },
-          {
-            "id": 12,
-            "type": "VDistance",
-            "refs": [
-              0,
-              10
-            ],
-            "expr": "D2/2",
-            "value": 21,
-            "sign": 1,
-            "flip": 0,
-            "driven": false,
-            "labelX": 0,
-            "labelY": 0
-          },
-          {
-            "id": 14,
-            "type": "HDistance",
-            "refs": [
-              0,
-              13
-            ],
-            "expr": "L1\u002BL2",
-            "value": 110,
-            "sign": 1,
-            "flip": 0,
-            "driven": false,
-            "labelX": 0,
-            "labelY": 0
-          },
-          {
-            "id": 15,
-            "type": "VDistance",
-            "refs": [
-              0,
-              13
-            ],
-            "expr": "D3/2",
-            "value": 12.5,
-            "sign": 1,
-            "flip": 0,
-            "driven": false,
-            "labelX": 0,
-            "labelY": 0
-          },
-          {
             "id": 17,
-            "type": "HDistance",
+            "type": "Vertical",
             "refs": [
-              0,
-              16
+              10
             ],
-            "expr": "L1\u002BL2\u002BL3",
-            "value": 145,
+            "value": 0,
             "sign": 1,
             "flip": 0,
             "driven": false,
@@ -335,13 +196,24 @@
           },
           {
             "id": 18,
-            "type": "VDistance",
+            "type": "Vertical",
             "refs": [
-              0,
-              16
+              12
             ],
-            "expr": "D3/2",
-            "value": 12.5,
+            "value": 0,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 19,
+            "type": "Vertical",
+            "refs": [
+              14
+            ],
+            "value": 0,
             "sign": 1,
             "flip": 0,
             "driven": false,
@@ -353,7 +225,37 @@
             "type": "HDistance",
             "refs": [
               0,
-              19
+              2
+            ],
+            "expr": "L1",
+            "value": 40,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 21,
+            "type": "HDistance",
+            "refs": [
+              0,
+              4
+            ],
+            "expr": "L1\u002BL2",
+            "value": 110,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 22,
+            "type": "HDistance",
+            "refs": [
+              0,
+              6
             ],
             "expr": "L1\u002BL2\u002BL3",
             "value": 145,
@@ -364,14 +266,96 @@
             "labelY": 0
           },
           {
-            "id": 21,
+            "id": 23,
+            "type": "Horizontal",
+            "refs": [
+              9
+            ],
+            "value": 0,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 24,
+            "type": "Horizontal",
+            "refs": [
+              11
+            ],
+            "value": 0,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 25,
+            "type": "Horizontal",
+            "refs": [
+              13
+            ],
+            "value": 0,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 26,
+            "type": "Horizontal",
+            "refs": [
+              15
+            ],
+            "value": 0,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 27,
             "type": "VDistance",
             "refs": [
               0,
-              19
+              1
             ],
-            "expr": "0",
-            "value": 0,
+            "expr": "D1/2",
+            "value": 15,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 28,
+            "type": "VDistance",
+            "refs": [
+              0,
+              3
+            ],
+            "expr": "D2/2",
+            "value": 21,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 29,
+            "type": "VDistance",
+            "refs": [
+              0,
+              5
+            ],
+            "expr": "D3/2",
+            "value": 12.5,
             "sign": 1,
             "flip": 0,
             "driven": false,
@@ -389,7 +373,7 @@
       "$type": "revolve",
       "sketchId": "F1",
       "isCut": false,
-      "axisEntity": 29,
+      "axisEntity": 15,
       "angle": "360",
       "reverse": false,
       "merge": true,
@@ -401,8 +385,8 @@
       "$type": "fillet",
       "edges": [
         {
-          "a": "F2.R.L23",
-          "b": "F2.R.L24",
+          "a": "F2.R.L9",
+          "b": "F2.R.L10",
           "hint": [
             40,
             15,
@@ -410,8 +394,8 @@
           ]
         },
         {
-          "a": "F2.R.L26",
-          "b": "F2.R.L27",
+          "a": "F2.R.L12",
+          "b": "F2.R.L13",
           "hint": [
             110,
             12.5,
@@ -430,8 +414,8 @@
       "$type": "chamfer",
       "edges": [
         {
-          "a": "F2.R.L22",
-          "b": "F2.R.L23",
+          "a": "F2.R.L8",
+          "b": "F2.R.L9",
           "hint": [
             0,
             15,
@@ -439,8 +423,8 @@
           ]
         },
         {
-          "a": "F2.R.L27",
-          "b": "F2.R.L28",
+          "a": "F2.R.L13",
+          "b": "F2.R.L14",
           "hint": [
             145,
             12.5,
@@ -448,8 +432,8 @@
           ]
         },
         {
-          "a": "F2.R.L24",
-          "b": "F2.R.L25",
+          "a": "F2.R.L10",
+          "b": "F2.R.L11",
           "hint": [
             40,
             21,
@@ -457,8 +441,8 @@
           ]
         },
         {
-          "a": "F2.R.L25",
-          "b": "F2.R.L26",
+          "a": "F2.R.L11",
+          "b": "F2.R.L12",
           "hint": [
             110,
             21,
@@ -506,31 +490,31 @@
             "fixed": false
           },
           {
-            "id": 4,
+            "id": 2,
             "x": 89,
             "y": 0,
             "fixed": false
           },
           {
-            "id": 7,
+            "id": 3,
             "x": 61,
             "y": 6,
             "fixed": false
           },
           {
-            "id": 10,
+            "id": 4,
             "x": 89,
             "y": 6,
             "fixed": false
           },
           {
-            "id": 13,
+            "id": 5,
             "x": 89,
             "y": -6,
             "fixed": false
           },
           {
-            "id": 16,
+            "id": 6,
             "x": 61,
             "y": -6,
             "fixed": false
@@ -539,135 +523,45 @@
         "entities": [
           {
             "$type": "line",
-            "p1": 16,
-            "p2": 13,
-            "id": 19,
+            "p1": 6,
+            "p2": 5,
+            "id": 7,
             "construction": false
           },
           {
             "$type": "arc",
-            "center": 4,
-            "start": 13,
-            "end": 10,
-            "id": 20,
+            "center": 2,
+            "start": 5,
+            "end": 4,
+            "id": 8,
             "construction": false
           },
           {
             "$type": "line",
-            "p1": 10,
-            "p2": 7,
-            "id": 21,
+            "p1": 4,
+            "p2": 3,
+            "id": 9,
             "construction": false
           },
           {
             "$type": "arc",
             "center": 1,
-            "start": 7,
-            "end": 16,
-            "id": 22,
+            "start": 3,
+            "end": 6,
+            "id": 10,
             "construction": false
           }
         ],
         "constraints": [
           {
-            "id": 2,
-            "type": "HDistance",
-            "refs": [
-              0,
-              1
-            ],
-            "expr": "L1\u002BL2/2-(KeyL-KeyW)/2",
-            "value": 61,
-            "sign": 1,
-            "flip": 0,
-            "driven": false,
-            "labelX": 0,
-            "labelY": 0
-          },
-          {
-            "id": 3,
-            "type": "VDistance",
-            "refs": [
-              0,
-              1
-            ],
-            "expr": "0",
-            "value": 0,
-            "sign": 1,
-            "flip": 0,
-            "driven": false,
-            "labelX": 0,
-            "labelY": 0
-          },
-          {
-            "id": 5,
-            "type": "HDistance",
-            "refs": [
-              0,
-              4
-            ],
-            "expr": "L1\u002BL2/2\u002B(KeyL-KeyW)/2",
-            "value": 89,
-            "sign": 1,
-            "flip": 0,
-            "driven": false,
-            "labelX": 0,
-            "labelY": 0
-          },
-          {
-            "id": 6,
-            "type": "VDistance",
-            "refs": [
-              0,
-              4
-            ],
-            "expr": "0",
-            "value": 0,
-            "sign": 1,
-            "flip": 0,
-            "driven": false,
-            "labelX": 0,
-            "labelY": 0
-          },
-          {
-            "id": 8,
-            "type": "HDistance",
-            "refs": [
-              0,
-              7
-            ],
-            "expr": "L1\u002BL2/2-(KeyL-KeyW)/2",
-            "value": 61,
-            "sign": 1,
-            "flip": 0,
-            "driven": false,
-            "labelX": 0,
-            "labelY": 0
-          },
-          {
-            "id": 9,
-            "type": "VDistance",
-            "refs": [
-              0,
-              7
-            ],
-            "expr": "KeyW/2",
-            "value": 6,
-            "sign": 1,
-            "flip": 0,
-            "driven": false,
-            "labelX": 0,
-            "labelY": 0
-          },
-          {
             "id": 11,
             "type": "HDistance",
             "refs": [
               0,
-              10
+              1
             ],
-            "expr": "L1\u002BL2/2\u002B(KeyL-KeyW)/2",
-            "value": 89,
+            "expr": "L1\u002BL2/2-(KeyL-KeyW)/2",
+            "value": 61,
             "sign": 1,
             "flip": 0,
             "driven": false,
@@ -676,13 +570,28 @@
           },
           {
             "id": 12,
-            "type": "VDistance",
+            "type": "HDistance",
             "refs": [
               0,
-              10
+              2
             ],
-            "expr": "KeyW/2",
-            "value": 6,
+            "expr": "L1\u002BL2/2\u002B(KeyL-KeyW)/2",
+            "value": 89,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 13,
+            "type": "HDistance",
+            "refs": [
+              0,
+              3
+            ],
+            "expr": "L1\u002BL2/2-(KeyL-KeyW)/2",
+            "value": 61,
             "sign": 1,
             "flip": 0,
             "driven": false,
@@ -694,7 +603,7 @@
             "type": "HDistance",
             "refs": [
               0,
-              13
+              4
             ],
             "expr": "L1\u002BL2/2\u002B(KeyL-KeyW)/2",
             "value": 89,
@@ -706,25 +615,25 @@
           },
           {
             "id": 15,
-            "type": "VDistance",
+            "type": "HDistance",
             "refs": [
               0,
-              13
+              5
             ],
-            "expr": "KeyW/2",
-            "value": 6,
-            "sign": -1,
+            "expr": "L1\u002BL2/2\u002B(KeyL-KeyW)/2",
+            "value": 89,
+            "sign": 1,
             "flip": 0,
             "driven": false,
             "labelX": 0,
             "labelY": 0
           },
           {
-            "id": 17,
+            "id": 16,
             "type": "HDistance",
             "refs": [
               0,
-              16
+              6
             ],
             "expr": "L1\u002BL2/2-(KeyL-KeyW)/2",
             "value": 61,
@@ -735,11 +644,80 @@
             "labelY": 0
           },
           {
+            "id": 17,
+            "type": "Horizontal",
+            "refs": [
+              7
+            ],
+            "value": 0,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
             "id": 18,
+            "type": "Horizontal",
+            "refs": [
+              9
+            ],
+            "value": 0,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 19,
+            "type": "Horizontal",
+            "refs": [
+              0,
+              1
+            ],
+            "value": 0,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 20,
+            "type": "Horizontal",
+            "refs": [
+              0,
+              2
+            ],
+            "value": 0,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 21,
             "type": "VDistance",
             "refs": [
               0,
-              16
+              3
+            ],
+            "expr": "KeyW/2",
+            "value": 6,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 22,
+            "type": "VDistance",
+            "refs": [
+              0,
+              5
             ],
             "expr": "KeyW/2",
             "value": 6,
@@ -793,13 +771,27 @@
             "$type": "circle",
             "center": 1,
             "r": 3,
-            "id": 4,
+            "id": 2,
             "construction": false
           }
         ],
         "constraints": [
           {
-            "id": 2,
+            "id": 3,
+            "type": "Diameter",
+            "refs": [
+              2
+            ],
+            "expr": "CrossD",
+            "value": 6,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 4,
             "type": "HDistance",
             "refs": [
               0,
@@ -814,28 +806,13 @@
             "labelY": 0
           },
           {
-            "id": 3,
-            "type": "VDistance",
+            "id": 5,
+            "type": "Horizontal",
             "refs": [
               0,
               1
             ],
-            "expr": "0",
             "value": 0,
-            "sign": 1,
-            "flip": 0,
-            "driven": false,
-            "labelX": 0,
-            "labelY": 0
-          },
-          {
-            "id": 5,
-            "type": "Diameter",
-            "refs": [
-              4
-            ],
-            "expr": "CrossD",
-            "value": 6,
             "sign": 1,
             "flip": 0,
             "driven": false,

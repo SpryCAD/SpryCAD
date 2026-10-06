@@ -54,6 +54,10 @@ static class Demos
                 var ms = sw.Elapsed.TotalMilliseconds;
                 var problems = d.Features.Where(f => !r.Status[f.Id].Ok || r.Status[f.Id].Warnings.Count > 0)
                     .Select(f => $"{f.Name}: {r.Status[f.Id].Error}{string.Join(";", r.Status[f.Id].Warnings)}").ToList();
+                // demo sketches are fully defined (black), by relations and dimensions
+                foreach (var sf in d.Features.OfType<SketchFeature>())
+                    if (r.State.Sketches.GetValueOrDefault(sf.Id)?.Solve is { } sv && sv.Status != SketchStatus.FullyDefined)
+                        problems.Add($"{sf.Name}: sketch {sv.Status}");
                 var body = r.State.Bodies.Count >= 1 ? r.State.Bodies[0].Solid : null;
                 var ok = problems.Count == 0 && r.State.Bodies.Count >= 1 && r.State.Bodies.All(bb => bb.Solid.Native != null && bb.Solid.Topology.OpenHalfEdges == 0);
                 var label = variant.Length == 0 ? "as designed" : string.Join(", ", variant.Select(v => $"{v.Item1}={v.Item2}"));
@@ -458,8 +462,7 @@ static class Demos
                 // the arc through flank points k and k+1 also passes through the involute point between them
                 var mid = g.P(X(Rho((k + 0.5) / 3.0)), (upper ? "" : "-") + "(" + Y(Rho((k + 0.5) / 3.0)) + ")");
                 g.Point(mid);
-                var arc = g.ArcThrough(pts[k], mid, pts[k + 1]);
-                var on = g.S.AddConstraint(CType.PointOnCircle, mid, arc);
+                g.ArcThrough(pts[k], mid, pts[k + 1]);
             }
             return pts.ToArray();
         }
@@ -469,7 +472,6 @@ static class Demos
         g.Arc(Sketch.OriginId, rootL, rootU);
         g.Line(rootU, up[0]); g.Line(rootL, lo[0]);
         g.Arc(Sketch.OriginId, lo[3], up[3]);
-        GearFlankError = g.FlankError;
         var gs = d.AddFeature(new SketchFeature { Name = "Tooth gap", Plane = PlaneRef.Front, Sketch = g.S });
         var gap = d.AddFeature(new ExtrudeFeature { Name = "Tooth gap", SketchId = gs.Id, IsCut = true, End = EndCondition.ThroughAll });
         d.AddFeature(new CircularPatternFeature { Name = "Teeth", Seeds = { gap.Id }, Axis = new DirRef { Axis = "Z" }, Count = "z" });
@@ -558,13 +560,14 @@ static class Demos
         var ks = d.AddFeature(new SketchFeature { Name = "Keyway", Plane = PlaneRef.Top, Sketch = k.S });
         d.AddFeature(new ExtrudeFeature { Name = "Keyway", SketchId = ks.Id, IsCut = true, End = EndCondition.ThroughAllBoth });
 
-        // spinner knob on the rim: pin into the rim, collar, grip with a domed top, revolved about its own axis
+        // spinner knob on the operator's side (away from the dished hub, i.e. towards -Y): pin into the rim,
+        // collar, grip with a domed end, revolved about its own axis
         var kn = new Sk(d);
-        int k0 = kn.P("D/2", "0"), k1 = kn.P("D/2+PinD/2", "0"), k2 = kn.P("D/2+PinD/2", "RimT/2+2"),
-            k3 = kn.P("D/2+KnobNeck", "RimT/2+2"), k4 = kn.P("D/2+KnobNeck", "RimT/2+5"), k5 = kn.P("D/2+KnobR", "RimT/2+8"),
-            k6 = kn.P("D/2+KnobR", "RimT/2+KnobL-KnobR"), kc = kn.P("D/2", "RimT/2+KnobL-KnobR"), k7 = kn.P("D/2", "RimT/2+KnobL");
+        int k0 = kn.P("D/2", "0"), k1 = kn.P("D/2+PinD/2", "0"), k2 = kn.P("D/2+PinD/2", "-(RimT/2+2)"),
+            k3 = kn.P("D/2+KnobNeck", "-(RimT/2+2)"), k4 = kn.P("D/2+KnobNeck", "-(RimT/2+5)"), k5 = kn.P("D/2+KnobR", "-(RimT/2+8)"),
+            k6 = kn.P("D/2+KnobR", "-(RimT/2+KnobL-KnobR)"), kc = kn.P("D/2", "-(RimT/2+KnobL-KnobR)"), k7 = kn.P("D/2", "-(RimT/2+KnobL)");
         kn.Line(k0, k1); kn.Line(k1, k2); kn.Line(k2, k3); kn.Line(k3, k4); kn.Line(k4, k5); kn.Line(k5, k6);
-        kn.Arc(kc, k6, k7);
+        kn.Arc(kc, k7, k6); // dome: counter-clockwise from the tip round to the side
         var axisLine = kn.Line(k7, k0);
         var knSk = d.AddFeature(new SketchFeature { Name = "Knob profile", Plane = PlaneRef.Front, Sketch = kn.S });
         d.AddFeature(new RevolveFeature { Name = "Spinner knob", SketchId = knSk.Id, AxisEntity = axisLine, Angle = "360", Merge = false });
@@ -583,11 +586,21 @@ static class Demos
         return d;
     }
 
-    /// <summary>Sketch builder: points fully dimensioned from the origin by expressions of the variables.</summary>
+    /// <summary>
+    /// Sketch builder that sketches like a SolidWorks user: lines whose ends share an X (Y) get a Vertical
+    /// (Horizontal) relation, points on an axis get a relation to the origin, centred rectangles use a
+    /// construction diagonal with the origin at its midpoint plus width/height dimensions, and only the
+    /// remaining coordinates are dimensioned (by expressions of the variables). Relations and dimensions are
+    /// added when the sketch is taken (<see cref="S"/>).
+    /// </summary>
     sealed class Sk
     {
-        public readonly Sketch S = new();
+        readonly Sketch _s = new();
         readonly Func<string, double?> _lookup;
+        bool _done;
+        // coordinate expressions per point (null: determined otherwise, e.g. by an arc), lines between points
+        readonly Dictionary<int, (string? x, string? y)> _coord = new() { [Sketch.OriginId] = ("0", "0") };
+        readonly List<(int a, int b, int id)> _lines = new();
 
         public Sk(CadDocument d)
         {
@@ -595,31 +608,62 @@ static class Demos
             _lookup = n => vals.TryGetValue(n, out var v) ? v : null;
         }
 
+        /// <summary>The finished sketch (relations and dimensions added on first access).</summary>
+        public Sketch S { get { Finish(); return _s; } }
+
         public double Eval(string e) => Expr.Eval(e, _lookup);
 
         /// <summary>Point at (x, y); a leading '-' means the negative side (the dimension is the magnitude).</summary>
         public int P(string x, string y, bool dimX = true)
         {
-            var p = S.AddPoint(new Vec2(Eval(x), Eval(y)));
-            if (dimX) Dim(CType.HDistance, x, Sketch.OriginId, p.Id);
-            Dim(CType.VDistance, y, Sketch.OriginId, p.Id);
+            var p = _s.AddPoint(new Vec2(Eval(x), Eval(y)));
+            _coord[p.Id] = (dimX ? Norm(x) : null, Norm(y));
             return p.Id;
         }
 
-        void Dim(CType t, string expr, params int[] refs)
+        static string Norm(string e) => e.Replace(" ", "");
+
+        public int Line(int a, int b) { var id = _s.Add(new SkLine { P1 = a, P2 = b }).Id; _lines.Add((a, b, id)); return id; }
+        public int Centerline(int a, int b) { var id = _s.Add(new SkLine { P1 = a, P2 = b, Construction = true }).Id; _lines.Add((a, b, id)); return id; }
+
+        /// <summary>
+        /// Axis-aligned rectangle; lines: bottom, right, top, left. Centred on the origin (x0 = -x1, y0 = -y1) it is
+        /// drawn as a centre rectangle: diagonal with the origin at its midpoint, width and height dimensions.
+        /// </summary>
+        public List<int> Rect(string x0, string y0, string x1, string y1)
         {
-            var neg = expr.StartsWith('-');
-            var mag = neg ? expr[1..] : expr;
-            var c = S.AddConstraint(t, refs);
-            c.Expr = mag; c.Value = Math.Abs(Eval(mag)); c.Sign = neg ? -1 : 1;
+            bool Centred(string lo, string hi) => Norm(lo) == "-" + Norm(hi) || Norm(lo) == "-(" + Norm(hi) + ")";
+            if (Centred(x0, x1) && Centred(y0, y1))
+            {
+                double w = Eval(x1), h = Eval(y1);
+                int p0 = Free(-w, -h), p1 = Free(w, -h), p2 = Free(w, h), p3 = Free(-w, h);
+                var L = Poly(p0, p1, p2, p3);
+                _s.AddConstraint(CType.Horizontal, L[0]); _s.AddConstraint(CType.Horizontal, L[2]);
+                _s.AddConstraint(CType.Vertical, L[1]); _s.AddConstraint(CType.Vertical, L[3]);
+                var diag = _s.Add(new SkLine { P1 = p0, P2 = p2, Construction = true });
+                _s.AddConstraint(CType.Midpoint, Sketch.OriginId, diag.Id);
+                Size(L[0], $"2*({x1})"); Size(L[1], $"2*({y1})");
+                return L;
+            }
+            return Poly(P(x0, y0), P(x1, y0), P(x1, y1), P(x0, y1));
         }
 
-        public int Line(int a, int b) => S.Add(new SkLine { P1 = a, P2 = b }).Id;
-        public int Centerline(int a, int b) => S.Add(new SkLine { P1 = a, P2 = b, Construction = true }).Id;
+        /// <summary>Point whose position comes from relations only (no coordinate dimensions).</summary>
+        int Free(double x, double y)
+        {
+            var p = _s.AddPoint(new Vec2(x, y));
+            _coord[p.Id] = (null, null);
+            return p.Id;
+        }
 
-        /// <summary>Axis-aligned rectangle from corner expressions; lines: bottom, right, top, left.</summary>
-        public List<int> Rect(string x0, string y0, string x1, string y1)
-            => Poly(P(x0, y0), P(x1, y0), P(x1, y1), P(x0, y1));
+        /// <summary>Length dimension of a line.</summary>
+        void Size(int line, string expr)
+        {
+            var c = _s.AddConstraint(CType.Distance, line);
+            c.Expr = Simplify(expr); c.Value = Math.Abs(Eval(expr));
+        }
+
+        static string Simplify(string e) => e.StartsWith("2*(") && e.EndsWith("/2)") && !e[3..^3].Contains('(') ? e[3..^3] : e;
 
         /// <summary>Closed polygon through the points.</summary>
         public List<int> Poly(params int[] pts)
@@ -631,19 +675,19 @@ static class Demos
 
         public int Circle(int center, string diameter)
         {
-            var c = S.Add(new SkCircle { Center = center, R = Eval(diameter) / 2 });
-            var k = S.AddConstraint(CType.Diameter, c.Id);
+            var c = _s.Add(new SkCircle { Center = center, R = Eval(diameter) / 2 });
+            var k = _s.AddConstraint(CType.Diameter, c.Id);
             k.Expr = diameter; k.Value = Eval(diameter);
             return c.Id;
         }
 
-        /// <summary>Arc from start to end (counter-clockwise) about center, all points already dimensioned.</summary>
-        public int Arc(int center, int start, int end) => S.Add(new SkArc { Center = center, Start = start, End = end }).Id;
+        /// <summary>Arc from start to end (counter-clockwise) about center.</summary>
+        public int Arc(int center, int start, int end) => _s.Add(new SkArc { Center = center, Start = start, End = end }).Id;
 
-        public void Point(int p) => S.Add(new SkPointEntity { P = p });
+        public void Point(int p) => _s.Add(new SkPointEntity { P = p });
 
-        /// <summary>Largest deviation measured by <see cref="ArcThrough"/> between its arcs and the sampled curve.</summary>
-        public double FlankError;
+        /// <summary>Point lies on an arc/circle.</summary>
+        public void OnArc(int point, int arc) => _s.AddConstraint(CType.PointOnCircle, point, arc);
 
         /// <summary>
         /// Arc from a to b through m (counter-clockwise order chosen automatically); its centre is a free point
@@ -651,14 +695,53 @@ static class Demos
         /// </summary>
         public int ArcThrough(int a, int m, int b)
         {
-            Vec2 A = S.P(a), M = S.P(m), B = S.P(b);
+            Vec2 A = _s.P(a), M = _s.P(m), B = _s.P(b);
             var ab = B - A; var am = M - A;
             var dd = 2 * Vec2.Cross(ab, am);
             var c = A + (new Vec2(am.Y, -am.X) * ab.LengthSq + new Vec2(-ab.Y, ab.X) * am.LengthSq) / dd; // circumcentre
-            var cp = S.AddPoint(c);
-            // counter-clockwise from start to end must pass through m
+            var cp = Free(c.X, c.Y);
             bool ccw = Vec2.Cross(A - c, M - c) > 0;
-            return ccw ? Arc(cp.Id, a, b) : Arc(cp.Id, b, a);
+            var arc = ccw ? Arc(cp, a, b) : Arc(cp, b, a);
+            OnArc(m, arc);
+            return arc;
+        }
+
+        /// <summary>Relations for shared coordinates, then dimensions for what is left.</summary>
+        void Finish()
+        {
+            if (_done) return;
+            _done = true;
+            foreach (var horizontal in new[] { false, true })
+            {
+                string? C(int p) => _coord.TryGetValue(p, out var c) ? (horizontal ? c.y : c.x) : null;
+                // points joined by a line with the same coordinate expression share that coordinate by a relation
+                var parent = _coord.Keys.ToDictionary(k => k, k => k);
+                int Find(int x) { while (parent[x] != x) x = parent[x] = parent[parent[x]]; return x; }
+                foreach (var (a, b, id) in _lines)
+                {
+                    var ca = C(a); var cb = C(b);
+                    if (ca == null || cb == null || ca != cb || Find(a) == Find(b)) continue;
+                    _s.AddConstraint(horizontal ? CType.Horizontal : CType.Vertical, id);
+                    parent[Find(a)] = Find(b);
+                }
+                foreach (var g in _coord.Keys.Where(k => C(k) != null).GroupBy(Find))
+                {
+                    var members = g.ToList();
+                    var expr = C(members[0])!;
+                    if (members.Contains(Sketch.OriginId)) continue; // already tied to the origin by relations
+                    var rep = members[0];
+                    if (expr == "0")
+                    {
+                        // on an axis: Horizontal/Vertical with the origin rather than a zero dimension
+                        _s.AddConstraint(horizontal ? CType.Horizontal : CType.Vertical, Sketch.OriginId, rep);
+                        continue;
+                    }
+                    var neg = expr.StartsWith('-');
+                    var mag = neg ? expr[1..] : expr;
+                    var c = _s.AddConstraint(horizontal ? CType.VDistance : CType.HDistance, Sketch.OriginId, rep);
+                    c.Expr = mag; c.Value = Math.Abs(Eval(mag)); c.Sign = neg ? -1 : 1;
+                }
+            }
         }
     }
 }

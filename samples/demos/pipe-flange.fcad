@@ -65,37 +65,37 @@
             "fixed": false
           },
           {
-            "id": 4,
+            "id": 2,
             "x": 75,
             "y": 0,
             "fixed": false
           },
           {
-            "id": 7,
+            "id": 3,
             "x": 75,
             "y": 18,
             "fixed": false
           },
           {
-            "id": 10,
+            "id": 4,
             "x": 44,
             "y": 18,
             "fixed": false
           },
           {
-            "id": 13,
+            "id": 5,
             "x": 44,
             "y": 50,
             "fixed": false
           },
           {
-            "id": 16,
+            "id": 6,
             "x": 30,
             "y": 50,
             "fixed": false
           },
           {
-            "id": 25,
+            "id": 13,
             "x": 0,
             "y": 50,
             "fixed": false
@@ -105,198 +105,74 @@
           {
             "$type": "line",
             "p1": 1,
+            "p2": 2,
+            "id": 7,
+            "construction": false
+          },
+          {
+            "$type": "line",
+            "p1": 2,
+            "p2": 3,
+            "id": 8,
+            "construction": false
+          },
+          {
+            "$type": "line",
+            "p1": 3,
             "p2": 4,
-            "id": 19,
+            "id": 9,
             "construction": false
           },
           {
             "$type": "line",
             "p1": 4,
-            "p2": 7,
-            "id": 20,
+            "p2": 5,
+            "id": 10,
             "construction": false
           },
           {
             "$type": "line",
-            "p1": 7,
-            "p2": 10,
-            "id": 21,
+            "p1": 5,
+            "p2": 6,
+            "id": 11,
             "construction": false
           },
           {
             "$type": "line",
-            "p1": 10,
-            "p2": 13,
-            "id": 22,
-            "construction": false
-          },
-          {
-            "$type": "line",
-            "p1": 13,
-            "p2": 16,
-            "id": 23,
-            "construction": false
-          },
-          {
-            "$type": "line",
-            "p1": 16,
+            "p1": 6,
             "p2": 1,
-            "id": 24,
+            "id": 12,
             "construction": false
           },
           {
             "$type": "line",
             "p1": 0,
-            "p2": 25,
-            "id": 28,
+            "p2": 13,
+            "id": 14,
             "construction": true
           }
         ],
         "constraints": [
           {
-            "id": 2,
-            "type": "HDistance",
-            "refs": [
-              0,
-              1
-            ],
-            "expr": "ID/2",
-            "value": 30,
-            "sign": 1,
-            "flip": 0,
-            "driven": false,
-            "labelX": 0,
-            "labelY": 0
-          },
-          {
-            "id": 3,
-            "type": "VDistance",
-            "refs": [
-              0,
-              1
-            ],
-            "expr": "0",
-            "value": 0,
-            "sign": 1,
-            "flip": 0,
-            "driven": false,
-            "labelX": 0,
-            "labelY": 0
-          },
-          {
-            "id": 5,
-            "type": "HDistance",
-            "refs": [
-              0,
-              4
-            ],
-            "expr": "OD/2",
-            "value": 75,
-            "sign": 1,
-            "flip": 0,
-            "driven": false,
-            "labelX": 0,
-            "labelY": 0
-          },
-          {
-            "id": 6,
-            "type": "VDistance",
-            "refs": [
-              0,
-              4
-            ],
-            "expr": "0",
-            "value": 0,
-            "sign": 1,
-            "flip": 0,
-            "driven": false,
-            "labelX": 0,
-            "labelY": 0
-          },
-          {
-            "id": 8,
-            "type": "HDistance",
-            "refs": [
-              0,
-              7
-            ],
-            "expr": "OD/2",
-            "value": 75,
-            "sign": 1,
-            "flip": 0,
-            "driven": false,
-            "labelX": 0,
-            "labelY": 0
-          },
-          {
-            "id": 9,
-            "type": "VDistance",
-            "refs": [
-              0,
-              7
-            ],
-            "expr": "T",
-            "value": 18,
-            "sign": 1,
-            "flip": 0,
-            "driven": false,
-            "labelX": 0,
-            "labelY": 0
-          },
-          {
-            "id": 11,
-            "type": "HDistance",
-            "refs": [
-              0,
-              10
-            ],
-            "expr": "HubD/2",
-            "value": 44,
-            "sign": 1,
-            "flip": 0,
-            "driven": false,
-            "labelX": 0,
-            "labelY": 0
-          },
-          {
-            "id": 12,
-            "type": "VDistance",
-            "refs": [
-              0,
-              10
-            ],
-            "expr": "T",
-            "value": 18,
-            "sign": 1,
-            "flip": 0,
-            "driven": false,
-            "labelX": 0,
-            "labelY": 0
-          },
-          {
-            "id": 14,
-            "type": "HDistance",
-            "refs": [
-              0,
-              13
-            ],
-            "expr": "HubD/2",
-            "value": 44,
-            "sign": 1,
-            "flip": 0,
-            "driven": false,
-            "labelX": 0,
-            "labelY": 0
-          },
-          {
             "id": 15,
-            "type": "VDistance",
+            "type": "Vertical",
             "refs": [
-              0,
-              13
+              8
             ],
-            "expr": "T\u002BHubH",
-            "value": 50,
+            "value": 0,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 16,
+            "type": "Vertical",
+            "refs": [
+              10
+            ],
+            "value": 0,
             "sign": 1,
             "flip": 0,
             "driven": false,
@@ -305,10 +181,36 @@
           },
           {
             "id": 17,
+            "type": "Vertical",
+            "refs": [
+              12
+            ],
+            "value": 0,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 18,
+            "type": "Vertical",
+            "refs": [
+              14
+            ],
+            "value": 0,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 19,
             "type": "HDistance",
             "refs": [
               0,
-              16
+              1
             ],
             "expr": "ID/2",
             "value": 30,
@@ -319,14 +221,82 @@
             "labelY": 0
           },
           {
-            "id": 18,
-            "type": "VDistance",
+            "id": 20,
+            "type": "HDistance",
             "refs": [
               0,
-              16
+              2
             ],
-            "expr": "T\u002BHubH",
-            "value": 50,
+            "expr": "OD/2",
+            "value": 75,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 21,
+            "type": "HDistance",
+            "refs": [
+              0,
+              4
+            ],
+            "expr": "HubD/2",
+            "value": 44,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 22,
+            "type": "Horizontal",
+            "refs": [
+              7
+            ],
+            "value": 0,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 23,
+            "type": "Horizontal",
+            "refs": [
+              9
+            ],
+            "value": 0,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 24,
+            "type": "Horizontal",
+            "refs": [
+              11
+            ],
+            "value": 0,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 25,
+            "type": "Horizontal",
+            "refs": [
+              0,
+              1
+            ],
+            "value": 0,
             "sign": 1,
             "flip": 0,
             "driven": false,
@@ -335,13 +305,13 @@
           },
           {
             "id": 26,
-            "type": "HDistance",
+            "type": "VDistance",
             "refs": [
               0,
-              25
+              3
             ],
-            "expr": "0",
-            "value": 0,
+            "expr": "T",
+            "value": 18,
             "sign": 1,
             "flip": 0,
             "driven": false,
@@ -353,7 +323,22 @@
             "type": "VDistance",
             "refs": [
               0,
-              25
+              5
+            ],
+            "expr": "T\u002BHubH",
+            "value": 50,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 28,
+            "type": "VDistance",
+            "refs": [
+              0,
+              13
             ],
             "expr": "T\u002BHubH",
             "value": 50,
@@ -407,13 +392,27 @@
             "$type": "circle",
             "center": 1,
             "r": 7,
-            "id": 4,
+            "id": 2,
             "construction": false
           }
         ],
         "constraints": [
           {
-            "id": 2,
+            "id": 3,
+            "type": "Diameter",
+            "refs": [
+              2
+            ],
+            "expr": "BoltD",
+            "value": 14,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 4,
             "type": "HDistance",
             "refs": [
               0,
@@ -428,28 +427,13 @@
             "labelY": 0
           },
           {
-            "id": 3,
-            "type": "VDistance",
+            "id": 5,
+            "type": "Horizontal",
             "refs": [
               0,
               1
             ],
-            "expr": "0",
             "value": 0,
-            "sign": 1,
-            "flip": 0,
-            "driven": false,
-            "labelX": 0,
-            "labelY": 0
-          },
-          {
-            "id": 5,
-            "type": "Diameter",
-            "refs": [
-              4
-            ],
-            "expr": "BoltD",
-            "value": 14,
             "sign": 1,
             "flip": 0,
             "driven": false,
@@ -495,8 +479,8 @@
       "$type": "fillet",
       "edges": [
         {
-          "a": "F2.R.L21",
-          "b": "F2.R.L22",
+          "a": "F2.R.L9",
+          "b": "F2.R.L10",
           "hint": [
             44,
             18,
@@ -515,8 +499,8 @@
       "$type": "chamfer",
       "edges": [
         {
-          "a": "F2.R.L20",
-          "b": "F2.R.L21",
+          "a": "F2.R.L8",
+          "b": "F2.R.L9",
           "hint": [
             75,
             18,
@@ -524,8 +508,8 @@
           ]
         },
         {
-          "a": "F2.R.L19",
-          "b": "F2.R.L20",
+          "a": "F2.R.L7",
+          "b": "F2.R.L8",
           "hint": [
             75,
             0,
@@ -533,8 +517,8 @@
           ]
         },
         {
-          "a": "F2.R.L22",
-          "b": "F2.R.L23",
+          "a": "F2.R.L10",
+          "b": "F2.R.L11",
           "hint": [
             44,
             50,
@@ -542,8 +526,8 @@
           ]
         },
         {
-          "a": "F2.R.L23",
-          "b": "F2.R.L24",
+          "a": "F2.R.L11",
+          "b": "F2.R.L12",
           "hint": [
             30,
             50,
@@ -551,8 +535,8 @@
           ]
         },
         {
-          "a": "F2.R.L24",
-          "b": "F2.R.L19",
+          "a": "F2.R.L12",
+          "b": "F2.R.L7",
           "hint": [
             30,
             0,

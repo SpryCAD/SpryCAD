@@ -187,127 +187,127 @@
             "fixed": false
           },
           {
-            "id": 4,
+            "id": 2,
             "x": 34.34300358366918,
             "y": 1.0500355127885204,
             "fixed": false
           },
           {
-            "id": 7,
+            "id": 3,
             "x": 35.915983169364694,
             "y": 1.5498174097140243,
             "fixed": false
           },
           {
-            "id": 10,
+            "id": 4,
             "x": 38.489244463874286,
             "y": 2.9219959959114554,
             "fixed": false
           },
           {
-            "id": 13,
+            "id": 5,
             "x": 33.94722494197722,
             "y": 0.9833739685047518,
             "fixed": false
           },
           {
-            "id": 17,
+            "id": 7,
             "x": 33.58484778972316,
             "y": 4.343082881020283,
             "fixed": false
           },
           {
-            "id": 20,
+            "id": 10,
             "x": 35.0004061185856,
             "y": 1.221104312693966,
             "fixed": false
           },
           {
-            "id": 24,
+            "id": 12,
             "x": 32.36403843511135,
             "y": 10.003731450490768,
             "fixed": false
           },
           {
-            "id": 27,
+            "id": 15,
             "x": 37.08304535371429,
             "y": 2.094924285680633,
             "fixed": false
           },
           {
-            "id": 31,
+            "id": 17,
             "x": 29.979847364917994,
             "y": 15.780838489681223,
             "fixed": false
           },
           {
-            "id": 34,
+            "id": 20,
             "x": 33.81497500920195,
             "y": -0.9717326114447509,
             "fixed": false
           },
           {
-            "id": 37,
+            "id": 21,
             "x": 34.34300358366918,
             "y": -1.0500355127885204,
             "fixed": false
           },
           {
-            "id": 40,
+            "id": 22,
             "x": 35.915983169364694,
             "y": -1.5498174097140243,
             "fixed": false
           },
           {
-            "id": 43,
+            "id": 23,
             "x": 38.489244463874286,
             "y": -2.9219959959114554,
             "fixed": false
           },
           {
-            "id": 45,
+            "id": 24,
             "x": 33.94722494197722,
             "y": -0.9833739685047518,
             "fixed": false
           },
           {
-            "id": 49,
+            "id": 26,
             "x": 33.58484778972316,
             "y": -4.343082881020283,
             "fixed": false
           },
           {
-            "id": 52,
+            "id": 29,
             "x": 35.0004061185856,
             "y": -1.221104312693966,
             "fixed": false
           },
           {
-            "id": 56,
+            "id": 31,
             "x": 32.36403843511135,
             "y": -10.003731450490768,
             "fixed": false
           },
           {
-            "id": 59,
+            "id": 34,
             "x": 37.08304535371429,
             "y": -2.094924285680633,
             "fixed": false
           },
           {
-            "id": 63,
+            "id": 36,
             "x": 29.979847364917994,
             "y": -15.780838489681223,
             "fixed": false
           },
           {
-            "id": 66,
+            "id": 39,
             "x": 33.48617639400859,
             "y": 0.9622840065915956,
             "fixed": false
           },
           {
-            "id": 69,
+            "id": 40,
             "x": 33.48617639400859,
             "y": -0.9622840065915956,
             "fixed": false
@@ -316,234 +316,128 @@
         "entities": [
           {
             "$type": "point",
-            "p": 13,
+            "p": 5,
+            "id": 6,
+            "construction": false
+          },
+          {
+            "$type": "arc",
+            "center": 7,
+            "start": 1,
+            "end": 2,
+            "id": 8,
+            "construction": false
+          },
+          {
+            "$type": "point",
+            "p": 10,
+            "id": 11,
+            "construction": false
+          },
+          {
+            "$type": "arc",
+            "center": 12,
+            "start": 2,
+            "end": 3,
+            "id": 13,
+            "construction": false
+          },
+          {
+            "$type": "point",
+            "p": 15,
             "id": 16,
             "construction": false
           },
           {
             "$type": "arc",
             "center": 17,
-            "start": 1,
+            "start": 3,
             "end": 4,
             "id": 18,
             "construction": false
           },
           {
             "$type": "point",
-            "p": 20,
-            "id": 23,
-            "construction": false
-          },
-          {
-            "$type": "arc",
-            "center": 24,
-            "start": 4,
-            "end": 7,
+            "p": 24,
             "id": 25,
             "construction": false
           },
           {
+            "$type": "arc",
+            "center": 26,
+            "start": 21,
+            "end": 20,
+            "id": 27,
+            "construction": false
+          },
+          {
             "$type": "point",
-            "p": 27,
+            "p": 29,
             "id": 30,
             "construction": false
           },
           {
             "$type": "arc",
             "center": 31,
-            "start": 7,
-            "end": 10,
+            "start": 22,
+            "end": 21,
             "id": 32,
             "construction": false
           },
           {
             "$type": "point",
-            "p": 45,
-            "id": 48,
+            "p": 34,
+            "id": 35,
             "construction": false
           },
           {
             "$type": "arc",
-            "center": 49,
-            "start": 37,
-            "end": 34,
-            "id": 50,
-            "construction": false
-          },
-          {
-            "$type": "point",
-            "p": 52,
-            "id": 55,
+            "center": 36,
+            "start": 23,
+            "end": 22,
+            "id": 37,
             "construction": false
           },
           {
             "$type": "arc",
-            "center": 56,
+            "center": 0,
             "start": 40,
-            "end": 37,
-            "id": 57,
-            "construction": false
-          },
-          {
-            "$type": "point",
-            "p": 59,
-            "id": 62,
-            "construction": false
-          },
-          {
-            "$type": "arc",
-            "center": 63,
-            "start": 43,
-            "end": 40,
-            "id": 64,
-            "construction": false
-          },
-          {
-            "$type": "arc",
-            "center": 0,
-            "start": 69,
-            "end": 66,
-            "id": 71,
+            "end": 39,
+            "id": 41,
             "construction": false
           },
           {
             "$type": "line",
-            "p1": 66,
+            "p1": 39,
             "p2": 1,
-            "id": 72,
+            "id": 42,
             "construction": false
           },
           {
             "$type": "line",
-            "p1": 69,
-            "p2": 34,
-            "id": 73,
+            "p1": 40,
+            "p2": 20,
+            "id": 43,
             "construction": false
           },
           {
             "$type": "arc",
             "center": 0,
-            "start": 43,
-            "end": 10,
-            "id": 74,
+            "start": 23,
+            "end": 4,
+            "id": 44,
             "construction": false
           }
         ],
         "constraints": [
           {
-            "id": 2,
-            "type": "HDistance",
-            "refs": [
-              0,
-              1
-            ],
-            "expr": "(rs\u002B(re-rs)*0)*cos((90/z - inva*180/pi \u002B (tan(acos(rb/((rs\u002B(re-rs)*0)))) - acos(rb/((rs\u002B(re-rs)*0)))*pi/180)*180/pi))",
-            "value": 33.81497500920195,
-            "sign": 1,
-            "flip": 0,
-            "driven": false,
-            "labelX": 0,
-            "labelY": 0
-          },
-          {
-            "id": 3,
-            "type": "VDistance",
-            "refs": [
-              0,
-              1
-            ],
-            "expr": "((rs\u002B(re-rs)*0)*sin((90/z - inva*180/pi \u002B (tan(acos(rb/((rs\u002B(re-rs)*0)))) - acos(rb/((rs\u002B(re-rs)*0)))*pi/180)*180/pi)))",
-            "value": 0.9717326114447509,
-            "sign": 1,
-            "flip": 0,
-            "driven": false,
-            "labelX": 0,
-            "labelY": 0
-          },
-          {
-            "id": 5,
-            "type": "HDistance",
-            "refs": [
-              0,
-              4
-            ],
-            "expr": "(rs\u002B(re-rs)*0.111111)*cos((90/z - inva*180/pi \u002B (tan(acos(rb/((rs\u002B(re-rs)*0.111111)))) - acos(rb/((rs\u002B(re-rs)*0.111111)))*pi/180)*180/pi))",
-            "value": 34.34300358366918,
-            "sign": 1,
-            "flip": 0,
-            "driven": false,
-            "labelX": 0,
-            "labelY": 0
-          },
-          {
-            "id": 6,
-            "type": "VDistance",
-            "refs": [
-              0,
-              4
-            ],
-            "expr": "((rs\u002B(re-rs)*0.111111)*sin((90/z - inva*180/pi \u002B (tan(acos(rb/((rs\u002B(re-rs)*0.111111)))) - acos(rb/((rs\u002B(re-rs)*0.111111)))*pi/180)*180/pi)))",
-            "value": 1.0500355127885204,
-            "sign": 1,
-            "flip": 0,
-            "driven": false,
-            "labelX": 0,
-            "labelY": 0
-          },
-          {
-            "id": 8,
-            "type": "HDistance",
-            "refs": [
-              0,
-              7
-            ],
-            "expr": "(rs\u002B(re-rs)*0.444444)*cos((90/z - inva*180/pi \u002B (tan(acos(rb/((rs\u002B(re-rs)*0.444444)))) - acos(rb/((rs\u002B(re-rs)*0.444444)))*pi/180)*180/pi))",
-            "value": 35.915983169364694,
-            "sign": 1,
-            "flip": 0,
-            "driven": false,
-            "labelX": 0,
-            "labelY": 0
-          },
-          {
             "id": 9,
-            "type": "VDistance",
+            "type": "PointOnCircle",
             "refs": [
-              0,
-              7
+              5,
+              8
             ],
-            "expr": "((rs\u002B(re-rs)*0.444444)*sin((90/z - inva*180/pi \u002B (tan(acos(rb/((rs\u002B(re-rs)*0.444444)))) - acos(rb/((rs\u002B(re-rs)*0.444444)))*pi/180)*180/pi)))",
-            "value": 1.5498174097140243,
-            "sign": 1,
-            "flip": 0,
-            "driven": false,
-            "labelX": 0,
-            "labelY": 0
-          },
-          {
-            "id": 11,
-            "type": "HDistance",
-            "refs": [
-              0,
-              10
-            ],
-            "expr": "(rs\u002B(re-rs)*1)*cos((90/z - inva*180/pi \u002B (tan(acos(rb/((rs\u002B(re-rs)*1)))) - acos(rb/((rs\u002B(re-rs)*1)))*pi/180)*180/pi))",
-            "value": 38.489244463874286,
-            "sign": 1,
-            "flip": 0,
-            "driven": false,
-            "labelX": 0,
-            "labelY": 0
-          },
-          {
-            "id": 12,
-            "type": "VDistance",
-            "refs": [
-              0,
-              10
-            ],
-            "expr": "((rs\u002B(re-rs)*1)*sin((90/z - inva*180/pi \u002B (tan(acos(rb/((rs\u002B(re-rs)*1)))) - acos(rb/((rs\u002B(re-rs)*1)))*pi/180)*180/pi)))",
-            "value": 2.9219959959114554,
+            "value": 0,
             "sign": 1,
             "flip": 0,
             "driven": false,
@@ -552,28 +446,12 @@
           },
           {
             "id": 14,
-            "type": "HDistance",
+            "type": "PointOnCircle",
             "refs": [
-              0,
+              10,
               13
             ],
-            "expr": "(rs\u002B(re-rs)*0.027778)*cos((90/z - inva*180/pi \u002B (tan(acos(rb/((rs\u002B(re-rs)*0.027778)))) - acos(rb/((rs\u002B(re-rs)*0.027778)))*pi/180)*180/pi))",
-            "value": 33.94722494197722,
-            "sign": 1,
-            "flip": 0,
-            "driven": false,
-            "labelX": 0,
-            "labelY": 0
-          },
-          {
-            "id": 15,
-            "type": "VDistance",
-            "refs": [
-              0,
-              13
-            ],
-            "expr": "((rs\u002B(re-rs)*0.027778)*sin((90/z - inva*180/pi \u002B (tan(acos(rb/((rs\u002B(re-rs)*0.027778)))) - acos(rb/((rs\u002B(re-rs)*0.027778)))*pi/180)*180/pi)))",
-            "value": 0.9833739685047518,
+            "value": 0,
             "sign": 1,
             "flip": 0,
             "driven": false,
@@ -584,7 +462,7 @@
             "id": 19,
             "type": "PointOnCircle",
             "refs": [
-              13,
+              15,
               18
             ],
             "value": 0,
@@ -595,73 +473,13 @@
             "labelY": 0
           },
           {
-            "id": 21,
-            "type": "HDistance",
-            "refs": [
-              0,
-              20
-            ],
-            "expr": "(rs\u002B(re-rs)*0.25)*cos((90/z - inva*180/pi \u002B (tan(acos(rb/((rs\u002B(re-rs)*0.25)))) - acos(rb/((rs\u002B(re-rs)*0.25)))*pi/180)*180/pi))",
-            "value": 35.0004061185856,
-            "sign": 1,
-            "flip": 0,
-            "driven": false,
-            "labelX": 0,
-            "labelY": 0
-          },
-          {
-            "id": 22,
-            "type": "VDistance",
-            "refs": [
-              0,
-              20
-            ],
-            "expr": "((rs\u002B(re-rs)*0.25)*sin((90/z - inva*180/pi \u002B (tan(acos(rb/((rs\u002B(re-rs)*0.25)))) - acos(rb/((rs\u002B(re-rs)*0.25)))*pi/180)*180/pi)))",
-            "value": 1.221104312693966,
-            "sign": 1,
-            "flip": 0,
-            "driven": false,
-            "labelX": 0,
-            "labelY": 0
-          },
-          {
-            "id": 26,
+            "id": 28,
             "type": "PointOnCircle",
             "refs": [
-              20,
-              25
+              24,
+              27
             ],
             "value": 0,
-            "sign": 1,
-            "flip": 0,
-            "driven": false,
-            "labelX": 0,
-            "labelY": 0
-          },
-          {
-            "id": 28,
-            "type": "HDistance",
-            "refs": [
-              0,
-              27
-            ],
-            "expr": "(rs\u002B(re-rs)*0.694444)*cos((90/z - inva*180/pi \u002B (tan(acos(rb/((rs\u002B(re-rs)*0.694444)))) - acos(rb/((rs\u002B(re-rs)*0.694444)))*pi/180)*180/pi))",
-            "value": 37.08304535371429,
-            "sign": 1,
-            "flip": 0,
-            "driven": false,
-            "labelX": 0,
-            "labelY": 0
-          },
-          {
-            "id": 29,
-            "type": "VDistance",
-            "refs": [
-              0,
-              27
-            ],
-            "expr": "((rs\u002B(re-rs)*0.694444)*sin((90/z - inva*180/pi \u002B (tan(acos(rb/((rs\u002B(re-rs)*0.694444)))) - acos(rb/((rs\u002B(re-rs)*0.694444)))*pi/180)*180/pi)))",
-            "value": 2.094924285680633,
             "sign": 1,
             "flip": 0,
             "driven": false,
@@ -672,7 +490,7 @@
             "id": 33,
             "type": "PointOnCircle",
             "refs": [
-              27,
+              29,
               32
             ],
             "value": 0,
@@ -683,105 +501,29 @@
             "labelY": 0
           },
           {
-            "id": 35,
+            "id": 38,
+            "type": "PointOnCircle",
+            "refs": [
+              34,
+              37
+            ],
+            "value": 0,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 45,
             "type": "HDistance",
             "refs": [
               0,
-              34
+              1
             ],
-            "expr": "(rs\u002B(re-rs)*0)*cos((90/z - inva*180/pi \u002B (tan(acos(rb/((rs\u002B(re-rs)*0)))) - acos(rb/((rs\u002B(re-rs)*0)))*pi/180)*180/pi))",
+            "expr": "(rs\u002B(re-rs)*0)*cos((90/z-inva*180/pi\u002B(tan(acos(rb/((rs\u002B(re-rs)*0))))-acos(rb/((rs\u002B(re-rs)*0)))*pi/180)*180/pi))",
             "value": 33.81497500920195,
             "sign": 1,
-            "flip": 0,
-            "driven": false,
-            "labelX": 0,
-            "labelY": 0
-          },
-          {
-            "id": 36,
-            "type": "VDistance",
-            "refs": [
-              0,
-              34
-            ],
-            "expr": "((rs\u002B(re-rs)*0)*sin((90/z - inva*180/pi \u002B (tan(acos(rb/((rs\u002B(re-rs)*0)))) - acos(rb/((rs\u002B(re-rs)*0)))*pi/180)*180/pi)))",
-            "value": 0.9717326114447509,
-            "sign": -1,
-            "flip": 0,
-            "driven": false,
-            "labelX": 0,
-            "labelY": 0
-          },
-          {
-            "id": 38,
-            "type": "HDistance",
-            "refs": [
-              0,
-              37
-            ],
-            "expr": "(rs\u002B(re-rs)*0.111111)*cos((90/z - inva*180/pi \u002B (tan(acos(rb/((rs\u002B(re-rs)*0.111111)))) - acos(rb/((rs\u002B(re-rs)*0.111111)))*pi/180)*180/pi))",
-            "value": 34.34300358366918,
-            "sign": 1,
-            "flip": 0,
-            "driven": false,
-            "labelX": 0,
-            "labelY": 0
-          },
-          {
-            "id": 39,
-            "type": "VDistance",
-            "refs": [
-              0,
-              37
-            ],
-            "expr": "((rs\u002B(re-rs)*0.111111)*sin((90/z - inva*180/pi \u002B (tan(acos(rb/((rs\u002B(re-rs)*0.111111)))) - acos(rb/((rs\u002B(re-rs)*0.111111)))*pi/180)*180/pi)))",
-            "value": 1.0500355127885204,
-            "sign": -1,
-            "flip": 0,
-            "driven": false,
-            "labelX": 0,
-            "labelY": 0
-          },
-          {
-            "id": 41,
-            "type": "HDistance",
-            "refs": [
-              0,
-              40
-            ],
-            "expr": "(rs\u002B(re-rs)*0.444444)*cos((90/z - inva*180/pi \u002B (tan(acos(rb/((rs\u002B(re-rs)*0.444444)))) - acos(rb/((rs\u002B(re-rs)*0.444444)))*pi/180)*180/pi))",
-            "value": 35.915983169364694,
-            "sign": 1,
-            "flip": 0,
-            "driven": false,
-            "labelX": 0,
-            "labelY": 0
-          },
-          {
-            "id": 42,
-            "type": "VDistance",
-            "refs": [
-              0,
-              40
-            ],
-            "expr": "((rs\u002B(re-rs)*0.444444)*sin((90/z - inva*180/pi \u002B (tan(acos(rb/((rs\u002B(re-rs)*0.444444)))) - acos(rb/((rs\u002B(re-rs)*0.444444)))*pi/180)*180/pi)))",
-            "value": 1.5498174097140243,
-            "sign": -1,
-            "flip": 0,
-            "driven": false,
-            "labelX": 0,
-            "labelY": 0
-          },
-          {
-            "id": 44,
-            "type": "VDistance",
-            "refs": [
-              0,
-              43
-            ],
-            "expr": "((rs\u002B(re-rs)*1)*sin((90/z - inva*180/pi \u002B (tan(acos(rb/((rs\u002B(re-rs)*1)))) - acos(rb/((rs\u002B(re-rs)*1)))*pi/180)*180/pi)))",
-            "value": 2.9219959959114554,
-            "sign": -1,
             "flip": 0,
             "driven": false,
             "labelX": 0,
@@ -792,10 +534,10 @@
             "type": "HDistance",
             "refs": [
               0,
-              45
+              2
             ],
-            "expr": "(rs\u002B(re-rs)*0.027778)*cos((90/z - inva*180/pi \u002B (tan(acos(rb/((rs\u002B(re-rs)*0.027778)))) - acos(rb/((rs\u002B(re-rs)*0.027778)))*pi/180)*180/pi))",
-            "value": 33.94722494197722,
+            "expr": "(rs\u002B(re-rs)*0.111111)*cos((90/z-inva*180/pi\u002B(tan(acos(rb/((rs\u002B(re-rs)*0.111111))))-acos(rb/((rs\u002B(re-rs)*0.111111)))*pi/180)*180/pi))",
+            "value": 34.34300358366918,
             "sign": 1,
             "flip": 0,
             "driven": false,
@@ -804,14 +546,59 @@
           },
           {
             "id": 47,
-            "type": "VDistance",
+            "type": "HDistance",
             "refs": [
               0,
-              45
+              3
             ],
-            "expr": "((rs\u002B(re-rs)*0.027778)*sin((90/z - inva*180/pi \u002B (tan(acos(rb/((rs\u002B(re-rs)*0.027778)))) - acos(rb/((rs\u002B(re-rs)*0.027778)))*pi/180)*180/pi)))",
-            "value": 0.9833739685047518,
-            "sign": -1,
+            "expr": "(rs\u002B(re-rs)*0.444444)*cos((90/z-inva*180/pi\u002B(tan(acos(rb/((rs\u002B(re-rs)*0.444444))))-acos(rb/((rs\u002B(re-rs)*0.444444)))*pi/180)*180/pi))",
+            "value": 35.915983169364694,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 48,
+            "type": "HDistance",
+            "refs": [
+              0,
+              4
+            ],
+            "expr": "(rs\u002B(re-rs)*1)*cos((90/z-inva*180/pi\u002B(tan(acos(rb/((rs\u002B(re-rs)*1))))-acos(rb/((rs\u002B(re-rs)*1)))*pi/180)*180/pi))",
+            "value": 38.489244463874286,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 49,
+            "type": "HDistance",
+            "refs": [
+              0,
+              5
+            ],
+            "expr": "(rs\u002B(re-rs)*0.027778)*cos((90/z-inva*180/pi\u002B(tan(acos(rb/((rs\u002B(re-rs)*0.027778))))-acos(rb/((rs\u002B(re-rs)*0.027778)))*pi/180)*180/pi))",
+            "value": 33.94722494197722,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 50,
+            "type": "HDistance",
+            "refs": [
+              0,
+              10
+            ],
+            "expr": "(rs\u002B(re-rs)*0.25)*cos((90/z-inva*180/pi\u002B(tan(acos(rb/((rs\u002B(re-rs)*0.25))))-acos(rb/((rs\u002B(re-rs)*0.25)))*pi/180)*180/pi))",
+            "value": 35.0004061185856,
+            "sign": 1,
             "flip": 0,
             "driven": false,
             "labelX": 0,
@@ -819,12 +606,28 @@
           },
           {
             "id": 51,
-            "type": "PointOnCircle",
+            "type": "HDistance",
             "refs": [
-              45,
-              50
+              0,
+              15
             ],
-            "value": 0,
+            "expr": "(rs\u002B(re-rs)*0.694444)*cos((90/z-inva*180/pi\u002B(tan(acos(rb/((rs\u002B(re-rs)*0.694444))))-acos(rb/((rs\u002B(re-rs)*0.694444)))*pi/180)*180/pi))",
+            "value": 37.08304535371429,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 52,
+            "type": "HDistance",
+            "refs": [
+              0,
+              20
+            ],
+            "expr": "(rs\u002B(re-rs)*0)*cos((90/z-inva*180/pi\u002B(tan(acos(rb/((rs\u002B(re-rs)*0))))-acos(rb/((rs\u002B(re-rs)*0)))*pi/180)*180/pi))",
+            "value": 33.81497500920195,
             "sign": 1,
             "flip": 0,
             "driven": false,
@@ -836,10 +639,10 @@
             "type": "HDistance",
             "refs": [
               0,
-              52
+              21
             ],
-            "expr": "(rs\u002B(re-rs)*0.25)*cos((90/z - inva*180/pi \u002B (tan(acos(rb/((rs\u002B(re-rs)*0.25)))) - acos(rb/((rs\u002B(re-rs)*0.25)))*pi/180)*180/pi))",
-            "value": 35.0004061185856,
+            "expr": "(rs\u002B(re-rs)*0.111111)*cos((90/z-inva*180/pi\u002B(tan(acos(rb/((rs\u002B(re-rs)*0.111111))))-acos(rb/((rs\u002B(re-rs)*0.111111)))*pi/180)*180/pi))",
+            "value": 34.34300358366918,
             "sign": 1,
             "flip": 0,
             "driven": false,
@@ -848,14 +651,59 @@
           },
           {
             "id": 54,
-            "type": "VDistance",
+            "type": "HDistance",
             "refs": [
               0,
-              52
+              22
             ],
-            "expr": "((rs\u002B(re-rs)*0.25)*sin((90/z - inva*180/pi \u002B (tan(acos(rb/((rs\u002B(re-rs)*0.25)))) - acos(rb/((rs\u002B(re-rs)*0.25)))*pi/180)*180/pi)))",
-            "value": 1.221104312693966,
-            "sign": -1,
+            "expr": "(rs\u002B(re-rs)*0.444444)*cos((90/z-inva*180/pi\u002B(tan(acos(rb/((rs\u002B(re-rs)*0.444444))))-acos(rb/((rs\u002B(re-rs)*0.444444)))*pi/180)*180/pi))",
+            "value": 35.915983169364694,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 55,
+            "type": "HDistance",
+            "refs": [
+              0,
+              24
+            ],
+            "expr": "(rs\u002B(re-rs)*0.027778)*cos((90/z-inva*180/pi\u002B(tan(acos(rb/((rs\u002B(re-rs)*0.027778))))-acos(rb/((rs\u002B(re-rs)*0.027778)))*pi/180)*180/pi))",
+            "value": 33.94722494197722,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 56,
+            "type": "HDistance",
+            "refs": [
+              0,
+              29
+            ],
+            "expr": "(rs\u002B(re-rs)*0.25)*cos((90/z-inva*180/pi\u002B(tan(acos(rb/((rs\u002B(re-rs)*0.25))))-acos(rb/((rs\u002B(re-rs)*0.25)))*pi/180)*180/pi))",
+            "value": 35.0004061185856,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 57,
+            "type": "HDistance",
+            "refs": [
+              0,
+              34
+            ],
+            "expr": "(rs\u002B(re-rs)*0.694444)*cos((90/z-inva*180/pi\u002B(tan(acos(rb/((rs\u002B(re-rs)*0.694444))))-acos(rb/((rs\u002B(re-rs)*0.694444)))*pi/180)*180/pi))",
+            "value": 37.08304535371429,
+            "sign": 1,
             "flip": 0,
             "driven": false,
             "labelX": 0,
@@ -863,12 +711,28 @@
           },
           {
             "id": 58,
-            "type": "PointOnCircle",
+            "type": "HDistance",
             "refs": [
-              52,
-              57
+              0,
+              39
             ],
-            "value": 0,
+            "expr": "rf*cos((90/z-inva*180/pi\u002B(tan(acos(rb/(rs)))-acos(rb/(rs))*pi/180)*180/pi))",
+            "value": 33.48617639400859,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 59,
+            "type": "VDistance",
+            "refs": [
+              0,
+              1
+            ],
+            "expr": "((rs\u002B(re-rs)*0)*sin((90/z-inva*180/pi\u002B(tan(acos(rb/((rs\u002B(re-rs)*0))))-acos(rb/((rs\u002B(re-rs)*0)))*pi/180)*180/pi)))",
+            "value": 0.9717326114447509,
             "sign": 1,
             "flip": 0,
             "driven": false,
@@ -877,13 +741,13 @@
           },
           {
             "id": 60,
-            "type": "HDistance",
+            "type": "VDistance",
             "refs": [
               0,
-              59
+              2
             ],
-            "expr": "(rs\u002B(re-rs)*0.694444)*cos((90/z - inva*180/pi \u002B (tan(acos(rb/((rs\u002B(re-rs)*0.694444)))) - acos(rb/((rs\u002B(re-rs)*0.694444)))*pi/180)*180/pi))",
-            "value": 37.08304535371429,
+            "expr": "((rs\u002B(re-rs)*0.111111)*sin((90/z-inva*180/pi\u002B(tan(acos(rb/((rs\u002B(re-rs)*0.111111))))-acos(rb/((rs\u002B(re-rs)*0.111111)))*pi/180)*180/pi)))",
+            "value": 1.0500355127885204,
             "sign": 1,
             "flip": 0,
             "driven": false,
@@ -895,11 +759,56 @@
             "type": "VDistance",
             "refs": [
               0,
-              59
+              3
             ],
-            "expr": "((rs\u002B(re-rs)*0.694444)*sin((90/z - inva*180/pi \u002B (tan(acos(rb/((rs\u002B(re-rs)*0.694444)))) - acos(rb/((rs\u002B(re-rs)*0.694444)))*pi/180)*180/pi)))",
-            "value": 2.094924285680633,
-            "sign": -1,
+            "expr": "((rs\u002B(re-rs)*0.444444)*sin((90/z-inva*180/pi\u002B(tan(acos(rb/((rs\u002B(re-rs)*0.444444))))-acos(rb/((rs\u002B(re-rs)*0.444444)))*pi/180)*180/pi)))",
+            "value": 1.5498174097140243,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 62,
+            "type": "VDistance",
+            "refs": [
+              0,
+              4
+            ],
+            "expr": "((rs\u002B(re-rs)*1)*sin((90/z-inva*180/pi\u002B(tan(acos(rb/((rs\u002B(re-rs)*1))))-acos(rb/((rs\u002B(re-rs)*1)))*pi/180)*180/pi)))",
+            "value": 2.9219959959114554,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 63,
+            "type": "VDistance",
+            "refs": [
+              0,
+              5
+            ],
+            "expr": "((rs\u002B(re-rs)*0.027778)*sin((90/z-inva*180/pi\u002B(tan(acos(rb/((rs\u002B(re-rs)*0.027778))))-acos(rb/((rs\u002B(re-rs)*0.027778)))*pi/180)*180/pi)))",
+            "value": 0.9833739685047518,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 64,
+            "type": "VDistance",
+            "refs": [
+              0,
+              10
+            ],
+            "expr": "((rs\u002B(re-rs)*0.25)*sin((90/z-inva*180/pi\u002B(tan(acos(rb/((rs\u002B(re-rs)*0.25))))-acos(rb/((rs\u002B(re-rs)*0.25)))*pi/180)*180/pi)))",
+            "value": 1.221104312693966,
+            "sign": 1,
             "flip": 0,
             "driven": false,
             "labelX": 0,
@@ -907,12 +816,13 @@
           },
           {
             "id": 65,
-            "type": "PointOnCircle",
+            "type": "VDistance",
             "refs": [
-              59,
-              64
+              0,
+              15
             ],
-            "value": 0,
+            "expr": "((rs\u002B(re-rs)*0.694444)*sin((90/z-inva*180/pi\u002B(tan(acos(rb/((rs\u002B(re-rs)*0.694444))))-acos(rb/((rs\u002B(re-rs)*0.694444)))*pi/180)*180/pi)))",
+            "value": 2.094924285680633,
             "sign": 1,
             "flip": 0,
             "driven": false,
@@ -920,15 +830,30 @@
             "labelY": 0
           },
           {
-            "id": 67,
-            "type": "HDistance",
+            "id": 66,
+            "type": "VDistance",
             "refs": [
               0,
-              66
+              20
             ],
-            "expr": "rf*cos((90/z - inva*180/pi \u002B (tan(acos(rb/(rs))) - acos(rb/(rs))*pi/180)*180/pi))",
-            "value": 33.48617639400859,
-            "sign": 1,
+            "expr": "((rs\u002B(re-rs)*0)*sin((90/z-inva*180/pi\u002B(tan(acos(rb/((rs\u002B(re-rs)*0))))-acos(rb/((rs\u002B(re-rs)*0)))*pi/180)*180/pi)))",
+            "value": 0.9717326114447509,
+            "sign": -1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 67,
+            "type": "VDistance",
+            "refs": [
+              0,
+              21
+            ],
+            "expr": "((rs\u002B(re-rs)*0.111111)*sin((90/z-inva*180/pi\u002B(tan(acos(rb/((rs\u002B(re-rs)*0.111111))))-acos(rb/((rs\u002B(re-rs)*0.111111)))*pi/180)*180/pi)))",
+            "value": 1.0500355127885204,
+            "sign": -1,
             "flip": 0,
             "driven": false,
             "labelX": 0,
@@ -939,11 +864,26 @@
             "type": "VDistance",
             "refs": [
               0,
-              66
+              22
             ],
-            "expr": "rf*sin((90/z - inva*180/pi \u002B (tan(acos(rb/(rs))) - acos(rb/(rs))*pi/180)*180/pi))",
-            "value": 0.9622840065915956,
-            "sign": 1,
+            "expr": "((rs\u002B(re-rs)*0.444444)*sin((90/z-inva*180/pi\u002B(tan(acos(rb/((rs\u002B(re-rs)*0.444444))))-acos(rb/((rs\u002B(re-rs)*0.444444)))*pi/180)*180/pi)))",
+            "value": 1.5498174097140243,
+            "sign": -1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 69,
+            "type": "VDistance",
+            "refs": [
+              0,
+              23
+            ],
+            "expr": "((rs\u002B(re-rs)*1)*sin((90/z-inva*180/pi\u002B(tan(acos(rb/((rs\u002B(re-rs)*1))))-acos(rb/((rs\u002B(re-rs)*1)))*pi/180)*180/pi)))",
+            "value": 2.9219959959114554,
+            "sign": -1,
             "flip": 0,
             "driven": false,
             "labelX": 0,
@@ -954,9 +894,69 @@
             "type": "VDistance",
             "refs": [
               0,
-              69
+              24
             ],
-            "expr": "(rf*sin((90/z - inva*180/pi \u002B (tan(acos(rb/(rs))) - acos(rb/(rs))*pi/180)*180/pi)))",
+            "expr": "((rs\u002B(re-rs)*0.027778)*sin((90/z-inva*180/pi\u002B(tan(acos(rb/((rs\u002B(re-rs)*0.027778))))-acos(rb/((rs\u002B(re-rs)*0.027778)))*pi/180)*180/pi)))",
+            "value": 0.9833739685047518,
+            "sign": -1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 71,
+            "type": "VDistance",
+            "refs": [
+              0,
+              29
+            ],
+            "expr": "((rs\u002B(re-rs)*0.25)*sin((90/z-inva*180/pi\u002B(tan(acos(rb/((rs\u002B(re-rs)*0.25))))-acos(rb/((rs\u002B(re-rs)*0.25)))*pi/180)*180/pi)))",
+            "value": 1.221104312693966,
+            "sign": -1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 72,
+            "type": "VDistance",
+            "refs": [
+              0,
+              34
+            ],
+            "expr": "((rs\u002B(re-rs)*0.694444)*sin((90/z-inva*180/pi\u002B(tan(acos(rb/((rs\u002B(re-rs)*0.694444))))-acos(rb/((rs\u002B(re-rs)*0.694444)))*pi/180)*180/pi)))",
+            "value": 2.094924285680633,
+            "sign": -1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 73,
+            "type": "VDistance",
+            "refs": [
+              0,
+              39
+            ],
+            "expr": "rf*sin((90/z-inva*180/pi\u002B(tan(acos(rb/(rs)))-acos(rb/(rs))*pi/180)*180/pi))",
+            "value": 0.9622840065915956,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 74,
+            "type": "VDistance",
+            "refs": [
+              0,
+              40
+            ],
+            "expr": "(rf*sin((90/z-inva*180/pi\u002B(tan(acos(rb/(rs)))-acos(rb/(rs))*pi/180)*180/pi)))",
             "value": 0.9622840065915956,
             "sign": -1,
             "flip": 0,
@@ -1019,19 +1019,19 @@
             "fixed": false
           },
           {
-            "id": 4,
+            "id": 2,
             "x": 9.3,
             "y": -2.5,
             "fixed": false
           },
           {
-            "id": 7,
+            "id": 3,
             "x": 9.3,
             "y": 2.5,
             "fixed": false
           },
           {
-            "id": 10,
+            "id": 4,
             "x": 0,
             "y": 2.5,
             "fixed": false
@@ -1041,41 +1041,39 @@
           {
             "$type": "line",
             "p1": 1,
+            "p2": 2,
+            "id": 5,
+            "construction": false
+          },
+          {
+            "$type": "line",
+            "p1": 2,
+            "p2": 3,
+            "id": 6,
+            "construction": false
+          },
+          {
+            "$type": "line",
+            "p1": 3,
             "p2": 4,
-            "id": 13,
+            "id": 7,
             "construction": false
           },
           {
             "$type": "line",
             "p1": 4,
-            "p2": 7,
-            "id": 14,
-            "construction": false
-          },
-          {
-            "$type": "line",
-            "p1": 7,
-            "p2": 10,
-            "id": 15,
-            "construction": false
-          },
-          {
-            "$type": "line",
-            "p1": 10,
             "p2": 1,
-            "id": 16,
+            "id": 8,
             "construction": false
           }
         ],
         "constraints": [
           {
-            "id": 2,
-            "type": "HDistance",
+            "id": 9,
+            "type": "Vertical",
             "refs": [
-              0,
-              1
+              6
             ],
-            "expr": "0",
             "value": 0,
             "sign": 1,
             "flip": 0,
@@ -1084,74 +1082,12 @@
             "labelY": 0
           },
           {
-            "id": 3,
-            "type": "VDistance",
+            "id": 10,
+            "type": "Vertical",
             "refs": [
-              0,
-              1
+              8
             ],
-            "expr": "KeyW/2",
-            "value": 2.5,
-            "sign": -1,
-            "flip": 0,
-            "driven": false,
-            "labelX": 0,
-            "labelY": 0
-          },
-          {
-            "id": 5,
-            "type": "HDistance",
-            "refs": [
-              0,
-              4
-            ],
-            "expr": "Bore/2\u002BKeyT",
-            "value": 9.3,
-            "sign": 1,
-            "flip": 0,
-            "driven": false,
-            "labelX": 0,
-            "labelY": 0
-          },
-          {
-            "id": 6,
-            "type": "VDistance",
-            "refs": [
-              0,
-              4
-            ],
-            "expr": "KeyW/2",
-            "value": 2.5,
-            "sign": -1,
-            "flip": 0,
-            "driven": false,
-            "labelX": 0,
-            "labelY": 0
-          },
-          {
-            "id": 8,
-            "type": "HDistance",
-            "refs": [
-              0,
-              7
-            ],
-            "expr": "Bore/2\u002BKeyT",
-            "value": 9.3,
-            "sign": 1,
-            "flip": 0,
-            "driven": false,
-            "labelX": 0,
-            "labelY": 0
-          },
-          {
-            "id": 9,
-            "type": "VDistance",
-            "refs": [
-              0,
-              7
-            ],
-            "expr": "KeyW/2",
-            "value": 2.5,
+            "value": 0,
             "sign": 1,
             "flip": 0,
             "driven": false,
@@ -1160,12 +1096,11 @@
           },
           {
             "id": 11,
-            "type": "HDistance",
+            "type": "Vertical",
             "refs": [
               0,
-              10
+              1
             ],
-            "expr": "0",
             "value": 0,
             "sign": 1,
             "flip": 0,
@@ -1175,10 +1110,66 @@
           },
           {
             "id": 12,
+            "type": "HDistance",
+            "refs": [
+              0,
+              2
+            ],
+            "expr": "Bore/2\u002BKeyT",
+            "value": 9.3,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 13,
+            "type": "Horizontal",
+            "refs": [
+              5
+            ],
+            "value": 0,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 14,
+            "type": "Horizontal",
+            "refs": [
+              7
+            ],
+            "value": 0,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 15,
             "type": "VDistance",
             "refs": [
               0,
-              10
+              1
+            ],
+            "expr": "KeyW/2",
+            "value": 2.5,
+            "sign": -1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 16,
+            "type": "VDistance",
+            "refs": [
+              0,
+              3
             ],
             "expr": "KeyW/2",
             "value": 2.5,
@@ -1401,13 +1392,27 @@
             "$type": "circle",
             "center": 1,
             "r": 4.934999999999999,
-            "id": 4,
+            "id": 2,
             "construction": false
           }
         ],
         "constraints": [
           {
-            "id": 2,
+            "id": 3,
+            "type": "Diameter",
+            "refs": [
+              2
+            ],
+            "expr": "LH",
+            "value": 9.869999999999997,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 4,
             "type": "HDistance",
             "refs": [
               0,
@@ -1422,28 +1427,13 @@
             "labelY": 0
           },
           {
-            "id": 3,
-            "type": "VDistance",
+            "id": 5,
+            "type": "Horizontal",
             "refs": [
               0,
               1
             ],
-            "expr": "0",
             "value": 0,
-            "sign": 1,
-            "flip": 0,
-            "driven": false,
-            "labelX": 0,
-            "labelY": 0
-          },
-          {
-            "id": 5,
-            "type": "Diameter",
-            "refs": [
-              4
-            ],
-            "expr": "LH",
-            "value": 9.869999999999997,
             "sign": 1,
             "flip": 0,
             "driven": false,

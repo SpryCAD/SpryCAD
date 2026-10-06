@@ -152,7 +152,20 @@ public sealed class FeatureTree : UserControl
         var sp = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, Margin = new Thickness(indent * 14, 0, 0, 0) };
         if (hasChildren)
         {
-            var exp = new TextBlock { Text = _expanded.Contains(id) ? "▾" : "▸", Width = 10, VerticalAlignment = VerticalAlignment.Center, Foreground = Brushes.Gray, Cursor = new Cursor(StandardCursorType.Hand) };
+            // an 18x18 hit area (transparent background so the whole square takes clicks), larger glyph, hover cue
+            var exp = new Border
+            {
+                Width = 18, Height = 18, CornerRadius = new CornerRadius(3), Background = Brushes.Transparent,
+                Cursor = new Cursor(StandardCursorType.Hand), VerticalAlignment = VerticalAlignment.Center,
+                Child = new TextBlock
+                {
+                    Text = _expanded.Contains(id) ? "▾" : "▸", FontSize = 14, Foreground = Brushes.DimGray,
+                    HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
+                },
+            };
+            ToolTip.SetTip(exp, _expanded.Contains(id) ? "Collapse" : "Expand");
+            exp.PointerEntered += (_, _) => exp.Background = new SolidColorBrush(Color.FromArgb(40, 0, 90, 200));
+            exp.PointerExited += (_, _) => exp.Background = Brushes.Transparent;
             exp.PointerPressed += (_, e) =>
             {
                 if (!_expanded.Add(id)) _expanded.Remove(id);
@@ -161,7 +174,7 @@ public sealed class FeatureTree : UserControl
             };
             sp.Children.Add(exp);
         }
-        else sp.Children.Add(new Control { Width = 10 });
+        else sp.Children.Add(new Control { Width = 18 });
         sp.Children.Add(Icons.Make(icon, 16));
         var tb = new TextBlock { Text = text, VerticalAlignment = VerticalAlignment.Center, FontSize = 12.5 };
         if (isHeader) tb.FontWeight = FontWeight.SemiBold;
