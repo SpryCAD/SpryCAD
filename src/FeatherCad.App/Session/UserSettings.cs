@@ -1,5 +1,16 @@
 namespace FeatherCad.App.Session;
 
+/// <summary>What the view rotates about when no rotation center has been set by a middle-click.</summary>
+public enum RotateCenter
+{
+    /// <summary>The middle of the model (SolidWorks' default).</summary>
+    ModelCenter,
+    /// <summary>The most recently selected vertex, edge or face.</summary>
+    Selection,
+    /// <summary>The point on the model under the cursor when the rotation starts (as Onshape/Fusion).</summary>
+    UnderCursor,
+}
+
 /// <summary>Per-user view preferences (not part of the document), stored as key=value lines in app data.</summary>
 public static class UserSettings
 {
@@ -9,6 +20,7 @@ public static class UserSettings
     public static bool Perspective { get; set; }
     /// <summary>Save every part as a container (ZIP with a preview image), not only parts with embedded files.</summary>
     public static bool SaveContainer { get; set; }
+    public static RotateCenter RotateAbout { get; set; } = RotateCenter.ModelCenter;
 
     public static void Load()
     {
@@ -23,6 +35,7 @@ public static class UserSettings
                 if (k == nameof(ReverseWheel)) ReverseWheel = v == "1";
                 else if (k == nameof(Perspective)) Perspective = v == "1";
                 else if (k == nameof(SaveContainer)) SaveContainer = v == "1";
+                else if (k == nameof(RotateAbout) && Enum.TryParse<RotateCenter>(v, out var rc)) RotateAbout = rc;
             }
         }
         catch { /* defaults */ }
@@ -38,6 +51,7 @@ public static class UserSettings
                 $"{nameof(ReverseWheel)}={(ReverseWheel ? 1 : 0)}",
                 $"{nameof(Perspective)}={(Perspective ? 1 : 0)}",
                 $"{nameof(SaveContainer)}={(SaveContainer ? 1 : 0)}",
+                $"{nameof(RotateAbout)}={RotateAbout}",
             });
         }
         catch { /* preferences are a convenience only */ }

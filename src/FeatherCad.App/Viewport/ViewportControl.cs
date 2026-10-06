@@ -59,6 +59,8 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
     public bool ShowPlanes = true;
     public bool ShowOrigin = true;
     public bool ReverseWheel;
+    /// <summary>What the view rotates about unless a rotation center was set by middle-clicking the model.</summary>
+    public RotateCenter RotateAbout = RotateCenter.ModelCenter;
 
     // highlight state
     public SelItem? Hover { get; set; }
@@ -83,6 +85,9 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
     enum Nav { None, Rotate, Pan, Zoom, Roll }
     Nav _nav; Point _navLast; Point _rightDown; bool _rightDragged; Vector3 _pivot;
     bool _leftDown;
+    // rotation center set by middle-clicking the model (SolidWorks): kept until a middle-click on empty space
+    Vector3? _pinnedPivot;
+    Point _middleDown; bool _middleDragged;
 
     // view animation
     Quaternion _animFromQ, _animToQ; Vector3 _animFromT, _animToT; float _animFromH, _animToH;
@@ -199,6 +204,8 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         if (ShowOrigin) DrawOrigin(_dyn);
         Mode?.Draw(this, _dyn);
         DrawPointAndSegmentHighlights(_dyn, hl);
+        if (_nav == Nav.Rotate) DrawPivot(_dyn, _pivot);
+        else if (_pinnedPivot is { } pin) DrawPivot(_dyn, pin);
         // edges a feature failed on (e.g. a fillet that does not fit), drawn on top in red
         foreach (var pl in ProblemEdges)
             for (int i = 0; i + 1 < pl.Length; i++) _dyn.Line(pl[i], pl[i + 1], new Rgba(0.9f, 0.1f, 0.1f), top: true);
@@ -332,6 +339,19 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         }
     }
 
+    /// <summary>The rotation center: a small screen-facing circle with a dot, on top of the model.</summary>
+    void DrawPivot(DynamicGeometry g, Vector3 at)
+    {
+        var c = Camera.V(at); var r = Camera.PixelSize * 7;
+        var right = Camera.V(Camera.Right); var up = Camera.V(Camera.Up);
+        var color = new Rgba(0.85f, 0.35f, 0.05f);
+        Vec3 P(double a, double s) => c + (right * Math.Cos(a) + up * Math.Sin(a)) * (r * s);
+        for (int i = 0; i < 24; i++)
+            g.Line(P(i * Math.PI / 12, 1), P((i + 1) * Math.PI / 12, 1), color, top: true);
+        g.Line(c - right * (r * 0.3), c + right * (r * 0.3), color, top: true);
+        g.Line(c - up * (r * 0.3), c + up * (r * 0.3), color, top: true);
+    }
+
     void DrawOrigin(DynamicGeometry g)
     {
         var s = Camera.PixelSize * 28;
@@ -434,6 +454,17 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         else AnimateTo(q);
     }
 
+    /// <summary>
+    /// Looks at the model from a world direction (a View Selector face, edge or corner), keeping +Y up; straight
+    /// down or up, the top/bottom views' up (-Z / +Z) is used.
+    /// </summary>
+    public void ViewFrom(Vector3 dir)
+    {
+        dir = Vector3.Normalize(dir);
+        var up = MathF.Abs(dir.Y) > 0.999f ? (dir.Y > 0 ? -Vector3.UnitZ : Vector3.UnitZ) : Vector3.UnitY;
+        AnimateTo(Camera.LookRotation(dir, up));
+    }
+
     /// <summary>Look straight at a frame (Normal To).</summary>
     public void NormalTo(Frame f)
     {
@@ -479,7 +510,8 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
                  : (e.KeyModifiers & KeyModifiers.Shift) != 0 ? Nav.Zoom
                  : (e.KeyModifiers & KeyModifiers.Alt) != 0 ? Nav.Roll
                  : Nav.Rotate;
-            _pivot = ComputePivot();
+            _pivot = ComputePivot(pt.Position);
+            _middleDown = pt.Position; _middleDragged = false;
             e.Pointer.Capture(this);
             e.Handled = true;
             return;
@@ -495,7 +527,7 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         {
             if ((e.KeyModifiers & KeyModifiers.Alt) != 0)
             {
-                _nav = Nav.Rotate; _pivot = ComputePivot();
+                _nav = Nav.Rotate; _pivot = ComputePivot(pt.Position);
                 e.Pointer.Capture(this);
                 return;
             }
@@ -509,16 +541,33 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
     Point _zoomAnchor;
 
     /// <summary>
-    /// Rotation center: the selected vertex (model corner or sketch point), edge (its middle) or face (the spot it
-    /// was picked), the most recent one when several are selected; otherwise the middle of the model.
+    /// Rotation center: one set by middle-clicking the model; otherwise per <see cref="RotateAbout"/> the selected
+    /// vertex (model corner or sketch point), edge (its middle) or face (the spot it was picked), or the model under
+    /// <paramref name="cursor"/>; failing those, the middle of the model.
     /// </summary>
-    Vector3 ComputePivot()
+    Vector3 ComputePivot(Point? cursor = null)
     {
-        if (Selection?.Items.LastOrDefault(s => s.Kind is SelKind.Vertex or SelKind.Edge or SelKind.Face) is { } sel)
+        if (_pinnedPivot is { } pin) return pin;
+        if (RotateAbout == RotateCenter.Selection &&
+            Selection?.Items.LastOrDefault(s => s.Kind is SelKind.Vertex or SelKind.Edge or SelKind.Face) is { } sel)
             return Camera.F(sel.Point);
+        if (RotateAbout == RotateCenter.UnderCursor && cursor is { } c && ModelPointAt(c) is { } hit)
+            return hit;
         var b = SceneBounds();
         return b.IsEmpty ? Camera.Target : Camera.F(b.Center);
     }
+
+    /// <summary>The model point under a screen point: a vertex near it, else where the ray meets a face or edge.</summary>
+    Vector3? ModelPointAt(Point p)
+    {
+        if (PickVertex(p.X, p.Y) is { } v) return Camera.F(v.point);
+        if (Pick(p.X, p.Y, SelFilter.Face) is { } f) return Camera.F(f.Point);
+        if (Pick(p.X, p.Y, SelFilter.Edge) is { } e) return Camera.F(e.Point);
+        return null;
+    }
+
+    /// <summary>Forgets a rotation center set by middle-clicking (e.g. when another part is opened).</summary>
+    public void ClearPivot() { _pinnedPivot = null; Redraw(); }
 
     protected override void OnPointerMoved(PointerEventArgs e)
     {
@@ -535,6 +584,7 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         if (_nav != Nav.None)
         {
             _animating = false;
+            if (!_middleDragged && Math.Abs(pos.X - _middleDown.X) + Math.Abs(pos.Y - _middleDown.Y) > 3) _middleDragged = true;
             switch (_nav)
             {
                 case Nav.Rotate: Camera.Orbit(dx, dy, _pivot); break;
@@ -553,7 +603,15 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
     protected override void OnPointerReleased(PointerReleasedEventArgs e)
     {
         base.OnPointerReleased(e);
-        if (_nav != Nav.None) { _nav = Nav.None; e.Pointer.Capture(null); return; }
+        if (_nav != Nav.None)
+        {
+            // a plain middle click (no drag) sets the rotation center on the model, or clears it on empty space
+            if (e.InitialPressMouseButton == MouseButton.Middle && _nav == Nav.Rotate && !_middleDragged)
+                _pinnedPivot = ModelPointAt(e.GetPosition(this));
+            _nav = Nav.None; e.Pointer.Capture(null);
+            Redraw(); // the rotation marker goes away (or moves to the new center)
+            return;
+        }
         if (e.InitialPressMouseButton == MouseButton.Right)
         {
             e.Pointer.Capture(null);

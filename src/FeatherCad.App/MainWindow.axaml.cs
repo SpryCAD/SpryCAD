@@ -27,6 +27,7 @@ public partial class MainWindow : Window
     bool _firstRebuild = true;
 
     public static MainWindow? Instance { get; private set; }
+    readonly ViewSelector _viewSelector;
 
     public MainWindow()
     {
@@ -36,11 +37,19 @@ public partial class MainWindow : Window
         Viewport.Mode = _modelMode;
         UserSettings.Load();
         Viewport.ReverseWheel = UserSettings.ReverseWheel;
+        Viewport.RotateAbout = UserSettings.RotateAbout;
         Viewport.Camera.Perspective = UserSettings.Perspective;
         Viewport.Overlay = Overlay;
         Viewport.Selection = Selection;
         Viewport.ContextRequested += OnViewportContext;
         Viewport.CameraChanged += UpdateTriadLabels;
+        _viewSelector = new ViewSelector(Viewport, NormalTo);
+        GraphicsArea.Children.Add(_viewSelector);
+        // a click elsewhere in the graphics area puts the View Selector away (and still does what it does)
+        Viewport.AddHandler(PointerPressedEvent, (_, e) =>
+        {
+            if (_viewSelector.IsOpen && e.GetCurrentPoint(Viewport).Properties.IsLeftButtonPressed) _viewSelector.Close();
+        }, Avalonia.Interactivity.RoutingStrategies.Tunnel);
         _modelMode.DoubleClicked += OnModelDoubleClick;
         _modelMode.PickHandler = PickToPage;
 
@@ -328,6 +337,7 @@ public partial class MainWindow : Window
         var inText = e.Source is TextBox;
         // keys typed into an input control (combo, check box, button, list) are that control's, not view shortcuts
         var inControl = inText || e.Source is ComboBox or ComboBoxItem or CheckBox or Button or ListBox or ListBoxItem or Slider or MenuItem;
+        if (_viewSelector.IsOpen && e.Key == Key.Escape) { _viewSelector.Close(); e.Handled = true; return; }
         if (ctrl)
         {
             bool handled = true;
@@ -392,7 +402,7 @@ public partial class MainWindow : Window
                 Viewport.ZoomToFit(); e.Handled = true;
                 break;
             case Key.Space:
-                ShowOrientationFlyout(); e.Handled = true;
+                _viewSelector.Toggle(); e.Handled = true;
                 break;
             case Key.Left: Viewport.Rotate(alt ? 0 : shift ? -90 : -15, 0); if (alt) { Viewport.Camera.Roll(-0.26f); Viewport.Redraw(); } e.Handled = true; break;
             case Key.Right: Viewport.Rotate(alt ? 0 : shift ? 90 : 15, 0); if (alt) { Viewport.Camera.Roll(0.26f); Viewport.Redraw(); } e.Handled = true; break;

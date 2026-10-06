@@ -359,26 +359,20 @@ public partial class MainWindow
     Flyout OrientationFlyout()
     {
         var grid = new WrapPanel { Width = 250 };
+        var f = new Flyout { Content = grid, Placement = PlacementMode.Bottom };
         foreach (var v in new[] { "Front", "Back", "Left", "Right", "Top", "Bottom", "Isometric", "Trimetric", "Dimetric" })
         {
             var b = new Button { Content = v, Width = 78, Margin = new Thickness(2), FontSize = 11 };
-            b.Click += (_, _) => { Viewport.StandardView(v); _orientationFlyout?.Hide(); };
+            b.Click += (_, _) => { Viewport.StandardView(v); f.Hide(); };
             grid.Children.Add(b);
         }
         var nb = new Button { Content = "Normal To", Width = 78, Margin = new Thickness(2), FontSize = 11 };
-        nb.Click += (_, _) => { NormalTo(); _orientationFlyout?.Hide(); };
+        nb.Click += (_, _) => { NormalTo(); f.Hide(); };
         grid.Children.Add(nb);
-        var f = new Flyout { Content = grid, Placement = PlacementMode.Bottom };
+        var sel = new Button { Content = "View Selector (Spacebar)", Margin = new Thickness(2), FontSize = 11, HorizontalAlignment = HorizontalAlignment.Stretch };
+        sel.Click += (_, _) => { f.Hide(); _viewSelector.Open(); };
+        grid.Children.Add(sel);
         return f;
-    }
-
-    Flyout? _orientationFlyout;
-
-    void ShowOrientationFlyout()
-    {
-        _orientationFlyout ??= OrientationFlyout();
-        _orientationFlyout.Placement = PlacementMode.Pointer;
-        _orientationFlyout.ShowAt(Viewport, true);
     }
 
     void SetStyle(DisplayStyle s) { Viewport.Style = s; Viewport.Redraw(); }
@@ -575,6 +569,7 @@ public partial class MainWindow
     {
         if (!await ConfirmDiscard()) return;
         LeaveModes();
+        Viewport.ClearPivot();
         Session.New();
         Viewport.StandardView("Trimetric", fit: true);
     }
@@ -606,6 +601,7 @@ public partial class MainWindow
         try
         {
             LeaveModes();
+            Viewport.ClearPivot();
             Session.Load(path);
             if (!path.EndsWith("autosave" + CadDocument.FileExtension, StringComparison.OrdinalIgnoreCase)) RecentFiles.Add(path);
             Status("Opened " + path);

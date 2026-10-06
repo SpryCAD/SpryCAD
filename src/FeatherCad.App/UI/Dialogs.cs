@@ -220,6 +220,12 @@ public static class Dialogs
         var units = new ComboBox { ItemsSource = new[] { "MMGS (millimeter, gram, second)", "IPS (inch, pound, second)" }, SelectedIndex = s.Doc.Units == UnitSystem.IPS ? 1 : 0, HorizontalAlignment = HorizontalAlignment.Stretch };
         var wheel = new CheckBox { Content = "Reverse mouse wheel zoom direction", IsChecked = owner.Viewport.ReverseWheel };
         var persp = new CheckBox { Content = "Perspective view", IsChecked = owner.Viewport.Camera.Perspective };
+        var pivots = new[] { Session.RotateCenter.ModelCenter, Session.RotateCenter.Selection, Session.RotateCenter.UnderCursor };
+        var pivot = new ComboBox
+        {
+            ItemsSource = new[] { "Rotate about the model center", "Rotate about the selection", "Rotate about the point under the cursor" },
+            SelectedIndex = Array.IndexOf(pivots, owner.Viewport.RotateAbout), HorizontalAlignment = HorizontalAlignment.Stretch,
+        };
         var container = new CheckBox { Content = "Always save parts as containers (with a preview image)", IsChecked = Session.UserSettings.SaveContainer };
         var color = new TextBox { Text = string.Join(", ", s.Doc.Color.Select(c => ((int)(c * 255)).ToString())) };
         var ok = new Button { Content = "OK", IsDefault = true };
@@ -232,6 +238,8 @@ public static class Dialogs
         sp.Children.Add(color);
         sp.Children.Add(new TextBlock { Text = "View", FontWeight = FontWeight.SemiBold });
         sp.Children.Add(wheel); sp.Children.Add(persp);
+        sp.Children.Add(pivot);
+        sp.Children.Add(new TextBlock { Text = "Middle-click a vertex, edge or face to rotate about that spot instead, until you middle-click empty space.", FontSize = 11, Foreground = Brushes.DimGray, TextWrapping = TextWrapping.Wrap });
         sp.Children.Add(new TextBlock { Text = "Files", FontWeight = FontWeight.SemiBold });
         sp.Children.Add(container);
         sp.Children.Add(new TextBlock { Text = "Otherwise parts are saved as plain JSON, unless they embed other files (e.g. an imported model). Either kind opens normally.", FontSize = 11, Foreground = Brushes.DimGray, TextWrapping = TextWrapping.Wrap });
@@ -244,6 +252,7 @@ public static class Dialogs
             owner.Viewport.Camera.Perspective = persp.IsChecked == true;
             Session.UserSettings.ReverseWheel = owner.Viewport.ReverseWheel;
             Session.UserSettings.Perspective = owner.Viewport.Camera.Perspective;
+            if (pivot.SelectedIndex >= 0) owner.Viewport.RotateAbout = Session.UserSettings.RotateAbout = pivots[pivot.SelectedIndex];
             Session.UserSettings.SaveContainer = container.IsChecked == true;
             Session.UserSettings.Save();
             var newUnits = units.SelectedIndex == 1 ? UnitSystem.IPS : UnitSystem.MMGS;
@@ -263,12 +272,13 @@ public static class Dialogs
         const string text = """
             VIEW
               Middle mouse drag ........ Rotate
+              Middle click ............. Rotate about this spot (empty space: clear)
               Ctrl + middle drag ....... Pan          (or right mouse drag)
               Shift + middle drag ...... Zoom
               Alt + middle drag ........ Roll
               Mouse wheel .............. Zoom at cursor
               F ........................ Zoom to fit
-              Spacebar ................. View orientation
+              Spacebar ................. View Selector (click a cube face/edge/corner)
               Ctrl+1..6 ................ Front/Back/Left/Right/Top/Bottom
               Ctrl+7 ................... Isometric
               Ctrl+8 ................... Normal To
