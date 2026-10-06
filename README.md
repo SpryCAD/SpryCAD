@@ -244,9 +244,13 @@ Check items off as they land.
 - [ ] Sweep and loft (path, sections, guide curves)
 - [ ] Draft (including parting line)
 - [ ] Smooth corner blends where three fillets meet (setback / vertex blends)
+- [x] Fillets along edges that run across tangent faces (the ball rolls from face to face in one tool)
+- [x] Patterned fillets solved again on instances whose geometry differs from the seed
 - [ ] Variable-radius and face fillets; chamfers on curved faces
 - [ ] General shell / offset that survives topology changes; thicken; offset surface bodies
 - [ ] Surface modelling: open surface bodies, knit, trim, extend, fill / patch, ruled and boundary surfaces
+- [ ] Fit traced section curves to the size of the face pair, not of the whole operand (a big pattern cut
+      leaves coarse curves that later local booleans must reconcile: handwheel spokes at 220-250 degrees)
 - [ ] Boolean robustness for the remaining tangent and partial-overlap cases (fillets of neighbouring features that
       overlap each other, cuts with fillets running through other fillets)
 - [ ] Body edits: split body, move / delete / replace face with healing
