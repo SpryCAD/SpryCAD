@@ -1,0 +1,87 @@
+# Builds the Windows installer and the Linux packages (tar.gz and .deb).
+#   - Run by hand (Actions > Packages > Run workflow): the packages are attached to the run as artifacts.
+#   - Push a version tag (git tag v0.2.0 && git push origin v0.2.0): the same, plus a draft GitHub release with
+#     the packages attached, to review and publish by hand. The tag sets the version (v0.2.0 -> 0.2.0);
+#     otherwise it is <Version> in src/FeatherCad.App/FeatherCad.App.csproj.
+name: Packages
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      # Inno Setup, unless the runner image already has it; the C++ build tools (thumbnail handler) come with it
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $ver = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME -replace '^v', '' } else { '' }
+          if ($ver) { ./build/make-installer.ps1 -Ver $ver } else { ./build/make-installer.ps1 }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: publish/FeatherCAD-Setup-*.exe
+          if-no-files-found: error
+
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build packages
+        run: |
+          ver=""
+          if [ "$GITHUB_REF_TYPE" = tag ]; then ver="${GITHUB_REF_NAME#v}"; fi
+          bash build/make-linux-package.sh $ver
+      # a quick check that the .deb is well formed and holds what it should
+      - name: Inspect .deb
+        run: |
+          deb=$(ls publish/feathercad_*_amd64.deb)
+          dpkg-deb --info "$deb"
+          dpkg-deb --contents "$deb" > contents.txt
+          for f in ./opt/feathercad/FeatherCAD ./usr/bin/feathercad ./usr/share/applications/feathercad.desktop \
+                   ./usr/share/mime/packages/feathercad.xml ./usr/share/icons/hicolor/256x256/apps/feathercad.png; do
+            grep -q " $f\( \|$\)" contents.txt || { echo "missing from the .deb: $f"; exit 1; }
+          done
+          grep ' ./opt/feathercad/FeatherCAD$' contents.txt | grep -q '^-rwxr-xr-x root/root' || { echo "FeatherCAD is not root-owned 755"; exit 1; }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-packages
+          path: |
+            publish/FeatherCAD-*-linux-x64.tar.gz
+            publish/feathercad_*_amd64.deb
+          if-no-files-found: error
+
+  release:
+    if: github.ref_type == 'tag'
+    needs: [windows, linux]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: packages
+          merge-multiple: true
+      - name: Draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" packages/* --repo "$GITHUB_REPOSITORY" --draft --generate-notes \
+            --title "FeatherCAD ${GITHUB_REF_NAME#v}"

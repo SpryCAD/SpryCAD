@@ -1,0 +1,4 @@
+# Shell scripts and Linux desktop files run on Linux: keep LF in every checkout
+*.sh text eol=lf
+*.desktop text eol=lf
+installer/linux/*.xml text eol=lf
