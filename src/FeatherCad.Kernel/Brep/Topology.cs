@@ -65,6 +65,8 @@ public sealed class Topology
     public List<TopoEdge> Edges { get; } = new();
     /// <summary>Half edges with no matching twin (0 for a watertight solid).</summary>
     public int OpenHalfEdges { get; private set; }
+    /// <summary>Diagnostics: open half-edges as they are found.</summary>
+    public static Action<string>? Debug;
 
     public static Topology Build(Solid s)
     {
@@ -139,7 +141,12 @@ public sealed class Topology
                 for (int i = 0; i < l.Length; i++)
                 {
                     int a = l[i], b = l[(i + 1) % l.Length];
-                    if (!owner.TryGetValue((b, a), out var fj)) { open++; continue; }
+                    if (!owner.TryGetValue((b, a), out var fj))
+                    {
+                        open++;
+                        if (Debug != null && open <= 20) Debug($"open {(resolveTJunctions ? "full" : "quick")}: {nameA} {t.Vertices[a]} -> {t.Vertices[b]}");
+                        continue;
+                    }
                     var nameB = s.Faces[fj].Tag.Name;
                     if (nameA == nameB) continue;
                     // keep one orientation per edge: the one owned by the lexicographically smaller name

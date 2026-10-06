@@ -37,8 +37,10 @@ static class Program
 {
     static int Main(string[] args)
     {
+        if (Environment.GetEnvironmentVariable("FC_TOPO") != null) FeatherCad.Kernel.Topology.Debug = Console.WriteLine;
         if (args.Length > 7 && args[0] == "fillet") return Hang.Run(args);
-        if (args.Length > 1 && args[0] == "verify-demos") return Demos.Verify(args[1]);
+        if (args.Length > 2 && args[0] == "rb") return RollingBallTool.Run(args);
+        if (args.Length > 1 && args[0] == "verify-demos") return Demos.Verify(args[1], filter: args.Length > 2 ? args[2] : null);
         if (args.Length > 1 && args[0] == "demo-sketches") return Demos.SketchReport(args[1]);
         if (args.Length > 0 && args[0] == "demos") return Demos.Write(args.Length > 1 ? args[1] : Path.Combine(Path.GetTempPath(), "fc-demos"));
         if (args.Length > 2 && args[0] == "validate") return Validate.Run(args[1], args[2]);
@@ -59,6 +61,7 @@ static class Program
             ExactTests.Run(t);
             Console.WriteLine("Native");
             NativeTests.Run(t);
+            RollingBallTool.Tests(t);
             NativeBoolTests.Run(t);
             NativeRevolveTests.Run(t);
             Console.WriteLine("Core");

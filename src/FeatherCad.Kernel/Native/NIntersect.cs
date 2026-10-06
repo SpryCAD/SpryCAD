@@ -81,10 +81,12 @@ public static class NIntersect
         // cache keeps the first sampling that is fine enough); keep that order until the cache is per-tolerance
         e.Samples(tol * 50);
 
-        // edge lying on the surface
+        // edge lying on the surface (fitted curves only within their fit tolerance: a boolean fits traced
+        // sections within 50 tol of the exact intersection)
         const int probe = 16;
         bool allOn = true;
-        for (int i = 0; i <= probe && allOn; i++) if (Math.Abs(F(lo + (hi - lo) * i / probe)) > tol) allOn = false;
+        var onTol = c is NSpline or NPolyline ? tol * 100 : tol;
+        for (int i = 0; i <= probe && allOn; i++) if (Math.Abs(F(lo + (hi - lo) * i / probe)) > onTol) allOn = false;
         if (allOn) return new EdgeHits(res, true);
 
         if (Math.Abs(F(e.T0)) < tol) res.Add(e.T0);
@@ -252,6 +254,8 @@ public static class NIntersect
     public static List<NCurve>? Analytic(NSurface a, NSurface b, double tol)
     {
         if (a.Kind == SurfaceKind.Plane && b.Kind == SurfaceKind.Plane) return PlanePlane(a.Plane!, b.Plane!);
+        if (a.Kind == SurfaceKind.Pipe) return PipeOther(a, b, tol);
+        if (b.Kind == SurfaceKind.Pipe) return PipeOther(b, a, tol);
 
         // coaxial surfaces of revolution (incl. planes perpendicular to the axis and spheres centred on it)
         foreach (var (o, ax) in CandidateAxes(a, b))
@@ -285,6 +289,30 @@ public static class NIntersect
                 }
                 return res;
             }
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Pipe against another surface: a rolling-ball pipe only touches its support surfaces (along its contact
+    /// curves, which are edges of the blend already: no section), and a plane normal to the spine through a
+    /// spine node cuts it in that node's circle. Anything else is traced.
+    /// </summary>
+    static List<NCurve>? PipeOther(NSurface pipe, NSurface o, double tol)
+    {
+        var sp = pipe.Spine!;
+        if (o.Kind != SurfaceKind.Pipe)
+            foreach (var sup in new[] { sp.SupportA, sp.SupportB })
+                if (sup != null && sup.Kind == o.Kind && sup.CoincidentWith(o, tol)) return new List<NCurve>();
+        if (o.Kind == SurfaceKind.Plane)
+        {
+            var pl = o.Plane!;
+            for (int i = 0; i < sp.P.Length; i++)
+                if (Math.Abs(pl.Distance(sp.P[i])) < tol && Math.Abs(Vec3.Dot(pl.Normal, sp.D[i])) > 1 - 1e-12)
+                {
+                    // the node's cross-section; other crossings of a short blend pipe with such a plane do not occur
+                    return new List<NCurve> { new NCircle(sp.P[i], sp.D[i], sp.D[i].AnyPerpendicular(), pipe.R) };
+                }
         }
         return null;
     }

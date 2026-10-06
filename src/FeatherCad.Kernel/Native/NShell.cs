@@ -93,6 +93,9 @@ public static class NShell
                 return new NSurface(s.Def with { Param2 = s.R2 + d });
             case SurfaceKind.Cone:
                 return new NSurface(s.Def with { Radius = s.R + d / Math.Cos(s.R2) });
+            case SurfaceKind.Pipe:
+                if (s.R + d <= 1e-9) throw new InvalidOperationException("shell: thickness exceeds a fillet radius");
+                return new NSurface(s.Def with { Radius = s.R + d });
         }
         throw new NotSupportedException();
     }

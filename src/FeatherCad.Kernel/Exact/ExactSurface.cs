@@ -57,6 +57,8 @@ public sealed class ExactSurface
                     if (d.LengthSq < 0.5) d = radial;
                     return center + d * Def.Param2;
                 }
+            case SurfaceKind.Pipe:
+                return Def.Spine!.Project(p, Def.Radius);
         }
         return p;
     }
@@ -93,6 +95,8 @@ public sealed class ExactSurface
                     var c = Def.Origin + radial * Def.Radius;
                     return (p - c).Normalized;
                 }
+            case SurfaceKind.Pipe:
+                return Def.Spine!.Normal(p);
         }
         return Vec3.UnitZ;
     }
@@ -121,6 +125,7 @@ public sealed class ExactSurface
             SurfaceKind.Sphere => $"Sphere R{Def.Radius:0.###}",
             SurfaceKind.Cone => $"Cone {2 * Def.Param2 * 180 / Math.PI:0.##}°",
             SurfaceKind.Torus => $"Torus R{Def.Radius:0.###} r{Def.Param2:0.###}",
+            SurfaceKind.Pipe => $"Fillet R{Def.Radius:0.###}",
             _ => Def.Kind.ToString(),
         };
     }

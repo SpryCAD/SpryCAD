@@ -111,7 +111,8 @@ public sealed class NBoolean
             Parallel.ForEach(toTrace, i =>
             {
                 var (fa, fb, _) = pairs[i];
-                var c = NIntersect.Trace(fa, fb.Surface, traceTol).Cast<NCurve>().ToList();
+                List<NCurve> c; using (Prof.Time(Prof.Enabled ? $"tr.{fa.Surface.Kind}x{fb.Surface.Kind}" : "")) c = NIntersect.Trace(fa, fb.Surface, traceTol).Cast<NCurve>().ToList();
+                if (Prof.Enabled && c.Count == 0) Prof.Add($"tr.empty.{fa.Surface.Kind}x{fb.Surface.Kind}", 0);
                 // traced from the other side too (small faces)
                 if (c.Count == 0) c = NIntersect.Trace(fb, fa.Surface, traceTol).Cast<NCurve>().ToList();
                 pairCurves[i] = c;
@@ -195,6 +196,7 @@ public sealed class NBoolean
         if (Trace != null) T($"unified: {Dump(result.Faces)}");
         result.Link();
         MergeEdges(result);
+        RemoveSpurs(result);
         result.Link();
         Lap("sew/unify/merge");
         var err = result.Validate();
@@ -204,6 +206,33 @@ public sealed class NBoolean
                     if (Trace != null) T($"  {f.Tag.Name} sense={f.Sense}: " + string.Join(" ", l.Coedges.Select(c => $"[{c.Start.P}->{c.End.P} {c.Edge.Curve.GetType().Name[1..]}{(c.Forward ? "+" : "-")}]")));
         if (err != null) throw new NBooleanException("result invalid: " + err);
         return result;
+    }
+
+    /// <summary>
+    /// Removes spurs: edges a loop runs out along and straight back (e.g. a section edge left dangling inside a
+    /// face). They bound nothing, but leave the face's tessellation with a slit.
+    /// </summary>
+    static void RemoveSpurs(NBody body)
+    {
+        foreach (var f in body.Faces)
+        {
+            foreach (var l in f.Loops)
+            {
+                if (l.Coedges.Count < 2) continue;
+                var stack = new List<NCoedge>(l.Coedges.Count);
+                bool Cancels(NCoedge a, NCoedge b) => ReferenceEquals(a.Edge, b.Edge) && a.Forward != b.Forward;
+                foreach (var c in l.Coedges)
+                {
+                    if (stack.Count > 0 && Cancels(stack[^1], c)) stack.RemoveAt(stack.Count - 1);
+                    else stack.Add(c);
+                }
+                // the loop's start can sit inside a spur too
+                while (stack.Count >= 2 && Cancels(stack[0], stack[^1])) { stack.RemoveAt(stack.Count - 1); stack.RemoveAt(0); }
+                if (stack.Count != l.Coedges.Count) { l.Coedges.Clear(); l.Coedges.AddRange(stack); }
+            }
+            f.Loops.RemoveAll(l => l.Coedges.Count == 0);
+        }
+        body.Faces.RemoveAll(f => f.Loops.Count == 0);
     }
 
     // ------------------------------------------------------------------------------------------
@@ -238,14 +267,14 @@ public sealed class NBoolean
 
     void FindEdgeSplits(NBody X, NBody Y, Dictionary<NEdge, List<(double, NVertex)>> splits, List<(NEdge, NFace)> onSurface)
     {
-        var fboxes = Y.Faces.Select(f => (f, box: f.Bounds(_sampleTol * 500))).ToList();
+        List<(NFace f, Box3 box)> fboxes; using (Prof.Time("split.fboxes")) fboxes = Y.Faces.Select(f => (f, box: f.Bounds(_sampleTol * 500))).ToList();
         foreach (var e in X.Edges)
         {
             var eb = e.Bounds(_sampleTol * 500);
             foreach (var (f, box) in fboxes)
             {
                 if (!eb.Overlaps(box, _onTol)) continue;
-                var hits = NIntersect.EdgeSurface(e, f.Surface, _tol);
+                NIntersect.EdgeHits hits; using (Prof.Time(Prof.Enabled ? $"split.{e.Curve.GetType().Name}x{f.Surface.Kind}" : "")) hits = NIntersect.EdgeSurface(e, f.Surface, _tol);
                 if (Trace != null && Environment.GetEnvironmentVariable("FC_TRACE_EDGE") is { } te && e.Mid.ToString().Contains(te))
                     T($"    edge {e.V0.P}->{e.V1.P} x {f.Tag.Name} ({f.Surface.Kind}): on={hits.OnSurface} hits {string.Join(" ", hits.Params.Select(t => $"{e.Curve.Eval(t)}/cls{Dom(f).Classify(f.Surface.Project(e.Curve.Eval(t)), _onTol)}"))}");
                 if (hits.OnSurface) { onSurface.Add((e, f)); continue; }
@@ -271,11 +300,20 @@ public sealed class NBoolean
     void ImprintSplitVertices(NBody A, NBody B, Dictionary<NEdge, List<(double t, NVertex v)>> splits)
     {
         var verts = splits.Values.SelectMany(l => l.Select(x => x.v)).Distinct(ReferenceEqualityComparer.Instance).Cast<NVertex>().ToList();
-        if (verts.Count == 0) return;
-        foreach (var e in A.Edges.Concat(B.Edges))
+        // vertices of one body lying inside an edge of the other split it too: e.g. a blend's tangent point on an
+        // edge it only touches (no crossing is reported for a touch)
+        var ba = A.Bounds; var bb = B.Bounds;
+        var olo = new Vec3(Math.Max(ba.Min.X, bb.Min.X), Math.Max(ba.Min.Y, bb.Min.Y), Math.Max(ba.Min.Z, bb.Min.Z));
+        var ohi = new Vec3(Math.Min(ba.Max.X, bb.Max.X), Math.Min(ba.Max.Y, bb.Max.Y), Math.Min(ba.Max.Z, bb.Max.Z));
+        var overlap = Box3.Empty; overlap.Add(olo); overlap.Add(ohi);
+        List<NVertex> Near(NBody b) => ohi.X < olo.X || ohi.Y < olo.Y || ohi.Z < olo.Z ? new() : b.Vertices.Where(v => overlap.Contains(v.P, _onTol)).ToList();
+        var forA = verts.Concat(Near(B)).Distinct(ReferenceEqualityComparer.Instance).Cast<NVertex>().ToList();
+        var forB = verts.Concat(Near(A)).Distinct(ReferenceEqualityComparer.Instance).Cast<NVertex>().ToList();
+        foreach (var (e, cand) in A.Edges.Select(e => (e, forA)).Concat(B.Edges.Select(e => (e, forB))))
         {
+            if (cand.Count == 0) continue;
             var box = e.Bounds(_sampleTol * 500);
-            foreach (var v in verts)
+            foreach (var v in cand)
             {
                 if (ReferenceEquals(v, e.V0) || ReferenceEquals(v, e.V1) || !box.Contains(v.P, _onTol)) continue;
                 if (Vec3.Distance(v.P, e.V0.P) < _tol * 10 || Vec3.Distance(v.P, e.V1.P) < _tol * 10) continue;

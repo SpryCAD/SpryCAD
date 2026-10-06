@@ -104,6 +104,30 @@ public static class Csg
         if (solids.Count == 0) return Solid.Empty;
         var list = solids.Where(s => !s.IsEmpty).ToList();
         if (list.Count == 0) return Solid.Empty;
+        if (list.Count > 1 && list.All(s => s.Native != null))
+        {
+            // native solids in groups whose boxes touch: each group is unioned, the (disjoint) groups are simply
+            // put together as separate shells of one body (e.g. pattern copies)
+            var boxes = list.Select(s => s.Native!.Bounds).ToList();
+            var parent = Enumerable.Range(0, list.Count).ToArray();
+            int Find(int x) { while (parent[x] != x) x = parent[x] = parent[parent[x]]; return x; }
+            for (int i = 0; i < list.Count; i++)
+                for (int j = i + 1; j < list.Count; j++)
+                    if (boxes[i].Overlaps(boxes[j], 1e-6)) parent[Find(i)] = Find(j);
+            var groups = Enumerable.Range(0, list.Count).GroupBy(Find).ToList();
+            if (groups.Count > 1)
+            {
+                var parts = groups.Select(g => g.Count() == 1 ? list[g.First()] : UnionAll(g.Select(i => list[i]).ToList())).ToList();
+                if (parts.All(p => p.Native != null))
+                {
+                    var nb = new Native.NBody();
+                    foreach (var p in parts) nb.Faces.AddRange(p.Native!.Clone().Faces);
+                    nb.Link();
+                    return Native.NTess.ToSolid(nb);
+                }
+                list = parts;
+            }
+        }
         while (list.Count > 1)
         {
             var next = new List<Solid>((list.Count + 1) / 2);

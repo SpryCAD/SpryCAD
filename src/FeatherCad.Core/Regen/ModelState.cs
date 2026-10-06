@@ -22,7 +22,16 @@ public sealed class SketchResult
 }
 
 /// <summary>Tool body produced by a feature, kept so patterns/mirrors can re-apply it.</summary>
-public sealed record ToolInfo(Solid Tool, bool IsCut, bool Merge);
+/// <summary>The tool solid a feature applied (for patterns/mirrors); combined tools are built on first use.</summary>
+public sealed class ToolInfo
+{
+    readonly Lazy<Solid> _tool;
+    public ToolInfo(Solid tool, bool isCut, bool merge) : this(() => tool, isCut, merge) { }
+    public ToolInfo(Func<Solid> tool, bool isCut, bool merge) { _tool = new Lazy<Solid>(tool); IsCut = isCut; Merge = merge; }
+    public Solid Tool => _tool.Value;
+    public bool IsCut { get; }
+    public bool Merge { get; }
+}
 
 /// <summary>Immutable model state after a feature.</summary>
 public sealed class ModelState

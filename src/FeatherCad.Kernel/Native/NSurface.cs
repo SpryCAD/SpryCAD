@@ -35,6 +35,12 @@ public sealed class NSurface
 
     public static NSurface FromPlane(Plane p) => new(SurfaceDef.PlaneDef, p);
 
+    /// <summary>Pipe of radius r around the spine.</summary>
+    public static NSurface Pipe(PipeSpine spine, double r)
+        => new(new SurfaceDef { Kind = SurfaceKind.Pipe, Origin = spine.P[0], Axis = spine.D[0], RefDir = spine.D[0].AnyPerpendicular(), Radius = r, Spine = spine });
+
+    public PipeSpine? Spine => Def.Spine;
+
     public Plane? Plane => Kind == SurfaceKind.Plane ? F.Plane : null;
     public Vec3 Axis => F.Normal;
     public Vec3 Origin => F.Origin;
@@ -67,6 +73,7 @@ public sealed class NSurface
                     var phi = Math.Atan2(l.Z, r - R);
                     return new Vec2(Theta(l, uHint), double.IsNaN(vHint) ? phi : NCurve.Wrap(phi, vHint));
                 }
+            case SurfaceKind.Pipe: return Spine!.UV(p, uHint);
         }
         return default;
     }
@@ -104,6 +111,7 @@ public sealed class NSurface
                     var r = R + R2 * Math.Cos(v);
                     return F.ToWorld(r * Math.Cos(u), r * Math.Sin(u), R2 * Math.Sin(v));
                 }
+            case SurfaceKind.Pipe: return Spine!.Surface(u, v, R);
         }
         return default;
     }
@@ -116,6 +124,7 @@ public sealed class NSurface
     /// <summary>Signed distance, positive on the side of the natural normal (exact for all kinds but the cone, which is scaled).</summary>
     public double F_(Vec3 p)
     {
+        if (Kind == SurfaceKind.Pipe) return Spine!.Closest(p).dist - R;
         var l = F.ToLocal3(p);
         switch (Kind)
         {
@@ -140,6 +149,7 @@ public sealed class NSurface
     public Vec3 Grad(Vec3 p)
     {
         if (Kind == SurfaceKind.Plane) return F.Normal;
+        if (Kind == SurfaceKind.Pipe) return Spine!.Normal(p);
         var l = F.ToLocal3(p);
         var rr = Math.Sqrt(l.X * l.X + l.Y * l.Y);
         // radial unit (arbitrary on the axis)
@@ -200,7 +210,7 @@ public sealed class NSurface
     // ---------------------------------------------------------------------------------------
     // relations
 
-    public bool IsRevolution => Kind != SurfaceKind.Plane;
+    public bool IsRevolution => Kind is not (SurfaceKind.Plane or SurfaceKind.Pipe);
 
     /// <summary>Same geometric surface (orientation ignored).</summary>
     public bool CoincidentWith(NSurface o, double tol)
@@ -212,6 +222,7 @@ public sealed class NSurface
             var d = Vec3.Dot(a.Normal, b.Normal);
             return Math.Abs(Math.Abs(d) - 1) < 1e-10 && Math.Abs(a.Distance(b.Origin)) < tol;
         }
+        if (Kind == SurfaceKind.Pipe) return Math.Abs(R - o.R) < tol && Spine!.SameAs(o.Spine!, tol);
         if (!SameAxisLine(o, tol)) return false;
         switch (Kind)
         {
@@ -233,6 +244,7 @@ public sealed class NSurface
 
     public bool SameAxisLine(NSurface o, double tol)
     {
+        if (!IsRevolution || !o.IsRevolution) return false;
         if (Math.Abs(Math.Abs(Vec3.Dot(Axis, o.Axis)) - 1) > 1e-10) return false;
         var d = o.Origin - Origin;
         return (d - Axis * Vec3.Dot(d, Axis)).Length < tol;
@@ -243,6 +255,7 @@ public sealed class NSurface
 
     public List<double> RayHits(Vec3 o, Vec3 d)
     {
+        if (Kind == SurfaceKind.Pipe) return Spine!.RayHits(o, d, R);
         var res = new List<double>();
         var lo = F.ToLocal3(o);
         var ld = new Vec3(Vec3.Dot(d, F.XDir), Vec3.Dot(d, F.YDir), Vec3.Dot(d, F.Normal));
@@ -320,6 +333,7 @@ public sealed class NSurface
     /// <summary>The surface's profile about (origin, axis) if it is a surface of revolution about that axis.</summary>
     public Profile? ProfileAbout(Vec3 origin, Vec3 axis, double tol)
     {
+        if (Kind == SurfaceKind.Pipe) return null;
         axis = axis.Normalized;
         double H(Vec3 p) => Vec3.Dot(p - origin, axis);
         bool OnAxis(Vec3 p) { var d = p - origin; return (d - axis * Vec3.Dot(d, axis)).Length < tol; }

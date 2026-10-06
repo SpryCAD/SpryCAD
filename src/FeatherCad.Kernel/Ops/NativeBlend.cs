@@ -5,7 +5,8 @@ namespace FeatherCad.Kernel;
 /// <summary>
 /// Fillets and chamfers on native B-rep edges: tools are built from the exact edge curve and the adjacent
 /// faces' surfaces (no tessellation), then subtracted (convex) or added (concave) with native booleans.
-/// Supported: lines between planes, and arcs between a plane and a perpendicular cylinder.
+/// Lines between planes and arcs between a plane and a perpendicular cylinder use extruded/revolved profiles;
+/// fillets on any other pair of faces use rolling-ball tools (<see cref="RollingBall"/>).
 /// </summary>
 public static class NativeBlend
 {
@@ -16,7 +17,7 @@ public static class NativeBlend
     /// <paramref name="problemEdges"/>.
     /// </summary>
     public static Solid Apply(Solid body, IReadOnlyList<NEdge> edges, double size, bool fillet, string prefix, List<string> errors,
-        bool overflow = true, List<Vec3[]>? problemEdges = null)
+        bool overflow = true, List<Vec3[]>? problemEdges = null, List<(Solid tool, bool cut)>? applied = null)
     {
         if (size <= 0) { errors.Add("Size must be greater than zero."); return body; }
         body.Native!.Link();
@@ -43,7 +44,16 @@ public static class NativeBlend
             }
             try
             {
-                var (tools, convex, fits) = e.Curve is NCircle ? ArcTools(group, size, fillet, name) : LineTool(e, size, fillet, name);
+                var (tools, convex, fits) = ForceRollingBall ? (null, false, false)
+                    : e.Curve is NCircle ? ArcTools(group, size, fillet, name) : LineTool(e, size, fillet, name);
+                if (tools == null && fillet)
+                {
+                    // any other pair of faces: rolling ball along the chain of edges this edge belongs to
+                    foreach (var o in Chain(e, edges)) if (!group.Contains(o)) { group.Add(o); done.Add(o); }
+                    var rb = RollingBall.Build(group, size, name, OnFaces);
+                    if (rb.Error != null) { Fail(rb.Error); continue; }
+                    (tools, convex, fits) = (new List<Solid> { rb.Tool! }, rb.Convex, rb.Fits);
+                }
                 if (tools == null) { Fail("unsupported edge geometry."); continue; }
                 if (!fits)
                 {
@@ -58,6 +68,7 @@ public static class NativeBlend
                     trimmedEdges.AddRange(group);
                 }
                 (convex ? cutTools : addTools).AddRange(tools);
+                applied?.AddRange(tools.Select(t => (t, convex)));
             }
             catch (Exception ex) { Fail(ex.Message); }
         }
@@ -102,6 +113,21 @@ public static class NativeBlend
     }
 
     static (NFace a, NFace b) Faces(NEdge e) => (e.Uses[0].Face, e.Uses[1].Face);
+
+    /// <summary>The selected edges connected to e end to end through edges between the same two surfaces.</summary>
+    static List<NEdge> Chain(NEdge e, IReadOnlyList<NEdge> selected)
+    {
+        var res = new List<NEdge> { e };
+        for (int i = 0; i < res.Count; i++)
+        {
+            var c = res[i];
+            foreach (var o in selected)
+                if (!res.Contains(o) && (ReferenceEquals(o.V0, c.V0) || ReferenceEquals(o.V0, c.V1) || ReferenceEquals(o.V1, c.V0) || ReferenceEquals(o.V1, c.V1))
+                    && RollingBall.SameSurfaces(e, o))
+                    res.Add(o);
+        }
+        return res;
+    }
 
     static Vec3 Outward(NFace f, Vec3 p) => f.Surface.Normal(p) * (f.Sense ? 1 : -1);
 
@@ -214,6 +240,9 @@ public static class NativeBlend
     /// </summary>
     /// <summary>Diagnostics of the overflow trimming (tests/tools).</summary>
     public static Action<string>? Debug;
+
+    /// <summary>Use rolling-ball tools for every fillet (tests compare them with the exact profile tools).</summary>
+    [ThreadStatic] public static bool ForceRollingBall;
 
     /// <summary>Verify that blends fit on their faces (off only for tests of the failure path).</summary>
     public static bool CheckFit = true;
@@ -416,7 +445,8 @@ public static class NativeBlend
                 foreach (var o in others)
                 {
                     if (seen.Contains(o)) continue;
-                    bool sibling = e.Curve is NCircle ec && o.Curve is NCircle oc && SameCircle(ec, oc) && SameFaces(e, o);
+                    // the other pieces of a seam-split edge: same named faces on the same surfaces
+                    bool sibling = SameFaces(e, o) && (e.Curve is NCircle ec && o.Curve is NCircle oc ? SameCircle(ec, oc) : RollingBall.SameSurfaces(e, o));
                     bool cont = false;
                     if (tangent && !sibling)
                         foreach (var oStart in new[] { true, false })

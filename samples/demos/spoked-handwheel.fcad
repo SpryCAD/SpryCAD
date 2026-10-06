@@ -1,0 +1,986 @@
+{
+  "format": "FeatherCAD",
+  "formatVersion": 1,
+  "units": "MMGS",
+  "equations": [
+    {
+      "name": "D",
+      "expr": "250"
+    },
+    {
+      "name": "RimT",
+      "expr": "22"
+    },
+    {
+      "name": "HubD",
+      "expr": "50"
+    },
+    {
+      "name": "HubL",
+      "expr": "46"
+    },
+    {
+      "name": "Bore",
+      "expr": "20"
+    },
+    {
+      "name": "KeyW",
+      "expr": "6"
+    },
+    {
+      "name": "KeyT",
+      "expr": "2.8"
+    },
+    {
+      "name": "NS",
+      "expr": "5"
+    },
+    {
+      "name": "SpokeD",
+      "expr": "16"
+    },
+    {
+      "name": "NG",
+      "expr": "3"
+    },
+    {
+      "name": "GripD",
+      "expr": "14"
+    },
+    {
+      "name": "GripDepth",
+      "expr": "3.5"
+    },
+    {
+      "name": "Rf",
+      "expr": "4"
+    },
+    {
+      "name": "Rh",
+      "expr": "4"
+    },
+    {
+      "name": "Rg",
+      "expr": "1.5"
+    },
+    {
+      "name": "Re",
+      "expr": "2"
+    },
+    {
+      "name": "C",
+      "expr": "1"
+    },
+    {
+      "name": "SpokeIn",
+      "expr": "HubD/2-4"
+    },
+    {
+      "name": "GripR",
+      "expr": "D/2-RimT/2-GripD/2\u002BGripDepth"
+    },
+    {
+      "name": "GripA",
+      "expr": "180/(NS*NG)"
+    }
+  ],
+  "features": [
+    {
+      "$type": "sketch",
+      "plane": {
+        "std": "Front"
+      },
+      "sketch": {
+        "points": [
+          {
+            "id": 0,
+            "x": 0,
+            "y": 0,
+            "fixed": true
+          },
+          {
+            "id": 1,
+            "x": 125,
+            "y": 0,
+            "fixed": false
+          },
+          {
+            "id": 4,
+            "x": 0,
+            "y": 22,
+            "fixed": false
+          }
+        ],
+        "entities": [
+          {
+            "$type": "circle",
+            "center": 1,
+            "r": 11,
+            "id": 2,
+            "construction": false
+          },
+          {
+            "$type": "line",
+            "p1": 0,
+            "p2": 4,
+            "id": 5,
+            "construction": true
+          }
+        ],
+        "constraints": [
+          {
+            "id": 3,
+            "type": "Diameter",
+            "refs": [
+              2
+            ],
+            "expr": "RimT",
+            "value": 22,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 6,
+            "type": "Vertical",
+            "refs": [
+              5
+            ],
+            "value": 0,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 7,
+            "type": "HDistance",
+            "refs": [
+              0,
+              1
+            ],
+            "expr": "D/2",
+            "value": 125,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 8,
+            "type": "Horizontal",
+            "refs": [
+              0,
+              1
+            ],
+            "value": 0,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 9,
+            "type": "VDistance",
+            "refs": [
+              0,
+              4
+            ],
+            "expr": "RimT",
+            "value": 22,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          }
+        ],
+        "nextId": 10
+      },
+      "id": "F1",
+      "name": "Rim section",
+      "suppressed": false
+    },
+    {
+      "$type": "revolve",
+      "sketchId": "F1",
+      "isCut": false,
+      "axisEntity": 0,
+      "angle": "360",
+      "reverse": false,
+      "merge": true,
+      "id": "F2",
+      "name": "Rim",
+      "suppressed": false
+    },
+    {
+      "$type": "sketch",
+      "plane": {
+        "std": "Front"
+      },
+      "sketch": {
+        "points": [
+          {
+            "id": 0,
+            "x": 0,
+            "y": 0,
+            "fixed": true
+          },
+          {
+            "id": 1,
+            "x": 10,
+            "y": -23,
+            "fixed": false
+          },
+          {
+            "id": 2,
+            "x": 25,
+            "y": -23,
+            "fixed": false
+          },
+          {
+            "id": 3,
+            "x": 25,
+            "y": 23,
+            "fixed": false
+          },
+          {
+            "id": 4,
+            "x": 10,
+            "y": 23,
+            "fixed": false
+          },
+          {
+            "id": 9,
+            "x": 0,
+            "y": 23,
+            "fixed": false
+          }
+        ],
+        "entities": [
+          {
+            "$type": "line",
+            "p1": 1,
+            "p2": 2,
+            "id": 5,
+            "construction": false
+          },
+          {
+            "$type": "line",
+            "p1": 2,
+            "p2": 3,
+            "id": 6,
+            "construction": false
+          },
+          {
+            "$type": "line",
+            "p1": 3,
+            "p2": 4,
+            "id": 7,
+            "construction": false
+          },
+          {
+            "$type": "line",
+            "p1": 4,
+            "p2": 1,
+            "id": 8,
+            "construction": false
+          },
+          {
+            "$type": "line",
+            "p1": 0,
+            "p2": 9,
+            "id": 10,
+            "construction": true
+          }
+        ],
+        "constraints": [
+          {
+            "id": 11,
+            "type": "Vertical",
+            "refs": [
+              6
+            ],
+            "value": 0,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 12,
+            "type": "Vertical",
+            "refs": [
+              8
+            ],
+            "value": 0,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 13,
+            "type": "Vertical",
+            "refs": [
+              10
+            ],
+            "value": 0,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 14,
+            "type": "HDistance",
+            "refs": [
+              0,
+              1
+            ],
+            "expr": "Bore/2",
+            "value": 10,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 15,
+            "type": "HDistance",
+            "refs": [
+              0,
+              2
+            ],
+            "expr": "HubD/2",
+            "value": 25,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 16,
+            "type": "Horizontal",
+            "refs": [
+              5
+            ],
+            "value": 0,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 17,
+            "type": "Horizontal",
+            "refs": [
+              7
+            ],
+            "value": 0,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 18,
+            "type": "VDistance",
+            "refs": [
+              0,
+              1
+            ],
+            "expr": "HubL/2",
+            "value": 23,
+            "sign": -1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 19,
+            "type": "VDistance",
+            "refs": [
+              0,
+              3
+            ],
+            "expr": "HubL/2",
+            "value": 23,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 20,
+            "type": "VDistance",
+            "refs": [
+              0,
+              9
+            ],
+            "expr": "HubL/2",
+            "value": 23,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          }
+        ],
+        "nextId": 21
+      },
+      "id": "F3",
+      "name": "Hub section",
+      "suppressed": false
+    },
+    {
+      "$type": "revolve",
+      "sketchId": "F3",
+      "isCut": false,
+      "axisEntity": 0,
+      "angle": "360",
+      "reverse": false,
+      "merge": true,
+      "id": "F4",
+      "name": "Hub",
+      "suppressed": false
+    },
+    {
+      "$type": "fillet",
+      "edges": [
+        {
+          "a": "F4.R.L5",
+          "b": "F4.R.L6",
+          "hint": [
+            25,
+            -23,
+            0
+          ]
+        },
+        {
+          "a": "F4.R.L6",
+          "b": "F4.R.L7",
+          "hint": [
+            25,
+            23,
+            0
+          ]
+        }
+      ],
+      "radius": "Re",
+      "tangentPropagation": true,
+      "overflow": true,
+      "id": "F5",
+      "name": "Hub ends",
+      "suppressed": false
+    },
+    {
+      "$type": "chamfer",
+      "edges": [
+        {
+          "a": "F4.R.L7",
+          "b": "F4.R.L8",
+          "hint": [
+            10,
+            23,
+            0
+          ]
+        },
+        {
+          "a": "F4.R.L8",
+          "b": "F4.R.L5",
+          "hint": [
+            10,
+            -23,
+            0
+          ]
+        }
+      ],
+      "distance": "C",
+      "tangentPropagation": true,
+      "overflow": true,
+      "id": "F6",
+      "name": "Bore chamfers",
+      "suppressed": false
+    },
+    {
+      "$type": "plane",
+      "mode": "Offset",
+      "base": {
+        "std": "Right"
+      },
+      "offset": "SpokeIn",
+      "angle": "45",
+      "flip": false,
+      "id": "F7",
+      "name": "Spoke plane",
+      "suppressed": false
+    },
+    {
+      "$type": "sketch",
+      "plane": {
+        "feature": "F7"
+      },
+      "sketch": {
+        "points": [
+          {
+            "id": 0,
+            "x": 0,
+            "y": 0,
+            "fixed": true
+          }
+        ],
+        "entities": [
+          {
+            "$type": "circle",
+            "center": 0,
+            "r": 8,
+            "id": 1,
+            "construction": false
+          }
+        ],
+        "constraints": [
+          {
+            "id": 2,
+            "type": "Diameter",
+            "refs": [
+              1
+            ],
+            "expr": "SpokeD",
+            "value": 16,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          }
+        ],
+        "nextId": 3
+      },
+      "id": "F8",
+      "name": "Spoke section",
+      "suppressed": false
+    },
+    {
+      "$type": "extrude",
+      "sketchId": "F8",
+      "isCut": false,
+      "end": "Blind",
+      "depth": "D/2-SpokeIn",
+      "reverse": false,
+      "merge": true,
+      "id": "F9",
+      "name": "Spoke",
+      "suppressed": false
+    },
+    {
+      "$type": "fillet",
+      "edges": [
+        {
+          "a": "F2.R.C2",
+          "b": "F9.S.C1",
+          "hint": [
+            117.450165565,
+            8,
+            0
+          ]
+        }
+      ],
+      "radius": "Rf",
+      "tangentPropagation": true,
+      "overflow": true,
+      "id": "F10",
+      "name": "Spoke to rim",
+      "suppressed": false
+    },
+    {
+      "$type": "fillet",
+      "edges": [
+        {
+          "a": "F4.R.L6",
+          "b": "F9.S.C1",
+          "hint": [
+            25,
+            8,
+            0
+          ]
+        }
+      ],
+      "radius": "Rh",
+      "tangentPropagation": true,
+      "overflow": true,
+      "id": "F11",
+      "name": "Spoke to hub",
+      "suppressed": false
+    },
+    {
+      "$type": "circularPattern",
+      "seeds": [
+        "F9",
+        "F10",
+        "F11"
+      ],
+      "axis": {
+        "axis": "Y"
+      },
+      "count": "NS",
+      "angle": "360",
+      "equalSpacing": true,
+      "reverse": false,
+      "id": "F12",
+      "name": "Spokes",
+      "suppressed": false
+    },
+    {
+      "$type": "sketch",
+      "plane": {
+        "std": "Top"
+      },
+      "sketch": {
+        "points": [
+          {
+            "id": 0,
+            "x": 0,
+            "y": 0,
+            "fixed": true
+          },
+          {
+            "id": 1,
+            "x": 108.08530988108552,
+            "y": 22.974241835362406,
+            "fixed": false
+          }
+        ],
+        "entities": [
+          {
+            "$type": "circle",
+            "center": 1,
+            "r": 7,
+            "id": 2,
+            "construction": false
+          }
+        ],
+        "constraints": [
+          {
+            "id": 3,
+            "type": "Diameter",
+            "refs": [
+              2
+            ],
+            "expr": "GripD",
+            "value": 14,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 4,
+            "type": "HDistance",
+            "refs": [
+              0,
+              1
+            ],
+            "expr": "GripR*cos(GripA)",
+            "value": 108.08530988108552,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 5,
+            "type": "VDistance",
+            "refs": [
+              0,
+              1
+            ],
+            "expr": "GripR*sin(GripA)",
+            "value": 22.974241835362406,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          }
+        ],
+        "nextId": 6
+      },
+      "id": "F13",
+      "name": "Grip",
+      "suppressed": false
+    },
+    {
+      "$type": "extrude",
+      "sketchId": "F13",
+      "isCut": true,
+      "end": "ThroughAllBoth",
+      "depth": "10",
+      "reverse": false,
+      "merge": true,
+      "id": "F14",
+      "name": "Grip",
+      "suppressed": false
+    },
+    {
+      "$type": "fillet",
+      "edges": [
+        {
+          "a": "F2.R.C2",
+          "b": "F14.S.C2",
+          "hint": [
+            111.508826484,
+            5.5,
+            -23.701932753
+          ]
+        }
+      ],
+      "radius": "Rg",
+      "tangentPropagation": true,
+      "overflow": true,
+      "id": "F15",
+      "name": "Grip edges",
+      "suppressed": false
+    },
+    {
+      "$type": "circularPattern",
+      "seeds": [
+        "F14",
+        "F15"
+      ],
+      "axis": {
+        "axis": "Y"
+      },
+      "count": "NS*NG",
+      "angle": "360",
+      "equalSpacing": true,
+      "reverse": false,
+      "id": "F16",
+      "name": "Grips",
+      "suppressed": false
+    },
+    {
+      "$type": "sketch",
+      "plane": {
+        "std": "Top"
+      },
+      "sketch": {
+        "points": [
+          {
+            "id": 0,
+            "x": 0,
+            "y": 0,
+            "fixed": true
+          },
+          {
+            "id": 1,
+            "x": 0,
+            "y": -3,
+            "fixed": false
+          },
+          {
+            "id": 2,
+            "x": 12.8,
+            "y": -3,
+            "fixed": false
+          },
+          {
+            "id": 3,
+            "x": 12.8,
+            "y": 3,
+            "fixed": false
+          },
+          {
+            "id": 4,
+            "x": 0,
+            "y": 3,
+            "fixed": false
+          }
+        ],
+        "entities": [
+          {
+            "$type": "line",
+            "p1": 1,
+            "p2": 2,
+            "id": 5,
+            "construction": false
+          },
+          {
+            "$type": "line",
+            "p1": 2,
+            "p2": 3,
+            "id": 6,
+            "construction": false
+          },
+          {
+            "$type": "line",
+            "p1": 3,
+            "p2": 4,
+            "id": 7,
+            "construction": false
+          },
+          {
+            "$type": "line",
+            "p1": 4,
+            "p2": 1,
+            "id": 8,
+            "construction": false
+          }
+        ],
+        "constraints": [
+          {
+            "id": 9,
+            "type": "Vertical",
+            "refs": [
+              6
+            ],
+            "value": 0,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 10,
+            "type": "Vertical",
+            "refs": [
+              8
+            ],
+            "value": 0,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 11,
+            "type": "Vertical",
+            "refs": [
+              0,
+              1
+            ],
+            "value": 0,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 12,
+            "type": "HDistance",
+            "refs": [
+              0,
+              2
+            ],
+            "expr": "Bore/2\u002BKeyT",
+            "value": 12.8,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 13,
+            "type": "Horizontal",
+            "refs": [
+              5
+            ],
+            "value": 0,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 14,
+            "type": "Horizontal",
+            "refs": [
+              7
+            ],
+            "value": 0,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 15,
+            "type": "VDistance",
+            "refs": [
+              0,
+              1
+            ],
+            "expr": "KeyW/2",
+            "value": 3,
+            "sign": -1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 16,
+            "type": "VDistance",
+            "refs": [
+              0,
+              3
+            ],
+            "expr": "KeyW/2",
+            "value": 3,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          }
+        ],
+        "nextId": 17
+      },
+      "id": "F17",
+      "name": "Keyway",
+      "suppressed": false
+    },
+    {
+      "$type": "extrude",
+      "sketchId": "F17",
+      "isCut": true,
+      "end": "ThroughAllBoth",
+      "depth": "10",
+      "reverse": false,
+      "merge": true,
+      "id": "F18",
+      "name": "Keyway",
+      "suppressed": false
+    }
+  ],
+  "nextFeatureId": 19,
+  "nameCounters": {},
+  "color": [
+    0.74,
+    0.76,
+    0.8
+  ],
+  "activeCount": 18
+}

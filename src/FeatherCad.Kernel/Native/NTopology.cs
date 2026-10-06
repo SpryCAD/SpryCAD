@@ -36,7 +36,7 @@ public sealed class NEdge
     {
         var cached = _samples;
         if (cached != null && cached.Tol <= tol * 1.0001) return cached.Points;
-        if (Curve is NSpline or NPolyline)
+        if (Curve is NSpline or NPolyline or NContact or NSection)
         {
             // adaptive: bisect until the chord error is below tol
             var res = new List<Vec3> { V0.P };
@@ -137,7 +137,19 @@ public sealed class NFace
 
     public IEnumerable<NCoedge> Coedges => Loops.SelectMany(l => l.Coedges);
 
+    // last computed bounds (faces keep their shape once built: splitting edges or cloning does not change it)
+    internal (double tol, Box3 box)? BoundsCache;
+
     public Box3 Bounds(double tol = 1e-3)
+    {
+        // a box sampled at a finer (or slightly coarser) tolerance is as good for overlap tests
+        if (BoundsCache is { } bc && bc.tol <= tol * 4) return bc.box;
+        var b = ComputeBounds(tol);
+        BoundsCache = (tol, b);
+        return b;
+    }
+
+    Box3 ComputeBounds(double tol)
     {
         var b = Box3.Empty;
         foreach (var c in Coedges) b.Add(c.Edge.Bounds(tol));
@@ -197,7 +209,7 @@ public sealed class NBody
         var b = Box3.Empty;
         foreach (var e in Edges) b.Add(e.TightBounds());
         foreach (var f in Faces)
-            if (f.Surface.Kind is SurfaceKind.Sphere or SurfaceKind.Torus)
+            if (f.Surface.Kind is SurfaceKind.Sphere or SurfaceKind.Torus or SurfaceKind.Pipe)
             {
                 var dom = NDomain.Of(f, 1e-4);
                 foreach (var q in dom.InteriorSamples(12))
@@ -240,6 +252,9 @@ public sealed class NBody
 
     public NBody Clone() => Map(c => c, s => s, x => x, false);
 
+    /// <summary>Diagnostics: a copy with new edge objects (no sample caches).</summary>
+    public static NBody CopyFresh(NBody b) => b.Map(c => c, s => s, x => x, false);
+
     public NBody Transformed(in Transform t, string? prefix = null)
     {
         var tt = t;
@@ -280,6 +295,7 @@ public sealed class NBody
                     : new FaceTag(prefix == null ? f.Tag.Name : prefix + f.Tag.Name, s.Kind == SurfaceKind.Plane ? SurfaceDef.PlaneDef : s.Def, f.Tag.Seq);
             }
             var nf = new NFace(s, f.Sense, tag, f.Anchor is { } an ? point(an) : null);
+            if (ReferenceEquals(s, f.Surface)) nf.BoundsCache = f.BoundsCache; // same geometry (clone / flip)
             foreach (var l in f.Loops)
             {
                 var nl = new NLoop();

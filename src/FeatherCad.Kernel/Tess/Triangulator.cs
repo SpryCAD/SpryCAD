@@ -190,7 +190,7 @@ public static class Triangulator
     // >0 if p,q,r is CCW
     static double Cross(Node p, Node q, Node r) => (q.X - p.X) * (r.Y - p.Y) - (q.Y - p.Y) * (r.X - p.X);
 
-    static bool IsEar(Node ear)
+    static bool IsEar(Node ear, bool relaxed = false)
     {
         var a = ear.Prev; var b = ear; var c = ear.Next;
         var area = Cross(a, b, c);
@@ -200,18 +200,34 @@ public static class Triangulator
         while (p != a)
         {
             if (!Same(p, a) && !Same(p, b) && !Same(p, c) &&
-                PointInTriangleStrict(a, b, c, p))
+                (relaxed ? BlocksRelaxed(a, b, c, p) : PointInTriangleStrict(a, b, c, p)))
                 return false;
             p = p.Next;
         }
         return true;
     }
 
+    /// <summary>
+    /// Relaxed blocking test: only points inside the ear or on its new diagonal (c→a) block it; points merely
+    /// touching the two polygon sides (a→b, b→c) do not (e.g. exactly collinear boundary runs).
+    /// </summary>
+    static bool BlocksRelaxed(Node a, Node b, Node c, Node p)
+    {
+        var d1 = Cross(a, b, p); var d2 = Cross(b, c, p); var d3 = Cross(c, a, p);
+        if (d1 < 0 || d2 < 0 || d3 < 0) return false;
+        if (d1 > 0 && d2 > 0) return true;    // inside, or on the diagonal
+        return false;                          // on a side
+    }
+
     static bool PointInTriangleStrict(Node a, Node b, Node c, Node p)
     {
-        // inclusive of edges so points on edges block ears (prevents overlaps at bridges)
+        // inclusive of edges so points on edges block ears (prevents overlaps at bridges); "on" allows for
+        // rounding (a boundary run that is collinear in exact arithmetic must not be cut across)
         var d1 = Cross(a, b, p); var d2 = Cross(b, c, p); var d3 = Cross(c, a, p);
-        return d1 >= 0 && d2 >= 0 && d3 >= 0;
+        var l2 = Math.Max(Math.Max((b.X - a.X) * (b.X - a.X) + (b.Y - a.Y) * (b.Y - a.Y), (c.X - b.X) * (c.X - b.X) + (c.Y - b.Y) * (c.Y - b.Y)),
+                          (a.X - c.X) * (a.X - c.X) + (a.Y - c.Y) * (a.Y - c.Y));
+        var eps = -1e-11 * l2;
+        return d1 >= eps && d2 >= eps && d3 >= eps;
     }
 
     static void EarClip(Node start, List<int> tris)
@@ -234,8 +250,18 @@ public static class Triangulator
             ear = ear.Next;
             if (++stall >= count)
             {
-                // no ear found: drop degenerate (collinear/duplicate) vertices, then force-clip
-                stall = 0; pass++;
+                // no ear found: try the relaxed test first (keeps every boundary vertex)
+                stall = 0;
+                var r = ear; Node? relaxedEar = null;
+                for (int k = 0; k < count; k++) { if (IsEar(r, relaxed: true)) { relaxedEar = r; break; } r = r.Next; }
+                if (relaxedEar != null)
+                {
+                    tris.Add(relaxedEar.Prev.I); tris.Add(relaxedEar.I); tris.Add(relaxedEar.Next.I);
+                    Remove(relaxedEar); count--; ear = relaxedEar.Next;
+                    continue;
+                }
+                // then drop degenerate (collinear/duplicate) vertices, then force-clip
+                pass++;
                 var p = ear; bool removed = false;
                 for (int k = 0; k < count && count > 3; k++)
                 {

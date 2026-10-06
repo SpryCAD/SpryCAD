@@ -242,6 +242,29 @@ public static class StepWriter
                     if (r < 1e-9) { hmax += 1; r = d.Radius + hmax * Math.Tan(d.Param2); }
                     return c.Add($"CONICAL_SURFACE('',#{Axis2(c, d.Origin + ax * hmax, ax, d.RefDir)},{R(r)},{R(d.Param2)})");
                 }
+            case SurfaceKind.Pipe:
+                {
+                    // no pipe surface in AP214: a bicubic B-spline fitted over the face's (angle, spine) box
+                    var sp = d.Spine!; var rad = d.Radius;
+                    double u0 = double.MaxValue, u1 = double.MinValue, v0 = double.MaxValue, v1 = double.MinValue, hint = double.NaN;
+                    foreach (var p in BoundaryPoints(f, b))
+                    {
+                        var q = sp.UV(p, hint); hint = q.X;
+                        u0 = Math.Min(u0, q.X); u1 = Math.Max(u1, q.X); v0 = Math.Min(v0, q.Y); v1 = Math.Max(v1, q.Y);
+                    }
+                    var du = (u1 - u0) * 0.02 + 1e-4; var dv = (v1 - v0) * 0.02 + 1e-4;
+                    u0 -= du; u1 += du; v0 = Math.Max(sp.S0, v0 - dv); v1 = Math.Min(sp.S1, v1 + dv);
+                    var srf = BSplineSurface.Fit((u, v) => sp.Surface(u, v, rad), u0, u1, v0, v1, 1e-7,
+                        Math.Max(4, (int)Math.Ceiling((u1 - u0) / 0.4)), Math.Max(4, (int)Math.Ceiling((v1 - v0) / Math.Max(rad, 1e-3))));
+                    int nu = srf.Poles.GetLength(0), nv = srf.Poles.GetLength(1);
+                    var rows = new List<string>();
+                    for (int i = 0; i < nu; i++)
+                        rows.Add("(" + string.Join(",", Enumerable.Range(0, nv).Select(j => "#" + c.Add(Pt(srf.Poles[i, j])))) + ")");
+                    var (ku, mu) = BSplineSurface.KnotVector(srf.KnotsU);
+                    var (kv, mv) = BSplineSurface.KnotVector(srf.KnotsV);
+                    return c.Add($"B_SPLINE_SURFACE_WITH_KNOTS('',{srf.DegreeU},{srf.DegreeV},({string.Join(",", rows)}),.UNSPECIFIED.,.F.,.F.,.F.," +
+                                 $"({string.Join(",", mu)}),({string.Join(",", mv)}),({string.Join(",", ku.Select(R))}),({string.Join(",", kv.Select(R))}),.UNSPECIFIED.)");
+                }
         }
         throw new InvalidOperationException("unknown surface");
     }

@@ -22,6 +22,7 @@ static class Demos
         ("l-bracket.fcad", Bracket),
         ("spur-gear.fcad", Gear),
         ("hand-wheel.fcad", HandWheel),
+        ("spoked-handwheel.fcad", SpokedWheel),
     };
 
     /// <summary>Equation changes each demo must survive (shows what the parameters do).</summary>
@@ -32,16 +33,17 @@ static class Demos
         ["heat-sink.fcad"] = new[] { new[] { ("N", "20"), ("T", "1.2") }, new[] { ("L", "120"), ("FinH", "40") }, new[] { ("N", "8"), ("T", "3") } },
         ["stepped-shaft.fcad"] = new[] { new[] { ("D2", "50"), ("KeyW", "14") }, new[] { ("L2", "100"), ("KeyL", "60") }, new[] { ("D1", "35"), ("Rs", "2"), ("C", "2") } },
         ["hand-wheel.fcad"] = new[] { new[] { ("NS", "3") }, new[] { ("Dish", "45"), ("SpokeD", "16") }, new[] { ("D", "260"), ("NS", "6"), ("KnobL", "60") } },
+        ["spoked-handwheel.fcad"] = new[] { new[] { ("NS", "6") }, new[] { ("D", "300"), ("RimT", "26"), ("NG", "4") }, new[] { ("NS", "4"), ("SpokeD", "20"), ("Rf", "3") } },
         ["spur-gear.fcad"] = new[] { new[] { ("z", "48") }, new[] { ("m", "2.5"), ("z", "30") }, new[] { ("PA", "25"), ("b", "20") } },
         ["l-bracket.fcad"] = new[] { new[] { ("Wb", "90"), ("HoleSp", "60") }, new[] { ("A", "100"), ("Bh", "80"), ("Gs", "40") }, new[] { ("T", "10"), ("Rb", "4") } },
     };
 
     /// <summary>Rebuilds every demo and its variants; writes the exact STEP of each to <paramref name="dir"/>.</summary>
-    public static int Verify(string dir, bool volumes = true)
+    public static int Verify(string dir, bool volumes = true, string? filter = null)
     {
         Directory.CreateDirectory(dir);
         int bad = 0;
-        foreach (var (file, build) in All)
+        foreach (var (file, build) in All.Where(x => filter == null || x.file.Contains(filter)))
         {
             var doc = build();
             foreach (var variant in new[] { Array.Empty<(string, string)>() }.Concat(Variants[file]))
@@ -571,6 +573,87 @@ static class Demos
         var axisLine = kn.Line(k7, k0);
         var knSk = d.AddFeature(new SketchFeature { Name = "Knob profile", Plane = PlaneRef.Front, Sketch = kn.S });
         d.AddFeature(new RevolveFeature { Name = "Spinner knob", SketchId = knSk.Id, AxisEntity = axisLine, Angle = "360", Merge = false });
+        return d;
+    }
+
+    // ------------------------------------------------------------------------------------------
+    // 8. Spoked hand wheel with filleted joints: round rim with finger scallops on its inner side, straight
+    //    spokes, keyed hub. Every junction is a rolling-ball fillet between curved faces: spoke/rim
+    //    (cylinder/torus), spoke/hub (cylinder/cylinder) and the scallop edges (torus/cylinder, convex). The
+    //    fillets are made once on the seed spoke and scallop and patterned with them.
+
+    static CadDocument SpokedWheel()
+    {
+        var d = Doc(("D", "250"), ("RimT", "22"), ("HubD", "50"), ("HubL", "46"), ("Bore", "20"), ("KeyW", "6"), ("KeyT", "2.8"),
+                    ("NS", "5"), ("SpokeD", "16"), ("NG", "3"), ("GripD", "14"), ("GripDepth", "3.5"),
+                    ("Rf", "4"), ("Rh", "4"), ("Rg", "1.5"), ("Re", "2"), ("C", "1"),
+                    // spokes start inside the hub wall; grips sit between the spokes (half a step off them)
+                    ("SpokeIn", "HubD/2-4"), ("GripR", "D/2-RimT/2-GripD/2+GripDepth"), ("GripA", "180/(NS*NG)"));
+
+        // rim: round section revolved about the wheel axis (Y)
+        var rs = new Sk(d);
+        var rimC = rs.Circle(rs.P("D/2", "0"), "RimT");
+        rs.Centerline(Sketch.OriginId, rs.P("0", "RimT"));
+        var rimSk = d.AddFeature(new SketchFeature { Name = "Rim section", Plane = PlaneRef.Front, Sketch = rs.S });
+        var rim = d.AddFeature(new RevolveFeature { Name = "Rim", SketchId = rimSk.Id, Angle = "360" });
+
+        // hub
+        var hs = new Sk(d);
+        var hl = hs.Poly(hs.P("Bore/2", "-HubL/2"), hs.P("HubD/2", "-HubL/2"), hs.P("HubD/2", "HubL/2"), hs.P("Bore/2", "HubL/2"));
+        hs.Centerline(Sketch.OriginId, hs.P("0", "HubL/2"));
+        var hubSk = d.AddFeature(new SketchFeature { Name = "Hub section", Plane = PlaneRef.Front, Sketch = hs.S });
+        var hub = d.AddFeature(new RevolveFeature { Name = "Hub", SketchId = hubSk.Id, Angle = "360" });
+        string H(int i) => $"{hub.Id}.R.L{hl[i]}";
+        double V(string e) => hs.Eval(e);
+        d.AddFeature(new FilletFeature
+        {
+            Name = "Hub ends", Radius = "Re",
+            Edges = { E(H(0), H(1), new Vec3(V("HubD/2"), V("-HubL/2"), 0)), E(H(1), H(2), new Vec3(V("HubD/2"), V("HubL/2"), 0)) },
+        });
+        d.AddFeature(new ChamferFeature
+        {
+            Name = "Bore chamfers", Distance = "C",
+            Edges = { E(H(2), H(3), new Vec3(V("Bore/2"), V("HubL/2"), 0)), E(H(3), H(0), new Vec3(V("Bore/2"), V("-HubL/2"), 0)) },
+        });
+
+        // one spoke along +X from inside the hub wall to the rim centre
+        var sp = d.AddFeature(new PlaneFeature { Name = "Spoke plane", Base = PlaneRef.Right, Offset = "SpokeIn" });
+        var sc = new Sk(d);
+        var spokeC = sc.Circle(Sketch.OriginId, "SpokeD");
+        var scSk = d.AddFeature(new SketchFeature { Name = "Spoke section", Plane = new PlaneRef { Feature = sp.Id }, Sketch = sc.S });
+        var spoke = d.AddFeature(new ExtrudeFeature { Name = "Spoke", SketchId = scSk.Id, Depth = "D/2-SpokeIn" });
+        string rimFace = $"{rim.Id}.R.C{rimC}", spokeFace = $"{spoke.Id}.S.C{spokeC}";
+        var rimFil = d.AddFeature(new FilletFeature
+        {
+            Name = "Spoke to rim", Radius = "Rf",
+            Edges = { E(rimFace, spokeFace, new Vec3(V("D/2-sqrt(RimT^2-SpokeD^2)/2"), V("SpokeD/2"), 0)) },
+        });
+        var hubFil = d.AddFeature(new FilletFeature
+        {
+            Name = "Spoke to hub", Radius = "Rh",
+            Edges = { E(H(1), spokeFace, new Vec3(V("HubD/2"), V("SpokeD/2"), 0)) },
+        });
+        d.AddFeature(new CircularPatternFeature { Name = "Spokes", Seeds = { spoke.Id, rimFil.Id, hubFil.Id }, Axis = new DirRef { Axis = "Y" }, Count = "NS" });
+
+        // finger grips: scallops cut into the inner side of the rim, edges rounded, patterned between the spokes
+        // (Top plane: sketch Y = -Z, so a positive sketch angle is a positive rotation about Y)
+        var g = new Sk(d);
+        var gripC = g.Circle(g.P("GripR*cos(GripA)", "GripR*sin(GripA)"), "GripD");
+        var gSk = d.AddFeature(new SketchFeature { Name = "Grip", Plane = PlaneRef.Top, Sketch = g.S });
+        var grip = d.AddFeature(new ExtrudeFeature { Name = "Grip", SketchId = gSk.Id, IsCut = true, End = EndCondition.ThroughAllBoth });
+        var ga = V("GripA") * Math.PI / 180; var gr = V("D/2-RimT/2");
+        var gripFil = d.AddFeature(new FilletFeature
+        {
+            Name = "Grip edges", Radius = "Rg",
+            Edges = { E(rimFace, $"{grip.Id}.S.C{gripC}", new Vec3(gr * Math.Cos(ga), V("RimT/4"), -gr * Math.Sin(ga))) },
+        });
+        d.AddFeature(new CircularPatternFeature { Name = "Grips", Seeds = { grip.Id, gripFil.Id }, Axis = new DirRef { Axis = "Y" }, Count = "NS*NG" });
+
+        // keyway along the bore
+        var k = new Sk(d);
+        k.Rect("0", "-KeyW/2", "Bore/2+KeyT", "KeyW/2");
+        var ks = d.AddFeature(new SketchFeature { Name = "Keyway", Plane = PlaneRef.Top, Sketch = k.S });
+        d.AddFeature(new ExtrudeFeature { Name = "Keyway", SketchId = ks.Id, IsCut = true, End = EndCondition.ThroughAllBoth });
         return d;
     }
 

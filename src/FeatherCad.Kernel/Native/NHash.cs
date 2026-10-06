@@ -13,6 +13,7 @@ public static class NHash
             var s = f.Surface;
             h.Add((int)s.Kind);
             if (s.Kind == SurfaceKind.Plane) { h.Add(s.Plane!.Normal); h.Add(s.Plane.D); }
+            else if (s.Kind == SurfaceKind.Pipe) { h.Add(s.R); foreach (var p in s.Spine!.P) h.Add(p); foreach (var d in s.Spine.D) h.Add(d); }
             else { h.Add(s.Origin); h.Add(s.Axis); h.Add(s.F.XDir); h.Add(s.R); h.Add(s.R2); }
             h.Add(f.Loops.Count);
             foreach (var l in f.Loops)
@@ -29,6 +30,8 @@ public static class NHash
                         case NEllipse el: h.Add(3); h.Add(el.C); h.Add(el.X); h.Add(el.Y); h.Add(el.A); h.Add(el.B); break;
                         case NSpline sp: h.Add(4); h.Add(sp.S.Degree); foreach (var p in sp.S.Poles) h.Add(p); foreach (var k in sp.S.Knots) h.Add(k); break;
                         case NPolyline pl: h.Add(5); foreach (var p in pl.Pts) h.Add(p); break;
+                        case NContact ct: h.Add(6); h.Add(ct.OnB ? 1 : 0); foreach (var p in ct.Spine.P) h.Add(p); break;
+                        case NSection sc: h.Add(7); h.Add(sc.P0); h.Add(sc.P1); break;
                         default: h.Add(e.Curve.GetType().Name); break;
                     }
                 }

@@ -329,12 +329,20 @@ public sealed class Regenerator
             }
             var bodies = new List<Body>();
             var errors = new List<string>();
+            var applied = new List<(Solid tool, bool cut)>();
             foreach (var b in State.Bodies)
             {
                 if (!byBody.TryGetValue(b.Id, out var seeds)) { bodies.Add(b); continue; }
                 var edges = NativeBlend.Expand(b.Solid.Native!, seeds, propagate);
-                var r = NativeBlend.Apply(b.Solid, edges, size, fillet, f.Id, errors, overflow, status.ProblemEdges);
+                var r = NativeBlend.Apply(b.Solid, edges, size, fillet, f.Id, errors, overflow, status.ProblemEdges, applied);
                 bodies.Add(new Body { Id = b.Id, Solid = r });
+            }
+            // a blend on one body with tools of one kind can be patterned/mirrored like a cut or boss (its copies
+            // blend the copies of the geometry it was made on)
+            if (errors.Count == 0 && byBody.Count == 1 && applied.Count > 0 && applied.All(t => t.cut == applied[0].cut))
+            {
+                var tools = applied.Select(t => t.tool).ToList();
+                State.Tools[f.Id] = new ToolInfo(() => tools.Count == 1 ? tools[0] : Csg.UnionAll(tools), applied[0].cut, true);
             }
             // all or nothing (as SolidWorks): a fillet that cannot be made on every edge fails as a whole,
             // naming the edges (highlighted in the viewport) instead of silently skipping some
@@ -478,7 +486,7 @@ public sealed class Regenerator
             foreach (var seedId in seeds)
             {
                 if (!State.Tools.TryGetValue(seedId, out var tool))
-                    throw new FeatureException("Only extrude, revolve, hole, pattern and mirror features can be patterned.");
+                    throw new FeatureException("Only extrude, revolve, hole, fillet, chamfer, pattern and mirror features can be patterned.");
                 var copies = new List<Solid>();
                 for (int i = 0; i < transforms.Count; i++)
                     copies.Add(tool.Tool.Transformed(transforms[i], $"{f.Id}.{i + 1}."));
@@ -488,8 +496,17 @@ public sealed class Regenerator
                 if (cutKind == null) cutKind = tool.IsCut; else if (cutKind != tool.IsCut) mixed = true;
             }
             // the pattern/mirror as a whole (seeds + copies) can itself be patterned or mirrored
+            // (built only when used; a cut and the fillet on its edges touch along the fillet's tangent faces, which
+            // a union may not resolve: such a pattern works, it just cannot be patterned again)
             if (!mixed && cutKind is bool isCut)
-                State.Tools[f.Id] = new ToolInfo(Csg.UnionAll(everything), isCut, true);
+                State.Tools[f.Id] = new ToolInfo(() =>
+                {
+                    var old = Csg.NoFallback;
+                    Csg.NoFallback = true;
+                    try { return Csg.UnionAll(everything); }
+                    catch (InvalidOperationException ex) { throw new FeatureException("This pattern cannot be patterned or mirrored again: " + ex.Message); }
+                    finally { Csg.NoFallback = old; }
+                }, isCut, true);
         }
 
         void DoLinearPattern(LinearPatternFeature lp)
