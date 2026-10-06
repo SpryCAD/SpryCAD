@@ -315,11 +315,17 @@ public partial class MainWindow
                 var first = ed.SelectedEntities.First();
                 page.Check(opt, "For construction", () => first.Construction, v => { ed.SetConstruction(v); });
             }
-            var fixRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4 };
-            var fixB = new Button { Content = "⚓ Fix" }; fixB.Click += (_, _) => { ed.FixSelection(true); BuildSketchPage(); };
-            var flB = new Button { Content = "Float" }; flB.Click += (_, _) => { ed.FixSelection(false); BuildSketchPage(); };
-            fixRow.Children.Add(fixB); fixRow.Children.Add(flB);
-            opt.Children.Add(fixRow);
+            // Fix / Float anchor and release points (of the selected points and geometry); a dimension has none
+            if (ed.SelectedPoints.Any() || ed.SelectedEntities.Any())
+            {
+                var fixRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4 };
+                var fixB = new Button { Content = "⚓ Fix" }; fixB.Click += (_, _) => { ed.FixSelection(true); BuildSketchPage(); };
+                var flB = new Button { Content = "Float" }; flB.Click += (_, _) => { ed.FixSelection(false); BuildSketchPage(); };
+                ToolTip.SetTip(fixB, "Anchor the selected points (and the end points of selected geometry) where they are");
+                ToolTip.SetTip(flB, "Release anchored points so the sketch can move them again");
+                fixRow.Children.Add(fixB); fixRow.Children.Add(flB);
+                opt.Children.Add(fixRow);
+            }
             if (ed.Selected.Any(r => r.Kind == SkRefKind.Constraint && ed.Sk.Constraint(r.Id) is { IsDimension: true }))
                 page.ButtonRow(opt, "Auto Arrange Dimensions", () => AutoArrange(ed), "dimension");
 

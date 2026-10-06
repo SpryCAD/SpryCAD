@@ -79,6 +79,8 @@ public sealed partial class SketchEditor : IViewportMode
     public static readonly Rgba Over = new(0.9f, 0.1f, 0.1f);
     public static readonly Rgba Constr = new(0.35f, 0.45f, 0.6f);
     public static readonly Rgba DimColor = new(0.10f, 0.10f, 0.12f);
+    /// <summary>A selected dimension's lines: the blue of its label (Brushes.RoyalBlue).</summary>
+    public static readonly Rgba DimSelectedColor = new(0.255f, 0.412f, 0.882f);
     public static readonly Rgba RefColor = new(0.55f, 0.25f, 0.65f);
 
     public SketchEditor(ViewportControl vp, SketchFeature feature, Frame frame, Func<string, double?> lookup)
@@ -593,6 +595,15 @@ public sealed partial class SketchEditor : IViewportMode
                 if (ctl.IsVisible && b.Inflate(2).Contains(new Point(sx, sy)))
                     return new SkRef(SkRefKind.Constraint, c);
             }
+            // a dimension's own lines pick it too (geometry under the cursor wins, above)
+            bestD = 5;
+            foreach (var c in Sk.Constraints.Where(c => c.IsDimension))
+                foreach (var (a, b) in DimLines(c))
+                {
+                    var d = SegDistPx(a, b, sx, sy);
+                    if (d < bestD) { bestD = d; best = new SkRef(SkRefKind.Constraint, c.Id); }
+                }
+            if (best != null) return best;
         }
         return null;
     }
@@ -1451,7 +1462,14 @@ public sealed partial class SketchEditor : IViewportMode
             SketchDrawing.PointMark(g, f, p.P, c, px, 2.2);
         }
         // dimensions
-        foreach (var c in Sk.Constraints.Where(c => c.IsDimension)) DrawDimension(g, c, c.Driven ? new Rgba(0.45f, 0.45f, 0.5f) : DimColor);
+        // a selected or hovered dimension is drawn whole (lines, extension lines, arrows) in its label's color, so
+        // it is plain where it leads
+        foreach (var c in Sk.Constraints.Where(c => c.IsDimension))
+        {
+            var sel = Selected.Contains(new SkRef(SkRefKind.Constraint, c.Id));
+            var hov = _hover is { Kind: SkRefKind.Constraint } dh && dh.Id == c.Id;
+            DrawDimension(g, c, sel ? DimSelectedColor : hov ? ViewportControl.HoverColor : c.Driven ? new Rgba(0.45f, 0.45f, 0.5f) : DimColor, ends: sel);
+        }
         if (_dimPreview != null) DrawDimension(g, _dimPreview, ViewportControl.HoverColor);
 
         // tool preview
@@ -1631,12 +1649,25 @@ public sealed partial class SketchEditor : IViewportMode
         return (Vec2.Zero, Vec2.Zero);
     }
 
-    void DrawDimension(DynamicGeometry g, SkConstraint c, Rgba col)
+    /// <summary>The lines a dimension is drawn with (dimension, extension and leader lines, the angle arc).</summary>
+    List<(Vec2 a, Vec2 b)> DimLines(SkConstraint c)
+    {
+        var lines = new List<(Vec2, Vec2)>();
+        DrawDimension(null, c, default, collect: lines);
+        return lines;
+    }
+
+    /// <param name="ends">mark the points the dimension measures (a selected one), so where it stops shows even
+    /// with another dimension drawn over it</param>
+    /// <param name="collect">instead of drawing, gather the lines (for hit testing)</param>
+    void DrawDimension(DynamicGeometry? g, SkConstraint c, Rgba col, bool ends = false, List<(Vec2, Vec2)>? collect = null)
     {
         var f = Frame; var px = Px;
-        void L(Vec2 a, Vec2 b) => g.Line(f.ToWorld(a), f.ToWorld(b), col, top: true);
+        void L(Vec2 a, Vec2 b) { if (collect != null) collect.Add((a, b)); else g!.Line(f.ToWorld(a), f.ToWorld(b), col, top: true); }
+        void End(Vec2 p) { if (ends && g != null) SketchDrawing.PointMark(g, f, p, col, px, 3.5); }
         void Arrow(Vec2 tip, Vec2 dir)
         {
+            if (g == null) return;
             dir = dir.Normalized; var n = dir.Perp; var s = px * 9; var w = px * 3;
             g.Tri(f.ToWorld(tip), f.ToWorld(tip - dir * s + n * w), f.ToWorld(tip - dir * s - n * w), col, top: true);
         }
@@ -1671,6 +1702,7 @@ public sealed partial class SketchEditor : IViewportMode
                         if (t < Math.Min(0, tb)) L(da, da + dir * t);
                         if (t > Math.Max(0, tb)) L(db, da + dir * t);
                         if ((db - da).Length > px * 2) { Arrow(da, da - db); Arrow(db, db - da); }
+                        End(a); End(b);
                         break;
                     }
                 case CType.Radius:
@@ -1685,12 +1717,14 @@ public sealed partial class SketchEditor : IViewportMode
                             var other = anchor - u * r;
                             L(other, (label - anchor).Length > r ? label : onCirc);
                             Arrow(onCirc, u); Arrow(other, -u);
+                            End(other);
                         }
                         else
                         {
                             L(anchor, (label - anchor).Length > r ? label : onCirc);
                             Arrow(onCirc, u);
                         }
+                        End(anchor); End(onCirc);
                         break;
                     }
                 case CType.Angle:
@@ -1709,6 +1743,7 @@ public sealed partial class SketchEditor : IViewportMode
                             prev = p;
                         }
                         L(anchor, anchor + d1 * rr * 1.05); L(anchor, anchor + d2 * rr * 1.05);
+                        End(anchor); End(anchor + d1 * rr); End(anchor + d2 * rr);
                         break;
                     }
             }
