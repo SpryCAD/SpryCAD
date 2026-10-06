@@ -447,7 +447,7 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
 
     public void Rotate(float yawDeg, float pitchDeg)
     {
-        var pivot = Camera.F(SceneBounds() is { IsEmpty: false } b ? b.Center : Vec3.Zero);
+        var pivot = ComputePivot();
         var q0 = Camera.Rotation; var t0 = Camera.Target;
         var qy = Quaternion.CreateFromAxisAngle(Camera.Up, yawDeg * MathF.PI / 180);
         var qx = Quaternion.CreateFromAxisAngle(Camera.Right, pitchDeg * MathF.PI / 180);
@@ -479,7 +479,7 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
                  : (e.KeyModifiers & KeyModifiers.Shift) != 0 ? Nav.Zoom
                  : (e.KeyModifiers & KeyModifiers.Alt) != 0 ? Nav.Roll
                  : Nav.Rotate;
-            _pivot = ComputePivot(pt.Position);
+            _pivot = ComputePivot();
             e.Pointer.Capture(this);
             e.Handled = true;
             return;
@@ -495,7 +495,7 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         {
             if ((e.KeyModifiers & KeyModifiers.Alt) != 0)
             {
-                _nav = Nav.Rotate; _pivot = ComputePivot(pt.Position);
+                _nav = Nav.Rotate; _pivot = ComputePivot();
                 e.Pointer.Capture(this);
                 return;
             }
@@ -508,8 +508,14 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
 
     Point _zoomAnchor;
 
-    Vector3 ComputePivot(Point p)
+    /// <summary>
+    /// Rotation center: the selected vertex (model corner or sketch point), edge (its middle) or face (the spot it
+    /// was picked), the most recent one when several are selected; otherwise the middle of the model.
+    /// </summary>
+    Vector3 ComputePivot()
     {
+        if (Selection?.Items.LastOrDefault(s => s.Kind is SelKind.Vertex or SelKind.Edge or SelKind.Face) is { } sel)
+            return Camera.F(sel.Point);
         var b = SceneBounds();
         return b.IsEmpty ? Camera.Target : Camera.F(b.Center);
     }
