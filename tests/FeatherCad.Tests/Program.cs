@@ -44,6 +44,21 @@ static class Program
         if (args.Length > 7 && args[0] == "fillet") return Hang.Run(args);
         if (args.Length > 2 && args[0] == "rb") return RollingBallTool.Run(args);
         if (args.Length > 1 && args[0] == "import") return ImportTool.Run(args);
+        if (args.Length > 1 && args[0] == "nurbsprobe")
+        {
+            var res = FeatherCad.Kernel.StepImport.Read(File.ReadAllBytes(args[1]), "F1.");
+            var f = res.Solids[0].Body.Faces.First(x => x.Surface.Kind == FeatherCad.Kernel.SurfaceKind.BSpline);
+            var s = f.Surface; var nb = s.Nurbs!;
+            Console.WriteLine($"U [{nb.U0},{nb.U1}] V [{nb.V0},{nb.V1}] closedU {nb.ClosedU} closedV {nb.ClosedV} poles {nb.Poles.Count}");
+            foreach (var v in new[] { 1.4, 1.5, 1.55, 1.565, 1.57 })
+            {
+                var p = s.Eval(Math.PI, v);
+                var c = nb.Closest(p);
+                var ch = nb.Closest(p, nb.U0 + (nb.U1 - nb.U0) / 2, v - 0.01);
+                Console.WriteLine($"face (pi,{v}) -> {p}: closest u={c.u:0.####} v={c.v:0.####} d={c.dist:g3} | hinted u={ch.u:0.####} v={ch.v:0.####} d={ch.dist:g3} | UV {s.UV(p, Math.PI, v - 0.01)}");
+            }
+            return 0;
+        }
         if (args.Length > 0 && args[0] == "fitcheck")
         {
             FeatherCad.Kernel.BSplineSurface.Debug = Console.WriteLine;

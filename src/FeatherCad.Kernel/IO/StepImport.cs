@@ -343,6 +343,12 @@ public static class StepImport
                     }
             }
             if (res == null && (s.Is("B_SPLINE_SURFACE_WITH_KNOTS") || s.Is("B_SPLINE_SURFACE"))) res = NSurface.BSpline(SplineSurface(s));
+            if (res == null && s.Type == "OFFSET_SURFACE")
+            {
+                // OFFSET_SURFACE(name, basis, distance, self_intersect): along the basis' normal
+                var basis = Surface(s.Args[1]);
+                res = NShell.OffsetSurface(basis, D(s.Args[2]) * _s);
+            }
             _surfaces[s.Id] = res;
             return res ?? throw new NotSupportedException(Friendly(s.Type));
         }

@@ -76,108 +76,140 @@ public sealed class NurbsSurface
     /// <summary>Closed in v (first and last pole rows coincide).</summary>
     public bool ClosedV { get; private set; }
 
+    bool PoleAt(double v) => Poles.Any(q => q.v == v);
+
     public bool IsPole(Vec3 p) => Poles.Any(q => Vec3.Distance(q.p, p) < 1e-7 * _scale);
 
     // ------------------------------------------------------------------------------------------
     // evaluation
 
-    static double[,] DersBasis(int i, double u, int p, int n, double[] U)
+    /// <summary>
+    /// Basis functions of span i and their derivatives up to order n (Piegl &amp; Tiller A2.3) into ders[k * (p + 1) + j],
+    /// without allocating (this runs for every closest-point step).
+    /// </summary>
+    static void DersBasis(int i, double u, int p, int n, double[] U, Span<double> ders)
     {
-        // Piegl & Tiller A2.3: basis functions and their derivatives up to order n
-        var ders = new double[n + 1, p + 1];
-        var ndu = new double[p + 1, p + 1];
-        var left = new double[p + 1]; var right = new double[p + 1];
-        ndu[0, 0] = 1;
+        int q = p + 1;
+        Span<double> ndu = stackalloc double[q * q];
+        Span<double> left = stackalloc double[q];
+        Span<double> right = stackalloc double[q];
+        Span<double> a = stackalloc double[2 * q];
+        ndu[0] = 1;
         for (int j = 1; j <= p; j++)
         {
             left[j] = u - U[i + 1 - j]; right[j] = U[i + j] - u;
             double saved = 0;
             for (int r = 0; r < j; r++)
             {
-                ndu[j, r] = right[r + 1] + left[j - r];
-                var temp = ndu[j, r] != 0 ? ndu[r, j - 1] / ndu[j, r] : 0;
-                ndu[r, j] = saved + right[r + 1] * temp;
+                ndu[j * q + r] = right[r + 1] + left[j - r];
+                var temp = ndu[j * q + r] != 0 ? ndu[r * q + j - 1] / ndu[j * q + r] : 0;
+                ndu[r * q + j] = saved + right[r + 1] * temp;
                 saved = left[j - r] * temp;
             }
-            ndu[j, j] = saved;
+            ndu[j * q + j] = saved;
         }
-        for (int j = 0; j <= p; j++) ders[0, j] = ndu[j, p];
-        var a = new double[2, p + 1];
+        for (int j = 0; j <= p; j++) ders[j] = ndu[j * q + p];
         for (int r = 0; r <= p; r++)
         {
-            int s1 = 0, s2 = 1; a[0, 0] = 1;
+            int s1 = 0, s2 = 1; a[0] = 1;
             for (int k = 1; k <= n; k++)
             {
                 double d = 0; int rk = r - k, pk = p - k;
-                if (r >= k) { a[s2, 0] = ndu[pk + 1, rk] != 0 ? a[s1, 0] / ndu[pk + 1, rk] : 0; d = a[s2, 0] * ndu[rk, pk]; }
+                if (r >= k) { a[s2 * q] = ndu[(pk + 1) * q + rk] != 0 ? a[s1 * q] / ndu[(pk + 1) * q + rk] : 0; d = a[s2 * q] * ndu[rk * q + pk]; }
                 int j1 = rk >= -1 ? 1 : -rk, j2 = r - 1 <= pk ? k - 1 : p - r;
                 for (int j = j1; j <= j2; j++)
                 {
-                    a[s2, j] = ndu[pk + 1, rk + j] != 0 ? (a[s1, j] - a[s1, j - 1]) / ndu[pk + 1, rk + j] : 0;
-                    d += a[s2, j] * ndu[rk + j, pk];
+                    a[s2 * q + j] = ndu[(pk + 1) * q + rk + j] != 0 ? (a[s1 * q + j] - a[s1 * q + j - 1]) / ndu[(pk + 1) * q + rk + j] : 0;
+                    d += a[s2 * q + j] * ndu[(rk + j) * q + pk];
                 }
-                if (r <= pk) { a[s2, k] = ndu[pk + 1, r] != 0 ? -a[s1, k - 1] / ndu[pk + 1, r] : 0; d += a[s2, k] * ndu[r, pk]; }
-                ders[k, r] = d;
+                if (r <= pk) { a[s2 * q + k] = ndu[(pk + 1) * q + r] != 0 ? -a[s1 * q + k - 1] / ndu[(pk + 1) * q + r] : 0; d += a[s2 * q + k] * ndu[r * q + pk]; }
+                ders[k * q + r] = d;
                 (s1, s2) = (s2, s1);
             }
         }
         int f = p;
-        for (int k = 1; k <= n; k++) { for (int j = 0; j <= p; j++) ders[k, j] *= f; f *= p - k; }
-        return ders;
+        for (int k = 1; k <= n; k++) { for (int j = 0; j <= p; j++) ders[k * q + j] *= f; f *= p - k; }
     }
 
     /// <summary>Surface point and derivatives: S, Su, Sv, Suu, Suv, Svv.</summary>
+    /// <summary>
+    /// Point and derivatives; outside the parameter box (open directions) the surface continues along its
+    /// tangent planes (first-order extension), so offsets and intersections near the boundary behave like those
+    /// of an unbounded surface.
+    /// </summary>
     public (Vec3 s, Vec3 su, Vec3 sv, Vec3 suu, Vec3 suv, Vec3 svv) Derivs(double u, double v)
+    {
+        double uc = ClosedU ? Math.Clamp(u, U0, U1) : Math.Clamp(u, U0, U1), vc = Math.Clamp(v, V0, V1);
+        if (u != uc || v != vc)
+        {
+            var d = DerivsIn(uc, vc);
+            double du = u - uc, dv = v - vc;
+            var s = d.s + d.su * du + d.sv * dv;
+            var su = d.su + d.suv * dv;
+            var sv = d.sv + d.suv * du;
+            return (s, su, sv, du != 0 ? Vec3.Zero : d.suu, d.suv, dv != 0 ? Vec3.Zero : d.svv);
+        }
+        return DerivsIn(u, v);
+    }
+
+    (Vec3 s, Vec3 su, Vec3 sv, Vec3 suu, Vec3 suv, Vec3 svv) DerivsIn(double u, double v)
     {
         int nu = P.GetLength(0) - 1, nv = P.GetLength(1) - 1;
         u = Math.Clamp(u, U0, U1); v = Math.Clamp(v, V0, V1);
         int su = BSplineCurve.FindSpan(nu, Pu, u, U), sv = BSplineCurve.FindSpan(nv, Pv, v, V);
-        var Nu = DersBasis(su, u, Pu, 2, U); var Nv = DersBasis(sv, v, Pv, 2, V);
-        // homogeneous derivatives A(k,l) and weight derivatives w(k,l), k+l ≤ 2
-        var A = new Vec3[3, 3]; var w = new double[3, 3];
+        int qu = Pu + 1, qv = Pv + 1;
+        Span<double> Nu = stackalloc double[3 * qu]; Span<double> Nv = stackalloc double[3 * qv];
+        DersBasis(su, u, Pu, 2, U, Nu); DersBasis(sv, v, Pv, 2, V, Nv);
+        // homogeneous derivatives A(k,l) and weight derivatives w(k,l), k+l ≤ 2 (index k * 3 + l)
+        Span<Vec3> A = stackalloc Vec3[9]; Span<double> w = stackalloc double[9];
         for (int k = 0; k <= 2; k++)
             for (int l = 0; l + k <= 2; l++)
             {
                 Vec3 acc = Vec3.Zero; double wacc = 0;
                 for (int i = 0; i <= Pu; i++)
+                {
+                    var bu = Nu[k * qu + i];
+                    if (bu == 0) continue;
                     for (int j = 0; j <= Pv; j++)
                     {
-                        var b = Nu[k, i] * Nv[l, j];
+                        var b = bu * Nv[l * qv + j];
                         if (b == 0) continue;
                         int pi = su - Pu + i, pj = sv - Pv + j;
                         var wt = W?[pi, pj] ?? 1;
                         acc += P[pi, pj] * (b * wt); wacc += b * wt;
                     }
-                A[k, l] = acc; w[k, l] = wacc;
+                }
+                A[k * 3 + l] = acc; w[k * 3 + l] = wacc;
             }
-        if (W == null) return (A[0, 0], A[1, 0], A[0, 1], A[2, 0], A[1, 1], A[0, 2]);
+        if (W == null) return (A[0], A[3], A[1], A[6], A[4], A[2]);
         // rational: quotient rule (Piegl & Tiller A4.4)
-        var S = new Vec3[3, 3];
+        Span<Vec3> S = stackalloc Vec3[9];
         for (int k = 0; k <= 2; k++)
             for (int l = 0; l + k <= 2; l++)
             {
-                var vv = A[k, l];
-                for (int j = 1; j <= l; j++) vv -= S[k, l - j] * (Binom(l, j) * w[0, j]);
+                var vv = A[k * 3 + l];
+                for (int j = 1; j <= l; j++) vv -= S[k * 3 + l - j] * (Binom(l, j) * w[j]);
                 for (int i = 1; i <= k; i++)
                 {
-                    vv -= S[k - i, l] * (Binom(k, i) * w[i, 0]);
+                    vv -= S[(k - i) * 3 + l] * (Binom(k, i) * w[i * 3]);
                     var v2 = Vec3.Zero;
-                    for (int j = 1; j <= l; j++) v2 += S[k - i, l - j] * (Binom(l, j) * w[i, j]);
+                    for (int j = 1; j <= l; j++) v2 += S[(k - i) * 3 + l - j] * (Binom(l, j) * w[i * 3 + j]);
                     vv -= v2 * Binom(k, i);
                 }
-                S[k, l] = vv / w[0, 0];
+                S[k * 3 + l] = vv / w[0];
             }
-        return (S[0, 0], S[1, 0], S[0, 1], S[2, 0], S[1, 1], S[0, 2]);
+        return (S[0], S[3], S[1], S[6], S[4], S[2]);
     }
 
     static double Binom(int n, int k) => (n, k) switch { (_, 0) => 1, (1, 1) => 1, (2, 1) => 2, (2, 2) => 1, _ => throw new ArgumentException() };
 
     public Vec3 Eval(double u, double v)
     {
+        if (u < U0 || u > U1 || v < V0 || v > V1) return Derivs(u, v).s; // extension beyond the patch
         int nu = P.GetLength(0) - 1, nv = P.GetLength(1) - 1;
-        u = Math.Clamp(u, U0, U1); v = Math.Clamp(v, V0, V1);
         int su = BSplineCurve.FindSpan(nu, Pu, u, U), sv = BSplineCurve.FindSpan(nv, Pv, v, V);
-        var Nu = BSplineCurve.Basis(su, u, Pu, U); var Nv = BSplineCurve.Basis(sv, v, Pv, V);
+        Span<double> Nu = stackalloc double[Pu + 1]; Span<double> Nv = stackalloc double[Pv + 1];
+        DersBasis(su, u, Pu, 0, U, Nu); DersBasis(sv, v, Pv, 0, V, Nv);
         Vec3 acc = Vec3.Zero; double wacc = 0;
         for (int i = 0; i <= Pu; i++)
             for (int j = 0; j <= Pv; j++)
@@ -206,7 +238,33 @@ public sealed class NurbsSurface
     // closest point
 
     /// <summary>Closest point of the patch to p: parameters, point, distance. A hint (on-surface parameters) is tried first.</summary>
+    // the last unhinted query per thread (distance and normal of the same point are usually asked together)
+    [ThreadStatic] static NurbsSurface? _lastSurf;
+    [ThreadStatic] static Vec3 _lastP;
+    [ThreadStatic] static (double u, double v, Vec3 c, double dist) _lastRes;
+
     public (double u, double v, Vec3 c, double dist) Closest(Vec3 p, double uHint = double.NaN, double vHint = double.NaN)
+    {
+        if (double.IsNaN(uHint) && double.IsNaN(vHint))
+        {
+            if (ReferenceEquals(_lastSurf, this) && _lastP == p) return _lastRes;
+            var r = ClosestCore(p, uHint, vHint);
+            _lastSurf = this; _lastP = p; _lastRes = r;
+            return r;
+        }
+        return ClosestCore(p, uHint, vHint);
+    }
+
+    /// <summary>Whether (u, v) is a proper foot point of p: the residual is normal to the surface there.</summary>
+    bool Stationary(Vec3 p, double u, double v)
+    {
+        var (s, su, sv, _, _, _) = Derivs(u, v);
+        var r = s - p;
+        double tol = 1e-9 * _scale;
+        return Math.Abs(Vec3.Dot(r, su)) <= tol * (su.Length + 1e-300) && Math.Abs(Vec3.Dot(r, sv)) <= tol * (sv.Length + 1e-300);
+    }
+
+    (double u, double v, Vec3 c, double dist) ClosestCore(Vec3 p, double uHint, double vHint)
     {
         if (!double.IsNaN(uHint) && !double.IsNaN(vHint))
         {
@@ -226,6 +284,8 @@ public sealed class NurbsSurface
                 for (int a = 0; a <= 1; a++)
                     for (int b = 0; b <= 1; b++)
                     {
+                        // a collapsed (pole) row is no seed: Newton cannot leave it (Su vanishes there)
+                        if ((j + b == 0 && PoleAt(V0)) || (j + b == G && PoleAt(V1))) continue;
                         var d2 = (_grid[i + a, j + b] - p).LengthSq;
                         if (d2 < best) { best = d2; bi = i + a; bj = j + b; }
                     }
@@ -234,7 +294,8 @@ public sealed class NurbsSurface
         var c0 = Eval(u0, v0);
         // a second start from a neighbouring cell centre guards against a stall on a boundary
         var res = (u0, v0, c0, Vec3.Distance(c0, p));
-        if (res.Item4 > 1e-9 * _scale)
+        // (only when the first search did not end on a proper foot point, e.g. stalled against a boundary)
+        if (res.Item4 > 1e-9 * _scale && !Stationary(p, u0, v0))
             foreach (var (du, dv) in new[] { (0.5, 0.5), (-0.5, 0.5), (0.5, -0.5), (-0.5, -0.5) })
             {
                 var (u1, v1) = Newton(p, Math.Clamp(_gu[bi] + du * (U1 - U0) / G, U0, U1), Math.Clamp(_gv[bj] + dv * (V1 - V0) / G, V0, V1));
@@ -284,7 +345,11 @@ public sealed class NurbsSurface
                 var su2 = Vec3.Dot(su, su); var sv2 = Vec3.Dot(sv, sv);
                 du = su2 > 1e-300 ? f / su2 : 0; dv = sv2 > 1e-300 ? g / sv2 : 0;
             }
-            var un = Math.Clamp(u - du, U0, U1); var vn = Math.Clamp(v - dv, V0, V1);
+            // closed directions stay in range (the caller unwraps); open ones may run onto the extension
+            // (not past a pole: the surface ends there)
+            double eu = ClosedU ? 0 : U1 - U0, ev = ClosedV ? 0 : V1 - V0;
+            var un = Math.Clamp(u - du, U0 - eu, U1 + eu);
+            var vn = Math.Clamp(v - dv, PoleAt(V0) ? V0 : V0 - ev, PoleAt(V1) ? V1 : V1 + ev);
             var step = Math.Abs(un - u) / (U1 - U0) + Math.Abs(vn - v) / (V1 - V0);
             u = un; v = vn;
             if (step < 1e-15) break;

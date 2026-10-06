@@ -157,6 +157,8 @@ public static class NTess
             case SurfaceKind.Cone: { var r = Math.Max(s.R, 1e-3); var hu = Ang(r) * r; return (hu, Math.Max(hu * 4, 1e-6)); }
             case SurfaceKind.Sphere: { var h = Ang(s.R) * s.R; return (h, h); }
             case SurfaceKind.Torus: { var hu = Ang(s.R + s.R2) * (s.R + s.R2); var hv = Ang(s.R2) * s.R2; return (hu, hv); }
+            case SurfaceKind.Offset:
+                return Spacing(s.Base!, tol);
             case SurfaceKind.BSpline:
                 {
                     var rho = Math.Min(s.Nurbs!.MinCurvatureRadius(), 1e6);
@@ -183,6 +185,7 @@ public static class NTess
         SurfaceKind.Torus => (s.R + s.R2, s.R2),
         SurfaceKind.Pipe => (s.R, 1),
         SurfaceKind.BSpline => s.Nurbs!.MetricScale(),
+        SurfaceKind.Offset => MetricScale(s.Base!),
         _ => (1, 1),
     };
 

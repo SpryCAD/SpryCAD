@@ -42,6 +42,28 @@ public sealed class NSurface
     public PipeSpine? Spine => Def.Spine;
     public NurbsSurface? Nurbs => Def.Nurbs;
 
+    public NSurface? Base => Def.Base;
+
+    /// <summary>
+    /// The surface moved by d along its natural normal: exact (analytic) for planes and surfaces of revolution and
+    /// pipes, an offset surface for B-splines (offsets of offsets add up).
+    /// </summary>
+    public static NSurface OffsetOf(NSurface s, double d)
+    {
+        if (s.Kind == SurfaceKind.Offset) return OffsetOf(s.Base!, s.R + d);
+        if (s.Kind != SurfaceKind.BSpline) throw new ArgumentException("offset surfaces are built on B-spline surfaces");
+        if (Math.Abs(d) < 1e-15) return s;
+        return new(new SurfaceDef { Kind = SurfaceKind.Offset, Origin = s.Origin, Axis = s.Axis, RefDir = s.F.XDir, Radius = d, Base = s });
+    }
+
+    /// <summary>Unit natural normal at face parameters (u, v).</summary>
+    public Vec3 NormalAt(double u, double v) => Kind switch
+    {
+        SurfaceKind.BSpline => Nurbs!.Normal(FromFaceU(u), FromFaceV(v)),
+        SurfaceKind.Offset => Base!.NormalAt(u, v),
+        _ => Normal(Eval(u, v)),
+    };
+
     /// <summary>A B-spline surface (parameters as in its knot vectors).</summary>
     public static NSurface BSpline(NurbsSurface s)
         => new(new SurfaceDef { Kind = SurfaceKind.BSpline, Origin = s.Box.Center, Axis = Vec3.UnitZ, RefDir = Vec3.UnitX, Nurbs = s });
@@ -51,12 +73,12 @@ public sealed class NSurface
     public Vec3 Origin => F.Origin;
     public double R => Def.Radius;
     public double R2 => Def.Param2;
-    public bool PeriodicU => Kind switch { SurfaceKind.Plane => false, SurfaceKind.BSpline => Nurbs!.ClosedU, _ => true };
+    public bool PeriodicU => Kind switch { SurfaceKind.Plane => false, SurfaceKind.BSpline => Nurbs!.ClosedU, SurfaceKind.Offset => Base!.PeriodicU, _ => true };
 
     // ---------------------------------------------------------------------------------------
     // parameterization
 
-    public bool PeriodicV => Kind == SurfaceKind.Torus || (Kind == SurfaceKind.BSpline && Nurbs!.ClosedV);
+    public bool PeriodicV => Kind == SurfaceKind.Torus || (Kind == SurfaceKind.BSpline && Nurbs!.ClosedV) || (Kind == SurfaceKind.Offset && Base!.PeriodicV);
 
     // B-spline parameters as seen by faces: a closed direction is mapped onto a full turn (period 2π), so the
     // seam and unwrapping logic of the periodic analytic surfaces applies; an open direction keeps its knots
@@ -96,6 +118,7 @@ public sealed class NSurface
                     return new Vec2(Theta(l, uHint), double.IsNaN(vHint) ? phi : NCurve.Wrap(phi, vHint));
                 }
             case SurfaceKind.Pipe: return Spine!.UV(p, uHint);
+            case SurfaceKind.Offset: return Base!.UV(p, uHint, vHint);
             case SurfaceKind.BSpline:
                 {
                     var c = Nurbs!.Closest(p, double.IsNaN(uHint) ? double.NaN : FromFaceU(uHint), double.IsNaN(vHint) ? double.NaN : FromFaceV(vHint));
@@ -122,6 +145,7 @@ public sealed class NSurface
     public bool IsPole(Vec3 p)
     {
         if (Kind == SurfaceKind.BSpline) return Nurbs!.IsPole(p);
+        if (Kind == SurfaceKind.Offset) return Base!.IsPole(Base.Project(p));
         if (Kind is not (SurfaceKind.Sphere or SurfaceKind.Cone)) return false;
         var l = F.ToLocal3(p);
         return l.X * l.X + l.Y * l.Y < 1e-14 * Math.Max(1, R * R);
@@ -147,6 +171,7 @@ public sealed class NSurface
                 }
             case SurfaceKind.Pipe: return Spine!.Surface(u, v, R);
             case SurfaceKind.BSpline: return Nurbs!.Eval(FromFaceU(u), FromFaceV(v));
+            case SurfaceKind.Offset: return Base!.Eval(u, v) + Base.NormalAt(u, v) * R;
         }
         return default;
     }
@@ -160,6 +185,7 @@ public sealed class NSurface
     public double F_(Vec3 p)
     {
         if (Kind == SurfaceKind.Pipe) return Spine!.Closest(p).dist - R;
+        if (Kind == SurfaceKind.Offset) return Base!.F_(p) - R;
         if (Kind == SurfaceKind.BSpline)
         {
             // distance to the patch, signed by the side of its normal
@@ -192,6 +218,7 @@ public sealed class NSurface
         if (Kind == SurfaceKind.Plane) return F.Normal;
         if (Kind == SurfaceKind.Pipe) return Spine!.Normal(p);
         if (Kind == SurfaceKind.BSpline) { var c = Nurbs!.Closest(p); return Nurbs.Normal(c.u, c.v); }
+        if (Kind == SurfaceKind.Offset) return Base!.Grad(p);
         var l = F.ToLocal3(p);
         var rr = Math.Sqrt(l.X * l.X + l.Y * l.Y);
         // radial unit (arbitrary on the axis)
@@ -252,7 +279,7 @@ public sealed class NSurface
     // ---------------------------------------------------------------------------------------
     // relations
 
-    public bool IsRevolution => Kind is not (SurfaceKind.Plane or SurfaceKind.Pipe or SurfaceKind.BSpline);
+    public bool IsRevolution => Kind is not (SurfaceKind.Plane or SurfaceKind.Pipe or SurfaceKind.BSpline or SurfaceKind.Offset);
 
     /// <summary>Same geometric surface (orientation ignored).</summary>
     public bool CoincidentWith(NSurface o, double tol)
@@ -266,6 +293,7 @@ public sealed class NSurface
         }
         if (Kind == SurfaceKind.Pipe) return Math.Abs(R - o.R) < tol && Spine!.SameAs(o.Spine!, tol);
         if (Kind == SurfaceKind.BSpline) return Nurbs!.SameAs(o.Nurbs!, tol);
+        if (Kind == SurfaceKind.Offset) return Math.Abs(R - o.R) < tol && Base!.CoincidentWith(o.Base!, tol);
         if (!SameAxisLine(o, tol)) return false;
         switch (Kind)
         {
@@ -300,6 +328,7 @@ public sealed class NSurface
     {
         if (Kind == SurfaceKind.Pipe) return Spine!.RayHits(o, d, R);
         if (Kind == SurfaceKind.BSpline) return Nurbs!.RayHits(o, d, F_);
+        if (Kind == SurfaceKind.Offset) return RayHitsByDistance(o, d, Base!.Nurbs!.Box, Math.Abs(R));
         var res = new List<double>();
         var lo = F.ToLocal3(o);
         var ld = new Vec3(Vec3.Dot(d, F.XDir), Vec3.Dot(d, F.YDir), Vec3.Dot(d, F.Normal));
@@ -377,7 +406,7 @@ public sealed class NSurface
     /// <summary>The surface's profile about (origin, axis) if it is a surface of revolution about that axis.</summary>
     public Profile? ProfileAbout(Vec3 origin, Vec3 axis, double tol)
     {
-        if (Kind is SurfaceKind.Pipe or SurfaceKind.BSpline) return null;
+        if (Kind is SurfaceKind.Pipe or SurfaceKind.BSpline or SurfaceKind.Offset) return null;
         axis = axis.Normalized;
         double H(Vec3 p) => Vec3.Dot(p - origin, axis);
         bool OnAxis(Vec3 p) { var d = p - origin; return (d - axis * Vec3.Dot(d, axis)).Length < tol; }
@@ -419,6 +448,56 @@ public sealed class NSurface
     }
 
     public string Describe() => Exact.Describe();
+
+    /// <summary>
+    /// Ray parameters where o + t d crosses this surface, for surfaces whose |F_| bounds the distance (isolation by
+    /// that bound inside the padded box, then bisection).
+    /// </summary>
+    List<double> RayHitsByDistance(Vec3 o, Vec3 d, Box3 box, double pad)
+    {
+        var res = new List<double>();
+        var dl = d.Length;
+        if (dl < 1e-300) return res;
+        pad += 1e-6 * Math.Max(box.Diagonal, 1);
+        double t0 = double.NegativeInfinity, t1 = double.PositiveInfinity;
+        for (int k = 0; k < 3; k++)
+        {
+            double ok = k == 0 ? o.X : k == 1 ? o.Y : o.Z, dk = k == 0 ? d.X : k == 1 ? d.Y : d.Z;
+            double lo = (k == 0 ? box.Min.X : k == 1 ? box.Min.Y : box.Min.Z) - pad, hi = (k == 0 ? box.Max.X : k == 1 ? box.Max.Y : box.Max.Z) + pad;
+            if (Math.Abs(dk) < 1e-300) { if (ok < lo || ok > hi) return res; continue; }
+            var a = (lo - ok) / dk; var b = (hi - ok) / dk;
+            if (a > b) (a, b) = (b, a);
+            t0 = Math.Max(t0, a); t1 = Math.Min(t1, b);
+        }
+        if (!(t1 > t0)) return res;
+        double F(double t) => F_(o + d * t);
+        var minL = 1e-7 * Math.Max(box.Diagonal, 1);
+        void Iso(double a, double b, double fa, double fb, int depth)
+        {
+            var L = (b - a) * dl;
+            if (Math.Abs(fa) + Math.Abs(fb) > L * 1.0001 + 1e-12) return;
+            if (depth >= 60 || L < minL * 100)
+            {
+                if (fa * fb < 0) res.Add(Roots.Bisect(F, a, b));
+                else if (fa == 0) res.Add(a);
+                return;
+            }
+            var m = 0.5 * (a + b); var fm = F(m);
+            Iso(a, m, fa, fm, depth + 1);
+            Iso(m, b, fm, fb, depth + 1);
+        }
+        const int n = 16;
+        double pt = t0, pf = F(t0);
+        for (int i = 1; i <= n; i++)
+        {
+            var t = t0 + (t1 - t0) * i / n; var f = F(t);
+            Iso(pt, t, pf, f, 0);
+            pt = t; pf = f;
+        }
+        res.Sort();
+        for (int i = res.Count - 1; i > 0; i--) if (Math.Abs(res[i] - res[i - 1]) * dl < minL * 10) res.RemoveAt(i);
+        return res;
+    }
 }
 
 public static class Roots

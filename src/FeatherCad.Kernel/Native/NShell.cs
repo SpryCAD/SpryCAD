@@ -101,7 +101,8 @@ public static class NShell
                 if (s.R + d <= 1e-9) throw new InvalidOperationException("shell: thickness exceeds a fillet radius");
                 return new NSurface(s.Def with { Radius = s.R + d });
             case SurfaceKind.BSpline:
-                throw new NotSupportedException("offsets of B-spline surfaces are not supported yet");
+            case SurfaceKind.Offset:
+                return NSurface.OffsetOf(s, d);
         }
         throw new NotSupportedException();
     }

@@ -163,6 +163,63 @@ static class ImportTests
                 t.Near(NTess.ToSolid(body, 1e-3).Volume(), exact, exact * 3e-4);
             });
 
+        // the same part as exact analytic geometry and as OCCT's NURBS conversion: shell and fillet must agree
+        (Solid nurbs, Solid analytic) BoxHole()
+        {
+            var res = StepImport.Read(File.ReadAllBytes(Path.Combine(Models(), "step", "n-boxhole.step")), "F1.");
+            var box = Builders.Box(new Vec3(-20, -20, 0), new Vec3(20, 20, 10), "Box");
+            var an = Csg.Subtract(box, Builders.Cylinder(new Vec3(0, 0, -1), Vec3.UnitZ, 6, 12, "Hole"));
+            return (NTess.ToSolid(res.Solids.Single().Body), an);
+        }
+        static string TopFace(Solid s) => s.Native!.Faces.First(f => f.Coedges.All(c => Math.Abs(c.Start.P.Z - 10) < 1e-6) && f.Coedges.Any(c => Math.Abs(c.Start.P.X) > 19)).Tag.Name;
+        static List<NEdge> HoleTopEdges(Solid s)
+        {
+            s.Native!.Link();
+            return s.Native.Edges.Where(e => !NativeBlend.IsSeam(e) && Math.Abs(e.V0.P.Z - 10) < 1e-6 && Math.Abs(e.Mid.Z - 10) < 1e-6
+                && Math.Abs(Math.Sqrt(e.Mid.X * e.Mid.X + e.Mid.Y * e.Mid.Y) - 6) < 1e-5).ToList();
+        }
+
+        t.Test("Shell of B-spline faces (offset surfaces) matches the analytic part", () =>
+        {
+            var (nurbs, an) = BoxHole();
+            Solid sn;
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            try { sn = ShellOp.Apply(nurbs, new HashSet<string> { TopFace(nurbs) }, 1, "S"); }
+            catch (ShellFailedException ex) { throw new AssertException(ex.Message + " / " + Csg.LastFallbackReason); }
+            Console.WriteLine($"        B-spline shell {sw.ElapsedMilliseconds} ms");
+            var sa = ShellOp.Apply(an, new HashSet<string> { TopFace(an) }, 1, "S");
+            if (Environment.GetEnvironmentVariable("FC_DUMP") is { } dumpDir)
+                using (var fs = File.Create(Path.Combine(dumpDir, "nurbs-shell.step"))) StepWriter.Write(fs, new[] { ("shell", sn) }, "shell");
+            t.True(sn.Native != null && sn.Topology.OpenHalfEdges == 0, "B-spline shell not closed");
+            t.True(sn.Native!.Faces.Any(f => f.Surface.Kind == SurfaceKind.Offset), "no offset surfaces in the shell");
+            var exact = 14869.03 - (38.0 * 38 * 9 - Math.PI * 49 * 9);
+            t.Near(NTess.ToSolid(sa.Native!, 1e-3).Volume(), exact, exact * 3e-4);
+            t.Near(NTess.ToSolid(sn.Native!, 1e-3).Volume(), exact, exact * 3e-4);
+        });
+
+        t.Test("Fillet between B-spline faces (rolling ball on offset surfaces) matches the analytic torus fillet", () =>
+        {
+            var (nurbs, an) = BoxHole();
+            var errors = new List<string>();
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            Prof.Reset(); Prof.Enabled = Environment.GetEnvironmentVariable("FC_PROF") != null;
+            var fn = NativeBlend.Apply(nurbs, NativeBlend.Expand(nurbs.Native!, HoleTopEdges(nurbs), true), 1, true, "Fil", errors);
+            Console.WriteLine($"        B-spline fillet {sw.ElapsedMilliseconds} ms");
+            if (Prof.Enabled) foreach (var (pn, pms, calls) in Prof.Results().OrderByDescending(x => x.ms).Take(12)) Console.WriteLine($"          {pn,-30} {pms,8:0} ms x{calls}");
+            Prof.Enabled = false;
+            if (Environment.GetEnvironmentVariable("FC_DUMP") is { } dumpDir)
+                using (var fs = File.Create(Path.Combine(dumpDir, "nurbs-fillet.step"))) StepWriter.Write(fs, new[] { ("fillet", fn) }, "fillet");
+            var fa = NativeBlend.Apply(an, NativeBlend.Expand(an.Native!, HoleTopEdges(an), true), 1, true, "Fil", errors);
+            t.True(errors.Count == 0, string.Join("; ", errors));
+            t.True(fn.Native != null && fn.Topology.OpenHalfEdges == 0, "B-spline fillet not closed");
+            t.True(fn.Native!.Faces.Any(f => f.Surface.Kind == SurfaceKind.Pipe), "no blend face");
+            // removed: corner region (1 - π/4) r² swept round the hole at its centroid radius
+            var removed = 2 * Math.PI * (6 + (10 - 3 * Math.PI) / (3 * (4 - Math.PI))) * (1 - Math.PI / 4);
+            var vn = NTess.ToSolid(fn.Native, 1e-3).Volume(); var va = NTess.ToSolid(fa.Native!, 1e-3).Volume();
+            t.Near(va, 14869.03 - removed, 0.3);
+            t.Near(vn, va, 0.3);
+        });
+
         t.Test("Boolean through imported B-spline geometry", () =>
         {
             var res = StepImport.Read(File.ReadAllBytes(Path.Combine(Models(), "step", "n-cyl.step")), "F1.");

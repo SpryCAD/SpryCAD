@@ -209,7 +209,7 @@ public sealed class NBody
         var b = Box3.Empty;
         foreach (var e in Edges) b.Add(e.TightBounds());
         foreach (var f in Faces)
-            if (f.Surface.Kind is SurfaceKind.Sphere or SurfaceKind.Torus or SurfaceKind.Pipe or SurfaceKind.BSpline)
+            if (f.Surface.Kind is SurfaceKind.Sphere or SurfaceKind.Torus or SurfaceKind.Pipe or SurfaceKind.BSpline or SurfaceKind.Offset)
             {
                 var dom = NDomain.Of(f, 1e-4);
                 foreach (var q in dom.InteriorSamples(12))

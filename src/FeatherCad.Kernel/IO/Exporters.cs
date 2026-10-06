@@ -252,7 +252,32 @@ public static class StepWriter
                     return c.Add($"CONICAL_SURFACE('',#{Axis2(c, d.Origin + ax * hmax, ax, d.RefDir)},{R(r)},{R(d.Param2)})");
                 }
             case SurfaceKind.Pipe: return WriteBSplineSurface(c, PipeFit(f, b));
-            case SurfaceKind.BSpline: return WriteNurbs(c, d.Nurbs!);
+            case SurfaceKind.BSpline:
+            case SurfaceKind.Offset:
+                {
+                    // faces reaching past their patch (onto its tangent extension, e.g. inner walls of a shell) have no
+                    // STEP surface: those get a B-spline fitted over the face instead
+                    var nb = d.Kind == SurfaceKind.BSpline ? d.Nurbs! : d.Base!.Nurbs!;
+                    double u0 = double.MaxValue, u1 = double.MinValue, v0 = double.MaxValue, v1 = double.MinValue;
+                    foreach (var p in BoundaryPoints(f, b))
+                    {
+                        var q = nb.Closest(p);
+                        u0 = Math.Min(u0, q.u); u1 = Math.Max(u1, q.u); v0 = Math.Min(v0, q.v); v1 = Math.Max(v1, q.v);
+                    }
+                    double eu = (nb.U1 - nb.U0) * 1e-9, ev = (nb.V1 - nb.V0) * 1e-9;
+                    bool inside = u0 >= nb.U0 - eu && u1 <= nb.U1 + eu && v0 >= nb.V0 - ev && v1 <= nb.V1 + ev;
+                    double off = d.Kind == SurfaceKind.Offset ? d.Radius : 0;
+                    // (offsets of closed surfaces are fitted too: readers do not all handle them)
+                    if (inside && (off == 0 || !(nb.ClosedU || nb.ClosedV)))
+                        return off == 0 ? WriteNurbs(c, nb) : c.Add($"OFFSET_SURFACE('',#{WriteNurbs(c, nb)},{R(off)},.F.)");
+                    var du = (u1 - u0) * 0.02 + 1e-9; var dv = (v1 - v0) * 0.02 + 1e-9;
+                    // round a closed direction: exactly one period (a padded fit would overlap itself)
+                    if (nb.ClosedU && u1 - u0 > 0.9 * (nb.U1 - nb.U0)) { u0 = nb.U0; u1 = nb.U1; du = 0; }
+                    if (nb.ClosedV && v1 - v0 > 0.9 * (nb.V1 - nb.V0)) { v0 = nb.V0; v1 = nb.V1; dv = 0; }
+                    var fit = BSplineSurface.Fit((u, v) => nb.Eval(u, v) + (off == 0 ? Vec3.Zero : nb.Normal(u, v) * off),
+                        u0 - du, u1 + du, v0 - dv, v1 + dv, 1e-5, 8, 8);
+                    return WriteBSplineSurface(c, fit);
+                }
         }
         throw new InvalidOperationException("unknown surface");
     }
