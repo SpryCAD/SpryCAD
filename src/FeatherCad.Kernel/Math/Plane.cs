@@ -179,6 +179,13 @@ public readonly struct Transform
     public bool IsMirror => Determinant < 0;
     public bool IsIdentity => M00 == 1 && M11 == 1 && M22 == 1 && M01 == 0 && M02 == 0 && M10 == 0 && M12 == 0 && M20 == 0 && M21 == 0 && T == Vec3.Zero;
 
+    /// <summary>The inverse of a rigid motion or reflection (orthonormal matrix: its transpose).</summary>
+    public Transform RigidInverse()
+    {
+        var r = new Transform(M00, M10, M20, M01, M11, M21, M02, M12, M22, Vec3.Zero);
+        return new Transform(r.M00, r.M01, r.M02, r.M10, r.M11, r.M12, r.M20, r.M21, r.M22, -r.Vector(T));
+    }
+
     /// <summary>Returns a * b (apply b first, then a).</summary>
     public static Transform operator *(Transform a, Transform b)
     {

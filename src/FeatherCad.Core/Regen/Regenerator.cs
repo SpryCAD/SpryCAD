@@ -541,12 +541,31 @@ public sealed class Regenerator
                 if (!State.Tools.TryGetValue(seedId, out var tool))
                     throw new FeatureException("Only extrude, revolve, hole, fillet, chamfer, pattern and mirror features can be patterned.");
                 var copies = new List<Solid>();
+                // instances solved again: their edges and tools, reused for instances whose edges are theirs moved
+                // (e.g. every grip that lands just left of a spoke)
+                var solved = new List<(Transform t, List<Vec3> points, double length, List<Solid> tools)>();
                 for (int i = 0; i < transforms.Count; i++)
                 {
                     // a blend whose instance edges are not the seed's edges moved is solved again there
                     if (tool.Blend is { } bs && InstanceEdges(bs, seeds, transforms[i], i) is { } inst && !inst.same)
                     {
-                        everything.AddRange(ReapplyBlend(bs, inst.body, inst.edges, i, seedId));
+                        var ti = transforms[i];
+                        var reuse = solved.FindIndex(sv =>
+                        {
+                            var rel = ti * sv.t.RigidInverse();
+                            return MatchEdges(inst.edges, sv.points.Select(p => rel.Point(p)), sv.length, inst.tol);
+                        });
+                        if (reuse >= 0)
+                        {
+                            var rel = ti * solved[reuse].t.RigidInverse();
+                            copies.AddRange(solved[reuse].tools.Select(x => x.Transformed(rel, $"{f.Id}.{i + 1}.")));
+                            continue;
+                        }
+                        var points = inst.edges.SelectMany(EdgePoints).ToList();
+                        var length = inst.edges.Sum(TrueLength);
+                        var (tools, sameKind) = ReapplyBlend(bs, inst.body, inst.edges, i, seedId, tool.IsCut);
+                        everything.AddRange(tools);
+                        if (tools.Count > 0 && sameKind) solved.Add((ti, points, length, tools));
                         continue;
                     }
                     copies.Add(tool.Tool.Transformed(transforms[i], $"{f.Id}.{i + 1}."));
@@ -579,7 +598,7 @@ public sealed class Regenerator
         /// hints moved, tangent chains as for the seed), and whether they are the seed's edges moved. Null when the
         /// references do not resolve (the tool is copied then, as before).
         /// </summary>
-        (Body body, List<Kernel.Native.NEdge> edges, bool same)? InstanceEdges(BlendSpec bs, IEnumerable<string> seeds, Transform t, int i)
+        (Body body, List<Kernel.Native.NEdge> edges, bool same, double tol)? InstanceEdges(BlendSpec bs, IEnumerable<string> seeds, Transform t, int i)
         {
             if (!Csg.UseNative || State.Bodies.Any(b => b.Solid.Native == null)) return null;
             var seedIds = seeds.ToList();
@@ -604,7 +623,14 @@ public sealed class Regenerator
             // instance's edges and the other way round
             // traced edges are fitted curves: the same intersection traced on two instances differs by the fit tolerance
             var tol = 1e-5 * Math.Max(1, body.Solid.Native!.Bounds.Diagonal);
-            var want = bs.Edges.SelectMany(w => w).Select(p => t.Point(p)).ToList();
+            bool same = MatchEdges(edges, bs.Edges.SelectMany(w => w).Select(p => t.Point(p)), bs.Length, tol);
+            if (Environment.GetEnvironmentVariable("FC_PATDBG") != null) Console.WriteLine($"  instance {i + 2}: {edges.Count} edges (seed {bs.Edges.Count}) -> {(same ? "copy" : "solve")}");
+            return (body, edges, same, tol);
+        }
+
+        /// <summary>Whether edges are the curves through the given points with the given total length (however split).</summary>
+        static bool MatchEdges(List<Kernel.Native.NEdge> edges, IEnumerable<Vec3> want, double length, double tol)
+        {
             static double Dist(Kernel.Native.NEdge e, Vec3 p)
             {
                 double lo = Math.Min(e.T0, e.T1), hi = Math.Max(e.T0, e.T1);
@@ -618,11 +644,8 @@ public sealed class Regenerator
                 if (e.Curve.Periodic) { while (u < lo - 1e-9) u += e.Curve.Period; while (u > hi + 1e-9) u -= e.Curve.Period; }
                 return Math.Min(Vec3.Distance(e.Curve.Eval(Math.Clamp(u, lo, hi)), p), Math.Min(Vec3.Distance(e.V0.P, p), Vec3.Distance(e.V1.P, p)));
             }
-            var lw = bs.Length; var le = edges.Sum(TrueLength);
-            bool same = want.All(p => edges.Any(e => Dist(e, p) < tol)) && Math.Abs(le - lw) <= 1e-4 * Math.Max(lw, 1e-9);
-            if (Environment.GetEnvironmentVariable("FC_PATDBG") != null)
-                Console.WriteLine($"  instance {i + 2}: {edges.Count} edges (seed {bs.Edges.Count}), worst point {want.Max(p => edges.Min(e => Dist(e, p))):g3} tol {tol:g3}, length {le:0.####} vs {lw:0.####} -> {(same ? "copy" : "solve")}");
-            return (body, edges, same);
+            var le = edges.Sum(TrueLength);
+            return Math.Abs(le - length) <= 1e-4 * Math.Max(length, 1e-9) && want.All(p => edges.Any(e => Dist(e, p) < tol));
         }
 
         static double TrueLength(Kernel.Native.NEdge e)
@@ -635,7 +658,7 @@ public sealed class Regenerator
         static Vec3[] EdgePoints(Kernel.Native.NEdge e) => Enumerable.Range(0, 9).Select(k => k == 0 ? e.V0.P : k == 8 ? e.V1.P : e.At(k / 8.0)).ToArray();
 
         /// <summary>Solves a patterned blend on instance i's own edges; returns the tools it applied.</summary>
-        List<Solid> ReapplyBlend(BlendSpec bs, Body body, List<Kernel.Native.NEdge> edges, int i, string seedId)
+        (List<Solid> tools, bool sameKind) ReapplyBlend(BlendSpec bs, Body body, List<Kernel.Native.NEdge> edges, int i, string seedId, bool cut)
         {
             var errors = new List<string>();
             var applied = new List<(Solid tool, bool cut)>();
@@ -645,10 +668,10 @@ public sealed class Regenerator
             if (errors.Count > 0)
             {
                 status.Warnings.Add($"Instance {i + 2} is not {(bs.Fillet ? "filleted" : "chamfered")}: {errors[0]}");
-                return new List<Solid>();
+                return (new List<Solid>(), false);
             }
             State = State.With(State.Bodies.Select(b => b.Id == body.Id ? new Body { Id = b.Id, Solid = r } : b).ToList());
-            return applied.Select(a => a.tool).ToList();
+            return (applied.Select(a => a.tool).ToList(), applied.All(a => a.cut == cut));
         }
 
         void DoLinearPattern(LinearPatternFeature lp)

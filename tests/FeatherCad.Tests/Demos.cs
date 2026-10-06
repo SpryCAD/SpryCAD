@@ -618,6 +618,21 @@ static class Demos
         var rimSk = d.AddFeature(new SketchFeature { Name = "Rim section", Plane = PlaneRef.Front, Sketch = rs.S });
         var rim = d.AddFeature(new RevolveFeature { Name = "Rim", SketchId = rimSk.Id, Angle = "360" });
 
+        // finger grips first: scallops cut into the inner side of the rim, edges rounded, patterned between the
+        // spokes; the spokes are added afterwards, so a grip next to a spoke never cuts into it
+        // (Top plane: sketch Y = -Z, so a positive sketch angle is a positive rotation about Y)
+        var g = new Sk(d);
+        var gripC = g.Circle(g.P("GripR*cos(GripA)", "GripR*sin(GripA)"), "GripD");
+        var gSk = d.AddFeature(new SketchFeature { Name = "Grip", Plane = PlaneRef.Top, Sketch = g.S });
+        var grip = d.AddFeature(new ExtrudeFeature { Name = "Grip", SketchId = gSk.Id, IsCut = true, End = EndCondition.ThroughAllBoth });
+        var ga = g.Eval("GripA") * Math.PI / 180; var gr = g.Eval("D/2-RimT/2");
+        var gripFil = d.AddFeature(new FilletFeature
+        {
+            Name = "Grip edges", Radius = "Rg",
+            Edges = { E($"{rim.Id}.R.C{rimC}", $"{grip.Id}.S.C{gripC}", new Vec3(gr * Math.Cos(ga), g.Eval("RimT/4"), -gr * Math.Sin(ga))) },
+        });
+        d.AddFeature(new CircularPatternFeature { Name = "Grips", Seeds = { grip.Id, gripFil.Id }, Axis = new DirRef { Axis = "Y" }, Count = "NS*NG" });
+
         // hub
         var hs = new Sk(d);
         var hl = hs.Poly(hs.P("Bore/2", "-HubL/2"), hs.P("HubD/2", "-HubL/2"), hs.P("HubD/2", "HubL/2"), hs.P("Bore/2", "HubL/2"));
@@ -655,20 +670,6 @@ static class Demos
             Edges = { E(H(1), spokeFace, new Vec3(V("HubD/2"), V("SpokeD/2"), 0)) },
         });
         d.AddFeature(new CircularPatternFeature { Name = "Spokes", Seeds = { spoke.Id, rimFil.Id, hubFil.Id }, Axis = new DirRef { Axis = "Y" }, Count = "NS" });
-
-        // finger grips: scallops cut into the inner side of the rim, edges rounded, patterned between the spokes
-        // (Top plane: sketch Y = -Z, so a positive sketch angle is a positive rotation about Y)
-        var g = new Sk(d);
-        var gripC = g.Circle(g.P("GripR*cos(GripA)", "GripR*sin(GripA)"), "GripD");
-        var gSk = d.AddFeature(new SketchFeature { Name = "Grip", Plane = PlaneRef.Top, Sketch = g.S });
-        var grip = d.AddFeature(new ExtrudeFeature { Name = "Grip", SketchId = gSk.Id, IsCut = true, End = EndCondition.ThroughAllBoth });
-        var ga = V("GripA") * Math.PI / 180; var gr = V("D/2-RimT/2");
-        var gripFil = d.AddFeature(new FilletFeature
-        {
-            Name = "Grip edges", Radius = "Rg",
-            Edges = { E(rimFace, $"{grip.Id}.S.C{gripC}", new Vec3(gr * Math.Cos(ga), V("RimT/4"), -gr * Math.Sin(ga))) },
-        });
-        d.AddFeature(new CircularPatternFeature { Name = "Grips", Seeds = { grip.Id, gripFil.Id }, Axis = new DirRef { Axis = "Y" }, Count = "NS*NG" });
 
         // keyway along the bore
         var k = new Sk(d);

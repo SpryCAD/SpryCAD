@@ -123,10 +123,12 @@ static class NativeBoolTests
             foreach (var angle in new[] { "236", "270" })
             {
                 var doc = CadDocument.Load(file);
+                // grips are cut before the spokes: an off-grid spoke may land on a scallop, which is another test
+                foreach (var gf in doc.Features.Where(f => f.Name is "Grip" or "Grip edges" or "Grips")) gf.Suppressed = true;
                 var spokes = doc.Features.OfType<CircularPatternFeature>().First(f => f.Name == "Spokes");
                 spokes.Angle = angle;
                 var r = new Regenerator().Rebuild(doc);
-                foreach (var f in doc.Features) t.True(r.Status[f.Id].Ok, $"angle {angle}: {f.Name}: {r.Status[f.Id].Error}");
+                foreach (var f in doc.Features.Where(f => !f.Suppressed)) t.True(r.Status[f.Id].Ok, $"angle {angle}: {f.Name}: {r.Status[f.Id].Error}");
             }
             // past a full turn the last instance would land on the seed
             var over = CadDocument.Load(file);
@@ -144,7 +146,8 @@ static class NativeBoolTests
             // after the edge has passed further vertices
             var dir = AppContext.BaseDirectory;
             while (dir != null && !Directory.Exists(Path.Combine(dir, "samples"))) dir = Path.GetDirectoryName(dir);
-            var file = Path.Combine(dir!, "samples", "demos", "spoked-handwheel.fcad");
+            // the earlier handwheel, grips cut after the spokes (and through them)
+            var file = Path.Combine(dir!, "tests", "FeatherCad.Tests", "models", "spoked-handwheel-grips-last.fcad");
             foreach (var a in new[] { "3", "9" })
             {
                 var doc = CadDocument.Load(file);
