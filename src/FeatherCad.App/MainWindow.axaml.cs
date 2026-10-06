@@ -85,7 +85,7 @@ public partial class MainWindow : Window
         Opened += (_, _) =>
         {
             if (Session.FilePath == null) Session.RequestRebuild();
-            Viewport.StandardView("Trimetric");
+            Viewport.StandardView("Trimetric", fit: false); // nothing to fit yet: keep the default zoom
         };
     }
 
@@ -337,7 +337,7 @@ public partial class MainWindow : Window
         var inText = e.Source is TextBox;
         // keys typed into an input control (combo, check box, button, list) are that control's, not view shortcuts
         var inControl = inText || e.Source is ComboBox or ComboBoxItem or CheckBox or Button or ListBox or ListBoxItem or Slider or MenuItem;
-        if (_viewSelector.IsOpen && e.Key == Key.Escape) { _viewSelector.Close(); e.Handled = true; return; }
+        if (_viewSelector.IsOpen && e.Key == Key.Escape) { _viewSelector.Close(restore: true); e.Handled = true; return; }
         if (ctrl)
         {
             bool handled = true;

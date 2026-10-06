@@ -59,6 +59,10 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
     public bool ShowPlanes = true;
     public bool ShowOrigin = true;
     public bool ReverseWheel;
+    /// <summary>Draw the part faded (shaded styles), e.g. so the View Selector cube stands out over it.</summary>
+    public bool Ghosted { get => _ghosted; set { if (_ghosted != value) { _ghosted = value; Redraw(); } } }
+    bool _ghosted;
+    const float GhostAlpha = 0.3f;
     /// <summary>What the view rotates about unless a rotation center was set by middle-clicking the model.</summary>
     public RotateCenter RotateAbout = RotateCenter.ModelCenter;
 
@@ -142,7 +146,28 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
 
         // solids
         _r.SetupDepth(true, true);
-        if (Style != DisplayStyle.Wireframe)
+        var ghost = Ghosted && Style is DisplayStyle.ShadedWithEdges or DisplayStyle.Shaded;
+        if (ghost)
+        {
+            // faded: depth first so only the nearest surface shows, then its colour blended over the background
+            _r.PolygonOffset(true, 1, 1);
+            _r.Gl.ColorMask(false, false, false, false);
+            foreach (var b in Bodies) _r.DrawMesh(_gpu[b.Mesh], PartColor, vp, view, Camera.Perspective);
+            _r.Gl.ColorMask(true, true, true, true);
+            _r.Blend(true);
+            _r.SetupDepth(true, false);
+            foreach (var b in Bodies)
+            {
+                var g = _gpu[b.Mesh];
+                _r.DrawMesh(g, PartColor.WithAlpha(GhostAlpha), vp, view, Camera.Perspective);
+                foreach (var (fr, color) in hl.Faces(b.Id, b.Mesh))
+                    _r.DrawMesh(g, color.WithAlpha(GhostAlpha), vp, view, Camera.Perspective, fr.IndexStart, fr.IndexCount);
+            }
+            _r.Blend(false);
+            _r.SetupDepth(true, true);
+            _r.PolygonOffset(false);
+        }
+        else if (Style != DisplayStyle.Wireframe)
         {
             _r.PolygonOffset(true, 1, 1);
             foreach (var b in Bodies)
@@ -162,10 +187,11 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
             _r.PolygonOffset(false);
         }
         // edges
+        if (ghost) _r.Blend(true);
         foreach (var b in Bodies)
         {
             var g = _gpu[b.Mesh];
-            if (Style != DisplayStyle.Shaded) _r.DrawEdges(g, EdgeColor, vp);
+            if (Style != DisplayStyle.Shaded) _r.DrawEdges(g, ghost ? EdgeColor.WithAlpha(GhostAlpha) : EdgeColor, vp);
             foreach (var (er, color) in hl.Edges(b.Id, b.Mesh))
             {
                 _r.SetupDepth(false, false);
@@ -173,6 +199,7 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
                 _r.SetupDepth(true, true);
             }
         }
+        if (ghost) _r.Blend(false);
         if (Style == DisplayStyle.HiddenLinesVisible)
         {
             // hidden edges, faint, on top
@@ -440,9 +467,12 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         else { Camera.Target = tmp.Target; Camera.HalfHeight = tmp.HalfHeight; Redraw(); }
     }
 
-    public void StandardView(string name, bool fit = false)
+    /// <summary>Turns to a named standard view, zoomed to fit (as SolidWorks' standard views).</summary>
+    public void StandardView(string name, bool fit = true) => OrientTo(Camera.StandardViews[name], fit);
+
+    /// <summary>Turns the view to an orientation, optionally zooming to fit the model as seen from there.</summary>
+    void OrientTo(Quaternion q, bool fit)
     {
-        var q = Camera.StandardViews[name];
         if (fit)
         {
             var tmp = new Camera { Width = Camera.Width, Height = Camera.Height, Rotation = q };
@@ -458,11 +488,11 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
     /// Looks at the model from a world direction (a View Selector face, edge or corner), keeping +Y up; straight
     /// down or up, the top/bottom views' up (-Z / +Z) is used.
     /// </summary>
-    public void ViewFrom(Vector3 dir)
+    public void ViewFrom(Vector3 dir, bool fit = false)
     {
         dir = Vector3.Normalize(dir);
         var up = MathF.Abs(dir.Y) > 0.999f ? (dir.Y > 0 ? -Vector3.UnitZ : Vector3.UnitZ) : Vector3.UnitY;
-        AnimateTo(Camera.LookRotation(dir, up));
+        OrientTo(Camera.LookRotation(dir, up), fit);
     }
 
     /// <summary>Look straight at a frame (Normal To).</summary>
