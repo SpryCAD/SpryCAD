@@ -12,8 +12,8 @@
     <ApplicationIcon>Assets\FeatherCAD.ico</ApplicationIcon>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
     <AssemblyName>FeatherCAD</AssemblyName>
-    <!-- no Version here: it comes from git (the latest v<x.y.z> tag), passed in by build/make-installer.ps1 and
-         build/make-linux-package.sh -->
+    <!-- no Version here: it comes from git (target FeatherCadGitVersion below) -->
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <Product>FeatherCAD</Product>
     <RootNamespace>FeatherCad.App</RootNamespace>
     <TieredPGO>true</TieredPGO>
@@ -39,5 +39,38 @@
   <ItemGroup>
     <ProjectReference Include="..\FeatherCad.Core\FeatherCad.Core.csproj" />
   </ItemGroup>
+
+  <!--
+    The version, from git on every build (dev runs too), as the packages get it (build/make-installer.ps1,
+    make-linux-package.sh): on the tag v0.0.1 it is 0.0.1, three commits later 0.0.1-dev.3. The file version is
+    0.0.1.3, and the informational version (shown in Help > About) adds the commit: 0.0.1-dev.3+aeb382f, with
+    ".dirty" when built with uncommitted changes. Without git or a v<x.y.z> tag: 0.0.0-dev.
+  -->
+  <Target Name="FeatherCadGitVersion" BeforeTargets="GetAssemblyVersion">
+    <Exec Command="git describe --tags --match &quot;v[0-9]*&quot; --long --dirty" WorkingDirectory="$(MSBuildProjectDirectory)"
+          ConsoleToMSBuild="true" IgnoreExitCode="true" EchoOff="true" StandardOutputImportance="low" StandardErrorImportance="low">
+      <Output TaskParameter="ConsoleOutput" PropertyName="_GitDescribe" />
+    </Exec>
+    <PropertyGroup>
+      <_GitPattern>^v(\d+\.\d+\.\d+)-(\d+)-g([0-9a-f]+)(-dirty)?$</_GitPattern>
+      <_GitOk>$([System.Text.RegularExpressions.Regex]::IsMatch('$(_GitDescribe)', '$(_GitPattern)'))</_GitOk>
+    </PropertyGroup>
+    <PropertyGroup Condition="'$(_GitOk)' == 'True'">
+      <_GitBase>$([System.Text.RegularExpressions.Regex]::Replace('$(_GitDescribe)', '$(_GitPattern)', '$1'))</_GitBase>
+      <_GitHeight>$([System.Text.RegularExpressions.Regex]::Replace('$(_GitDescribe)', '$(_GitPattern)', '$2'))</_GitHeight>
+      <_GitHash>$([System.Text.RegularExpressions.Regex]::Replace('$(_GitDescribe)', '$(_GitPattern)', '$3'))</_GitHash>
+      <_GitDirty>$([System.Text.RegularExpressions.Regex]::Replace('$(_GitDescribe)', '$(_GitPattern)', '$4'))</_GitDirty>
+      <Version Condition="'$(_GitHeight)' == '0'">$(_GitBase)</Version>
+      <Version Condition="'$(_GitHeight)' != '0'">$(_GitBase)-dev.$(_GitHeight)</Version>
+      <FileVersion>$(_GitBase).$(_GitHeight)</FileVersion>
+      <InformationalVersion>$(Version)+$(_GitHash)</InformationalVersion>
+      <InformationalVersion Condition="'$(_GitDirty)' != ''">$(InformationalVersion).dirty</InformationalVersion>
+    </PropertyGroup>
+    <PropertyGroup Condition="'$(_GitOk)' != 'True'">
+      <Version>0.0.0-dev</Version>
+      <FileVersion>0.0.0.0</FileVersion>
+      <InformationalVersion>0.0.0-dev</InformationalVersion>
+    </PropertyGroup>
+  </Target>
 
 </Project>

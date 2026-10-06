@@ -313,6 +313,15 @@ public static class Dialogs
         var ok = new Button { Content = "OK", IsDefault = true, IsCancel = true };
         var sp = new StackPanel { Spacing = 6 };
         sp.Children.Add(new TextBlock { Text = "FeatherCAD", FontSize = 22, FontWeight = FontWeight.Bold, Foreground = new SolidColorBrush(Color.FromRgb(180, 35, 42)) });
+        // from git at build time (FeatherCadGitVersion in the .csproj): "0.0.1-dev.3+aeb382f[.dirty]"
+        var info = System.Reflection.Assembly.GetEntryAssembly()?
+            .GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
+            .OfType<System.Reflection.AssemblyInformationalVersionAttribute>().FirstOrDefault()?.InformationalVersion ?? "";
+        var plus = info.IndexOf('+');
+        var (ver, build) = plus < 0 ? (info, "") : (info[..plus], info[(plus + 1)..]);
+        var verText = new SelectableTextBlock { Text = $"Version {ver}" + (build.Length > 0 ? $"   (commit {build.Replace(".dirty", ", uncommitted changes")})" : ""), Foreground = Brushes.DimGray };
+        ToolTip.SetTip(verText, info);
+        sp.Children.Add(verText);
         sp.Children.Add(new TextBlock { Text = "Fast, lightweight, open source parametric 3D CAD.", TextWrapping = TextWrapping.Wrap });
         sp.Children.Add(new TextBlock { Text = "Own plane-based B-rep kernel in C#, Avalonia UI, OpenGL viewport.\nNative format: .fcad (JSON). Export: STEP AP214, STL.", TextWrapping = TextWrapping.Wrap, Foreground = Brushes.DimGray });
         sp.Children.Add(new TextBlock { Text = "License: MIT", Foreground = Brushes.DimGray });
