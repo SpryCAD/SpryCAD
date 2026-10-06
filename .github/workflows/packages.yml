@@ -1,8 +1,9 @@
 # Builds the Windows installer and the Linux packages (tar.gz and .deb).
 #   - Run by hand (Actions > Packages > Run workflow): the packages are attached to the run as artifacts.
 #   - Push a version tag (git tag v0.2.0 && git push origin v0.2.0): the same, plus a draft GitHub release with
-#     the packages attached, to review and publish by hand. The tag sets the version (v0.2.0 -> 0.2.0);
-#     otherwise it is <Version> in src/FeatherCad.App/FeatherCad.App.csproj.
+#     the packages attached, to review and publish by hand.
+# The version always comes from git (the build scripts): on a tag v0.2.0 it is 0.2.0, three commits later 0.2.0-dev.3.
+# The checkouts fetch the full history so the tags are there to describe.
 name: Packages
 
 on:
@@ -18,6 +19,8 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
@@ -28,27 +31,24 @@ jobs:
           if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
       - name: Build installer
         shell: pwsh
-        run: |
-          $ver = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME -replace '^v', '' } else { '' }
-          if ($ver) { ./build/make-installer.ps1 -Ver $ver } else { ./build/make-installer.ps1 }
+        run: ./build/make-installer.ps1
       - uses: actions/upload-artifact@v4
         with:
           name: windows-installer
-          path: publish/FeatherCAD-Setup-*.exe
+          path: publish/FeatherCAD_setup_v*.exe
           if-no-files-found: error
 
   linux:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
       - name: Build packages
-        run: |
-          ver=""
-          if [ "$GITHUB_REF_TYPE" = tag ]; then ver="${GITHUB_REF_NAME#v}"; fi
-          bash build/make-linux-package.sh $ver
+        run: bash build/make-linux-package.sh
       # a quick check that the .deb is well formed and holds what it should
       - name: Inspect .deb
         run: |

@@ -12,8 +12,8 @@
     <ApplicationIcon>Assets\FeatherCAD.ico</ApplicationIcon>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
     <AssemblyName>FeatherCAD</AssemblyName>
-    <!-- also the installer's version (build/make-installer.ps1) -->
-    <Version>0.1.0</Version>
+    <!-- no Version here: it comes from git (the latest v<x.y.z> tag), passed in by build/make-installer.ps1 and
+         build/make-linux-package.sh -->
     <Product>FeatherCAD</Product>
     <RootNamespace>FeatherCad.App</RootNamespace>
     <TieredPGO>true</TieredPGO>

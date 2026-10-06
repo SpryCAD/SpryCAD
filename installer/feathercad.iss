@@ -1,12 +1,17 @@
 ; Inno Setup script for FeatherCAD. Build with build\make-installer.ps1, which publishes the app into
-; ..\publish\win-x64, generates the demo parts into ..\publish\demos, and passes the version in (iscc /DAppVer=...). Produces FeatherCAD-Setup-<version>.exe in ..\publish.
+; ..\publish\win-x64, generates the demo parts into ..\publish\demos, and passes the version from git in (iscc /DAppVer=0.0.1-dev.3 /DAppVerNum=0.0.1.3). Produces FeatherCAD_setup_v<version>.exe in ..\publish.
 ;
 ; The app is published self-contained, so the PC needs no .NET runtime.
 ; Installs for the current user by default (no admin prompt); the first page offers "all users" instead.
 ; Settings, recent files and autosave live per user in %APPDATA%\FeatherCAD, so they survive upgrades and uninstall.
 
+; the version comes from git (make-installer.ps1); these only let the script compile on its own
 #ifndef AppVer
-  #define AppVer "0.1.0"
+  #define AppVer "0.0.0-dev"
+#endif
+; the numeric x.y.z.n form Windows needs for file versions
+#ifndef AppVerNum
+  #define AppVerNum "0.0.0.0"
 #endif
 #define AppName "FeatherCAD"
 #define AppExe "FeatherCAD.exe"
@@ -31,14 +36,14 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 LicenseFile=..\LICENSE
 OutputDir=..\publish
-OutputBaseFilename=FeatherCAD-Setup-{#AppVer}
+OutputBaseFilename=FeatherCAD_setup_v{#AppVer}
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
 SetupIconFile=..\src\FeatherCad.App\Assets\FeatherCAD.ico
 UninstallDisplayIcon={app}\{#AppExe}
 UninstallDisplayName={#AppName}
-VersionInfoVersion={#AppVer}
+VersionInfoVersion={#AppVerNum}
 ; Explorer refreshes .fcad icons after install and uninstall.
 ChangesAssociations=yes
 CloseApplications=yes

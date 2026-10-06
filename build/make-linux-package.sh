@@ -4,15 +4,20 @@
 # with install.sh / uninstall.sh (per-user menu entry, icon and .fcad file type; see installer/linux), and, where
 # dpkg-deb exists, publish/feathercad_<version>_amd64.deb.
 # Runs on Linux, macOS or Git Bash on Windows (GNU tar sets the Linux file modes either way).
-# Usage:  build/make-linux-package.sh [version]   (default: <Version> in the app's .csproj)
+# Usage:  build/make-linux-package.sh
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 proj="$root/src/FeatherCad.App/FeatherCad.App.csproj"
 rid=linux-x64
 
-# 1) Version: argument, else <Version> in the app's .csproj.
-ver="${1:-$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' "$proj" | head -n1)}"
-[ -n "$ver" ] || { echo "No version: pass one or set <Version> in $proj" >&2; exit 1; }
+# 1) Version, always from git: the latest v<x.y.z> tag, and how many commits HEAD is past it. On the tag: 0.0.1;
+#    3 commits after it: 0.0.1-dev.3 (as make-installer.ps1).
+desc="$(git -C "$root" describe --tags --match 'v[0-9]*' --long 2>/dev/null || true)"
+if [[ ! "$desc" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)-([0-9]+)-g[0-9a-f]+$ ]]; then
+  echo "No version: no v<x.y.z> tag is reachable from HEAD (tag a commit, or fetch the tags / full history)." >&2; exit 1
+fi
+base="${BASH_REMATCH[1]}"; dev="${BASH_REMATCH[2]}"
+if [ "$dev" = 0 ]; then ver="$base"; debver="$base"; else ver="$base-dev.$dev"; debver="$base+dev.$dev"; fi
 echo "== version $ver =="
 
 # 2) Publish self-contained and ReadyToRun (as publish.sh does) into a clean folder.
@@ -61,8 +66,8 @@ if ! command -v dpkg-deb >/dev/null; then
   echo "== dpkg-deb not found: skipping the .deb (build it on Linux, WSL or CI) =="
   exit 0
 fi
-# Debian versions sort "-" as a revision separator: a pre-release (0.2.0-beta) is 0.2.0~beta, before 0.2.0
-debver="${ver//-/\~}"
+# (debver, from step 1: a dev build is 0.0.1+dev.3, which Debian sorts after 0.0.1 as it should; "-" would read
+#  as a Debian revision separator)
 deb="$root/publish/feathercad_${debver}_amd64.deb"
 pkg="$root/publish/deb-stage"
 rm -rf "$pkg" "$deb"

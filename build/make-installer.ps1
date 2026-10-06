@@ -1,18 +1,23 @@
 # Windows installer build: publish the app into .\publish\win-x64, generate the demo parts into .\publish\demos,
 # then compile installer\feathercad.iss into
-#   publish\FeatherCAD-Setup-<version>.exe
+#   publish\FeatherCAD_setup_v<version>.exe
 # Needs Inno Setup 6 (https://jrsoftware.org/isdl.php, or: winget install JRSoftware.InnoSetup), and the Visual Studio
 # C++ build tools for the Explorer thumbnail handler (see build\make-thumbs.ps1).
-# Run from anywhere:  pwsh -File build\make-installer.ps1 [-Ver 0.2.0]
-param([string]$Ver)
+# Run from anywhere:  pwsh -File build\make-installer.ps1
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $proj = Join-Path $root 'src\FeatherCad.App\FeatherCad.App.csproj'
 
-# 1) Version: -Ver, else <Version> in the app's .csproj.
-$ver = if ($Ver) { $Ver } else { ([xml](Get-Content $proj)).Project.PropertyGroup.Version | Where-Object { $_ } | Select-Object -First 1 }
-if (-not $ver) { throw "No version: pass -Ver or set <Version> in $proj" }
-Write-Host "== version $ver ==" -ForegroundColor Cyan
+# 1) Version, always from git: the latest v<x.y.z> tag, and how many commits HEAD is past it. On the tag: 0.0.1;
+#    3 commits after it: 0.0.1-dev.3. Windows file versions are four numbers: 0.0.1.3.
+$d = git -C $root describe --tags --match 'v[0-9]*' --long 2>$null
+if ($LASTEXITCODE -ne 0 -or $d -notmatch '^v(\d+\.\d+\.\d+)-(\d+)-g[0-9a-f]+$') {
+  throw "No version: no v<x.y.z> tag is reachable from HEAD (tag a commit, or fetch the tags / full history)."
+}
+$dev = [int]$Matches[2]
+$ver = if ($dev -eq 0) { $Matches[1] } else { "$($Matches[1])-dev.$dev" }
+$verNum = "$($Matches[1]).$dev"
+Write-Host "== version $ver (file version $verNum) ==" -ForegroundColor Cyan
 
 # 2) Locate the Inno Setup compiler (ISCC.exe) before spending time on the publish: PATH, then the standard
 #    install locations (machine-wide, and the per-user install winget uses).
@@ -40,7 +45,7 @@ $out = Join-Path $root 'publish\win-x64'
 if (Test-Path $out) { Remove-Item $out -Recurse -Force }
 Write-Host "== publishing to $out ==" -ForegroundColor Cyan
 & dotnet publish $proj -c Release -r win-x64 --self-contained true -p:PublishReadyToRun=true -p:DebugType=none `
-    "-p:Version=$ver" -o $out
+    "-p:Version=$ver" "-p:FileVersion=$verNum" -o $out
 if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed with exit code $LASTEXITCODE" }
 
 # 3b) The Explorer thumbnail handler, next to the app (the installer registers it for .fcad files).
@@ -57,7 +62,7 @@ if ($LASTEXITCODE -ne 0) { throw "demo generation failed with exit code $LASTEXI
 # 5) Compile.
 $iss = Join-Path $root 'installer\feathercad.iss'
 Write-Host "== compiling installer ($iscc) ==" -ForegroundColor Cyan
-& $iscc "/DAppVer=$ver" $iss
+& $iscc "/DAppVer=$ver" "/DAppVerNum=$verNum" $iss
 if ($LASTEXITCODE -ne 0) { throw "ISCC failed with exit code $LASTEXITCODE" }
 
-Write-Host "== installer ready -> $(Join-Path $root "publish\FeatherCAD-Setup-$ver.exe") ==" -ForegroundColor Green
+Write-Host "== installer ready -> $(Join-Path $root "publish\FeatherCAD_setup_v$ver.exe") ==" -ForegroundColor Green
