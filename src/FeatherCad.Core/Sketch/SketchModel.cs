@@ -122,6 +122,13 @@ public sealed class SkConstraint
     /// <summary>Dimension label offset in sketch coordinates relative to the anchor.</summary>
     public double LabelX { get; set; }
     public double LabelY { get; set; }
+    /// <summary>
+    /// The user put the label where it is (clicked there when making the dimension, or dragged it): it stays there.
+    /// Otherwise the editor lays it out (clear of the geometry and the other labels). Null in files from before
+    /// this flag, where a label off its default spot (a nonzero offset) was placed by hand.
+    /// </summary>
+    public bool? LabelPlaced { get; set; }
+    [JsonIgnore] public bool HasPlacedLabel => LabelPlaced ?? (LabelX != 0 || LabelY != 0);
     /// <summary>Optional user name (e.g. D1) usable in equations as D1@Sketch1.</summary>
     public string? Name { get; set; }
 

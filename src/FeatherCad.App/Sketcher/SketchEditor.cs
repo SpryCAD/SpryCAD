@@ -35,7 +35,7 @@ readonly record struct Snap(SnapKind Kind, Vec2 P, int Id = -1, bool H = false, 
 /// horizontal/vertical, midpoint, on-entity), Smart Dimension, dragging with live solving and
 /// relation display, closely following the SolidWorks sketcher.
 /// </summary>
-public sealed class SketchEditor : IViewportMode
+public sealed partial class SketchEditor : IViewportMode
 {
     public SketchFeature Feature { get; }
     public Sketch Sk => Feature.Sketch;
@@ -364,7 +364,7 @@ public sealed class SketchEditor : IViewportMode
                     var c = Sk.AddPoint(Frame.ToLocal(cyl.Origin), fix: true);
                     var ci = Sk.Add(new SkCircle { Center = c.Id, R = cyl.Radius });
                     var rc = Sk.AddConstraint(CType.Radius, ci.Id); rc.Value = cyl.Radius; rc.Expr = Expr.Format(cyl.Radius);
-                    rc.LabelX = cyl.Radius * 0.7; rc.LabelY = cyl.Radius * 0.7;
+                    rc.LabelPlaced = false; // made by the editor: laid out
                     created++;
                     continue;
                 }
@@ -398,13 +398,17 @@ public sealed class SketchEditor : IViewportMode
     // ---------------------------------------------------------------------------------------
     // input
 
-    double Px => _vp.Camera.PixelSize;
+    // a camera the view will move to, standing in for the view's own while working out a layout for it
+    Camera? _layoutCamera;
+    Camera Cam => _layoutCamera ?? _vp.Camera;
+
+    double Px => Cam.PixelSize;
 
     Vec2 SketchPos(PointerInfo p) => _vp.PlanePoint(Frame, p.X, p.Y) ?? _mouse;
 
     Point Screen(Vec2 p)
     {
-        var s = _vp.Camera.Project(Frame.ToWorld(p));
+        var s = Cam.Project(Frame.ToWorld(p));
         return new Point(s.X, s.Y);
     }
 
@@ -1129,6 +1133,7 @@ public sealed class SketchEditor : IViewportMode
                     break;
                 }
             case SkRefKind.Constraint:
+                Snapshot(); // a moved label is a change (undoable, saved)
                 _dragLabel = h;
                 break;
         }
@@ -1147,6 +1152,7 @@ public sealed class SketchEditor : IViewportMode
         {
             var anchor = DimAnchor(dc);
             dc.LabelX = m.X - anchor.X; dc.LabelY = m.Y - anchor.Y;
+            dc.LabelPlaced = true;
             UpdateOverlay(_vp);
             _vp.Redraw();
             return;
@@ -1317,6 +1323,7 @@ public sealed class SketchEditor : IViewportMode
         SketchSolver.CaptureSign(Sk, c);
         c.Expr = Expr.Format(c.Value);
         c.Name = "D" + (Sk.Constraints.Count(x => x.IsDimension) + 1);
+        c.LabelPlaced = true; // where it was clicked
         if (SketchSolver.WouldOverDefine(Sk, c))
         {
             c.Driven = true;
@@ -1336,7 +1343,7 @@ public sealed class SketchEditor : IViewportMode
     {
         if (Overlay == null || c.Driven) return;
         CloseModifyBox(false);
-        var pos = Screen(DimAnchor(c) + new Vec2(c.LabelX, c.LabelY));
+        var pos = Screen(LabelPos(c));
         var tb = new TextBox
         {
             Text = c.Expr ?? Expr.Format(c.Value),
@@ -1636,7 +1643,7 @@ public sealed class SketchEditor : IViewportMode
         try
         {
             var anchor = DimAnchor(c);
-            var label = anchor + new Vec2(c.LabelX, c.LabelY);
+            var label = LabelPos(c);
             switch (c.Type)
             {
                 case CType.Distance:
@@ -1754,19 +1761,23 @@ public sealed class SketchEditor : IViewportMode
     {
         if (Overlay == null) return;
         var live = new HashSet<int>();
-        foreach (var c in Sk.Constraints.Where(c => c.IsDimension))
+        var dims = Sk.Constraints.Where(c => c.IsDimension).ToList();
+        foreach (var c in dims)
         {
             live.Add(c.Id);
-            if (!_labels.TryGetValue(c.Id, out var b))
-            {
-                b = MakeLabel();
-                _labels[c.Id] = b;
-                Overlay.Children.Add(b);
-            }
+            if (_labels.ContainsKey(c.Id)) continue;
+            var nb = MakeLabel();
+            _labels[c.Id] = nb;
+            Overlay.Children.Add(nb);
+        }
+        // labels the user did not place go where they are clear of each other and of the geometry
+        LayoutLabels(dims, c => LabelSize(_labels[c.Id], DimText(c)));
+        foreach (var c in dims)
+        {
             var sel = Selected.Contains(new SkRef(SkRefKind.Constraint, c.Id));
             var hov = _hover is { Kind: SkRefKind.Constraint } h && h.Id == c.Id;
-            SetLabel(b, DimText(c), c.Driven ? Brushes.Gray : sel ? Brushes.RoyalBlue : hov ? Brushes.DarkOrange : Brushes.Black,
-                DimAnchor(c) + new Vec2(c.LabelX, c.LabelY));
+            SetLabel(_labels[c.Id], DimText(c), c.Driven ? Brushes.Gray : sel ? Brushes.RoyalBlue : hov ? Brushes.DarkOrange : Brushes.Black,
+                LabelPos(c));
         }
         foreach (var id in _labels.Keys.Where(k => !live.Contains(k)).ToList())
         {

@@ -100,8 +100,8 @@ public partial class MainWindow
         ShowTab("Sketch");
         ShowConfirmCorner(() => ExitSketch(true), DiscardSketch, "Exit Sketch", "Discard changes");
         BuildSketchPage();
-        // a new sketch turns to its plane; an existing one also zooms to fit its geometry
-        Viewport.NormalTo(frame, isNew ? null : SketchBounds(sf.Sketch, frame));
+        // a new sketch turns to its plane; an existing one also zooms to fit its geometry and its dimensions
+        Viewport.NormalTo(frame, isNew ? null : SketchFit(sf.Sketch, frame));
         if (pointsOnly) _sketch.SetTool(SketchTool.Point);
         else if (_pendingTool != null) { _sketch.SetTool(_pendingTool.Value); _pendingTool = null; }
         else _sketch.SetTool(SketchTool.Select);
@@ -109,6 +109,26 @@ public partial class MainWindow
         RefreshScene();
         _sketch.UpdateOverlay(Viewport);
         OnSketchChanged();
+    }
+
+    /// <summary>
+    /// What editing a sketch zooms to: its geometry and all its dimensions. The dimension rows are spaced in screen
+    /// pixels, so where they end up depends on the zoom: fitted again until it settles (a few rounds).
+    /// </summary>
+    Box3? SketchFit(Sketch sk, Frame frame)
+    {
+        if (SketchBounds(sk, frame) is not { } box) return null;
+        if (_sketch == null) return box;
+        for (int i = 0; i < 5; i++)
+        {
+            var cam = Viewport.NormalToCamera(frame, box);
+            if (_sketch.DimensionsExtent(cam) is not { } dims) break;
+            var next = box; next.Add(dims);
+            var grew = (next.Max - next.Min).Length - (box.Max - box.Min).Length;
+            box = next;
+            if (grew <= 1e-3 * (box.Max - box.Min).Length) break; // settled
+        }
+        return box;
     }
 
     /// <summary>
@@ -203,6 +223,13 @@ public partial class MainWindow
     // ------------------------------------------------------------------------------------------
     // sketch PropertyManager (relations / properties of the selection)
 
+    void AutoArrange(SketchEditor ed)
+    {
+        var n = ed.AutoArrangeDimensions();
+        Status(n == 0 ? "All dimension labels are already arranged automatically."
+            : $"{n} dimension label{(n == 1 ? "" : "s")} arranged automatically (Ctrl+Z to undo).");
+    }
+
     void BuildSketchPage()
     {
         if (_sketch == null) return;
@@ -219,6 +246,8 @@ public partial class MainWindow
             var t = page.Section("Tools");
             page.Info(t, "L Line · R Rectangle · C Circle · A Arc · P Point · D Smart Dimension · T Trim · Esc Select. Drag points to move geometry. Double-click a dimension to change its value.");
             page.Number(t, "Polygon sides", () => ed.PolygonSides.ToString(), v => { if (int.TryParse(v, out var n)) ed.PolygonSides = Math.Clamp(n, 3, 64); }, "polygon", "");
+            page.ButtonRow(t, "Auto Arrange Dimensions", () => AutoArrange(ed), "dimension");
+            page.Info(t, "Dimension labels you place or drag stay where you put them; the others arrange themselves. Auto Arrange puts the placed ones back in the arrangement (select some dimensions first to arrange only those).");
             var m = page.Section("Model Edges");
             page.Info(m, "Select model edges or faces (in Select mode) and use Convert Entities to project them into the sketch.");
             page.ButtonRow(m, "Convert Entities", ConvertEntities, "convert");
@@ -291,6 +320,8 @@ public partial class MainWindow
             var flB = new Button { Content = "Float" }; flB.Click += (_, _) => { ed.FixSelection(false); BuildSketchPage(); };
             fixRow.Children.Add(fixB); fixRow.Children.Add(flB);
             opt.Children.Add(fixRow);
+            if (ed.Selected.Any(r => r.Kind == SkRefKind.Constraint && ed.Sk.Constraint(r.Id) is { IsDimension: true }))
+                page.ButtonRow(opt, "Auto Arrange Dimensions", () => AutoArrange(ed), "dimension");
 
             // parameters of a single point / dimension
             if (ed.Selected.Count == 1)

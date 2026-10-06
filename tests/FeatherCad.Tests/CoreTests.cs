@@ -86,6 +86,22 @@ static class CoreTests
             t.True(SketchSolver.WouldOverDefine(sk, extra), "length of opposite side is redundant");
         });
 
+        t.Test("Dimension labels: placed by the user or laid out (and files from before the flag)", () =>
+        {
+            var sk = Rect(80, 40);
+            var d = sk.Constraints.First(c => c.IsDimension);
+            t.True(!d.HasPlacedLabel, "a dimension made in code (no offset, no flag) is laid out");
+            d.LabelX = 5; d.LabelY = -3;
+            t.True(d.HasPlacedLabel, "a file from before the flag: a label off its default spot was placed by hand");
+            d.LabelPlaced = false;
+            t.True(!d.HasPlacedLabel, "Auto Arrange clears it, whatever the offset");
+            d.LabelPlaced = true;
+            var back = Serialization.Clone(sk).Constraints.First(c => c.Id == d.Id);
+            t.True(back.HasPlacedLabel && back.LabelX == 5, "the flag and the position are saved");
+            var json = System.Text.Json.JsonSerializer.Serialize(Rect(80, 40), Serialization.Options);
+            t.True(!json.Contains("labelPlaced"), "no flag written for laid out labels of older sketches (unchanged files)");
+        });
+
         t.Test("Solver: straight slot keeps its sides parallel to the centerline", () =>
         {
             // built as the Straight Slot tool does

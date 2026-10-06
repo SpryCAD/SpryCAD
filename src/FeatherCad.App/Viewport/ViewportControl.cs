@@ -533,6 +533,18 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         OrientTo(Camera.LookRotation(dir, up), fit);
     }
 
+    /// <summary>The camera Normal To a frame ends at, fitted to a box (nothing moves).</summary>
+    public Camera NormalToCamera(Frame f, Box3 box)
+    {
+        var cam = new Camera
+        {
+            Width = Camera.Width, Height = Camera.Height, Perspective = Camera.Perspective, Fov = Camera.Fov, SceneRadius = Camera.SceneRadius,
+            Rotation = Camera.LookRotation(Camera.F(f.Normal), Camera.F(f.YDir)),
+        };
+        cam.Fit(box);
+        return cam;
+    }
+
     /// <summary>
     /// Look straight at a frame (Normal To). With <paramref name="fit"/>, also zoomed to fit that box as seen from
     /// there (e.g. the sketch being edited), in the same animation.
@@ -542,8 +554,7 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         var q = Camera.LookRotation(Camera.F(f.Normal), Camera.F(f.YDir));
         if (fit is { IsEmpty: false } box)
         {
-            var tmp = new Camera { Width = Camera.Width, Height = Camera.Height, Rotation = q };
-            tmp.Fit(box);
+            var tmp = NormalToCamera(f, box);
             AnimateTo(q, tmp.Target, tmp.HalfHeight);
             return;
         }
