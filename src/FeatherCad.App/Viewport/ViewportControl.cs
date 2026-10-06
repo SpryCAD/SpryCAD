@@ -231,6 +231,7 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         if (ShowOrigin) DrawOrigin(_dyn);
         Mode?.Draw(this, _dyn);
         DrawPointAndSegmentHighlights(_dyn, hl);
+        if (AxisPreview is { } ap) DrawAxisPreview(_dyn, ap.dir, ap.color);
         if (_nav == Nav.Rotate) DrawPivot(_dyn, _pivot);
         else if (Spinning) DrawPivot(_dyn, _spinPivot);
         else if (_pinnedPivot is { } pin) DrawPivot(_dyn, pin);
@@ -365,6 +366,23 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
                 foreach (var (a2, b2) in SketchDrawing.Segments2D(sd.Result.Sketch, ent))
                     g.Line(sd.Result.Frame.ToWorld(a2), sd.Result.Frame.ToWorld(b2), c, top: true);
         }
+    }
+
+    /// <summary>An axis through the origin to show (e.g. while an X/Y/Z axis button is hovered), or null.</summary>
+    public (Vec3 dir, Rgba color)? AxisPreview { get => _axisPreview; set { _axisPreview = value; Redraw(); } }
+    (Vec3 dir, Rgba color)? _axisPreview;
+
+    /// <summary>The axis line through the origin across the model, with an arrow at its positive end.</summary>
+    void DrawAxisPreview(DynamicGeometry g, Vec3 dir, Rgba color)
+    {
+        var b = SceneBounds();
+        var len = b.IsEmpty ? 100 : b.Diagonal * 0.6 + b.Center.Length;
+        var tip = dir * len;
+        g.Line(-tip, tip, color, top: true);
+        var s = Camera.PixelSize * 12;
+        var n = Vec3.Cross(dir, Camera.V(Camera.Back));
+        n = n.Length > 1e-9 ? n.Normalized : dir.AnyPerpendicular();
+        g.Tri(tip, tip - dir * s + n * (s * 0.4), tip - dir * s - n * (s * 0.4), color, top: true);
     }
 
     /// <summary>The rotation center: a small screen-facing circle with a dot, on top of the model.</summary>

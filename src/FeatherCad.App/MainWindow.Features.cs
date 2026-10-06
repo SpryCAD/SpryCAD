@@ -548,16 +548,48 @@ public partial class MainWindow
         return box;
     }
 
-    void AxisButtons(PmPage page, Avalonia.Controls.StackPanel s, Action<string> set)
+    /// <summary>
+    /// X / Y / Z axis buttons; the axis in use (<paramref name="current"/>) shows pressed, also when the page is
+    /// opened again to edit. Returns a refresh, for when the choice changes another way (an edge picked instead).
+    /// </summary>
+    Action AxisButtons(PmPage page, Avalonia.Controls.StackPanel s, Func<string?> current, Action<string> set)
     {
         var row = new Avalonia.Controls.StackPanel { Orientation = Avalonia.Layout.Orientation.Horizontal, Spacing = 4 };
+        var buttons = new List<(string axis, Button button)>();
+        void Refresh()
+        {
+            foreach (var (a, b) in buttons)
+            {
+                var on = current() == a;
+                if (on)
+                {
+                    b.Background = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.FromRgb(205, 225, 252));
+                    b.BorderBrush = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.FromRgb(60, 120, 220));
+                }
+                else { b.ClearValue(Button.BackgroundProperty); b.ClearValue(Button.BorderBrushProperty); }
+                b.FontWeight = on ? Avalonia.Media.FontWeight.SemiBold : Avalonia.Media.FontWeight.Normal;
+            }
+        }
         foreach (var a in new[] { "X", "Y", "Z" })
         {
-            var b = new Button { Content = a + " axis", Padding = new Avalonia.Thickness(6, 2) };
-            b.Click += (_, _) => { set(a); page.RaiseChanged(); };
+            var b = new Button { Content = a + " axis", Padding = new Avalonia.Thickness(6, 2), BorderThickness = new Avalonia.Thickness(1) };
+            b.Click += (_, _) => { set(a); Refresh(); page.RaiseChanged(); };
+            // hovering shows the axis in the graphics area (through the origin, in the triad's colors)
+            var (dir, col) = a switch
+            {
+                "X" => (Vec3.UnitX, new Rgba(0.85f, 0.1f, 0.1f)),
+                "Y" => (Vec3.UnitY, new Rgba(0.1f, 0.65f, 0.1f)),
+                _ => (Vec3.UnitZ, new Rgba(0.1f, 0.3f, 0.9f)),
+            };
+            b.PointerEntered += (_, _) => Viewport.AxisPreview = (dir, col);
+            b.PointerExited += (_, _) => Viewport.AxisPreview = null;
+            b.DetachedFromVisualTree += (_, _) => Viewport.AxisPreview = null; // the page closed under the pointer
             row.Children.Add(b);
+            buttons.Add((a, b));
         }
         s.Children.Add(row);
+        Refresh();
+        return Refresh;
     }
 
     void LinearPatternCommand() => OpenLinearPatternPage(new LinearPatternFeature { Seeds = SeedsFromSelection() }, true);
@@ -570,16 +602,21 @@ public partial class MainWindow
         var dirBox = page.Selection(d1, "Direction", SelFilter.Edge | SelFilter.Face | SelFilter.Plane, "Pattern direction: a linear edge, face, plane, or axis button", 1);
         if (DirItem(f.Direction, st) is { } di) dirBox.Items.Add(di);
         var axisLbl = new TextBlock { FontSize = 11, Foreground = Avalonia.Media.Brushes.DimGray };
-        void UpdAxis() => axisLbl.Text = f.Direction.Axis != null ? $"Using {f.Direction.Axis} axis" : "";
+        Action? axes1 = null;
+        void UpdAxis() { axisLbl.Text = f.Direction.Axis != null ? $"Using the {f.Direction.Axis} axis" : ""; axes1?.Invoke(); }
         dirBox.Changed += () => { if (dirBox.Items.FirstOrDefault()?.ToDirRef() is { } dr) { f.Direction = dr; UpdAxis(); } };
-        AxisButtons(page, d1, a => { f.Direction = new DirRef { Axis = a }; dirBox.Items.Clear(); dirBox.Refresh(); UpdAxis(); });
+        axes1 = AxisButtons(page, d1, () => f.Direction.Axis, a => { f.Direction = new DirRef { Axis = a }; dirBox.Items.Clear(); dirBox.Refresh(); UpdAxis(); });
         d1.Children.Add(axisLbl); UpdAxis();
         page.Check(d1, "Reverse direction", () => f.Reverse, v => f.Reverse = v);
         page.Number(d1, "Spacing", () => f.Spacing, v => f.Spacing = v, "dimension");
         page.Number(d1, "Instances", () => f.Count, v => f.Count = v, "lpattern", "");
         var d2 = page.Section("Direction 2");
-        var use2 = page.Check(d2, "Use direction 2", () => f.Direction2 != null, v => f.Direction2 = v ? (f.Direction2 ?? new DirRef { Axis = "Y" }) : null);
-        AxisButtons(page, d2, a => { f.Direction2 = new DirRef { Axis = a }; use2.IsChecked = true; });
+        var axisLbl2 = new TextBlock { FontSize = 11, Foreground = Avalonia.Media.Brushes.DimGray };
+        Action? axes2 = null;
+        void UpdAxis2() { axisLbl2.Text = f.Direction2?.Axis != null ? $"Using the {f.Direction2.Axis} axis" : ""; axes2?.Invoke(); }
+        var use2 = page.Check(d2, "Use direction 2", () => f.Direction2 != null, v => { f.Direction2 = v ? (f.Direction2 ?? new DirRef { Axis = "Y" }) : null; UpdAxis2(); });
+        axes2 = AxisButtons(page, d2, () => f.Direction2?.Axis, a => { f.Direction2 = new DirRef { Axis = a }; use2.IsChecked = true; UpdAxis2(); });
+        d2.Children.Add(axisLbl2); UpdAxis2();
         page.Check(d2, "Reverse direction", () => f.Reverse2, v => f.Reverse2 = v);
         page.Number(d2, "Spacing", () => f.Spacing2, v => f.Spacing2 = v, "dimension");
         page.Number(d2, "Instances", () => f.Count2, v => f.Count2 = v, "lpattern", "");
@@ -598,9 +635,10 @@ public partial class MainWindow
         var axBox = page.Selection(p, "Axis", SelFilter.Edge | SelFilter.Face | SelFilter.Plane, "Axis: a cylindrical face, circular or linear edge, or axis button", 1);
         if (DirItem(f.Axis, st) is { } ai) axBox.Items.Add(ai);
         var axisLbl = new TextBlock { FontSize = 11, Foreground = Avalonia.Media.Brushes.DimGray };
-        void UpdAxis() => axisLbl.Text = f.Axis.Axis != null ? $"Using {f.Axis.Axis} axis" : "";
+        Action? axes = null;
+        void UpdAxis() { axisLbl.Text = f.Axis.Axis != null ? $"Using the {f.Axis.Axis} axis" : ""; axes?.Invoke(); }
         axBox.Changed += () => { if (axBox.Items.FirstOrDefault()?.ToDirRef() is { } dr) { f.Axis = dr; UpdAxis(); } };
-        AxisButtons(page, p, a => { f.Axis = new DirRef { Axis = a }; axBox.Items.Clear(); axBox.Refresh(); UpdAxis(); });
+        axes = AxisButtons(page, p, () => f.Axis.Axis, a => { f.Axis = new DirRef { Axis = a }; axBox.Items.Clear(); axBox.Refresh(); UpdAxis(); });
         p.Children.Add(axisLbl); UpdAxis();
         page.Check(p, "Reverse direction", () => f.Reverse, v => f.Reverse = v);
         page.Number(p, "Angle", () => f.Angle, v => f.Angle = v, "cpattern", "°");
