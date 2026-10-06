@@ -100,7 +100,8 @@ public partial class MainWindow
         ShowTab("Sketch");
         ShowConfirmCorner(() => ExitSketch(true), DiscardSketch, "Exit Sketch", "Discard changes");
         BuildSketchPage();
-        if (isNew) Viewport.NormalTo(frame);
+        // a new sketch turns to its plane; an existing one also zooms to fit its geometry
+        Viewport.NormalTo(frame, isNew ? null : SketchBounds(sf.Sketch, frame));
         if (pointsOnly) _sketch.SetTool(SketchTool.Point);
         else if (_pendingTool != null) { _sketch.SetTool(_pendingTool.Value); _pendingTool = null; }
         else _sketch.SetTool(SketchTool.Select);
@@ -108,6 +109,30 @@ public partial class MainWindow
         RefreshScene();
         _sketch.UpdateOverlay(Viewport);
         OnSketchChanged();
+    }
+
+    /// <summary>
+    /// The sketch's geometry in world space (lines, arcs and circles at their full extent, points; construction
+    /// geometry too), or null when it has none. Never smaller than a fifth of the model, so a sketch of one point
+    /// (a single hole position) does not zoom in absurdly far.
+    /// </summary>
+    Box3? SketchBounds(Sketch sk, Frame frame)
+    {
+        var b = Box3.Empty;
+        foreach (var e in sk.Entities)
+        {
+            foreach (var (p, q) in FeatherCad.App.Viewport.SketchDrawing.Segments2D(sk, e)) { b.Add(frame.ToWorld(p)); b.Add(frame.ToWorld(q)); }
+            foreach (var id in e.PointIds) if (sk.Point(id) is { } pt) b.Add(frame.ToWorld(pt.P));
+        }
+        if (b.IsEmpty) return null;
+        var model = Viewport.SceneBounds();
+        var min = model.IsEmpty ? 0 : model.Diagonal * 0.2;
+        if (b.Diagonal < min)
+        {
+            var c = b.Center; var h = new Vec3(min, min, min) * (0.5 / Math.Sqrt(3));
+            b.Add(c - h); b.Add(c + h);
+        }
+        return b;
     }
 
     void OnSketchChanged()

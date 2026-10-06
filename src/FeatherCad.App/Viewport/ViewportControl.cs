@@ -533,10 +533,20 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         OrientTo(Camera.LookRotation(dir, up), fit);
     }
 
-    /// <summary>Look straight at a frame (Normal To).</summary>
-    public void NormalTo(Frame f)
+    /// <summary>
+    /// Look straight at a frame (Normal To). With <paramref name="fit"/>, also zoomed to fit that box as seen from
+    /// there (e.g. the sketch being edited), in the same animation.
+    /// </summary>
+    public void NormalTo(Frame f, Box3? fit = null)
     {
         var q = Camera.LookRotation(Camera.F(f.Normal), Camera.F(f.YDir));
+        if (fit is { IsEmpty: false } box)
+        {
+            var tmp = new Camera { Width = Camera.Width, Height = Camera.Height, Rotation = q };
+            tmp.Fit(box);
+            AnimateTo(q, tmp.Target, tmp.HalfHeight);
+            return;
+        }
         // keep the target in the plane's vicinity
         var t = Camera.Target;
         var tv = Camera.V(t);
