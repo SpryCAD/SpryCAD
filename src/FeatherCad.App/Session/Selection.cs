@@ -3,7 +3,7 @@ using FeatherCad.Kernel;
 
 namespace FeatherCad.App.Session;
 
-public enum SelKind { Face, Edge, Plane, Sketch, Feature, Body, Origin }
+public enum SelKind { Face, Edge, Plane, Sketch, Feature, Body, Origin, Vertex, SketchSegment }
 
 [Flags]
 public enum SelFilter
@@ -11,6 +11,10 @@ public enum SelFilter
     None = 0,
     Face = 1, Edge = 2, Plane = 4, Sketch = 8, Feature = 16, Body = 32,
     PlanarFace = 64,
+    /// <summary>Model vertices and sketch points (only when a selection box asks for points).</summary>
+    Vertex = 128,
+    /// <summary>Individual sketch lines/arcs (only when a selection box asks for curves).</summary>
+    SketchSegment = 256,
     Any = Face | Edge | Plane | Sketch | Feature,
 }
 
@@ -32,6 +36,8 @@ public sealed class SelItem
     /// <summary>Feature id for sketches, plane features and features.</summary>
     public string? FeatureId { get; init; }
     public Frame? Frame { get; init; }
+    /// <summary>Sketch point id (Vertex picked in a sketch) or sketch entity id (SketchSegment).</summary>
+    public int SketchItem { get; init; } = -1;
 
     public string Key => Kind switch
     {
@@ -41,6 +47,8 @@ public sealed class SelItem
         SelKind.Sketch => $"S:{FeatureId}",
         SelKind.Feature => $"X:{FeatureId}",
         SelKind.Body => $"B:{BodyId}",
+        SelKind.Vertex => FeatureId != null ? $"V:{FeatureId}:{SketchItem}" : $"V:{BodyId}:{Point.X:0.######},{Point.Y:0.######},{Point.Z:0.######}",
+        SelKind.SketchSegment => $"G:{FeatureId}:{SketchItem}",
         _ => "O",
     };
 
@@ -52,6 +60,8 @@ public sealed class SelItem
         SelKind.Sketch => doc.Find(FeatureId!)?.Name ?? "Sketch",
         SelKind.Feature => doc.Find(FeatureId!)?.Name ?? "Feature",
         SelKind.Body => $"Body<{BodyId}>",
+        SelKind.Vertex => FeatureId != null ? $"Point{SketchItem}@{doc.Find(FeatureId)?.Name}" : "Vertex<" + $"{Point.X:0.##}, {Point.Y:0.##}, {Point.Z:0.##}>",
+        SelKind.SketchSegment => $"Line{SketchItem}@{doc.Find(FeatureId!)?.Name}",
         _ => "Origin",
     };
 
@@ -64,6 +74,23 @@ public sealed class SelItem
         if (Kind == SelKind.Plane) return FeatureId != null ? new PlaneRef { Feature = FeatureId } : new PlaneRef { Std = Name };
         if (Kind == SelKind.Face && Planar) return new PlaneRef { Face = ToFaceRef() };
         if (Kind == SelKind.Sketch) return new PlaneRef { Feature = FeatureId };
+        return null;
+    }
+
+    /// <summary>Vertex picks as a point reference (sketch point, or the end of an edge between named faces).</summary>
+    public PointRef? ToPointRef()
+    {
+        if (Kind != SelKind.Vertex) return null;
+        if (FeatureId != null) return new PointRef { Sketch = FeatureId, SketchPoint = SketchItem };
+        if (Edge != null) { var e = Edge.Clone(); e.Hint = Point; return new PointRef { Vertex = e }; }
+        return null;
+    }
+
+    /// <summary>Edges and sketch lines/arcs as a curve reference.</summary>
+    public CurveRef? ToCurveRef()
+    {
+        if (Kind == SelKind.Edge && Edge != null) return new CurveRef { Edge = Edge.Clone() };
+        if (Kind == SelKind.SketchSegment && FeatureId != null) return new CurveRef { Sketch = FeatureId, SketchEntity = SketchItem };
         return null;
     }
 

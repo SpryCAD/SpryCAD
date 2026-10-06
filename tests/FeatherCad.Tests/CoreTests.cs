@@ -212,6 +212,72 @@ static class CoreTests
             t.Eq(Demos.Verify(dir, volumes: false), 0);
         });
 
+        t.Test("Reference planes: offset, through a vertex or sketch point, at an angle", () =>
+        {
+            var doc = new CadDocument();
+            doc.Equations.Add(new Equation { Name = "W", Expr = "100" });
+            var s1 = doc.AddFeature(new SketchFeature { Plane = PlaneRef.Front, Sketch = Rect(100, 60, "W") });
+            var e1 = doc.AddFeature(new ExtrudeFeature { SketchId = s1.Id, Depth = "20" });
+            // parallel to Right through the box corner (W, 60, 20): the vertex is the end of an edge between named faces
+            var corner = doc.AddFeature(new PlaneFeature
+            {
+                Mode = PlaneMode.ThroughPoint, Base = PlaneRef.Right,
+                Point = new PointRef { Vertex = new EdgeRef { A = e1.Id + ".End", B = e1.Id + ".S.L6", Hint = new Vec3(100, 60, 20) } },
+            });
+            // through a sketch point
+            var sk = new Sketch(); var sp = sk.AddPoint(new Vec2(30, 40));
+            sk.Add(new SkPointEntity { P = sp.Id });
+            var ps = doc.AddFeature(new SketchFeature { Plane = PlaneRef.Front, Sketch = sk });
+            var thru = doc.AddFeature(new PlaneFeature { Mode = PlaneMode.ThroughPoint, Base = PlaneRef.Top, Point = new PointRef { Sketch = ps.Id, SketchPoint = sp.Id } });
+            // Top plane tilted 30 degrees about X, then moved through the sketch point
+            var tilt = doc.AddFeature(new PlaneFeature
+            {
+                Mode = PlaneMode.Angle, Base = PlaneRef.Top, Axis = new DirRef { Axis = "X" }, Angle = "30",
+                Point = new PointRef { Sketch = ps.Id, SketchPoint = sp.Id },
+            });
+            var regen = new Regenerator();
+            var r = regen.Rebuild(doc);
+            foreach (var f in doc.Features) t.True(r.Status[f.Id].Ok, $"{f.Name}: {r.Status[f.Id].Error}");
+            var pc = r.State.Planes[corner.Id];
+            t.Near(Vec3.Dot(new Vec3(100, 60, 20) - pc.Origin, pc.Normal), 0, 1e-9);
+            t.Near(Math.Abs(Vec3.Dot(pc.Normal, Vec3.UnitX)), 1, 1e-12);
+            var pt = r.State.Planes[thru.Id];
+            t.Near(Vec3.Dot(new Vec3(30, 40, 0) - pt.Origin, pt.Normal), 0, 1e-9);
+            var pa = r.State.Planes[tilt.Id];
+            t.Near(Vec3.Distance(pa.Normal, new Vec3(0, Math.Cos(Math.PI / 6), Math.Sin(Math.PI / 6))), 0, 1e-12);
+            t.Near(Vec3.Dot(new Vec3(30, 40, 0) - pa.Origin, pa.Normal), 0, 1e-9);
+            // normal to a sketch line at its end (the end is picked by the reference point)
+            var ls = new Sketch(); var l0 = ls.AddPoint(new Vec2(10, 10)); var l1 = ls.AddPoint(new Vec2(40, 50));
+            var line = ls.Add(new SkLine { P1 = l0.Id, P2 = l1.Id, Construction = true });
+            var lsk = doc.AddFeature(new SketchFeature { Plane = PlaneRef.Front, Sketch = ls });
+            var normal = doc.AddFeature(new PlaneFeature
+            {
+                Mode = PlaneMode.NormalToCurve, Curve = new CurveRef { Sketch = lsk.Id, SketchEntity = line.Id },
+                Point = new PointRef { Sketch = lsk.Id, SketchPoint = l1.Id },
+            });
+            r = regen.Rebuild(doc);
+            t.True(r.Status[normal.Id].Ok, r.Status[normal.Id].Error ?? "");
+            var pn = r.State.Planes[normal.Id];
+            t.Near(Vec3.Distance(pn.Origin, new Vec3(40, 50, 0)), 0, 1e-9);
+            t.Near(Vec3.Distance(pn.Normal, new Vec3(30, 40, 0).Normalized), 0, 1e-12);
+            // normal to a model edge (the box's vertical edge at x=W, y=60) at its top end
+            var en = doc.AddFeature(new PlaneFeature
+            {
+                Mode = PlaneMode.NormalToCurve, Curve = new CurveRef { Edge = new EdgeRef { A = e1.Id + ".S.L5", B = e1.Id + ".S.L6", Hint = new Vec3(100, 60, 10) } },
+                Point = new PointRef { Vertex = new EdgeRef { A = e1.Id + ".End", B = e1.Id + ".S.L6", Hint = new Vec3(100, 60, 20) } },
+            });
+            r = regen.Rebuild(doc);
+            t.True(r.Status[en.Id].Ok, r.Status[en.Id].Error ?? "");
+            var pe = r.State.Planes[en.Id];
+            t.Near(Vec3.Distance(pe.Origin, new Vec3(100, 60, 20)), 0, 1e-9);
+            t.Near(Math.Abs(Vec3.Dot(pe.Normal, Vec3.UnitZ)), 1, 1e-12);
+            // the vertex plane follows the model
+            doc.Equations[0].Expr = "130";
+            r = regen.Rebuild(doc);
+            pc = r.State.Planes[corner.Id];
+            t.Near(Vec3.Dot(new Vec3(130, 60, 20) - pc.Origin, pc.Normal), 0, 1e-9);
+        });
+
         t.Test("Start-up warm-up model rebuilds cleanly", () =>
         {
             // the warm-up part must exercise the real paths without errors (else it warms nothing)

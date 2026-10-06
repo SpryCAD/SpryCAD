@@ -189,12 +189,55 @@ public sealed class MirrorFeature : Feature
     public PlaneRef Plane { get; set; } = PlaneRef.Right;
 }
 
+/// <summary>How a reference plane is placed relative to its base plane.</summary>
+public enum PlaneMode
+{
+    /// <summary>Parallel to the base plane at a distance.</summary>
+    Offset,
+    /// <summary>Parallel to the base plane through a point (model vertex or sketch point).</summary>
+    ThroughPoint,
+    /// <summary>The base plane rotated about an axis (edge or X/Y/Z) by an angle; optionally moved through a point.</summary>
+    Angle,
+    /// <summary>Normal to a curve (model edge or sketch line/arc) at a point on it, e.g. its end.</summary>
+    NormalToCurve,
+}
+
 public sealed class PlaneFeature : Feature
 {
     public override string Kind => "Plane";
+    public PlaneMode Mode { get; set; } = PlaneMode.Offset;
     public PlaneRef Base { get; set; } = PlaneRef.Front;
     public string Offset { get; set; } = "10";
+    /// <summary>Point the plane passes through (ThroughPoint; optional for Angle).</summary>
+    public PointRef? Point { get; set; }
+    /// <summary>Rotation axis (Angle).</summary>
+    public DirRef? Axis { get; set; }
+    /// <summary>Rotation angle in degrees (Angle).</summary>
+    public string Angle { get; set; } = "45";
+    /// <summary>The curve the plane is normal to (NormalToCurve); the plane passes through <see cref="Point"/>.</summary>
+    public CurveRef? Curve { get; set; }
     public bool Flip { get; set; }
+}
+
+/// <summary>A curve: a model edge (between named faces) or a line/arc of a sketch.</summary>
+public sealed class CurveRef
+{
+    public EdgeRef? Edge { get; set; }
+    public string? Sketch { get; set; }
+    public int SketchEntity { get; set; }
+    public CurveRef Clone() => new() { Edge = Edge?.Clone(), Sketch = Sketch, SketchEntity = SketchEntity };
+}
+
+/// <summary>
+/// A point in the model: a model vertex (the end, nearest to <see cref="EdgeRef.Hint"/>, of the edge between the
+/// named faces, so it follows model changes) or a point of a sketch (follows the sketch's dimensions).
+/// </summary>
+public sealed class PointRef
+{
+    public EdgeRef? Vertex { get; set; }
+    public string? Sketch { get; set; }
+    public int SketchPoint { get; set; }
+    public PointRef Clone() => new() { Vertex = Vertex?.Clone(), Sketch = Sketch, SketchPoint = SketchPoint };
 }
 
 public enum CombineOp { Add, Subtract, Common }

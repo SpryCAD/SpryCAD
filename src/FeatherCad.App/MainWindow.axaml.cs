@@ -184,9 +184,14 @@ public partial class MainWindow : Window
             new("Right", null, Frame.Right, half),
         };
         foreach (var f in doc.Features.Take(doc.ActiveCount).OfType<PlaneFeature>())
-            if (state.Planes.TryGetValue(f.Id, out var fr) && !f.Suppressed) planes.Add(new PlaneDisplay(f.Name, f.Id, fr, half * 0.8));
+            if (state.Planes.TryGetValue(f.Id, out var fr) && !f.Suppressed && !(_edit?.Feature is PlaneFeature { } ep && ep.Id == f.Id))
+                planes.Add(new PlaneDisplay(f.Name, f.Id, fr, half * 0.8));
+        // the plane being created/edited: its live preview (a new plane is not in the document yet)
+        var editingPlane = _edit?.Feature is PlaneFeature;
+        if (_edit?.Feature is PlaneFeature pf && Session.PreviewActive && Session.PreviewResult?.State.Planes.TryGetValue(pf.Id, out var pfr) == true)
+            planes.Add(new PlaneDisplay(pf.Name, pf.Id, pfr, half * 0.8));
         Viewport.Planes = planes;
-        Viewport.ShowPlanes = _showPlanes || state.Bodies.Count == 0 && _sketch == null;
+        Viewport.ShowPlanes = _showPlanes || editingPlane || state.Bodies.Count == 0 && _sketch == null;
 
         // visible sketches: not consumed by an active feature, or selected
         var consumed = new HashSet<string>();

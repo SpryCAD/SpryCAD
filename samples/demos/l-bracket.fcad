@@ -309,10 +309,12 @@
     },
     {
       "$type": "plane",
+      "mode": "Offset",
       "base": {
         "std": "Front"
       },
       "offset": "Wb/2-Gt",
+      "angle": "45",
       "flip": false,
       "id": "F3",
       "name": "Gusset plane",
@@ -517,10 +519,12 @@
     },
     {
       "$type": "plane",
+      "mode": "Offset",
       "base": {
         "std": "Top"
       },
       "offset": "T",
+      "angle": "45",
       "flip": false,
       "id": "F8",
       "name": "Leg top",
@@ -652,10 +656,12 @@
     },
     {
       "$type": "plane",
+      "mode": "Offset",
       "base": {
         "std": "Right"
       },
       "offset": "T",
+      "angle": "45",
       "flip": false,
       "id": "F11",
       "name": "Upright face",

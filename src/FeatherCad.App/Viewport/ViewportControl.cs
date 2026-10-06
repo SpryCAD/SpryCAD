@@ -198,6 +198,7 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         DrawSketches(_dyn, hl);
         if (ShowOrigin) DrawOrigin(_dyn);
         Mode?.Draw(this, _dyn);
+        DrawPointAndSegmentHighlights(_dyn, hl);
         // edges a feature failed on (e.g. a fillet that does not fit), drawn on top in red
         foreach (var pl in ProblemEdges)
             for (int i = 0; i + 1 < pl.Length; i++) _dyn.Line(pl[i], pl[i + 1], new Rgba(0.9f, 0.1f, 0.1f), top: true);
@@ -308,6 +309,26 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
             var key = new SelItem { Kind = SelKind.Sketch, FeatureId = s.FeatureId }.Key;
             var c = hl.Of(key) ?? new Rgba(0.15f, 0.2f, 0.45f);
             SketchDrawing.DrawStatic(g, s.Result, c, Camera.PixelSize);
+        }
+    }
+
+    /// <summary>Selected/hovered vertices (a small cross) and sketch lines/arcs (re-drawn in the highlight colour).</summary>
+    void DrawPointAndSegmentHighlights(DynamicGeometry g, Highlights hl)
+    {
+        var px = Camera.PixelSize;
+        foreach (var (it, c) in hl.Items)
+        {
+            if (it.Kind == SelKind.Vertex)
+            {
+                var r = px * 6;
+                g.Line(it.Point - Vec3.UnitX * r, it.Point + Vec3.UnitX * r, c, top: true);
+                g.Line(it.Point - Vec3.UnitY * r, it.Point + Vec3.UnitY * r, c, top: true);
+                g.Line(it.Point - Vec3.UnitZ * r, it.Point + Vec3.UnitZ * r, c, top: true);
+            }
+            else if (it.Kind == SelKind.SketchSegment && Sketches.FirstOrDefault(s => s.FeatureId == it.FeatureId) is { } sd
+                     && sd.Result.Sketch.Entity(it.SketchItem) is { } ent)
+                foreach (var (a2, b2) in SketchDrawing.Segments2D(sd.Result.Sketch, ent))
+                    g.Line(sd.Result.Frame.ToWorld(a2), sd.Result.Frame.ToWorld(b2), c, top: true);
         }
     }
 
@@ -617,6 +638,46 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
                     best = new SelItem { Kind = SelKind.Plane, Name = p.Name, FeatureId = p.FeatureId, Frame = p.Frame, Point = ro + rd * t, Normal = p.Frame.Normal };
                 }
             }
+
+        // vertices: model vertices and sketch points win when a box asks for points
+        if ((filter & SelFilter.Vertex) != 0)
+        {
+            SelItem? bestV = null; double bestVPx = 9;
+            if (PickVertex(x, y) is { } mv)
+            {
+                var s0 = Camera.Project(mv.point);
+                bestVPx = Math.Sqrt((s0.X - x) * (s0.X - x) + (s0.Y - y) * (s0.Y - y));
+                bestV = new SelItem
+                {
+                    Kind = SelKind.Vertex, BodyId = mv.body.Id, Point = mv.point,
+                    Edge = new Core.Model.EdgeRef { A = mv.edge.FaceA, B = mv.edge.FaceB, Body = mv.body.Id, Hint = mv.point },
+                };
+            }
+            foreach (var s in Sketches)
+                foreach (var p in s.Result.Sketch.Points)
+                {
+                    var w = s.Result.Frame.ToWorld(p.P);
+                    var sp = Camera.Project(w);
+                    var d = Math.Sqrt((sp.X - x) * (sp.X - x) + (sp.Y - y) * (sp.Y - y));
+                    if (d < bestVPx) { bestVPx = d; bestV = new SelItem { Kind = SelKind.Vertex, FeatureId = s.FeatureId, SketchItem = p.Id, Point = w }; }
+                }
+            if (bestV != null) return bestV;
+        }
+        if ((filter & SelFilter.SketchSegment) != 0)
+        {
+            double bestPx = sketchPx; SelItem? bestSeg = null;
+            foreach (var s in Sketches)
+                foreach (var e in s.Result.Sketch.Entities)
+                {
+                    if (e is not (Core.Sketching.SkLine or Core.Sketching.SkArc or Core.Sketching.SkCircle)) continue;
+                    foreach (var (a2, b2) in SketchDrawing.Segments2D(s.Result.Sketch, e))
+                    {
+                        var (d, wp) = ScreenDistance(s.Result.Frame.ToWorld(a2), s.Result.Frame.ToWorld(b2), x, y);
+                        if (d < bestPx) { bestPx = d; bestSeg = new SelItem { Kind = SelKind.SketchSegment, FeatureId = s.FeatureId, SketchItem = e.Id, Point = wp }; }
+                    }
+                }
+            if (bestSeg != null) return bestSeg;
+        }
 
         // edges (screen distance), must be visible
         if ((filter & SelFilter.Edge) != 0)

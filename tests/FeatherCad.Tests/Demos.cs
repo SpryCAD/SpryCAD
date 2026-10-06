@@ -20,6 +20,8 @@ static class Demos
         ("heat-sink.fcad", HeatSink),
         ("stepped-shaft.fcad", Shaft),
         ("l-bracket.fcad", Bracket),
+        ("spur-gear.fcad", Gear),
+        ("hand-wheel.fcad", HandWheel),
     };
 
     /// <summary>Equation changes each demo must survive (shows what the parameters do).</summary>
@@ -29,6 +31,8 @@ static class Demos
         ["enclosure.fcad"] = new[] { new[] { ("L", "160"), ("W", "100") }, new[] { ("VentN", "9"), ("VentP", "5") }, new[] { ("H", "60"), ("BossH", "20"), ("Wall", "3") } },
         ["heat-sink.fcad"] = new[] { new[] { ("N", "20"), ("T", "1.2") }, new[] { ("L", "120"), ("FinH", "40") }, new[] { ("N", "8"), ("T", "3") } },
         ["stepped-shaft.fcad"] = new[] { new[] { ("D2", "50"), ("KeyW", "14") }, new[] { ("L2", "100"), ("KeyL", "60") }, new[] { ("D1", "35"), ("Rs", "2"), ("C", "2") } },
+        ["hand-wheel.fcad"] = new[] { new[] { ("NS", "3") }, new[] { ("Dish", "45"), ("SpokeD", "16") }, new[] { ("D", "260"), ("NS", "6"), ("KnobL", "60") } },
+        ["spur-gear.fcad"] = new[] { new[] { ("z", "48") }, new[] { ("m", "2.5"), ("z", "30") }, new[] { ("PA", "25"), ("b", "20") } },
         ["l-bracket.fcad"] = new[] { new[] { ("Wb", "90"), ("HoleSp", "60") }, new[] { ("A", "100"), ("Bh", "80"), ("Gs", "40") }, new[] { ("T", "10"), ("Rb", "4") } },
     };
 
@@ -50,11 +54,16 @@ static class Demos
                 var ms = sw.Elapsed.TotalMilliseconds;
                 var problems = d.Features.Where(f => !r.Status[f.Id].Ok || r.Status[f.Id].Warnings.Count > 0)
                     .Select(f => $"{f.Name}: {r.Status[f.Id].Error}{string.Join(";", r.Status[f.Id].Warnings)}").ToList();
-                var body = r.State.Bodies.Count == 1 ? r.State.Bodies[0].Solid : null;
-                var ok = problems.Count == 0 && body?.Native != null && body.Topology.OpenHalfEdges == 0;
+                var body = r.State.Bodies.Count >= 1 ? r.State.Bodies[0].Solid : null;
+                var ok = problems.Count == 0 && r.State.Bodies.Count >= 1 && r.State.Bodies.All(bb => bb.Solid.Native != null && bb.Solid.Topology.OpenHalfEdges == 0);
                 var label = variant.Length == 0 ? "as designed" : string.Join(", ", variant.Select(v => $"{v.Item1}={v.Item2}"));
                 Console.WriteLine($"{(ok ? "ok  " : "FAIL")} {file,-20} {label,-32} {ms,6:0} ms  vol {(body != null && volumes ? KernelTests.Vex(body).ToString("0") : "-"),8}  {string.Join(" | ", problems)}");
-                if (!ok) bad++;
+                if (!ok)
+                {
+                    bad++;
+                    foreach (var bb in r.State.Bodies)
+                        Console.WriteLine($"     body {bb.Id}: native={bb.Solid.Native != null} open={bb.Solid.Topology.OpenHalfEdges} ({Csg.LastFallbackReason})");
+                }
                 if (variant.Length == 0 && body != null)
                 {
                     using var fs = File.Create(Path.Combine(dir, Path.ChangeExtension(file, ".step")));
@@ -66,9 +75,110 @@ static class Demos
         return bad;
     }
 
+    /// <summary><c>-- demo-sketches name</c>: solve status of each sketch of one demo (debugging).</summary>
+    public static int SketchReport(string name)
+    {
+        var doc = All.First(a => a.file.StartsWith(name)).build();
+        var r = new Regenerator().Rebuild(doc);
+        foreach (var f in doc.Features.OfType<SketchFeature>())
+        {
+            var sr = r.State.Sketches.GetValueOrDefault(f.Id);
+            var sv = sr?.Solve;
+            Console.WriteLine($"{f.Name}: {(sv == null ? "no result" : $"status={sv.Status} converged={sv.Converged} residual={sv.Residual:g3} free points={sv.FreePoints.Count}")} {r.Status[f.Id].Error}");
+            if (sv != null && f.Sketch.Constraints.Count < 200)
+            {
+                var dofs = SketchSolver.Analyze(sr!.Sketch);
+                Console.WriteLine($"   analyze: {dofs.Status}, free points {string.Join(",", dofs.FreePoints)}");
+                var sk = sr.Sketch;
+                foreach (var c in sk.Constraints.Where(c => c.IsDimension))
+                {
+                    var m = SketchSolver.Measure(sk, c);
+                    if (Math.Abs(m - c.Value) > 1e-6) Console.WriteLine($"   dim {c.Type} {string.Join(",", c.Refs)} target {c.Value:0.######} measured {m:0.######} expr {c.Expr}");
+                }
+                foreach (var c in sk.Constraints.Where(c => c.Type == CType.PointOnCircle))
+                {
+                    var p = sk.P(c.Refs[0]); var a = (SkArc)sk.Entity(c.Refs[1])!;
+                    var dev = (p - sk.P(a.Center)).Length - (sk.P(a.Start) - sk.P(a.Center)).Length;
+                    if (Math.Abs(dev) > 1e-6) Console.WriteLine($"   on-arc {c.Refs[0]} -> arc {c.Refs[1]} deviation {dev:g3}");
+                }
+                foreach (var a in sk.Entities.OfType<SkArc>())
+                {
+                    var dev = (sk.P(a.End) - sk.P(a.Center)).Length - (sk.P(a.Start) - sk.P(a.Center)).Length;
+                    if (Math.Abs(dev) > 1e-6) Console.WriteLine($"   arc {a.Id} end/start radius mismatch {dev:g3}");
+                }
+            }
+        }
+        for (int i = 1; i <= doc.Features.Count; i++)
+        {
+            var ri = new Regenerator().Rebuild(doc, i);
+            Console.WriteLine($"  after {doc.Features[i - 1].Name}: " + string.Join(" ", ri.State.Bodies.Select(bb => $"{bb.Id}:open={bb.Solid.Topology.OpenHalfEdges}")));
+            foreach (var bb in ri.State.Bodies.Where(bb => bb.Solid.Topology.OpenHalfEdges > 0))
+            {
+                var topo = bb.Solid.Topology;
+                var owner = new HashSet<(int, int)>();
+                foreach (var fl in topo.FaceLoops) foreach (var l in fl) for (int j = 0; j < l.Length; j++) owner.Add((l[j], l[(j + 1) % l.Length]));
+                var counts = new Dictionary<string, int>();
+                for (int fi = 0; fi < topo.FaceLoops.Count; fi++)
+                    foreach (var l in topo.FaceLoops[fi])
+                        for (int j = 0; j < l.Length; j++)
+                            if (!owner.Contains((l[(j + 1) % l.Length], l[j])))
+                            {
+                                var n = bb.Solid.Faces[fi].Tag.Name;
+                                counts[n] = counts.GetValueOrDefault(n) + 1;
+                                if (counts[n] <= 3) Console.WriteLine($"     open {n}: {topo.Vertices[l[j]]} -> {topo.Vertices[l[(j + 1) % l.Length]]}");
+                            }
+                Console.WriteLine("     open by face: " + string.Join(", ", counts.Select(kv => $"{kv.Key}={kv.Value}")));
+                // facet orientation vs the exact outward normal, per native face
+                var nb = bb.Solid.Native!;
+                foreach (var nf in nb.Faces.Where(x => counts.ContainsKey(x.Tag.Name)))
+                {
+                    var one = new FeatherCad.Kernel.Native.NBody(); one.Faces.Add(nf);
+                    var facets = FeatherCad.Kernel.Native.NTess.Facets(one);
+                    int good = 0, flipped = 0;
+                    foreach (var fc in facets)
+                    {
+                        var c = fc.Centroid();
+                        var n = nf.Surface.Normal(nf.Surface.Project(c)) * (nf.Sense ? 1 : -1);
+                        if (Vec3.Dot(n, fc.Plane.Normal) > 0) good++; else flipped++;
+                    }
+                    var dom = FeatherCad.Kernel.Native.NDomain.Of(nf, 0.02);
+                    Console.WriteLine($"     face {nf.Tag.Name} loops={nf.Loops.Count} facets ok={good} flipped={flipped} uv=[{dom.UMin:0.###},{dom.UMax:0.###}]x[{dom.VMin:0.###},{dom.VMax:0.###}] loop areas={string.Join(",", dom.Loops.Select(l => { double a = 0; for (int q = 0, w = l.Length - 1; q < l.Length; w = q++) a += l[w].X * l[q].Y - l[q].X * l[w].Y; return (a / 2).ToString("0.####"); }))}");
+                }
+                break;
+            }
+            if (ri.State.Bodies.Any(bb => bb.Solid.Topology.OpenHalfEdges > 0)) break;
+        }
+        if (name.StartsWith("spur")) Console.WriteLine($"involute flank deviation: {FlankDeviation(doc, r):0.######} mm");
+        return 0;
+    }
+
+    /// <summary>Largest distance from the exact involute (sampled densely) to the nearest flank arc of the gap sketch.</summary>
+    public static double FlankDeviation(CadDocument doc, RegenResult r)
+    {
+        var (v, _) = Regenerator.EvaluateEquations(doc);
+        double rb = v["rb"], rs = v["rs"], re = v["re"], z = v["z"], inva = v["inva"];
+        var gap = doc.Features.OfType<SketchFeature>().First(f => f.Name == "Tooth gap");
+        var sk = r.State.Sketches[gap.Id].Sketch;
+        var arcs = sk.Entities.OfType<SkArc>().Where(a => a.Center != Sketch.OriginId).ToList();
+        double worst = 0;
+        for (int i = 0; i <= 400; i++)
+        {
+            var rho = rs + (re - rs) * i / 400.0;
+            var a = Math.Acos(rb / rho);
+            var phi = Math.PI / (2 * z) - inva + (Math.Tan(a) - a);
+            foreach (var sgn in new[] { 1, -1 })
+            {
+                var p = new Vec2(rho * Math.Cos(phi), sgn * rho * Math.Sin(phi));
+                worst = Math.Max(worst, arcs.Min(ar => Math.Abs((p - sk.P(ar.Center)).Length - (sk.P(ar.Start) - sk.P(ar.Center)).Length)));
+            }
+        }
+        return worst;
+    }
+
     public static int Write(string dir)
     {
         Directory.CreateDirectory(dir);
+        var broken = new List<string>();
         foreach (var (file, build) in All)
         {
             var doc = build();
@@ -78,11 +188,15 @@ static class Demos
             foreach (var f in doc.Features)
                 if (!r.Status[f.Id].Ok || r.Status[f.Id].Warnings.Count > 0)
                     Console.WriteLine($"  {f.Name}: {r.Status[f.Id].Error} {string.Join("; ", r.Status[f.Id].Warnings)}");
+            if (doc.Features.Any(f => !r.Status[f.Id].Ok)) broken.Add(file);
             foreach (var b in r.State.Bodies)
                 Console.WriteLine($"  body: native={b.Solid.Native != null} open={b.Solid.Topology.OpenHalfEdges} faces: " +
                     string.Join(" ", b.Solid.Native?.Faces.Select(f => f.Tag.Name).Distinct() ?? Array.Empty<string>()));
         }
-        return 0;
+        // a failed feature fails the run, so a broken demo can't ship in the installer (build/make-installer.ps1)
+        if (broken.Count == 0) return 0;
+        Console.Error.WriteLine($"Broken demos (a feature failed to rebuild): {string.Join(", ", broken)}");
+        return 1;
     }
 
     // ------------------------------------------------------------------------------------------
@@ -303,6 +417,161 @@ static class Demos
     }
 
     // ------------------------------------------------------------------------------------------
+    // 6. Spur gear with involute teeth: module, tooth count and pressure angle drive everything
+
+    /// <summary>Largest distance between the arc-approximated flanks and the true involute (last built gear).</summary>
+    public static double GearFlankError;
+
+    static CadDocument Gear()
+    {
+        var d = Doc(("m", "2"), ("z", "36"), ("PA", "20"), ("b", "14"), ("Bore", "14"), ("KeyW", "5"), ("KeyT", "2.3"),
+                    ("Web", "6"), ("NLH", "6"),
+                    // derived geometry (standard full-depth teeth)
+                    ("r", "m*z/2"), ("rb", "r*cos(PA)"), ("ra", "r+m"), ("rf", "r-1.25*m"), ("inva", "tan(PA)-PA*pi/180"),
+                    ("rs", "max(rb, rf+0.1*m)"), ("re", "ra+0.3*m"),
+                    ("HubD", "2.2*Bore"), ("RimD", "2*rf-4*m"), ("Pocket", "(b-Web)/2"),
+                    ("LH", "0.7*(RimD-HubD)/2"), ("LHR", "(RimD+HubD)/4"));
+
+        // blank with bore
+        var s = new Sk(d);
+        s.Circle(Sketch.OriginId, "2*ra");
+        s.Circle(Sketch.OriginId, "Bore");
+        var bs = d.AddFeature(new SketchFeature { Name = "Blank", Plane = PlaneRef.Front, Sketch = s.S });
+        var blank = d.AddFeature(new ExtrudeFeature { Name = "Blank", SketchId = bs.Id, Depth = "b" });
+
+        // one tooth gap, centred on +X: root arc, radial lines below the base circle, involute flanks (three arcs
+        // each through exact involute points), closed outside the tip circle
+        var g = new Sk(d);
+        // polar angle (degrees) of the upper flank at radius rho: half gap at the base circle + involute function
+        static string Phi(string rho) => $"(90/z - inva*180/pi + (tan(acos(rb/({rho}))) - acos(rb/({rho}))*pi/180)*180/pi)";
+        static string Rho(double frac) => $"(rs+(re-rs)*{frac * frac:0.######})"; // denser near the base circle
+        string X(string rho) => $"{rho}*cos({Phi(rho)})";
+        string Y(string rho) => $"{rho}*sin({Phi(rho)})";
+        int[] Flank(bool upper)
+        {
+            var pts = new List<int>();
+            // the lower flank's outer end only gets its height: the closing arc (centred on the axis, through the
+            // upper end) fixes its radius, a second full dimension would be redundant
+            for (int k = 0; k <= 3; k++) pts.Add(g.P(X(Rho(k / 3.0)), (upper ? "" : "-") + "(" + Y(Rho(k / 3.0)) + ")", dimX: upper || k < 3));
+            for (int k = 0; k < 3; k++)
+            {
+                // the arc through flank points k and k+1 also passes through the involute point between them
+                var mid = g.P(X(Rho((k + 0.5) / 3.0)), (upper ? "" : "-") + "(" + Y(Rho((k + 0.5) / 3.0)) + ")");
+                g.Point(mid);
+                var arc = g.ArcThrough(pts[k], mid, pts[k + 1]);
+                var on = g.S.AddConstraint(CType.PointOnCircle, mid, arc);
+            }
+            return pts.ToArray();
+        }
+        var up = Flank(true); var lo = Flank(false);
+        var rootU = g.P($"rf*cos({Phi("rs")})", $"rf*sin({Phi("rs")})");
+        var rootL = g.P($"rf*cos({Phi("rs")})", $"-(rf*sin({Phi("rs")}))", dimX: false); // on the root arc
+        g.Arc(Sketch.OriginId, rootL, rootU);
+        g.Line(rootU, up[0]); g.Line(rootL, lo[0]);
+        g.Arc(Sketch.OriginId, lo[3], up[3]);
+        GearFlankError = g.FlankError;
+        var gs = d.AddFeature(new SketchFeature { Name = "Tooth gap", Plane = PlaneRef.Front, Sketch = g.S });
+        var gap = d.AddFeature(new ExtrudeFeature { Name = "Tooth gap", SketchId = gs.Id, IsCut = true, End = EndCondition.ThroughAll });
+        d.AddFeature(new CircularPatternFeature { Name = "Teeth", Seeds = { gap.Id }, Axis = new DirRef { Axis = "Z" }, Count = "z" });
+
+        // keyway in the bore
+        var k = new Sk(d);
+        k.Rect("0", "-KeyW/2", "Bore/2+KeyT", "KeyW/2");
+        var ks = d.AddFeature(new SketchFeature { Name = "Keyway", Plane = PlaneRef.Front, Sketch = k.S });
+        d.AddFeature(new ExtrudeFeature { Name = "Keyway", SketchId = ks.Id, IsCut = true, End = EndCondition.ThroughAll });
+
+        // web: recessed on both faces between hub and rim, with lightening holes
+        var w = new Sk(d);
+        w.Circle(Sketch.OriginId, "RimD"); w.Circle(Sketch.OriginId, "HubD");
+        var ws = d.AddFeature(new SketchFeature { Name = "Web recess", Plane = PlaneRef.Front, Sketch = w.S });
+        var rec = d.AddFeature(new ExtrudeFeature { Name = "Web recess", SketchId = ws.Id, IsCut = true, Depth = "Pocket" });
+        var back = d.AddFeature(new PlaneFeature { Name = "Back face", Base = PlaneRef.Front, Offset = "b" });
+        var w2 = new Sk(d);
+        w2.Circle(Sketch.OriginId, "RimD"); w2.Circle(Sketch.OriginId, "HubD");
+        var ws2 = d.AddFeature(new SketchFeature { Name = "Web recess (back)", Plane = new PlaneRef { Feature = back.Id }, Sketch = w2.S });
+        d.AddFeature(new ExtrudeFeature { Name = "Web recess (back)", SketchId = ws2.Id, IsCut = true, Reverse = true, Depth = "Pocket" });
+        var l = new Sk(d);
+        l.Circle(l.P("LHR", "0"), "LH");
+        var ls = d.AddFeature(new SketchFeature { Name = "Lightening hole", Plane = PlaneRef.Front, Sketch = l.S });
+        var lh = d.AddFeature(new ExtrudeFeature { Name = "Lightening hole", SketchId = ls.Id, IsCut = true, End = EndCondition.ThroughAll });
+        d.AddFeature(new CircularPatternFeature { Name = "Lightening holes", Seeds = { lh.Id }, Axis = new DirRef { Axis = "Z" }, Count = "NLH" });
+        return d;
+    }
+
+    // ------------------------------------------------------------------------------------------
+    // 7. Cast-iron hand wheel: round rim, dished (raised) hub, slanted spokes on planes normal to their
+    //    centrelines, keyed bore, and a spinner knob on the rim (separate body: it turns on its pin)
+
+    static CadDocument HandWheel()
+    {
+        var d = Doc(("D", "200"), ("RimT", "18"), ("HubD", "46"), ("HubH", "40"), ("Bore", "16"), ("KeyW", "5"), ("KeyT", "2.3"),
+                    ("Dish", "30"), ("NS", "5"), ("SpokeD", "13"), ("C", "1.5"),
+                    ("KnobNeck", "6"), ("KnobR", "11"), ("KnobL", "45"), ("PinD", "8"),
+                    // spoke centreline: from inside the hub to the rim centre
+                    ("SpokeIn", "HubD/2*0.5"), ("SpokeL", "sqrt((D/2-SpokeIn)^2+Dish^2)"));
+
+        // rim: a circle revolved about the wheel axis (Y)
+        var rs = new Sk(d);
+        rs.Circle(rs.P("D/2", "0"), "RimT");
+        rs.Centerline(Sketch.OriginId, rs.P("0", "Dish"));
+        var rimSk = d.AddFeature(new SketchFeature { Name = "Rim section", Plane = PlaneRef.Front, Sketch = rs.S });
+        d.AddFeature(new RevolveFeature { Name = "Rim", SketchId = rimSk.Id, Angle = "360" });
+
+        // hub: raised by Dish above the rim plane (the dish), bored
+        var hs = new Sk(d);
+        var hl = hs.Poly(hs.P("Bore/2", "Dish-HubH/2"), hs.P("HubD/2", "Dish-HubH/2"), hs.P("HubD/2", "Dish+HubH/2"), hs.P("Bore/2", "Dish+HubH/2"));
+        hs.Centerline(Sketch.OriginId, hs.P("0", "Dish+HubH/2"));
+        var hubSk = d.AddFeature(new SketchFeature { Name = "Hub section", Plane = PlaneRef.Front, Sketch = hs.S });
+        var hub = d.AddFeature(new RevolveFeature { Name = "Hub", SketchId = hubSk.Id, Angle = "360" });
+
+        // one spoke: centreline sketch, plane normal to it at the hub end, circle, extrude along the line
+        var cl = new Sk(d);
+        int a = cl.P("SpokeIn", "Dish"), b = cl.P("D/2", "0");
+        var line = cl.Centerline(a, b);
+        var clSk = d.AddFeature(new SketchFeature { Name = "Spoke centreline", Plane = PlaneRef.Front, Sketch = cl.S });
+        var sp = d.AddFeature(new PlaneFeature
+        {
+            Name = "Spoke plane", Mode = PlaneMode.NormalToCurve,
+            Curve = new CurveRef { Sketch = clSk.Id, SketchEntity = line }, Point = new PointRef { Sketch = clSk.Id, SketchPoint = a },
+        });
+        var sc = new Sk(d);
+        sc.Circle(Sketch.OriginId, "SpokeD");
+        var scSk = d.AddFeature(new SketchFeature { Name = "Spoke section", Plane = new PlaneRef { Feature = sp.Id }, Sketch = sc.S });
+        var spoke = d.AddFeature(new ExtrudeFeature { Name = "Spoke", SketchId = scSk.Id, Depth = "SpokeL" });
+        d.AddFeature(new CircularPatternFeature { Name = "Spokes", Seeds = { spoke.Id }, Axis = new DirRef { Axis = "Y" }, Count = "NS" });
+
+        // hub edges broken
+        string H(int i) => $"{hub.Id}.R.L{hl[i]}";
+        double V(string e) => hs.Eval(e);
+        d.AddFeature(new ChamferFeature
+        {
+            Name = "Hub chamfers", Distance = "C",
+            Edges =
+            {
+                E(H(1), H(2), new Vec3(V("HubD/2"), V("Dish+HubH/2"), 0)), E(H(0), H(1), new Vec3(V("HubD/2"), V("Dish-HubH/2"), 0)),
+                E(H(2), H(3), new Vec3(V("Bore/2"), V("Dish+HubH/2"), 0)), E(H(3), H(0), new Vec3(V("Bore/2"), V("Dish-HubH/2"), 0)),
+            },
+        });
+        // keyway along the bore (Top plane: sketch Y = -Z)
+        var k = new Sk(d);
+        k.Rect("0", "-KeyW/2", "Bore/2+KeyT", "KeyW/2");
+        var ks = d.AddFeature(new SketchFeature { Name = "Keyway", Plane = PlaneRef.Top, Sketch = k.S });
+        d.AddFeature(new ExtrudeFeature { Name = "Keyway", SketchId = ks.Id, IsCut = true, End = EndCondition.ThroughAllBoth });
+
+        // spinner knob on the rim: pin into the rim, collar, grip with a domed top, revolved about its own axis
+        var kn = new Sk(d);
+        int k0 = kn.P("D/2", "0"), k1 = kn.P("D/2+PinD/2", "0"), k2 = kn.P("D/2+PinD/2", "RimT/2+2"),
+            k3 = kn.P("D/2+KnobNeck", "RimT/2+2"), k4 = kn.P("D/2+KnobNeck", "RimT/2+5"), k5 = kn.P("D/2+KnobR", "RimT/2+8"),
+            k6 = kn.P("D/2+KnobR", "RimT/2+KnobL-KnobR"), kc = kn.P("D/2", "RimT/2+KnobL-KnobR"), k7 = kn.P("D/2", "RimT/2+KnobL");
+        kn.Line(k0, k1); kn.Line(k1, k2); kn.Line(k2, k3); kn.Line(k3, k4); kn.Line(k4, k5); kn.Line(k5, k6);
+        kn.Arc(kc, k6, k7);
+        var axisLine = kn.Line(k7, k0);
+        var knSk = d.AddFeature(new SketchFeature { Name = "Knob profile", Plane = PlaneRef.Front, Sketch = kn.S });
+        d.AddFeature(new RevolveFeature { Name = "Spinner knob", SketchId = knSk.Id, AxisEntity = axisLine, Angle = "360", Merge = false });
+        return d;
+    }
+
+    // ------------------------------------------------------------------------------------------
     // helpers
 
     static EdgeRef E(string a, string b, Vec3 hint) => new() { A = a, B = b, Hint = hint };
@@ -329,10 +598,10 @@ static class Demos
         public double Eval(string e) => Expr.Eval(e, _lookup);
 
         /// <summary>Point at (x, y); a leading '-' means the negative side (the dimension is the magnitude).</summary>
-        public int P(string x, string y)
+        public int P(string x, string y, bool dimX = true)
         {
             var p = S.AddPoint(new Vec2(Eval(x), Eval(y)));
-            Dim(CType.HDistance, x, Sketch.OriginId, p.Id);
+            if (dimX) Dim(CType.HDistance, x, Sketch.OriginId, p.Id);
             Dim(CType.VDistance, y, Sketch.OriginId, p.Id);
             return p.Id;
         }
@@ -372,5 +641,24 @@ static class Demos
         public int Arc(int center, int start, int end) => S.Add(new SkArc { Center = center, Start = start, End = end }).Id;
 
         public void Point(int p) => S.Add(new SkPointEntity { P = p });
+
+        /// <summary>Largest deviation measured by <see cref="ArcThrough"/> between its arcs and the sampled curve.</summary>
+        public double FlankError;
+
+        /// <summary>
+        /// Arc from a to b through m (counter-clockwise order chosen automatically); its centre is a free point
+        /// placed at the circumcentre, fixed by the solver through a PointOnCircle relation on m.
+        /// </summary>
+        public int ArcThrough(int a, int m, int b)
+        {
+            Vec2 A = S.P(a), M = S.P(m), B = S.P(b);
+            var ab = B - A; var am = M - A;
+            var dd = 2 * Vec2.Cross(ab, am);
+            var c = A + (new Vec2(am.Y, -am.X) * ab.LengthSq + new Vec2(-ab.Y, ab.X) * am.LengthSq) / dd; // circumcentre
+            var cp = S.AddPoint(c);
+            // counter-clockwise from start to end must pass through m
+            bool ccw = Vec2.Cross(A - c, M - c) > 0;
+            return ccw ? Arc(cp.Id, a, b) : Arc(cp.Id, b, a);
+        }
     }
 }

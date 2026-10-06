@@ -9,8 +9,12 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\FeatherCAD.ico</ApplicationIcon>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
     <AssemblyName>FeatherCAD</AssemblyName>
+    <!-- also the installer's version (build/make-installer.ps1) -->
+    <Version>0.1.0</Version>
+    <Product>FeatherCAD</Product>
     <RootNamespace>FeatherCad.App</RootNamespace>
     <TieredPGO>true</TieredPGO>
     <ServerGarbageCollector>false</ServerGarbageCollector>
@@ -25,6 +29,11 @@
     <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.22" />
     <PackageReference Include="Avalonia.Fonts.Inter" Version="11.3.22" />
     <PackageReference Include="Silk.NET.OpenGL" Version="2.23.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Drawn by build/make-icon.ps1 -->
+    <AvaloniaResource Include="Assets\**" />
   </ItemGroup>
 
   <ItemGroup>

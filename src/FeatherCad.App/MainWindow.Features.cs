@@ -619,16 +619,67 @@ public partial class MainWindow
         OpenPlanePage(new PlaneFeature { Base = b }, true);
     }
 
+    /// <summary>
+    /// Plane page: offset from a plane, parallel through a point, at an angle about an axis, or normal to a curve
+    /// at a point (as SolidWorks' plane references). Only the references of the chosen type are shown.
+    /// </summary>
     void OpenPlanePage(PlaneFeature f, bool isNew)
     {
         var page = new PmPage("Plane", "plane");
         var st = StateForEdit(f, isNew);
-        var r = page.Section("First Reference");
+        Action sync = () => { };
+
+        var t = page.Section("Plane Type");
+        page.Combo(t, "Type", new List<(PlaneMode, string)>
+        {
+            (PlaneMode.Offset, "Offset distance"), (PlaneMode.ThroughPoint, "Parallel through a point"),
+            (PlaneMode.Angle, "At angle about an axis"), (PlaneMode.NormalToCurve, "Normal to curve at a point"),
+        }, () => f.Mode, v => { f.Mode = v; sync(); });
+
+        var r = page.Section("Plane");
         var box = page.Selection(r, "Reference", SelFilter.Plane | SelFilter.PlanarFace, "Plane or planar face", 1);
         if (PlaneItem(f.Base, st) is { } pi) box.Items.Add(pi);
         box.Changed += () => { if (box.Items.FirstOrDefault()?.ToPlaneRef() is { } pr) f.Base = pr; };
-        page.Number(r, "Offset", () => f.Offset, v => f.Offset = v, "dimension");
-        page.Check(r, "Flip offset", () => f.Flip, v => f.Flip = v);
+        var offsetRow = page.Number(r, "Offset", () => f.Offset, v => f.Offset = v, "dimension");
+
+        var ax = page.Section("Axis");
+        var axisBox = page.Selection(ax, "Axis", SelFilter.Edge, "Linear edge (or choose X / Y / Z)", 1);
+        if (f.Axis?.Edge is { } ae) axisBox.Items.Add(new SelItem { Kind = SelKind.Edge, Edge = ae, BodyId = ae.Body, Point = ae.Hint });
+        page.Combo(ax, "Or axis", new List<(string, string)> { ("", "(selected edge)"), ("X", "X axis"), ("Y", "Y axis"), ("Z", "Z axis") },
+            () => f.Axis?.Axis ?? "", v => { if (v != "") f.Axis = new DirRef { Axis = v }; });
+        axisBox.Changed += () => { if (axisBox.Items.FirstOrDefault()?.ToDirRef() is { } dr) f.Axis = dr; };
+        page.Number(ax, "Angle", () => f.Angle, v => f.Angle = v, "dimension", "°");
+
+        var cv = page.Section("Curve");
+        var curveBox = page.Selection(cv, "Curve", SelFilter.Edge | SelFilter.SketchSegment, "Edge, or sketch line / arc", 1);
+        if (f.Curve?.Edge is { } ce) curveBox.Items.Add(new SelItem { Kind = SelKind.Edge, Edge = ce, BodyId = ce.Body, Point = ce.Hint });
+        else if (f.Curve?.Sketch is { } cs) curveBox.Items.Add(new SelItem { Kind = SelKind.SketchSegment, FeatureId = cs, SketchItem = f.Curve.SketchEntity });
+        curveBox.Changed += () => { if (curveBox.Items.FirstOrDefault()?.ToCurveRef() is { } cr) f.Curve = cr; };
+
+        var pt = page.Section("Point");
+        var pointBox = page.Selection(pt, "Point", SelFilter.Vertex, "Vertex or sketch point", 1);
+        if (f.Point is { } pr0)
+        {
+            Vec3 at = default;
+            try { at = Resolver.ResolvePoint(pr0, st); } catch (FeatureException) { }
+            pointBox.Items.Add(pr0.Sketch != null
+                ? new SelItem { Kind = SelKind.Vertex, FeatureId = pr0.Sketch, SketchItem = pr0.SketchPoint, Point = at }
+                : new SelItem { Kind = SelKind.Vertex, Edge = pr0.Vertex, BodyId = pr0.Vertex?.Body, Point = at });
+        }
+        pointBox.Changed += () => f.Point = pointBox.Items.FirstOrDefault()?.ToPointRef();
+        page.Check(pt, "Flip normal", () => f.Flip, v => f.Flip = v);
+
+        // show only what the plane type uses
+        sync = () =>
+        {
+            void Show(StackPanel s, bool on) { if (s.Parent is Control c) c.IsVisible = on; }
+            Show(r, f.Mode != PlaneMode.NormalToCurve);
+            offsetRow.IsEnabled = f.Mode == PlaneMode.Offset;
+            Show(ax, f.Mode == PlaneMode.Angle);
+            Show(cv, f.Mode == PlaneMode.NormalToCurve);
+            Show(pt, f.Mode != PlaneMode.Offset);
+        };
+        sync();
         BeginEdit(f, isNew, page, overlay: false);
     }
 

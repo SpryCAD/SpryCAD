@@ -475,10 +475,12 @@
     },
     {
       "$type": "plane",
+      "mode": "Offset",
       "base": {
         "std": "Top"
       },
       "offset": "D2/2",
+      "angle": "45",
       "flip": false,
       "id": "F5",
       "name": "Keyway plane",

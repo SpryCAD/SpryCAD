@@ -360,10 +360,12 @@
     },
     {
       "$type": "plane",
+      "mode": "Offset",
       "base": {
         "std": "Front"
       },
       "offset": "Wall",
+      "angle": "45",
       "flip": false,
       "id": "F6",
       "name": "Floor plane",
@@ -485,10 +487,12 @@
     },
     {
       "$type": "plane",
+      "mode": "Offset",
       "base": {
         "std": "Front"
       },
       "offset": "Wall\u002BBossH",
+      "angle": "45",
       "flip": false,
       "id": "F10",
       "name": "Boss top plane",
@@ -704,10 +708,12 @@
     },
     {
       "$type": "plane",
+      "mode": "Offset",
       "base": {
         "std": "Right"
       },
       "offset": "L/2",
+      "angle": "45",
       "flip": false,
       "id": "F13",
       "name": "Right wall plane",

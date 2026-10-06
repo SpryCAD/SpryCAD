@@ -973,14 +973,27 @@ public sealed class NBoolean
                 merged.Loops.Add(loop);
             }
             if (!ok) continue;
-            // the merged face must still be a non-wrapping patch on periodic surfaces
-            try { NDomain.Of(merged, _sampleTol * 500); }
+            // the merged face must still be a non-wrapping patch on periodic surfaces, with an outer loop: merging
+            // all pieces of e.g. a torus around a hole would leave only the hole's loop, whose inside is the
+            // opposite region of the face
+            try
+            {
+                var dom = NDomain.Of(merged, _sampleTol * 500);
+                if (dom.Loops.All(l => SignedArea(l) <= 0)) continue;
+            }
             catch (InvalidOperationException) { continue; }
             foreach (var m in members) remove.Add(m);
             add.Add(merged);
         }
         body.Faces.RemoveAll(remove.Contains);
         body.Faces.AddRange(add);
+    }
+
+    static double SignedArea(Vec2[] l)
+    {
+        double a = 0;
+        for (int i = 0, j = l.Length - 1; i < l.Length; j = i++) a += l[j].X * l[i].Y - l[i].X * l[j].Y;
+        return a / 2;
     }
 
     /// <summary>Joins consecutive edges at vertices where nothing else meets and the curve continues.</summary>

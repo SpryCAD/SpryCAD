@@ -206,6 +206,85 @@ public static class Resolver
         return (a + d * t - p).Length;
     }
 
+    /// <summary>Position of a model vertex or sketch point.</summary>
+    public static Vec3 ResolvePoint(PointRef r, ModelState st)
+    {
+        if (r.Sketch != null)
+        {
+            if (!st.Sketches.TryGetValue(r.Sketch, out var sk)) throw new FeatureException("The sketch of the reference point is missing.");
+            if (sk.Sketch.Point(r.SketchPoint) is not { } p) throw new FeatureException("The reference sketch point no longer exists.");
+            return sk.Frame.ToWorld(p.P);
+        }
+        if (r.Vertex is { } v)
+        {
+            // the end of the referenced edge nearest the remembered position
+            if (ResolveNativeEdge(v, st) is { } ne) return NearestEnd(ne.edge.V0.P, ne.edge.V1.P, v.Hint);
+            var (_, te) = ResolveEdge(v, st);
+            return NearestEnd(te.Start, te.End, v.Hint);
+        }
+        throw new FeatureException("No reference point selected.");
+
+        static Vec3 NearestEnd(Vec3 a, Vec3 b, Vec3 hint) => Vec3.Distance(a, hint) <= Vec3.Distance(b, hint) ? a : b;
+    }
+
+    /// <summary>
+    /// Point on the curve nearest <paramref name="near"/> and the unit tangent there (oriented from the curve's
+    /// start to its end).
+    /// </summary>
+    public static (Vec3 point, Vec3 tangent) CurveTangent(CurveRef r, Vec3 near, ModelState st)
+    {
+        if (r.Sketch != null)
+        {
+            if (!st.Sketches.TryGetValue(r.Sketch, out var sr)) throw new FeatureException("The sketch of the reference curve is missing.");
+            var sk = sr.Sketch; var fr = sr.Frame;
+            var q = fr.ToLocal(near);
+            switch (sk.Entity(r.SketchEntity))
+            {
+                case Sketching.SkLine l:
+                    {
+                        var a = sk.P(l.P1); var b = sk.P(l.P2); var d = b - a;
+                        if (d.Length < 1e-12) break;
+                        var t = Math.Clamp(Vec2.Dot(q - a, d) / d.LengthSq, 0, 1);
+                        return (fr.ToWorld(a + d * t), (fr.ToWorld(b) - fr.ToWorld(a)).Normalized);
+                    }
+                case Sketching.SkArc arc:
+                    {
+                        var c = sk.P(arc.Center); var rad = (sk.P(arc.Start) - c).Length;
+                        var dir = q - c; if (dir.Length < 1e-12) dir = sk.P(arc.Start) - c;
+                        var p = c + dir.Normalized * rad;
+                        var tan = new Vec2(-(p - c).Y, (p - c).X); // counter-clockwise, start to end
+                        return (fr.ToWorld(p), (fr.ToWorld(p + tan) - fr.ToWorld(p)).Normalized);
+                    }
+                case Sketching.SkCircle ci:
+                    {
+                        var c = sk.P(ci.Center);
+                        var dir = q - c; if (dir.Length < 1e-12) dir = new Vec2(1, 0);
+                        var p = c + dir.Normalized * ci.R;
+                        var tan = new Vec2(-(p - c).Y, (p - c).X);
+                        return (fr.ToWorld(p), (fr.ToWorld(p + tan) - fr.ToWorld(p)).Normalized);
+                    }
+            }
+            throw new FeatureException("The reference curve must be a sketch line, arc or circle.");
+        }
+        if (r.Edge is { } er)
+        {
+            if (ResolveNativeEdge(er, st) is { } ne)
+            {
+                var e = ne.edge;
+                double lo = Math.Min(e.T0, e.T1), hi = Math.Max(e.T0, e.T1);
+                var t = Math.Clamp(e.Curve.Param(near, e.Curve.Periodic ? 0.5 * (lo + hi) : null), lo, hi);
+                var tan = e.Curve.Deriv(t) * (e.T1 >= e.T0 ? 1 : -1);
+                return (e.Curve.Eval(t), tan.Normalized);
+            }
+            var (_, te) = ResolveEdge(er, st);
+            EdgeSeg best = te.Segs[0]; double bd = double.MaxValue;
+            foreach (var s in te.Segs) { var dd = DistanceToSegment(near, s.A, s.B); if (dd < bd) { bd = dd; best = s; } }
+            var sd = best.B - best.A; var tt = Math.Clamp(Vec3.Dot(near - best.A, sd) / sd.LengthSq, 0, 1);
+            return (best.A + sd * tt, sd.Normalized);
+        }
+        throw new FeatureException("No reference curve selected.");
+    }
+
     /// <summary>Resolves a direction/axis to (point on axis, unit direction).</summary>
     public static (Vec3 origin, Vec3 dir) ResolveDir(DirRef r, ModelState st)
     {

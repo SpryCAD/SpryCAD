@@ -306,10 +306,12 @@
     },
     {
       "$type": "plane",
+      "mode": "Offset",
       "base": {
         "std": "Front"
       },
       "offset": "B",
+      "angle": "45",
       "flip": false,
       "id": "F4",
       "name": "Base top",

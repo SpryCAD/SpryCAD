@@ -533,9 +533,43 @@ public sealed class Regenerator
 
         void DoPlane(PlaneFeature p)
         {
-            var frame = Resolver.ResolvePlane(p.Base, State).Offset(Num(p.Offset, "Offset"));
+            if (p.Mode == PlaneMode.NormalToCurve)
+            {
+                if (p.Curve == null) throw new FeatureException("Select the curve (edge or sketch line/arc) the plane is normal to.");
+                if (p.Point == null) throw new FeatureException("Select the point on the curve (e.g. its end) the plane passes through.");
+                var (pt, n) = Resolver.CurveTangent(p.Curve, Resolver.ResolvePoint(p.Point, State), State);
+                // in-plane X axis: horizontal (perpendicular to Z) unless the curve is vertical
+                var up = Math.Abs(n.Z) < 0.9 ? Vec3.UnitZ : Vec3.UnitY;
+                var x = Vec3.Cross(up, n).Normalized;
+                var nf = new Frame(pt, x, Vec3.Cross(n, x), n);
+                State.Planes[f.Id] = p.Flip ? nf.Flipped() : nf;
+                return;
+            }
+            var frame = Resolver.ResolvePlane(p.Base, State);
+            switch (p.Mode)
+            {
+                case PlaneMode.Offset:
+                    frame = frame.Offset(Num(p.Offset, "Offset"));
+                    break;
+                case PlaneMode.ThroughPoint:
+                    if (p.Point == null) throw new FeatureException("Select a vertex or sketch point for the plane to pass through.");
+                    frame = Through(frame, Resolver.ResolvePoint(p.Point, State));
+                    break;
+                case PlaneMode.Angle:
+                    {
+                        if (p.Axis == null) throw new FeatureException("Select the axis (an edge, or X, Y or Z) to rotate the plane about.");
+                        var (o, axis) = Resolver.ResolveDir(p.Axis, State);
+                        var rot = Transform.Rotation(o, axis, Num(p.Angle, "Angle") * Math.PI / 180);
+                        frame = new Frame(rot.Point(frame.Origin), rot.Vector(frame.XDir), rot.Vector(frame.YDir), rot.Vector(frame.Normal));
+                        if (p.Point != null) frame = Through(frame, Resolver.ResolvePoint(p.Point, State));
+                        break;
+                    }
+            }
             if (p.Flip) frame = frame.Flipped();
             State.Planes[f.Id] = frame;
+
+            // same orientation, moved along the normal so the plane contains q (origin projected onto it)
+            static Frame Through(Frame fr, Vec3 q) => fr.Offset(Vec3.Dot(q - fr.Origin, fr.Normal));
         }
 
         void DoCombine(CombineFeature c)

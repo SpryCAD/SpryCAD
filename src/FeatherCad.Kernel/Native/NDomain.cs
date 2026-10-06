@@ -87,6 +87,13 @@ public sealed class NDomain
                 var mid = (UMin + UMax) / 2;
                 var shift = Math.Round((mid - uv[0].X) / (2 * Math.PI)) * 2 * Math.PI;
                 if (shift != 0) for (int i = 0; i < uv.Count; i++) uv[i] = new Vec2(uv[i].X + shift, uv[i].Y);
+                if (s.PeriodicV)
+                {
+                    // a torus is periodic in v too: a hole may come out a full turn away from the face
+                    var vmid = (VMin + VMax) / 2;
+                    var vshift = Math.Round((vmid - uv[0].Y) / (2 * Math.PI)) * 2 * Math.PI;
+                    if (vshift != 0) for (int i = 0; i < uv.Count; i++) uv[i] = new Vec2(uv[i].X, uv[i].Y + vshift);
+                }
             }
             foreach (var q in uv)
             {
