@@ -514,8 +514,13 @@ public sealed class Regenerator
                 if (!byBody.TryGetValue(b.Id, out var set)) byBody[b.Id] = set = new HashSet<string>();
                 set.Add(name);
             }
-            var bodies = State.Bodies.Select(b => byBody.TryGetValue(b.Id, out var names)
-                ? new Body { Id = b.Id, Solid = ShellOp.Apply(b.Solid, names, t, f.Id) } : b).ToList();
+            List<Body> bodies;
+            try
+            {
+                bodies = State.Bodies.Select(b => byBody.TryGetValue(b.Id, out var names)
+                    ? new Body { Id = b.Id, Solid = ShellOp.Apply(b.Solid, names, t, f.Id) } : b).ToList();
+            }
+            catch (ShellFailedException ex) { throw new FeatureException(ex.Message); }
             State = State.With(bodies);
         }
 

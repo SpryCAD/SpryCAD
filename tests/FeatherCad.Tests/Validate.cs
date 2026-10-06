@@ -12,7 +12,7 @@ static class Validate
         var doc = CadDocument.Load(file);
         var sw = System.Diagnostics.Stopwatch.StartNew();
         var r = new Regenerator().Rebuild(doc);
-        Console.WriteLine($"  rebuild {sw.ElapsedMilliseconds} ms"); sw.Restart();
+        Console.WriteLine($"  rebuild {sw.ElapsedMilliseconds} ms (last fallback: {Csg.LastFallbackReason})"); sw.Restart();
         foreach (var f in doc.Features) if (!r.Status[f.Id].Ok) Console.WriteLine($"  {f.Name}: {r.Status[f.Id].Error}");
         if (Environment.GetEnvironmentVariable("FC_EDGES") is { } en)
             foreach (var b in r.State.Bodies)

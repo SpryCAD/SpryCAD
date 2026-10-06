@@ -5,6 +5,9 @@ namespace FeatherCad.Kernel;
 /// vertex to the intersection of its offset planes, and subtracts that inner solid. Removed
 /// (open) faces are offset outward instead so the inner solid breaks through them.
 /// </summary>
+/// <summary>A shell that cannot be made, with a message for the user.</summary>
+public sealed class ShellFailedException(string message) : Exception(message);
+
 public static class ShellOp
 {
     public static Solid Apply(Solid body, ISet<string> openFaces, double thickness, string prefix)
@@ -12,13 +15,23 @@ public static class ShellOp
         if (thickness <= 0) throw new ArgumentException("Thickness must be greater than zero.");
         if (Csg.UseNative && body.Native != null)
         {
+            // exact bodies are shelled exactly or not at all: the facet method below cannot represent their
+            // curved faces and, on a failure here, only produces a slow, broken result
+            string why;
             try
             {
                 var solid = Native.NTess.ToSolid(Native.NShell.Apply(body.Native, openFaces, thickness, prefix));
                 if (!solid.IsEmpty) return solid;
-                Csg.LastFallbackReason = "shell removed everything";
+                why = "the wall thickness removes the whole part";
             }
-            catch (Exception ex) { Csg.LastFallbackReason = ex.Message; }
+            catch (Exception ex) when (ex is InvalidOperationException or Native.NBooleanException or NotSupportedException)
+            {
+                Csg.LastFallbackReason = ex.Message;
+                why = ex.Message.Contains("fillet radius")
+                    ? "the wall is as thick as a fillet or round is wide, so that fillet's inner surface vanishes. Use a thinner wall, or shell before adding the fillet"
+                    : "at this wall thickness the inner surface changes shape (a fillet, hole or other face comes closer to another face than the wall is thick). Try a thinner wall, or shell before adding fillets and chamfers";
+            }
+            throw new ShellFailedException("The shell cannot be made: " + why + ".");
         }
         var topo = body.Topology;
         int nv = topo.Vertices.Count;

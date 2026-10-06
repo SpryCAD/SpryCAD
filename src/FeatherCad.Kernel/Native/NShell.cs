@@ -8,6 +8,9 @@ namespace FeatherCad.Kernel.Native;
 /// </summary>
 public static class NShell
 {
+    /// <summary>Diagnostics (tests/tools).</summary>
+    public static Action<string>? Debug;
+
     public static NBody Apply(NBody body, ISet<string> openFaces, double thickness, string prefix)
     {
         var inner = Offset(body, f => openFaces.Contains(f.Tag.Name) ? thickness : -thickness, prefix + ".I.");
@@ -44,6 +47,7 @@ public static class NShell
         foreach (var (v, ss) in vFaces)
         {
             var p = Solve(ss, v.P, tol, out var res);
+            Debug?.Invoke($"vertex {v.P} -> {p} res {res:g2} on {string.Join(",", ss.Select(x => x.Kind))}");
             if (res > 1e-6 * scale) throw new InvalidOperationException("shell: offset corner has no solution");
             vmap[v] = new NVertex(p);
         }
@@ -115,6 +119,16 @@ public static class NShell
             pts.Add(p);
         }
         pts.Add(v1.P);
+        // a transversal (non-tangent) intersection is followed continuously from vertex to vertex instead: solving
+        // each sample on its own can jump between branches (e.g. the near and far side of a tube cut by a plane)
+        if (e.Curve is not NLine && Vec3.Cross(sa.Grad(v0.P), sb.Grad(v0.P)).Length > 1e-3)
+        {
+            var dir0 = e.Curve.Deriv(e.T0).Normalized;
+            var length = Math.Max(e.Length, Vec3.Distance(v0.P, v1.P));
+            if (March(sa, sb, v0.P, v1.P, dir0, length, scale) is { } marched) pts = marched;
+        }
+        if (sa.Kind == SurfaceKind.Pipe || sb.Kind == SurfaceKind.Pipe)
+            Debug?.Invoke($"edge {e.Curve.GetType().Name} {sa.Kind}/{sb.Kind}: " + string.Join(" ", pts.Select(p => p.ToString())));
         var fitTol = 1e-7 * scale;
 
         var cands = new List<NCurve>();
@@ -144,6 +158,46 @@ public static class NShell
         }
         var bs = BSplineCurve.Interpolate(pts, 3);
         return new NEdge(new NSpline(bs), 0, 1, v0, v1);
+    }
+
+    /// <summary>
+    /// Points along the intersection of a and b from p0 to p1, starting in direction dir0: steps along the tangent
+    /// (∇a × ∇b), projected back onto both surfaces, turning at most a few degrees per step. Null when the curve
+    /// cannot be followed to p1 (tangent surfaces, a different branch).
+    /// </summary>
+    static List<Vec3>? March(NSurface a, NSurface b, Vec3 p0, Vec3 p1, Vec3 dir0, double length, double scale)
+    {
+        Vec3? Tan(Vec3 p, Vec3 prev)
+        {
+            var t = Vec3.Cross(a.Grad(p), b.Grad(p));
+            if (t.Length < 1e-6) return null;
+            t = t.Normalized;
+            return Vec3.Dot(t, prev) < 0 ? -t : t;
+        }
+        var pts = new List<Vec3> { p0 };
+        var cur = p0;
+        if (Tan(cur, dir0) is not { } ct) return null;
+        double hmax = length / 8, hmin = length * 1e-6, h = hmax / 4, travelled = 0;
+        var tol = 1e-9 * scale;
+        for (int it = 0; it < 20000; it++)
+        {
+            if (Vec3.Distance(cur, p1) <= 1.5 * h && Vec3.Dot(p1 - cur, ct) > 0) { pts.Add(p1); return pts; }
+            var nx = NSurface.ProjectToIntersection(a, b, cur + ct * h);
+            var ok = Math.Abs(a.F_(nx)) < tol && Math.Abs(b.F_(nx)) < tol && Vec3.Dot(nx - cur, ct) > 0;
+            Vec3? nt = ok ? Tan(nx, ct) : null;
+            // small turns only: the interpolating spline through the points then follows the curve closely
+            if (nt == null || Vec3.Dot(nt.Value, ct) < Math.Cos(Math.PI / 36) || Vec3.Distance(nx, cur) > 1.5 * h)
+            {
+                h /= 2;
+                if (h < hmin) return null;
+                continue;
+            }
+            travelled += Vec3.Distance(cur, nx);
+            if (travelled > 4 * length + hmax) return null;
+            pts.Add(nx); cur = nx; ct = nt.Value;
+            if (Vec3.Dot(nt.Value, ct) > Math.Cos(Math.PI / 72)) h = Math.Min(h * 1.5, hmax);
+        }
+        return null;
     }
 
     /// <summary>Edge on curve c running through pts (from v0 to v1) with increasing parameter.</summary>

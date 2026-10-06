@@ -98,6 +98,30 @@ static class ImportTests
             t.Near(Vol(r2.State.Bodies[0].Solid), v1, 1e-6);
         });
 
+        t.Test("Shell of an exact body it cannot offset fails fast with a reason (no broken fallback)", () =>
+        {
+            // user's part: fillet (rolling ball, trimmed by a wall) then shell whose inner fillet no longer reaches the wall
+            var dir = AppContext.BaseDirectory;
+            while (dir != null && !Directory.Exists(Path.Combine(dir, "samples"))) dir = Path.GetDirectoryName(dir);
+            var path = Path.Combine(dir!, "tests", "FeatherCad.Tests", "models", "failed-shell.fcad");
+            var d = CadDocument.Load(path);
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            var r = new Regenerator().Rebuild(d);
+            t.True(sw.ElapsedMilliseconds < 8000, $"took {sw.ElapsedMilliseconds} ms");
+            var shell = d.Features.OfType<ShellFeature>().Single();
+            var st = r.Status[shell.Id];
+            t.True(!st.Ok && st.Error!.Contains("shell cannot be made"), "expected a shell error, got: " + (st.Error ?? "success"));
+            t.True(r.State.Bodies.All(b => b.Solid.Native != null && b.Solid.Topology.OpenHalfEdges == 0), "the part before the shell must stay intact");
+            // shelled before the fillet and chamfer (thinner wall), it works
+            var fs = d.Features;
+            fs.Remove(shell);
+            fs.Insert(fs.FindIndex(f => f is FilletFeature), shell);
+            shell.Thickness = "1";
+            var r2 = new Regenerator().Rebuild(d);
+            t.True(r2.Status.Values.All(s => s.Ok), string.Join("; ", r2.Status.Values.Where(s => !s.Ok).Select(s => s.Error)));
+            t.True(r2.State.Bodies.All(b => b.Solid.Native != null && b.Solid.Topology.OpenHalfEdges == 0), "shelled part not closed");
+        });
+
         t.Test("STEP import: inch documents get the geometry in inches", () =>
         {
             var (step, volume) = Exported("heat-sink.fcad");

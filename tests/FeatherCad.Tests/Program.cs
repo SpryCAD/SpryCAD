@@ -39,6 +39,8 @@ static class Program
     {
         if (Environment.GetEnvironmentVariable("FC_TOPO") != null) FeatherCad.Kernel.Topology.Debug = Console.WriteLine;
         if (Environment.GetEnvironmentVariable("FC_BLEND") != null) FeatherCad.Kernel.NativeBlend.Debug = Console.WriteLine;
+        if (Environment.GetEnvironmentVariable("FC_BOOL") != null) FeatherCad.Kernel.Native.NBoolean.Trace = Console.WriteLine;
+        if (Environment.GetEnvironmentVariable("FC_SHELL") != null) FeatherCad.Kernel.Native.NShell.Debug = Console.WriteLine;
         if (args.Length > 7 && args[0] == "fillet") return Hang.Run(args);
         if (args.Length > 2 && args[0] == "rb") return RollingBallTool.Run(args);
         if (args.Length > 1 && args[0] == "import") return ImportTool.Run(args);

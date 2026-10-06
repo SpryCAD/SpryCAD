@@ -350,9 +350,10 @@ static class CoreTests
             var dir = AppContext.BaseDirectory;
             while (dir != null && !Directory.Exists(Path.Combine(dir, "samples"))) dir = Path.GetDirectoryName(dir);
             t.True(dir != null, "samples folder");
-            foreach (var file in Directory.GetFiles(Path.Combine(dir!, "samples"), "*.fcad"))
+            // (files named Failed* are reproductions of failures, tested on their own)
+            foreach (var file in Directory.GetFiles(Path.Combine(dir!, "samples"), "*.fcad").Where(f => !Path.GetFileName(f).StartsWith("Failed")))
             {
-                var doc = CadDocument.FromJson(File.ReadAllText(file));
+                var doc = CadDocument.Load(file);
                 if (Environment.GetEnvironmentVariable("FC_TRACE") != null) FeatherCad.Kernel.Native.NBoolean.Trace = m => Console.WriteLine("T " + m);
                 var r = new Regenerator().Rebuild(doc);
                 FeatherCad.Kernel.Native.NBoolean.Trace = null;
