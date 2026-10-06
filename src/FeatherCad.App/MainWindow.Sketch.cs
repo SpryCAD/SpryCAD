@@ -94,7 +94,8 @@ public partial class MainWindow
         _sketch.Changed += OnSketchChanged;
         _sketch.SelectionChanged += BuildSketchPage;
         _sketch.Message += Status;
-        _sketch.ToolChanged += () => { UpdateToolButtons(); };
+        // the panel shows tool settings (e.g. polygon sides) for the tool in use
+        _sketch.ToolChanged += () => { UpdateToolButtons(); if (_sketch?.Selected.Count == 0) BuildSketchPage(); };
         Viewport.Mode = _sketch;
         Viewport.Hover = null;
         ShowTab("Sketch");
@@ -243,9 +244,15 @@ public partial class MainWindow
             page.Info(s, "Blue = under defined, black = fully defined, red = over defined.");
             if (ed.PointsOnly)
                 page.Info(s, "Click on the face to place hole centers. Add dimensions (Smart Dimension) to locate them, then click OK.");
+            // settings of the tool in use (a finished polygon is plain lines: its sides are set while drawing it)
+            if (ed.Tool == SketchTool.Polygon)
+            {
+                var poly = page.Section("Polygon");
+                page.Number(poly, "Sides", () => ed.PolygonSides.ToString(), v => { if (int.TryParse(v, out var n)) ed.PolygonSides = Math.Clamp(n, 3, 64); }, "polygon", "");
+                page.Info(poly, "Click the center, then a corner.");
+            }
             var t = page.Section("Tools");
             page.Info(t, "L Line · R Rectangle · C Circle · A Arc · P Point · D Smart Dimension · T Trim · Esc Select. Drag points to move geometry. Double-click a dimension to change its value.");
-            page.Number(t, "Polygon sides", () => ed.PolygonSides.ToString(), v => { if (int.TryParse(v, out var n)) ed.PolygonSides = Math.Clamp(n, 3, 64); }, "polygon", "");
             page.ButtonRow(t, "Auto Arrange Dimensions", () => AutoArrange(ed), "dimension");
             page.Info(t, "Dimension labels you place or drag stay where you put them; the others arrange themselves. Auto Arrange puts the placed ones back in the arrangement (select some dimensions first to arrange only those).");
             var m = page.Section("Model Edges");
