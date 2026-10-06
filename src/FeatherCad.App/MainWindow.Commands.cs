@@ -33,6 +33,49 @@ public partial class MainWindow
         return m;
     }
 
+    /// <summary>
+    /// A menu item for an on/off setting (<paramref name="radio"/>: one of a set of choices), marked while it is
+    /// on. The mark is read from the setting each time the menu shows, so it is right however it was changed.
+    /// </summary>
+    static MenuItem Toggle(string header, Func<bool> isOn, Action click, bool radio = false)
+    {
+        // drawn in the icon spot as the app's check boxes / radio buttons look, so the kind of control and its
+        // state show at a glance, unchecked too (a menu's own check mark shows nothing when off)
+        // the theme's own check box colors (they follow the system accent), so these match the app's check boxes
+        static Avalonia.Media.IBrush Theme(string key, Avalonia.Media.IBrush fallback)
+            => Application.Current is { } app && app.TryGetResource(key, app.ActualThemeVariant, out var r) && r is Avalonia.Media.IBrush b ? b : fallback;
+        var accent = Theme("CheckBoxCheckBackgroundFillChecked", new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.FromRgb(60, 60, 60)));
+        var glyph = Theme("CheckBoxCheckGlyphForegroundChecked", Avalonia.Media.Brushes.White);
+        var offBorder = Theme("CheckBoxCheckBackgroundStrokeUnchecked", Avalonia.Media.Brushes.Gray);
+        var offFill = Theme("CheckBoxCheckBackgroundFillUnchecked", Avalonia.Media.Brushes.White);
+        var mark = new Avalonia.Controls.Shapes.Path
+        {
+            Data = Avalonia.Media.Geometry.Parse(radio ? "M 3,6 A 3,3 0 1 1 9,6 A 3,3 0 1 1 3,6 Z" : "M 2.5,6.5 L 5,9 L 9.5,3.5"),
+            Stroke = radio ? null : glyph, StrokeThickness = 1.8,
+            Fill = radio ? accent : null,
+            HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center, VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
+        };
+        var box = new Border
+        {
+            Width = 14, Height = 14, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(radio ? 7 : 3),
+            Child = new Avalonia.Controls.Viewbox { Width = 12, Height = 12, Child = new Canvas { Width = 12, Height = 12, Children = { mark } } },
+        };
+        var m = new MenuItem { Header = header, Icon = box };
+        void Sync()
+        {
+            var on = isOn();
+            mark.IsVisible = on;
+            box.BorderBrush = on ? accent : offBorder;
+            box.Background = on && !radio ? accent : offFill;
+        }
+        Sync();
+        m.AttachedToVisualTree += (_, _) => Sync();
+        m.Click += (_, _) => { click(); Sync(); };
+        return m;
+    }
+
+    MenuItem StyleItem(string header, DisplayStyle s) => Toggle(header, () => Viewport.Style == s, () => SetStyle(s), radio: true);
+
     static MenuItem Sub(string header, params object[] items)
     {
         var m = new MenuItem { Header = header };
@@ -107,15 +150,15 @@ public partial class MainWindow
             Item("Zoom to _Fit", () => Viewport.ZoomToFit(), "F", "fit"),
             "-",
             Sub("_Display Style",
-                Item("Shaded With Edges", () => SetStyle(DisplayStyle.ShadedWithEdges)),
-                Item("Shaded", () => SetStyle(DisplayStyle.Shaded)),
-                Item("Hidden Lines Visible", () => SetStyle(DisplayStyle.HiddenLinesVisible)),
-                Item("Wireframe", () => SetStyle(DisplayStyle.Wireframe))),
-            Item("Perspective", () => { Viewport.Camera.Perspective = !Viewport.Camera.Perspective; Viewport.Redraw(); }),
+                StyleItem("Shaded With Edges", DisplayStyle.ShadedWithEdges),
+                StyleItem("Shaded", DisplayStyle.Shaded),
+                StyleItem("Hidden Lines Visible", DisplayStyle.HiddenLinesVisible),
+                StyleItem("Wireframe", DisplayStyle.Wireframe)),
+            Toggle("Perspective", () => Viewport.Camera.Perspective, () => { Viewport.Camera.Perspective = !Viewport.Camera.Perspective; Viewport.Redraw(); }),
             "-",
-            Item("Planes", TogglePlanes, null, "planes"),
-            Item("Origins", () => { Viewport.ShowOrigin = !Viewport.ShowOrigin; Viewport.Redraw(); }, null, "origin"),
-            Item("Sketch Relations", () => { if (_sketch != null) { _sketch.ShowRelations = !_sketch.ShowRelations; _sketch.UpdateOverlay(Viewport); } })));
+            Toggle("Planes", () => _showPlanes, TogglePlanes),
+            Toggle("Origins", () => Viewport.ShowOrigin, () => { Viewport.ShowOrigin = !Viewport.ShowOrigin; Viewport.Redraw(); }),
+            Toggle("Sketch Relations", () => _sketch?.ShowRelations ?? true, () => { if (_sketch != null) { _sketch.ShowRelations = !_sketch.ShowRelations; _sketch.UpdateOverlay(Viewport); } })));
         MainMenu.Items.Add(Sub("_Insert",
             Item("_Sketch", () => StartSketchCommand(), null, "sketch"),
             "-",
@@ -349,10 +392,10 @@ public partial class MainWindow
         H("normalto", "Normal To (Ctrl+8)", NormalTo);
         var disp = H("display", "Display Style", () => { });
         var df = new MenuFlyout();
-        df.Items.Add(Item("Shaded With Edges", () => SetStyle(DisplayStyle.ShadedWithEdges)));
-        df.Items.Add(Item("Shaded", () => SetStyle(DisplayStyle.Shaded)));
-        df.Items.Add(Item("Hidden Lines Visible", () => SetStyle(DisplayStyle.HiddenLinesVisible)));
-        df.Items.Add(Item("Wireframe", () => SetStyle(DisplayStyle.Wireframe)));
+        df.Items.Add(StyleItem("Shaded With Edges", DisplayStyle.ShadedWithEdges));
+        df.Items.Add(StyleItem("Shaded", DisplayStyle.Shaded));
+        df.Items.Add(StyleItem("Hidden Lines Visible", DisplayStyle.HiddenLinesVisible));
+        df.Items.Add(StyleItem("Wireframe", DisplayStyle.Wireframe));
         disp.Flyout = df;
         H("planes", "Hide/Show Planes", TogglePlanes);
     }

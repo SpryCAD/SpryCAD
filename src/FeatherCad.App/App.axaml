@@ -3,7 +3,13 @@
              x:Class="FeatherCad.App.App"
              RequestedThemeVariant="Light">
   <Application.Styles>
-    <FluentTheme DensityStyle="Compact" />
+    <!-- a fixed accent (check boxes, radio buttons, focus lines, list selections) rather than the system's, so the
+         app looks the same on every PC; the menu check boxes (MainWindow.Commands.cs) take it from here too -->
+    <FluentTheme DensityStyle="Compact">
+      <FluentTheme.Palettes>
+        <ColorPaletteResources x:Key="Light" Accent="#FF3D3D3D" />
+      </FluentTheme.Palettes>
+    </FluentTheme>
     <StyleInclude Source="avares://FeatherCAD/UI/Styles.axaml" />
   </Application.Styles>
 </Application>

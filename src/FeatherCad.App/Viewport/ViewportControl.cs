@@ -372,13 +372,44 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
     public (Vec3 dir, Rgba color)? AxisPreview { get => _axisPreview; set { _axisPreview = value; Redraw(); } }
     (Vec3 dir, Rgba color)? _axisPreview;
 
-    /// <summary>The axis line through the origin across the model, with an arrow at its positive end.</summary>
+    /// <summary>
+    /// The axis line through the origin, as long as the model is along it, clipped to what is on screen (so the
+    /// arrow at its positive end is always in view); nothing when the axis does not cross the view.
+    /// </summary>
     void DrawAxisPreview(DynamicGeometry g, Vec3 dir, Rgba color)
     {
+        // along the axis: as far as the model reaches (its box corners), and a little more
         var b = SceneBounds();
-        var len = b.IsEmpty ? 100 : b.Diagonal * 0.6 + b.Center.Length;
-        var tip = dir * len;
-        g.Line(-tip, tip, color, top: true);
+        double len = 50;
+        if (!b.IsEmpty)
+            for (int i = 0; i < 8; i++)
+            {
+                var c = new Vec3((i & 1) == 0 ? b.Min.X : b.Max.X, (i & 2) == 0 ? b.Min.Y : b.Max.Y, (i & 4) == 0 ? b.Min.Z : b.Max.Z);
+                len = Math.Max(len, Math.Abs(Vec3.Dot(c, dir)) * 1.1);
+            }
+        // the part of [-len, len] on screen (20 px in from the edges): sampled, then each end refined
+        const double margin = 20;
+        bool OnScreen(double t)
+        {
+            if (Camera.Perspective && Camera.DepthOf(dir * t) <= 0) return false; // behind the eye
+            var s = Camera.Project(dir * t);
+            return s.Z > -1 && s.Z < 1 && s.X >= margin && s.X <= Camera.Width - margin && s.Y >= margin && s.Y <= Camera.Height - margin;
+        }
+        const int samples = 64;
+        int first = -1, last = -1;
+        for (int i = 0; i <= samples; i++)
+            if (OnScreen(-len + 2 * len * i / samples)) { if (first < 0) first = i; last = i; }
+        if (first < 0) return;
+        double Refine(double inside, double outside)
+        {
+            for (int k = 0; k < 20; k++) { var m = (inside + outside) / 2; if (OnScreen(m)) inside = m; else outside = m; }
+            return inside;
+        }
+        double T(int i) => -len + 2 * len * i / samples;
+        var t0 = first > 0 ? Refine(T(first), T(first - 1)) : T(first);
+        var t1 = last < samples ? Refine(T(last), T(last + 1)) : T(last);
+        var tip = dir * t1;
+        g.Line(dir * t0, tip, color, top: true);
         var s = Camera.PixelSize * 12;
         var n = Vec3.Cross(dir, Camera.V(Camera.Back));
         n = n.Length > 1e-9 ? n.Normalized : dir.AnyPerpendicular();
