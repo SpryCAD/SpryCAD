@@ -4,7 +4,7 @@ Fast, lightweight, open-source **parametric 3D CAD** with a SolidWorks-style wor
 Pure C# — its own B-rep geometry kernel, an Avalonia UI and an OpenGL viewport — so it runs
 natively on **Windows, Linux and macOS** with no browser, no Electron and no native CAD kernel to install.
 
-![workflow](docs/workflow.png)
+![workflow](docs/mainwindow.png)
 
 ## Highlights
 
