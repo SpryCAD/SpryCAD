@@ -15,6 +15,9 @@ public sealed class NurbsSurface
     public double[,]? W { get; }
     public double[] U { get; }
     public double[] V { get; }
+    /// <summary>Number of non-empty knot spans in u / v.</summary>
+    public int SpansU => U.Skip(Pu).Take(U.Length - 2 * Pu).Distinct().Count() - 1;
+    public int SpansV => V.Skip(Pv).Take(V.Length - 2 * Pv).Distinct().Count() - 1;
     public double U0 => U[Pu];
     public double U1 => U[^(Pu + 1)];
     public double V0 => V[Pv];

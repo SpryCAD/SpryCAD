@@ -161,9 +161,16 @@ public static class NTess
                 return Spacing(s.Base!, tol);
             case SurfaceKind.BSpline:
                 {
-                    var rho = Math.Min(s.Nurbs!.MinCurvatureRadius(), 1e6);
-                    var h = Ang(rho) * rho;
-                    return (Math.Max(h, 1e-6), Math.Max(h, 1e-6));
+                    // one grid cell per knot span (the surface is a single polynomial piece in each); the refinement
+                    // below then adds points only where the surface really curves away from the facets. (A uniform
+                    // grid sized for the tightest bend would fill large flat areas of the same face with tiny facets.)
+                    var nb = s.Nurbs!;
+                    var (su, sv) = MetricScale(s);
+                    var rho = Math.Min(nb.MinCurvatureRadius(), 1e6);
+                    var hc = Ang(rho) * rho;
+                    var hu = Math.Max(hc, (nb.U1 - nb.U0) * su / Math.Max(1, nb.SpansU));
+                    var hv = Math.Max(hc, (nb.V1 - nb.V0) * sv / Math.Max(1, nb.SpansV));
+                    return (Math.Max(hu, 1e-6), Math.Max(hv, 1e-6));
                 }
             case SurfaceKind.Pipe:
                 {

@@ -189,6 +189,20 @@ public sealed class DisplayMesh
         var pos = new List<float>(); var nrm = new List<float>(); var idxOut = new List<int>();
         var byFacet = tris.GroupBy(t => t.face).ToDictionary(g => g.Key, g => g.ToList());
         var order = Enumerable.Range(0, nf).OrderBy(i => solid.Faces[i].Tag.Name, StringComparer.Ordinal).ToList();
+        // smooth normals of curved faces: once per vertex of each face (a vertex is shared by ~6 triangles), faces
+        // in parallel (on free-form surfaces each normal is a closest-point search)
+        var normals = new Dictionary<int, Vec3>[nf];
+        Parallel.For(0, nf, fi =>
+        {
+            var f = solid.Faces[fi];
+            if (!f.Tag.Surface.IsCurved || !byFacet.TryGetValue(fi, out var list)) return;
+            var d = new Dictionary<int, Vec3>();
+            var fn = f.Plane.Normal;
+            foreach (var (a, b, c, _) in list)
+                foreach (var k in new[] { a, b, c })
+                    if (!d.ContainsKey(k)) d[k] = f.Tag.Surface.NormalAt(pts[k], fn);
+            normals[fi] = d;
+        });
         string? curName = null; int curStart = 0; SurfaceDef? curSurf = null; Plane? curPlane = null; var curBox = Box3.Empty;
         void Flush()
         {
@@ -207,15 +221,17 @@ public sealed class DisplayMesh
             if (!byFacet.TryGetValue(fi, out var list)) continue;
             var fn = f.Plane.Normal;
             var curved = f.Tag.Surface.IsCurved;
+            var fnorm = normals[fi];
             foreach (var (a, b, c, _) in list)
             {
                 var pa = pts[a]; var pb = pts[b]; var pc = pts[c];
                 vol += Vec3.Dot(pa, Vec3.Cross(pb, pc));
-                foreach (var p in new[] { pa, pb, pc })
+                foreach (var k in new[] { a, b, c })
                 {
+                    var p = pts[k];
                     idxOut.Add(pos.Count / 3);
                     pos.Add((float)p.X); pos.Add((float)p.Y); pos.Add((float)p.Z);
-                    var n = curved ? f.Tag.Surface.NormalAt(p, fn) : fn;
+                    var n = curved && fnorm != null ? fnorm[k] : fn;
                     nrm.Add((float)n.X); nrm.Add((float)n.Y); nrm.Add((float)n.Z);
                     curBox.Add(p);
                     m.Bounds.Add(p);

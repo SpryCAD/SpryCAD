@@ -44,6 +44,28 @@ static class Program
         if (args.Length > 7 && args[0] == "fillet") return Hang.Run(args);
         if (args.Length > 2 && args[0] == "rb") return RollingBallTool.Run(args);
         if (args.Length > 1 && args[0] == "import") return ImportTool.Run(args);
+        if (args.Length > 1 && args[0] == "loadtime")
+        {
+            // what opening a STEP file in the app costs: rebuild of the importing part, then the display mesh
+            foreach (var file in args.Skip(1))
+                for (int run = 0; run < 3; run++)
+                {
+                    var data = File.ReadAllBytes(file);
+                    var doc = new FeatherCad.Core.Model.CadDocument();
+                    doc.AddFile("imports/m.step", data);
+                    doc.AddFeature(new FeatherCad.Core.Model.ImportFeature { File = "imports/m.step", Sha256 = FeatherCad.Core.Model.DocumentContainer.Hash(data) + run });
+                    var sw = System.Diagnostics.Stopwatch.StartNew();
+                    var r = new FeatherCad.Core.Regen.Regenerator().Rebuild(doc);
+                    var t1 = sw.ElapsedMilliseconds;
+                    var tris = 0;
+                    FeatherCad.Kernel.Prof.Reset(); FeatherCad.Kernel.Prof.Enabled = run == 2;
+                    foreach (var b in r.State.Bodies) tris += b.Mesh.Indices.Length / 3;
+                    if (run == 2) foreach (var (pn, pms, calls) in FeatherCad.Kernel.Prof.Results().OrderByDescending(x => x.ms).Take(10)) Console.WriteLine($"    {pn,-26} {pms,8:0} ms x{calls}");
+                    FeatherCad.Kernel.Prof.Enabled = false;
+                    Console.WriteLine($"{Path.GetFileName(file),-24} run {run}: rebuild {t1} ms, display mesh {sw.ElapsedMilliseconds - t1} ms ({tris} triangles)");
+                }
+            return 0;
+        }
         if (args.Length > 1 && args[0] == "nurbsprobe")
         {
             var res = FeatherCad.Kernel.StepImport.Read(File.ReadAllBytes(args[1]), "F1.");
