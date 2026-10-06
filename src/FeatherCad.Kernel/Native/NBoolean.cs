@@ -924,6 +924,18 @@ public sealed class NBoolean
         bool Copy(NEdge e) => f.Coedges.Any(c => (ReferenceEquals(c.Edge.V0, e.V0) && ReferenceEquals(c.Edge.V1, e.V1) || ReferenceEquals(c.Edge.V0, e.V1) && ReferenceEquals(c.Edge.V1, e.V0))
             && !e.Closed && Vec3.Distance(c.Edge.Mid, e.Mid) < Math.Max(_onTol * 4, Math.Max(FitTol(e.Curve), FitTol(c.Edge.Curve)) * 4));
         secs = secs.Where(e => !boundaryEdges.Contains(e) && !Copy(e)).ToList();
+        // the same curve twice among the sections (an edge of the other body and the traced intersection with one of
+        // its faces): one splits the face, sewing joins the other to it
+        for (int i = secs.Count - 1; i > 0; i--)
+        {
+            var e = secs[i];
+            for (int j = 0; j < i; j++)
+            {
+                var o = secs[j];
+                if (e.Closed || !(ReferenceEquals(o.V0, e.V0) && ReferenceEquals(o.V1, e.V1) || ReferenceEquals(o.V0, e.V1) && ReferenceEquals(o.V1, e.V0))) continue;
+                if (Vec3.Distance(o.Mid, e.Mid) < Math.Max(_onTol * 4, Math.Max(FitTol(e.Curve), FitTol(o.Curve)) * 4)) { secs.RemoveAt(i); break; }
+            }
+        }
         // prune dangling section edges (an end not connected to anything else)
         var vertexDeg = new Dictionary<NVertex, int>(ReferenceEqualityComparer.Instance);
         void Inc(NVertex v) => vertexDeg[v] = vertexDeg.GetValueOrDefault(v) + 1;
@@ -1332,7 +1344,7 @@ public sealed class NBoolean
                 for (int j = i + 1; j < l.Count; j++)
                 {
                     if (replace.ContainsKey(l[j])) continue;
-                    if (Vec3.Distance(l[i].Mid, l[j].Mid) > _onTol * 4) continue;
+                    if (Vec3.Distance(l[i].Mid, l[j].Mid) > Math.Max(_onTol * 4, Math.Max(FitTol(l[i].Curve), FitTol(l[j].Curve)) * 4)) continue;
                     var flip = !ReferenceEquals(l[i].V0, l[j].V0) || (l[i].Closed && Vec3.Dot(l[i].Curve.Deriv(l[i].T0), l[j].Curve.Deriv(l[j].T0)) < 0);
                     replace[l[j]] = (l[i], flip);
                     break;
