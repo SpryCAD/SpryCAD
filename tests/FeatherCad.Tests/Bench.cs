@@ -10,7 +10,7 @@ static class Bench
 {
     public static void Run(string file, int runs)
     {
-        var json = File.ReadAllText(file);
+        var json = CadDocument.Load(file).ToJson(); // plain or container
         Console.WriteLine($"bench {Path.GetFileName(file)}");
         var times = new List<double>();
         var tessTimes = new List<double>();
@@ -106,7 +106,7 @@ static class Bench
     /// </summary>
     public static void Repro(string file, string feature, string prop, string value)
     {
-        var doc = CadDocument.FromJson(File.ReadAllText(file));
+        var doc = CadDocument.Load(file);
         var f = doc.Features.First(x => x.Name == feature);
         f.GetType().GetProperty(prop)!.SetValue(f, value);
         var log = new List<string>();

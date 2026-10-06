@@ -38,6 +38,17 @@ public static class DocumentContainer
 
     public static string Hash(byte[] data) => Convert.ToHexString(SHA256.HashData(data)).ToLowerInvariant();
 
+    /// <summary>
+    /// The preview image saved in containers (and shown by Explorer as the file's thumbnail): the solid bodies of
+    /// a rebuild, in the part's color. Null when there is nothing solid to show.
+    /// </summary>
+    public static byte[]? RenderThumbnail(CadDocument doc, Regen.RegenResult? result)
+    {
+        var bodies = result?.State.Bodies;
+        if (bodies == null || bodies.Count == 0) return null;
+        return Kernel.Thumbnail.Render(bodies.Select(b => (b.Mesh, doc.Color)));
+    }
+
     public static void Save(CadDocument doc, string path, bool container)
     {
         foreach (var name in doc.Files.Keys) CheckName(name);

@@ -87,12 +87,7 @@ public sealed class DocumentSession
     /// <summary>Preview of the last rebuilt part (null before the first rebuild or when it fails).</summary>
     public byte[]? RenderThumbnail()
     {
-        try
-        {
-            var bodies = Result?.State.Bodies;
-            if (bodies == null || bodies.Count == 0) return null;
-            return Kernel.Thumbnail.Render(bodies.Select(b => (b.Mesh, Doc.Color)));
-        }
+        try { return DocumentContainer.RenderThumbnail(Doc, Result); }
         catch { return null; } // a preview is never worth failing a save
     }
 

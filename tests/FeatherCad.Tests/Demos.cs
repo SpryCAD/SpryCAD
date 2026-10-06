@@ -181,6 +181,25 @@ static class Demos
         return worst;
     }
 
+    /// <summary>
+    /// <c>-- containerize &lt;file or folder&gt;...</c>: rebuilds parts and saves each in place as a container with
+    /// its preview image (the content is unchanged). Folders: their *.fcad files, not subfolders.
+    /// </summary>
+    public static int Containerize(IEnumerable<string> paths)
+    {
+        int bad = 0;
+        foreach (var path in paths.SelectMany(p => Directory.Exists(p) ? Directory.GetFiles(p, "*.fcad").Order() : new[] { p }.AsEnumerable()))
+        {
+            var doc = CadDocument.Load(path);
+            var r = new Regenerator().Rebuild(doc);
+            doc.Thumbnail = DocumentContainer.RenderThumbnail(doc, r) ?? doc.Thumbnail;
+            doc.Save(path, container: true);
+            Console.WriteLine($"{path}: container{(doc.Thumbnail != null ? " with preview" : ", NO PREVIEW (nothing solid)")}");
+            if (doc.Thumbnail == null) bad++;
+        }
+        return bad == 0 ? 0 : 1;
+    }
+
     public static int Write(string dir)
     {
         Directory.CreateDirectory(dir);
@@ -188,8 +207,10 @@ static class Demos
         foreach (var (file, build) in All)
         {
             var doc = build();
-            File.WriteAllText(Path.Combine(dir, file), doc.ToJson());
             var r = new Regenerator().Rebuild(doc);
+            // a container with its preview, as the app saves parts (Explorer shows it as the thumbnail)
+            doc.Thumbnail = DocumentContainer.RenderThumbnail(doc, r);
+            doc.Save(Path.Combine(dir, file), container: true);
             Console.WriteLine($"{file}: {doc.Features.Count} features, {r.Milliseconds:0} ms");
             foreach (var f in doc.Features)
                 if (!r.Status[f.Id].Ok || r.Status[f.Id].Warnings.Count > 0)

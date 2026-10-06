@@ -328,7 +328,7 @@ static class CoreTests
             };
             foreach (var (file, budget) in cases)
             {
-                var json = File.ReadAllText(file);
+                var json = CadDocument.Load(file).ToJson(); // samples are containers
                 double best = double.MaxValue;
                 for (int i = 0; i < 6; i++)
                 {

@@ -13,7 +13,7 @@ static class Hang
 {
     public static int Run(string[] a)
     {
-        var doc = CadDocument.FromJson(File.ReadAllText(a[1]));
+        var doc = CadDocument.Load(a[1]);
         double D(int i) => double.Parse(a[i], System.Globalization.CultureInfo.InvariantCulture);
         var timeout = a.Length > 8 ? D(8) : 30;
         doc.AddFeature(new FilletFeature { Radius = a[7], Edges = { new EdgeRef { A = a[2], B = a[3], Hint = new Vec3(D(4), D(5), D(6)) } } });
