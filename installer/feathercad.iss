@@ -16,6 +16,7 @@
 #define AppName "FeatherCAD"
 #define AppExe "FeatherCAD.exe"
 #define ProgId "FeatherCAD.Part"
+#define StepProgId "FeatherCAD.Step"
 ; Explorer thumbnail handler (shell\FeatherCadThumbs, built by build\make-thumbs.ps1): its COM class id
 #define ThumbClsid "{{7176CCFF-2CCE-451E-BDB2-EFD093B1801B}"
 #define ThumbDll "FeatherCadThumbs.dll"
@@ -51,6 +52,7 @@ CloseApplications=yes
 [Tasks]
 Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Additional shortcuts:"; Flags: unchecked
 Name: "associate"; Description: "Open .fcad &part files with FeatherCAD"; GroupDescription: "File types:"
+Name: "stepopenwith"; Description: "Offer FeatherCAD in ""Open with"" for &STEP files (.step, .stp)"; GroupDescription: "File types:"
 
 [Files]
 Source: "..\publish\win-x64\*"; DestDir: "{app}"; Excludes: "{#ThumbDll}"; Flags: recursesubdirs ignoreversion
@@ -76,6 +78,15 @@ Root: HKA; Subkey: "Software\Classes\{#ProgId}"; ValueType: string; ValueName: "
 Root: HKA; Subkey: "Software\Classes\{#ProgId}\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\{#AppExe},0"; Tasks: associate
 Root: HKA; Subkey: "Software\Classes\{#ProgId}\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExe}"" ""%1"""; Tasks: associate
 Root: HKA; Subkey: "Software\Classes\Applications\{#AppExe}\SupportedTypes"; ValueType: string; ValueName: ".fcad"; ValueData: ""; Flags: uninsdeletekey
+; STEP files: FeatherCAD is offered under "Open with" (it imports the model into a new part), without taking over
+; the default program another CAD package may own; the user can still pick FeatherCAD and "Always" there.
+Root: HKA; Subkey: "Software\Classes\{#StepProgId}"; ValueType: string; ValueName: ""; ValueData: "STEP Model"; Flags: uninsdeletekey; Tasks: stepopenwith
+Root: HKA; Subkey: "Software\Classes\{#StepProgId}\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\{#AppExe},0"; Tasks: stepopenwith
+Root: HKA; Subkey: "Software\Classes\{#StepProgId}\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExe}"" ""%1"""; Tasks: stepopenwith
+Root: HKA; Subkey: "Software\Classes\.step\OpenWithProgids"; ValueType: string; ValueName: "{#StepProgId}"; ValueData: ""; Flags: uninsdeletevalue; Tasks: stepopenwith
+Root: HKA; Subkey: "Software\Classes\.stp\OpenWithProgids"; ValueType: string; ValueName: "{#StepProgId}"; ValueData: ""; Flags: uninsdeletevalue; Tasks: stepopenwith
+Root: HKA; Subkey: "Software\Classes\Applications\{#AppExe}\SupportedTypes"; ValueType: string; ValueName: ".step"; ValueData: ""; Tasks: stepopenwith
+Root: HKA; Subkey: "Software\Classes\Applications\{#AppExe}\SupportedTypes"; ValueType: string; ValueName: ".stp"; ValueData: ""; Tasks: stepopenwith
 ; Explorer thumbnails: the preview image saved inside container parts (plain JSON parts keep the icon)
 Root: HKA; Subkey: "Software\Classes\CLSID\{#ThumbClsid}"; ValueType: string; ValueName: ""; ValueData: "FeatherCAD Thumbnail Handler"; Flags: uninsdeletekey; Tasks: associate
 Root: HKA; Subkey: "Software\Classes\CLSID\{#ThumbClsid}\InprocServer32"; ValueType: string; ValueName: ""; ValueData: "{app}\{#ThumbDll}"; Tasks: associate
