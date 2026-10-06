@@ -63,6 +63,7 @@ static class Program
             Console.WriteLine("Native");
             NativeTests.Run(t);
             RollingBallTool.Tests(t);
+            ContainerTests.Run(t);
             NativeBoolTests.Run(t);
             NativeRevolveTests.Run(t);
             Console.WriteLine("Core");

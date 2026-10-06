@@ -8,8 +8,10 @@ namespace FeatherCad.Core.Model;
 public enum UnitSystem { MMGS, IPS }
 
 /// <summary>
-/// The native part document. Serialized as human-readable JSON (*.fcad) holding the full
-/// parametric history: equations, sketches with constraints, and features.
+/// The native part document: the full parametric history (equations, sketches with constraints, features).
+/// A *.fcad file is either plain, human-readable JSON, or — when the part embeds other files (e.g. an imported
+/// STEP model) or the user prefers it — a ZIP container holding that same JSON as <c>model.json</c>, the
+/// embedded files under <c>attachments/</c> and a <c>thumbnail.png</c> preview. Both open the same way.
 /// </summary>
 public sealed class CadDocument
 {
@@ -27,6 +29,17 @@ public sealed class CadDocument
     public Dictionary<string, int> NameCounters { get; set; } = new();
     /// <summary>Part appearance (RGB 0-1).</summary>
     public double[] Color { get; set; } = { 0.74, 0.76, 0.80 };
+    /// <summary>
+    /// Index of the embedded files (name, size, SHA-256), written by <see cref="Save"/>; null when there are none.
+    /// It keeps model.json self-describing (and a changed attachment visible in a diff).
+    /// </summary>
+    public List<AttachmentInfo>? Attachments { get; set; }
+
+    /// <summary>Embedded files by name (e.g. "imports/bracket.step"); saved in the container, not in the JSON.</summary>
+    [JsonIgnore] public Dictionary<string, byte[]> Files { get; set; } = new(StringComparer.Ordinal);
+
+    /// <summary>Preview image (PNG) stored in containers.</summary>
+    [JsonIgnore] public byte[]? Thumbnail { get; set; }
 
     public Feature? Find(string id) => Features.FirstOrDefault(f => f.Id == id);
     public int IndexOf(string id) => Features.FindIndex(f => f.Id == id);
@@ -101,10 +114,41 @@ public sealed class CadDocument
         return d;
     }
 
-    public CadDocument Clone() => FromJson(ToJson());
+    /// <summary>Deep copy of the history; embedded files and thumbnail are shared (they are never modified in place).</summary>
+    public CadDocument Clone()
+    {
+        var d = FromJson(ToJson());
+        d.Files = new Dictionary<string, byte[]>(Files, StringComparer.Ordinal);
+        d.Thumbnail = Thumbnail;
+        return d;
+    }
 
-    public void Save(string path) => File.WriteAllText(path, ToJson());
-    public static CadDocument Load(string path) => FromJson(File.ReadAllText(path));
+    /// <summary>Embeds (or replaces) a file. Names are relative paths with forward slashes ("imports/part.step").</summary>
+    public void AddFile(string name, byte[] content)
+    {
+        DocumentContainer.CheckName(name);
+        Files[name] = content;
+    }
+
+    /// <summary>
+    /// Saves the part: plain JSON, or a container when it has embedded files or <paramref name="container"/> is set.
+    /// Written to a temporary file first, so a failed save never destroys the previous version.
+    /// </summary>
+    public void Save(string path, bool container = false) => DocumentContainer.Save(this, path, container);
+
+    /// <summary>Loads plain JSON or container files.</summary>
+    public static CadDocument Load(string path) => DocumentContainer.Load(path);
+
+    /// <summary>Whether the file is a container (ZIP) rather than plain JSON.</summary>
+    public static bool IsContainer(string path) => DocumentContainer.IsContainer(path);
+}
+
+/// <summary>An embedded file as listed in model.json.</summary>
+public sealed class AttachmentInfo
+{
+    public string Name { get; set; } = "";
+    public long Size { get; set; }
+    public string Sha256 { get; set; } = "";
 }
 
 public static class Serialization

@@ -62,9 +62,31 @@ public sealed class DocumentSession
 
     public void Save(string path)
     {
-        Doc.Save(path);
+        var container = UserSettings.SaveContainer || Doc.Files.Count > 0;
+        if (container) Doc.Thumbnail = RenderThumbnail() ?? Doc.Thumbnail;
+        Doc.Save(path, container);
         FilePath = path; Dirty = false;
         DocumentChanged?.Invoke();
+    }
+
+    /// <summary>Preview of the last rebuilt part (null before the first rebuild or when it fails).</summary>
+    public byte[]? RenderThumbnail()
+    {
+        try
+        {
+            var bodies = Result?.State.Bodies;
+            if (bodies == null || bodies.Count == 0) return null;
+            return Kernel.Thumbnail.Render(bodies.Select(b => (b.Mesh, Doc.Color)));
+        }
+        catch { return null; } // a preview is never worth failing a save
+    }
+
+    /// <summary>Replaces the document with a snapshot; embedded files are kept (snapshots hold only the JSON).</summary>
+    void Restore(string json)
+    {
+        var files = Doc.Files; var thumb = Doc.Thumbnail;
+        Doc = CadDocument.FromJson(json);
+        Doc.Files = files; Doc.Thumbnail = thumb;
     }
 
     /// <summary>Call before mutating the document; records an undo snapshot.</summary>
@@ -100,7 +122,7 @@ public sealed class DocumentSession
     {
         if (_undo.Count == 0) return;
         _redo.Add(Doc.ToJson());
-        Doc = CadDocument.FromJson(_undo[^1]);
+        Restore(_undo[^1]);
         _undo.RemoveAt(_undo.Count - 1);
         Dirty = true;
         DocumentChanged?.Invoke();
@@ -111,7 +133,7 @@ public sealed class DocumentSession
     {
         if (_redo.Count == 0) return;
         _undo.Add(Doc.ToJson());
-        Doc = CadDocument.FromJson(_redo[^1]);
+        Restore(_redo[^1]);
         _redo.RemoveAt(_redo.Count - 1);
         Dirty = true;
         DocumentChanged?.Invoke();
@@ -121,7 +143,7 @@ public sealed class DocumentSession
     /// <summary>Drops the last undo snapshot (used when a change was cancelled).</summary>
     public void CancelChange(string snapshotJson)
     {
-        Doc = CadDocument.FromJson(snapshotJson);
+        Restore(snapshotJson);
         if (_undo.Count > 0) _undo.RemoveAt(_undo.Count - 1);
         DocumentChanged?.Invoke();
         RequestRebuild();

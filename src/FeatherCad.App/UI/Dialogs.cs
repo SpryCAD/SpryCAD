@@ -220,6 +220,7 @@ public static class Dialogs
         var units = new ComboBox { ItemsSource = new[] { "MMGS (millimeter, gram, second)", "IPS (inch, pound, second)" }, SelectedIndex = s.Doc.Units == UnitSystem.IPS ? 1 : 0, HorizontalAlignment = HorizontalAlignment.Stretch };
         var wheel = new CheckBox { Content = "Reverse mouse wheel zoom direction", IsChecked = owner.Viewport.ReverseWheel };
         var persp = new CheckBox { Content = "Perspective view", IsChecked = owner.Viewport.Camera.Perspective };
+        var container = new CheckBox { Content = "Always save parts as containers (with a preview image)", IsChecked = Session.UserSettings.SaveContainer };
         var color = new TextBox { Text = string.Join(", ", s.Doc.Color.Select(c => ((int)(c * 255)).ToString())) };
         var ok = new Button { Content = "OK", IsDefault = true };
         var cancel = new Button { Content = "Cancel", IsCancel = true };
@@ -231,6 +232,9 @@ public static class Dialogs
         sp.Children.Add(color);
         sp.Children.Add(new TextBlock { Text = "View", FontWeight = FontWeight.SemiBold });
         sp.Children.Add(wheel); sp.Children.Add(persp);
+        sp.Children.Add(new TextBlock { Text = "Files", FontWeight = FontWeight.SemiBold });
+        sp.Children.Add(container);
+        sp.Children.Add(new TextBlock { Text = "Otherwise parts are saved as plain JSON, unless they embed other files (e.g. an imported model). Either kind opens normally.", FontSize = 11, Foreground = Brushes.DimGray, TextWrapping = TextWrapping.Wrap });
         sp.Children.Add(Buttons(ok, cancel));
         var w = MakeWindow("Options", sp, 420);
         ok.Click += (_, _) =>
@@ -240,6 +244,7 @@ public static class Dialogs
             owner.Viewport.Camera.Perspective = persp.IsChecked == true;
             Session.UserSettings.ReverseWheel = owner.Viewport.ReverseWheel;
             Session.UserSettings.Perspective = owner.Viewport.Camera.Perspective;
+            Session.UserSettings.SaveContainer = container.IsChecked == true;
             Session.UserSettings.Save();
             var newUnits = units.SelectedIndex == 1 ? UnitSystem.IPS : UnitSystem.MMGS;
             var parts = (color.Text ?? "").Split(',').Select(p => double.TryParse(p.Trim(), out var v) ? Math.Clamp(v / 255, 0, 1) : -1).ToArray();

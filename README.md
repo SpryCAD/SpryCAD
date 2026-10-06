@@ -26,7 +26,8 @@ natively on **Windows, Linux and macOS** with no browser, no Electron and no nat
   plane–tilted cone, …) the fillet is the pipe swept by the ball, its centre solved exactly on the faces'
   offset surfaces (within 1e-8 mm; it reproduces the exact torus of a plane/cylinder fillet to 2e-9 mm), and
   exported to STEP as a fitted B-spline surface. Fillets and chamfers can be patterned and mirrored like cuts.
-- **Open formats**: native `.fcad` files are readable, diffable JSON; export to **STEP AP214** and **binary STL**.
+- **Open formats**: native `.fcad` files are readable, diffable JSON (or a ZIP holding that JSON when a part embeds
+  other files); export to **STEP AP214** and **binary STL**.
 
 ## Features
 
@@ -197,6 +198,16 @@ dimension expressions). Example:
     { "$type": "fillet", "id": "F5", "name": "Fillet1", "radius": "5", "edges": [ { "a": "F2.S.L3", "b": "F2.End", "hint": [100, 60, 10] } ] }
   ]
 }
+```
+
+A part that embeds other files (e.g. an imported model) is saved as a **container**: a ZIP archive with the same
+JSON as `model.json`, the embedded files under `attachments/` (listed with size and SHA-256 in `model.json`, and
+verified on open) and a `thumbnail.png` preview. Options → "Always save parts as containers" saves every part
+that way. Both kinds use the `.fcad` extension and are told apart by their first bytes. To diff containers in git:
+
+```bash
+git config diff.fcad.textconv 'sh -c "unzip -p \"$0\" model.json 2>/dev/null || cat \"$0\""'
+# and in .gitattributes:  *.fcad diff=fcad
 ```
 
 ## Current limitations / roadmap
