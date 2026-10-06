@@ -359,18 +359,34 @@ public partial class MainWindow
     {
         _fmTab = new Button { Classes = { "tb" }, Content = Icons.Make("part", 18) };
         ToolTip.SetTip(_fmTab, "FeatureManager Design Tree");
-        _fmTab.Click += (_, _) => { if (_page != null) { Tree.IsVisible = !Tree.IsVisible; PmHost.IsVisible = !Tree.IsVisible; } };
-        _pmTab = new Button { Classes = { "tb" }, Content = Icons.Make("options", 18) };
-        ToolTip.SetTip(_pmTab, "PropertyManager");
-        _pmTab.Click += (_, _) => { if (_page != null) { Tree.IsVisible = false; PmHost.IsVisible = true; } };
+        _fmTab.Click += (_, _) => ShowPanel(tree: true);
+        _pmTab = new Button { Classes = { "tb" }, Content = Icons.Make("propsheet", 18) };
+        ToolTip.SetTip(_pmTab, "PropertyManager (the settings of the feature or sketch being edited)");
+        _pmTab.Click += (_, _) => ShowPanel(tree: false);
         PanelTabs.Children.Add(_fmTab);
         PanelTabs.Children.Add(_pmTab);
         UpdatePanelTabs();
     }
 
+    /// <summary>Shows the design tree, or (while a page is open) the PropertyManager.</summary>
+    void ShowPanel(bool tree)
+    {
+        if (!tree && _page == null) return;
+        Tree.IsVisible = tree;
+        PmHost.IsVisible = !tree;
+        UpdatePanelTabs();
+    }
+
+    /// <summary>
+    /// The PropertyManager tab is there only while a page is open (editing a feature or sketch); the tab whose
+    /// panel is showing is drawn pressed.
+    /// </summary>
     void UpdatePanelTabs()
     {
-        if (_pmTab != null) _pmTab.IsEnabled = _page != null;
+        if (_fmTab == null || _pmTab == null) return;
+        _pmTab.IsVisible = _page != null;
+        _fmTab.Classes.Set("active", Tree.IsVisible);
+        _pmTab.Classes.Set("active", PmHost.IsVisible);
     }
 
     // ------------------------------------------------------------------------------------------
