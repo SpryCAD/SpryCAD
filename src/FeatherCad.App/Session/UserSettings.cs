@@ -18,8 +18,11 @@ public static class UserSettings
 
     public static bool ReverseWheel { get; set; }
     public static bool Perspective { get; set; }
-    /// <summary>Save every part as a container (ZIP with a preview image), not only parts with embedded files.</summary>
-    public static bool SaveContainer { get; set; }
+    /// <summary>
+    /// Save every part as a container (ZIP with a preview image, which Explorer shows as its thumbnail), not only
+    /// parts with embedded files. On by default.
+    /// </summary>
+    public static bool SaveContainer { get; set; } = true;
     public static RotateCenter RotateAbout { get; set; } = RotateCenter.ModelCenter;
 
     public static void Load()

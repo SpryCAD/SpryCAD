@@ -1,7 +1,8 @@
 # Windows installer build: publish the app into .\publish\win-x64, generate the demo parts into .\publish\demos,
 # then compile installer\feathercad.iss into
 #   publish\FeatherCAD-Setup-<version>.exe
-# Needs Inno Setup 6 (https://jrsoftware.org/isdl.php, or: winget install JRSoftware.InnoSetup).
+# Needs Inno Setup 6 (https://jrsoftware.org/isdl.php, or: winget install JRSoftware.InnoSetup), and the Visual Studio
+# C++ build tools for the Explorer thumbnail handler (see build\make-thumbs.ps1).
 # Run from anywhere:  pwsh -File build\make-installer.ps1 [-Ver 0.2.0]
 param([string]$Ver)
 $ErrorActionPreference = 'Stop'
@@ -27,6 +28,11 @@ if (-not $iscc) {
 if (-not $iscc) {
   throw "Inno Setup compiler (ISCC.exe) not found. Install it from https://jrsoftware.org/isdl.php, or add it to PATH."
 }
+# ... and the C++ tools for the thumbnail handler, also before the publish (make-thumbs.ps1 explains how to get them)
+$vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+if (-not ((Test-Path $vswhere) -and (& $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath))) {
+  throw "Visual Studio C++ build tools not found (needed for the thumbnail handler). See build\make-thumbs.ps1."
+}
 
 # 3) Publish self-contained and ReadyToRun (as publish.ps1 does) into a clean folder, so nothing from an older
 #    build ends up in the installer.
@@ -36,6 +42,9 @@ Write-Host "== publishing to $out ==" -ForegroundColor Cyan
 & dotnet publish $proj -c Release -r win-x64 --self-contained true -p:PublishReadyToRun=true -p:DebugType=none `
     "-p:Version=$ver" -o $out
 if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed with exit code $LASTEXITCODE" }
+
+# 3b) The Explorer thumbnail handler, next to the app (the installer registers it for .fcad files).
+& (Join-Path $PSScriptRoot 'make-thumbs.ps1') -Out $out
 
 # 4) Generate the parametric demo parts fresh (tests/FeatherCad.Tests/Demos.cs), so the installer ships the
 #    current set rather than whatever was last written into samples\demos.
