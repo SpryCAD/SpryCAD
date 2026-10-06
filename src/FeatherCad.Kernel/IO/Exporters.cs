@@ -95,8 +95,9 @@ public static class StepWriter
             {
                 try
                 {
-                    var brep = ExactBrep.Build(s);
-                    if (brep.Warnings.Count == 0) shells = WriteExact(c, brep, s);
+                    ExactBrep brep;
+                    using (Prof.Time("step.brep")) brep = ExactBrep.Build(s);
+                    using (Prof.Time("step.write")) if (brep.Warnings.Count == 0) shells = WriteExact(c, brep, s);
                 }
                 catch (Exception ex) { LastError = ex; shells = null; }
             }
@@ -137,6 +138,7 @@ public static class StepWriter
         for (int i = 0; i < vtx.Length; i++) vtx[i] = c.Add($"VERTEX_POINT('',#{c.Add(Pt(b.Vertices[i]))})");
 
         var edgeIds = new int[b.Edges.Count];
+        var _edges = Prof.Time("step.edges");
         foreach (var e in b.Edges)
         {
             int geom;
@@ -168,11 +170,18 @@ public static class StepWriter
             edgeIds[e.Index] = c.Add($"EDGE_CURVE('',#{vtx[e.V0]},#{vtx[e.V1]},#{geom},.T.)");
         }
 
+        _edges.Dispose();
         var facesByLump = new Dictionary<int, List<int>>();
+        // blend (pipe) surfaces are fitted up front, in parallel (each face is independent)
+        var pipes = b.Faces.Where(f => f.Loops.Count > 0 && f.Surface.Kind == SurfaceKind.Pipe).ToList();
+        var fits = new BSplineSurface[pipes.Count];
+        using (Prof.Time("step.pipefits")) Parallel.For(0, pipes.Count, i => fits[i] = PipeFit(pipes[i], b));
+        var fitOf = new Dictionary<ExactFace, BSplineSurface>(ReferenceEqualityComparer.Instance);
+        for (int i = 0; i < pipes.Count; i++) fitOf[pipes[i]] = fits[i];
         foreach (var f in b.Faces)
         {
             if (f.Loops.Count == 0) continue;
-            int surf = WriteSurface(c, f, b);
+            int surf = fitOf.TryGetValue(f, out var fit) ? WriteBSplineSurface(c, fit) : WriteSurface(c, f, b);
             // planar faces: the loop enclosing the largest area is the outer bound
             int outer = -1;
             if (f.Surface.Kind == SurfaceKind.Plane)
@@ -242,33 +251,73 @@ public static class StepWriter
                     if (r < 1e-9) { hmax += 1; r = d.Radius + hmax * Math.Tan(d.Param2); }
                     return c.Add($"CONICAL_SURFACE('',#{Axis2(c, d.Origin + ax * hmax, ax, d.RefDir)},{R(r)},{R(d.Param2)})");
                 }
-            case SurfaceKind.Pipe:
-                {
-                    // no pipe surface in AP214: a bicubic B-spline fitted over the face's (angle, spine) box
-                    var sp = d.Spine!; var rad = d.Radius;
-                    double u0 = double.MaxValue, u1 = double.MinValue, v0 = double.MaxValue, v1 = double.MinValue, hint = double.NaN;
-                    foreach (var p in BoundaryPoints(f, b))
-                    {
-                        var q = sp.UV(p, hint); hint = q.X;
-                        u0 = Math.Min(u0, q.X); u1 = Math.Max(u1, q.X); v0 = Math.Min(v0, q.Y); v1 = Math.Max(v1, q.Y);
-                    }
-                    var du = (u1 - u0) * 0.02 + 1e-4; var dv = (v1 - v0) * 0.02 + 1e-4;
-                    u0 -= du; u1 += du; v0 = Math.Max(sp.S0, v0 - dv); v1 = Math.Min(sp.S1, v1 + dv);
-                    var srf = BSplineSurface.Fit((u, v) => sp.Surface(u, v, rad), u0, u1, v0, v1, 1e-7,
-                        Math.Max(4, (int)Math.Ceiling((u1 - u0) / 0.4)), Math.Max(4, (int)Math.Ceiling((v1 - v0) / Math.Max(rad, 1e-3))));
-                    int nu = srf.Poles.GetLength(0), nv = srf.Poles.GetLength(1);
-                    var rows = new List<string>();
-                    for (int i = 0; i < nu; i++)
-                        rows.Add("(" + string.Join(",", Enumerable.Range(0, nv).Select(j => "#" + c.Add(Pt(srf.Poles[i, j])))) + ")");
-                    var (ku, mu) = BSplineSurface.KnotVector(srf.KnotsU);
-                    var (kv, mv) = BSplineSurface.KnotVector(srf.KnotsV);
-                    return c.Add($"B_SPLINE_SURFACE_WITH_KNOTS('',{srf.DegreeU},{srf.DegreeV},({string.Join(",", rows)}),.UNSPECIFIED.,.F.,.F.,.F.," +
-                                 $"({string.Join(",", mu)}),({string.Join(",", mv)}),({string.Join(",", ku.Select(R))}),({string.Join(",", kv.Select(R))}),.UNSPECIFIED.)");
-                }
+            case SurfaceKind.Pipe: return WriteBSplineSurface(c, PipeFit(f, b));
         }
         throw new InvalidOperationException("unknown surface");
     }
 
+    /// <summary>No pipe surface in AP214: a bicubic B-spline fitted over the face's (angle, spine) box.</summary>
+    static BSplineSurface PipeFit(ExactFace f, ExactBrep b)
+    {
+        var d = f.Surface.Def;
+        var sp = d.Spine!; var rad = d.Radius;
+        // the pipe's own parameterization is only C1 along the spine (Hermite nodes) and so fits slowly; fit the same
+        // surface through a C2 spline of the spine nodes (same points within ~1e-8) with a smooth frame instead
+        var range = BoundaryPoints(f, b).Select(p => sp.Closest(p).s).ToList();
+        double s0 = range.Min(), s1 = range.Max(), pad = (s1 - s0) * 0.05 + 1e-3;
+        var nodes = Enumerable.Range(0, sp.P.Length).Where(i => sp.S[i] >= s0 - pad && sp.S[i] <= s1 + pad).ToList();
+        if (nodes.Count < 4)
+        {
+            // too few nodes in range: sample the Hermite spine instead
+            nodes.Clear();
+        }
+        double sa = nodes.Count > 0 ? sp.S[nodes[0]] : Math.Max(sp.S0, s0 - pad), sb = nodes.Count > 0 ? sp.S[nodes[^1]] : Math.Min(sp.S1, s1 + pad);
+        var pts = nodes.Count > 0 ? nodes.Select(i => sp.P[i]).ToList() : Enumerable.Range(0, 9).Select(k => sp.Eval(sa + (sb - sa) * k / 8)).ToList();
+        var c2 = BSplineCurve.Interpolate(pts, 3);
+        // chord-length parameters of the interpolation ≈ spine arc length: s ↦ t linear
+        double T(double s) => Math.Clamp((s - sa) / (sb - sa), 0, 1);
+        Vec3 C(double s) => c2.Eval(T(s));
+        Vec3 Tan(double s) { const double h = 1e-6; var t = T(s); double a = Math.Max(0, t - h), z = Math.Min(1, t + h); return (c2.Eval(z) - c2.Eval(a)).Normalized; }
+        // frame: a fixed reference direction made perpendicular to the tangent (the normal of the plane the spine turns
+        // in, else any direction across it)
+        var refv = Vec3.Zero;
+        for (int k = 0; k < 16; k++) refv += Vec3.Cross(Tan(sa + (sb - sa) * k / 16), Tan(sa + (sb - sa) * (k + 1) / 16));
+        refv = refv.Length > 1e-9 ? refv.Normalized : Tan(sa).AnyPerpendicular();
+        (Vec3 n1, Vec3 n2) Frame(double s) { var t = Tan(s); var n = (refv - t * Vec3.Dot(refv, t)).Normalized; return (n, Vec3.Cross(t, n)); }
+        Vec3 Surface(double th, double s) { var (n1, n2) = Frame(s); return C(s) + (n1 * Math.Cos(th) + n2 * Math.Sin(th)) * rad; }
+        double u0 = double.MaxValue, u1 = double.MinValue, v0 = double.MaxValue, v1 = double.MinValue, hint = double.NaN;
+        foreach (var p in BoundaryPoints(f, b))
+        {
+            var s = sp.Closest(p).s;
+            var (n1, n2) = Frame(s); var r = p - C(s);
+            var th = Math.Atan2(Vec3.Dot(r, n2), Vec3.Dot(r, n1));
+            if (!double.IsNaN(hint)) th = Native.NCurve.Wrap(th, hint);
+            hint = th;
+            u0 = Math.Min(u0, th); u1 = Math.Max(u1, th); v0 = Math.Min(v0, s); v1 = Math.Max(v1, s);
+        }
+        var du = (u1 - u0) * 0.02 + 1e-4; var dv = (v1 - v0) * 0.02 + 1e-4;
+        u0 -= du; u1 += du; v0 = Math.Max(sa, v0 - dv); v1 = Math.Min(sb, v1 + dv);
+        // start near the final size (cubic interpolation error ~ h⁴ / (384 ρ³) for curvature radius ρ): around
+        // the pipe ρ is its radius, along it the tightest bend of the surface (inner side of the spine)
+        const double fitTol = 1e-5;
+        var du0 = Math.Pow(384 * fitTol / Math.Max(rad, 1e-3), 0.25);
+        var bend = Math.Max(Math.Min(sp.MinCurvatureRadius - rad, 1e6), rad * 0.25);
+        var dv0 = Math.Pow(384 * fitTol * bend * bend * bend, 0.25);
+        return BSplineSurface.Fit(Surface, u0, u1, v0, v1, fitTol,
+            Math.Max(4, (int)Math.Ceiling((u1 - u0) / du0)), Math.Clamp((int)Math.Ceiling((v1 - v0) / dv0), 4, 192));
+    }
+
+    static int WriteBSplineSurface(Ctx c, BSplineSurface srf)
+    {
+        int nu = srf.Poles.GetLength(0), nv = srf.Poles.GetLength(1);
+        var rows = new List<string>();
+        for (int i = 0; i < nu; i++)
+            rows.Add("(" + string.Join(",", Enumerable.Range(0, nv).Select(j => "#" + c.Add(Pt(srf.Poles[i, j])))) + ")");
+        var (ku, mu) = BSplineSurface.KnotVector(srf.KnotsU);
+        var (kv, mv) = BSplineSurface.KnotVector(srf.KnotsV);
+        return c.Add($"B_SPLINE_SURFACE_WITH_KNOTS('',{srf.DegreeU},{srf.DegreeV},({string.Join(",", rows)}),.UNSPECIFIED.,.F.,.F.,.F.," +
+                     $"({string.Join(",", mu)}),({string.Join(",", mv)}),({string.Join(",", ku.Select(R))}),({string.Join(",", kv.Select(R))}),.UNSPECIFIED.)");
+    }
 
     /// <summary>Writes the closed shells of a solid (one per connected lump). Returns shell ids.</summary>
     static List<int> WriteSolid(Ctx c, Solid s)

@@ -143,8 +143,38 @@ public sealed record BSplineCurve(int Degree, Vec3[] Poles, double[] Knots) : Ex
             var N = Basis(span, uk[k], p, U);
             for (int i = 0; i <= p; i++) A[k, span - p + i] = N[i];
         }
-        var P = SolveDense(A, pts.ToArray(), n + 1);
+        var P = SolveBanded(A, pts.ToArray(), n + 1, p);
         return new BSplineCurve(p, P, U);
+    }
+
+    /// <summary>
+    /// Gaussian elimination limited to the band of the interpolation matrix (row k has non-zeros only in columns
+    /// span-p..span); collocation matrices with averaged knots are totally positive, so no pivoting is needed.
+    /// O(n p²) instead of O(n³).
+    /// </summary>
+    static Vec3[] SolveBanded(double[,] A, Vec3[] b, int n, int p)
+    {
+        var M = (double[,])A.Clone(); var x = (Vec3[])b.Clone();
+        int w = 2 * p + 1;
+        for (int c = 0; c < n; c++)
+        {
+            var piv = M[c, c];
+            if (Math.Abs(piv) < 1e-300) return SolveDense(A, b, n); // not banded as expected: the general solver
+            for (int r = c + 1; r < Math.Min(n, c + w); r++)
+            {
+                var f = M[r, c] / piv;
+                if (f == 0) continue;
+                for (int k = c; k < Math.Min(n, c + w); k++) M[r, k] -= f * M[c, k];
+                x[r] -= x[c] * f;
+            }
+        }
+        for (int r = n - 1; r >= 0; r--)
+        {
+            var s = x[r];
+            for (int k = r + 1; k < Math.Min(n, r + w); k++) s -= x[k] * M[r, k];
+            x[r] = s / M[r, r];
+        }
+        return x;
     }
 
     static Vec3[] SolveDense(double[,] A, Vec3[] b, int n)

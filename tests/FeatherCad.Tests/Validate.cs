@@ -9,8 +9,10 @@ static class Validate
 {
     public static int Run(string file, string step)
     {
-        var doc = CadDocument.FromJson(File.ReadAllText(file));
+        var doc = CadDocument.Load(file);
+        var sw = System.Diagnostics.Stopwatch.StartNew();
         var r = new Regenerator().Rebuild(doc);
+        Console.WriteLine($"  rebuild {sw.ElapsedMilliseconds} ms"); sw.Restart();
         foreach (var f in doc.Features) if (!r.Status[f.Id].Ok) Console.WriteLine($"  {f.Name}: {r.Status[f.Id].Error}");
         if (Environment.GetEnvironmentVariable("FC_EDGES") is { } en)
             foreach (var b in r.State.Bodies)
@@ -85,9 +87,15 @@ static class Validate
             }
             catch (Exception ex) { Console.WriteLine("  exact B-rep failed: " + ex); }
         }
+        Console.WriteLine($"  checks {sw.ElapsedMilliseconds} ms"); sw.Restart();
+        Prof.Reset(); Prof.Enabled = true;
+        if (Environment.GetEnvironmentVariable("FC_FIT") != null) BSplineSurface.Debug = m => { lock (Console.Out) Console.WriteLine("  " + m); };
         using var fs = File.Create(step);
         StepWriter.Write(fs, r.State.Bodies.Select(b => (b.Id, b.Solid)), Path.GetFileNameWithoutExtension(file));
         if (StepWriter.LastError != null) Console.WriteLine("  STEP exact export failed: " + StepWriter.LastError);
+        Console.WriteLine($"  STEP export {sw.ElapsedMilliseconds} ms");
+        foreach (var (pn, pms, calls) in Prof.Results().OrderByDescending(x => x.ms).Take(8)) Console.WriteLine($"    {pn,-30} {pms,8:0} ms x{calls}");
+        Prof.Enabled = false;
         return 0;
     }
 }

@@ -53,6 +53,14 @@ public sealed class DocumentSession
         RequestRebuild();
     }
 
+    /// <summary>A fresh, unchanged document (e.g. a STEP model just opened as a new part): nothing to undo or save.</summary>
+    public void MarkClean()
+    {
+        _undo.Clear(); _redo.Clear();
+        Dirty = false;
+        DocumentChanged?.Invoke();
+    }
+
     /// <summary>Marks the document as having unsaved changes (e.g. recovered from an autosave).</summary>
     public void MarkDirty()
     {
@@ -62,6 +70,10 @@ public sealed class DocumentSession
 
     public void Save(string path)
     {
+        // embedded files no feature refers to any more (e.g. an import that was undone) are not saved
+        var json = string.Concat(Doc.Features.Select(CadDocument.JsonOf));
+        foreach (var name in Doc.Files.Keys.ToList())
+            if (!json.Contains($"\"{name}\"")) Doc.Files.Remove(name);
         var container = UserSettings.SaveContainer || Doc.Files.Count > 0;
         if (container) Doc.Thumbnail = RenderThumbnail() ?? Doc.Thumbnail;
         Doc.Save(path, container);

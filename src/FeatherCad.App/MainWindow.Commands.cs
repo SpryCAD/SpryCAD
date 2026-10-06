@@ -73,6 +73,7 @@ public partial class MainWindow
             Item("Save _As...", () => _ = SaveAs(), "Ctrl+Shift+S"),
             RecentMenu(),
             "-",
+            Item("_Import STEP...", () => _ = ImportDialog(), "Ctrl+I", "open"),
             Item("Export _STEP...", () => _ = Export("step"), null, "export"),
             Item("Export S_TL...", () => _ = Export("stl"), null, "export"),
             "-",
@@ -486,6 +487,53 @@ public partial class MainWindow
     // file commands
 
     static readonly FilePickerFileType FcadType = new("FeatherCAD Part") { Patterns = new[] { "*.fcad" } };
+    static readonly FilePickerFileType StepType = new("STEP model") { Patterns = new[] { "*.step", "*.stp" } };
+    static readonly FilePickerFileType OpenableType = new("Parts and STEP models") { Patterns = new[] { "*.fcad", "*.step", "*.stp" } };
+
+    static bool IsStep(string path) => Path.GetExtension(path).ToLowerInvariant() is ".step" or ".stp";
+
+    /// <summary>Imports a STEP file into the current part (as SolidWorks' Insert > Imported body).</summary>
+    async Task ImportDialog()
+    {
+        if (!await ResolvePendingEdit()) return;
+        var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = "Import STEP",
+            FileTypeFilter = new[] { StepType },
+            AllowMultiple = false,
+        });
+        var path = files.FirstOrDefault()?.TryGetLocalPath();
+        if (path != null) ImportFile(path);
+    }
+
+    /// <summary>
+    /// Embeds the file in the part and adds an Imported feature that reads it (the part then saves as a container,
+    /// so it keeps working when the original file moves).
+    /// </summary>
+    void ImportFile(string path)
+    {
+        byte[] data;
+        try { data = File.ReadAllBytes(path); }
+        catch (Exception ex) { _ = Dialogs.Message(this, "Import failed", ex.Message); return; }
+        if (!System.Text.Encoding.ASCII.GetString(data, 0, Math.Min(64, data.Length)).TrimStart().StartsWith("ISO-10303-21"))
+        {
+            _ = Dialogs.Message(this, "Import failed", Path.GetFileName(path) + " is not a STEP file.");
+            return;
+        }
+        var hash = DocumentContainer.Hash(data);
+        var baseName = Path.GetFileName(path);
+        // same name, different content (another version of the file): keep both
+        var name = "imports/" + baseName;
+        for (int k = 2; Session.Doc.Files.TryGetValue(name, out var existing) && DocumentContainer.Hash(existing) != hash; k++)
+            name = $"imports/{Path.GetFileNameWithoutExtension(baseName)} ({k}){Path.GetExtension(baseName)}";
+        Session.Change(() =>
+        {
+            Session.Doc.AddFile(name, data);
+            Session.Doc.AddFeature(new ImportFeature { Name = Path.GetFileNameWithoutExtension(baseName), File = name, Sha256 = hash });
+        });
+        _fitAfterLoad = true;
+        Status("Imported " + baseName);
+    }
 
     /// <summary>A sketch or feature edit that is not in the document yet.</summary>
     bool HasPendingEdit => (_sketch != null && (_sketch.Modified || _sketchIsNew)) || _edit != null;
@@ -537,7 +585,7 @@ public partial class MainWindow
         var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
         {
             Title = "Open Part",
-            FileTypeFilter = new[] { FcadType },
+            FileTypeFilter = new[] { OpenableType, FcadType, StepType },
             AllowMultiple = false,
         });
         var path = files.FirstOrDefault()?.TryGetLocalPath();
@@ -546,6 +594,15 @@ public partial class MainWindow
 
     public void OpenFile(string path)
     {
+        if (IsStep(path))
+        {
+            // a STEP model opens as a new part holding it
+            LeaveModes();
+            Session.New();
+            ImportFile(path);
+            Session.MarkClean();
+            return;
+        }
         try
         {
             LeaveModes();

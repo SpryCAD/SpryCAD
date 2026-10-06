@@ -136,7 +136,32 @@ public sealed class Regenerator
                 case MirrorFeature m: DoMirror(m); break;
                 case PlaneFeature p: DoPlane(p); break;
                 case CombineFeature c: DoCombine(c); break;
+                case ImportFeature im: DoImport(im); break;
             }
+        }
+
+        // ---- imported solids ----
+
+        static readonly Lru<(string hash, string prefix, double scale), StepImportResult> ImportCache = new(4);
+
+        void DoImport(ImportFeature im)
+        {
+            if (!doc.Files.TryGetValue(im.File, out var data))
+                throw new FeatureException($"The imported file \"{im.File}\" is not stored in this part.");
+            var hash = DocumentContainer.Hash(data);
+            var scale = doc.Units == UnitSystem.IPS ? 1 / 25.4 : 1;
+            var key = (hash, f.Id + ".", scale);
+            if (!ImportCache.TryGet(key, out var r))
+            {
+                try { r = StepImport.Read(data, f.Id + ".", scale); }
+                catch (InvalidDataException ex) { throw new FeatureException(ex.Message); }
+                ImportCache.Add(key, r);
+            }
+            status.Warnings.AddRange(r.Warnings);
+            var bodies = new List<Body>(State.Bodies);
+            for (int i = 0; i < r.Solids.Count; i++)
+                bodies.Add(new Body { Id = i == 0 ? f.Id : $"{f.Id}-{i + 1}", Solid = Kernel.Native.NTess.ToSolid(r.Solids[i].Body.Clone()) });
+            State = State.With(bodies);
         }
 
         // ---- sketches ----

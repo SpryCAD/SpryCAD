@@ -63,6 +63,7 @@ public sealed class DirRef
 [JsonDerivedType(typeof(MirrorFeature), "mirror")]
 [JsonDerivedType(typeof(PlaneFeature), "plane")]
 [JsonDerivedType(typeof(CombineFeature), "combine")]
+[JsonDerivedType(typeof(ImportFeature), "import")]
 public abstract class Feature
 {
     public string Id { get; set; } = "";
@@ -259,6 +260,19 @@ public sealed class CombineFeature : Feature
     public CombineOp Op { get; set; } = CombineOp.Add;
     public string MainBody { get; set; } = "";
     public List<string> ToolBodies { get; set; } = new();
+}
+
+/// <summary>
+/// Solids read from a file embedded in the part (e.g. "imports/bracket.step"), one body per solid. Faces are
+/// named after the file's own face ids, so features applied on top keep their references.
+/// </summary>
+public sealed class ImportFeature : Feature
+{
+    public override string Kind => "Imported";
+    /// <summary>Name of the embedded file (<see cref="CadDocument.Files"/>).</summary>
+    public string File { get; set; } = "";
+    /// <summary>SHA-256 of the embedded file when it was imported (a replaced file rebuilds).</summary>
+    public string Sha256 { get; set; } = "";
 }
 
 public sealed class Equation
