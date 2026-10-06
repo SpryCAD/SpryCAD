@@ -210,20 +210,74 @@ git config diff.fcad.textconv 'sh -c "unzip -p \"$0\" model.json 2>/dev/null || 
 # and in .gitattributes:  *.fcad diff=fcad
 ```
 
-## Current limitations / roadmap
+## Current limitations
 
-- Booleans run on the exact-plane facet representation and the exact B-rep is rebuilt afterwards. Results
-  are exact for planes, cylinders, cones, spheres and tori and their line/circle intersections; general
-  intersection curves are B-spline fits (within ~1e-3 mm of both surfaces). **Next:** native analytic
-  surface/surface booleans so the facet stage is no longer needed, and NURBS faces (lofts/sweeps).
-- Fillet/chamfer support straight edges between planar faces and circular edges (full rims or partial arcs,
-  e.g. around a rounded corner) between a plane and a perpendicular cylinder, with tangent propagation;
-  corners where three blended edges meet are mitered rather than rolled-ball blended.
-- Shell offsets faces by moving vertices; walls that would touch or self-intersect (e.g. holes closer than twice
-  the thickness) can fail.
+- Shell keeps the faces and edges of the part and moves them: when the inner surface changes shape at the wall
+  thickness (a fillet or hole closer to another face than the wall is thick) it fails with an explanation.
+- Corners where three fillets meet are not blended yet; chamfers on curved face pairs are not supported.
+- STEP import reads exact solids (analytic and B-spline faces); assemblies, surfaces of revolution/extrusion
+  and open surface models are not imported yet.
 - Sketch profiles use the union of closed regions; crossing lines must be split with Trim first.
-- Not yet: STEP import, assemblies, drawings, sweeps/lofts, draft, sketch fillets, section views.
-- Developed and tested on Windows 11. Linux and macOS use the same code (Avalonia + OpenGL) but have not been tested yet.
+- Developed and tested on Windows 11. Linux and macOS use the same code (Avalonia + OpenGL) but have not been
+  tested yet.
+
+## Roadmap
+
+Check items off as they land.
+
+### Kernel performance
+
+- [ ] Local booleans: work only on the faces near the tool instead of the whole body (rebuild time follows
+      the size of the change, not of the part)
+- [ ] Reuse face splits, edge samples and domains of faces a boolean leaves untouched
+- [ ] Analytic intersections for more pairs (plane/torus, cylinder/sphere, oblique cone/plane, ...)
+- [ ] Pattern copies that do not touch: copy the topology instead of running booleans
+- [ ] Recognise B-spline faces that are planes, cylinders or cones on import (sheet-metal STEP files)
+- [ ] Faster B-spline closest point (better seeds, fewer Newton steps) and adaptive traces between B-splines
+- [ ] Display normals from the tessellator's parameters; reuse unchanged faces' meshes; level of detail
+- [ ] Rolling-ball spine at 1e-6 instead of 1e-8; independent fillet chains in parallel
+
+### Modelling
+
+- [ ] Sweep and loft (path, sections, guide curves)
+- [ ] Draft (including parting line)
+- [ ] Smooth corner blends where three fillets meet (setback / vertex blends)
+- [ ] Variable-radius and face fillets; chamfers on curved faces
+- [ ] General shell / offset that survives topology changes; thicken; offset surface bodies
+- [ ] Surface modelling: open surface bodies, knit, trim, extend, fill / patch, ruled and boundary surfaces
+- [ ] Boolean robustness for the remaining tangent and partial-overlap cases
+- [ ] Body edits: split body, move / delete / replace face with healing
+- [ ] Sheet metal: flanges, bends with K-factor, flat pattern
+
+### Geometry and topology
+
+- [ ] Swept / extruded / revolved surfaces (also in STEP import); true offset curves
+- [ ] Tolerant modelling (per-edge and per-vertex tolerances) for imperfect imported geometry
+- [ ] General curve/curve and curve/surface intersector
+- [ ] Healing on import (gaps, slivers, orientation; orientation from loops is done)
+- [ ] Non-manifold, sheet and wire bodies
+- [ ] Persistent naming through all splits and merges
+
+### Analysis
+
+- [ ] Exact mass properties (integrated on the surfaces, not the mesh)
+- [ ] Minimum distance, curvature analysis, interference detection
+- [ ] Section views / exact planar slices
+
+### Data exchange
+
+- [x] STEP import of exact solids (analytic and B-spline faces)
+- [x] Embedded files in .fcad containers
+- [ ] STEP assemblies (placed instances), colours and layers; AP242 with PMI
+- [ ] IGES and Parasolid (x_t)
+- [ ] File-format plugins (import/export registry, plugins loaded on first use)
+
+### Beyond the kernel
+
+- [ ] Assemblies and mates
+- [ ] Drawings with hidden-line removal
+- [ ] Configurations
+- [ ] Scripting API
 
 ## License
 
