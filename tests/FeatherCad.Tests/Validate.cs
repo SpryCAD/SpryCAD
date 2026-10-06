@@ -9,10 +9,21 @@ static class Validate
 {
     public static int Run(string file, string step)
     {
-        var doc = CadDocument.Load(file);
+        CadDocument doc;
+        if (Path.GetExtension(file).ToLowerInvariant() is ".step" or ".stp")
+        {
+            // a STEP file: a part importing it
+            doc = new CadDocument();
+            var data = File.ReadAllBytes(file);
+            doc.AddFile("imports/model.step", data);
+            doc.AddFeature(new ImportFeature { File = "imports/model.step", Sha256 = DocumentContainer.Hash(data) });
+        }
+        else doc = CadDocument.Load(file);
         var sw = System.Diagnostics.Stopwatch.StartNew();
         var r = new Regenerator().Rebuild(doc);
         Console.WriteLine($"  rebuild {sw.ElapsedMilliseconds} ms (last fallback: {Csg.LastFallbackReason})"); sw.Restart();
+        if (Environment.GetEnvironmentVariable("FC_NOCHECKS") == null)
+        {
         foreach (var f in doc.Features) if (!r.Status[f.Id].Ok) Console.WriteLine($"  {f.Name}: {r.Status[f.Id].Error}");
         if (Environment.GetEnvironmentVariable("FC_EDGES") is { } en)
             foreach (var b in r.State.Bodies)
@@ -65,6 +76,7 @@ static class Validate
                     Console.WriteLine($"face {f.Tag.Name} {f.Surface.Kind} sense={f.Sense} loops={f.Loops.Count}");
                     var dom = FeatherCad.Kernel.Native.NDomain.Of(f, 0.02);
                     Console.WriteLine($"  uv [{dom.UMin:0.####},{dom.UMax:0.####}]x[{dom.VMin:0.####},{dom.VMax:0.####}] area {dom.SignedArea():0.######} spine [{f.Surface.Spine?.S0:0.###},{f.Surface.Spine?.S1:0.###}]");
+                    foreach (var dl in dom.Loops) Console.WriteLine("  domain: " + string.Join(" ", dl.Select(q => $"({q.X:0.###},{q.Y:0.###})")));
                     var facets = new List<Face>();
                     var single = new FeatherCad.Kernel.Native.NBody(); single.Faces.Add(f);
                     facets = FeatherCad.Kernel.Native.NTess.Facets(single, 0.02);
@@ -86,6 +98,7 @@ static class Validate
                 Console.WriteLine($"  exact B-rep: {brep.Faces.Count} faces, warnings: {string.Join("; ", brep.Warnings)}");
             }
             catch (Exception ex) { Console.WriteLine("  exact B-rep failed: " + ex); }
+        }
         }
         Console.WriteLine($"  checks {sw.ElapsedMilliseconds} ms"); sw.Restart();
         Prof.Reset(); Prof.Enabled = true;

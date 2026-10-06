@@ -40,18 +40,40 @@ public sealed class NSurface
         => new(new SurfaceDef { Kind = SurfaceKind.Pipe, Origin = spine.P[0], Axis = spine.D[0], RefDir = spine.D[0].AnyPerpendicular(), Radius = r, Spine = spine });
 
     public PipeSpine? Spine => Def.Spine;
+    public NurbsSurface? Nurbs => Def.Nurbs;
+
+    /// <summary>A B-spline surface (parameters as in its knot vectors).</summary>
+    public static NSurface BSpline(NurbsSurface s)
+        => new(new SurfaceDef { Kind = SurfaceKind.BSpline, Origin = s.Box.Center, Axis = Vec3.UnitZ, RefDir = Vec3.UnitX, Nurbs = s });
 
     public Plane? Plane => Kind == SurfaceKind.Plane ? F.Plane : null;
     public Vec3 Axis => F.Normal;
     public Vec3 Origin => F.Origin;
     public double R => Def.Radius;
     public double R2 => Def.Param2;
-    public bool PeriodicU => Kind != SurfaceKind.Plane;
+    public bool PeriodicU => Kind switch { SurfaceKind.Plane => false, SurfaceKind.BSpline => Nurbs!.ClosedU, _ => true };
 
     // ---------------------------------------------------------------------------------------
     // parameterization
 
-    public bool PeriodicV => Kind == SurfaceKind.Torus;
+    public bool PeriodicV => Kind == SurfaceKind.Torus || (Kind == SurfaceKind.BSpline && Nurbs!.ClosedV);
+
+    // B-spline parameters as seen by faces: a closed direction is mapped onto a full turn (period 2π), so the
+    // seam and unwrapping logic of the periodic analytic surfaces applies; an open direction keeps its knots
+    double ToFaceU(double u) => Nurbs!.ClosedU ? 2 * Math.PI * (u - Nurbs.U0) / (Nurbs.U1 - Nurbs.U0) : u;
+    double ToFaceV(double v) => Nurbs!.ClosedV ? 2 * Math.PI * (v - Nurbs.V0) / (Nurbs.V1 - Nurbs.V0) : v;
+    double FromFaceU(double u)
+    {
+        if (!Nurbs!.ClosedU) return u;
+        var a = u % (2 * Math.PI); if (a < 0) a += 2 * Math.PI;
+        return Nurbs.U0 + (Nurbs.U1 - Nurbs.U0) * a / (2 * Math.PI);
+    }
+    double FromFaceV(double v)
+    {
+        if (!Nurbs!.ClosedV) return v;
+        var a = v % (2 * Math.PI); if (a < 0) a += 2 * Math.PI;
+        return Nurbs.V0 + (Nurbs.V1 - Nurbs.V0) * a / (2 * Math.PI);
+    }
 
     public Vec2 UV(Vec3 p, double uHint = double.NaN, double vHint = double.NaN)
     {
@@ -74,6 +96,17 @@ public sealed class NSurface
                     return new Vec2(Theta(l, uHint), double.IsNaN(vHint) ? phi : NCurve.Wrap(phi, vHint));
                 }
             case SurfaceKind.Pipe: return Spine!.UV(p, uHint);
+            case SurfaceKind.BSpline:
+                {
+                    var c = Nurbs!.Closest(p, double.IsNaN(uHint) ? double.NaN : FromFaceU(uHint), double.IsNaN(vHint) ? double.NaN : FromFaceV(vHint));
+                    double u = ToFaceU(c.u), v = ToFaceV(c.v);
+                    // closed directions unwrap next to the hint, like the angles of analytic surfaces
+                    if (Nurbs.ClosedU && !double.IsNaN(uHint)) u = NCurve.Wrap(u, uHint);
+                    if (Nurbs.ClosedV && !double.IsNaN(vHint)) v = NCurve.Wrap(v, vHint);
+                    // poles: u is free there; keep the hint
+                    if (!double.IsNaN(uHint) && Nurbs.IsPole(p)) u = uHint;
+                    return new Vec2(u, v);
+                }
         }
         return default;
     }
@@ -88,6 +121,7 @@ public sealed class NSurface
     /// <summary>True when the point is on the axis, where θ is undefined (sphere pole, cone apex).</summary>
     public bool IsPole(Vec3 p)
     {
+        if (Kind == SurfaceKind.BSpline) return Nurbs!.IsPole(p);
         if (Kind is not (SurfaceKind.Sphere or SurfaceKind.Cone)) return false;
         var l = F.ToLocal3(p);
         return l.X * l.X + l.Y * l.Y < 1e-14 * Math.Max(1, R * R);
@@ -112,6 +146,7 @@ public sealed class NSurface
                     return F.ToWorld(r * Math.Cos(u), r * Math.Sin(u), R2 * Math.Sin(v));
                 }
             case SurfaceKind.Pipe: return Spine!.Surface(u, v, R);
+            case SurfaceKind.BSpline: return Nurbs!.Eval(FromFaceU(u), FromFaceV(v));
         }
         return default;
     }
@@ -125,6 +160,12 @@ public sealed class NSurface
     public double F_(Vec3 p)
     {
         if (Kind == SurfaceKind.Pipe) return Spine!.Closest(p).dist - R;
+        if (Kind == SurfaceKind.BSpline)
+        {
+            // distance to the patch, signed by the side of its normal
+            var c = Nurbs!.Closest(p);
+            return Vec3.Dot(p - c.c, Nurbs.Normal(c.u, c.v)) >= 0 ? c.dist : -c.dist;
+        }
         var l = F.ToLocal3(p);
         switch (Kind)
         {
@@ -150,6 +191,7 @@ public sealed class NSurface
     {
         if (Kind == SurfaceKind.Plane) return F.Normal;
         if (Kind == SurfaceKind.Pipe) return Spine!.Normal(p);
+        if (Kind == SurfaceKind.BSpline) { var c = Nurbs!.Closest(p); return Nurbs.Normal(c.u, c.v); }
         var l = F.ToLocal3(p);
         var rr = Math.Sqrt(l.X * l.X + l.Y * l.Y);
         // radial unit (arbitrary on the axis)
@@ -210,7 +252,7 @@ public sealed class NSurface
     // ---------------------------------------------------------------------------------------
     // relations
 
-    public bool IsRevolution => Kind is not (SurfaceKind.Plane or SurfaceKind.Pipe);
+    public bool IsRevolution => Kind is not (SurfaceKind.Plane or SurfaceKind.Pipe or SurfaceKind.BSpline);
 
     /// <summary>Same geometric surface (orientation ignored).</summary>
     public bool CoincidentWith(NSurface o, double tol)
@@ -223,6 +265,7 @@ public sealed class NSurface
             return Math.Abs(Math.Abs(d) - 1) < 1e-10 && Math.Abs(a.Distance(b.Origin)) < tol;
         }
         if (Kind == SurfaceKind.Pipe) return Math.Abs(R - o.R) < tol && Spine!.SameAs(o.Spine!, tol);
+        if (Kind == SurfaceKind.BSpline) return Nurbs!.SameAs(o.Nurbs!, tol);
         if (!SameAxisLine(o, tol)) return false;
         switch (Kind)
         {
@@ -256,6 +299,7 @@ public sealed class NSurface
     public List<double> RayHits(Vec3 o, Vec3 d)
     {
         if (Kind == SurfaceKind.Pipe) return Spine!.RayHits(o, d, R);
+        if (Kind == SurfaceKind.BSpline) return Nurbs!.RayHits(o, d, F_);
         var res = new List<double>();
         var lo = F.ToLocal3(o);
         var ld = new Vec3(Vec3.Dot(d, F.XDir), Vec3.Dot(d, F.YDir), Vec3.Dot(d, F.Normal));
@@ -333,7 +377,7 @@ public sealed class NSurface
     /// <summary>The surface's profile about (origin, axis) if it is a surface of revolution about that axis.</summary>
     public Profile? ProfileAbout(Vec3 origin, Vec3 axis, double tol)
     {
-        if (Kind == SurfaceKind.Pipe) return null;
+        if (Kind is SurfaceKind.Pipe or SurfaceKind.BSpline) return null;
         axis = axis.Normalized;
         double H(Vec3 p) => Vec3.Dot(p - origin, axis);
         bool OnAxis(Vec3 p) { var d = p - origin; return (d - axis * Vec3.Dot(d, axis)).Length < tol; }

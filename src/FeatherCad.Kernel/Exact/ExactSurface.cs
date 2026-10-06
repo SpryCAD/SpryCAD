@@ -59,6 +59,8 @@ public sealed class ExactSurface
                 }
             case SurfaceKind.Pipe:
                 return Def.Spine!.Project(p, Def.Radius);
+            case SurfaceKind.BSpline:
+                return Def.Nurbs!.Closest(p).c;
         }
         return p;
     }
@@ -97,6 +99,11 @@ public sealed class ExactSurface
                 }
             case SurfaceKind.Pipe:
                 return Def.Spine!.Normal(p);
+            case SurfaceKind.BSpline:
+                {
+                    var c = Def.Nurbs!.Closest(p);
+                    return Def.Nurbs.Normal(c.u, c.v);
+                }
         }
         return Vec3.UnitZ;
     }
@@ -126,6 +133,7 @@ public sealed class ExactSurface
             SurfaceKind.Cone => $"Cone {2 * Def.Param2 * 180 / Math.PI:0.##}°",
             SurfaceKind.Torus => $"Torus R{Def.Radius:0.###} r{Def.Param2:0.###}",
             SurfaceKind.Pipe => $"Fillet R{Def.Radius:0.###}",
+            SurfaceKind.BSpline => "B-spline surface",
             _ => Def.Kind.ToString(),
         };
     }

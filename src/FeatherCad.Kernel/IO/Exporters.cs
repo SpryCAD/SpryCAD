@@ -252,6 +252,7 @@ public static class StepWriter
                     return c.Add($"CONICAL_SURFACE('',#{Axis2(c, d.Origin + ax * hmax, ax, d.RefDir)},{R(r)},{R(d.Param2)})");
                 }
             case SurfaceKind.Pipe: return WriteBSplineSurface(c, PipeFit(f, b));
+            case SurfaceKind.BSpline: return WriteNurbs(c, d.Nurbs!);
         }
         throw new InvalidOperationException("unknown surface");
     }
@@ -305,6 +306,24 @@ public static class StepWriter
         var dv0 = Math.Pow(384 * fitTol * bend * bend * bend, 0.25);
         return BSplineSurface.Fit(Surface, u0, u1, v0, v1, fitTol,
             Math.Max(4, (int)Math.Ceiling((u1 - u0) / du0)), Math.Clamp((int)Math.Ceiling((v1 - v0) / dv0), 4, 192));
+    }
+
+    /// <summary>A B-spline surface as it is (rational ones as the complex entity STEP uses).</summary>
+    static int WriteNurbs(Ctx c, Native.NurbsSurface s)
+    {
+        int nu = s.P.GetLength(0), nv = s.P.GetLength(1);
+        var rows = new List<string>();
+        for (int i = 0; i < nu; i++)
+            rows.Add("(" + string.Join(",", Enumerable.Range(0, nv).Select(j => "#" + c.Add(Pt(s.P[i, j])))) + ")");
+        var (ku, mu) = BSplineSurface.KnotVector(s.U);
+        var (kv, mv) = BSplineSurface.KnotVector(s.V);
+        var poles = $"({string.Join(",", rows)})";
+        var knots = $"({string.Join(",", mu)}),({string.Join(",", mv)}),({string.Join(",", ku.Select(R))}),({string.Join(",", kv.Select(R))}),.UNSPECIFIED.";
+        if (s.W == null)
+            return c.Add($"B_SPLINE_SURFACE_WITH_KNOTS('',{s.Pu},{s.Pv},{poles},.UNSPECIFIED.,.F.,.F.,.F.,{knots})");
+        var wrows = string.Join(",", Enumerable.Range(0, nu).Select(i => "(" + string.Join(",", Enumerable.Range(0, nv).Select(j => R(s.W[i, j]))) + ")"));
+        return c.Add($"(BOUNDED_SURFACE()B_SPLINE_SURFACE({s.Pu},{s.Pv},{poles},.UNSPECIFIED.,.F.,.F.,.F.)B_SPLINE_SURFACE_WITH_KNOTS({knots})" +
+                     $"GEOMETRIC_REPRESENTATION_ITEM()RATIONAL_B_SPLINE_SURFACE(({wrows}))REPRESENTATION_ITEM('')SURFACE())");
     }
 
     static int WriteBSplineSurface(Ctx c, BSplineSurface srf)

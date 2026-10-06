@@ -130,13 +130,54 @@ static class ImportTests
             t.Near(Vol(r.State.Bodies[0].Solid), volume / Math.Pow(25.4, 3), volume / Math.Pow(25.4, 3) * 1e-4);
         });
 
-        t.Test("STEP import: unsupported geometry is reported, not half-imported", () =>
+        t.Test("STEP import: B-spline blend faces (spoked wheel round trip)", () =>
         {
-            var (step, _) = Exported("spoked-handwheel.fcad", volume: false);
+            var original = new Regenerator().Rebuild(Demos.All.First(d => d.file == "spoked-handwheel.fcad").build()).State.Bodies.Single().Solid;
+            using var ms = new MemoryStream();
+            StepWriter.Write(ms, new[] { ("wheel", original) }, "wheel");
+            var step = ms.ToArray();
+            var volume = NTess.ToSolid(original.Native!, 5e-3).Volume();
             var r = new Regenerator().Rebuild(ImportDoc(step));
             var s = r.Status.Values.First();
-            t.True(!s.Ok && s.Error!.Contains("B-spline"), "expected a clear error, got: " + s.Error);
+            t.True(s.Ok, s.Error ?? "");
+            var b = r.State.Bodies.Single().Solid;
+            t.True(b.Native != null && b.Topology.OpenHalfEdges == 0, "not closed");
+            t.True(b.Native!.Faces.Count(f => f.Surface.Kind == SurfaceKind.BSpline) == 100, "blend faces are not B-splines");
+            // the blends were exported as fitted B-splines (within 1e-5 mm); both tessellated at 5e-3
+            t.Near(NTess.ToSolid(b.Native, 5e-3).Volume(), volume, volume * 2e-4);
         });
+
+        // NURBS-converted solids and a rolling-ball fillet written by OCCT: rational, closed and polar B-spline surfaces
+        foreach (var (file, exact) in new[]
+        {
+            ("n-cyl.step", Math.PI * 100 * 30), ("n-cone.step", Math.PI * 100 * 20 / 3), ("n-sphere.step", 4.0 / 3 * Math.PI * 1000),
+            ("n-torus.step", 2 * Math.PI * Math.PI * 20 * 25), ("n-boxhole.step", 40.0 * 40 * 10 - Math.PI * 36 * 10), ("occ-fillet.step", 53076.38),
+        })
+            t.Test($"STEP import: B-spline surfaces from OCCT ({file})", () =>
+            {
+                var res = StepImport.Read(File.ReadAllBytes(Path.Combine(Models(), "step", file)), "F1.");
+                var body = res.Solids.Single().Body;
+                t.Eq(body.Validate(), null);
+                var solid = NTess.ToSolid(body);
+                t.True(solid.Topology.OpenHalfEdges == 0, "display mesh not closed");
+                t.Near(NTess.ToSolid(body, 1e-3).Volume(), exact, exact * 3e-4);
+            });
+
+        t.Test("Boolean through imported B-spline geometry", () =>
+        {
+            var res = StepImport.Read(File.ReadAllBytes(Path.Combine(Models(), "step", "n-cyl.step")), "F1.");
+            var cyl = NTess.ToSolid(res.Solids.Single().Body);
+            var cut = Csg.Subtract(cyl, Builders.Box(new Vec3(0, -20, 10), new Vec3(20, 20, 20), "Cut"));
+            t.True(cut.Native != null && cut.Topology.OpenHalfEdges == 0, $"cut not exact/closed ({Csg.LastFallbackReason})");
+            t.Near(NTess.ToSolid(cut.Native!, 1e-3).Volume(), Math.PI * 100 * 30 - Math.PI * 100 / 2 * 10, 5);
+        });
+    }
+
+    static string Models()
+    {
+        var dir = AppContext.BaseDirectory;
+        while (dir != null && !Directory.Exists(Path.Combine(dir, "samples"))) dir = Path.GetDirectoryName(dir);
+        return Path.Combine(dir!, "tests", "FeatherCad.Tests", "models");
     }
 
     static bool IsConvex(NEdge e)

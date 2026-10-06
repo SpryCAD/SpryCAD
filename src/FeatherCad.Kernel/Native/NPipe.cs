@@ -266,6 +266,36 @@ public sealed class PipeSpine
     }
 }
 
+/// <summary>
+/// An iso-parameter curve of a surface (face parameters): u fixed (axis 0, running along v) or v fixed (axis 1);
+/// sign −1 runs it backwards so edges can keep increasing parameters.
+/// </summary>
+public sealed class NIso : NCurve
+{
+    public NSurface S { get; }
+    public int Axis { get; }
+    public double C { get; }
+    public int Sign { get; }
+
+    public NIso(NSurface s, int axis, double c, int sign) { S = s; Axis = axis; C = c; Sign = sign; }
+
+    public override Vec3 Eval(double t) => Axis == 0 ? S.Eval(C, Sign * t) : S.Eval(Sign * t, C);
+    public override Vec3 Deriv(double t)
+    {
+        const double h = 1e-6;
+        return (Eval(t + h) - Eval(t - h)) / (2 * h);
+    }
+    public override double Param(Vec3 p, double? hint = null)
+    {
+        double? h = hint.HasValue ? Sign * hint.Value : null;
+        var q = Axis == 0 ? S.UV(p, C, h ?? double.NaN) : S.UV(p, h ?? double.NaN, C);
+        return Sign * (Axis == 0 ? q.Y : q.X);
+    }
+    public override NCurve Transformed(in Transform t) => new NIso(S.Transformed(t), Axis, C, Sign);
+    public override int Samples(double t0, double t1, double tol) => 32;
+    public override ExactCurve ToExact() => BSplineCurve.Interpolate(Enumerable.Range(0, 33).Select(i => Eval(i / 32.0)).ToList(), 3);
+}
+
 /// <summary>Where a rolling-ball pipe touches one of its support surfaces: the support's foot point of the spine.</summary>
 public sealed class NContact : NCurve
 {

@@ -157,6 +157,12 @@ public static class NTess
             case SurfaceKind.Cone: { var r = Math.Max(s.R, 1e-3); var hu = Ang(r) * r; return (hu, Math.Max(hu * 4, 1e-6)); }
             case SurfaceKind.Sphere: { var h = Ang(s.R) * s.R; return (h, h); }
             case SurfaceKind.Torus: { var hu = Ang(s.R + s.R2) * (s.R + s.R2); var hv = Ang(s.R2) * s.R2; return (hu, hv); }
+            case SurfaceKind.BSpline:
+                {
+                    var rho = Math.Min(s.Nurbs!.MinCurvatureRadius(), 1e6);
+                    var h = Ang(rho) * rho;
+                    return (Math.Max(h, 1e-6), Math.Max(h, 1e-6));
+                }
             case SurfaceKind.Pipe:
                 {
                     // around: the pipe radius; along: the tightest bend of the surface (inner side of the spine)
@@ -176,6 +182,7 @@ public static class NTess
         SurfaceKind.Sphere => (s.R, s.R),
         SurfaceKind.Torus => (s.R + s.R2, s.R2),
         SurfaceKind.Pipe => (s.R, 1),
+        SurfaceKind.BSpline => s.Nurbs!.MetricScale(),
         _ => (1, 1),
     };
 

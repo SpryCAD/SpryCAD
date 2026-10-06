@@ -14,6 +14,7 @@ public static class NHash
             h.Add((int)s.Kind);
             if (s.Kind == SurfaceKind.Plane) { h.Add(s.Plane!.Normal); h.Add(s.Plane.D); }
             else if (s.Kind == SurfaceKind.Pipe) { h.Add(s.R); foreach (var p in s.Spine!.P) h.Add(p); foreach (var d in s.Spine.D) h.Add(d); }
+            else if (s.Kind == SurfaceKind.BSpline) { foreach (var p in s.Nurbs!.P) h.Add(p); foreach (var k in s.Nurbs.U) h.Add(k); foreach (var k in s.Nurbs.V) h.Add(k); if (s.Nurbs.W != null) foreach (var w in s.Nurbs.W) h.Add(w); }
             else { h.Add(s.Origin); h.Add(s.Axis); h.Add(s.F.XDir); h.Add(s.R); h.Add(s.R2); }
             h.Add(f.Loops.Count);
             foreach (var l in f.Loops)

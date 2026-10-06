@@ -160,15 +160,24 @@ public static class NSeamSplit
         var s = f.Surface;
         double sg = f.Sense ? 1 : -1;
         if (open.Count > 2) throw new NotSupportedException($"face {f.Tag.Name}: more than two loops around the surface");
-        // seam position: as far as possible from every vertex
-        var vcoords = loops.SelectMany(l => l).Select(x => C(x.Uv[0], axis)).ToList();
-        double best = 0, bestGap = -1;
-        for (int k = 0; k < 72; k++)
+        // seam position: clear of the holes (it must not cross them) and as far as possible from the vertices of
+        // the loops it joins
+        var vcoords = open.SelectMany(i => loops[i]).Select(x => C(x.Uv[0], axis)).ToList();
+        var holes = Enumerable.Range(0, loops.Count).Where(i => !open.Contains(i) && loops[i].Count > 0)
+            .Select(i => { var pts = loops[i].SelectMany(x => x.Uv).Select(q => C(q, axis)).ToList(); return (lo: pts.Min(), hi: pts.Max()); }).ToList();
+        double best = 0, bestGap = double.NegativeInfinity;
+        for (int k = 0; k < 360; k++)
         {
-            var c = 2 * Math.PI * k / 72;
+            var c = 2 * Math.PI * k / 360;
             var gap = vcoords.Count == 0 ? Math.PI : vcoords.Min(v => Math.Abs(NCurve.Wrap(v, c) - c));
+            foreach (var (lo, hi) in holes)
+            {
+                var m = 0.5 * (lo + hi);
+                gap = Math.Min(gap, Math.Abs(NCurve.Wrap(c, m) - m) - 0.5 * (hi - lo)); // negative inside a hole's range
+            }
             if (gap > bestGap) { bestGap = gap; best = c; }
         }
+        if (bestGap <= 0) throw new NotSupportedException($"face {f.Tag.Name}: holes all the way round, no room for a seam");
         double Coord(Vec3 p, double near)
         {
             var q = s.UV(p, axis == 0 ? near : double.NaN, axis == 1 ? near * sg : double.NaN);
@@ -211,6 +220,7 @@ public static class NSeamSplit
         }
         NEdge Seam(NVertex a, NVertex b, Vec3 mid)
         {
+            if (s.Kind == SurfaceKind.BSpline) return IsoEdge(s, axis, a, b, mid);
             if (axis == 0 && s.Kind is SurfaceKind.Cylinder or SurfaceKind.Cone)
             {
                 var d = b.P - a.P;
@@ -526,6 +536,7 @@ public static class NSeamSplit
     /// <summary>The iso-curve of the cut between two points (mid point pm on it): a line on cylinders and cones, a circle otherwise.</summary>
     static NEdge CutEdge(NSurface s, int axis, NVertex a, NVertex b, Vec3 pm)
     {
+        if (s.Kind == SurfaceKind.BSpline) return IsoEdge(s, axis, a, b, pm);
         if (axis == 0 && s.Kind is SurfaceKind.Cylinder or SurfaceKind.Cone)
         {
             var d = b.P - a.P;
@@ -533,6 +544,22 @@ public static class NSeamSplit
         }
         var (circle, t0, t1) = CircleThrough(a.P, pm, b.P);
         return new NEdge(circle, t0, t1, a, b);
+    }
+
+    /// <summary>
+    /// The iso-parameter curve of a B-spline face from a to b (through pm): the cut coordinate fixed (u for axis 0,
+    /// v for axis 1), the other one running from a's value to b's, the way that passes through pm.
+    /// </summary>
+    static NEdge IsoEdge(NSurface s, int axis, NVertex a, NVertex b, Vec3 pm)
+    {
+        var qa = s.UV(a.P); var qm = s.UV(pm, qa.X, qa.Y); var qb = s.UV(b.P, qm.X, qm.Y);
+        double fixedC = axis == 0 ? qm.X : qm.Y;
+        double t0 = axis == 0 ? qa.Y : qa.X, tm = axis == 0 ? qm.Y : qm.X, t1 = axis == 0 ? qb.Y : qb.X;
+        // the running parameter must pass through pm's value between the two ends
+        bool rising = t1 > t0;
+        if ((tm - t0) * (t1 - tm) < 0) { if (rising) t1 -= 2 * Math.PI; else t1 += 2 * Math.PI; rising = t1 > t0; }
+        var curve = new NIso(s, axis, fixedC, rising ? 1 : -1);
+        return new NEdge(curve, rising ? t0 : -t0, rising ? t1 : -t1, a, b);
     }
 
     /// <summary>Circle through p0, pm, p1, oriented from p0 through pm to p1; parameters of p0 and p1.</summary>

@@ -20,6 +20,21 @@ static class ImportTool
             {
                 var r = StepImport.Read(File.ReadAllBytes(file), "F1.");
                 var ms = sw.ElapsedMilliseconds;
+                if (Environment.GetEnvironmentVariable("FC_PROF") != null)
+                {
+                    foreach (var s in r.Solids)
+                    {
+                        var t0 = Stopwatch.StartNew();
+                        var facets = NTess.Facets(s.Body);
+                        Console.WriteLine($"  tessellation {t0.ElapsedMilliseconds} ms ({facets.Count} facets)");
+                        t0.Restart();
+                        foreach (var f in s.Body.Faces) NDomain.Of(f);
+                        Console.WriteLine($"  domains {t0.ElapsedMilliseconds} ms");
+                        t0.Restart();
+                        var top = NTess.ToSolid(s.Body).Topology;
+                        Console.WriteLine($"  topology+tess {t0.ElapsedMilliseconds} ms");
+                    }
+                }
                 foreach (var w in r.Warnings) Console.WriteLine("  warning: " + w);
                 foreach (var s in r.Solids)
                 {

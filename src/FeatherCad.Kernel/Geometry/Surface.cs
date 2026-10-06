@@ -3,7 +3,7 @@ using FeatherCad.Kernel.Native;
 namespace FeatherCad.Kernel;
 
 /// <summary>Pipe: the canal surface of a ball rolling along a spine curve (rolling-ball blends).</summary>
-public enum SurfaceKind { Plane, Cylinder, Cone, Sphere, Torus, Pipe }
+public enum SurfaceKind { Plane, Cylinder, Cone, Sphere, Torus, Pipe, BSpline }
 
 /// <summary>
 /// The exact ("true") geometry a face was created from. Faces are stored as exact planar
@@ -25,6 +25,8 @@ public sealed record SurfaceDef
     public double Param2 { get; init; }
     /// <summary>Pipe spine (Radius is the pipe radius).</summary>
     public PipeSpine? Spine { get; init; }
+    /// <summary>B-spline surface geometry.</summary>
+    public NurbsSurface? Nurbs { get; init; }
     /// <summary>Facet count used for a full revolution.</summary>
     public int Segments { get; init; }
 
@@ -37,7 +39,7 @@ public sealed record SurfaceDef
         if (Kind == SurfaceKind.Plane) return this;
         var axis = t.Normal(Axis);
         var refd = t.Normal(RefDir);
-        return this with { Origin = t.Point(Origin), Axis = axis, RefDir = refd, Spine = Spine?.Transformed(t) };
+        return this with { Origin = t.Point(Origin), Axis = axis, RefDir = refd, Spine = Spine?.Transformed(t), Nurbs = Nurbs?.Transformed(t) };
     }
 
     /// <summary>Analytic outward normal at p, given the facet normal (used to pick the side).</summary>
@@ -77,6 +79,12 @@ public sealed record SurfaceDef
             case SurfaceKind.Pipe:
                 n = Spine!.Normal(p);
                 break;
+            case SurfaceKind.BSpline:
+                {
+                    var c = Nurbs!.Closest(p);
+                    n = Nurbs.Normal(c.u, c.v);
+                    break;
+                }
             default:
                 return facetNormal;
         }

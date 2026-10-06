@@ -36,7 +36,7 @@ public sealed class NEdge
     {
         var cached = _samples;
         if (cached != null && cached.Tol <= tol * 1.0001) return cached.Points;
-        if (Curve is NSpline or NPolyline or NContact or NSection)
+        if (Curve is NSpline or NPolyline or NContact or NSection or NIso)
         {
             // adaptive: bisect until the chord error is below tol
             var res = new List<Vec3> { V0.P };
@@ -209,7 +209,7 @@ public sealed class NBody
         var b = Box3.Empty;
         foreach (var e in Edges) b.Add(e.TightBounds());
         foreach (var f in Faces)
-            if (f.Surface.Kind is SurfaceKind.Sphere or SurfaceKind.Torus or SurfaceKind.Pipe)
+            if (f.Surface.Kind is SurfaceKind.Sphere or SurfaceKind.Torus or SurfaceKind.Pipe or SurfaceKind.BSpline)
             {
                 var dom = NDomain.Of(f, 1e-4);
                 foreach (var q in dom.InteriorSamples(12))

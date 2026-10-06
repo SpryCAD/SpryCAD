@@ -191,7 +191,53 @@ public static class StepImport
             if (nf.Loops.Count > 0) return new[] { nf };
             // no edges: a whole closed surface (a full sphere is one face with only a vertex loop)
             if (nf.Surface.Kind == SurfaceKind.Sphere) return WholeSphere(nf);
+            if (nf.Surface.Kind == SurfaceKind.BSpline && WholeBSpline(nf) is { } pieces) return pieces;
             throw new NotSupportedException($"closed {nf.Surface.Kind.ToString().ToLowerInvariant()} faces without edges");
+        }
+
+        /// <summary>
+        /// A closed B-spline face without edges: closed round with a pole at each end (sphere-like) becomes two halves
+        /// between iso-curves from pole to pole; closed both ways (torus-like) gets the two seam iso-curves.
+        /// Null for other shapes.
+        /// </summary>
+        IEnumerable<NFace>? WholeBSpline(NFace f)
+        {
+            var s = f.Surface; var nb = s.Nurbs!;
+            NFace Oriented(Vec3 anchor, params (NEdge e, bool fwd)[] cs)
+            {
+                var h = new NFace(s, f.Sense, f.Tag, anchor);
+                var l = new NLoop();
+                foreach (var (e, fwd) in cs) l.Coedges.Add(new NCoedge(e, fwd));
+                h.Loops.Add(l);
+                if (NDomain.Of(h).SignedArea() < 0)
+                {
+                    l.Coedges.Reverse();
+                    for (int i = 0; i < l.Coedges.Count; i++) l.Coedges[i] = new NCoedge(l.Coedges[i].Edge, !l.Coedges[i].Forward);
+                }
+                return h;
+            }
+            if (nb.ClosedU && !nb.ClosedV && nb.Poles.Count == 2)
+            {
+                double v0 = nb.V0, v1 = nb.V1, vm = 0.5 * (v0 + v1);
+                var south = new NVertex(s.Eval(0, v0)); var north = new NVertex(s.Eval(0, v1));
+                NEdge Meridian(double u) => new(new NIso(s, 0, u, 1), v0, v1, south, north);
+                var m0 = Meridian(0); var m1 = Meridian(Math.PI);
+                return new[]
+                {
+                    Oriented(s.Eval(0.5 * Math.PI, vm), (m0, true), (m1, false)),
+                    Oriented(s.Eval(1.5 * Math.PI, vm), (m1, true), (m0, false)),
+                };
+            }
+            if (nb.ClosedU && nb.ClosedV)
+            {
+                var V = new NVertex(s.Eval(0, 0));
+                var ru = new NVertex(s.Eval(Math.PI, 0)); var tv = new NVertex(s.Eval(0, Math.PI));
+                NEdge Iso(int axis, double t0, double t1, NVertex a, NVertex b) => new(new NIso(s, axis, 0, 1), t0, t1, a, b);
+                var r1 = Iso(1, 0, Math.PI, V, ru); var r2 = Iso(1, Math.PI, 2 * Math.PI, ru, V);
+                var t1 = Iso(0, 0, Math.PI, V, tv); var t2 = Iso(0, Math.PI, 2 * Math.PI, tv, V);
+                return new[] { Oriented(s.Eval(Math.PI, Math.PI), (r1, true), (r2, true), (t1, true), (t2, true), (r2, false), (r1, false), (t2, false), (t1, false)) };
+            }
+            return null;
         }
 
         /// <summary>A full sphere as two half spheres between two meridians.</summary>
@@ -296,6 +342,7 @@ public static class StepImport
                         break;
                     }
             }
+            if (res == null && (s.Is("B_SPLINE_SURFACE_WITH_KNOTS") || s.Is("B_SPLINE_SURFACE"))) res = NSurface.BSpline(SplineSurface(s));
             _surfaces[s.Id] = res;
             return res ?? throw new NotSupportedException(Friendly(s.Type));
         }
@@ -375,6 +422,44 @@ public static class StepImport
             }
             if (c.Is("B_SPLINE_CURVE_WITH_KNOTS") || c.Is("B_SPLINE_CURVE")) return Spline(c, same);
             throw new NotSupportedException(c.Type.ToLowerInvariant().Replace('_', ' ') + " edges");
+        }
+
+        /// <summary>
+        /// B_SPLINE_SURFACE_WITH_KNOTS(name, u_degree, v_degree, poles, form, u_closed, v_closed, self, u_mults, v_mults,
+        /// u_knots, v_knots, spec), or the complex (rational) form with B_SPLINE_SURFACE / B_SPLINE_SURFACE_WITH_KNOTS /
+        /// RATIONAL_B_SPLINE_SURFACE parts.
+        /// </summary>
+        NurbsSurface SplineSurface(StepInstance s)
+        {
+            List<object?> bs, kn;
+            if (s.Parts.Count == 1) { bs = s.Args.Skip(1).Take(7).ToList(); kn = s.Args.Skip(8).ToList(); }
+            else { bs = s.Part("B_SPLINE_SURFACE")!; kn = s.Part("B_SPLINE_SURFACE_WITH_KNOTS")!; }
+            int pu = (int)D(bs[0]), pv = (int)D(bs[1]);
+            var rows = (List<object?>)bs[2];
+            int nu = rows.Count, nv = ((List<object?>)rows[0]!).Count;
+            var poles = new Vec3[nu, nv];
+            for (int i = 0; i < nu; i++)
+            {
+                var row = (List<object?>)rows[i]!;
+                for (int j = 0; j < nv; j++) poles[i, j] = Point(row[j]);
+            }
+            double[] Knots(List<object?> mults, List<object?> vals)
+            {
+                var k = new List<double>();
+                for (int i = 0; i < mults.Count; i++) for (int m = 0; m < (int)D(mults[i]); m++) k.Add(D(vals[i]));
+                return k.ToArray();
+            }
+            var U = Knots((List<object?>)kn[0]!, (List<object?>)kn[2]!);
+            var V = Knots((List<object?>)kn[1]!, (List<object?>)kn[3]!);
+            if (U.Length != nu + pu + 1 || V.Length != nv + pv + 1) throw new InvalidDataException($"STEP: B-spline surface #{s.Id} has inconsistent knots.");
+            double[,]? w = null;
+            if (s.Part("RATIONAL_B_SPLINE_SURFACE") is { } rw)
+            {
+                var wrows = (List<object?>)rw[0]!;
+                w = new double[nu, nv];
+                for (int i = 0; i < nu; i++) { var row = (List<object?>)wrows[i]!; for (int j = 0; j < nv; j++) w[i, j] = D(row[j]); }
+            }
+            return new NurbsSurface(pu, pv, poles, w, U, V);
         }
 
         NCurve Spline(StepInstance c, bool same)
