@@ -56,6 +56,7 @@ public partial class MainWindow : Window
         Tree.ExpandToggled += () => RebuildTree();
         Tree.RollbackTo += (id, after) => RollbackTo(id, after);
         Tree.RollbackRequested += t => { if (t == null) RollForward(); };
+        Tree.MoveRequested += MoveFeature;
 
         _previewTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(90) };
         _previewTimer.Tick += (_, _) => { _previewTimer.Stop(); RunPreview(); };

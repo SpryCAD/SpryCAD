@@ -69,9 +69,8 @@ public sealed class CadDocument
             foreach (var f in Features)
             {
                 if (gone.Contains(f.Id)) continue;
-                var json = JsonSerializer.Serialize(f, typeof(Feature), Serialization.Options);
-                // "F7" as a whole value (sketchId, seeds) or "F7.…" as a face/edge name prefix ("F17" does not match)
-                if (gone.Any(id => json.Contains($"\"{id}\"") || json.Contains($"\"{id}.")))
+                var json = JsonOf(f);
+                if (gone.Any(id => Refers(json, id)))
                 {
                     gone.Add(f.Id); result.Add(f); grew = true;
                 }
@@ -79,6 +78,14 @@ public sealed class CadDocument
         }
         return result;
     }
+
+    public static string JsonOf(Feature f) => JsonSerializer.Serialize(f, typeof(Feature), Serialization.Options);
+
+    /// <summary>
+    /// Whether a feature's serialized definition refers to feature <paramref name="id"/>: "F7" as a whole value
+    /// (sketchId, seeds) or "F7.…" as a face/edge name prefix ("F17" does not match).
+    /// </summary>
+    public static bool Refers(string featureJson, string id) => featureJson.Contains($"\"{id}\"") || featureJson.Contains($"\"{id}.");
 
     /// <summary>Features that consume the given one (e.g. the extrude using a sketch).</summary>
     public IEnumerable<Feature> ConsumersOf(string id) => Features.Where(f => f.Consumes.Contains(id) ||

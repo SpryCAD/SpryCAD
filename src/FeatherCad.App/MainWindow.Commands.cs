@@ -699,6 +699,48 @@ public partial class MainWindow
 
     void RollForward() => Session.Change(() => Session.Doc.RollbackIndex = null);
 
+    /// <summary>
+    /// Tree drag reorder: puts the feature (with the sketches only it absorbs) before/after the target feature or
+    /// the rollback bar ("__rollback"). Refused when a feature would end up before something it refers to.
+    /// </summary>
+    void MoveFeature(string id, string target, bool after)
+    {
+        if (_sketch != null || _edit != null) { Status("Finish the current edit before reordering features."); return; }
+        var d = Session.Doc;
+        if (d.Find(id) is not { } f) return;
+        var group = d.Features.Where(x => x == f || x is SketchFeature && f.Consumes.Contains(x.Id) && d.ConsumersOf(x.Id).All(c => c == f)).ToList();
+
+        // the rollback bar rides along in the list as a marker, so moves across it keep what is rolled back right
+        var bar = new object();
+        var order = d.Features.Cast<object>().ToList();
+        order.Insert(d.ActiveCount, bar);
+        object anchor;
+        if (target == "__rollback") anchor = bar;
+        else if (d.Find(target) is { } t && !group.Contains(t)) anchor = t;
+        else return;
+        order.RemoveAll(o => o is Feature x && group.Contains(x));
+        order.InsertRange(order.IndexOf(anchor) + (after ? 1 : 0), group);
+        var moved = order.OfType<Feature>().ToList();
+        var active = order.IndexOf(bar);
+        if (moved.SequenceEqual(d.Features) && active == d.ActiveCount) return;
+
+        var json = moved.ToDictionary(x => x.Id, CadDocument.JsonOf);
+        for (int i = 0; i < moved.Count; i++)
+            for (int j = i + 1; j < moved.Count; j++)
+                if (CadDocument.Refers(json[moved[i].Id], moved[j].Id))
+                {
+                    Status($"Can't move {f.Name} there: {moved[i].Name} uses {moved[j].Name}, which would come after it.");
+                    return;
+                }
+        Session.Change(() =>
+        {
+            d.Features.Clear();
+            d.Features.AddRange(moved);
+            d.RollbackIndex = active >= moved.Count ? null : active;
+        });
+        Status($"Moved {f.Name} (Ctrl+Z to undo)");
+    }
+
     async Task RenameFeature(Feature f)
     {
         var name = await Dialogs.Input(this, "Rename", "Feature name:", f.Name);

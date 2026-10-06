@@ -86,6 +86,36 @@ static class CoreTests
             t.True(SketchSolver.WouldOverDefine(sk, extra), "length of opposite side is redundant");
         });
 
+        t.Test("Solver: straight slot keeps its sides parallel to the centerline", () =>
+        {
+            // built as the Straight Slot tool does
+            var sk = new Sketch();
+            var ca = sk.AddPoint(new Vec2(0, 0)); var cb = sk.AddPoint(new Vec2(30, 0));
+            var axis = sk.Add(new SkLine { P1 = ca.Id, P2 = cb.Id, Construction = true });
+            var p1 = sk.AddPoint(new Vec2(0, 5)); var p2 = sk.AddPoint(new Vec2(30, 5));
+            var p3 = sk.AddPoint(new Vec2(30, -5)); var p4 = sk.AddPoint(new Vec2(0, -5));
+            var top = sk.Add(new SkLine { P1 = p1.Id, P2 = p2.Id });
+            var bot = sk.Add(new SkLine { P1 = p3.Id, P2 = p4.Id });
+            var arcB = sk.Add(new SkArc { Center = cb.Id, Start = p3.Id, End = p2.Id });
+            var arcA = sk.Add(new SkArc { Center = ca.Id, Start = p1.Id, End = p4.Id });
+            foreach (var (l, arc) in new[] { (top, arcB), (bot, arcA), (top, arcA), (bot, arcB) })
+                SketchSolver.CaptureSign(sk, sk.AddConstraint(CType.Tangent, l.Id, arc.Id));
+            var par = new SkConstraint { Id = 900, Type = CType.Parallel, Refs = new[] { top.Id, axis.Id } };
+            t.True(!SketchSolver.WouldOverDefine(sk, par), "parallel side is not implied by the tangencies alone");
+            var c = sk.AddConstraint(CType.Parallel, top.Id, axis.Id);
+            var second = new SkConstraint { Id = 901, Type = CType.Parallel, Refs = new[] { bot.Id, axis.Id } };
+            t.True(SketchSolver.WouldOverDefine(sk, second), "the other side then follows");
+
+            // drag one corner of a side: the slot must stay a slot (parallel sides, equal ends)
+            var r = SketchSolver.Solve(sk, new Dictionary<int, Vec2> { [p2.Id] = new Vec2(32, 9) });
+            t.True(r.Converged, "converged");
+            var u = (sk.P(cb.Id) - sk.P(ca.Id)).Normalized;
+            t.Near(Vec2.Cross(u, (sk.P(p2.Id) - sk.P(p1.Id)).Normalized), 0, 1e-6);
+            t.Near(Vec2.Cross(u, (sk.P(p4.Id) - sk.P(p3.Id)).Normalized), 0, 1e-6);
+            t.Near(Vec2.Distance(sk.P(ca.Id), sk.P(p1.Id)), Vec2.Distance(sk.P(cb.Id), sk.P(p2.Id)), 1e-6);
+            _ = c;
+        });
+
         t.Test("Profile: rectangle with circle hole", () =>
         {
             var sk = Rect(80, 40);

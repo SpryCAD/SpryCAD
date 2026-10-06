@@ -1027,7 +1027,9 @@ public sealed class SketchEditor : IViewportMode
             var t = Sk.AddConstraint(CType.Tangent, l.Id, arc.Id);
             SketchSolver.CaptureSign(Sk, t);
         }
-        _ = axisLine;
+        // sides parallel to the centerline. One relation is enough: with the four tangencies it makes the end radii
+        // equal, so the other side follows (a second Parallel would be redundant)
+        Sk.AddConstraint(CType.Parallel, top.Id, axisLine.Id);
     }
 
     // ---- trim ----
