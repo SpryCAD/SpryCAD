@@ -1,0 +1,54 @@
+# Windows installer build: publish the app into .\publish\win-x64, generate the demo parts into .\publish\demos,
+# then compile installer\feathercad.iss into
+#   publish\FeatherCAD-Setup-<version>.exe
+# Needs Inno Setup 6 (https://jrsoftware.org/isdl.php, or: winget install JRSoftware.InnoSetup).
+# Run from anywhere:  pwsh -File build\make-installer.ps1 [-Ver 0.2.0]
+param([string]$Ver)
+$ErrorActionPreference = 'Stop'
+$root = Split-Path -Parent $PSScriptRoot
+$proj = Join-Path $root 'src\FeatherCad.App\FeatherCad.App.csproj'
+
+# 1) Version: -Ver, else <Version> in the app's .csproj.
+$ver = if ($Ver) { $Ver } else { ([xml](Get-Content $proj)).Project.PropertyGroup.Version | Where-Object { $_ } | Select-Object -First 1 }
+if (-not $ver) { throw "No version: pass -Ver or set <Version> in $proj" }
+Write-Host "== version $ver ==" -ForegroundColor Cyan
+
+# 2) Locate the Inno Setup compiler (ISCC.exe) before spending time on the publish: PATH, then the standard
+#    install locations (machine-wide, and the per-user install winget uses).
+$iscc = (Get-Command 'iscc.exe' -ErrorAction SilentlyContinue | Select-Object -First 1).Source
+if (-not $iscc) {
+  foreach ($p in @(
+      "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+      "${env:ProgramFiles}\Inno Setup 6\ISCC.exe",
+      "${env:LOCALAPPDATA}\Programs\Inno Setup 6\ISCC.exe")) {
+    if (Test-Path $p) { $iscc = $p; break }
+  }
+}
+if (-not $iscc) {
+  throw "Inno Setup compiler (ISCC.exe) not found. Install it from https://jrsoftware.org/isdl.php, or add it to PATH."
+}
+
+# 3) Publish self-contained and ReadyToRun (as publish.ps1 does) into a clean folder, so nothing from an older
+#    build ends up in the installer.
+$out = Join-Path $root 'publish\win-x64'
+if (Test-Path $out) { Remove-Item $out -Recurse -Force }
+Write-Host "== publishing to $out ==" -ForegroundColor Cyan
+& dotnet publish $proj -c Release -r win-x64 --self-contained true -p:PublishReadyToRun=true -p:DebugType=none `
+    "-p:Version=$ver" -o $out
+if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed with exit code $LASTEXITCODE" }
+
+# 4) Generate the parametric demo parts fresh (tests/FeatherCad.Tests/Demos.cs), so the installer ships the
+#    current set rather than whatever was last written into samples\demos.
+$demos = Join-Path $root 'publish\demos'
+if (Test-Path $demos) { Remove-Item $demos -Recurse -Force }
+Write-Host "== generating demo parts into $demos ==" -ForegroundColor Cyan
+& dotnet run --project (Join-Path $root 'tests\FeatherCad.Tests') -c Release -- demos $demos
+if ($LASTEXITCODE -ne 0) { throw "demo generation failed with exit code $LASTEXITCODE" }
+
+# 5) Compile.
+$iss = Join-Path $root 'installer\feathercad.iss'
+Write-Host "== compiling installer ($iscc) ==" -ForegroundColor Cyan
+& $iscc "/DAppVer=$ver" $iss
+if ($LASTEXITCODE -ne 0) { throw "ISCC failed with exit code $LASTEXITCODE" }
+
+Write-Host "== installer ready -> $(Join-Path $root "publish\FeatherCAD-Setup-$ver.exe") ==" -ForegroundColor Green
