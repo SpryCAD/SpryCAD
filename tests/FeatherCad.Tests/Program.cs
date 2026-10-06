@@ -92,6 +92,7 @@ static class Program
         if (args.Length > 0 && args[0] == "demos") return Demos.Write(args.Length > 1 ? args[1] : Path.Combine(Path.GetTempPath(), "fc-demos"));
         if (args.Length > 2 && args[0] == "validate") return Validate.Run(args[1], args[2]);
         if (args.Length > 4 && args[0] == "repro") { Bench.Repro(args[1], args[2], args[3], args[4]); return 0; }
+        if (args.Length > 1 && args[0] == "localbench") return LocalBench.Run(args[1], args.Length > 2 ? int.Parse(args[2]) : 5);
         if (args.Length > 1 && args[0] == "bench")
         {
             Bench.Run(args[1], args.Length > 2 ? int.Parse(args[2]) : 5);

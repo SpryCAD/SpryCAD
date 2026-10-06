@@ -208,6 +208,14 @@ public sealed class NDomain
                 var q = new Vec2(UMin + (UMax - UMin) * i / 7, VMin + (VMax - VMin) * j / 7);
                 if (ContainsUV(q)) cands.Add(q);
             }
+        // a regular grid can land in the holes of a regular hole pattern: try a low-discrepancy (R2) point set
+        // before triangulating, which is slow for faces with hundreds of holes
+        for (int k = 0; k < 64 && cands.Count < 6; k++)
+        {
+            double fu = (0.5 + k * 0.7548776662466927) % 1, fv = (0.5 + k * 0.5698402909980532) % 1;
+            var q = new Vec2(UMin + (UMax - UMin) * fu, VMin + (VMax - VMin) * fv);
+            if (ContainsUV(q)) cands.Add(q);
+        }
         if (cands.Count < 6)
         {
             // thin or oddly shaped domain: use triangle centroids

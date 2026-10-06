@@ -227,14 +227,16 @@ Check items off as they land.
 
 ### Kernel performance
 
-- [ ] Local booleans: work only on the faces near the tool instead of the whole body (rebuild time follows
+- [x] Local booleans: work only on the faces near the tool instead of the whole body (rebuild time follows
       the size of the change, not of the part)
-- [ ] Reuse face splits, edge samples and domains of faces a boolean leaves untouched
+- [ ] Reuse face splits and edge samples of faces a boolean leaves untouched (face domains and edge
+      bounds are reused)
 - [ ] Analytic intersections for more pairs (plane/torus, cylinder/sphere, oblique cone/plane, ...)
 - [ ] Pattern copies that do not touch: copy the topology instead of running booleans
 - [ ] Recognise B-spline faces that are planes, cylinders or cones on import (sheet-metal STEP files)
 - [ ] Faster B-spline closest point (better seeds, fewer Newton steps) and adaptive traces between B-splines
 - [ ] Display normals from the tessellator's parameters; reuse unchanged faces' meshes; level of detail
+- [ ] Fewer surviving allocations per operation (clone of a 3000-face body triggers gen-1 GCs)
 - [ ] Rolling-ball spine at 1e-6 instead of 1e-8; independent fillet chains in parallel
 
 ### Modelling

@@ -32,6 +32,9 @@ public static class Prof
         _acc.AddOrUpdate(name, (dt, 1), (_, v) => (v.ticks + dt, v.calls + 1));
     }
 
+    /// <summary>Counts <paramref name="calls"/> events without time (e.g. how many faces a stage visited).</summary>
+    public static void Count(string name, int calls) => _acc.AddOrUpdate(name, (0, calls), (_, v) => (v.ticks, v.calls + calls));
+
     public static void Reset() => _acc.Clear();
 
     public static IEnumerable<(string name, double ms, int calls)> Results()

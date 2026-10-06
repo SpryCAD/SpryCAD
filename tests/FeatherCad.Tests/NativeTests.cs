@@ -70,6 +70,47 @@ static class NativeBoolTests
 
     public static void Run(TestRunner t)
     {
+        t.Test("Native bool: local booleans give the whole-body result", () =>
+        {
+            // a plate with a hole pattern, then cuts and bosses touching few faces: faces far from each tool are
+            // skipped by every stage, which must not change the result
+            NBody Plate()
+            {
+                var plate = NativeTests.Box(new Vec3(0, 0, 0), new Vec3(70, 70, 8), "P");
+                var holes = new NBody();
+                for (int i = 0; i < 6; i++)
+                    for (int j = 0; j < 6; j++)
+                        holes.Faces.AddRange(NativeTests.Cyl(new Vec3(10 + 10 * i, 10 + 10 * j, -1), Vec3.UnitZ, 2.5, 10, $"G{i}{j}").Faces);
+                holes.Link();
+                return NBoolean.Run(plate, holes, BoolOp.Subtract);
+            }
+            var tools = new (NBody tool, BoolOp op)[]
+            {
+                (NativeTests.Cyl(new Vec3(15, 15, 4), Vec3.UnitZ, 1.5, 10, "T1"), BoolOp.Subtract),             // blind hole between holes
+                (NativeTests.Cyl(new Vec3(35, 35, 8), Vec3.UnitZ, 4, 6, "T2"), BoolOp.Union),                   // boss on the top face
+                (NativeTests.Box(new Vec3(28, -1, 3), new Vec3(42, 12, 9), "T3"), BoolOp.Subtract),             // slot through a hole and the edge
+                (NativeTests.Cyl(new Vec3(-1, 50, 4), Vec3.UnitX, 1.5, 6, "T4"), BoolOp.Subtract),              // hole in a side wall
+                (NativeTests.Box(new Vec3(60, 60, 8), new Vec3(75, 75, 12), "T5"), BoolOp.Union),               // block over a corner, overhanging
+            };
+            var saved = NBoolean.Local;
+            try
+            {
+                var bodies = new List<NBody>();
+                foreach (var local in new[] { false, true })
+                {
+                    NBoolean.Local = local;
+                    var body = Plate();
+                    foreach (var (tool, op) in tools) body = NBoolean.Run(body, tool, op);
+                    t.True(body.Validate() == null, body.Validate() ?? "");
+                    bodies.Add(body);
+                }
+                t.Eq(bodies[1].Faces.Count, bodies[0].Faces.Count);
+                t.Eq(bodies[1].Edges.Count(), bodies[0].Edges.Count());
+                t.Near(Vol(bodies[1]), Vol(bodies[0]), 1e-6 * Vol(bodies[0]));
+            }
+            finally { NBoolean.Local = saved; }
+        });
+
         t.Test("Native bool: overlapping boxes", () =>
         {
             var a = NativeTests.Box(new Vec3(0, 0, 0), new Vec3(10, 10, 10), "A");

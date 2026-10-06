@@ -16,6 +16,11 @@ public sealed class NEdge
     public readonly List<NCoedge> Uses = new();
     // one immutable reference so concurrent readers never see points from one tolerance with another tolerance
     sealed record SampleCache(List<Vec3> Points, double Tol);
+    // bounds of the samples at Tol (unpadded); unlike the samples it survives cloning, so operations on a big part
+    // can test the edges far from the change without sampling them (the samples themselves stay per body: the
+    // tessellation follows them)
+    sealed record BoxCache(Box3 Box, double Tol);
+    BoxCache? _box;
     SampleCache? _samples;
 
     public NEdge(NCurve c, double t0, double t1, NVertex v0, NVertex v1)
@@ -62,7 +67,9 @@ public sealed class NEdge
         return pts;
     }
 
-    public void InvalidateSamples() => _samples = null;
+    public void InvalidateSamples() { _samples = null; _box = null; }
+    /// <summary>Takes over another edge's cached bounds (same curve, same parameter range: a clone).</summary>
+    internal void CopyBounds(NEdge from) => _box = from._box;
 
     /// <summary>Exact bounds for lines/circles/ellipses (endpoints plus axis extremes inside the range).</summary>
     public Box3 TightBounds()
@@ -93,8 +100,16 @@ public sealed class NEdge
 
     public Box3 Bounds(double tol = 1e-3)
     {
-        var b = Box3.Empty;
-        foreach (var p in Samples(tol)) b.Add(p);
+        Box3 b;
+        if (_box is { } bc && bc.Tol <= tol * 1.0001) b = bc.Box;
+        else
+        {
+            var pts = Samples(tol);
+            var c = _samples;
+            b = Box3.Empty;
+            foreach (var p in pts) b.Add(p);
+            _box = new BoxCache(b, c != null && ReferenceEquals(c.Points, pts) ? c.Tol : tol);
+        }
         // pad by the chord tolerance so sampled bounds enclose the curve
         b.Add(b.Min - new Vec3(tol, tol, tol)); b.Add(b.Max + new Vec3(tol, tol, tol));
         return b;
@@ -139,6 +154,26 @@ public sealed class NFace
 
     // last computed bounds (faces keep their shape once built: splitting edges or cloning does not change it)
     internal (double tol, Box3 box)? BoundsCache;
+
+    // a domain built for this face (or the face it was cloned from), valid while the loops have the same geometry
+    internal sealed record DomainEntry(NDomain Dom, double Tol, double Sig);
+    internal DomainEntry? DomainCache;
+
+    /// <summary>A cheap fingerprint of the loops' geometry and the orientation (changes when loops are edited).</summary>
+    internal double LoopSignature()
+    {
+        double h = Sense ? 1 : 2; int k = 0;
+        foreach (var l in Loops)
+        {
+            h = h * 1.000123 + 17 * ++k;
+            foreach (var c in l.Coedges)
+            {
+                var p = c.Start.P;
+                h = h * 1.000017 + p.X + 1.31 * p.Y + 1.73 * p.Z + 0.37 * c.Edge.T0 + 0.61 * c.Edge.T1 + (c.Forward ? 0.5 : 0.25);
+            }
+        }
+        return h;
+    }
 
     public Box3 Bounds(double tol = 1e-3)
     {
@@ -221,17 +256,24 @@ public sealed class NBody
     /// <summary>Connects coedges to their faces and edges (call after building or editing).</summary>
     public void Link()
     {
-        foreach (var e in Edges) e.Uses.Clear();
+        // clearing an edge once per use is cheaper than collecting the distinct edges first
+        foreach (var f in Faces)
+            foreach (var l in f.Loops)
+                foreach (var c in l.Coedges) c.Edge.Uses.Clear();
         foreach (var f in Faces)
             foreach (var l in f.Loops)
                 foreach (var c in l.Coedges) { c.Face = f; c.Edge.Uses.Add(c); }
     }
 
     /// <summary>Checks the body is a closed, consistently oriented 2-manifold.</summary>
-    public string? Validate()
+    public string? Validate() => Validate(Faces, null);
+
+    /// <summary>Validates the loops of <paramref name="faces"/> and the uses of <paramref name="edges"/> (all edges
+    /// of those faces when null), after linking the whole body.</summary>
+    public string? Validate(IEnumerable<NFace> faces, IEnumerable<NEdge>? edges)
     {
         Link();
-        foreach (var f in Faces)
+        foreach (var f in faces)
         {
             if (f.Loops.Count == 0) return $"face {f.Tag.Name} has no loops";
             foreach (var l in f.Loops)
@@ -242,7 +284,7 @@ public sealed class NBody
                         return $"open loop on {f.Tag.Name}";
             }
         }
-        foreach (var e in Edges)
+        foreach (var e in edges ?? faces.SelectMany(f => f.Coedges).Select(c => c.Edge).Distinct())
         {
             if (e.Uses.Count != 2) return $"edge used {e.Uses.Count} times ({e.Curve.GetType().Name} {e.V0.P}->{e.V1.P} on {string.Join(",", e.Uses.Select(u => u.Face.Tag.Name))})";
             if (e.Uses[0].Forward == e.Uses[1].Forward) return $"edge used twice in the same direction ({e.Curve.GetType().Name} {e.V0.P}->{e.V1.P} on {e.Uses[0].Face.Tag.Name}/{e.Uses[0].Face.Sense}, {e.Uses[1].Face.Tag.Name}/{e.Uses[1].Face.Sense})";
@@ -250,7 +292,46 @@ public sealed class NBody
         return null;
     }
 
-    public NBody Clone() => Map(c => c, s => s, x => x, false);
+    /// <summary>A copy with new topology objects (operations edit clones); edge samples and face domains carry over.</summary>
+    public NBody Clone()
+    {
+        // the hot path of every operation: presized maps, no per-element delegates, linked while copying
+        int n = 0;
+        foreach (var f in Faces) foreach (var l in f.Loops) n += l.Coedges.Count;
+        var vmap = new Dictionary<NVertex, NVertex>(n / 2 + 8, ReferenceEqualityComparer.Instance);
+        var emap = new Dictionary<NEdge, NEdge>(n / 2 + 8, ReferenceEqualityComparer.Instance);
+        NVertex V(NVertex v)
+        {
+            if (!vmap.TryGetValue(v, out var nv)) vmap[v] = nv = new NVertex(v.P);
+            return nv;
+        }
+        var b = new NBody();
+        b.Faces.Capacity = Faces.Count;
+        foreach (var f in Faces)
+        {
+            var nf = new NFace(f.Surface, f.Sense, f.Tag, f.Anchor) { BoundsCache = f.BoundsCache, DomainCache = f.DomainCache };
+            foreach (var l in f.Loops)
+            {
+                var nl = new NLoop();
+                nl.Coedges.Capacity = l.Coedges.Count;
+                foreach (var c in l.Coedges)
+                {
+                    var e = c.Edge;
+                    if (!emap.TryGetValue(e, out var ne))
+                    {
+                        emap[e] = ne = new NEdge(e.Curve, e.T0, e.T1, V(e.V0), V(e.V1));
+                        ne.CopyBounds(e);
+                    }
+                    var nc = new NCoedge(ne, c.Forward) { Face = nf };
+                    ne.Uses.Add(nc);
+                    nl.Coedges.Add(nc);
+                }
+                nf.Loops.Add(nl);
+            }
+            b.Faces.Add(nf);
+        }
+        return b;
+    }
 
     /// <summary>Diagnostics: a copy with new edge objects (no sample caches).</summary>
     public static NBody CopyFresh(NBody b) => b.Map(c => c, s => s, x => x, false);
@@ -283,7 +364,7 @@ public sealed class NBody
             if (emap.TryGetValue(e, out var n)) return n;
             if (!cmap.TryGetValue(e.Curve, out var c)) cmap[e.Curve] = c = curve(e.Curve);
             // transformed curves keep their parameterization (lines/circles/ellipses/splines)
-            return emap[e] = new NEdge(c, e.T0, e.T1, V(e.V0), V(e.V1));
+                return emap[e] = new NEdge(c, e.T0, e.T1, V(e.V0), V(e.V1));
         }
         var b = new NBody();
         foreach (var f in Faces)

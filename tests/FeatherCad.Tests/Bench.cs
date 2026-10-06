@@ -49,9 +49,12 @@ static class Bench
                 var reg = new Regenerator(); reg.Rebuild(doc);
                 var last = doc.Features[^1];
                 last.Name += " ";
+                Prof.Reset(); Csg.ClearCache();
                 var sw2 = Stopwatch.StartNew();
                 var r2 = reg.Rebuild(doc);
                 Console.WriteLine($"  incremental (last feature): {sw2.Elapsed.TotalMilliseconds:0.0} ms, rebuilt {r2.Rebuilt}");
+                if (Environment.GetEnvironmentVariable("FC_PROF_LAST") != null)
+                    foreach (var (name, pms, calls) in Prof.Results()) Console.WriteLine($"      {name,-24} {pms,8:0.0} ms  x{calls}");
                 // edit cost per feature: change a numeric parameter of feature k to a new value (best of 3)
                 Console.WriteLine("  edit cost (change a parameter of the feature):");
                 int bump = 0;
@@ -66,8 +69,15 @@ static class Bench
                         reg.Rebuild(doc);
                         var v = double.Parse(orig, System.Globalization.CultureInfo.InvariantCulture) * (1 + 0.002 * ++bump);
                         prop.SetValue(doc.Features[k], v.ToString("R", System.Globalization.CultureInfo.InvariantCulture));
+                        bool prof = rep == 0 && Environment.GetEnvironmentVariable("FC_PROF_EDIT") == doc.Features[k].Name;
+                        if (prof) { Prof.Reset(); Prof.Enabled = true; }
                         var sw3 = Stopwatch.StartNew();
                         var r3 = reg.Rebuild(doc);
+                        if (prof)
+                        {
+                            Prof.Enabled = false;
+                            foreach (var (name, pms, calls) in Prof.Results()) Console.WriteLine($"      {name,-24} {pms,8:0.0} ms  x{calls}");
+                        }
                         best = Math.Min(best, sw3.Elapsed.TotalMilliseconds);
                         rebuilt = r3.Rebuilt;
                         if (rep == 0 && sw3.Elapsed.TotalMilliseconds > 500)

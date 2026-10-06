@@ -20,6 +20,59 @@ public sealed class NBoolean
     readonly double _sampleTol;
     readonly Dictionary<NFace, NDomain> _domains = new(ReferenceEqualityComparer.Instance);
     readonly List<NVertex> _pool = new();
+    // faces of either operand whose box does not reach the other operand: the boolean leaves them as they are
+    // (never split, outside the other body), so every stage skips them and its cost follows the size of the change
+    readonly HashSet<NFace> _far = new(ReferenceEqualityComparer.Instance);
+    public static bool Local = Environment.GetEnvironmentVariable("FC_NOLOCAL") == null;
+    bool Active(NFace f) => !_far.Contains(f);
+    IEnumerable<NFace> ActiveFaces(NBody b) => _far.Count == 0 ? b.Faces : b.Faces.Where(Active);
+    static List<NEdge> EdgesOf(IEnumerable<NFace> faces)
+    {
+        var seen = new HashSet<NEdge>(ReferenceEqualityComparer.Instance);
+        var res = new List<NEdge>();
+        foreach (var f in faces) foreach (var l in f.Loops) foreach (var c in l.Coedges) if (seen.Add(c.Edge)) res.Add(c.Edge);
+        return res;
+    }
+    static List<NVertex> VerticesOf(IEnumerable<NEdge> edges)
+    {
+        var seen = new HashSet<NVertex>(ReferenceEqualityComparer.Instance);
+        var res = new List<NVertex>();
+        foreach (var e in edges) { if (seen.Add(e.V0)) res.Add(e.V0); if (seen.Add(e.V1)) res.Add(e.V1); }
+        return res;
+    }
+
+    /// <summary>Marks the faces of each operand that cannot reach the other one (see <see cref="_far"/>).</summary>
+    void FindFar(NBody A, NBody B)
+    {
+        _far.Clear();
+        var big = 1e300;
+        _region = new Box3 { Min = new Vec3(-big, -big, -big), Max = new Vec3(big, big, big) };
+        if (!Local) return;
+        var pad = _onTol * 10;
+        var ba = Box3.Empty; foreach (var f in A.Faces) ba.Add(f.Bounds(_sampleTol * 500));
+        var bb = Box3.Empty; foreach (var f in B.Faces) bb.Add(f.Bounds(_sampleTol * 500));
+        foreach (var f in A.Faces) if (!f.Bounds(_sampleTol * 500).Overlaps(bb, pad)) _far.Add(f);
+        foreach (var f in B.Faces) if (!f.Bounds(_sampleTol * 500).Overlaps(ba, pad)) _far.Add(f);
+        // where the operands can meet (both boxes), padded
+        var lo = new Vec3(Math.Max(ba.Min.X, bb.Min.X), Math.Max(ba.Min.Y, bb.Min.Y), Math.Max(ba.Min.Z, bb.Min.Z));
+        var hi = new Vec3(Math.Min(ba.Max.X, bb.Max.X), Math.Min(ba.Max.Y, bb.Max.Y), Math.Min(ba.Max.Z, bb.Max.Z));
+        var pv = new Vec3(pad, pad, pad);
+        _region = new Box3 { Min = lo - pv, Max = hi + pv };
+    }
+
+    Box3 _region;
+
+    /// <summary>
+    /// Edges of the active faces that reach the region where the operands meet. The others keep their
+    /// vertices, neighbours and uses: an edge outside both boxes cannot touch the other operand.
+    /// </summary>
+    List<NEdge> NearEdges(IEnumerable<NFace> faces)
+    {
+        var res = new List<NEdge>();
+        foreach (var e in EdgesOf(faces))
+            if (_far.Count == 0 && !Local || e.Bounds(_sampleTol * 500).Overlaps(_region, 0)) res.Add(e);
+        return res;
+    }
 
     NBoolean(double scale)
     {
@@ -40,22 +93,42 @@ public sealed class NBoolean
         var scale = (hi - lo).Length;
         if (!(scale > 0) || hi.X < lo.X || hi.Y < lo.Y || hi.Z < lo.Z) scale = Math.Min(ba.Diagonal, bb.Diagonal);
         var nb = new NBoolean(scale);
-        return nb.Execute(a.Clone(), b.Clone(), op);
+        NBody ca, cb; using (Prof.Time("bool.clone")) { ca = a.Clone(); cb = b.Clone(); }
+        return nb.Execute(ca, cb, op);
     }
 
     /// <summary>Builds the missing face domains in parallel (all at the same sampling tolerance, so concurrent
     /// edge sampling produces identical results), then caches them.</summary>
-    void PrepareDomains(IEnumerable<NFace> faces)
+    void PrepareDomains(IEnumerable<NFace> faces, bool interior = true)
     {
         var todo = faces.Where(f => !_domains.ContainsKey(f)).Distinct(ReferenceEqualityComparer.Instance).Cast<NFace>().ToList();
         var built = new NDomain[todo.Count];
-        Parallel.For(0, todo.Count, i => { built[i] = NDomain.Of(todo[i], _sampleTol * 500); built[i].InteriorPoint(); });
+        Parallel.For(0, todo.Count, i => { built[i] = Build(todo[i], _sampleTol * 500); if (interior) built[i].InteriorPoint(); });
         for (int i = 0; i < todo.Count; i++) _domains[todo[i]] = built[i];
     }
 
+    readonly System.Collections.Concurrent.ConcurrentDictionary<NFace, NDomain> _farDomains = new(ReferenceEqualityComparer.Instance);
+
+    /// <summary>Domains during the parallel ray casts: far faces are built on first hit (most rays never reach them).</summary>
+    NDomain RayDom(NFace g) => _far.Contains(g) ? _farDomains.GetOrAdd(g, f => Build(f, _sampleTol * 500)) : Dom(g);
+
     NDomain Dom(NFace f)
     {
-        if (!_domains.TryGetValue(f, out var d)) _domains[f] = d = NDomain.Of(f, _sampleTol * 500);
+        if (!_domains.TryGetValue(f, out var d)) _domains[f] = d = Build(f, _sampleTol * 500);
+        return d;
+    }
+
+    /// <summary>
+    /// A face's domain, kept on the face for the next operation (it survives cloning, and is rebuilt when the
+    /// loops' geometry changed): a big face with many holes is not resampled by every small cut on the part.
+    /// </summary>
+    NDomain Build(NFace f, double tol)
+    {
+        if (!Local) return NDomain.Of(f, tol);
+        var sig = f.LoopSignature();
+        if (f.DomainCache is { } dc && dc.Tol <= tol * 1.0001 && dc.Sig == sig) return dc.Dom;
+        var d = NDomain.Of(f, tol);
+        f.DomainCache = new(d, tol, sig);
         return d;
     }
 
@@ -63,8 +136,10 @@ public sealed class NBoolean
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();
         void Lap(string what) { if (Prof.Enabled) Prof.Add("bool." + what, sw.Elapsed.TotalMilliseconds); T($"[{sw.ElapsedMilliseconds} ms] {what}"); sw.Restart(); }
+        FindFar(A, B);
         MergeVertices(A, B);
         A.Link(); B.Link();
+        Lap("merge vertices");
 
         // 1-2. split edges where they meet the other body's faces
         var onSurface = new List<(NEdge e, NFace f)>();
@@ -73,7 +148,7 @@ public sealed class NBoolean
         FindEdgeSplits(B, A, splits, onSurface);
         ImprintSplitVertices(A, B, splits);
         Lap("edge splits");
-        ApplySplits(A, splits); ApplySplits(B, splits);
+        ApplySplits(ActiveFaces(A).ToList(), splits); ApplySplits(ActiveFaces(B).ToList(), splits);
         _domains.Clear();
         A.Link(); B.Link();
 
@@ -84,14 +159,14 @@ public sealed class NBoolean
         var faceBoxB = new Dictionary<NFace, Box3>(ReferenceEqualityComparer.Instance);
         using (Prof.Time("sec.boxes"))
         {
-            foreach (var f in A.Faces) faceBoxA[f] = f.Bounds(_sampleTol * 500);
-            foreach (var f in B.Faces) faceBoxB[f] = f.Bounds(_sampleTol * 500);
+            foreach (var f in ActiveFaces(A)) faceBoxA[f] = f.Bounds(_sampleTol * 500);
+            foreach (var f in ActiveFaces(B)) faceBoxB[f] = f.Bounds(_sampleTol * 500);
         }
         // candidate face pairs; intersection curves are computed up front (traced ones in parallel: they are
         // pure functions of the two faces), then section edges are assembled sequentially in pair order
         var pairs = new List<(NFace fa, NFace fb, bool coincident)>();
-        foreach (var fa in A.Faces)
-            foreach (var fb in B.Faces)
+        foreach (var fa in ActiveFaces(A))
+            foreach (var fb in ActiveFaces(B))
                 if (faceBoxA[fa].Overlaps(faceBoxB[fb], _onTol))
                     pairs.Add((fa, fb, fa.Surface.CoincidentWith(fb.Surface, _tol * 10)));
         var pairCurves = new List<NCurve>[pairs.Count];
@@ -192,14 +267,17 @@ public sealed class NBoolean
         // 8. sew coincident edges, simplify
         Sew(result);
         result.Link();
+        Lap("sew");
         Unify(result);
         if (Trace != null) T($"unified: {Dump(result.Faces)}");
         result.Link();
+        Lap("unify");
         MergeEdges(result);
         RemoveSpurs(result);
         result.Link();
-        Lap("sew/unify/merge");
-        var err = result.Validate();
+        Lap("merge edges");
+        var err = _far.Count == 0 ? result.Validate() : result.Validate(ActiveFaces(result).ToList(), NearEdges(ActiveFaces(result)));
+        Lap("validate");
         if (err != null && Trace != null)
             foreach (var f in result.Faces)
                 foreach (var l in f.Loops)
@@ -241,12 +319,13 @@ public sealed class NBoolean
     void MergeVertices(NBody A, NBody B)
     {
         _pool.Clear();
-        _pool.AddRange(A.Vertices);
-        foreach (var v in B.Vertices)
+        _pool.AddRange(VerticesOf(NearEdges(ActiveFaces(A))));
+        var edgesB = NearEdges(ActiveFaces(B));
+        foreach (var v in VerticesOf(edgesB))
         {
             var m = _pool.FirstOrDefault(p => Vec3.Distance(p.P, v.P) < _tol * 10);
             if (m == null) { _pool.Add(v); continue; }
-            foreach (var e in B.Edges)
+            foreach (var e in edgesB)
             {
                 if (ReferenceEquals(e.V0, v)) e.V0 = m;
                 if (ReferenceEquals(e.V1, v)) e.V1 = m;
@@ -267,8 +346,8 @@ public sealed class NBoolean
 
     void FindEdgeSplits(NBody X, NBody Y, Dictionary<NEdge, List<(double, NVertex)>> splits, List<(NEdge, NFace)> onSurface)
     {
-        List<(NFace f, Box3 box)> fboxes; using (Prof.Time("split.fboxes")) fboxes = Y.Faces.Select(f => (f, box: f.Bounds(_sampleTol * 500))).ToList();
-        foreach (var e in X.Edges)
+        List<(NFace f, Box3 box)> fboxes; using (Prof.Time("split.fboxes")) fboxes = ActiveFaces(Y).Select(f => (f, box: f.Bounds(_sampleTol * 500))).ToList();
+        foreach (var e in NearEdges(ActiveFaces(X)))
         {
             var eb = e.Bounds(_sampleTol * 500);
             foreach (var (f, box) in fboxes)
@@ -306,10 +385,10 @@ public sealed class NBoolean
         var olo = new Vec3(Math.Max(ba.Min.X, bb.Min.X), Math.Max(ba.Min.Y, bb.Min.Y), Math.Max(ba.Min.Z, bb.Min.Z));
         var ohi = new Vec3(Math.Min(ba.Max.X, bb.Max.X), Math.Min(ba.Max.Y, bb.Max.Y), Math.Min(ba.Max.Z, bb.Max.Z));
         var overlap = Box3.Empty; overlap.Add(olo); overlap.Add(ohi);
-        List<NVertex> Near(NBody b) => ohi.X < olo.X || ohi.Y < olo.Y || ohi.Z < olo.Z ? new() : b.Vertices.Where(v => overlap.Contains(v.P, _onTol)).ToList();
+        List<NVertex> Near(NBody b) => ohi.X < olo.X || ohi.Y < olo.Y || ohi.Z < olo.Z ? new() : VerticesOf(NearEdges(ActiveFaces(b))).Where(v => overlap.Contains(v.P, _onTol)).ToList();
         var forA = verts.Concat(Near(B)).Distinct(ReferenceEqualityComparer.Instance).Cast<NVertex>().ToList();
         var forB = verts.Concat(Near(A)).Distinct(ReferenceEqualityComparer.Instance).Cast<NVertex>().ToList();
-        foreach (var (e, cand) in A.Edges.Select(e => (e, forA)).Concat(B.Edges.Select(e => (e, forB))))
+        foreach (var (e, cand) in NearEdges(ActiveFaces(A)).Select(e => (e, forA)).Concat(NearEdges(ActiveFaces(B)).Select(e => (e, forB))))
         {
             if (cand.Count == 0) continue;
             var box = e.Bounds(_sampleTol * 500);
@@ -326,10 +405,10 @@ public sealed class NBoolean
         }
     }
 
-    static void ApplySplits(NBody body, Dictionary<NEdge, List<(double t, NVertex v)>> splits)
+    static void ApplySplits(List<NFace> faces, Dictionary<NEdge, List<(double t, NVertex v)>> splits)
     {
         var pieces = new Dictionary<NEdge, List<NEdge>>(ReferenceEqualityComparer.Instance);
-        foreach (var e in body.Edges.ToList())
+        foreach (var e in EdgesOf(faces))
         {
             if (!splits.TryGetValue(e, out var sp) || sp.Count == 0) continue;
             var ordered = sp.OrderBy(x => x.t).ToList();
@@ -345,9 +424,10 @@ public sealed class NBoolean
             pieces[e] = list;
         }
         if (pieces.Count == 0) return;
-        foreach (var f in body.Faces)
+        foreach (var f in faces)
             foreach (var l in f.Loops)
             {
+                if (!l.Coedges.Any(c => pieces.ContainsKey(c.Edge))) continue;
                 var nc = new List<NCoedge>();
                 foreach (var c in l.Coedges)
                 {
@@ -712,15 +792,27 @@ public sealed class NBoolean
         for (int i = 0; i < pieces.Count; i++) idx[pieces[i]] = i;
         var plone = Prof.Time("cls.lone");
         var lone = new bool[pieces.Count];
+        // only faces of the other body near this one can touch it
+        var near = other.Where(Active).ToList();
         for (int i = 0; i < pieces.Count; i++)
-            foreach (var g in other)
+            if (Active(pieces[i]))
+            foreach (var g in near)
                 if (pieces[i].Surface.CoincidentWith(g.Surface, _tol * 10) && FBox(pieces[i]).Overlaps(FBox(g), _onTol)) { lone[i] = true; break; }
         plone.Dispose();
         var punion = Prof.Time("cls.union");
         var parent = Enumerable.Range(0, pieces.Count).ToArray();
         int Find(int x) { while (parent[x] != x) x = parent[x] = parent[parent[x]]; return x; }
         var users = new Dictionary<NEdge, List<int>>(ReferenceEqualityComparer.Instance);
+        // far pieces are outside; an edge of an active piece used once among the active pieces is shared with a
+        // far face (shells are closed and section edges block): that region is outside too
+        int outsideRoot = -1;
         for (int i = 0; i < pieces.Count; i++)
+        {
+            if (Active(pieces[i])) continue;
+            if (outsideRoot < 0) outsideRoot = i; else parent[Find(i)] = Find(outsideRoot);
+        }
+        for (int i = 0; i < pieces.Count; i++)
+            if (Active(pieces[i]))
             foreach (var c in pieces[i].Coedges)
             {
                 if (!users.TryGetValue(c.Edge, out var l)) users[c.Edge] = l = new();
@@ -728,12 +820,18 @@ public sealed class NBoolean
             }
         foreach (var (e, us) in users)
         {
+            if (us.Count == 1 && outsideRoot >= 0 && !_blockers.Contains(e))
+            {
+                if (!lone[us[0]]) parent[Find(us[0])] = Find(outsideRoot);
+                continue;
+            }
             if (us.Count != 2 || _blockers.Contains(e)) continue;
             if (lone[us[0]] || lone[us[1]]) continue;
-            // the other body must not pass through the edge
+            // the other body must not pass through the edge (an edge of a far face cannot reach it)
             bool touches = false;
             var eb = e.Bounds(_sampleTol * 500);
-            foreach (var g in other)
+            if (eb.Overlaps(_region, 0))
+            foreach (var g in near)
             {
                 if (!FBox(g).Overlaps(eb, _onTol)) continue;
                 if (Math.Abs(g.Surface.F_(e.Mid)) < _onTol || Math.Abs(g.Surface.F_(e.V0.P)) < _onTol && Math.Abs(g.Surface.F_(e.V1.P)) < _onTol) { touches = true; break; }
@@ -750,10 +848,14 @@ public sealed class NBoolean
         // representatives are ray-classified in parallel (read-only from here on)
         punion.Dispose();
         var pprep = Prof.Time("cls.prep");
+        // a region with a far face is outside the other body: no ray test
+        var outside = new HashSet<int>();
+        if (outsideRoot >= 0) outside.Add(Find(outsideRoot));
         var reps = new Dictionary<int, int>();
-        for (int i = 0; i < pieces.Count; i++) reps.TryAdd(Find(i), i);
-        PrepareDomains(other.Concat(reps.Values.Select(i => pieces[i])));
-        foreach (var f in other) FBox(f);
+        for (int i = 0; i < pieces.Count; i++) if (Active(pieces[i]) && !outside.Contains(Find(i))) reps.TryAdd(Find(i), i);
+        PrepareDomains(reps.Values.Select(i => pieces[i]));
+        PrepareDomains(near, interior: false);
+        foreach (var f in near) FBox(f);
         foreach (var i in reps.Values) { FBox(pieces[i]); Dom(pieces[i]).InteriorPoint(); }
         pprep.Dispose();
         using var prays = Prof.Time("cls.rays");
@@ -767,8 +869,9 @@ public sealed class NBoolean
         });
         if (failure != null) throw failure;
         var compState = new Dictionary<int, State>();
+        foreach (var c in outside) compState[c] = State.Out;
         for (int k = 0; k < repList.Count; k++) compState[repList[k].Key] = states[k];
-        for (int i = 0; i < pieces.Count; i++) res[pieces[i]] = compState[Find(i)];
+        for (int i = 0; i < pieces.Count; i++) res[pieces[i]] = Active(pieces[i]) ? compState[Find(i)] : State.Out;
         if (Trace != null && Environment.GetEnvironmentVariable("FC_TRACE_COMP") != null)
             foreach (var g in Enumerable.Range(0, pieces.Count).GroupBy(Find).Where(g => g.Count() > 1))
                 T($"  component {compState[g.Key]} rep={pieces[g.Key].Tag.Name}@{Dom(pieces[g.Key]).InteriorPoint()}: " + string.Join(", ", g.Select(i => $"{pieces[i].Tag.Name}@{Dom(pieces[i]).InteriorPoint()}")));
@@ -776,6 +879,14 @@ public sealed class NBoolean
     }
     Box3 FBox(NFace f)
     {
+        if (_far.Contains(f))
+        {
+            // cached on the face (computed when the far faces were found): safe from the parallel ray casts
+            var fb = f.Bounds(_sampleTol * 500);
+            var pd = _sampleTol * 500;
+            fb.Add(fb.Min - new Vec3(pd, pd, pd)); fb.Add(fb.Max + new Vec3(pd, pd, pd));
+            return fb;
+        }
         if (_fbox.TryGetValue(f, out var b)) return b;
         var d = Dom(f);
         b = Box3.Empty;
@@ -821,7 +932,7 @@ public sealed class NBoolean
         {
             if (!FBox(g).Overlaps(new Box3 { Min = p, Max = p }, _onTol)) continue;
             if (Math.Abs(g.Surface.F_(p)) > _onTol) continue;
-            if (Dom(g).Classify(g.Surface.Project(p), _onTol) < 0) continue;
+            if (RayDom(g).Classify(g.Surface.Project(p), _onTol) < 0) continue;
             var ng = g.Surface.Normal(p) * (g.Sense ? 1 : -1);
             return Vec3.Dot(nf, ng) > 0 ? State.OnSame : State.OnOpposite;
         }
@@ -837,7 +948,7 @@ public sealed class NBoolean
                 {
                     if (t < -_onTol) continue;
                     var q = p + d * t;
-                    var c = Dom(g).Classify(q, _onTol * 4);
+                    var c = RayDom(g).Classify(q, _onTol * 4);
                     if (c < 0) continue;                 // the surface, but outside this face
                     if (c == 0 || t <= _onTol) { ok = false; break; } // on an edge, or starting on the face
                     // grazing hits are ambiguous
@@ -875,7 +986,7 @@ public sealed class NBoolean
     {
         WeldVertices(body);
         body.Link();
-        var single = body.Edges.Where(e => e.Uses.Count == 1).ToList();
+        var single = NearEdges(ActiveFaces(body)).Where(e => e.Uses.Count == 1).ToList();
         // partially overlapping open edges (one split where the other is not): split at each other's vertices
         var openVerts = single.SelectMany(e => new[] { e.V0, e.V1 }).Distinct(ReferenceEqualityComparer.Instance).Cast<NVertex>().ToList();
         var splits = new Dictionary<NEdge, List<(double t, NVertex v)>>(ReferenceEqualityComparer.Instance);
@@ -894,9 +1005,9 @@ public sealed class NBoolean
         }
         if (splits.Count > 0)
         {
-            ApplySplits(body, splits);
+            ApplySplits(ActiveFaces(body).ToList(), splits);
             body.Link();
-            single = body.Edges.Where(e => e.Uses.Count == 1).ToList();
+            single = NearEdges(ActiveFaces(body)).Where(e => e.Uses.Count == 1).ToList();
         }
         var byEnds = new Dictionary<(NVertex, NVertex), List<NEdge>>();
         (NVertex, NVertex) Key(NEdge e) => System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(e.V0) <= System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(e.V1) ? (e.V0, e.V1) : (e.V1, e.V0);
@@ -923,7 +1034,7 @@ public sealed class NBoolean
             }
         }
         if (replace.Count == 0) return;
-        foreach (var f in body.Faces)
+        foreach (var f in ActiveFaces(body))
             foreach (var lp in f.Loops)
                 for (int i = 0; i < lp.Coedges.Count; i++)
                 {
@@ -939,7 +1050,9 @@ public sealed class NBoolean
         var grid = new Dictionary<(long, long, long), List<NVertex>>();
         var rep = new Dictionary<NVertex, NVertex>(ReferenceEqualityComparer.Instance);
         (long, long, long) K(Vec3 p, int dx, int dy, int dz) => ((long)Math.Floor(p.X / cell) + dx, (long)Math.Floor(p.Y / cell) + dy, (long)Math.Floor(p.Z / cell) + dz);
-        foreach (var e in body.Edges)
+        var edges = NearEdges(ActiveFaces(body));
+        if (_far.Count > 0) edges = edges.OrderBy(e => e.Uses.Any(u => _far.Contains(u.Face)) ? 0 : 1).ToList();
+        foreach (var e in edges)
             foreach (var v in new[] { e.V0, e.V1 })
             {
                 if (rep.ContainsKey(v)) continue;
@@ -955,7 +1068,7 @@ public sealed class NBoolean
                 if (!grid.TryGetValue(k, out var lst)) grid[k] = lst = new();
                 lst.Add(v);
             }
-        foreach (var e in body.Edges.ToList())
+        foreach (var e in edges)
         {
             e.V0 = rep[e.V0]; e.V1 = rep[e.V1];
         }
@@ -970,7 +1083,7 @@ public sealed class NBoolean
         for (int i = 0; i < faces.Count; i++) idx[faces[i]] = i;
         var parent = Enumerable.Range(0, faces.Count).ToArray();
         int Find(int x) { while (parent[x] != x) x = parent[x] = parent[parent[x]]; return x; }
-        foreach (var e in body.Edges)
+        foreach (var e in NearEdges(ActiveFaces(body)))
         {
             if (e.Uses.Count != 2) continue;
             var f = e.Uses[0].Face; var g = e.Uses[1].Face;
@@ -1037,53 +1150,59 @@ public sealed class NBoolean
     /// <summary>Joins consecutive edges at vertices where nothing else meets and the curve continues.</summary>
     void MergeEdges(NBody body)
     {
-        bool changed = true;
-        while (changed)
-        {
-            changed = false;
-            body.Link();
-            var edgesAt = new Dictionary<NVertex, List<NEdge>>(ReferenceEqualityComparer.Instance);
-            foreach (var e in body.Edges)
-                foreach (var v in new[] { e.V0, e.V1 })
-                {
-                    if (!edgesAt.TryGetValue(v, out var l)) edgesAt[v] = l = new();
-                    if (!l.Contains(e)) l.Add(e);
-                }
-            foreach (var (v, list) in edgesAt)
+        body.Link();
+        var edgesAt = new Dictionary<NVertex, List<NEdge>>(ReferenceEqualityComparer.Instance);
+        foreach (var e in NearEdges(ActiveFaces(body)))
+            foreach (var v in new[] { e.V0, e.V1 })
             {
-                if (list.Count != 2) continue;
-                var (e1, e2) = (list[0], list[1]);
-                if (e1.Closed || e2.Closed || ReferenceEquals(e1, e2)) continue;
-                if (!SameCurve(e1.Curve, e2.Curve)) continue;
-                // both edges must be used by the same two faces
-                var f1 = e1.Uses.Select(u => u.Face).ToHashSet(ReferenceEqualityComparer.Instance);
-                if (!e2.Uses.All(u => f1.Contains(u.Face))) continue;
-                // order so that e1 ends at v and e2 starts at v along the curve parameter
-                NEdge first, second;
-                if (ReferenceEquals(e1.V1, v) && ReferenceEquals(e2.V0, v)) { first = e1; second = e2; }
-                else if (ReferenceEquals(e2.V1, v) && ReferenceEquals(e1.V0, v)) { first = e2; second = e1; }
-                else continue;
-                if (!ReferenceEquals(first.Curve, second.Curve) || Math.Abs(first.T1 - second.T0) > 1e-9 * Math.Max(1, Math.Abs(first.T1))) continue;
-                if (ReferenceEquals(first.V0, second.V1)) continue; // would create a closed edge
-                var joined = new NEdge(first.Curve, first.T0, second.T1, first.V0, second.V1);
-                foreach (var f in body.Faces)
-                    foreach (var lp in f.Loops)
-                    {
-                        int n = lp.Coedges.Count;
-                        int i1 = lp.Coedges.FindIndex(c => ReferenceEquals(c.Edge, first));
-                        int i2 = lp.Coedges.FindIndex(c => ReferenceEquals(c.Edge, second));
-                        if (i1 < 0 || i2 < 0) continue;
-                        bool fwd = lp.Coedges[i1].Forward;
-                        // forward traversal: first then second; reversed: second then first
-                        int lead = fwd ? i1 : i2;
-                        var rotated = Enumerable.Range(0, n).Select(k => lp.Coedges[(lead + k) % n]).ToList();
-                        rotated.RemoveRange(0, 2);
-                        rotated.Insert(0, new NCoedge(joined, fwd));
-                        lp.Coedges.Clear(); lp.Coedges.AddRange(rotated);
-                    }
-                changed = true;
-                break;
+                if (!edgesAt.TryGetValue(v, out var l)) edgesAt[v] = l = new();
+                if (!l.Contains(e)) l.Add(e);
             }
+        // a merge only changes the edges at the two outer vertices: those are revisited, nothing is relinked
+        var work = new Queue<NVertex>(edgesAt.Keys);
+        while (work.Count > 0)
+        {
+            var v = work.Dequeue();
+            if (!edgesAt.TryGetValue(v, out var list) || list.Count != 2) continue;
+            var (e1, e2) = (list[0], list[1]);
+            if (e1.Closed || e2.Closed || ReferenceEquals(e1, e2)) continue;
+            if (!SameCurve(e1.Curve, e2.Curve)) continue;
+            // both edges must be used by the same two faces
+            var f1 = e1.Uses.Select(u => u.Face).ToHashSet(ReferenceEqualityComparer.Instance);
+            if (!e2.Uses.All(u => f1.Contains(u.Face))) continue;
+            // order so that e1 ends at v and e2 starts at v along the curve parameter
+            NEdge first, second;
+            if (ReferenceEquals(e1.V1, v) && ReferenceEquals(e2.V0, v)) { first = e1; second = e2; }
+            else if (ReferenceEquals(e2.V1, v) && ReferenceEquals(e1.V0, v)) { first = e2; second = e1; }
+            else continue;
+            if (!ReferenceEquals(first.Curve, second.Curve) || Math.Abs(first.T1 - second.T0) > 1e-9 * Math.Max(1, Math.Abs(first.T1))) continue;
+            if (ReferenceEquals(first.V0, second.V1)) continue; // would create a closed edge
+            var joined = new NEdge(first.Curve, first.T0, second.T1, first.V0, second.V1);
+            foreach (NFace f in f1)
+                foreach (var lp in f.Loops)
+                {
+                    int n = lp.Coedges.Count;
+                    int i1 = lp.Coedges.FindIndex(c => ReferenceEquals(c.Edge, first));
+                    int i2 = lp.Coedges.FindIndex(c => ReferenceEquals(c.Edge, second));
+                    if (i1 < 0 || i2 < 0) continue;
+                    bool fwd = lp.Coedges[i1].Forward;
+                    // forward traversal: first then second; reversed: second then first
+                    int lead = fwd ? i1 : i2;
+                    var rotated = Enumerable.Range(0, n).Select(k => lp.Coedges[(lead + k) % n]).ToList();
+                    rotated.RemoveRange(0, 2);
+                    var nc = new NCoedge(joined, fwd) { Face = f };
+                    rotated.Insert(0, nc);
+                    joined.Uses.Add(nc);
+                    lp.Coedges.Clear(); lp.Coedges.AddRange(rotated);
+                }
+            edgesAt.Remove(v);
+            foreach (var end in new[] { first.V0, second.V1 })
+                if (edgesAt.TryGetValue(end, out var el))
+                {
+                    el.RemoveAll(x => ReferenceEquals(x, first) || ReferenceEquals(x, second));
+                    el.Add(joined);
+                    work.Enqueue(end);
+                }
         }
     }
 
