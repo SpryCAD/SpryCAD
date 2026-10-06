@@ -607,6 +607,17 @@ public sealed class SketchEditor : IViewportMode
     Snap FindSnap(Vec2 m, Vec2? from)
     {
         var tol = Px * 8;
+        // a line ending on a fixed snap point that is level/plumb with its start also gets Horizontal/Vertical
+        // (the point can't be moved onto the inference, so only when it already lines up to within a pixel)
+        Snap Aligned(Snap s)
+        {
+            if (from is not { } f || Tool is not (SketchTool.Line or SketchTool.Centerline)) return s;
+            var d = s.P - f;
+            if (d.Length < tol) return s;
+            if (Math.Abs(d.Y) < Px) return s with { H = true };
+            if (Math.Abs(d.X) < Px) return s with { V = true };
+            return s;
+        }
         // existing points
         SkPoint? bestP = null; double bestD = tol;
         foreach (var p in Sk.Points)
@@ -614,22 +625,23 @@ public sealed class SketchEditor : IViewportMode
             var d = Vec2.Distance(p.P, m);
             if (d < bestD) { bestD = d; bestP = p; }
         }
-        if (bestP != null) return new Snap(bestP.Id == Sketch.OriginId ? SnapKind.Origin : SnapKind.Point, bestP.P, bestP.Id);
-        // model vertices (part corners, arc ends) under the cursor
+        if (bestP != null) return Aligned(new Snap(bestP.Id == Sketch.OriginId ? SnapKind.Origin : SnapKind.Point, bestP.P, bestP.Id));
+        // model vertices (part corners, arc ends) under the cursor; the hit is kept so the point can be tied to
+        // this vertex later (a line's start is only resolved when its end is clicked, elsewhere on screen)
         if (_lastScreen is { } scr && _vp.PickVertex(scr.X, scr.Y) is { } mv)
-            return new Snap(SnapKind.ModelVertex, Frame.ToLocal(mv.point));
+            return Aligned(new Snap(SnapKind.ModelVertex, Frame.ToLocal(mv.point), Model: new ModelHit(mv.body, mv.edge, mv.point)));
         // centers of model circles in planes parallel to the sketch (hole and boss rims, arcs)
         foreach (var mc in ModelCircles())
-            if (Vec2.Distance(mc.center, m) < tol) return new Snap(SnapKind.ModelCenter, mc.center, Model: new ModelHit(mc.body, mc.edge, mc.edge.Start));
+            if (Vec2.Distance(mc.center, m) < tol) return Aligned(new Snap(SnapKind.ModelCenter, mc.center, Model: new ModelHit(mc.body, mc.edge, mc.edge.Start)));
         // midpoints
         foreach (var l in Sk.Entities.OfType<SkLine>())
         {
             var mid = (Sk.P(l.P1) + Sk.P(l.P2)) * 0.5;
-            if (Vec2.Distance(mid, m) < tol) return new Snap(SnapKind.Midpoint, mid, l.Id);
+            if (Vec2.Distance(mid, m) < tol) return Aligned(new Snap(SnapKind.Midpoint, mid, l.Id));
         }
         // model edge under the cursor: its midpoint, or a point on it
         var modelEdge = ModelEdgeSnap(m, tol);
-        if (modelEdge is { Kind: SnapKind.ModelMidpoint }) return modelEdge.Value;
+        if (modelEdge is { Kind: SnapKind.ModelMidpoint }) return Aligned(modelEdge.Value);
         // horizontal / vertical inference relative to the previous point
         bool h = false, v = false;
         var pos = m;
@@ -764,8 +776,8 @@ public sealed class SketchEditor : IViewportMode
             case SnapKind.Origin:
                 return s.Id;
         }
-        if (s.Kind == SnapKind.ModelVertex && _lastScreen is { } scr && _vp.PickVertex(scr.X, scr.Y) is { } mv &&
-            SketchReferences.Create(Sk, Frame, mv.edge, mv.body.Id, true, mv.point) is SkPointEntity rp)
+        if (s.Kind == SnapKind.ModelVertex && s.Model is { } vh &&
+            SketchReferences.Create(Sk, Frame, vh.Edge, vh.Body.Id, true, vh.Point) is SkPointEntity rp)
             return rp.P; // shares the fixed reference point: coincident with the model vertex
         if (s.Model is { } mh && s.Kind is SnapKind.ModelEdge or SnapKind.ModelMidpoint or SnapKind.ModelCenter)
         {
@@ -853,8 +865,12 @@ public sealed class SketchEditor : IViewportMode
         int b = ResolvePoint(s);
         if (a == b) return;
         var l = Sk.Add(new SkLine { P1 = a, P2 = b, Construction = Tool == SketchTool.Centerline });
-        if (s.H) Sk.AddConstraint(CType.Horizontal, l.Id);
-        else if (s.V) Sk.AddConstraint(CType.Vertical, l.Id);
+        if (s.H || s.V)
+        {
+            // skipped when the ends are already held level/plumb (e.g. both on fixed model corners)
+            var hv = new SkConstraint { Id = Sk.NewId(), Type = s.H ? CType.Horizontal : CType.Vertical, Refs = new[] { l.Id } };
+            if (!SketchSolver.WouldOverDefine(Sk, hv)) Sk.Constraints.Add(hv);
+        }
         Resolve();
         _clicks.Add(Sk.P(b)); _clickSnaps.Add(new Snap(SnapKind.Point, Sk.P(b), b));
         _chainPoint = b;
@@ -1703,7 +1719,14 @@ public sealed class SketchEditor : IViewportMode
     Border? _snapLabel;
 
     /// <summary>Name of the relation the current snap will create (shown next to the cursor).</summary>
-    static string? SnapText(Snap s) => s.Kind switch
+    static string? SnapText(Snap s)
+    {
+        var text = SnapKindText(s);
+        if (s.Kind == SnapKind.None || text == null) return text;
+        return s.H ? text + ", Horizontal" : s.V ? text + ", Vertical" : text;
+    }
+
+    static string? SnapKindText(Snap s) => s.Kind switch
     {
         SnapKind.Point or SnapKind.Origin => "Coincident",
         SnapKind.ModelVertex => "Coincident (model)",
