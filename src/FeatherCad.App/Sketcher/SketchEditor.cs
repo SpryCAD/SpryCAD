@@ -1450,12 +1450,14 @@ public sealed partial class SketchEditor : IViewportMode
                 else g.Line(f.ToWorld(a), f.ToWorld(b), c, top: true);
             }
         }
-        // end points
+        // end points, and points only relations use (e.g. a center rectangle's center, where its diagonals meet):
+        // shown, as they can be snapped to and dimensioned. Point entities have their own mark (above).
+        var shown = Sk.Entities.Where(e => e is not SkPointEntity).SelectMany(e => e.PointIds)
+            .Concat(Sk.Constraints.SelectMany(c => c.Refs)).ToHashSet();
+        var ownMark = Sk.Entities.OfType<SkPointEntity>().Select(e => e.P).ToHashSet();
         foreach (var p in Sk.Points)
         {
-            if (p.Id == o) continue;
-            var used = Sk.Entities.Any(e => e is not SkPointEntity && e.PointIds.Contains(p.Id));
-            if (!used) continue;
+            if (p.Id == o || !shown.Contains(p.Id) || ownMark.Contains(p.Id)) continue;
             var c = _hover is { Kind: SkRefKind.Point } h && h.Id == p.Id ? ViewportControl.HoverColor
                 : Selected.Contains(new SkRef(SkRefKind.Point, p.Id)) || _dimPicks.Contains(new SkRef(SkRefKind.Point, p.Id)) ? ViewportControl.SelectColor
                 : ColorOfPoint(p.Id);
@@ -1524,7 +1526,9 @@ public sealed partial class SketchEditor : IViewportMode
                 {
                     var d = m - c0;
                     var a = c0 - d; L(a, new Vec2(m.X, a.Y)); L(new Vec2(m.X, a.Y), m); L(m, new Vec2(a.X, m.Y)); L(new Vec2(a.X, m.Y), a);
-                    L(a, m, true);
+                    // both construction diagonals and the center point, as the rectangle is made
+                    L(a, m, true); L(new Vec2(m.X, a.Y), new Vec2(a.X, m.Y), true);
+                    SketchDrawing.PointMark(g, f, c0, pc, px, 2.2);
                     break;
                 }
             case SketchTool.Circle:
