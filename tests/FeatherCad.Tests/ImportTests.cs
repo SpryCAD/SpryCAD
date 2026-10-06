@@ -122,6 +122,25 @@ static class ImportTests
             t.True(r2.State.Bodies.All(b => b.Solid.Native != null && b.Solid.Topology.OpenHalfEdges == 0), "shelled part not closed");
         });
 
+        t.Test("STEP import: the solid's own unit context wins over other units in the file; flipped face flags are corrected", () =>
+        {
+            var (step, volume) = Exported("l-bracket.fcad");
+            var text = System.Text.Encoding.ASCII.GetString(step);
+            // an unused metre unit ahead of everything (presentation data in real files)
+            text = text.Replace("DATA;\n", "DATA;\n#0=(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT($,.METRE.));\n");
+            // one planar face written with its same_sense flag reversed (its loops still say outward)
+            var m = System.Text.RegularExpressions.Regex.Match(text, @"ADVANCED_FACE\('[^']*',\([^)]*\),#(\d+),\.T\.\)");
+            t.True(m.Success, "no face to flip");
+            text = text[..m.Index] + m.Value.Replace(",.T.)", ",.F.)") + text[(m.Index + m.Length)..];
+            var res = StepImport.Read(System.Text.Encoding.ASCII.GetBytes(text), "F1.");
+            t.True(res.Warnings.Any(w => w.Contains("orientation")), "flipped flag not reported");
+            var body = res.Solids.Single().Body;
+            t.Eq(body.Validate(), null);
+            var solid = NTess.ToSolid(body);
+            t.True(solid.Topology.OpenHalfEdges == 0, "display mesh not closed");
+            t.Near(NTess.ToSolid(body, 1e-3).Volume(), volume, volume * 2e-5);
+        });
+
         t.Test("STEP import: inch documents get the geometry in inches", () =>
         {
             var (step, volume) = Exported("heat-sink.fcad");

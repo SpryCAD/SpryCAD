@@ -63,17 +63,38 @@ public static class StepImport
     // ------------------------------------------------------------------------------------------
     // units
 
-    static double LengthUnitMm(StepFile f)
-    {
-        foreach (var u in f.Instances.Values.OrderBy(i => i.Id))
-            if (u.Is("LENGTH_UNIT")) return UnitFactor(f, u, length: true);
-        return 1;
-    }
+    static double LengthUnitMm(StepFile f) => Unit(f, "LENGTH_UNIT", length: true);
 
-    static double AngleUnitRadians(StepFile f)
+    static double AngleUnitRadians(StepFile f) => Unit(f, "PLANE_ANGLE_UNIT", length: false);
+
+    /// <summary>
+    /// The unit of the solids' geometry: from the context of the shape representation holding them (files often
+    /// carry other units too, e.g. a metre unit for presentation data); else from any unit context; else the
+    /// first such unit in the file.
+    /// </summary>
+    static double Unit(StepFile f, string kind, bool length)
     {
+        var solids = new HashSet<int>(f.OfType("MANIFOLD_SOLID_BREP").Concat(f.OfType("BREP_WITH_VOIDS")).Select(s => s.Id));
+        IEnumerable<StepInstance> Contexts()
+        {
+            // representations listing a solid among their items, then every unit context
+            foreach (var r in f.Instances.Values.OrderBy(i => i.Id))
+            {
+                var args = r.Parts.FirstOrDefault(p => p.Type.EndsWith("SHAPE_REPRESENTATION")).Args;
+                if (args == null || args.Count < 3 || args[1] is not List<object?> items) continue;
+                if (items.Any(x => x is StepRef sr && solids.Contains(sr.Id)) && args[2] is StepRef cr && f.Instances.TryGetValue(cr.Id, out var ctx))
+                    yield return ctx;
+            }
+            foreach (var c in f.Instances.Values.Where(i => i.Is("GLOBAL_UNIT_ASSIGNED_CONTEXT")).OrderBy(i => i.Id)) yield return c;
+        }
+        foreach (var ctx in Contexts())
+        {
+            if (ctx.Part("GLOBAL_UNIT_ASSIGNED_CONTEXT") is not { } ua || ua.Count == 0 || ua[0] is not List<object?> units) continue;
+            foreach (var u in units)
+                if (u is StepRef ur && f.Instances.TryGetValue(ur.Id, out var ui) && ui.Is(kind)) return UnitFactor(f, ui, length);
+        }
         foreach (var u in f.Instances.Values.OrderBy(i => i.Id))
-            if (u.Is("PLANE_ANGLE_UNIT")) return UnitFactor(f, u, length: false);
+            if (u.Is(kind)) return UnitFactor(f, u, length);
         return 1;
     }
 
@@ -143,6 +164,17 @@ public static class StepImport
                 return;
             }
             body.Link();
+            // the loops, which agree with the neighbouring faces through the shared edges, decide which side is
+            // outside; some writers get a face's same_sense flag wrong (seen on rational fillet faces): such a face's
+            // outer loop runs clockwise in its parameter plane, so its sense is flipped
+            int flipped = 0;
+            foreach (var f in body.Faces)
+            {
+                if (f.Surface.PeriodicU || f.Surface.PeriodicV) continue; // (wrapping faces are oriented after splitting)
+                try { if (NDomain.Of(f).SignedArea() < 0) { f.Sense = !f.Sense; flipped++; } }
+                catch (InvalidOperationException) { }
+            }
+            if (flipped > 0) _warn.Add($"{name}: {flipped} face(s) had their orientation flag reversed in the file; corrected from their edges.");
             try { NSeamSplit.Apply(body); }
             catch (Exception ex) when (ex is NotSupportedException or InvalidOperationException) { _warn.Add($"{name}: {ex.Message}; the solid was skipped."); return; }
             body.Link();

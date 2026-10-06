@@ -431,19 +431,36 @@ public sealed class NurbsSurface
     /// <summary>Smallest radius of curvature over the grid (rough), for tessellation spacing.</summary>
     public double MinCurvatureRadius()
     {
-        double kmax = 0;
-        for (int i = 0; i <= 8; i++)
-            for (int j = 0; j <= 8; j++)
+        if (_minRho is { } cached) return cached;
+        // derivative sizes over the patch, to recognise degenerate samples (poles, collapsed edges) whose
+        // curvature estimate is meaningless
+        const int n = 8;
+        var samples = new List<(Vec3 su, Vec3 sv, Vec3 suu, Vec3 svv)>();
+        double msu = 0, msv = 0;
+        for (int i = 0; i <= n; i++)
+            for (int j = 0; j <= n; j++)
             {
-                var (_, su, sv, suu, _, svv) = Derivs(U0 + (U1 - U0) * i / 8, V0 + (V1 - V0) * j / 8);
-                var n = Vec3.Cross(su, sv);
-                if (n.Length < 1e-12) continue;
-                n = n.Normalized;
-                if (su.LengthSq > 1e-24) kmax = Math.Max(kmax, Math.Abs(Vec3.Dot(suu, n)) / su.LengthSq);
-                if (sv.LengthSq > 1e-24) kmax = Math.Max(kmax, Math.Abs(Vec3.Dot(svv, n)) / sv.LengthSq);
+                var (_, su, sv, suu, _, svv) = Derivs(U0 + (U1 - U0) * i / n, V0 + (V1 - V0) * j / n);
+                samples.Add((su, sv, suu, svv));
+                msu = Math.Max(msu, su.Length); msv = Math.Max(msv, sv.Length);
             }
-        return kmax > 1e-12 ? 1 / kmax : double.PositiveInfinity;
+        double kmax = 0;
+        foreach (var (su, sv, suu, svv) in samples)
+        {
+            if (su.Length < 1e-2 * msu || sv.Length < 1e-2 * msv) continue;
+            var nn = Vec3.Cross(su, sv);
+            if (nn.Length < 1e-12) continue;
+            nn = nn.Normalized;
+            kmax = Math.Max(kmax, Math.Abs(Vec3.Dot(suu, nn)) / su.LengthSq);
+            kmax = Math.Max(kmax, Math.Abs(Vec3.Dot(svv, nn)) / sv.LengthSq);
+        }
+        // never finer than a thousandth of the patch: the mesh refines locally where it needs to anyway
+        var rho = kmax > 1e-12 ? 1 / kmax : double.PositiveInfinity;
+        rho = Math.Max(rho, 1e-3 * _scale);
+        _minRho = rho;
+        return rho;
     }
+    double? _minRho;
 
     /// <summary>Average lengths of Su and Sv (parameter to distance scale).</summary>
     public (double su, double sv) MetricScale()

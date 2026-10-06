@@ -27,11 +27,24 @@ static class ImportTool
                         var t0 = Stopwatch.StartNew();
                         var facets = NTess.Facets(s.Body);
                         Console.WriteLine($"  tessellation {t0.ElapsedMilliseconds} ms ({facets.Count} facets)");
+                        foreach (var g in facets.GroupBy(x => x.Tag.Name).OrderByDescending(g => g.Count()).Take(6))
+                        {
+                            var kind = s.Body.Faces.First(f => f.Tag.Name == g.Key).Surface.Kind;
+                            Console.WriteLine($"    {g.Key} {kind}: {g.Count()} facets");
+                        }
                         t0.Restart();
-                        foreach (var f in s.Body.Faces) NDomain.Of(f);
+                        foreach (var f in s.Body.Faces)
+                        {
+                            var dm = NDomain.Of(f);
+                            if (f.Surface.Kind == SurfaceKind.BSpline && Environment.GetEnvironmentVariable("FC_AREAS") != null)
+                            {
+                                var nb = f.Surface.Nurbs!;
+                                Console.WriteLine($"    {f.Tag.Name} sense={f.Sense} area={dm.SignedArea():0.####} deg {nb.Pu}x{nb.Pv} poles {nb.P.GetLength(0)}x{nb.P.GetLength(1)} closed {nb.ClosedU}/{nb.ClosedV} rational={nb.W != null}");
+                            }
+                        }
                         Console.WriteLine($"  domains {t0.ElapsedMilliseconds} ms");
                         t0.Restart();
-                        var top = NTess.ToSolid(s.Body).Topology;
+                        if (Environment.GetEnvironmentVariable("FC_NOTOPO") == null) { var top = NTess.ToSolid(s.Body).Topology; }
                         Console.WriteLine($"  topology+tess {t0.ElapsedMilliseconds} ms");
                     }
                 }
