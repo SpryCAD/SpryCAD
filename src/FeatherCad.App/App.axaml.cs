@@ -38,8 +38,23 @@ public partial class App : Application
         {
             var w = new MainWindow();
             desktop.MainWindow = w;
-            if (desktop.Args is { Length: > 0 } args && File.Exists(args[0])) w.OpenFile(args[0]);
+            if (desktop.Args is { Length: > 0 } args)
+                _ = OpenFiles(w, args.Where(File.Exists));
+            // files from later launches (SingleInstance): open in tabs here, the window brought to the front
+            SingleInstance.Listen(files => Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+            {
+                if (w.WindowState == Avalonia.Controls.WindowState.Minimized) w.WindowState = Avalonia.Controls.WindowState.Normal;
+                w.Activate();
+                _ = OpenFiles(w, files);
+            }));
         }
         base.OnFrameworkInitializationCompleted();
+    }
+
+    /// <summary>Opens files one after another (each may ask a question first), stopping if one is cancelled.</summary>
+    static async Task OpenFiles(MainWindow w, IEnumerable<string> files)
+    {
+        foreach (var f in files)
+            if (!await w.OpenFileAsync(f)) break;
     }
 }

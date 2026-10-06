@@ -601,6 +601,8 @@ public partial class MainWindow
         else created = true;
         if (IsStep(path))
         {
+            // the STEP model, imported into a new part named after it (a later Save As suggests that name)
+            Session.UntitledName = Path.GetFileNameWithoutExtension(path);
             Session.New();
             ImportFile(path);
             Session.MarkClean();
@@ -646,7 +648,7 @@ public partial class MainWindow
         {
             Title = "Save Part As",
             DefaultExtension = "fcad",
-            SuggestedFileName = Session.FilePath != null ? Path.GetFileName(Session.FilePath) : "Part1.fcad",
+            SuggestedFileName = Session.FilePath != null ? Path.GetFileName(Session.FilePath) : Session.UntitledName + CadDocument.FileExtension,
             FileTypeChoices = new[] { FcadType },
         });
         var path = f?.TryGetLocalPath();
@@ -662,7 +664,7 @@ public partial class MainWindow
         var type = kind == "step"
             ? new FilePickerFileType("STEP AP214") { Patterns = new[] { "*.step", "*.stp" } }
             : new FilePickerFileType("STL (binary)") { Patterns = new[] { "*.stl" } };
-        var baseName = Session.FilePath != null ? Path.GetFileNameWithoutExtension(Session.FilePath) : "Part1";
+        var baseName = Session.FilePath != null ? Path.GetFileNameWithoutExtension(Session.FilePath) : Session.UntitledName;
         var f = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
         {
             Title = kind == "step" ? "Export STEP" : "Export STL",
