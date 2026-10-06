@@ -17,7 +17,8 @@ namespace FeatherCad.App;
 
 public partial class MainWindow : Window
 {
-    public readonly DocumentSession Session = new();
+    /// <summary>The session of the active tab (see MainWindow.Tabs.cs).</summary>
+    public DocumentSession Session { get; private set; } = new();
     public readonly SelectionSet Selection = new();
     readonly ModelMode _modelMode;
     SketchEditor? _sketch;
@@ -53,9 +54,8 @@ public partial class MainWindow : Window
         _modelMode.DoubleClicked += OnModelDoubleClick;
         _modelMode.PickHandler = PickToPage;
 
-        Session.Rebuilt += OnRebuilt;
-        Session.DocumentChanged += OnDocumentChanged;
-        Session.BusyChanged += busy => BusyText.IsVisible = busy;
+        _tab = AddTab(Session);
+        UpdateTabHeader(_tab);
         Selection.Changed += OnSelectionChanged;
 
         Tree.SelectedChanged += OnTreeSelected;
@@ -131,7 +131,7 @@ public partial class MainWindow : Window
         }
         UpdateProblemEdges();
         if (_firstRebuild) { _firstRebuild = false; }
-        if (_fitAfterLoad && !Session.PreviewActive) { _fitAfterLoad = false; Viewport.StandardView("Trimetric", fit: true); }
+        if (_tab.FitAfterLoad && !Session.PreviewActive) { _tab.FitAfterLoad = false; Viewport.StandardView("Trimetric", fit: true); }
     }
 
     /// <summary>
@@ -352,6 +352,8 @@ public partial class MainWindow : Window
                 case Key.Y: if (!inText) Redo(); else handled = false; break;
                 case Key.B: Session.RequestRebuild(); break;
                 case Key.Q: Session.ForceRebuild(); break;
+                case Key.W or Key.F4: _ = CloseTab(_tab); break;
+                case Key.Tab: _ = CycleTab(shift ? -1 : 1); break;
                 case Key.D1: Viewport.StandardView("Front"); break;
                 case Key.D2: Viewport.StandardView("Back"); break;
                 case Key.D3: Viewport.StandardView("Left"); break;
@@ -520,25 +522,32 @@ public partial class MainWindow : Window
 
     public static void ShowErrorStatic(string msg) => Instance?.Status("⚠ " + msg);
 
+    /// <summary>
+    /// Saves every tab with unsaved changes to the autosave folder: autosave.fcad, autosave-2.fcad, ... all in the
+    /// same tick, which is how Recover Autosave tells one session's files from older ones.
+    /// </summary>
     void AutoSave()
     {
-        if (!Session.Dirty) return;
+        var dirty = _parts.Where(t => t.Session.Dirty).ToList();
+        if (dirty.Count == 0) return;
         try
         {
-            var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "FeatherCAD");
-            Directory.CreateDirectory(dir);
-            Session.Doc.Save(Path.Combine(dir, "autosave" + CadDocument.FileExtension));
+            Directory.CreateDirectory(AutosaveDir);
+            for (int i = 0; i < dirty.Count; i++)
+                dirty[i].Session.Doc.Save(Path.Combine(AutosaveDir, "autosave" + (i == 0 ? "" : $"-{i + 1}") + CadDocument.FileExtension));
         }
         catch { /* best effort */ }
     }
 
     async void OnClosing(object? sender, WindowClosingEventArgs e)
     {
-        if ((!Session.Dirty && !HasPendingEdit) || _closeConfirmed) return;
+        if ((!HasPendingEdit && !_parts.Any(t => t.Session.Dirty)) || _closeConfirmed) return;
         e.Cancel = true;
+        // the pending edit (active tab) first, then each part with unsaved changes, shown as it is asked about
         if (!await ResolvePendingEdit()) return;
-        if (Session.Dirty)
+        foreach (var t in _parts.Where(t => t.Session.Dirty).ToList())
         {
+            if (!await SwitchTo(t)) return;
             var r = await Dialogs.YesNoCancel(this, "FeatherCAD", $"Save changes to {Session.Title.TrimEnd(' ', '*')}?");
             if (r == null) return;
             if (r == true && !await Save()) return;

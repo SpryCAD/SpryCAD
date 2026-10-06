@@ -40,6 +40,13 @@
       </DockPanel>
     </Border>
 
+    <!-- Document tabs: one per open part -->
+    <Border DockPanel.Dock="Top" Background="#FFE8EDF3" BorderBrush="#FFD5DCE6" BorderThickness="0,0,0,1">
+      <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
+        <StackPanel x:Name="DocTabs" Orientation="Horizontal" Margin="4,3,4,0" Spacing="2" />
+      </ScrollViewer>
+    </Border>
+
     <Grid ColumnDefinitions="290,4,*">
       <!-- Left panel: FeatureManager / PropertyManager -->
       <Border Grid.Column="0" Background="#FFF5F7FA" BorderBrush="#FFD5DCE6" BorderThickness="0,0,1,0">

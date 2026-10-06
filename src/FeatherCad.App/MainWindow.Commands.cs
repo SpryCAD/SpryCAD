@@ -55,7 +55,7 @@ public partial class MainWindow
                 var p = path;
                 var item = new MenuItem { Header = $"_{n++} {Path.GetFileName(p)}" };
                 ToolTip.SetTip(item, p);
-                item.Click += async (_, _) => { if (await ConfirmDiscard()) OpenFile(p); };
+                item.Click += (_, _) => OpenFile(p);
                 m.Items.Add(item);
             }
         }
@@ -71,6 +71,7 @@ public partial class MainWindow
             Item("_Open...", () => _ = OpenFileDialog(), "Ctrl+O", "open"),
             Item("_Save", () => _ = Save(), "Ctrl+S", "save"),
             Item("Save _As...", () => _ = SaveAs(), "Ctrl+Shift+S"),
+            Item("_Close", () => _ = CloseTab(_tab), "Ctrl+W"),
             RecentMenu(),
             "-",
             Item("_Import STEP...", () => _ = ImportDialog(), "Ctrl+I", "open"),
@@ -525,7 +526,7 @@ public partial class MainWindow
             Session.Doc.AddFile(name, data);
             Session.Doc.AddFeature(new ImportFeature { Name = Path.GetFileNameWithoutExtension(baseName), File = name, Sha256 = hash });
         });
-        _fitAfterLoad = true;
+        _tab.FitAfterLoad = true;
         Status("Imported " + baseName);
     }
 
@@ -565,51 +566,70 @@ public partial class MainWindow
         return true;
     }
 
+    /// <summary>A new part, in a tab of its own.</summary>
     async Task NewFile()
     {
-        if (!await ConfirmDiscard()) return;
-        LeaveModes();
-        Viewport.ClearPivot();
-        Session.New();
-        Viewport.StandardView("Trimetric", fit: true);
+        if (await NewTab() is not { } t) return;
+        t.Session.New(); // the view is fitted when its first rebuild arrives
     }
 
     async Task OpenFileDialog()
     {
-        if (!await ConfirmDiscard()) return;
         var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
         {
             Title = "Open Part",
             FileTypeFilter = new[] { OpenableType, FcadType, StepType },
-            AllowMultiple = false,
+            AllowMultiple = true,
         });
-        var path = files.FirstOrDefault()?.TryGetLocalPath();
-        if (path != null) OpenFile(path);
+        foreach (var f in files)
+            if (f.TryGetLocalPath() is { } path && !await OpenFileAsync(path)) break;
     }
 
-    public void OpenFile(string path)
+    public void OpenFile(string path) => _ = OpenFileAsync(path);
+
+    /// <summary>
+    /// Opens a part (or a STEP model, as a new part holding it) in a tab of its own: the tab already showing it
+    /// if it is open, else the active tab if that is an untouched new part, else a new tab. False if cancelled.
+    /// </summary>
+    public async Task<bool> OpenFileAsync(string path)
     {
+        if (_parts.FirstOrDefault(t => t.Session.FilePath is { } p && SamePath(p, path)) is { } open)
+            return await SwitchTo(open);
+        var created = false;
+        if (IsUntouched(_tab)) { if (!await ResolvePendingEdit()) return false; LeaveModes(); }
+        else if (await NewTab() is null) return false;
+        else created = true;
         if (IsStep(path))
         {
-            // a STEP model opens as a new part holding it
-            LeaveModes();
             Session.New();
             ImportFile(path);
             Session.MarkClean();
-            return;
+            return true;
         }
         try
         {
-            LeaveModes();
             Viewport.ClearPivot();
             Session.Load(path);
-            if (!path.EndsWith("autosave" + CadDocument.FileExtension, StringComparison.OrdinalIgnoreCase)) RecentFiles.Add(path);
+            if (!IsAutosave(path)) RecentFiles.Add(path);
             Status("Opened " + path);
-            _fitAfterLoad = true;
+            _tab.FitAfterLoad = true;
+            return true;
         }
-        catch (Exception ex) { _ = Dialogs.Message(this, "Open failed", ex.Message); }
+        catch (Exception ex)
+        {
+            if (created) await CloseTab(_tab); // nothing to show for it
+            await Dialogs.Message(this, "Open failed", ex.Message);
+            return false;
+        }
     }
-    bool _fitAfterLoad;
+
+    static bool SamePath(string a, string b) =>
+        string.Equals(Path.GetFullPath(a), Path.GetFullPath(b), OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+
+    static string AutosaveDir => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "FeatherCAD");
+
+    static bool IsAutosave(string path) =>
+        SamePath(Path.GetDirectoryName(Path.GetFullPath(path)) ?? "", AutosaveDir) && Path.GetFileName(path).StartsWith("autosave", StringComparison.OrdinalIgnoreCase);
 
     async Task<bool> Save()
     {
@@ -671,15 +691,27 @@ public partial class MainWindow
         catch (Exception ex) { await Dialogs.Message(this, "Export failed", ex.Message); }
     }
 
-    void RecoverAutosave()
+    /// <summary>
+    /// Opens the parts of the last autosave, each in its own tab: the files written in the same autosave tick as
+    /// the newest one (older numbered files are left over from sessions with more parts open).
+    /// </summary>
+    async void RecoverAutosave()
     {
-        var p = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "FeatherCAD", "autosave" + CadDocument.FileExtension);
-        if (!File.Exists(p)) { Status("No autosave found."); return; }
-        OpenFile(p);
-        Session.FilePath = null;
-        // recovered work is not saved anywhere yet: closing it must prompt
-        Session.MarkDirty();
-        Status("Recovered the autosave: use Save As to keep it.");
+        var files = Directory.Exists(AutosaveDir)
+            ? new DirectoryInfo(AutosaveDir).GetFiles("autosave*" + CadDocument.FileExtension).OrderByDescending(f => f.LastWriteTimeUtc).ToList()
+            : new List<FileInfo>();
+        if (files.Count == 0) { Status("No autosave found."); return; }
+        var newest = files[0].LastWriteTimeUtc;
+        int n = 0;
+        foreach (var f in files.Where(f => newest - f.LastWriteTimeUtc < TimeSpan.FromSeconds(10)).OrderBy(f => f.Name))
+        {
+            if (!await OpenFileAsync(f.FullName)) break;
+            Session.FilePath = null;
+            // recovered work is not saved anywhere yet: closing it must prompt
+            Session.MarkDirty();
+            n++;
+        }
+        if (n > 0) Status(n == 1 ? "Recovered the autosave: use Save As to keep it." : $"Recovered {n} autosaved parts: use Save As to keep them.");
     }
 
     // ------------------------------------------------------------------------------------------

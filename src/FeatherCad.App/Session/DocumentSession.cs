@@ -32,7 +32,10 @@ public sealed class DocumentSession
 
     public static CadDocument NewDocument() => new();
 
-    public string Title => (FilePath != null ? Path.GetFileNameWithoutExtension(FilePath) : "Part1") + (Dirty ? " *" : "");
+    /// <summary>The name of a part not saved yet ("Part1", "Part2", ...: one per tab).</summary>
+    public string UntitledName { get; set; } = "Part1";
+
+    public string Title => (FilePath != null ? Path.GetFileNameWithoutExtension(FilePath) : UntitledName) + (Dirty ? " *" : "");
 
     public void New()
     {

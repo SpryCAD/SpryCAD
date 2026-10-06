@@ -293,6 +293,8 @@ public static class Dialogs
 
             GENERAL
               Ctrl+N/O/S ............... New / Open / Save
+              Ctrl+W ................... Close the part (its tab)
+              Ctrl+Tab ................. Next part tab (Shift: previous)
               Ctrl+Z / Ctrl+Y .......... Undo / Redo
               Ctrl+B / Ctrl+Q .......... Rebuild / Force rebuild
               Enter / Esc .............. OK / Cancel in PropertyManager
