@@ -483,15 +483,12 @@ public sealed partial class SketchEditor : IViewportMode
                     }
                     else
                     {
-                        // model edges/faces can be selected too (for Convert Entities / Normal To)
-                        var m = _vp.Pick(p.X, p.Y, SelFilter.Edge | SelFilter.Face);
+                        // model edges/faces can be selected too (for Convert Entities / Normal To), with a click:
+                        // done on release, so a drag starting over the part is a box selection as anywhere else
+                        _modelPick = _vp.Pick(p.X, p.Y, SelFilter.Edge | SelFilter.Face);
+                        _modelPickCtrl = p.Ctrl;
                         if (!p.Ctrl) Selected.Clear();
-                        if (m != null && _vp.Selection != null)
-                        {
-                            if (p.Ctrl) _vp.Selection.Toggle(m); else _vp.Selection.Set(m);
-                            _down = false;
-                        }
-                        else if (!p.Ctrl) _vp.Selection?.Clear();
+                        if (_modelPick == null && !p.Ctrl) _vp.Selection?.Clear();
                     }
                     SelectionChanged?.Invoke();
                     break;
@@ -510,10 +507,21 @@ public sealed partial class SketchEditor : IViewportMode
         vp.Redraw();
     }
 
+    // a model edge/face pressed on in Select: selected on release if the press was a click (not a box drag)
+    SelItem? _modelPick;
+    bool _modelPickCtrl;
+
     public void PointerUp(ViewportControl vp, PointerInfo p)
     {
         var wasDragging = _dragging;
         _down = false;
+        if (!wasDragging && _modelPick is { } mp && _vp.Selection != null)
+        {
+            if (_modelPickCtrl) _vp.Selection.Toggle(mp); else _vp.Selection.Set(mp);
+            SelectionChanged?.Invoke();
+            vp.Redraw();
+        }
+        _modelPick = null;
         if (_dragging) EndDrag();
         else if (Tool is SketchTool.Line or SketchTool.Centerline && _clicks.Count == 1 && _chainPoint < 0)
         {
@@ -1200,6 +1208,9 @@ public sealed partial class SketchEditor : IViewportMode
                 }
                 if (all) Selected.Add(new SkRef(SkRefKind.Entity, e.Id));
             }
+            // dimensions whose label lies wholly inside the box
+            foreach (var (id, label) in _labels)
+                if (label.IsVisible && r.Contains(label.Bounds)) Selected.Add(new SkRef(SkRefKind.Constraint, id));
             SelectionChanged?.Invoke();
         }
         _dragging = false; _dragOrigins = null; _dragCircle = -1; _dragLabel = null; _boxSel = null;
