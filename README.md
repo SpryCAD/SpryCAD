@@ -161,27 +161,39 @@ tests/FeatherCad.Tests  Kernel + core test runner
 
 ### The kernel
 
-FeatherCAD uses its own **boundary-representation** kernel written for speed and robustness:
+FeatherCAD has its own **exact boundary-representation kernel** (`Kernel/Native`), written for speed and
+robustness:
 
-- **Exact planes.** Every face carries the exact plane it was built from; booleans split along those
-  planes (plane-based geometry) rather than re-deriving planes from rounded vertices, which keeps
-  results crack-free and watertight.
-- **Topology vs. geometry are separate.** A solid is faces → loops → edges → vertices; each face points to a
-  `SurfaceDef` (plane, cylinder, cone, sphere, torus) describing its **true** shape. Curved faces are currently
-  stored as fine planar facets *that remember their exact surface* (axis, radius…). That exact data already
-  drives smooth shading, hole/boss rim chamfers and fillets and pattern axes, and it is what a future exact
-  NURBS/analytic surface back end will use — files will upgrade without changes.
-- **Exact B-rep layer** (`Kernel/Exact`). After every operation the facets of each analytic surface are merged
-  back into one exact face (`ExactBrep`). Boundaries are recognized as exact lines and circles; general
-  intersection curves (e.g. two crossing pipes) become cubic B-splines interpolated through points projected
-  onto *both* exact surfaces. Vertices are projected onto all their incident surfaces. This exact B-rep drives
-  STEP export (PLANE, CYLINDRICAL/CONICAL/SPHERICAL/TOROIDAL_SURFACE, LINE, CIRCLE, B_SPLINE_CURVE_WITH_KNOTS),
-  display refinement (curved faces are subdivided adaptively onto their true surface, crack-free) and the
-  face/edge readouts in the status bar. Exported files are verified with OpenCascade's B-rep checker
-  (valid closed solids, exact volumes).
+- **Exact geometry.** A solid is faces → loops → edges → vertices; every face lies on an exact surface and every
+  edge on an exact curve. Surfaces: plane, cylinder, cone, sphere and torus (analytic), the rolling-ball pipe of
+  a fillet, **B-spline / NURBS** surfaces (rational, periodic, as imported from STEP) and offset surfaces. Curves:
+  line, circle, ellipse, B-spline, and curves defined on surfaces (fillet contact lines, cross sections,
+  iso-parameter lines). Facets exist only for display, thumbnails and mesh export.
+- **Analytic and NURBS side by side.** This is the same choice Parasolid and ACIS make: analytic surfaces are
+  exact, compact and fast (closed-form intersections, no fitting error), and NURBS covers everything else.
+  The algorithms above the surface layer (booleans, fillets, shell, tessellation, STEP) work on both through
+  one surface interface, so a new surface type plugs in without changing them, and nothing built on today's
+  surfaces is lost if more of the kernel moves to NURBS later.
+- **Booleans** split edges where they cross the other body, compute section curves (analytically for
+  analytic pairs, otherwise traced on both surfaces and fitted within tolerance), split faces in their
+  parameter domains, classify the pieces exactly, and sew. They are **local**: faces and edges far from the
+  tool are skipped by every stage, so the cost follows the size of the change, not of the part.
+- **Fillets** are rolling-ball blends built from the exact faces: the ball centre runs along the
+  intersection of the faces' offset surfaces, and the blend is the pipe around it. Edges whose faces change
+  tangentially (a groove's rim running from the rim onto a spoke fillet) get one tool, with the ball rolling
+  from face to face. Lines and arcs between planes and cylinders use extruded/revolved profiles. **Shell**
+  offsets every face exactly.
+- **Patterns** copy the seed's tool where an instance's geometry is the seed's moved, and solve fillets and
+  chamfers again where it is not.
+- **Data exchange.** STEP export writes the exact faces (analytic surfaces, NURBS, offset surfaces; fillet
+  pipes as fitted B-splines). STEP import reads exact solids, splits faces that wrap around periodic
+  surfaces, and corrects face orientation from the loops. Exported files are checked with OpenCascade's
+  B-rep checker (valid closed solids, exact volumes).
 - **Persistent naming.** Faces are named from the feature and sketch entity that created them
   (`F3.S.L7` = side face of extrude F3 from sketch line 7). References to faces/edges use these names plus a
   geometric hint, so fillets and sketches-on-faces survive parameter changes.
+- An older faceted kernel (`Kernel/Brep`, `Kernel/Csg`) remains as a fallback for the few operations the
+  exact kernel cannot do yet.
 
 ### The `.fcad` format
 
