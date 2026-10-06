@@ -197,8 +197,11 @@ robustness:
 
 ### The `.fcad` format
 
-Plain JSON: units, equations, and the ordered feature list with sketches (points, entities, constraints and
-dimension expressions). Example:
+A part is a JSON document: units, the part colour, equations, and the ordered feature list with sketches
+(points, entities, constraints and dimension expressions). Features store what was asked for (expressions,
+face and edge references by persistent name plus a hint point), never computed geometry: the model is rebuilt
+on open. An `.fcad` file is either this JSON as plain text, or a container (below) that holds it as
+`model.json`. Example:
 
 ```json
 {
