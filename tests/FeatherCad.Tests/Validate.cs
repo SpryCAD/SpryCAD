@@ -12,6 +12,10 @@ static class Validate
         var doc = CadDocument.FromJson(File.ReadAllText(file));
         var r = new Regenerator().Rebuild(doc);
         foreach (var f in doc.Features) if (!r.Status[f.Id].Ok) Console.WriteLine($"  {f.Name}: {r.Status[f.Id].Error}");
+        if (Environment.GetEnvironmentVariable("FC_EDGES") is { } en)
+            foreach (var b in r.State.Bodies)
+                foreach (var e in b.Solid.Topology.Edges.Where(e => (e.FaceA + "|" + e.FaceB).Contains(en)))
+                    Console.WriteLine($"  display edge {e.FaceA} | {e.FaceB} ({e.Length:0.###} mm)");
         foreach (var b in r.State.Bodies)
             Console.WriteLine($"  body {b.Id}: native={b.Solid.Native != null} open={b.Solid.Topology.OpenHalfEdges} meshVolume={b.Mesh.Volume:0.###} exact={KernelTests.Vex(b.Solid):0.###}");
         // FC_FACE=<face name>: tessellation diagnostics for that face

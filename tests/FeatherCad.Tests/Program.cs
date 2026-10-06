@@ -38,6 +38,7 @@ static class Program
     static int Main(string[] args)
     {
         if (Environment.GetEnvironmentVariable("FC_TOPO") != null) FeatherCad.Kernel.Topology.Debug = Console.WriteLine;
+        if (Environment.GetEnvironmentVariable("FC_BLEND") != null) FeatherCad.Kernel.NativeBlend.Debug = Console.WriteLine;
         if (args.Length > 7 && args[0] == "fillet") return Hang.Run(args);
         if (args.Length > 2 && args[0] == "rb") return RollingBallTool.Run(args);
         if (args.Length > 1 && args[0] == "verify-demos") return Demos.Verify(args[1], filter: args.Length > 2 ? args[2] : null);

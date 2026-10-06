@@ -86,6 +86,25 @@ static class RollingBallTool
 
     public static void Tests(TestRunner t)
     {
+        t.Test("Chamfer on a keyed bore runs up to the keyway walls (no wedge left)", () =>
+        {
+            var plate = Builders.Box(new Vec3(-20, -20, 0), new Vec3(20, 20, 10), "Plate");
+            var s = Csg.Subtract(plate, Builders.Cylinder(new Vec3(0, 0, -1), Vec3.UnitZ, 7, 12, "Bore"));
+            s = Csg.Subtract(s, Builders.Box(new Vec3(0, -2.5, -1), new Vec3(9.3, 2.5, 11), "Key"));
+            var nb = s.Native!; nb.Link();
+            var edges = nb.Edges.Where(e => e.Uses.Count == 2 && !NativeBlend.IsSeam(e) && e.Curve is NCircle
+                && e.Uses.Any(u => u.Face.Tag.Name.StartsWith("Bore")) && Math.Abs(e.V0.P.Z - 10) < 1e-9).ToList();
+            var errors = new List<string>();
+            var res = NativeBlend.Apply(s, NativeBlend.Expand(nb, edges, true), 1, false, "Chamfer", errors);
+            t.True(errors.Count == 0, string.Join("; ", errors));
+            t.True(res.Native != null && res.Topology.OpenHalfEdges == 0, "not a closed native body");
+            // just past the keyway wall, inside the chamfer: removed (was a wedge left standing)
+            foreach (var y in new[] { 2.52, -2.52 })
+                t.True(!NativeBlend.PointInside(res.Native!, new Vec3(7.066, y, 9.8)), $"wedge left at y={y}");
+            t.True(NativeBlend.PointInside(res.Native!, new Vec3(7.5, 2.6, 9.4)), "material below the chamfer removed");
+            t.True(NativeBlend.PointInside(res.Native!, new Vec3(-7.3, 0, 9.1)), "material below the chamfer removed");
+            t.True(!NativeBlend.PointInside(res.Native!, new Vec3(-7.3, 0, 9.8)), "chamfer missing");
+        });
         foreach (var name in new[] { "boss", "bore" })
             t.Test($"Rolling-ball fillet reproduces the exact torus fillet ({name})", () =>
             {

@@ -156,7 +156,15 @@ public static class NativeBlend
             var q = E + t * (L * i / 16);
             fits = OnFaces(cA.Face, q + uA * tl) && OnFaces(cB.Face, q + uB * tl);
         }
-        return (new List<Solid> { Builders.Extrude(new[] { new ProfileRegion(loop) }, lframe, 0, L, name) }, convex, fits);
+        var tools = new List<Solid> { Builders.Extrude(new[] { new ProfileRegion(loop) }, lframe, 0, L, name) };
+        // ends meeting a face at an angle: an extension past the end, cut back to that face
+        var ext = 3 * Math.Max(size, tl);
+        if (EndPlane(cA.Start, -t, cA.Face, cB.Face, new[] { e }) is { } p0)
+            tools.Add(Trim(Builders.Extrude(new[] { new ProfileRegion(loop) }, lframe, -ext, 0, name), p0));
+        if (EndPlane(cA.End, t, cA.Face, cB.Face, new[] { e }) is { } p1)
+            tools.Add(Trim(Builders.Extrude(new[] { new ProfileRegion(loop) }, lframe, L, L + ext, name), p1));
+        tools.RemoveAll(x => x.IsEmpty);
+        return (tools, convex, fits);
     }
 
     static (List<Solid>? tools, bool convex, bool fits) ArcTools(List<NEdge> arcs, double size, bool fillet, string name)
@@ -208,22 +216,95 @@ public static class NativeBlend
                 var dir = refDir * Math.Cos(a) + yDir * Math.Sin(a);
                 fits = OnFaces(cP.Face, cs.Origin + ax * onPlane.Y + dir * onPlane.X) && OnFaces(cC.Face, cs.Origin + ax * onCyl.Y + dir * onCyl.X);
             }
+        // chain ends meeting a face at an angle (e.g. a keyway wall across a bore): extensions past the ends, each
+        // cut back to its face
+        var extensions = new List<(double a0, double sweep, Plane plane)>();
+        if (ranges.Sum(r => r.sweep) < 2 * Math.PI - 1e-6)
+        {
+            var delta = Math.Min(Math.Min(3 * Math.Max(size, tlc) / cs.R, Math.PI / 4), (2 * Math.PI - ranges.Sum(r => r.sweep)) / 2);
+            static double Wrap2(double a) { a %= 2 * Math.PI; return a > Math.PI ? a - 2 * Math.PI : a < -Math.PI ? a + 2 * Math.PI : a; }
+            Vec3 DirAt(double a) => -refDir * Math.Sin(a) + yDir * Math.Cos(a);
+            for (int i = 0; i < arcs.Count; i++)
+            {
+                var arc = arcs[i]; var (a0, sweep) = ranges[i];
+                var startV = Math.Abs(Wrap2(Ang(arc.V0.P) - a0)) < 1e-6 ? arc.V0 : arc.V1;
+                var endV = ReferenceEquals(startV, arc.V0) ? arc.V1 : arc.V0;
+                foreach (var atStart in new[] { true, false })
+                {
+                    var v = atStart ? startV : endV;
+                    if (arcs.Count(o => ReferenceEquals(o.V0, v) || ReferenceEquals(o.V1, v)) > 1) continue; // joint inside the chain
+                    var dirOut = atStart ? -DirAt(a0) : DirAt(a0 + sweep);
+                    if (delta > 1e-9 && EndPlane(v, dirOut, cP.Face, cC.Face, arcs) is { } pl)
+                        extensions.Add((atStart ? a0 - delta : a0 + sweep, delta, pl));
+                }
+            }
+        }
         var tools = new List<Solid>();
+        foreach (var (xa, xs, pl) in extensions)
+        {
+            var startDir = refDir * Math.Cos(xa) + yDir * Math.Sin(xa);
+            var xf = new Frame(cs.Origin, startDir, ax, Vec3.Cross(startDir, ax));
+            var piece = Trim(Builders.Revolve(new[] { new ProfileRegion(prof) }, xf, Vec2.Zero, new Vec2(0, 1), xs, name), pl);
+            if (!piece.IsEmpty) tools.Add(piece);
+        }
         if (ranges.Sum(r => r.sweep) > 2 * Math.PI - 1e-6)
         {
             var frame = new Frame(cs.Origin, refDir, ax, Vec3.Cross(refDir, ax));
             tools.Add(Builders.Revolve(new[] { new ProfileRegion(prof) }, frame, Vec2.Zero, new Vec2(0, 1), 2 * Math.PI, name));
             return (tools, convex, fits);
         }
-        int k = 0;
         foreach (var (a0, sweep) in ranges)
         {
             if (sweep < 1e-9) continue;
             var startDir = refDir * Math.Cos(a0) + yDir * Math.Sin(a0);
             var pframe = new Frame(cs.Origin, startDir, ax, Vec3.Cross(startDir, ax));
-            tools.Add(Builders.Revolve(new[] { new ProfileRegion(prof) }, pframe, Vec2.Zero, new Vec2(0, 1), sweep, ranges.Count == 1 ? name : $"{name}.{k++}"));
+            tools.Add(Builders.Revolve(new[] { new ProfileRegion(prof) }, pframe, Vec2.Zero, new Vec2(0, 1), sweep, name));
         }
         return (tools, convex, fits);
+    }
+
+    /// <summary>
+    /// The plane of the face a blend's end vertex runs into, when that face is planar and meets the edge at an
+    /// angle (a face square to the edge already matches the tool's square end). Oriented with the edge next to
+    /// the vertex on its positive side. Null when there is no single such face.
+    /// </summary>
+    static Plane? EndPlane(NVertex v, Vec3 dirOut, NFace fa, NFace fb, IEnumerable<NEdge> blended)
+    {
+        var inside = v.P - dirOut.Normalized * 1e-3;
+        Plane? found = null;
+        foreach (var face in new[] { fa, fb })
+            foreach (var c in face.Coedges)
+            {
+                var e = c.Edge;
+                if (!ReferenceEquals(e.V0, v) && !ReferenceEquals(e.V1, v)) continue;
+                if (blended.Contains(e) || IsSeam(e)) continue;
+                foreach (var u in e.Uses)
+                {
+                    var f = u.Face;
+                    if (ReferenceEquals(f, fa) || ReferenceEquals(f, fb)) continue;
+                    if (f.Surface.CoincidentWith(fa.Surface, 1e-9) || f.Surface.CoincidentWith(fb.Surface, 1e-9)) continue;
+                    if (f.Surface.Kind != SurfaceKind.Plane) return null;
+                    var n = f.Surface.Plane!.Normal;
+                    var cos = Math.Abs(Vec3.Dot(n, dirOut.Normalized));
+                    if (cos > 0.9999 || cos < 0.05) return null; // square end, or a face along the edge
+                    var pl = Plane.FromPointNormal(v.P, n);
+                    if (pl.Distance(inside) < 0) pl = Plane.FromPointNormal(v.P, -n);
+                    if (found != null && Math.Abs(Vec3.Dot(found.Normal, pl.Normal) - 1) > 1e-9) return null;
+                    found = pl;
+                }
+            }
+        return found;
+    }
+
+    /// <summary>The part of the tool on the positive side of the plane.</summary>
+    static Solid Trim(Solid tool, Plane pl)
+    {
+        var box = tool.Bounds; var pad = box.Diagonal + 1;
+        var n = pl.Normal; var origin = pl.Project(box.Center);
+        var x = n.AnyPerpendicular(); var y = Vec3.Cross(n, x);
+        var rect = ProfileLoop.Polygon(new[] { new Vec2(-pad, -pad), new Vec2(pad, -pad), new Vec2(pad, pad), new Vec2(-pad, pad) }, "trim");
+        var slab = Builders.Extrude(new[] { new ProfileRegion(rect) }, new Frame(origin, x, y, n), -pad, 0, "trim");
+        return Csg.Subtract(tool, slab);
     }
 
     /// <summary>Distance from the edge to where the fillet/chamfer meets each face (same formula as the profile).</summary>
@@ -369,6 +450,15 @@ public static class NativeBlend
     {
         new Vec3(0.5773, 0.5774, 0.5775).Normalized, new Vec3(-0.3121, 0.8410, 0.4419).Normalized, new Vec3(0.7071, -0.1213, -0.6965).Normalized,
     };
+
+    /// <summary>Whether p lies inside the body (ray parity on the exact faces).</summary>
+    public static bool PointInside(NBody body, Vec3 p)
+    {
+        body.Link();
+        var doms = new Dictionary<NFace, NDomain>(ReferenceEqualityComparer.Instance);
+        foreach (var f in body.Faces) doms[f] = NDomain.Of(f, 1e-3);
+        return Inside(body, doms, p);
+    }
 
     /// <summary>Point-in-solid by ray parity; directions that graze a face boundary are skipped.</summary>
     static bool Inside(NBody body, Dictionary<NFace, NDomain> doms, Vec3 p)
