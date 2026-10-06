@@ -1,0 +1,871 @@
+{
+  "format": "FeatherCAD",
+  "formatVersion": 1,
+  "units": "MMGS",
+  "equations": [
+    {
+      "name": "D1",
+      "expr": "30"
+    },
+    {
+      "name": "L1",
+      "expr": "40"
+    },
+    {
+      "name": "D2",
+      "expr": "42"
+    },
+    {
+      "name": "L2",
+      "expr": "70"
+    },
+    {
+      "name": "D3",
+      "expr": "25"
+    },
+    {
+      "name": "L3",
+      "expr": "35"
+    },
+    {
+      "name": "C",
+      "expr": "1.5"
+    },
+    {
+      "name": "Rs",
+      "expr": "1"
+    },
+    {
+      "name": "KeyW",
+      "expr": "12"
+    },
+    {
+      "name": "KeyL",
+      "expr": "40"
+    },
+    {
+      "name": "KeyT",
+      "expr": "5"
+    },
+    {
+      "name": "CrossD",
+      "expr": "6"
+    }
+  ],
+  "features": [
+    {
+      "$type": "sketch",
+      "plane": {
+        "std": "Front"
+      },
+      "sketch": {
+        "points": [
+          {
+            "id": 0,
+            "x": 0,
+            "y": 0,
+            "fixed": true
+          },
+          {
+            "id": 1,
+            "x": 0,
+            "y": 15,
+            "fixed": false
+          },
+          {
+            "id": 4,
+            "x": 40,
+            "y": 15,
+            "fixed": false
+          },
+          {
+            "id": 7,
+            "x": 40,
+            "y": 21,
+            "fixed": false
+          },
+          {
+            "id": 10,
+            "x": 110,
+            "y": 21,
+            "fixed": false
+          },
+          {
+            "id": 13,
+            "x": 110,
+            "y": 12.5,
+            "fixed": false
+          },
+          {
+            "id": 16,
+            "x": 145,
+            "y": 12.5,
+            "fixed": false
+          },
+          {
+            "id": 19,
+            "x": 145,
+            "y": 0,
+            "fixed": false
+          }
+        ],
+        "entities": [
+          {
+            "$type": "line",
+            "p1": 0,
+            "p2": 1,
+            "id": 22,
+            "construction": false
+          },
+          {
+            "$type": "line",
+            "p1": 1,
+            "p2": 4,
+            "id": 23,
+            "construction": false
+          },
+          {
+            "$type": "line",
+            "p1": 4,
+            "p2": 7,
+            "id": 24,
+            "construction": false
+          },
+          {
+            "$type": "line",
+            "p1": 7,
+            "p2": 10,
+            "id": 25,
+            "construction": false
+          },
+          {
+            "$type": "line",
+            "p1": 10,
+            "p2": 13,
+            "id": 26,
+            "construction": false
+          },
+          {
+            "$type": "line",
+            "p1": 13,
+            "p2": 16,
+            "id": 27,
+            "construction": false
+          },
+          {
+            "$type": "line",
+            "p1": 16,
+            "p2": 19,
+            "id": 28,
+            "construction": false
+          },
+          {
+            "$type": "line",
+            "p1": 19,
+            "p2": 0,
+            "id": 29,
+            "construction": false
+          }
+        ],
+        "constraints": [
+          {
+            "id": 2,
+            "type": "HDistance",
+            "refs": [
+              0,
+              1
+            ],
+            "expr": "0",
+            "value": 0,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 3,
+            "type": "VDistance",
+            "refs": [
+              0,
+              1
+            ],
+            "expr": "D1/2",
+            "value": 15,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 5,
+            "type": "HDistance",
+            "refs": [
+              0,
+              4
+            ],
+            "expr": "L1",
+            "value": 40,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 6,
+            "type": "VDistance",
+            "refs": [
+              0,
+              4
+            ],
+            "expr": "D1/2",
+            "value": 15,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 8,
+            "type": "HDistance",
+            "refs": [
+              0,
+              7
+            ],
+            "expr": "L1",
+            "value": 40,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 9,
+            "type": "VDistance",
+            "refs": [
+              0,
+              7
+            ],
+            "expr": "D2/2",
+            "value": 21,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 11,
+            "type": "HDistance",
+            "refs": [
+              0,
+              10
+            ],
+            "expr": "L1\u002BL2",
+            "value": 110,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 12,
+            "type": "VDistance",
+            "refs": [
+              0,
+              10
+            ],
+            "expr": "D2/2",
+            "value": 21,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 14,
+            "type": "HDistance",
+            "refs": [
+              0,
+              13
+            ],
+            "expr": "L1\u002BL2",
+            "value": 110,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 15,
+            "type": "VDistance",
+            "refs": [
+              0,
+              13
+            ],
+            "expr": "D3/2",
+            "value": 12.5,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 17,
+            "type": "HDistance",
+            "refs": [
+              0,
+              16
+            ],
+            "expr": "L1\u002BL2\u002BL3",
+            "value": 145,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 18,
+            "type": "VDistance",
+            "refs": [
+              0,
+              16
+            ],
+            "expr": "D3/2",
+            "value": 12.5,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 20,
+            "type": "HDistance",
+            "refs": [
+              0,
+              19
+            ],
+            "expr": "L1\u002BL2\u002BL3",
+            "value": 145,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 21,
+            "type": "VDistance",
+            "refs": [
+              0,
+              19
+            ],
+            "expr": "0",
+            "value": 0,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          }
+        ],
+        "nextId": 30
+      },
+      "id": "F1",
+      "name": "Profile",
+      "suppressed": false
+    },
+    {
+      "$type": "revolve",
+      "sketchId": "F1",
+      "isCut": false,
+      "axisEntity": 29,
+      "angle": "360",
+      "reverse": false,
+      "merge": true,
+      "id": "F2",
+      "name": "Shaft",
+      "suppressed": false
+    },
+    {
+      "$type": "fillet",
+      "edges": [
+        {
+          "a": "F2.R.L23",
+          "b": "F2.R.L24",
+          "hint": [
+            40,
+            15,
+            0
+          ]
+        },
+        {
+          "a": "F2.R.L26",
+          "b": "F2.R.L27",
+          "hint": [
+            110,
+            12.5,
+            0
+          ]
+        }
+      ],
+      "radius": "Rs",
+      "tangentPropagation": true,
+      "overflow": true,
+      "id": "F3",
+      "name": "Shoulder fillets",
+      "suppressed": false
+    },
+    {
+      "$type": "chamfer",
+      "edges": [
+        {
+          "a": "F2.R.L22",
+          "b": "F2.R.L23",
+          "hint": [
+            0,
+            15,
+            0
+          ]
+        },
+        {
+          "a": "F2.R.L27",
+          "b": "F2.R.L28",
+          "hint": [
+            145,
+            12.5,
+            0
+          ]
+        },
+        {
+          "a": "F2.R.L24",
+          "b": "F2.R.L25",
+          "hint": [
+            40,
+            21,
+            0
+          ]
+        },
+        {
+          "a": "F2.R.L25",
+          "b": "F2.R.L26",
+          "hint": [
+            110,
+            21,
+            0
+          ]
+        }
+      ],
+      "distance": "C",
+      "tangentPropagation": true,
+      "overflow": true,
+      "id": "F4",
+      "name": "Chamfers",
+      "suppressed": false
+    },
+    {
+      "$type": "plane",
+      "base": {
+        "std": "Top"
+      },
+      "offset": "D2/2",
+      "flip": false,
+      "id": "F5",
+      "name": "Keyway plane",
+      "suppressed": false
+    },
+    {
+      "$type": "sketch",
+      "plane": {
+        "feature": "F5"
+      },
+      "sketch": {
+        "points": [
+          {
+            "id": 0,
+            "x": 0,
+            "y": 0,
+            "fixed": true
+          },
+          {
+            "id": 1,
+            "x": 61,
+            "y": 0,
+            "fixed": false
+          },
+          {
+            "id": 4,
+            "x": 89,
+            "y": 0,
+            "fixed": false
+          },
+          {
+            "id": 7,
+            "x": 61,
+            "y": 6,
+            "fixed": false
+          },
+          {
+            "id": 10,
+            "x": 89,
+            "y": 6,
+            "fixed": false
+          },
+          {
+            "id": 13,
+            "x": 89,
+            "y": -6,
+            "fixed": false
+          },
+          {
+            "id": 16,
+            "x": 61,
+            "y": -6,
+            "fixed": false
+          }
+        ],
+        "entities": [
+          {
+            "$type": "line",
+            "p1": 16,
+            "p2": 13,
+            "id": 19,
+            "construction": false
+          },
+          {
+            "$type": "arc",
+            "center": 4,
+            "start": 13,
+            "end": 10,
+            "id": 20,
+            "construction": false
+          },
+          {
+            "$type": "line",
+            "p1": 10,
+            "p2": 7,
+            "id": 21,
+            "construction": false
+          },
+          {
+            "$type": "arc",
+            "center": 1,
+            "start": 7,
+            "end": 16,
+            "id": 22,
+            "construction": false
+          }
+        ],
+        "constraints": [
+          {
+            "id": 2,
+            "type": "HDistance",
+            "refs": [
+              0,
+              1
+            ],
+            "expr": "L1\u002BL2/2-(KeyL-KeyW)/2",
+            "value": 61,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 3,
+            "type": "VDistance",
+            "refs": [
+              0,
+              1
+            ],
+            "expr": "0",
+            "value": 0,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 5,
+            "type": "HDistance",
+            "refs": [
+              0,
+              4
+            ],
+            "expr": "L1\u002BL2/2\u002B(KeyL-KeyW)/2",
+            "value": 89,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 6,
+            "type": "VDistance",
+            "refs": [
+              0,
+              4
+            ],
+            "expr": "0",
+            "value": 0,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 8,
+            "type": "HDistance",
+            "refs": [
+              0,
+              7
+            ],
+            "expr": "L1\u002BL2/2-(KeyL-KeyW)/2",
+            "value": 61,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 9,
+            "type": "VDistance",
+            "refs": [
+              0,
+              7
+            ],
+            "expr": "KeyW/2",
+            "value": 6,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 11,
+            "type": "HDistance",
+            "refs": [
+              0,
+              10
+            ],
+            "expr": "L1\u002BL2/2\u002B(KeyL-KeyW)/2",
+            "value": 89,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 12,
+            "type": "VDistance",
+            "refs": [
+              0,
+              10
+            ],
+            "expr": "KeyW/2",
+            "value": 6,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 14,
+            "type": "HDistance",
+            "refs": [
+              0,
+              13
+            ],
+            "expr": "L1\u002BL2/2\u002B(KeyL-KeyW)/2",
+            "value": 89,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 15,
+            "type": "VDistance",
+            "refs": [
+              0,
+              13
+            ],
+            "expr": "KeyW/2",
+            "value": 6,
+            "sign": -1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 17,
+            "type": "HDistance",
+            "refs": [
+              0,
+              16
+            ],
+            "expr": "L1\u002BL2/2-(KeyL-KeyW)/2",
+            "value": 61,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 18,
+            "type": "VDistance",
+            "refs": [
+              0,
+              16
+            ],
+            "expr": "KeyW/2",
+            "value": 6,
+            "sign": -1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          }
+        ],
+        "nextId": 23
+      },
+      "id": "F6",
+      "name": "Keyway",
+      "suppressed": false
+    },
+    {
+      "$type": "extrude",
+      "sketchId": "F6",
+      "isCut": true,
+      "end": "Blind",
+      "depth": "KeyT",
+      "reverse": true,
+      "merge": true,
+      "id": "F7",
+      "name": "Keyway",
+      "suppressed": false
+    },
+    {
+      "$type": "sketch",
+      "plane": {
+        "std": "Top"
+      },
+      "sketch": {
+        "points": [
+          {
+            "id": 0,
+            "x": 0,
+            "y": 0,
+            "fixed": true
+          },
+          {
+            "id": 1,
+            "x": 20,
+            "y": 0,
+            "fixed": false
+          }
+        ],
+        "entities": [
+          {
+            "$type": "circle",
+            "center": 1,
+            "r": 3,
+            "id": 4,
+            "construction": false
+          }
+        ],
+        "constraints": [
+          {
+            "id": 2,
+            "type": "HDistance",
+            "refs": [
+              0,
+              1
+            ],
+            "expr": "L1/2",
+            "value": 20,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 3,
+            "type": "VDistance",
+            "refs": [
+              0,
+              1
+            ],
+            "expr": "0",
+            "value": 0,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 5,
+            "type": "Diameter",
+            "refs": [
+              4
+            ],
+            "expr": "CrossD",
+            "value": 6,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          }
+        ],
+        "nextId": 6
+      },
+      "id": "F8",
+      "name": "Cross hole",
+      "suppressed": false
+    },
+    {
+      "$type": "extrude",
+      "sketchId": "F8",
+      "isCut": true,
+      "end": "ThroughAllBoth",
+      "depth": "10",
+      "reverse": false,
+      "merge": true,
+      "id": "F9",
+      "name": "Cross hole",
+      "suppressed": false
+    }
+  ],
+  "nextFeatureId": 10,
+  "nameCounters": {},
+  "color": [
+    0.74,
+    0.76,
+    0.8
+  ],
+  "activeCount": 9
+}

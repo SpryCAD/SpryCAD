@@ -206,6 +206,12 @@ static class CoreTests
             finally { NativeBlend.CheckFit = oldFit; Csg.FallbackSeconds = oldBudget; }
         });
 
+        t.Test("Demo models rebuild, also with changed parameters, and export exact STEP", () =>
+        {
+            var dir = Path.Combine(Path.GetTempPath(), "feathercad-tests", "demos");
+            t.Eq(Demos.Verify(dir, volumes: false), 0);
+        });
+
         t.Test("Start-up warm-up model rebuilds cleanly", () =>
         {
             // the warm-up part must exercise the real paths without errors (else it warms nothing)

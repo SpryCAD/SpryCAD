@@ -474,16 +474,22 @@ public sealed class Regenerator
         {
             if (!seeds.Any()) throw new FeatureException("Select the features to pattern.");
             if (transforms.Count == 0) throw new FeatureException("The pattern has no instances.");
+            var everything = new List<Solid>(); bool? cutKind = null; bool mixed = false;
             foreach (var seedId in seeds)
             {
                 if (!State.Tools.TryGetValue(seedId, out var tool))
-                    throw new FeatureException("Only extrude, revolve and hole features can be patterned.");
+                    throw new FeatureException("Only extrude, revolve, hole, pattern and mirror features can be patterned.");
                 var copies = new List<Solid>();
                 for (int i = 0; i < transforms.Count; i++)
                     copies.Add(tool.Tool.Transformed(transforms[i], $"{f.Id}.{i + 1}."));
                 var all = Csg.UnionAll(copies);
                 ApplyTool(all, tool.IsCut, true);
+                everything.Add(tool.Tool); everything.Add(all);
+                if (cutKind == null) cutKind = tool.IsCut; else if (cutKind != tool.IsCut) mixed = true;
             }
+            // the pattern/mirror as a whole (seeds + copies) can itself be patterned or mirrored
+            if (!mixed && cutKind is bool isCut)
+                State.Tools[f.Id] = new ToolInfo(Csg.UnionAll(everything), isCut, true);
         }
 
         void DoLinearPattern(LinearPatternFeature lp)

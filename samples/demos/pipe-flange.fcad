@@ -1,0 +1,579 @@
+{
+  "format": "FeatherCAD",
+  "formatVersion": 1,
+  "units": "MMGS",
+  "equations": [
+    {
+      "name": "OD",
+      "expr": "150"
+    },
+    {
+      "name": "ID",
+      "expr": "60"
+    },
+    {
+      "name": "T",
+      "expr": "18"
+    },
+    {
+      "name": "HubD",
+      "expr": "88"
+    },
+    {
+      "name": "HubH",
+      "expr": "32"
+    },
+    {
+      "name": "PCD",
+      "expr": "118"
+    },
+    {
+      "name": "BoltD",
+      "expr": "14"
+    },
+    {
+      "name": "N",
+      "expr": "8"
+    },
+    {
+      "name": "Rfil",
+      "expr": "5"
+    },
+    {
+      "name": "C",
+      "expr": "1.5"
+    }
+  ],
+  "features": [
+    {
+      "$type": "sketch",
+      "plane": {
+        "std": "Front"
+      },
+      "sketch": {
+        "points": [
+          {
+            "id": 0,
+            "x": 0,
+            "y": 0,
+            "fixed": true
+          },
+          {
+            "id": 1,
+            "x": 30,
+            "y": 0,
+            "fixed": false
+          },
+          {
+            "id": 4,
+            "x": 75,
+            "y": 0,
+            "fixed": false
+          },
+          {
+            "id": 7,
+            "x": 75,
+            "y": 18,
+            "fixed": false
+          },
+          {
+            "id": 10,
+            "x": 44,
+            "y": 18,
+            "fixed": false
+          },
+          {
+            "id": 13,
+            "x": 44,
+            "y": 50,
+            "fixed": false
+          },
+          {
+            "id": 16,
+            "x": 30,
+            "y": 50,
+            "fixed": false
+          },
+          {
+            "id": 25,
+            "x": 0,
+            "y": 50,
+            "fixed": false
+          }
+        ],
+        "entities": [
+          {
+            "$type": "line",
+            "p1": 1,
+            "p2": 4,
+            "id": 19,
+            "construction": false
+          },
+          {
+            "$type": "line",
+            "p1": 4,
+            "p2": 7,
+            "id": 20,
+            "construction": false
+          },
+          {
+            "$type": "line",
+            "p1": 7,
+            "p2": 10,
+            "id": 21,
+            "construction": false
+          },
+          {
+            "$type": "line",
+            "p1": 10,
+            "p2": 13,
+            "id": 22,
+            "construction": false
+          },
+          {
+            "$type": "line",
+            "p1": 13,
+            "p2": 16,
+            "id": 23,
+            "construction": false
+          },
+          {
+            "$type": "line",
+            "p1": 16,
+            "p2": 1,
+            "id": 24,
+            "construction": false
+          },
+          {
+            "$type": "line",
+            "p1": 0,
+            "p2": 25,
+            "id": 28,
+            "construction": true
+          }
+        ],
+        "constraints": [
+          {
+            "id": 2,
+            "type": "HDistance",
+            "refs": [
+              0,
+              1
+            ],
+            "expr": "ID/2",
+            "value": 30,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 3,
+            "type": "VDistance",
+            "refs": [
+              0,
+              1
+            ],
+            "expr": "0",
+            "value": 0,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 5,
+            "type": "HDistance",
+            "refs": [
+              0,
+              4
+            ],
+            "expr": "OD/2",
+            "value": 75,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 6,
+            "type": "VDistance",
+            "refs": [
+              0,
+              4
+            ],
+            "expr": "0",
+            "value": 0,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 8,
+            "type": "HDistance",
+            "refs": [
+              0,
+              7
+            ],
+            "expr": "OD/2",
+            "value": 75,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 9,
+            "type": "VDistance",
+            "refs": [
+              0,
+              7
+            ],
+            "expr": "T",
+            "value": 18,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 11,
+            "type": "HDistance",
+            "refs": [
+              0,
+              10
+            ],
+            "expr": "HubD/2",
+            "value": 44,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 12,
+            "type": "VDistance",
+            "refs": [
+              0,
+              10
+            ],
+            "expr": "T",
+            "value": 18,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 14,
+            "type": "HDistance",
+            "refs": [
+              0,
+              13
+            ],
+            "expr": "HubD/2",
+            "value": 44,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 15,
+            "type": "VDistance",
+            "refs": [
+              0,
+              13
+            ],
+            "expr": "T\u002BHubH",
+            "value": 50,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 17,
+            "type": "HDistance",
+            "refs": [
+              0,
+              16
+            ],
+            "expr": "ID/2",
+            "value": 30,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 18,
+            "type": "VDistance",
+            "refs": [
+              0,
+              16
+            ],
+            "expr": "T\u002BHubH",
+            "value": 50,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 26,
+            "type": "HDistance",
+            "refs": [
+              0,
+              25
+            ],
+            "expr": "0",
+            "value": 0,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 27,
+            "type": "VDistance",
+            "refs": [
+              0,
+              25
+            ],
+            "expr": "T\u002BHubH",
+            "value": 50,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          }
+        ],
+        "nextId": 29
+      },
+      "id": "F1",
+      "name": "Profile",
+      "suppressed": false
+    },
+    {
+      "$type": "revolve",
+      "sketchId": "F1",
+      "isCut": false,
+      "axisEntity": 0,
+      "angle": "360",
+      "reverse": false,
+      "merge": true,
+      "id": "F2",
+      "name": "Flange",
+      "suppressed": false
+    },
+    {
+      "$type": "sketch",
+      "plane": {
+        "std": "Top"
+      },
+      "sketch": {
+        "points": [
+          {
+            "id": 0,
+            "x": 0,
+            "y": 0,
+            "fixed": true
+          },
+          {
+            "id": 1,
+            "x": 59,
+            "y": 0,
+            "fixed": false
+          }
+        ],
+        "entities": [
+          {
+            "$type": "circle",
+            "center": 1,
+            "r": 7,
+            "id": 4,
+            "construction": false
+          }
+        ],
+        "constraints": [
+          {
+            "id": 2,
+            "type": "HDistance",
+            "refs": [
+              0,
+              1
+            ],
+            "expr": "PCD/2",
+            "value": 59,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 3,
+            "type": "VDistance",
+            "refs": [
+              0,
+              1
+            ],
+            "expr": "0",
+            "value": 0,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 5,
+            "type": "Diameter",
+            "refs": [
+              4
+            ],
+            "expr": "BoltD",
+            "value": 14,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          }
+        ],
+        "nextId": 6
+      },
+      "id": "F3",
+      "name": "Bolt hole",
+      "suppressed": false
+    },
+    {
+      "$type": "extrude",
+      "sketchId": "F3",
+      "isCut": true,
+      "end": "ThroughAllBoth",
+      "depth": "10",
+      "reverse": false,
+      "merge": true,
+      "id": "F4",
+      "name": "Bolt hole cut",
+      "suppressed": false
+    },
+    {
+      "$type": "circularPattern",
+      "seeds": [
+        "F4"
+      ],
+      "axis": {
+        "axis": "Y"
+      },
+      "count": "N",
+      "angle": "360",
+      "equalSpacing": true,
+      "reverse": false,
+      "id": "F5",
+      "name": "Bolt circle",
+      "suppressed": false
+    },
+    {
+      "$type": "fillet",
+      "edges": [
+        {
+          "a": "F2.R.L21",
+          "b": "F2.R.L22",
+          "hint": [
+            44,
+            18,
+            0
+          ]
+        }
+      ],
+      "radius": "Rfil",
+      "tangentPropagation": true,
+      "overflow": true,
+      "id": "F6",
+      "name": "Hub fillet",
+      "suppressed": false
+    },
+    {
+      "$type": "chamfer",
+      "edges": [
+        {
+          "a": "F2.R.L20",
+          "b": "F2.R.L21",
+          "hint": [
+            75,
+            18,
+            0
+          ]
+        },
+        {
+          "a": "F2.R.L19",
+          "b": "F2.R.L20",
+          "hint": [
+            75,
+            0,
+            0
+          ]
+        },
+        {
+          "a": "F2.R.L22",
+          "b": "F2.R.L23",
+          "hint": [
+            44,
+            50,
+            0
+          ]
+        },
+        {
+          "a": "F2.R.L23",
+          "b": "F2.R.L24",
+          "hint": [
+            30,
+            50,
+            0
+          ]
+        },
+        {
+          "a": "F2.R.L24",
+          "b": "F2.R.L19",
+          "hint": [
+            30,
+            0,
+            0
+          ]
+        }
+      ],
+      "distance": "C",
+      "tangentPropagation": true,
+      "overflow": true,
+      "id": "F7",
+      "name": "Edge breaks",
+      "suppressed": false
+    }
+  ],
+  "nextFeatureId": 8,
+  "nameCounters": {},
+  "color": [
+    0.74,
+    0.76,
+    0.8
+  ],
+  "activeCount": 7
+}

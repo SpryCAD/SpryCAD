@@ -1,0 +1,761 @@
+{
+  "format": "FeatherCAD",
+  "formatVersion": 1,
+  "units": "MMGS",
+  "equations": [
+    {
+      "name": "L",
+      "expr": "80"
+    },
+    {
+      "name": "W",
+      "expr": "60"
+    },
+    {
+      "name": "B",
+      "expr": "5"
+    },
+    {
+      "name": "FinH",
+      "expr": "25"
+    },
+    {
+      "name": "T",
+      "expr": "1.6"
+    },
+    {
+      "name": "N",
+      "expr": "14"
+    },
+    {
+      "name": "Margin",
+      "expr": "8"
+    },
+    {
+      "name": "HoleD",
+      "expr": "3.4"
+    },
+    {
+      "name": "CbD",
+      "expr": "6.5"
+    },
+    {
+      "name": "CbH",
+      "expr": "2.5"
+    },
+    {
+      "name": "Rc",
+      "expr": "4"
+    }
+  ],
+  "features": [
+    {
+      "$type": "sketch",
+      "plane": {
+        "std": "Front"
+      },
+      "sketch": {
+        "points": [
+          {
+            "id": 0,
+            "x": 0,
+            "y": 0,
+            "fixed": true
+          },
+          {
+            "id": 1,
+            "x": -40,
+            "y": -30,
+            "fixed": false
+          },
+          {
+            "id": 4,
+            "x": 40,
+            "y": -30,
+            "fixed": false
+          },
+          {
+            "id": 7,
+            "x": 40,
+            "y": 30,
+            "fixed": false
+          },
+          {
+            "id": 10,
+            "x": -40,
+            "y": 30,
+            "fixed": false
+          }
+        ],
+        "entities": [
+          {
+            "$type": "line",
+            "p1": 1,
+            "p2": 4,
+            "id": 13,
+            "construction": false
+          },
+          {
+            "$type": "line",
+            "p1": 4,
+            "p2": 7,
+            "id": 14,
+            "construction": false
+          },
+          {
+            "$type": "line",
+            "p1": 7,
+            "p2": 10,
+            "id": 15,
+            "construction": false
+          },
+          {
+            "$type": "line",
+            "p1": 10,
+            "p2": 1,
+            "id": 16,
+            "construction": false
+          }
+        ],
+        "constraints": [
+          {
+            "id": 2,
+            "type": "HDistance",
+            "refs": [
+              0,
+              1
+            ],
+            "expr": "L/2",
+            "value": 40,
+            "sign": -1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 3,
+            "type": "VDistance",
+            "refs": [
+              0,
+              1
+            ],
+            "expr": "W/2",
+            "value": 30,
+            "sign": -1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 5,
+            "type": "HDistance",
+            "refs": [
+              0,
+              4
+            ],
+            "expr": "L/2",
+            "value": 40,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 6,
+            "type": "VDistance",
+            "refs": [
+              0,
+              4
+            ],
+            "expr": "W/2",
+            "value": 30,
+            "sign": -1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 8,
+            "type": "HDistance",
+            "refs": [
+              0,
+              7
+            ],
+            "expr": "L/2",
+            "value": 40,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 9,
+            "type": "VDistance",
+            "refs": [
+              0,
+              7
+            ],
+            "expr": "W/2",
+            "value": 30,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 11,
+            "type": "HDistance",
+            "refs": [
+              0,
+              10
+            ],
+            "expr": "L/2",
+            "value": 40,
+            "sign": -1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 12,
+            "type": "VDistance",
+            "refs": [
+              0,
+              10
+            ],
+            "expr": "W/2",
+            "value": 30,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          }
+        ],
+        "nextId": 17
+      },
+      "id": "F1",
+      "name": "Base",
+      "suppressed": false
+    },
+    {
+      "$type": "extrude",
+      "sketchId": "F1",
+      "isCut": false,
+      "end": "Blind",
+      "depth": "B",
+      "reverse": false,
+      "merge": true,
+      "id": "F2",
+      "name": "Base plate",
+      "suppressed": false
+    },
+    {
+      "$type": "fillet",
+      "edges": [
+        {
+          "a": "F2.S.L13",
+          "b": "F2.S.L14",
+          "hint": [
+            40,
+            -30,
+            2.5
+          ]
+        },
+        {
+          "a": "F2.S.L14",
+          "b": "F2.S.L15",
+          "hint": [
+            40,
+            30,
+            2.5
+          ]
+        },
+        {
+          "a": "F2.S.L15",
+          "b": "F2.S.L16",
+          "hint": [
+            -40,
+            30,
+            2.5
+          ]
+        },
+        {
+          "a": "F2.S.L16",
+          "b": "F2.S.L13",
+          "hint": [
+            -40,
+            -30,
+            2.5
+          ]
+        }
+      ],
+      "radius": "Rc",
+      "tangentPropagation": true,
+      "overflow": true,
+      "id": "F3",
+      "name": "Base corners",
+      "suppressed": false
+    },
+    {
+      "$type": "plane",
+      "base": {
+        "std": "Front"
+      },
+      "offset": "B",
+      "flip": false,
+      "id": "F4",
+      "name": "Base top",
+      "suppressed": false
+    },
+    {
+      "$type": "sketch",
+      "plane": {
+        "feature": "F4"
+      },
+      "sketch": {
+        "points": [
+          {
+            "id": 0,
+            "x": 0,
+            "y": 0,
+            "fixed": true
+          },
+          {
+            "id": 1,
+            "x": -40,
+            "y": -22,
+            "fixed": false
+          },
+          {
+            "id": 4,
+            "x": -38.4,
+            "y": -22,
+            "fixed": false
+          },
+          {
+            "id": 7,
+            "x": -38.4,
+            "y": 22,
+            "fixed": false
+          },
+          {
+            "id": 10,
+            "x": -40,
+            "y": 22,
+            "fixed": false
+          }
+        ],
+        "entities": [
+          {
+            "$type": "line",
+            "p1": 1,
+            "p2": 4,
+            "id": 13,
+            "construction": false
+          },
+          {
+            "$type": "line",
+            "p1": 4,
+            "p2": 7,
+            "id": 14,
+            "construction": false
+          },
+          {
+            "$type": "line",
+            "p1": 7,
+            "p2": 10,
+            "id": 15,
+            "construction": false
+          },
+          {
+            "$type": "line",
+            "p1": 10,
+            "p2": 1,
+            "id": 16,
+            "construction": false
+          }
+        ],
+        "constraints": [
+          {
+            "id": 2,
+            "type": "HDistance",
+            "refs": [
+              0,
+              1
+            ],
+            "expr": "L/2",
+            "value": 40,
+            "sign": -1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 3,
+            "type": "VDistance",
+            "refs": [
+              0,
+              1
+            ],
+            "expr": "(W/2-Margin)",
+            "value": 22,
+            "sign": -1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 5,
+            "type": "HDistance",
+            "refs": [
+              0,
+              4
+            ],
+            "expr": "(L/2-T)",
+            "value": 38.4,
+            "sign": -1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 6,
+            "type": "VDistance",
+            "refs": [
+              0,
+              4
+            ],
+            "expr": "(W/2-Margin)",
+            "value": 22,
+            "sign": -1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 8,
+            "type": "HDistance",
+            "refs": [
+              0,
+              7
+            ],
+            "expr": "(L/2-T)",
+            "value": 38.4,
+            "sign": -1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 9,
+            "type": "VDistance",
+            "refs": [
+              0,
+              7
+            ],
+            "expr": "W/2-Margin",
+            "value": 22,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 11,
+            "type": "HDistance",
+            "refs": [
+              0,
+              10
+            ],
+            "expr": "L/2",
+            "value": 40,
+            "sign": -1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 12,
+            "type": "VDistance",
+            "refs": [
+              0,
+              10
+            ],
+            "expr": "W/2-Margin",
+            "value": 22,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          }
+        ],
+        "nextId": 17
+      },
+      "id": "F5",
+      "name": "Fin",
+      "suppressed": false
+    },
+    {
+      "$type": "extrude",
+      "sketchId": "F5",
+      "isCut": false,
+      "end": "Blind",
+      "depth": "FinH",
+      "reverse": false,
+      "merge": true,
+      "id": "F6",
+      "name": "Fin",
+      "suppressed": false
+    },
+    {
+      "$type": "linearPattern",
+      "seeds": [
+        "F6"
+      ],
+      "direction": {
+        "axis": "X"
+      },
+      "spacing": "(L-T)/(N-1)",
+      "count": "N",
+      "reverse": false,
+      "spacing2": "20",
+      "count2": "1",
+      "reverse2": false,
+      "id": "F7",
+      "name": "Fins",
+      "suppressed": false
+    },
+    {
+      "$type": "sketch",
+      "plane": {
+        "feature": "F4"
+      },
+      "sketch": {
+        "points": [
+          {
+            "id": 0,
+            "x": 0,
+            "y": 0,
+            "fixed": true
+          },
+          {
+            "id": 1,
+            "x": -32,
+            "y": -26,
+            "fixed": false
+          },
+          {
+            "id": 5,
+            "x": 32,
+            "y": -26,
+            "fixed": false
+          },
+          {
+            "id": 9,
+            "x": 32,
+            "y": 26,
+            "fixed": false
+          },
+          {
+            "id": 13,
+            "x": -32,
+            "y": 26,
+            "fixed": false
+          }
+        ],
+        "entities": [
+          {
+            "$type": "point",
+            "p": 1,
+            "id": 4,
+            "construction": false
+          },
+          {
+            "$type": "point",
+            "p": 5,
+            "id": 8,
+            "construction": false
+          },
+          {
+            "$type": "point",
+            "p": 9,
+            "id": 12,
+            "construction": false
+          },
+          {
+            "$type": "point",
+            "p": 13,
+            "id": 16,
+            "construction": false
+          }
+        ],
+        "constraints": [
+          {
+            "id": 2,
+            "type": "HDistance",
+            "refs": [
+              0,
+              1
+            ],
+            "expr": "(L/2-Margin)",
+            "value": 32,
+            "sign": -1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 3,
+            "type": "VDistance",
+            "refs": [
+              0,
+              1
+            ],
+            "expr": "(W/2-Margin/2)",
+            "value": 26,
+            "sign": -1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 6,
+            "type": "HDistance",
+            "refs": [
+              0,
+              5
+            ],
+            "expr": "L/2-Margin",
+            "value": 32,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 7,
+            "type": "VDistance",
+            "refs": [
+              0,
+              5
+            ],
+            "expr": "(W/2-Margin/2)",
+            "value": 26,
+            "sign": -1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 10,
+            "type": "HDistance",
+            "refs": [
+              0,
+              9
+            ],
+            "expr": "L/2-Margin",
+            "value": 32,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 11,
+            "type": "VDistance",
+            "refs": [
+              0,
+              9
+            ],
+            "expr": "W/2-Margin/2",
+            "value": 26,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 14,
+            "type": "HDistance",
+            "refs": [
+              0,
+              13
+            ],
+            "expr": "(L/2-Margin)",
+            "value": 32,
+            "sign": -1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          },
+          {
+            "id": 15,
+            "type": "VDistance",
+            "refs": [
+              0,
+              13
+            ],
+            "expr": "W/2-Margin/2",
+            "value": 26,
+            "sign": 1,
+            "flip": 0,
+            "driven": false,
+            "labelX": 0,
+            "labelY": 0
+          }
+        ],
+        "nextId": 17
+      },
+      "id": "F8",
+      "name": "Hole positions",
+      "suppressed": false
+    },
+    {
+      "$type": "hole",
+      "sketchId": "F8",
+      "type": "Counterbore",
+      "diameter": "HoleD",
+      "depth": "10",
+      "throughAll": true,
+      "cbDiameter": "CbD",
+      "cbDepth": "CbH",
+      "csDiameter": "13",
+      "csAngle": "90",
+      "drillPoint": true,
+      "id": "F9",
+      "name": "Mounting holes",
+      "suppressed": false
+    }
+  ],
+  "nextFeatureId": 10,
+  "nameCounters": {},
+  "color": [
+    0.74,
+    0.76,
+    0.8
+  ],
+  "activeCount": 9
+}
