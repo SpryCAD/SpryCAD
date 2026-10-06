@@ -1,3 +1,5 @@
+using FeatherCad.Core.Model;
+using FeatherCad.Core.Regen;
 using FeatherCad.Kernel;
 using FeatherCad.Kernel.Native;
 
@@ -109,6 +111,29 @@ static class NativeBoolTests
                 t.Near(Vol(bodies[1]), Vol(bodies[0]), 1e-6 * Vol(bodies[0]));
             }
             finally { NBoolean.Local = saved; }
+        });
+
+        t.Test("Native bool: fillets crossing the seam of a revolved face", () =>
+        {
+            // spoke patterns at angles that put a spoke and its fillets across the rim's and the hub's revolve seams:
+            // the fillet contact lines cross the seam edges inside the surface (an edge/surface test only grazes)
+            var dir = AppContext.BaseDirectory;
+            while (dir != null && !Directory.Exists(Path.Combine(dir, "samples"))) dir = Path.GetDirectoryName(dir);
+            var file = Path.Combine(dir!, "samples", "demos", "spoked-handwheel.fcad");
+            foreach (var angle in new[] { "236", "270" })
+            {
+                var doc = CadDocument.Load(file);
+                var spokes = doc.Features.OfType<CircularPatternFeature>().First(f => f.Name == "Spokes");
+                spokes.Angle = angle;
+                var r = new Regenerator().Rebuild(doc);
+                foreach (var f in doc.Features) t.True(r.Status[f.Id].Ok, $"angle {angle}: {f.Name}: {r.Status[f.Id].Error}");
+            }
+            // past a full turn the last instance would land on the seed
+            var over = CadDocument.Load(file);
+            over.Features.OfType<CircularPatternFeature>().First(f => f.Name == "Spokes").Angle = "360.72";
+            var ro = new Regenerator().Rebuild(over);
+            var st = ro.Status[over.Features.First(f => f.Name == "Spokes").Id];
+            t.True(!st.Ok && st.Error!.Contains("360"), st.Error ?? "accepted");
         });
 
         t.Test("Native bool: overlapping boxes", () =>

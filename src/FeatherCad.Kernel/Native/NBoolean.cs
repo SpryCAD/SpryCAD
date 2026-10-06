@@ -146,6 +146,7 @@ public sealed class NBoolean
         var splits = new Dictionary<NEdge, List<(double t, NVertex v)>>(ReferenceEqualityComparer.Instance);
         FindEdgeSplits(A, B, splits, onSurface);
         FindEdgeSplits(B, A, splits, onSurface);
+        using (Prof.Time("split.crossings")) CrossOnSurfaceEdges(onSurface, splits);
         ImprintSplitVertices(A, B, splits);
         Lap("edge splits");
         ApplySplits(ActiveFaces(A).ToList(), splits); ApplySplits(ActiveFaces(B).ToList(), splits);
@@ -367,9 +368,209 @@ public sealed class NBoolean
                     var v = Snap(p);
                     if (!splits.TryGetValue(e, out var l)) splits[e] = l = new();
                     if (!l.Any(x => ReferenceEquals(x.Item2, v))) l.Add((t, v));
+                    // the edge runs along the surface here (e.g. a seam crossing a fillet's contact line): the hit is a
+                    // double root, accurate only to about the square root of the solver tolerance
+                    if (Math.Abs(Vec3.Dot(e.Curve.Deriv(t).Normalized, f.Surface.Normal(p))) < 0.05) _grazing.Add(v);
                 }
             }
         }
+    }
+
+    // split vertices from grazing edge/surface hits
+    readonly HashSet<NVertex> _grazing = new(ReferenceEqualityComparer.Instance);
+
+    /// <summary>
+    /// An edge lying on a face of the other body (a fillet's contact line on the face it rolls on) crosses that
+    /// face's boundary edges inside the surface, transversally: those crossings are found curve against curve and
+    /// split both edges. Edge/surface hits there are grazing (the boundary edge touches the fillet's surface)
+    /// and land up to a millimetre off; a grazing split near a crossing is replaced by it.
+    /// </summary>
+    void CrossOnSurfaceEdges(List<(NEdge e, NFace f)> onSurface, Dictionary<NEdge, List<(double t, NVertex v)>> splits)
+    {
+        var near = Math.Max(_onTol * 200, 1e3 * _tol);
+        foreach (var (e, f) in onSurface)
+        {
+            var eb = e.Bounds(_sampleTol * 500);
+            if (Trace != null && Environment.GetEnvironmentVariable("FC_TRACE_CROSS") is { } tcf && e.Mid.ToString().Contains(tcf))
+                T($"   pair {e.Curve.GetType().Name}{e.V0.P}->{e.V1.P} on {f.Tag.Name}: " + string.Join(" ", f.Coedges.Select(c => $"[{c.Edge.Curve.GetType().Name}{c.Edge.V0.P}->{c.Edge.V1.P}]")));
+            foreach (var c in f.Coedges)
+            {
+                var g = c.Edge;
+                if (ReferenceEquals(g, e) || !eb.Overlaps(g.Bounds(_sampleTol * 500), _onTol)) continue;
+                foreach (var (te, tg, p, reach) in Crossings(e, g))
+                {
+                    if (Near(p, e) || Near(p, g)) continue;
+                    var v = Snap(p);
+                    foreach (var (edge, t) in new[] { (e, te), (g, tg) })
+                    {
+                        if (!splits.TryGetValue(edge, out var l)) splits[edge] = l = new();
+                        // grazing splits of this edge close to the crossing were the same point, computed badly
+                        l.RemoveAll(x => !ReferenceEquals(x.v, v) && _grazing.Contains(x.v) && Vec3.Distance(x.v.P, p) < near + reach);
+                        if (!l.Any(x => ReferenceEquals(x.v, v))) l.Add((t, v));
+                    }
+                    if (Trace != null) T($"  on-surface crossing {p} reach {reach:g3}: {e.Curve.GetType().Name}{e.Mid} x {g.Curve.GetType().Name}{g.Mid} on {f.Tag.Name}; splits now {string.Join(" ", splits[e].Select(x => x.v.P))} | {string.Join(" ", splits[g].Select(x => x.v.P))}");
+                }
+            }
+        }
+        bool Near(Vec3 p, NEdge x) => Vec3.Distance(p, x.V0.P) < _tol * 10 || Vec3.Distance(p, x.V1.P) < _tol * 10;
+    }
+
+    readonly Dictionary<(NEdge, NEdge), List<(double, double, Vec3, double)>> _crossings = new();
+
+    /// <summary>Crossings of an unordered pair of edges, computed once (the same answer whichever edge is on the face).</summary>
+    List<(double ta, double tb, Vec3 p, double reach)> Crossings(NEdge e, NEdge g)
+    {
+        bool swap = System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(e) > System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(g);
+        var key = swap ? (g, e) : (e, g);
+        if (!_crossings.TryGetValue(key, out var r))
+        {
+            // the distance profile is read along the more finely sampled edge (a line has a single segment)
+            var (x, y) = key;
+            bool flip = x.Samples(_sampleTol * 500).Count < y.Samples(_sampleTol * 500).Count;
+            r = flip ? CurveCrossings(y, x).Select(c => (c.tb, c.ta, c.p, c.reach)).ToList() : CurveCrossings(x, y).Select(c => (c.ta, c.tb, c.p, c.reach)).ToList();
+            _crossings[key] = r;
+        }
+        return swap ? r.Select(x => (x.Item2, x.Item1, x.Item3, x.Item4)).ToList() : r;
+    }
+
+    /// <summary>Points where two edges cross (closer than the coincidence tolerance), from polyline seeds refined by alternating projection.</summary>
+    List<(double ta, double tb, Vec3 p, double reach)> CurveCrossings(NEdge a, NEdge b)
+    {
+        var res = new List<(double, double, Vec3, double)>();
+        var pa = a.Samples(_sampleTol * 500); var pb = b.Samples(_sampleTol * 500);
+        double lo(NEdge x) => Math.Min(x.T0, x.T1); double hi(NEdge x) => Math.Max(x.T0, x.T1);
+        double Par(NEdge x, Vec3 p, double hint)
+        {
+            var t = x.Curve.Param(p, hint);
+            if (x.Curve.Periodic) { while (t < lo(x) - 1e-9) t += x.Curve.Period; while (t > hi(x) + 1e-9) t -= x.Curve.Period; }
+            return Math.Clamp(t, lo(x), hi(x));
+        }
+        var gap = _sampleTol * 500 * 4 + _onTol;
+        // only segments inside the other edge's box can be close (long edges such as full circles have many)
+        List<int> Segs(List<Vec3> pts, Box3 other)
+        {
+            var r = new List<int>();
+            for (int i = 1; i < pts.Count; i++)
+            {
+                var bx = Box3.Empty; bx.Add(pts[i - 1]); bx.Add(pts[i]);
+                if (bx.Overlaps(other, gap)) r.Add(i);
+            }
+            return r;
+        }
+        var sa = Segs(pa, b.Bounds(_sampleTol * 500)); var sb = Segs(pb, a.Bounds(_sampleTol * 500));
+        // closest segment of b for each segment of a; seeds are the local minima of that distance along a (one per
+        // crossing, two for a shallow double crossing), and stretches where the edges coincide are skipped
+        var best = new Dictionary<int, (int j, double s, double u, double d)>();
+        foreach (var i in sa)
+            foreach (var j in sb)
+            {
+                var (s0, u0, d0) = SegSeg(pa[i - 1], pa[i], pb[j - 1], pb[j]);
+                if (d0 <= gap && (!best.TryGetValue(i, out var cur) || d0 < cur.d)) best[i] = (j, s0, u0, d0);
+            }
+        var coincident = _tol * 100;
+        var seeds = new List<int>();
+        var keys = best.Keys.OrderBy(k => k).ToList();
+        for (int k = 0; k < keys.Count; k++)
+        {
+            int i = keys[k];
+            var bi = best[i];
+            if (bi.d < coincident)
+            {
+                // a stretch within the coincidence tolerance: an overlap if it runs to an end of either edge's seeds,
+                // otherwise the edges touch (a shallow double crossing narrower than the tolerance): one crossing at
+                // the closest point
+                int k1 = k;
+                while (k1 + 1 < keys.Count && keys[k1 + 1] == keys[k1] + 1 && best[keys[k1 + 1]].d < coincident) k1++;
+                bool local = best.TryGetValue(i - 1, out var before) && before.d >= coincident
+                    && best.TryGetValue(keys[k1] + 1, out var after) && after.d >= coincident;
+                if (local)
+                    for (int x = k; x <= k1; x++)
+                    {
+                        var dx = best[keys[x]].d;
+                        if ((x == k || best[keys[x - 1]].d >= dx) && (x == k1 || best[keys[x + 1]].d >= dx)) seeds.Add(keys[x]);
+                    }
+                k = k1;
+                continue;
+            }
+            if (best.TryGetValue(i - 1, out var pv) && pv.d < bi.d) continue;
+            if (best.TryGetValue(i + 1, out var nx) && nx.d < bi.d) continue;
+            seeds.Add(i);
+        }
+        if (Trace != null && Environment.GetEnvironmentVariable("FC_TRACE_CROSS") is { } tc && (a.Mid.ToString().Contains(tc) || b.Mid.ToString().Contains(tc)))
+            T($"    cross {a.Curve.GetType().Name}{a.V0.P}->{a.V1.P} x {b.Curve.GetType().Name}{b.V0.P}->{b.V1.P}: segs {sa.Count}x{sb.Count} coinc {coincident:g3} tol {_tol:g3} seeds {string.Join(",", seeds)}");
+        foreach (var i in seeds)
+            {
+                var (j, s, u, d) = best[i];
+                var q = pa[i - 1] + (pa[i] - pa[i - 1]) * s;
+                var ta = Par(a, q, a.T0 + (a.T1 - a.T0) * (i - 1 + s) / (pa.Count - 1));
+                var tb = Par(b, q, b.T0 + (b.T1 - b.T0) * (j - 1 + u) / (pb.Count - 1));
+                // Gauss-Newton on |a(ta) - b(tb)|^2: converges fast even for curves crossing at a shallow angle
+                Vec3 xa = a.Curve.Eval(ta), xb = b.Curve.Eval(tb);
+                for (int k = 0; k < 30 && Vec3.Distance(xa, xb) > _tol * 0.1; k++)
+                {
+                    Vec3 da = a.Curve.Deriv(ta), db = b.Curve.Deriv(tb), r = xa - xb;
+                    double aa = Vec3.Dot(da, da), bb = Vec3.Dot(db, db), ab = Vec3.Dot(da, db);
+                    double det = aa * bb - ab * ab;
+                    if (!(det > 1e-12 * aa * bb)) break; // parallel
+                    double ga = Vec3.Dot(da, r), gb = -Vec3.Dot(db, r);
+                    // solve [aa -ab; -ab bb] [dta dtb] = -[ga gb]
+                    double dta = -(bb * ga + ab * gb) / det, dtb = -(ab * ga + aa * gb) / det;
+                    ta = Math.Clamp(ta + dta, lo(a), hi(a)); tb = Math.Clamp(tb + dtb, lo(b), hi(b));
+                    xa = a.Curve.Eval(ta); xb = b.Curve.Eval(tb);
+                }
+                if (Vec3.Distance(xa, xb) > _tol * 10) continue;
+                // running along each other is an overlap, not a crossing (sewing handles it)
+                if (Math.Abs(Vec3.Dot(a.Curve.Deriv(ta).Normalized, b.Curve.Deriv(tb).Normalized)) > 0.99995) continue;
+                var p = (xa + xb) * 0.5;
+                if (res.Any(r => Vec3.Distance(r.Item3, p) < _tol * 10)) continue;
+                res.Add((ta, tb, p, 0.0));
+            }
+        // two crossings enclosing a sliver narrower than the boundary tolerance (curves touching at a shallow angle):
+        // one touch point, so no face piece is a few microns wide
+        res.Sort((x, y) => x.Item1.CompareTo(y.Item1));
+        for (int k = 0; k + 1 < res.Count; k++)
+        {
+            var (ta0, tb0, p0, r0) = res[k]; var (ta1, tb1, p1, r1) = res[k + 1];
+            double width = 0;
+            for (int m = 1; m < 8; m++)
+            {
+                var t = ta0 + (ta1 - ta0) * m / 8;
+                var x = a.Curve.Eval(t);
+                width = Math.Max(width, Vec3.Distance(x, b.Curve.Eval(Par(b, x, tb0 + (tb1 - tb0) * m / 8))));
+            }
+            if (width > _onTol * 10) continue;
+            var tm = 0.5 * (ta0 + ta1);
+            var xa = a.Curve.Eval(tm);
+            var tbm = Par(b, xa, 0.5 * (tb0 + tb1));
+            var pm = (xa + b.Curve.Eval(tbm)) * 0.5;
+            res[k] = (tm, tbm, pm, Math.Max(Vec3.Distance(pm, p0) + r0, Vec3.Distance(pm, p1) + r1));
+            res.RemoveAt(k + 1);
+            k--;
+        }
+        return res;
+    }
+
+    static (double s, double u, double d) SegSeg(Vec3 p0, Vec3 p1, Vec3 q0, Vec3 q1)
+    {
+        Vec3 d1 = p1 - p0, d2 = q1 - q0, r = p0 - q0;
+        double a = Vec3.Dot(d1, d1), e = Vec3.Dot(d2, d2), f = Vec3.Dot(d2, r);
+        double s, u;
+        if (a < 1e-300 && e < 1e-300) { s = u = 0; }
+        else if (a < 1e-300) { s = 0; u = Math.Clamp(f / e, 0, 1); }
+        else
+        {
+            double c = Vec3.Dot(d1, r);
+            if (e < 1e-300) { u = 0; s = Math.Clamp(-c / a, 0, 1); }
+            else
+            {
+                double b = Vec3.Dot(d1, d2), den = a * e - b * b;
+                s = den > 1e-300 ? Math.Clamp((b * f - c * e) / den, 0, 1) : 0;
+                u = (b * s + f) / e;
+                if (u < 0) { u = 0; s = Math.Clamp(-c / a, 0, 1); }
+                else if (u > 1) { u = 1; s = Math.Clamp((b - c) / a, 0, 1); }
+            }
+        }
+        return (s, u, Vec3.Distance(p0 + d1 * s, q0 + d2 * u));
     }
 
     /// <summary>
@@ -682,7 +883,7 @@ public sealed class NBoolean
                 if (ReferenceEquals(h.To, start.From)) break;
                 h = Next(h);
             }
-            if (cyc.Count == 0 || !ReferenceEquals(cyc[^1].To, cyc[0].From)) throw new NBooleanException("face split: open cycle");
+            if (cyc.Count == 0 || !ReferenceEquals(cyc[^1].To, cyc[0].From)) throw new NBooleanException($"face split: open cycle on {f.Tag.Name} near {cyc.LastOrDefault()?.To.P}");
             cycles.Add(cyc);
         }
 
@@ -704,7 +905,7 @@ public sealed class NBoolean
             var a0 = poly[k]; var a1 = poly[(k + 1) % poly.Length];
             var probe = Vec2.Lerp(a0, a1, 0.5) + (a1 - a0).Perp * 1e-3;
             var owner = faces.FirstOrDefault(x => PointIn(x.o.poly, probe));
-            if (owner.face == null) throw new NBooleanException("face split: hole without owner");
+            if (owner.face == null) throw new NBooleanException($"face split: hole without owner on {f.Tag.Name}");
             owner.face.Loops.Add(ToLoop(cyc));
         }
         foreach (var (_, face) in faces) yield return face;

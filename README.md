@@ -247,7 +247,8 @@ Check items off as they land.
 - [ ] Variable-radius and face fillets; chamfers on curved faces
 - [ ] General shell / offset that survives topology changes; thicken; offset surface bodies
 - [ ] Surface modelling: open surface bodies, knit, trim, extend, fill / patch, ruled and boundary surfaces
-- [ ] Boolean robustness for the remaining tangent and partial-overlap cases
+- [ ] Boolean robustness for the remaining tangent and partial-overlap cases (fillets of neighbouring features that
+      overlap each other, cuts with fillets running through other fillets)
 - [ ] Body edits: split body, move / delete / replace face with healing
 - [ ] Sheet metal: flanges, bends with K-factor, flat pattern
 

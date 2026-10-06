@@ -584,6 +584,10 @@ public sealed class Regenerator
             var n = (int)Math.Round(Num(cp.Count, "Instances"));
             var total = Num(cp.Angle, "Angle") * Math.PI / 180;
             if (n < 2 || n > 2000) throw new FeatureException("Instance count must be between 2 and 2000.");
+            // equal spacing spreads the instances over the total angle: past a full turn the last instance would land
+            // on (or just past) the seed
+            if (cp.EqualSpacing && !(total > 0 && total <= 2 * Math.PI + 1e-9))
+                throw new FeatureException("With equal spacing the total angle must be more than 0° and at most 360°.");
             var step = cp.EqualSpacing ? (Math.Abs(total - 2 * Math.PI) < 1e-9 ? total / n : total / (n - 1)) : total;
             var ts = new List<Transform>();
             for (int i = 1; i < n; i++) ts.Add(Transform.Rotation(o, ax, step * i));
