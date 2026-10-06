@@ -531,8 +531,13 @@ public sealed class Regenerator
 
         // ---- patterns / mirror ----
 
-        void ApplyInstances(IEnumerable<string> seeds, IReadOnlyList<Transform> transforms)
+        /// <summary>
+        /// Applies the seeds' tools at each transform (instance i is number i + 2, the seed being 1). Instances listed
+        /// in <paramref name="skip"/> are left out; an instance whose tool cannot be applied is left out with a warning.
+        /// </summary>
+        void ApplyInstances(IEnumerable<string> seeds, IReadOnlyList<Transform> transforms, IEnumerable<int>? skip = null)
         {
+            var skipped = new HashSet<int>((skip ?? Enumerable.Empty<int>()).Select(n => n - 2));
             if (!seeds.Any()) throw new FeatureException("Select the features to pattern.");
             if (transforms.Count == 0) throw new FeatureException("The pattern has no instances.");
             var everything = new List<Solid>(); bool? cutKind = null; bool mixed = false;
@@ -540,12 +545,13 @@ public sealed class Regenerator
             {
                 if (!State.Tools.TryGetValue(seedId, out var tool))
                     throw new FeatureException("Only extrude, revolve, hole, fillet, chamfer, pattern and mirror features can be patterned.");
-                var copies = new List<Solid>();
+                var copies = new List<(int i, Solid tool)>();
                 // instances solved again: their edges and tools, reused for instances whose edges are theirs moved
                 // (e.g. every grip that lands just left of a spoke)
                 var solved = new List<(Transform t, List<Vec3> points, double length, List<Solid> tools)>();
                 for (int i = 0; i < transforms.Count; i++)
                 {
+                    if (skipped.Contains(i)) continue;
                     // a blend whose instance edges are not the seed's edges moved is solved again there
                     if (tool.Blend is { } bs && InstanceEdges(bs, seeds, transforms[i], i) is { } inst && !inst.same)
                     {
@@ -558,24 +564,56 @@ public sealed class Regenerator
                         if (reuse >= 0)
                         {
                             var rel = ti * solved[reuse].t.RigidInverse();
-                            copies.AddRange(solved[reuse].tools.Select(x => x.Transformed(rel, $"{f.Id}.{i + 1}.")));
+                            copies.AddRange(solved[reuse].tools.Select(x => (i, x.Transformed(rel, $"{f.Id}.{i + 1}."))));
                             continue;
                         }
                         var points = inst.edges.SelectMany(EdgePoints).ToList();
                         var length = inst.edges.Sum(TrueLength);
-                        var (tools, sameKind) = ReapplyBlend(bs, inst.body, inst.edges, i, seedId, tool.IsCut);
+                        List<Solid> tools; bool sameKind;
+                        var at = State;
+                        try { (tools, sameKind) = ReapplyBlend(bs, inst.body, inst.edges, i, seedId, tool.IsCut); }
+                        catch (Exception ex) when (ex is FeatureException or InvalidOperationException or Kernel.Native.NBooleanException)
+                        {
+                            State = at;
+                            status.Warnings.Add($"Instance {i + 2} is not {(bs.Fillet ? "filleted" : "chamfered")}: {ex.Message}");
+                            continue;
+                        }
                         everything.AddRange(tools);
                         if (tools.Count > 0 && sameKind) solved.Add((ti, points, length, tools));
                         continue;
                     }
-                    copies.Add(tool.Tool.Transformed(transforms[i], $"{f.Id}.{i + 1}."));
+                    copies.Add((i, tool.Tool.Transformed(transforms[i], $"{f.Id}.{i + 1}.")));
                 }
                 everything.Add(tool.Tool);
                 if (copies.Count > 0)
                 {
-                    var all = Csg.UnionAll(copies);
-                    ApplyTool(all, tool.IsCut, true);
-                    everything.Add(all);
+                    var before = State;
+                    try
+                    {
+                        var all = Csg.UnionAll(copies.Select(c => c.tool).ToList());
+                        ApplyTool(all, tool.IsCut, true);
+                        everything.Add(all);
+                    }
+                    catch (Exception ex) when (ex is FeatureException or InvalidOperationException or Kernel.Native.NBooleanException)
+                    {
+                        // all copies at once failed: one at a time, leaving out (with a warning) the ones that fail
+                        State = before;
+                        foreach (var g in copies.GroupBy(c => c.i))
+                        {
+                            var at = State;
+                            try
+                            {
+                                var one = g.Count() == 1 ? g.First().tool : Csg.UnionAll(g.Select(c => c.tool).ToList());
+                                ApplyTool(one, tool.IsCut, true);
+                                everything.Add(one);
+                            }
+                            catch (Exception ex2) when (ex2 is FeatureException or InvalidOperationException or Kernel.Native.NBooleanException)
+                            {
+                                State = at;
+                                status.Warnings.Add($"Instance {g.Key + 2} of {Describe(seedId)} is skipped: {ex2.Message}");
+                            }
+                        }
+                    }
                 }
                 if (cutKind == null) cutKind = tool.IsCut; else if (cutKind != tool.IsCut) mixed = true;
             }
@@ -657,6 +695,8 @@ public sealed class Regenerator
 
         static Vec3[] EdgePoints(Kernel.Native.NEdge e) => Enumerable.Range(0, 9).Select(k => k == 0 ? e.V0.P : k == 8 ? e.V1.P : e.At(k / 8.0)).ToArray();
 
+        string Describe(string featureId) => doc.Features.FirstOrDefault(x => x.Id == featureId)?.Name ?? featureId;
+
         /// <summary>Solves a patterned blend on instance i's own edges; returns the tools it applied.</summary>
         (List<Solid> tools, bool sameKind) ReapplyBlend(BlendSpec bs, Body body, List<Kernel.Native.NEdge> edges, int i, string seedId, bool cut)
         {
@@ -691,7 +731,7 @@ public sealed class Regenerator
             for (int i = 0; i < n1; i++)
                 for (int j = 0; j < n2; j++)
                     if (i != 0 || j != 0) ts.Add(Transform.Translation(d1 * (s1 * i) + d2 * (s2 * j)));
-            ApplyInstances(lp.Seeds, ts);
+            ApplyInstances(lp.Seeds, ts, lp.Skip);
         }
 
         void DoCircularPattern(CircularPatternFeature cp)
@@ -708,7 +748,7 @@ public sealed class Regenerator
             var step = cp.EqualSpacing ? (Math.Abs(total - 2 * Math.PI) < 1e-9 ? total / n : total / (n - 1)) : total;
             var ts = new List<Transform>();
             for (int i = 1; i < n; i++) ts.Add(Transform.Rotation(o, ax, step * i));
-            ApplyInstances(cp.Seeds, ts);
+            ApplyInstances(cp.Seeds, ts, cp.Skip);
         }
 
         void DoMirror(MirrorFeature m)

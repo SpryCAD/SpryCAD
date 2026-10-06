@@ -620,6 +620,9 @@ public partial class MainWindow
         page.Check(d2, "Reverse direction", () => f.Reverse2, v => f.Reverse2 = v);
         page.Number(d2, "Spacing", () => f.Spacing2, v => f.Spacing2 = v, "dimension");
         page.Number(d2, "Instances", () => f.Count2, v => f.Count2 = v, "lpattern", "");
+        var sk = page.Section("Instances to Skip");
+        page.IntList(sk, "Instances", () => f.Skip, v => f.Skip = v, 2,
+            "Instance numbers to leave out, e.g. 2, 5, 7-9. The seed is 1; numbers run along direction 1, then row by row along direction 2.");
         var seeds = SeedBox(page, f.Seeds);
         page.Activate(f.Seeds.Count == 0 ? seeds : dirBox);
         BeginEdit(f, isNew, page, overlay: false, hint: f.Seeds.Count == 0 ? "Select the feature(s) to pattern." : null);
@@ -644,6 +647,9 @@ public partial class MainWindow
         page.Number(p, "Angle", () => f.Angle, v => f.Angle = v, "cpattern", "°");
         page.Number(p, "Instances", () => f.Count, v => f.Count = v, null, "");
         page.Check(p, "Equal spacing", () => f.EqualSpacing, v => f.EqualSpacing = v);
+        var sk = page.Section("Instances to Skip");
+        page.IntList(sk, "Instances", () => f.Skip, v => f.Skip = v, 2,
+            "Instance numbers to leave out, e.g. 2, 5, 7-9. The seed is 1; numbers run around the axis in the pattern direction.");
         var seeds = SeedBox(page, f.Seeds);
         page.Activate(f.Seeds.Count == 0 ? seeds : axBox);
         BeginEdit(f, isNew, page, overlay: false, hint: f.Seeds.Count == 0 ? "Select the feature(s) to pattern." : null);

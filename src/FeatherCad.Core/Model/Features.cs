@@ -181,6 +181,8 @@ public sealed class LinearPatternFeature : Feature
     public string Spacing2 { get; set; } = "20";
     public string Count2 { get; set; } = "1";
     public bool Reverse2 { get; set; }
+    /// <summary>Instances to skip, numbered from the seed (1) along direction 1, then row by row along direction 2.</summary>
+    public List<int> Skip { get; set; } = new();
 }
 
 public sealed class CircularPatternFeature : Feature
@@ -192,6 +194,8 @@ public sealed class CircularPatternFeature : Feature
     public string Angle { get; set; } = "360";
     public bool EqualSpacing { get; set; } = true;
     public bool Reverse { get; set; }
+    /// <summary>Instances to skip, numbered from the seed (1) around the axis.</summary>
+    public List<int> Skip { get; set; } = new();
 }
 
 public sealed class MirrorFeature : Feature

@@ -190,6 +190,33 @@ public sealed class PmPage
         return tb;
     }
 
+    /// <summary>A list of whole numbers ("2, 5, 7-9"), each at least <paramref name="min"/>; empty means none.</summary>
+    public TextBox IntList(StackPanel s, string label, Func<List<int>> get, Action<List<int>> set, int min, string? tip = null)
+    {
+        static string Format(List<int> v) => string.Join(", ", v.OrderBy(x => x));
+        var tb = new TextBox { Text = Format(get()), MinWidth = 90, HorizontalAlignment = HorizontalAlignment.Stretch, Watermark = "none" };
+        if (tip != null) ToolTip.SetTip(tb, tip);
+        tb.TextChanged += (_, _) =>
+        {
+            var res = new SortedSet<int>();
+            string? err = null;
+            foreach (var part in (tb.Text ?? "").Split(new[] { ',', ';', ' ' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                var r = part.Split('-');
+                if (r.Length == 1 && int.TryParse(r[0], out var n) && n >= min) res.Add(n);
+                else if (r.Length == 2 && int.TryParse(r[0], out var a) && int.TryParse(r[1], out var b) && a >= min && b >= a && b - a < 10000)
+                    for (int k = a; k <= b; k++) res.Add(k);
+                else { err = $"\"{part}\" is not an instance number ({min} or more) or a range such as {min}-{min + 2}"; break; }
+            }
+            if (err != null) { _invalid[tb] = label; tb.BorderBrush = Brushes.Red; ToolTip.SetTip(tb, err); return; }
+            _invalid.Remove(tb); tb.BorderBrush = null; ToolTip.SetTip(tb, tip);
+            set(res.ToList());
+            Changed?.Invoke();
+        };
+        s.Children.Add(Row(label, tb, null));
+        return tb;
+    }
+
     public CheckBox Check(StackPanel s, string label, Func<bool> get, Action<bool> set)
     {
         var cb = new CheckBox { Content = label, IsChecked = get(), FontSize = 12 };

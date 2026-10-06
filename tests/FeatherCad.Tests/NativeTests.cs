@@ -161,6 +161,30 @@ static class NativeBoolTests
             }
         });
 
+        t.Test("Pattern: instances to skip", () =>
+        {
+            var dir = AppContext.BaseDirectory;
+            while (dir != null && !Directory.Exists(Path.Combine(dir, "samples"))) dir = Path.GetDirectoryName(dir);
+            var file = Path.Combine(dir!, "samples", "demos", "spoked-handwheel.fcad");
+            double Vol(CadDocument d, out RegenResult r)
+            {
+                r = new Regenerator().Rebuild(d);
+                foreach (var f in d.Features) t.True(r.Status[f.Id].Ok, $"{f.Name}: {r.Status[f.Id].Error}");
+                return r.State.Bodies[0].Solid.Volume();
+            }
+            var all = Vol(CadDocument.Load(file), out var r0);
+            var doc = CadDocument.Load(file);
+            doc.Features.OfType<CircularPatternFeature>().First(f => f.Name == "Spokes").Skip = new() { 3 };
+            var skipped = Vol(doc, out var r1);
+            var names = r1.State.Bodies[0].Solid.Native!.Faces.Select(f => f.Tag.Name).ToHashSet();
+            var spokes = doc.Features.First(f => f.Name == "Spokes").Id;
+            // instance 3 is gone, the others keep their names
+            t.True(!names.Any(n => n.StartsWith($"{spokes}.2.")), "instance 3 left out");
+            t.True(names.Any(n => n.StartsWith($"{spokes}.1.")) && names.Any(n => n.StartsWith($"{spokes}.3.")), "instances 2 and 4 named as before");
+            // one spoke (with its fillets) less: about a fifth of the spokes' material
+            t.True(skipped < all - 1000, $"volume {skipped} vs {all}");
+        });
+
         t.Test("Native bool: overlapping boxes", () =>
         {
             var a = NativeTests.Box(new Vec3(0, 0, 0), new Vec3(10, 10, 10), "A");
