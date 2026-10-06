@@ -17,10 +17,17 @@ public static class NativeBlend
     /// <paramref name="problemEdges"/>.
     /// </summary>
     public static Solid Apply(Solid body, IReadOnlyList<NEdge> edges, double size, bool fillet, string prefix, List<string> errors,
-        bool overflow = true, List<Vec3[]>? problemEdges = null, List<(Solid tool, bool cut)>? applied = null)
+        bool overflow = true, List<Vec3[]>? problemEdges = null, List<(Solid tool, bool cut)>? applied = null, ChamferSize? chamfer = null)
     {
         if (size <= 0) { errors.Add("Size must be greater than zero."); return body; }
         body.Native!.Link();
+        var ch = chamfer ?? ChamferSize.Equal(size);
+        // an unequal chamfer is measured on the same face all along a chain (e.g. the top face around a box):
+        // the reference is the first edge's face (the other one when flipped), carried to edges sharing it
+        NFace? refA = null, refB = null;
+        if (edges.Count > 0) { var (f0, f1) = Faces(edges[0]); (refA, refB) = ch.Flip ? (f1, f0) : (f0, f1); }
+        static bool Like(NFace f, NFace? g) => g != null && (ReferenceEquals(f, g) || f.Surface.CoincidentWith(g.Surface, 1e-9));
+        bool RefIsFirst(NFace x, NFace y) => Like(x, refA) || (!Like(y, refA) && (Like(y, refB) || !Like(x, refB) && !ch.Flip));
         var cutTools = new List<Solid>();
         var addTools = new List<Solid>();
         var done = new HashSet<NEdge>(ReferenceEqualityComparer.Instance);
@@ -45,7 +52,7 @@ public static class NativeBlend
             try
             {
                 var (tools, convex, fits) = ForceRollingBall ? (null, false, false)
-                    : e.Curve is NCircle ? ArcTools(group, size, fillet, name) : LineTool(e, size, fillet, name);
+                    : e.Curve is NCircle ? ArcTools(group, size, fillet, name, ch, RefIsFirst) : LineTool(e, size, fillet, name, ch, RefIsFirst);
                 if (tools == null && fillet)
                 {
                     // any other pair of faces: rolling ball along the chain of edges this edge belongs to
@@ -134,7 +141,7 @@ public static class NativeBlend
     /// <summary>Direction of the edge as traversed by the coedge, at curve parameter t.</summary>
     static Vec3 Tangent(NCoedge c, double t) => (c.Edge.Curve.Deriv(t) * (c.Forward ? 1 : -1)).Normalized;
 
-    static (List<Solid>? tools, bool convex, bool fits) LineTool(NEdge e, double size, bool fillet, string name)
+    static (List<Solid>? tools, bool convex, bool fits) LineTool(NEdge e, double size, bool fillet, string name, ChamferSize ch, Func<NFace, NFace, bool> refIsFirst)
     {
         var cA = e.Uses[0]; var cB = e.Uses[1];
         if (e.Curve is not NLine || cA.Face.Surface.Kind != SurfaceKind.Plane || cB.Face.Surface.Kind != SurfaceKind.Plane) return (null, false, false);
@@ -147,18 +154,19 @@ public static class NativeBlend
         var x = uA; var y = Vec3.Cross(t, x).Normalized;
         var lframe = new Frame(E, x, y, t);
         Vec2 P(Vec3 v) => new(Vec3.Dot(v, x), Vec3.Dot(v, y));
-        var loop = EdgeBlend.Profile2D(P(uA), P(uB), P(nA), P(nB), Vec2.Zero, size, fillet, convex);
+        var (dA, dB) = fillet ? (size, size) : EdgeBlend.ChamferLegs(P(uA), P(uB), ch, refIsFirst(cA.Face, cB.Face));
+        var loop = EdgeBlend.Profile2D(P(uA), P(uB), P(nA), P(nB), Vec2.Zero, dA, fillet, convex, dB);
         if (loop == null) return (null, convex, false);
-        var tl = TangentLength(P(uA), P(uB), size, fillet);
+        var (tlA, tlB) = TangentLengths(P(uA), P(uB), size, fillet, dA, dB);
         bool fits = true;
         for (int i = 0; i <= 16 && fits; i++)
         {
             var q = E + t * (L * i / 16);
-            fits = OnFaces(cA.Face, q + uA * tl) && OnFaces(cB.Face, q + uB * tl);
+            fits = OnFaces(cA.Face, q + uA * tlA) && OnFaces(cB.Face, q + uB * tlB);
         }
         var tools = new List<Solid> { Builders.Extrude(new[] { new ProfileRegion(loop) }, lframe, 0, L, name) };
         // ends meeting a face at an angle: an extension past the end, cut back to that face
-        var ext = 3 * Math.Max(size, tl);
+        var ext = 3 * Math.Max(size, Math.Max(tlA, tlB));
         if (EndPlane(cA.Start, -t, cA.Face, cB.Face, new[] { e }) is { } p0)
             tools.Add(Trim(Builders.Extrude(new[] { new ProfileRegion(loop) }, lframe, -ext, 0, name), p0));
         if (EndPlane(cA.End, t, cA.Face, cB.Face, new[] { e }) is { } p1)
@@ -167,7 +175,7 @@ public static class NativeBlend
         return (tools, convex, fits);
     }
 
-    static (List<Solid>? tools, bool convex, bool fits) ArcTools(List<NEdge> arcs, double size, bool fillet, string name)
+    static (List<Solid>? tools, bool convex, bool fits) ArcTools(List<NEdge> arcs, double size, bool fillet, string name, ChamferSize ch, Func<NFace, NFace, bool> refIsFirst)
     {
         var e = arcs[0];
         var cP = e.Uses[0]; var cC = e.Uses[1];
@@ -190,12 +198,14 @@ public static class NativeBlend
         var uC2 = new Vec2(0, Math.Sign(Vec3.Dot(uC, ax)));
         var nP2 = new Vec2(0, Math.Sign(Vec3.Dot(nP, ax)));
         var nC2 = new Vec2(Math.Sign(Vec3.Dot(nC, rho)), 0);
-        var prof = EdgeBlend.Profile2D(uP2, uC2, nP2, nC2, new Vec2(cs.R, h0), size, fillet, convex);
+        var (dP, dC) = fillet ? (size, size) : EdgeBlend.ChamferLegs(uP2, uC2, ch, refIsFirst(cP.Face, cC.Face));
+        var prof = EdgeBlend.Profile2D(uP2, uC2, nP2, nC2, new Vec2(cs.R, h0), dP, fillet, convex, dC);
         if (prof == null) return (null, convex, false);
         if (prof.Verts.Any(v => v.P.X < -1e-9)) throw new InvalidOperationException("size too large for this edge");
-        var tlc = TangentLength(uP2, uC2, size, fillet);
-        var onPlane = new Vec2(cs.R, h0) + uP2 * tlc;   // (radius, height) of the tangent circle on the plane
-        var onCyl = new Vec2(cs.R, h0) + uC2 * tlc;     // ... and on the cylinder
+        var (tlP, tlC) = TangentLengths(uP2, uC2, size, fillet, dP, dC);
+        var tlc = Math.Max(tlP, tlC);
+        var onPlane = new Vec2(cs.R, h0) + uP2 * tlP;   // (radius, height) of the tangent circle on the plane
+        var onCyl = new Vec2(cs.R, h0) + uC2 * tlC;     // ... and on the cylinder
 
         var refDir = cs.F.XDir; var yDir = Vec3.Cross(ax, refDir);
         double Ang(Vec3 p) { var r = p - cs.Origin; return Math.Atan2(Vec3.Dot(r, yDir), Vec3.Dot(r, refDir)); }
@@ -307,12 +317,13 @@ public static class NativeBlend
         return Csg.Subtract(tool, slab);
     }
 
-    /// <summary>Distance from the edge to where the fillet/chamfer meets each face (same formula as the profile).</summary>
-    static double TangentLength(Vec2 uA, Vec2 uB, double size, bool fillet)
+    /// <summary>Distances from the edge to where the fillet/chamfer meets face A and face B (as in the profile).</summary>
+    static (double a, double b) TangentLengths(Vec2 uA, Vec2 uB, double size, bool fillet, double chamferA, double chamferB)
     {
-        if (!fillet) return size;
+        if (!fillet) return (chamferA, chamferB);
         var theta = Math.Acos(Math.Clamp(Vec2.Dot(uA.Normalized, uB.Normalized), -1, 1));
-        return size / Math.Tan(theta / 2);
+        var tl = size / Math.Tan(theta / 2);
+        return (tl, tl);
     }
 
     /// <summary>

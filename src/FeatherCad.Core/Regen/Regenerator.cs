@@ -128,7 +128,7 @@ public sealed class Regenerator
                 case ExtrudeFeature e: DoExtrude(e); break;
                 case RevolveFeature r: DoRevolve(r); break;
                 case FilletFeature fi: DoBlend(fi.Edges, Positive(fi.Radius, "Radius"), true, fi.TangentPropagation, fi.Overflow); break;
-                case ChamferFeature ch: DoBlend(ch.Edges, Positive(ch.Distance, "Distance"), false, ch.TangentPropagation, ch.Overflow); break;
+                case ChamferFeature ch: { var cs = ChamferSizeOf(ch); DoBlend(ch.Edges, cs.D1, false, ch.TangentPropagation, ch.Overflow, cs); break; }
                 case HoleFeature h: DoHole(h); break;
                 case ShellFeature sh: DoShell(sh); break;
                 case LinearPatternFeature lp: DoLinearPattern(lp); break;
@@ -276,10 +276,28 @@ public sealed class Regenerator
 
         // ---- fillet / chamfer ----
 
-        void DoBlend(List<EdgeRef> refs, double size, bool fillet, bool propagate, bool overflow = true)
+        ChamferSize ChamferSizeOf(ChamferFeature ch)
+        {
+            switch (ch.Type)
+            {
+                case ChamferType.AngleDistance:
+                    {
+                        var d = Positive(ch.Distance, "Distance");
+                        var a = Num(ch.Angle, "Angle");
+                        if (a <= 0 || a >= 180) throw new FeatureException("Angle must be between 0 and 180 degrees.");
+                        return new ChamferSize(d, 0, a * Math.PI / 180, ch.Flip);
+                    }
+                case ChamferType.DistanceDistance:
+                    return new ChamferSize(Positive(ch.Distance, "Distance 1"), Positive(ch.Distance2, "Distance 2"), 0, ch.Flip);
+                default:
+                    return ChamferSize.Equal(Positive(ch.Distance, "Distance"));
+            }
+        }
+
+        void DoBlend(List<EdgeRef> refs, double size, bool fillet, bool propagate, bool overflow = true, ChamferSize? chamfer = null)
         {
             if (refs.Count == 0) throw new FeatureException("No edges selected.");
-            if (TryNativeBlend(refs, size, fillet, propagate, overflow)) return;
+            if (TryNativeBlend(refs, size, fillet, propagate, overflow, chamfer)) return;
             var byBody = new Dictionary<string, List<TopoEdge>>();
             foreach (var r in refs)
             {
@@ -303,7 +321,7 @@ public sealed class Regenerator
             foreach (var b in State.Bodies)
             {
                 if (!byBody.TryGetValue(b.Id, out var edges)) { bodies.Add(b); continue; }
-                var r = EdgeBlend.Apply(b.Solid, edges, size, fillet, f.Id, errors);
+                var r = EdgeBlend.Apply(b.Solid, edges, size, fillet, f.Id, errors, chamfer);
                 bodies.Add(new Body { Id = b.Id, Solid = r });
             }
             status.Warnings.AddRange(errors);
@@ -315,7 +333,7 @@ public sealed class Regenerator
         /// Fillet/chamfer on native bodies: edges resolved and tangent-chained on the exact B-rep, tools built
         /// from exact geometry. False (state untouched) when a body is not native or an edge is not found.
         /// </summary>
-        bool TryNativeBlend(List<EdgeRef> refs, double size, bool fillet, bool propagate, bool overflow)
+        bool TryNativeBlend(List<EdgeRef> refs, double size, bool fillet, bool propagate, bool overflow, ChamferSize? chamfer)
         {
             if (!Csg.UseNative || State.Bodies.Any(b => b.Solid.Native == null)) return false;
             var byBody = new Dictionary<string, List<Kernel.Native.NEdge>>();
@@ -334,7 +352,7 @@ public sealed class Regenerator
             {
                 if (!byBody.TryGetValue(b.Id, out var seeds)) { bodies.Add(b); continue; }
                 var edges = NativeBlend.Expand(b.Solid.Native!, seeds, propagate);
-                var r = NativeBlend.Apply(b.Solid, edges, size, fillet, f.Id, errors, overflow, status.ProblemEdges, applied);
+                var r = NativeBlend.Apply(b.Solid, edges, size, fillet, f.Id, errors, overflow, status.ProblemEdges, applied, chamfer);
                 bodies.Add(new Body { Id = b.Id, Solid = r });
             }
             // a blend on one body with tools of one kind can be patterned/mirrored like a cut or boss (its copies

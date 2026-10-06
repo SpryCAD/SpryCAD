@@ -121,11 +121,22 @@ public sealed class FilletFeature : Feature
     public bool Overflow { get; set; } = true;
 }
 
+/// <summary>Equal distances on both faces, a distance and an angle, or two distances (SolidWorks' chamfer types).</summary>
+public enum ChamferType { Distance, AngleDistance, DistanceDistance }
+
 public sealed class ChamferFeature : Feature
 {
     public override string Kind => "Chamfer";
     public List<EdgeRef> Edges { get; set; } = new();
+    public ChamferType Type { get; set; } = ChamferType.Distance;
+    /// <summary>The equal distance, or the distance along the reference face.</summary>
     public string Distance { get; set; } = "1";
+    /// <summary>Distance along the other face (<see cref="ChamferType.DistanceDistance"/>).</summary>
+    public string Distance2 { get; set; } = "1";
+    /// <summary>Angle of the chamfer to the reference face, degrees (<see cref="ChamferType.AngleDistance"/>).</summary>
+    public string Angle { get; set; } = "45";
+    /// <summary>Measure Distance and Angle on the edge's other face.</summary>
+    public bool Flip { get; set; }
     public bool TangentPropagation { get; set; } = true;
     /// <summary>A chamfer running into neighbouring geometry is trimmed by it instead of failing.</summary>
     public bool Overflow { get; set; } = true;

@@ -1,6 +1,26 @@
 namespace FeatherCad.Kernel;
 
 /// <summary>
+/// Chamfer legs: <see cref="D1"/> along the reference face and <see cref="D2"/> along the other one, or, with an
+/// <see cref="Angle"/> (radians, &gt; 0), D1 along the reference face and the chamfer face at that angle to it.
+/// <see cref="Flip"/> makes the edge's other face the reference.
+/// </summary>
+public sealed record ChamferSize(double D1, double D2, double Angle = 0, bool Flip = false)
+{
+    public static ChamferSize Equal(double d) => new(d, d);
+
+    /// <summary>(along the reference face, along the other face) where the faces meet at interior angle theta.</summary>
+    public (double dRef, double dOther) Legs(double theta)
+    {
+        if (Angle <= 0) return (D1, D2);
+        // triangle edge / reference leg end / other leg end: angle theta at the edge, Angle at the reference leg end
+        if (theta + Angle >= Math.PI - 1e-6)
+            throw new InvalidOperationException("the chamfer angle is too large for this edge: the chamfer would not reach the other face.");
+        return (D1, D1 * Math.Sin(Angle) / Math.Sin(theta + Angle));
+    }
+}
+
+/// <summary>
 /// Chamfers and fillets on model edges. A tool solid is built per edge from the exact
 /// geometry of the two adjacent faces and then subtracted (convex edges) or added (concave edges).
 /// Supported: straight edges between planar faces, and circular edges between a plane and a
@@ -8,7 +28,7 @@ namespace FeatherCad.Kernel;
 /// </summary>
 public static class EdgeBlend
 {
-    public static Solid Apply(Solid body, IEnumerable<TopoEdge> edges, double size, bool fillet, string prefix, List<string> errors)
+    public static Solid Apply(Solid body, IEnumerable<TopoEdge> edges, double size, bool fillet, string prefix, List<string> errors, ChamferSize? chamfer = null)
     {
         if (size <= 0) { errors.Add("Size must be greater than zero."); return body; }
         var cutTools = new List<Solid>();
@@ -19,7 +39,7 @@ public static class EdgeBlend
             var name = $"{prefix}.{i++}";
             try
             {
-                var (tool, convex) = BuildTool(body, e, size, fillet, name);
+                var (tool, convex) = BuildTool(body, e, size, fillet, name, chamfer ?? ChamferSize.Equal(size));
                 if (tool == null) { errors.Add($"Edge {e.FaceA} / {e.FaceB}: unsupported edge geometry."); continue; }
                 (convex ? cutTools : addTools).Add(tool);
             }
@@ -31,7 +51,7 @@ public static class EdgeBlend
         return result;
     }
 
-    static (Solid? tool, bool convex) BuildTool(Solid body, TopoEdge e, double size, bool fillet, string name)
+    static (Solid? tool, bool convex) BuildTool(Solid body, TopoEdge e, double size, bool fillet, string name, ChamferSize ch)
     {
         var s = e.Segs[0];
         var fa = body.Faces[s.FaceA]; var fb = body.Faces[s.FaceB];
@@ -47,7 +67,8 @@ public static class EdgeBlend
             var x = uA; var y = Vec3.Cross(t, x).Normalized;
             var lframe = new Frame(E, x, y, t);
             Vec2 P(Vec3 v) => new(Vec3.Dot(v, x), Vec3.Dot(v, y));
-            var loop = Profile2D(P(uA), P(uB), P(nA), P(nB), Vec2.Zero, size, fillet, convex);
+            var (dA, dB) = fillet ? (size, size) : ChamferLegs(P(uA), P(uB), ch, !ch.Flip);
+            var loop = Profile2D(P(uA), P(uB), P(nA), P(nB), Vec2.Zero, dA, fillet, convex, dB);
             if (loop == null) return (null, convex);
             return (Builders.Extrude(new[] { new ProfileRegion(loop) }, lframe, 0, L, name), convex);
         }
@@ -72,7 +93,8 @@ public static class EdgeBlend
         var nP2 = new Vec2(0, Math.Sign(Vec3.Dot(nP, ax)));
         var nC2 = new Vec2(Math.Sign(Vec3.Dot(nC, rho)), 0);
         var E2 = new Vec2(cs.Radius, h0);
-        var prof = Profile2D(uP2, uC2, nP2, nC2, E2, size, fillet, convex);
+        var (dP, dC) = fillet ? (size, size) : ChamferLegs(uP2, uC2, ch, !ch.Flip);
+        var prof = Profile2D(uP2, uC2, nP2, nC2, E2, dP, fillet, convex, dC);
         if (prof == null) return (null, convex);
         if (prof.Verts.Any(v => v.P.X < -1e-9)) throw new InvalidOperationException("size too large for this edge");
         var refDir = cs.RefDir.LengthSq > 0.5 ? cs.RefDir : ax.AnyPerpendicular();
@@ -112,24 +134,35 @@ public static class EdgeBlend
         return (partial, convex);
     }
 
+    /// <summary>Chamfer leg lengths (along face A, along face B) for faces running along uA/uB from the edge.</summary>
+    internal static (double dA, double dB) ChamferLegs(Vec2 uA, Vec2 uB, ChamferSize c, bool refIsA)
+    {
+        var theta = Math.Acos(Math.Clamp(Vec2.Dot(uA.Normalized, uB.Normalized), -1, 1));
+        var (r, o) = c.Legs(theta);
+        return refIsA ? (r, o) : (o, r);
+    }
+
     /// <summary>
     /// Cross-section of the blend tool around corner point E: uA/uB run along the two faces
-    /// (into the faces), nA/nB are the outward face normals.
+    /// (into the faces), nA/nB are the outward face normals. A chamfer runs from <paramref name="size"/> along
+    /// face A to <paramref name="sizeB"/> (default: the same) along face B.
     /// </summary>
-    internal static ProfileLoop? Profile2D(Vec2 uA, Vec2 uB, Vec2 nA, Vec2 nB, Vec2 E, double size, bool fillet, bool convex)
+    internal static ProfileLoop? Profile2D(Vec2 uA, Vec2 uB, Vec2 nA, Vec2 nB, Vec2 E, double size, bool fillet, bool convex, double sizeB = double.NaN)
     {
         uA = uA.Normalized; uB = uB.Normalized;
         var cosT = Math.Clamp(Vec2.Dot(uA, uB), -1, 1);
         var theta = Math.Acos(cosT);
         if (theta < 1e-3 || theta > Math.PI - 1e-3) return null;
-        // the tool reaches slightly past the corner (outside for cuts, inside for additions)
+        if (double.IsNaN(sizeB)) sizeB = size;
+        // the tool reaches slightly past the corner (outside for cuts, inside for additions); its sides from the
+        // leg ends to there stay off the faces, so only the chamfer triangle acts on the body
         var outDir = (nA + nB).Normalized;
         if (outDir.LengthSq < 0.5) return null;
-        var X = E + outDir * (convex ? 1 : -1) * size * 0.5;
+        var X = E + outDir * (convex ? 1 : -1) * Math.Max(size, sizeB) * 0.5;
         var loop = new ProfileLoop();
         if (!fillet)
         {
-            var TA = E + uA * size; var TB = E + uB * size;
+            var TA = E + uA * size; var TB = E + uB * sizeB;
             loop.Verts.Add(new ProfileVertex(TA, "a"));
             loop.Verts.Add(new ProfileVertex(X, "b"));
             loop.Verts.Add(new ProfileVertex(TB, "F"));

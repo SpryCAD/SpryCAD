@@ -539,6 +539,95 @@ static class CoreTests
             t.Eq(r.State.Bodies[0].Solid.Topology.OpenHalfEdges, 0);
         });
 
+        // a 100 x 50 x 20 block (x 0..100, y 0..20 up, z -50..0) chamfered on the given top edges
+        (double removed, Kernel.Native.NBody body) Chamfered(ChamferFeature ch, Func<TopoEdge, bool> pick)
+        {
+            var doc = new CadDocument();
+            var s1 = doc.AddFeature(new SketchFeature { Plane = PlaneRef.Top, Sketch = Rect(100, 50) });
+            var e1 = doc.AddFeature(new ExtrudeFeature { SketchId = s1.Id, Depth = "20" });
+            var r = new Regenerator().Rebuild(doc);
+            var before = r.State.Bodies[0].Solid.Volume();
+            foreach (var e in r.State.Bodies[0].Solid.Topology.Edges.Where(e => e.IsLinear && (e.FaceA == e1.Id + ".End" || e.FaceB == e1.Id + ".End")).Where(pick))
+                ch.Edges.Add(new EdgeRef { A = e.FaceA, B = e.FaceB, Hint = e.Midpoint });
+            doc.AddFeature(ch);
+            r = new Regenerator().Rebuild(doc);
+            if (!r.Status[ch.Id].Ok) throw new Exception(r.Status[ch.Id].Error);
+            var solid = r.State.Bodies[0].Solid;
+            t.Eq(solid.Topology.OpenHalfEdges, 0);
+            return (before - solid.Volume(), solid.Native!);
+        }
+        static bool FrontEdge(TopoEdge e) => Math.Abs(e.Start.Z) < 1e-9 && Math.Abs(e.End.Z) < 1e-9;
+
+        t.Test("Chamfer types: equal, distance-distance, angle-distance (volumes)", () =>
+        {
+            t.Near(Chamfered(new ChamferFeature { Distance = "2" }, FrontEdge).removed, 0.5 * 2 * 2 * 100, 1e-6);
+            t.Near(Chamfered(new ChamferFeature { Type = ChamferType.DistanceDistance, Distance = "2", Distance2 = "4" }, FrontEdge).removed, 0.5 * 2 * 4 * 100, 1e-6);
+            // 90 degree edge: the other leg is d * tan(angle)
+            t.Near(Chamfered(new ChamferFeature { Type = ChamferType.AngleDistance, Distance = "2", Angle = "30" }, FrontEdge).removed,
+                0.5 * 2 * 2 * Math.Tan(Math.PI / 6) * 100, 1e-6);
+            t.Near(Chamfered(new ChamferFeature { Type = ChamferType.AngleDistance, Distance = "2", Angle = "45" }, FrontEdge).removed, 0.5 * 2 * 2 * 100, 1e-6);
+        });
+
+        t.Test("Chamfer flip puts the distances on the other faces", () =>
+        {
+            // on the top face 3 from the edge: inside the chamfer only when the 4 leg runs along the top
+            var probe = new Vec3(50, 19.9, -3);
+            var a = Chamfered(new ChamferFeature { Type = ChamferType.DistanceDistance, Distance = "2", Distance2 = "4" }, FrontEdge).body;
+            var b = Chamfered(new ChamferFeature { Type = ChamferType.DistanceDistance, Distance = "2", Distance2 = "4", Flip = true }, FrontEdge).body;
+            t.True(NativeBlend.PointInside(a, probe) != NativeBlend.PointInside(b, probe), "flip swaps the legs");
+            // legs 4 and 4 tan 60 = 6.9: 5 along the top is inside only when the 6.9 leg runs along the top
+            var probe2 = new Vec3(50, 19.9, -5);
+            var c = Chamfered(new ChamferFeature { Type = ChamferType.AngleDistance, Distance = "4", Angle = "60" }, FrontEdge).body;
+            var d = Chamfered(new ChamferFeature { Type = ChamferType.AngleDistance, Distance = "4", Angle = "60", Flip = true }, FrontEdge).body;
+            t.True(NativeBlend.PointInside(c, probe2) != NativeBlend.PointInside(d, probe2), "flip swaps the reference face");
+        });
+
+        t.Test("Unequal chamfer around the top keeps its long leg on the same face", () =>
+        {
+            foreach (var flip in new[] { false, true })
+            {
+                var (removed, body) = Chamfered(new ChamferFeature { Type = ChamferType.DistanceDistance, Distance = "1", Distance2 = "3", Flip = flip }, _ => true);
+                // 2 from each edge on the top face: removed on all four sides, or kept on all four
+                var probes = new[] { new Vec3(50, 19.95, -2), new Vec3(50, 19.95, -48), new Vec3(2, 19.95, -25), new Vec3(98, 19.95, -25) };
+                var inside = probes.Select(p => NativeBlend.PointInside(body, p)).ToList();
+                t.True(inside.All(x => x == inside[0]), $"flip={flip}: same leg on every edge ({string.Join(",", inside)})");
+                t.True(removed > 1.5 * 290 && removed < 1.5 * 300, $"removed {removed}");
+            }
+        });
+
+        t.Test("Unequal chamfer on a hole rim", () =>
+        {
+            var doc = new CadDocument();
+            var s1 = doc.AddFeature(new SketchFeature { Plane = PlaneRef.Top, Sketch = Rect(50, 50) });
+            var e1 = doc.AddFeature(new ExtrudeFeature { SketchId = s1.Id, Depth = "12" });
+            var top = new FaceRef { Name = e1.Id + ".End", Hint = new Vec3(25, 12, -25), Normal = Vec3.UnitY };
+            var hs = new Sketch(); var hp = hs.AddPoint(new Vec2(25, 25)); hs.Add(new SkPointEntity { P = hp.Id });
+            var s2 = doc.AddFeature(new SketchFeature { Plane = new PlaneRef { Face = top }, Sketch = hs });
+            doc.AddFeature(new HoleFeature { SketchId = s2.Id, Diameter = "10", ThroughAll = true });
+            var r = new Regenerator().Rebuild(doc);
+            var before = r.State.Bodies[0].Solid.Volume();
+            var rim = r.State.Bodies[0].Solid.Topology.Edges.First(e => e.Closed && (e.FaceA == e1.Id + ".End" || e.FaceB == e1.Id + ".End"));
+            var got = new List<double>();
+            foreach (var flip in new[] { false, true, false })
+            {
+                var d = doc.Clone();
+                var ch = d.AddFeature(got.Count == 2 ? new ChamferFeature { Distance = "1", Edges = { new EdgeRef { A = rim.FaceA, B = rim.FaceB, Hint = rim.Midpoint } } }
+                    : new ChamferFeature { Type = ChamferType.DistanceDistance, Distance = "1", Distance2 = "2", Flip = flip, Edges = { new EdgeRef { A = rim.FaceA, B = rim.FaceB, Hint = rim.Midpoint } } });
+                var rr = new Regenerator().Rebuild(d);
+                t.True(rr.Status[ch.Id].Ok, rr.Status[ch.Id].Error ?? "");
+                got.Add(before - rr.State.Bodies[0].Solid.Volume());
+            }
+            // Pappus: triangle with legs dr (radial, on the top) and dh (down the bore), centroid at R + dr/3
+            double Ring(double dr, double dh) => 2 * Math.PI * (5 + dr / 3) * dr * dh / 2;
+            // volumes are measured on the faceted bore, a few percent over the exact rings (the equal chamfer too)
+            t.Near(got[2], Ring(1, 1), Ring(1, 1) * 0.08);
+            got.RemoveAt(2);
+            got.Sort();
+            t.Near(got[0], Ring(1, 2), Ring(1, 2) * 0.05);
+            t.Near(got[1], Ring(2, 1), Ring(2, 1) * 0.05);
+            t.True(got[1] - got[0] > 1, "flip moves the long leg from the bore to the top face");
+        });
+
         t.Test("Document: rounded corner then top fillets (user scenario)", () =>
         {
             var doc = new CadDocument();

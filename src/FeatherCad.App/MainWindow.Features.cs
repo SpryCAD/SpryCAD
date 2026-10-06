@@ -370,7 +370,28 @@ public partial class MainWindow
         };
         var p = page.Section(fillet ? "Fillet Parameters" : "Chamfer Parameters");
         if (fillet) page.Number(p, "Radius", () => ((FilletFeature)f).Radius, v => ((FilletFeature)f).Radius = v, "fillet");
-        else page.Number(p, "Distance", () => ((ChamferFeature)f).Distance, v => ((ChamferFeature)f).Distance = v, "chamfer");
+        else
+        {
+            var ch = (ChamferFeature)f;
+            TextBox? d2 = null, angle = null;
+            CheckBox? flip = null;
+            static Control RowOf(Control field) => (Control)field.Parent!.Parent!; // number field -> its label row
+            void ShowFields()
+            {
+                RowOf(d2!).IsVisible = ch.Type == ChamferType.DistanceDistance;
+                RowOf(angle!).IsVisible = ch.Type == ChamferType.AngleDistance;
+                flip!.IsVisible = ch.Type != ChamferType.Distance;
+            }
+            page.Combo(p, "Type", new List<(ChamferType, string)>
+            {
+                (ChamferType.Distance, "Equal distance"), (ChamferType.AngleDistance, "Angle distance"), (ChamferType.DistanceDistance, "Distance distance"),
+            }, () => ch.Type, v => { ch.Type = v; ShowFields(); });
+            page.Number(p, "Distance", () => ch.Distance, v => ch.Distance = v, "chamfer");
+            d2 = page.Number(p, "Distance 2", () => ch.Distance2, v => ch.Distance2 = v, "chamfer");
+            angle = page.Number(p, "Angle", () => ch.Angle, v => ch.Angle = v, "dimension", "°");
+            flip = page.Check(p, "Flip direction (measure on the other face)", () => ch.Flip, v => ch.Flip = v);
+            ShowFields();
+        }
         if (fillet) page.Check(p, "Tangent propagation", () => ((FilletFeature)f).TangentPropagation, v => ((FilletFeature)f).TangentPropagation = v);
         else page.Check(p, "Tangent propagation", () => ((ChamferFeature)f).TangentPropagation, v => ((ChamferFeature)f).TangentPropagation = v);
         // SolidWorks "overflow": where the blend runs into neighbouring geometry it is trimmed by it (keep edge)
