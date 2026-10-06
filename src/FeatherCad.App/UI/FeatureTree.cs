@@ -37,6 +37,19 @@ public sealed class FeatureTree : UserControl
         _overlay.Children.Add(_dropLine);
         var layers = new Grid { Children = { _rows, _overlay } };
         Content = new ScrollViewer { Content = layers, HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto, Padding = new Thickness(2, 4) };
+        // a hidden tree (a feature being edited) hovers nothing
+        PropertyChanged += (_, e) => { if (e.Property == IsVisibleProperty && !IsVisible) SetHover(null); };
+    }
+
+    // the row under the pointer, highlighted in the graphics area. Kept here because a row that is removed (the
+    // tree rebuilt) or hidden under the pointer gets no "pointer left": the highlight would stay on the model.
+    string? _hoverId;
+
+    void SetHover(string? id)
+    {
+        if (_hoverId == id) return;
+        _hoverId = id;
+        HoverChanged?.Invoke(id ?? "");
     }
 
     public string? SelectedId => _selectedId;
@@ -60,6 +73,7 @@ public sealed class FeatureTree : UserControl
 
     public void Rebuild(CadDocument doc, string title, RegenResult? result)
     {
+        SetHover(null); // the hovered row is going away
         _rows.Children.Clear();
         _rowById.Clear();
         _childRows.Clear();
@@ -311,8 +325,8 @@ public sealed class FeatureTree : UserControl
             if (moving && s is { } m && m.target != id) MoveRequested?.Invoke(id, m.target, m.after);
         };
         row.PointerCaptureLost += (_, _) => { if (_pressId == id && _moving) EndMove(row); };
-        row.PointerEntered += (_, _) => HoverChanged?.Invoke(id);
-        row.PointerExited += (_, _) => HoverChanged?.Invoke("");
+        row.PointerEntered += (_, _) => SetHover(id);
+        row.PointerExited += (_, _) => SetHover(null);
         _rowById[id] = row;
         _rows.Children.Add(row);
         return row;

@@ -180,7 +180,10 @@ public partial class MainWindow : Window
         {
             var idx = _edit.IsNew ? doc.ActiveCount : doc.IndexOf(_edit.Feature.Id);
             state = StateBefore(baseResult, idx);
-            if (Session.PreviewActive && Session.PreviewResult is { } pr) preview = pr.State.Bodies;
+            // the preview overlay only when the feature being edited rebuilt: a failed one (e.g. a new chamfer with no
+            // edges yet) leaves the model unchanged, and that whole model would show as the yellow overlay
+            if (Session.PreviewActive && Session.PreviewResult is { } pr && pr.Status.GetValueOrDefault(_edit.Feature.Id) is { Ok: true })
+                preview = pr.State.Bodies;
         }
 
         Viewport.Bodies = state.Bodies;
