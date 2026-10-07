@@ -12,6 +12,41 @@ static class KernelTests
 
     public static void Run(TestRunner t)
     {
+        t.Test("Measure: closest points between points, segments and triangles", () =>
+        {
+            MeasureShape Tri(double z) { var s = new MeasureShape(); s.Triangles.Add((new Vec3(0, 0, z), new Vec3(10, 0, z), new Vec3(0, 10, z))); return s; }
+            // parallel triangles 5 apart: the distance is the gap, closest points one above the other
+            var (d, a, b) = ClosestPoints.Between(Tri(0), Tri(5));
+            t.Near(d, 5, 1e-9); t.Near(a.Z, 0, 1e-9); t.Near(b.Z, 5, 1e-9); t.Near(a.X, b.X, 1e-9); t.Near(a.Y, b.Y, 1e-9);
+            // a point over the inside of a triangle, and one beside it (nearest the edge)
+            var p = new MeasureShape(); p.Points.Add(new Vec3(2, 2, 3));
+            t.Near(ClosestPoints.Between(p, Tri(0)).Distance, 3, 1e-9);
+            var q = new MeasureShape(); q.Points.Add(new Vec3(-4, 5, 3));
+            t.Near(ClosestPoints.Between(q, Tri(0)).Distance, 5, 1e-9);
+            // skew segments: 1 apart where they cross over
+            var s1 = new MeasureShape(); s1.Segments.Add((new Vec3(-5, 0, 0), new Vec3(5, 0, 0)));
+            var s2 = new MeasureShape(); s2.Segments.Add((new Vec3(0, -5, 1), new Vec3(0, 5, 1)));
+            var (ds, sa, sb) = ClosestPoints.Between(s1, s2);
+            t.Near(ds, 1, 1e-9); t.Near(sa.X, 0, 1e-9); t.Near(sb.Y, 0, 1e-9);
+            // a segment through a triangle touches it
+            var through = new MeasureShape(); through.Segments.Add((new Vec3(2, 2, -1), new Vec3(2, 2, 1)));
+            t.Near(ClosestPoints.Between(through, Tri(0)).Distance, 0, 1e-12);
+            // crossing triangles touch; a big mesh against a point uses its nearest triangle
+            var cross = new MeasureShape(); cross.Triangles.Add((new Vec3(1, 1, -2), new Vec3(1, 1, 2), new Vec3(1, 8, 0)));
+            t.Near(ClosestPoints.Between(cross, Tri(0)).Distance, 0, 1e-12);
+            var grid = new MeasureShape();
+            for (int i = 0; i < 40; i++)
+                for (int j = 0; j < 40; j++)
+                {
+                    var o = new Vec3(i, j, 0);
+                    grid.Triangles.Add((o, o + new Vec3(1, 0, 0), o + new Vec3(0, 1, 0)));
+                    grid.Triangles.Add((o + new Vec3(1, 0, 0), o + new Vec3(1, 1, 0), o + new Vec3(0, 1, 0)));
+                }
+            var above = new MeasureShape(); above.Points.Add(new Vec3(17.3, 22.6, 4));
+            var (dg, onGrid, _) = ClosestPoints.Between(grid, above);
+            t.Near(dg, 4, 1e-9); t.Near(onGrid.X, 17.3, 1e-9); t.Near(onGrid.Y, 22.6, 1e-9);
+        });
+
         t.Test("Box volume & watertight", () =>
         {
             var b = Builders.Box(new Vec3(0, 0, 0), new Vec3(100, 50, 20));

@@ -79,6 +79,7 @@ public partial class MainWindow : Window
         BuildHud();
         BuildTriadLabels();
         BuildPanelTabs();
+        BuildGestures();
 
         AddHandler(KeyDownEvent, OnWindowKeyDown, RoutingStrategies.Tunnel);
         AddHandler(KeyUpEvent, OnWindowKeyUp, RoutingStrategies.Tunnel);
@@ -471,6 +472,14 @@ public partial class MainWindow : Window
 
     void ShowPage(PmPage? page)
     {
+        // the Measure tool's drawing belongs to its page
+        if (_measurePage != null && page != _measurePage) EndMeasure();
+        // the plane-pick page closed (cancelled, or replaced by another command): the planes go back to as set
+        if (_planePickPage != null && page != _planePickPage)
+        {
+            _planePickPage = null;
+            Avalonia.Threading.Dispatcher.UIThread.Post(RefreshScene);
+        }
         // pattern instance markers belong to the page that showed them
         if (page != _page) { _instanceMarkers?.Dispose(); _instanceMarkers = null; }
         _page = page;

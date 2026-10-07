@@ -182,6 +182,7 @@ public partial class MainWindow
                 Item("_Plane...", PlaneCommand, null, "plane"))));
         MainMenu.Items.Add(Sub("_Tools",
             Item("_Equations...", () => _ = Dialogs.Equations(this), null, "equations"),
+            Item("Mea_sure...", MeasureCommand, null, "measure"),
             Item("_Mass Properties...", () => _ = Dialogs.MassProperties(this), null, "mass"),
             "-",
             Item("_Options...", () => _ = Dialogs.Options(this), null, "options")));
@@ -284,6 +285,7 @@ public partial class MainWindow
                 Cmd("normalto", "Normal\nTo", NormalTo);
                 break;
             case "Evaluate":
+                Cmd("measure", "Measure", MeasureCommand);
                 Cmd("mass", "Mass\nProperties", () => _ = Dialogs.MassProperties(this));
                 Cmd("equations", "Equations", () => _ = Dialogs.Equations(this));
                 Sep();
@@ -336,6 +338,7 @@ public partial class MainWindow
         ["Convert Entities"] = "Projects the selected model edges into the sketch.",
         ["Trim Entities"] = "Trims sketch entities at their intersections.",
         ["Construction Geometry"] = "Toggles the selected sketch entities to construction.",
+        ["Measure"] = "Distance, angle, radius, length and area of the faces, edges and vertices you click.",
         ["Mass Properties"] = "Volume, mass, surface area and center of mass.",
         ["Equations"] = "Global variables that drive dimensions.",
     };
@@ -491,6 +494,37 @@ public partial class MainWindow
     // ------------------------------------------------------------------------------------------
     // context menus
 
+    // ------------------------------------------------------------------------------------------
+    // mouse gestures (right-drag, as SolidWorks)
+
+    GestureWheel? _gestures;
+
+    void BuildGestures()
+    {
+        _gestures = new GestureWheel();
+        GraphicsArea.Children.Add(_gestures);
+        Viewport.GestureBegan += p => _gestures.Open(p, GestureCommands());
+        Viewport.GestureMoved += p => _gestures.Move(p);
+        Viewport.GestureEnded += p => _gestures.End(p);
+    }
+
+    /// <summary>The wheel's commands (right, up, left, down): sketch tools while sketching, else model ones.</summary>
+    GestureWheel.Command?[] GestureCommands() => _sketch != null
+        ? new GestureWheel.Command?[]
+        {
+            new("dimension", "Smart Dimension", () => SetSketchTool(SketchTool.SmartDimension)),
+            new("circle", "Circle", () => SetSketchTool(SketchTool.Circle)),
+            new("line", "Line", () => SetSketchTool(SketchTool.Line)),
+            new("rect", "Rectangle", () => SetSketchTool(SketchTool.Rectangle)),
+        }
+        : new GestureWheel.Command?[]
+        {
+            new("measure", "Measure", MeasureCommand),
+            new("normalto", "Normal To", NormalTo),
+            new("fit", "Zoom to Fit", () => Viewport.ZoomToFit()),
+            new("sketch", "Sketch", () => StartSketchCommand()),
+        };
+
     void OnViewportContext(PointerInfo p)
     {
         var menu = new ContextMenu();
@@ -538,6 +572,8 @@ public partial class MainWindow
                 if (sk != null) menu.Items.Add(Item("Edit Sketch", () => EditFeature(sk)));
             }
             if (menu.Items.Count > 0) menu.Items.Add(new Separator());
+            // measures what was right-clicked (and the rest of the selection), as SolidWorks
+            if (_page != _measurePage || _measurePage == null) menu.Items.Add(Item("Measure", MeasureCommand, null, "measure"));
             menu.Items.Add(Item("Zoom to Fit", () => Viewport.ZoomToFit(), "F", "fit"));
             menu.Items.Add(Sub("View Orientation",
                 Item("Front", () => Viewport.StandardView("Front")),

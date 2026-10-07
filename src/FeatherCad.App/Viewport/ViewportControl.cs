@@ -75,6 +75,11 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
     public IReadOnlyList<Vec3[]> ProblemEdges { get; set; } = Array.Empty<Vec3[]>();
 
     public event Action<PointerInfo>? ContextRequested;
+    /// <summary>
+    /// Mouse gestures (as SolidWorks): a right-button drag. Began (press point), Moved (pointer), Ended (pointer).
+    /// Without a handler a right-drag pans.
+    /// </summary>
+    public event Action<Point>? GestureBegan, GestureMoved, GestureEnded;
     public event Action? CameraChanged;
 
     public static readonly Rgba HoverColor = new(1.0f, 0.50f, 0.05f);
@@ -232,6 +237,8 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         Mode?.Draw(this, _dyn);
         DrawPointAndSegmentHighlights(_dyn, hl);
         if (AxisPreview is { } ap) DrawAxisPreview(_dyn, ap.dir, ap.color);
+        DrawMeasureLines(_dyn);
+        if (Hover is { Kind: SelKind.Vertex, FeatureId: null } hv) DrawPointHover(_dyn, hv);
         if (_nav == Nav.Rotate) DrawPivot(_dyn, _pivot);
         else if (Spinning) DrawPivot(_dyn, _spinPivot);
         else if (_pinnedPivot is { } pin) DrawPivot(_dyn, pin);
@@ -370,6 +377,72 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
 
     /// <summary>An axis through the origin to show (e.g. while an X/Y/Z axis button is hovered), or null.</summary>
     public (Vec3 dir, Rgba color)? AxisPreview { get => _axisPreview; set { _axisPreview = value; Redraw(); } }
+
+    /// <summary>How a Measure line is drawn.</summary>
+    public enum MeasureStyle
+    {
+        /// <summary>A distance between two points: a square at each end.</summary>
+        Distance,
+        /// <summary>A secondary distance (center to center behind a minimum distance): dashed, squares at the ends.</summary>
+        Dashed,
+        /// <summary>A radius from a center (a): a center mark there, an arrow where it meets the item (b).</summary>
+        Radius,
+        /// <summary>A point (a; b unused): a square.</summary>
+        Point,
+    }
+
+    /// <summary>The Measure tool's lines and marks, drawn over the model.</summary>
+    public IReadOnlyList<(Vec3 a, Vec3 b, MeasureStyle style)> MeasureLines
+    {
+        get => _measureLines;
+        set { _measureLines = value; Redraw(); }
+    }
+    IReadOnlyList<(Vec3 a, Vec3 b, MeasureStyle style)> _measureLines = Array.Empty<(Vec3, Vec3, MeasureStyle)>();
+    public static readonly Rgba MeasureColor = new(0.80f, 0.10f, 0.55f);
+
+    /// <summary>
+    /// A hovered model vertex or circle center (faces and edges show by their color; a point needs a mark): a
+    /// square, and for a center also a cross through it.
+    /// </summary>
+    void DrawPointHover(DynamicGeometry g, SelItem h)
+    {
+        var px = Camera.PixelSize;
+        var r = Camera.V(Camera.Right) * px; var u = Camera.V(Camera.Up) * px;
+        var p = h.Point;
+        g.Quad(p - r * 4 - u * 4, p + r * 4 - u * 4, p + r * 4 + u * 4, p - r * 4 + u * 4, HoverColor, top: true);
+        if (h.IsCenter) { g.Line(p - r * 11, p + r * 11, HoverColor, top: true); g.Line(p - u * 11, p + u * 11, HoverColor, top: true); }
+    }
+
+    void DrawMeasureLines(DynamicGeometry g)
+    {
+        var px = Camera.PixelSize;
+        var right = Camera.V(Camera.Right); var up = Camera.V(Camera.Up);
+        var c = MeasureColor;
+        void Square(Vec3 p) { var r = right * (px * 3); var u = up * (px * 3); g.Quad(p - r - u, p + r - u, p + r + u, p - r + u, c, top: true); }
+        foreach (var (a, b, style) in _measureLines)
+        {
+            switch (style)
+            {
+                case MeasureStyle.Point: Square(a); break;
+                case MeasureStyle.Distance: g.Line(a, b, c, top: true); Square(a); Square(b); break;
+                case MeasureStyle.Dashed: g.Dashed(a, b, c, px * 6, top: true); Square(a); Square(b); break;
+                case MeasureStyle.Radius:
+                    {
+                        g.Line(a, b, c, top: true);
+                        // center mark: a small screen-facing cross
+                        g.Line(a - right * (px * 6), a + right * (px * 6), c, top: true);
+                        g.Line(a - up * (px * 6), a + up * (px * 6), c, top: true);
+                        // arrow at the item, pointing at it (drawn in the screen plane)
+                        var d = b - a; d -= Camera.V(Camera.Back) * Vec3.Dot(d, Camera.V(Camera.Back));
+                        if (d.Length < 1e-12) break;
+                        d = d.Normalized;
+                        var n = Vec3.Cross(Camera.V(Camera.Back), d);
+                        g.Tri(b, b - d * (px * 11) + n * (px * 4), b - d * (px * 11) - n * (px * 4), c, top: true);
+                        break;
+                    }
+            }
+        }
+    }
     (Vec3 dir, Rgba color)? _axisPreview;
 
     /// <summary>
@@ -656,7 +729,7 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         }
         if (props.IsRightButtonPressed)
         {
-            _rightDown = pt.Position; _rightDragged = false;
+            _rightDown = pt.Position; _navLast = pt.Position; _rightDragged = false;
             e.Pointer.Capture(this);
             e.Handled = true;
             return;
@@ -715,8 +788,15 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         var dx = (float)(pos.X - _navLast.X); var dy = (float)(pos.Y - _navLast.Y);
         if (pt.Properties.IsRightButtonPressed && _nav == Nav.None)
         {
-            if (!_rightDragged && Math.Abs(pos.X - _rightDown.X) + Math.Abs(pos.Y - _rightDown.Y) > 4) _rightDragged = true;
-            if (_rightDragged) { Camera.Pan(dx, dy); _navLast = pos; Redraw(); }
+            if (!_rightDragged && Math.Abs(pos.X - _rightDown.X) + Math.Abs(pos.Y - _rightDown.Y) > 4)
+            {
+                _rightDragged = true;
+                GestureBegan?.Invoke(_rightDown);
+            }
+            if (!_rightDragged) return;
+            if (GestureBegan != null) GestureMoved?.Invoke(pos);
+            else { Camera.Pan(dx, dy); Redraw(); }
+            _navLast = pos;
             return;
         }
         if (_nav != Nav.None)
@@ -754,6 +834,7 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         {
             e.Pointer.Capture(null);
             if (!_rightDragged) ContextRequested?.Invoke(Info(e));
+            else GestureEnded?.Invoke(e.GetPosition(this));
             _rightDragged = false;
             return;
         }
@@ -842,10 +923,21 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
             }
 
         // vertices: model vertices and sketch points win when a box asks for points
-        if ((filter & SelFilter.Vertex) != 0)
+        if ((filter & (SelFilter.Vertex | SelFilter.Center)) != 0)
         {
             SelItem? bestV = null; double bestVPx = 9;
-            if (PickVertex(x, y) is { } mv)
+            // circle and arc centers (the Measure tool): a model vertex as near wins
+            if ((filter & SelFilter.Center) != 0)
+                foreach (var b in Bodies)
+                    foreach (var (c, r) in CircleCenters(b))
+                    {
+                        var sc = Camera.Project(c);
+                        if (Camera.Perspective && Camera.DepthOf(c) <= 0) continue;
+                        var d = Math.Sqrt((sc.X - x) * (sc.X - x) + (sc.Y - y) * (sc.Y - y));
+                        if (d < bestVPx - 0.5) { bestVPx = d; bestV = new SelItem { Kind = SelKind.Vertex, BodyId = b.Id, Point = c, IsCenter = true, CenterRadius = r }; }
+                    }
+            if ((filter & SelFilter.Vertex) == 0) { if (bestV != null) return bestV; }
+            else if (PickVertex(x, y) is { } mv && ScreenPx(mv.point, x, y) <= bestVPx + 0.5)
             {
                 var s0 = Camera.Project(mv.point);
                 bestVPx = Math.Sqrt((s0.X - x) * (s0.X - x) + (s0.Y - y) * (s0.Y - y));
@@ -855,6 +947,7 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
                     Edge = new Core.Model.EdgeRef { A = mv.edge.FaceA, B = mv.edge.FaceB, Body = mv.body.Id, Hint = mv.point },
                 };
             }
+            if ((filter & SelFilter.Vertex) != 0)
             foreach (var s in Sketches)
                 foreach (var p in s.Result.Sketch.Points)
                 {
@@ -940,6 +1033,22 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
     }
 
     /// <summary>Visible model vertex (edge end point) under the cursor.</summary>
+    double ScreenPx(Vec3 p, double x, double y) { var s = Camera.Project(p); return Math.Sqrt((s.X - x) * (s.X - x) + (s.Y - y) * (s.Y - y)); }
+
+    // circle and arc centers of each body (from its exact edges), worked out once per body
+    static readonly System.Runtime.CompilerServices.ConditionalWeakTable<Body, List<(Vec3 center, double radius)>> _centers = new();
+
+    /// <summary>The distinct centers of a body's circular edges (circles and arcs), with their radii.</summary>
+    static List<(Vec3 center, double radius)> CircleCenters(Body b) => _centers.GetValue(b, body =>
+    {
+        var list = new List<(Vec3, double)>();
+        if (body.Solid.Native is not { } nb) return list;
+        foreach (var e in nb.Edges)
+            if (e.Curve is Kernel.Native.NCircle c && !list.Any(x => Vec3.Distance(x.Item1, c.C) < 1e-6 && Math.Abs(x.Item2 - c.R) < 1e-6))
+                list.Add((c.C, c.R));
+        return list;
+    });
+
     public (Body body, TopoEdge edge, Vec3 point)? PickVertex(double x, double y, double radiusPx = 8)
     {
         var face = Pick(x, y, SelFilter.Face);

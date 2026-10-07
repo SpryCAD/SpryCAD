@@ -273,7 +273,10 @@ public static class Dialogs
             VIEW
               Middle mouse drag ........ Rotate
               Middle click ............. Rotate about this spot (empty space: clear)
-              Ctrl + middle drag ....... Pan          (or right mouse drag)
+              Ctrl + middle drag ....... Pan
+              Right mouse drag ......... Gestures: right Measure, up Normal To,
+                                         left Zoom to Fit, down Sketch
+                                         (sketching: Smart Dimension, Circle, Line, Rectangle)
               Shift + middle drag ...... Zoom
               Alt + middle drag ........ Roll
               Mouse wheel .............. Zoom at cursor

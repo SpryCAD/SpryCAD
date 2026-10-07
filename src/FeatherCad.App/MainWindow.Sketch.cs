@@ -55,10 +55,14 @@ public partial class MainWindow
         page.OnCancel = () => { _pendingAfterSketch = null; _pendingTool = null; ShowPage(null); };
         page.OnOk = page.OnCancel;
         ShowPage(page);
+        _planePickPage = page; // the planes show while it is open (ShowPage restores them when it goes)
         Viewport.ShowPlanes = true;
         Viewport.Redraw();
         Status("Select a plane or planar face for the sketch.");
     }
+
+    // the "select a plane for the sketch" page, while open: it shows the planes, even when they are hidden
+    PmPage? _planePickPage;
 
     bool TryPlaneOf(SelItem? sel, out PlaneRef? pr, out Frame frame)
     {

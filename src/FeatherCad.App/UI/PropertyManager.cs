@@ -302,7 +302,7 @@ public sealed class PmPage
         SelKind.Sketch => (f & SelFilter.Sketch) != 0,
         SelKind.Feature => (f & SelFilter.Feature) != 0,
         SelKind.Body => (f & SelFilter.Body) != 0,
-        SelKind.Vertex => (f & SelFilter.Vertex) != 0,
+        SelKind.Vertex => s.IsCenter ? (f & SelFilter.Center) != 0 : (f & SelFilter.Vertex) != 0,
         SelKind.SketchSegment => (f & SelFilter.SketchSegment) != 0,
         _ => false,
     };

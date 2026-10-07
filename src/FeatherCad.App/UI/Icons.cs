@@ -34,6 +34,8 @@ public static class Icons
         ["combine"] = ("M9 12m-6 0a6 6 0 1 0 12 0a6 6 0 1 0-12 0 M15 12m-6 0a6 6 0 1 0 12 0a6 6 0 1 0-12 0", null),
         ["equations"] = ("M4 8h16 M4 16h16", "M9 3l-2 18 M17 3l-2 18"),
         ["mass"] = ("M5 8h14l2 13H3z M9 8a3 3 0 0 1 6 0", null),
+        // Measure: a ruler with ticks
+        ["measure"] = ("M3 15l12-12 6 6-12 12z", "M7 11l2 2 M10 8l2 2 M13 5l2 2"),
         ["export"] = ("M4 14v6h16v-6 M12 3v12 M8 11l4 4 4-4", null),
         ["import"] = ("M4 14v6h16v-6 M12 15V3 M8 7l4-4 4 4", null),
         // sketch tools

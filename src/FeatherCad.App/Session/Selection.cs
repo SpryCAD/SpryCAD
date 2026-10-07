@@ -15,6 +15,8 @@ public enum SelFilter
     Vertex = 128,
     /// <summary>Individual sketch lines/arcs (only when a selection box asks for curves).</summary>
     SketchSegment = 256,
+    /// <summary>Centers of circles and arcs (picked as a point: the Measure tool).</summary>
+    Center = 512,
     Any = Face | Edge | Plane | Sketch | Feature,
 }
 
@@ -38,6 +40,9 @@ public sealed class SelItem
     public Frame? Frame { get; init; }
     /// <summary>Sketch point id (Vertex picked in a sketch) or sketch entity id (SketchSegment).</summary>
     public int SketchItem { get; init; } = -1;
+    /// <summary>A Vertex that is the center of a circle or arc (no vertex of the model), with that circle's radius.</summary>
+    public bool IsCenter { get; init; }
+    public double CenterRadius { get; init; }
 
     public string Key => Kind switch
     {
@@ -60,7 +65,7 @@ public sealed class SelItem
         SelKind.Sketch => doc.Find(FeatureId!)?.Name ?? "Sketch",
         SelKind.Feature => doc.Find(FeatureId!)?.Name ?? "Feature",
         SelKind.Body => $"Body<{BodyId}>",
-        SelKind.Vertex => FeatureId != null ? $"Point{SketchItem}@{doc.Find(FeatureId)?.Name}" : "Vertex<" + $"{Point.X:0.##}, {Point.Y:0.##}, {Point.Z:0.##}>",
+        SelKind.Vertex => FeatureId != null ? $"Point{SketchItem}@{doc.Find(FeatureId)?.Name}" : IsCenter ? $"Center<Ø{2 * CenterRadius:0.###}>" : "Vertex<" + $"{Point.X:0.##}, {Point.Y:0.##}, {Point.Z:0.##}>",
         SelKind.SketchSegment => $"Line{SketchItem}@{doc.Find(FeatureId!)?.Name}",
         _ => "Origin",
     };
