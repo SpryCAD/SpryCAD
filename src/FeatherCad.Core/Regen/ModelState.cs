@@ -102,3 +102,6 @@ public sealed class RegenResult
     public Dictionary<string, double> EquationValues { get; init; } = new();
     public Dictionary<string, string> EquationErrors { get; init; } = new();
 }
+
+/// <summary>A rebuild's progress: feature <c>Index</c> of <c>Count</c> is being built; <c>Detail</c> is progress inside it.</summary>
+public sealed record RegenProgress(int Index, int Count, string FeatureId, string FeatureName, string? Detail);

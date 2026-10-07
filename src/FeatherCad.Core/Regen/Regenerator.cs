@@ -15,7 +15,13 @@ public sealed class Regenerator
     sealed record CacheEntry(ulong Key, ModelState State, FeatureStatus Status);
     readonly List<CacheEntry> _cache = new();
 
-    public RegenResult Rebuild(CadDocument doc, int? upTo = null)
+    /// <summary>
+    /// Rebuilds the document (features already built with the same inputs come from the cache).
+    /// <paramref name="progress"/> is told which feature is being built (and, within patterns, which instance);
+    /// <paramref name="cancel"/> stops the rebuild between features and pattern instances with
+    /// <see cref="OperationCanceledException"/> (the features completed so far stay cached).
+    /// </summary>
+    public RegenResult Rebuild(CadDocument doc, int? upTo = null, CancellationToken cancel = default, Action<RegenProgress>? progress = null)
     {
         var sw = Stopwatch.StartNew();
         var (eqValues, eqErrors) = EvaluateEquations(doc);
@@ -39,16 +45,23 @@ public sealed class Regenerator
                 continue;
             }
             if (_cache.Count > i) _cache.RemoveRange(i, _cache.Count - i);
+            cancel.ThrowIfCancellationRequested();
             var st = new FeatureStatus();
             var fsw = Stopwatch.StartNew();
+            progress?.Invoke(new RegenProgress(i, count, f.Id, f.Name, null));
             if (!f.Suppressed)
             {
                 try
                 {
-                    var ctx = new Ctx(doc, state.Copy(), lookup, st, f);
+                    var ctx = new Ctx(doc, state.Copy(), lookup, st, f)
+                    {
+                        Cancel = cancel,
+                        Detail = progress == null ? null : d => progress(new RegenProgress(i, count, f.Id, f.Name, d)),
+                    };
                     using (Prof.Time("feature." + f.GetType().Name)) ctx.Execute();
                     state = ctx.State;
                 }
+                catch (OperationCanceledException) { throw; }
                 catch (FeatureException ex) { st.Error = ex.Message; }
                 catch (Expr.ExprException ex) { st.Error = ex.Message; }
                 catch (Exception ex) { st.Error = "Rebuild error: " + ex.Message; }
@@ -72,6 +85,58 @@ public sealed class Regenerator
     }
 
     public void Invalidate() => _cache.Clear();
+
+    /// <summary>
+    /// The transforms of a linear or circular pattern's instances 2, 3, … (the seed is instance 1), evaluated
+    /// against the model state before the pattern; null for other features. Throws <see cref="FeatureException"/>
+    /// for invalid parameters.
+    /// </summary>
+    public static List<Transform>? PatternTransforms(Feature f, ModelState state, Func<string, double?> lookup)
+    {
+        double Num(string? expr, string what)
+        {
+            if (!Expr.TryEval(expr, lookup, out var v, out var err)) throw new FeatureException($"{what}: {err}");
+            return v;
+        }
+        var ts = new List<Transform>();
+        switch (f)
+        {
+            case LinearPatternFeature lp:
+                {
+                    var (_, d1) = Resolver.ResolveDir(lp.Direction, state);
+                    if (lp.Reverse) d1 = -d1;
+                    var s1 = Num(lp.Spacing, "Spacing"); var n1 = (int)Math.Round(Num(lp.Count, "Instances"));
+                    int n2 = 1; double s2 = 0; Vec3 d2 = Vec3.Zero;
+                    if (lp.Direction2 != null)
+                    {
+                        (_, d2) = Resolver.ResolveDir(lp.Direction2, state);
+                        if (lp.Reverse2) d2 = -d2;
+                        s2 = Num(lp.Spacing2, "Spacing 2"); n2 = (int)Math.Round(Num(lp.Count2, "Instances 2"));
+                    }
+                    if (n1 < 1 || n2 < 1 || n1 * n2 > 2000) throw new FeatureException("Instance count must be between 1 and 2000.");
+                    for (int i = 0; i < n1; i++)
+                        for (int j = 0; j < n2; j++)
+                            if (i != 0 || j != 0) ts.Add(Transform.Translation(d1 * (s1 * i) + d2 * (s2 * j)));
+                    return ts;
+                }
+            case CircularPatternFeature cp:
+                {
+                    var (o, ax) = Resolver.ResolveDir(cp.Axis, state);
+                    if (cp.Reverse) ax = -ax;
+                    var n = (int)Math.Round(Num(cp.Count, "Instances"));
+                    var total = Num(cp.Angle, "Angle") * Math.PI / 180;
+                    if (n < 2 || n > 2000) throw new FeatureException("Instance count must be between 2 and 2000.");
+                    // equal spacing spreads the instances over the total angle: past a full turn the last instance would
+                    // land on (or just past) the seed
+                    if (cp.EqualSpacing && !(total > 0 && total <= 2 * Math.PI + 1e-9))
+                        throw new FeatureException("With equal spacing the total angle must be more than 0° and at most 360°.");
+                    var step = cp.EqualSpacing ? (Math.Abs(total - 2 * Math.PI) < 1e-9 ? total / n : total / (n - 1)) : total;
+                    for (int i = 1; i < n; i++) ts.Add(Transform.Rotation(o, ax, step * i));
+                    return ts;
+                }
+            default: return null;
+        }
+    }
 
     static ulong Hash(ulong h, string s)
     {
@@ -106,6 +171,9 @@ public sealed class Regenerator
     sealed class Ctx(CadDocument doc, ModelState state, Func<string, double?> lookup, FeatureStatus status, Feature f)
     {
         public ModelState State = state;
+        public CancellationToken Cancel;
+        /// <summary>Progress within the feature (e.g. "instance 7 of 24").</summary>
+        public Action<string>? Detail;
 
         double Num(string? expr, string what)
         {
@@ -552,6 +620,8 @@ public sealed class Regenerator
                 for (int i = 0; i < transforms.Count; i++)
                 {
                     if (skipped.Contains(i)) continue;
+                    Cancel.ThrowIfCancellationRequested();
+                    Detail?.Invoke($"{Describe(seedId)}, instance {i + 2} of {transforms.Count + 1}");
                     // a blend whose instance edges are not the seed's edges moved is solved again there
                     if (tool.Blend is { } bs && InstanceEdges(bs, seeds, transforms[i], i) is { } inst && !inst.same)
                     {
@@ -588,32 +658,46 @@ public sealed class Regenerator
                 if (copies.Count > 0)
                 {
                     var before = State;
+                    // exact only: where the copies cannot be applied together they are tried one at a time below (a
+                    // faceted fallback of the whole pattern is slow and loses the exact geometry)
+                    var oldAll = Csg.NoFallback;
                     try
                     {
+                        Csg.NoFallback = true;
                         var all = Csg.UnionAll(copies.Select(c => c.tool).ToList());
                         ApplyTool(all, tool.IsCut, true);
                         everything.Add(all);
                     }
                     catch (Exception ex) when (ex is FeatureException or InvalidOperationException or Kernel.Native.NBooleanException)
                     {
-                        // all copies at once failed: one at a time, leaving out (with a warning) the ones that fail
+                        // all copies at once failed: one at a time, leaving out (with a warning) the ones that fail; no
+                        // slow faceted fallback for these (an instance that fails exactly is skipped, not approximated)
                         State = before;
-                        foreach (var g in copies.GroupBy(c => c.i))
+                        var oldFallback = Csg.NoFallback;
+                        Csg.NoFallback = true;
+                        try
                         {
-                            var at = State;
-                            try
+                            foreach (var g in copies.GroupBy(c => c.i))
                             {
-                                var one = g.Count() == 1 ? g.First().tool : Csg.UnionAll(g.Select(c => c.tool).ToList());
-                                ApplyTool(one, tool.IsCut, true);
-                                everything.Add(one);
-                            }
-                            catch (Exception ex2) when (ex2 is FeatureException or InvalidOperationException or Kernel.Native.NBooleanException)
-                            {
-                                State = at;
-                                status.Warnings.Add($"Instance {g.Key + 2} of {Describe(seedId)} is skipped: {ex2.Message}");
+                                Cancel.ThrowIfCancellationRequested();
+                                Detail?.Invoke($"{Describe(seedId)}, instance {g.Key + 2} of {transforms.Count + 1} (one at a time)");
+                                var at = State;
+                                try
+                                {
+                                    var one = g.Count() == 1 ? g.First().tool : Csg.UnionAll(g.Select(c => c.tool).ToList());
+                                    ApplyTool(one, tool.IsCut, true);
+                                    everything.Add(one);
+                                }
+                                catch (Exception ex2) when (ex2 is FeatureException or InvalidOperationException or Kernel.Native.NBooleanException)
+                                {
+                                    State = at;
+                                    status.Warnings.Add($"Instance {g.Key + 2} of {Describe(seedId)} is skipped: {ex2.Message}");
+                                }
                             }
                         }
+                        finally { Csg.NoFallback = oldFallback; }
                     }
+                    finally { Csg.NoFallback = oldAll; }
                 }
                 if (cutKind == null) cutKind = tool.IsCut; else if (cutKind != tool.IsCut) mixed = true;
             }
@@ -702,7 +786,12 @@ public sealed class Regenerator
         {
             var errors = new List<string>();
             var applied = new List<(Solid tool, bool cut)>();
-            var r = NativeBlend.Apply(body.Solid, edges, bs.Size, bs.Fillet, $"{f.Id}.{i + 1}.{seedId}", errors, bs.Overflow, status.ProblemEdges, applied, bs.Chamfer);
+            Solid r;
+            // an instance's blend either works exactly or is skipped: no slow faceted fallback
+            var oldFallback = Csg.NoFallback;
+            Csg.NoFallback = true;
+            try { r = NativeBlend.Apply(body.Solid, edges, bs.Size, bs.Fillet, $"{f.Id}.{i + 1}.{seedId}", errors, bs.Overflow, status.ProblemEdges, applied, bs.Chamfer); }
+            finally { Csg.NoFallback = oldFallback; }
             // one instance whose own geometry cannot take the blend (e.g. it lands where the radius folds over itself)
             // does not fail the whole pattern: that instance is left without it and named in a warning
             if (errors.Count > 0)
@@ -714,42 +803,9 @@ public sealed class Regenerator
             return (applied.Select(a => a.tool).ToList(), applied.All(a => a.cut == cut));
         }
 
-        void DoLinearPattern(LinearPatternFeature lp)
-        {
-            var (_, d1) = Resolver.ResolveDir(lp.Direction, State);
-            if (lp.Reverse) d1 = -d1;
-            var s1 = Num(lp.Spacing, "Spacing"); var n1 = (int)Math.Round(Num(lp.Count, "Instances"));
-            int n2 = 1; double s2 = 0; Vec3 d2 = Vec3.Zero;
-            if (lp.Direction2 != null)
-            {
-                (_, d2) = Resolver.ResolveDir(lp.Direction2, State);
-                if (lp.Reverse2) d2 = -d2;
-                s2 = Num(lp.Spacing2, "Spacing 2"); n2 = (int)Math.Round(Num(lp.Count2, "Instances 2"));
-            }
-            if (n1 < 1 || n2 < 1 || n1 * n2 > 2000) throw new FeatureException("Instance count must be between 1 and 2000.");
-            var ts = new List<Transform>();
-            for (int i = 0; i < n1; i++)
-                for (int j = 0; j < n2; j++)
-                    if (i != 0 || j != 0) ts.Add(Transform.Translation(d1 * (s1 * i) + d2 * (s2 * j)));
-            ApplyInstances(lp.Seeds, ts, lp.Skip);
-        }
+        void DoLinearPattern(LinearPatternFeature lp) => ApplyInstances(lp.Seeds, PatternTransforms(lp, State, lookup)!, lp.Skip);
 
-        void DoCircularPattern(CircularPatternFeature cp)
-        {
-            var (o, ax) = Resolver.ResolveDir(cp.Axis, State);
-            if (cp.Reverse) ax = -ax;
-            var n = (int)Math.Round(Num(cp.Count, "Instances"));
-            var total = Num(cp.Angle, "Angle") * Math.PI / 180;
-            if (n < 2 || n > 2000) throw new FeatureException("Instance count must be between 2 and 2000.");
-            // equal spacing spreads the instances over the total angle: past a full turn the last instance would land
-            // on (or just past) the seed
-            if (cp.EqualSpacing && !(total > 0 && total <= 2 * Math.PI + 1e-9))
-                throw new FeatureException("With equal spacing the total angle must be more than 0° and at most 360°.");
-            var step = cp.EqualSpacing ? (Math.Abs(total - 2 * Math.PI) < 1e-9 ? total / n : total / (n - 1)) : total;
-            var ts = new List<Transform>();
-            for (int i = 1; i < n; i++) ts.Add(Transform.Rotation(o, ax, step * i));
-            ApplyInstances(cp.Seeds, ts, cp.Skip);
-        }
+        void DoCircularPattern(CircularPatternFeature cp) => ApplyInstances(cp.Seeds, PatternTransforms(cp, State, lookup)!, cp.Skip);
 
         void DoMirror(MirrorFeature m)
         {

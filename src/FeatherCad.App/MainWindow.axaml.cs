@@ -470,6 +470,8 @@ public partial class MainWindow : Window
 
     void ShowPage(PmPage? page)
     {
+        // pattern instance markers belong to the page that showed them
+        if (page != _page) { _instanceMarkers?.Dispose(); _instanceMarkers = null; }
         _page = page;
         if (page == null)
         {

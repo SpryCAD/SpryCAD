@@ -33,6 +33,7 @@ public static class NativeBlend
         var done = new HashSet<NEdge>(ReferenceEqualityComparer.Instance);
         bool anyTrimmed = false;
         var trimmedEdges = new List<NEdge>();
+        var failedChains = new HashSet<NEdge>(ReferenceEqualityComparer.Instance);
         int i = 0;
         foreach (var e in edges)
         {
@@ -60,11 +61,13 @@ public static class NativeBlend
                     // two surfaces only (separate tools, trimmed where they run past their faces)
                     RollingBall.Result? rb = null;
                     var tangent = TangentChain(e, edges, done);
-                    if (tangent.Count > Chain(e, edges).Count)
+                    // a tangent chain that failed as one tool is not tried again from each of its other edges
+                    if (tangent.Count > Chain(e, edges).Count && !tangent.Any(failedChains.Contains))
                     {
                         var r2 = RollingBall.Build(tangent, size, name, OnFaces);
                         Debug?.Invoke($"tangent chain {name}: {tangent.Count} edges -> {r2.Error ?? (r2.Fits ? "fits" : "overflows")}");
                         if (r2.Error == null) { rb = r2; foreach (var o in tangent) if (!group.Contains(o)) { group.Add(o); done.Add(o); } }
+                        else foreach (var o in tangent) failedChains.Add(o);
                     }
                     if (rb == null)
                     {

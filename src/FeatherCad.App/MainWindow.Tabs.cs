@@ -41,7 +41,8 @@ public partial class MainWindow
         var t = new PartTab(s);
         s.Rebuilt += () => { if (s == Session) OnRebuilt(); };
         s.DocumentChanged += () => { UpdateTabHeader(t); if (s == Session) OnDocumentChanged(); };
-        s.BusyChanged += busy => { if (s == Session) BusyText.IsVisible = busy; };
+        s.BusyChanged += busy => { if (s == Session) { BusyText.IsVisible = busy; BusyText.Text = "Rebuilding…"; } };
+        s.Progress += p => { if (s == Session && s.Busy) BusyText.Text = p.Text; };
 
         t.Label = new TextBlock { VerticalAlignment = VerticalAlignment.Center, FontSize = 12, Margin = new Thickness(0, 0, 6, 0) };
         var close = new Button

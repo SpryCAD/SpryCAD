@@ -185,6 +185,38 @@ static class NativeBoolTests
             t.True(skipped < all - 1000, $"volume {skipped} vs {all}");
         });
 
+        t.Test("Rebuild: progress, cancellation, pattern instance positions", () =>
+        {
+            var dir = AppContext.BaseDirectory;
+            while (dir != null && !Directory.Exists(Path.Combine(dir, "samples"))) dir = Path.GetDirectoryName(dir);
+            var doc = CadDocument.Load(Path.Combine(dir!, "samples", "demos", "spoked-handwheel.fcad"));
+            // progress: every feature, and the instances inside a pattern
+            var seen = new List<RegenProgress>();
+            var regen = new Regenerator();
+            var full = regen.Rebuild(doc, null, default, p => { lock (seen) seen.Add(p); });
+            t.Eq(seen.Select(p => p.FeatureId).Distinct().Count(), doc.Features.Count);
+            t.True(seen.Any(p => p.FeatureName == "Grips" && p.Detail != null && p.Detail.Contains("instance")), "pattern instances reported");
+            // cancellation: stops between features; the completed ones stay cached and the next rebuild finishes the job
+            var r2 = new Regenerator();
+            var cts = new CancellationTokenSource();
+            bool threw = false;
+            try { r2.Rebuild(doc, null, cts.Token, p => { if (p.FeatureName == "Spokes") cts.Cancel(); }); }
+            catch (OperationCanceledException) { threw = true; }
+            t.True(threw, "cancelled");
+            var after = r2.Rebuild(doc);
+            t.True(after.Rebuilt < doc.Features.Count, $"features before the cancel come from the cache ({after.Rebuilt} rebuilt)");
+            t.Near(after.State.Bodies[0].Solid.Volume(), full.State.Bodies[0].Solid.Volume(), 1e-6 * full.State.Bodies[0].Solid.Volume());
+            // instance positions: the seed's tool centre moved by each transform (as the instance markers place them)
+            int gi = doc.Features.FindIndex(f => f.Name == "Grips");
+            var grips = (CircularPatternFeature)doc.Features[gi];
+            var before = full.States[gi - 1];
+            var lookup = new Func<string, double?>(n => full.EquationValues.TryGetValue(n, out var v) ? v : null);
+            var ts = Regenerator.PatternTransforms(grips, before, lookup)!;
+            t.Eq(ts.Count, (int)Math.Round(lookup("NS")!.Value * lookup("NG")!.Value) - 1);
+            var c = before.Tools[grips.Seeds[0]].Tool.Bounds.Center;
+            foreach (var tr in ts) t.Near(new Vec3(tr.Point(c).X, 0, tr.Point(c).Z).Length, new Vec3(c.X, 0, c.Z).Length, 1e-9);
+        });
+
         t.Test("Native bool: overlapping boxes", () =>
         {
             var a = NativeTests.Box(new Vec3(0, 0, 0), new Vec3(10, 10, 10), "A");

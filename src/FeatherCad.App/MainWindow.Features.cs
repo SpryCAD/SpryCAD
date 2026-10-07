@@ -83,6 +83,13 @@ public partial class MainWindow
             var i = doc.IndexOf(clone.Id);
             if (i >= 0) doc.Features[i] = clone;
         }
+        // a preview that rebuilds slow features says so up front (from how long they took last time)
+        if (_page != null && !_edit.IsNew)
+        {
+            var (secs, slowest, slowSecs) = Session.Estimate(doc, doc.IndexOf(clone.Id));
+            var note = secs >= 2 ? $"⏱ Each preview rebuilds the features from here on: about {secs:0} s{(slowest != null && slowSecs >= 1 ? $" ({slowest} {slowSecs:0.0} s)" : "")}." : null;
+            if (note != null && (_page.Message == null || _page.Message == _edit.Hint || _page.Message.StartsWith("⏱"))) _page.Message = note;
+        }
         Session.RequestPreview(doc);
     }
 
@@ -621,11 +628,12 @@ public partial class MainWindow
         page.Number(d2, "Spacing", () => f.Spacing2, v => f.Spacing2 = v, "dimension");
         page.Number(d2, "Instances", () => f.Count2, v => f.Count2 = v, "lpattern", "");
         var sk = page.Section("Instances to Skip");
-        page.IntList(sk, "Instances", () => f.Skip, v => f.Skip = v, 2,
-            "Instance numbers to leave out, e.g. 2, 5, 7-9. The seed is 1; numbers run along direction 1, then row by row along direction 2.");
+        var skipBox = page.IntList(sk, "Instances", () => f.Skip, v => f.Skip = v, 2,
+            "Instance numbers to leave out, e.g. 2, 5, 7-9 (or click the numbers in the graphics area). The seed is 1; numbers run along direction 1, then row by row along direction 2.");
         var seeds = SeedBox(page, f.Seeds);
         page.Activate(f.Seeds.Count == 0 ? seeds : dirBox);
         BeginEdit(f, isNew, page, overlay: false, hint: f.Seeds.Count == 0 ? "Select the feature(s) to pattern." : null);
+        ShowInstanceMarkers(f, st, f.Seeds, () => f.Skip, skipBox, page);
     }
 
     void CircularPatternCommand() => OpenCircularPatternPage(new CircularPatternFeature { Seeds = SeedsFromSelection() }, true);
@@ -648,11 +656,38 @@ public partial class MainWindow
         page.Number(p, "Instances", () => f.Count, v => f.Count = v, null, "");
         page.Check(p, "Equal spacing", () => f.EqualSpacing, v => f.EqualSpacing = v);
         var sk = page.Section("Instances to Skip");
-        page.IntList(sk, "Instances", () => f.Skip, v => f.Skip = v, 2,
-            "Instance numbers to leave out, e.g. 2, 5, 7-9. The seed is 1; numbers run around the axis in the pattern direction.");
+        var skipBox = page.IntList(sk, "Instances", () => f.Skip, v => f.Skip = v, 2,
+            "Instance numbers to leave out, e.g. 2, 5, 7-9 (or click the numbers in the graphics area). The seed is 1; numbers run around the axis in the pattern direction.");
         var seeds = SeedBox(page, f.Seeds);
         page.Activate(f.Seeds.Count == 0 ? seeds : axBox);
         BeginEdit(f, isNew, page, overlay: false, hint: f.Seeds.Count == 0 ? "Select the feature(s) to pattern." : null);
+        ShowInstanceMarkers(f, st, f.Seeds, () => f.Skip, skipBox, page);
+    }
+
+    InstanceMarkers? _instanceMarkers;
+
+    /// <summary>
+    /// Numbered markers at the pattern's instances (centre of the seeds' tools, moved by each instance's transform);
+    /// clicking one adds it to or removes it from the skip list (written into the page's field, which updates the
+    /// preview). Removed when the page closes.
+    /// </summary>
+    void ShowInstanceMarkers(Feature f, ModelState st, List<string> seeds, Func<List<int>> getSkip, TextBox skipBox, PmPage page)
+    {
+        _instanceMarkers?.Dispose();
+        List<(int, Vec3)> Positions()
+        {
+            var box = Box3.Empty;
+            foreach (var id in seeds) if (st.Tools.TryGetValue(id, out var t)) box.Add(t.Tool.Bounds);
+            if (box.IsEmpty) return new();
+            var c = box.Center;
+            var ts = Regenerator.PatternTransforms(f, st, Session.Lookup) ?? new();
+            var res = new List<(int, Vec3)> { (1, c) };
+            for (int i = 0; i < ts.Count; i++) res.Add((i + 2, ts[i].Point(c)));
+            return res;
+        }
+        var markers = new InstanceMarkers(Viewport, Positions, getSkip, list => skipBox.Text = string.Join(", ", list));
+        _instanceMarkers = markers;
+        page.Changed += () => { if (_instanceMarkers == markers) markers.Rebuild(); };
     }
 
     void MirrorCommand()

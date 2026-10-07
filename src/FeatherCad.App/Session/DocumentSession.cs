@@ -21,6 +21,8 @@ public sealed class DocumentSession
     public event Action? Rebuilt;
     public event Action? DocumentChanged;
     public event Action<bool>? BusyChanged;
+    /// <summary>What the running rebuild is doing (UI thread, a few times a second at most).</summary>
+    public event Action<RebuildProgress>? Progress;
 
     readonly List<string> _undo = new();
     readonly List<string> _redo = new();
@@ -29,6 +31,12 @@ public sealed class DocumentSession
     // separate slots: a live-preview request must never replace a pending real rebuild
     CadDocument? _pendingReal, _pendingPreview;
     bool _running;
+    // the running rebuild: cancelled when a newer request of the same kind (or any real rebuild) supersedes it
+    CancellationTokenSource? _runningCts;
+    bool _runningPreview;
+    // how long each feature took when last built: the time left of a rebuild is estimated from them
+    readonly System.Collections.Concurrent.ConcurrentDictionary<string, double> _featureMs = new();
+    long _lastProgressPost;
 
     public static CadDocument NewDocument() => new();
 
@@ -161,6 +169,23 @@ public sealed class DocumentSession
 
     public void RequestRebuild() => Enqueue(Doc.Clone(), preview: false);
 
+    /// <summary>
+    /// How long building <paramref name="doc"/>'s features from index <paramref name="from"/> on took last time (seconds),
+    /// and the slowest of them: a warning before a slow preview.
+    /// </summary>
+    public (double seconds, string? slowest, double slowestSeconds) Estimate(CadDocument doc, int from)
+    {
+        double total = 0, worst = 0; string? name = null;
+        for (int i = Math.Max(0, from); i < Math.Min(doc.ActiveCount, doc.Features.Count); i++)
+        {
+            var f = doc.Features[i];
+            if (f.Suppressed || !_featureMs.TryGetValue(f.Id, out var ms)) continue;
+            total += ms;
+            if (ms > worst) { worst = ms; name = f.Name; }
+        }
+        return (total / 1000, name, worst / 1000);
+    }
+
     /// <summary>Rebuilds a temporary document (feature being edited) for live preview.</summary>
     public void RequestPreview(CadDocument previewDoc) => Enqueue(previewDoc.Clone(), preview: true);
 
@@ -183,6 +208,9 @@ public sealed class DocumentSession
         {
             if (preview) _pendingPreview = snapshot; else _pendingReal = snapshot;
             if (preview) PreviewActive = true;
+            // a newer preview makes the running preview pointless; a real rebuild goes before any preview, and a
+            // newer real rebuild replaces the running one (its result would not be shown)
+            if (_running && (_runningPreview || !preview)) _runningCts?.Cancel();
             if (_running) return;
             _running = true;
         }
@@ -204,18 +232,35 @@ public sealed class DocumentSession
                 else { _running = false; break; }
             }
             RegenResult r;
+            var cts = new CancellationTokenSource();
+            lock (_lock) { _runningCts = cts; _runningPreview = preview; }
+            var started = System.Diagnostics.Stopwatch.StartNew();
+            // estimate: the features still to build, at the time they took last time
+            double Remaining(int from) => doc.Features.Skip(from).Take(Math.Max(0, doc.ActiveCount - from))
+                .Sum(f => _featureMs.TryGetValue(f.Id, out var ms) ? ms : 0);
+            void Report(RegenProgress p)
+            {
+                var now = Environment.TickCount64;
+                if (now - Interlocked.Read(ref _lastProgressPost) < 150) return;
+                Interlocked.Exchange(ref _lastProgressPost, now);
+                var rp = new RebuildProgress(preview, p.Index, p.Count, p.FeatureName, p.Detail, started.Elapsed.TotalSeconds, Remaining(p.Index) / 1000);
+                Dispatcher.UIThread.Post(() => Progress?.Invoke(rp));
+            }
             try
             {
-                r = _regen.Rebuild(doc);
+                r = _regen.Rebuild(doc, null, cts.Token, Report);
+                foreach (var (id, st) in r.Status) if (st.Milliseconds > 0) _featureMs[id] = st.Milliseconds;
                 // build display meshes off the UI thread
                 foreach (var b in r.State.Bodies) _ = b.Mesh;
                 foreach (var s in r.States) foreach (var b in s.Bodies) if (!b.HasMesh && s == r.States[^1]) _ = b.Mesh;
             }
+            catch (OperationCanceledException) { continue; } // superseded by a newer request
             catch (Exception ex)
             {
                 Dispatcher.UIThread.Post(() => App.ShowError("Rebuild failed: " + ex.Message));
                 continue;
             }
+            finally { lock (_lock) _runningCts = null; }
             bool stale;
             lock (_lock) stale = (preview ? _pendingPreview : _pendingReal) != null;
             if (stale) continue; // a newer request is waiting; skip publishing this one
@@ -239,6 +284,22 @@ public sealed class DocumentSession
         {
             var vals = Regenerator.EvaluateEquations(Doc).values;
             return n => vals.TryGetValue(n, out var v) ? v : null;
+        }
+    }
+}
+
+/// <summary>A running rebuild's progress, for the status bar.</summary>
+public sealed record RebuildProgress(bool Preview, int Index, int Count, string Feature, string? Detail, double ElapsedSeconds, double EstimatedLeftSeconds)
+{
+    public string Text
+    {
+        get
+        {
+            var t = $"{(Preview ? "Preview" : "Rebuilding")}: {Feature} ({Index + 1}/{Count})";
+            if (Detail != null) t += $" – {Detail}";
+            t += $"  {ElapsedSeconds:0.0} s";
+            if (EstimatedLeftSeconds >= 1) t += $", about {EstimatedLeftSeconds:0} s left";
+            return t;
         }
     }
 }
