@@ -13,6 +13,23 @@ static class SheetMetalTests
 
     static double Volume(NBody b) => NTess.ToSolid(b, 0.002).Volume();
 
+    /// <summary>
+    /// Every tangent line runs over material (inside the outline, out of its holes). A centerline is one span from
+    /// where it enters the material to where it leaves, across holes, as in other systems' flat patterns.
+    /// </summary>
+    public static void OnMaterial(TestRunner t, FlatPattern f)
+    {
+        var loops = f.Regions.SelectMany(r => r.AllLoops()).ToList();
+        bool In(Vec2 p) => loops.Count(l => l.Contains(p)) % 2 == 1;
+        foreach (var b in f.Bends)
+            foreach (var (a, c) in b.Tangents)
+                for (int i = 1; i < 20; i++)
+                {
+                    var p = a + (c - a) * (i / 20.0);
+                    t.True(In(p), $"bend line point {p} is off the material");
+                }
+    }
+
     public static void Run(TestRunner t)
     {
         t.Test("Sheet metal: L bracket unfolds to the bend allowance", () =>
@@ -40,8 +57,9 @@ static class SheetMetalTests
             var fb = SheetUnfold.Unfold(b, 0.3).Bends[0];
             var dir = (fb.B - fb.A) * (1 / Vec2.Distance(fb.A, fb.B));
             double Offset((Vec2 A, Vec2 B) l) => Vec2.Cross(dir, l.A - fb.A);
-            t.Near(Math.Abs(Offset(fb.Tangent1) - Offset(fb.Tangent2)), Math.PI / 2 * (1 + 0.3 * 2), 1e-9);
-            t.Near(Offset(fb.Tangent1) + Offset(fb.Tangent2), 0, 1e-9);
+            t.Eq(fb.Tangents.Count, 2);
+            t.Near(Math.Abs(Offset(fb.Tangents[0]) - Offset(fb.Tangents[1])), Math.PI / 2 * (1 + 0.3 * 2), 1e-9);
+            t.Near(Offset(fb.Tangents[0]) + Offset(fb.Tangents[1]), 0, 1e-9);
             t.Near(fb.Allowance, Math.PI / 2 * (1 + 0.3 * 2), 1e-9);
 
             // DIN 6935: r/s = 0.5, k = 0.65 + ½ log₁₀ 0.5; the neutral fiber at k s/2
@@ -154,6 +172,9 @@ static class SheetMetalTests
             t.Eq(f.Regions[0].Holes.Count, 1);
             t.Eq(f.Bends.Count, 2); // the bend split by the hole is one bend
             NativeTests.Check(t, f.Body);
+            // the tangent lines of the bend under the hole stop at it: two pieces each, all on material
+            OnMaterial(t, f);
+            t.True(f.Bends.Any(x => x.Tangents.Count == 4), "tangent lines split by the hole");
             var dir = Path.Combine(Path.GetTempPath(), "feathercad-tests");
             Directory.CreateDirectory(dir);
             using (var fs = File.Create(Path.Combine(dir, "flat-bend-hole.dxf"))) DxfWriter.Write(fs, f);
@@ -203,14 +224,16 @@ static class SheetMetalTests
             t.True(ReferenceEquals(r.State.Bodies[0].Solid.Native, shown.Body), "flat shown");
             var bb = r.State.Bodies[0].Solid.TightBounds();
             foreach (var bend in shown.Bends)
-                foreach (var p in new[] { bend.A, bend.B, bend.Tangent1.A, bend.Tangent1.B, bend.Tangent2.A, bend.Tangent2.B })
+                foreach (var p in new[] { bend.A, bend.B }.Concat(bend.Tangents.SelectMany(x => new[] { x.A, x.B })))
                 {
                     var w = shown.Frame.ToWorld(p.X, p.Y, 0);
                     t.True(w.X >= bb.Min.X - 1e-6 && w.X <= bb.Max.X + 1e-6 && w.Y >= bb.Min.Y - 1e-6 && w.Y <= bb.Max.Y + 1e-6
                         && w.Z >= bb.Min.Z - 1e-6 && w.Z <= bb.Max.Z + 1e-6, $"bend line point {w} off the flat {bb.Min}..{bb.Max}");
                 }
-            t.Near(Vec2.Distance(shown.Bends[0].Tangent1.A, shown.Bends[0].Tangent1.B), 100, 1e-6);
-            t.Near(Vec2.Distance(shown.Bends[0].Tangent1.A, shown.Bends[0].Tangent2.A), Math.PI, 1e-6); // allowance π/2 (1 + 0.5·2)
+            var tg = shown.Bends[0].Tangents;
+            t.Eq(tg.Count, 2);
+            t.Near(Vec2.Distance(tg[0].A, tg[0].B), 100, 1e-6);
+            t.Near(Vec2.Distance(tg[0].A, tg[1].A), Math.PI, 1e-6); // allowance π/2 (1 + 0.5·2)
             t.Near(KernelTests.Vex(r.State.Bodies[0].Solid), 100 * 2 * (128 + 2 * Math.PI), 1e-3);
             t.Near(KernelTests.Vex(r.State.Bodies[0].Solid), folded, 0.2); // K = 0.5 keeps the volume (the folded bends are faceted)
 

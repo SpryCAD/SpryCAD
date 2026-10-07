@@ -418,22 +418,33 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
     /// <summary>A line of a flattened sheet metal part.</summary>
     public enum BendLineKind { BendUp, BendDown, Tangent }
 
+    /// <summary>A bend line on the flat's unfolded face (a, b), the face's outward normal, the sheet thickness and the bend's width in the flat.</summary>
+    public readonly record struct BendLine(Vec3 A, Vec3 B, BendLineKind Kind, Vec3 Normal, double Thickness, double Width);
+
     /// <summary>
     /// The bend lines (centerlines: up bends green, down bends red, dash-dot) and bend tangent lines (gray, dashed) of
-    /// the part shown flat; drawn on both faces of the sheet, just off them so the faces do not hide them.
+    /// the part shown flat. Drawn on the face of the sheet toward the viewer, a few pixels off it (whatever the zoom,
+    /// the face does not hide them); tangent lines only where the bend is wide enough on screen to tell them apart.
     /// </summary>
-    public IReadOnlyList<(Vec3 a, Vec3 b, BendLineKind kind)> BendLines
+    public IReadOnlyList<BendLine> BendLines
     {
         get => _bendLines;
         set { _bendLines = value; Redraw(); }
     }
-    IReadOnlyList<(Vec3 a, Vec3 b, BendLineKind kind)> _bendLines = Array.Empty<(Vec3, Vec3, BendLineKind)>();
+    IReadOnlyList<BendLine> _bendLines = Array.Empty<BendLine>();
 
     void DrawBendLines(DynamicGeometry g)
     {
         var px = Camera.PixelSize;
-        foreach (var (a, b, kind) in _bendLines)
+        var toEye = Camera.V(Camera.Back);
+        foreach (var l in _bendLines)
         {
+            if (l.Kind == BendLineKind.Tangent && l.Width < px * 8) continue; // would crowd the centerline
+            // on the face toward the viewer, lifted toward the viewer by 2 pixels
+            var facing = Vec3.Dot(toEye, l.Normal) >= 0;
+            var shift = facing ? l.Normal * (px * 2) : -l.Normal * (l.Thickness + px * 2);
+            Vec3 a = l.A + shift, b = l.B + shift;
+            var kind = l.Kind;
             if (kind == BendLineKind.Tangent) { g.Dashed(a, b, new Rgba(0.45f, 0.47f, 0.52f), px * 4); continue; }
             var c = kind == BendLineKind.BendUp ? new Rgba(0.05f, 0.55f, 0.20f) : new Rgba(0.80f, 0.12f, 0.12f);
             // dash-dot, like a centerline

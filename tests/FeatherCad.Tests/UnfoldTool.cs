@@ -37,6 +37,12 @@ static class UnfoldTool
                     var m = (bend.A + bend.B) * 0.5 - mid;
                     Console.WriteLine($"    bend {bend.Angle * 180 / Math.PI:0.##}° r {bend.InnerRadius:0.####} {(bend.Up ? "up" : "down")}, length {Vec2.Distance(bend.A, bend.B):0.###}, midpoint ±({Math.Abs(m.X):0.###}, {Math.Abs(m.Y):0.###})");
                 }
+                var loops = flat.Regions.SelectMany(x => x.AllLoops()).ToList();
+                bool In(Vec2 p) => loops.Count(l => l.Contains(p)) % 2 == 1;
+                int off = flat.Bends.Sum(bd => bd.Tangents.Sum(tg => Enumerable.Range(1, 19).Count(i => !In(tg.A + (tg.B - tg.A) * (i / 20.0)))));
+                Console.WriteLine($"  tangent lines: {flat.Bends.Sum(bd => bd.Tangents.Count)} pieces, {off} sample points off the material");
+                if (off > 0) bad++;
+                if (args.FirstOrDefault(a => a.StartsWith("--compare=")) is { } cmp) bad += Compare(loops, cmp[10..]);
                 var err = flat.Body.Validate();
                 if (err != null) { Console.WriteLine("  flat body invalid: " + err); bad++; }
                 var path = Path.Combine(outDir, Path.GetFileNameWithoutExtension(file) + ".flat.dxf");
@@ -46,5 +52,131 @@ static class UnfoldTool
             catch (UnfoldException ex) { Console.WriteLine("  cannot unfold: " + ex.Message); bad++; }
         }
         return bad;
+    }
+
+    /// <summary>
+    /// Compares the flat outline with another system's DXF of it (outline layers: everything but bend lines; inches
+    /// when $INSUNITS is 1): both centered on their bounds, the best of the four mirror images, the largest
+    /// distance from each outline's points to the other outline.
+    /// </summary>
+    static int Compare(List<ProfileLoop> ours, string dxfPath)
+    {
+        var (refSegs, inches) = ReadDxf(dxfPath);
+        var s = inches ? 25.4 : 1.0;
+        refSegs = refSegs.Select(x => (x.A * s, x.B * s)).ToList();
+        var oursSegs = ours.SelectMany(l => l.Verts.Select((v, i) => (A: v.P, B: l.Verts[(i + 1) % l.Verts.Count].P))).ToList();
+        static (Vec2 min, Vec2 max) Bounds(IEnumerable<(Vec2 A, Vec2 B)> segs)
+        {
+            var pts = segs.SelectMany(x => new[] { x.A, x.B }).ToList();
+            return (new Vec2(pts.Min(p => p.X), pts.Min(p => p.Y)), new Vec2(pts.Max(p => p.X), pts.Max(p => p.Y)));
+        }
+        var (rmin, rmax) = Bounds(refSegs); var (omin, omax) = Bounds(oursSegs);
+        var rc = (rmin + rmax) * 0.5; var oc = (omin + omax) * 0.5;
+        Console.WriteLine($"  reference {Path.GetFileName(dxfPath)}: {refSegs.Count} segments, size {rmax.X - rmin.X:0.###} x {rmax.Y - rmin.Y:0.###}; ours {omax.X - omin.X:0.###} x {omax.Y - omin.Y:0.###}");
+        static double Dist(Vec2 p, List<(Vec2 A, Vec2 B)> segs)
+        {
+            double best = double.MaxValue;
+            foreach (var (a, b) in segs)
+            {
+                var d = b - a; var l2 = Vec2.Dot(d, d);
+                var t = l2 < 1e-24 ? 0 : Math.Clamp(Vec2.Dot(p - a, d) / l2, 0, 1);
+                best = Math.Min(best, Vec2.Distance(p, a + d * t));
+            }
+            return best;
+        }
+        static IEnumerable<Vec2> Dense(List<(Vec2 A, Vec2 B)> segs) => segs.SelectMany(x => Enumerable.Range(0, 4).Select(i => x.A + (x.B - x.A) * (i / 4.0)));
+        (double toRef, double toOurs, Vec2 worst) best = (double.MaxValue, 0, default);
+        foreach (var (sx, sy) in new[] { (1, 1), (-1, 1), (1, -1), (-1, -1) })
+        {
+            Vec2 M(Vec2 p) => new((p.X - oc.X) * sx + rc.X, (p.Y - oc.Y) * sy + rc.Y);
+            var mapped = oursSegs.Select(x => (A: M(x.A), B: M(x.B))).ToList();
+            double toRef = 0; Vec2 worst = default;
+            foreach (var p in Dense(mapped)) { var d = Dist(p, refSegs); if (d > toRef) { toRef = d; worst = p; } }
+            if (toRef >= best.toRef) continue;
+            double toOurs = 0;
+            foreach (var p in Dense(refSegs)) toOurs = Math.Max(toOurs, Dist(p, mapped));
+            best = (toRef, toOurs, worst);
+        }
+        Console.WriteLine($"  outline deviation: ours to reference {best.toRef:0.####}, reference to ours {best.toOurs:0.####} (worst near {best.worst - rc} from the center)");
+        if (Environment.GetEnvironmentVariable("FC_DEV") != null)
+        {
+            // where ours is off by more than 0.01: grouped in 5 mm cells
+            foreach (var (sx, sy) in new[] { (1, 1), (-1, 1), (1, -1), (-1, -1) })
+            {
+                Vec2 M(Vec2 p) => new((p.X - oc.X) * sx + rc.X, (p.Y - oc.Y) * sy + rc.Y);
+                var mapped = oursSegs.Select(x => (A: M(x.A), B: M(x.B))).ToList();
+                var devs = Dense(mapped).Select(p => (p, d: Dist(p, refSegs))).ToList();
+                if (Math.Abs(devs.Max(x => x.d) - best.toRef) > 1e-9) continue;
+                foreach (var g in devs.Where(x => x.d > 0.01).GroupBy(x => (Math.Round((x.p.X - rc.X) / 5), Math.Round((x.p.Y - rc.Y) / 5))).OrderByDescending(g => g.Max(x => x.d)))
+                    Console.WriteLine($"    near ({g.Key.Item1 * 5}, {g.Key.Item2 * 5}): {g.Count()} points, max {g.Max(x => x.d):0.####}");
+                break;
+            }
+        }
+        return Math.Max(best.toRef, best.toOurs) > 0.05 ? 1 : 0;
+    }
+
+    /// <summary>The outline of a DXF as segments (lines, arcs and polylines with bulges, sampled), and whether it is in inches.</summary>
+    static (List<(Vec2 A, Vec2 B)> segs, bool inches) ReadDxf(string path)
+    {
+        var lines = File.ReadAllLines(path);
+        var pairs = new List<(int code, string value)>();
+        for (int i = 0; i + 1 < lines.Length; i += 2) pairs.Add((int.Parse(lines[i].Trim()), lines[i + 1].Trim()));
+        double D(string v) => double.Parse(v, System.Globalization.CultureInfo.InvariantCulture);
+        bool inches = false;
+        for (int i = 0; i + 1 < pairs.Count; i++) if (pairs[i] is (9, "$INSUNITS")) inches = pairs[i + 1].value == "1";
+        var segs = new List<(Vec2, Vec2)>();
+        void Arc(Vec2 c, double r, double a0, double a1)
+        {
+            while (a1 <= a0) a1 += 2 * Math.PI;
+            int n = Math.Max(4, (int)Math.Ceiling((a1 - a0) / (Math.PI / 90)));
+            for (int k = 0; k < n; k++) segs.Add((c + Vec2.FromAngle(a0 + (a1 - a0) * k / n, r), c + Vec2.FromAngle(a0 + (a1 - a0) * (k + 1) / n, r)));
+        }
+        int start = pairs.FindIndex(p => p is (2, "ENTITIES"));
+        for (int i = start; i >= 0 && i < pairs.Count; i++)
+        {
+            if (pairs[i].code != 0) continue;
+            var type = pairs[i].value;
+            if (type == "ENDSEC") break;
+            int j = i + 1;
+            var ent = new List<(int code, string value)>();
+            while (j < pairs.Count && pairs[j].code != 0) ent.Add(pairs[j++]);
+            var layer = ent.FirstOrDefault(e => e.code == 8).value ?? "";
+            if (layer.Contains("BEND", StringComparison.OrdinalIgnoreCase)) continue;
+            double G(int code) => D(ent.First(e => e.code == code).value);
+            switch (type)
+            {
+                case "LINE": segs.Add((new Vec2(G(10), G(20)), new Vec2(G(11), G(21)))); break;
+                case "ARC": Arc(new Vec2(G(10), G(20)), G(40), G(50) * Math.PI / 180, G(51) * Math.PI / 180); break;
+                case "CIRCLE": Arc(new Vec2(G(10), G(20)), G(40), 0, 2 * Math.PI); break;
+                case "LWPOLYLINE":
+                    {
+                        var pts = new List<(Vec2 p, double bulge)>();
+                        foreach (var (code, value) in ent)
+                        {
+                            if (code == 10) pts.Add((new Vec2(D(value), 0), 0));
+                            else if (code == 20) pts[^1] = (new Vec2(pts[^1].p.X, D(value)), 0);
+                            else if (code == 42) pts[^1] = (pts[^1].p, D(value));
+                        }
+                        bool closed = ent.Any(e => e.code == 70 && (int.Parse(e.value) & 1) == 1);
+                        int cnt = closed ? pts.Count : pts.Count - 1;
+                        for (int k = 0; k < cnt; k++)
+                        {
+                            var (a, bulge) = pts[k]; var b = pts[(k + 1) % pts.Count].p;
+                            if (Math.Abs(bulge) < 1e-12) { segs.Add((a, b)); continue; }
+                            // bulge = tan(θ/4), counter-clockwise when positive
+                            var th = 4 * Math.Atan(bulge);
+                            var chord = Vec2.Distance(a, b); var r = chord / (2 * Math.Sin(Math.Abs(th) / 2));
+                            var mid = (a + b) * 0.5; var nrm = (b - a).Perp * (1 / chord);
+                            var h = r * Math.Cos(th / 2) * Math.Sign(bulge);
+                            var c = mid + nrm * h;
+                            var a0 = (a - c).Angle; var a1 = (b - c).Angle;
+                            if (th > 0) Arc(c, r, a0, a1); else Arc(c, r, a1, a0);
+                        }
+                        break;
+                    }
+            }
+            i = j - 1;
+        }
+        return (segs, inches);
     }
 }

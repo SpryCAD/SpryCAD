@@ -4,11 +4,11 @@ namespace FeatherCad.Kernel;
 
 /// <summary>
 /// A bend of a flat pattern: its centerline in the flat, the bend angle (radians), inner radius and length in the
-/// flat (the bend allowance), and its two tangent lines (where the bend meets the walls).
+/// flat (the bend allowance), and its tangent lines (where the bend meets the walls) as the pieces over material.
 /// </summary>
 /// <param name="Up">The bend folds toward the flat's normal (the unfolded side is the bend's inside).</param>
 public sealed record FlatBend(Vec2 A, Vec2 B, double Angle, double InnerRadius, bool Up, double Allowance,
-    (Vec2 A, Vec2 B) Tangent1, (Vec2 A, Vec2 B) Tangent2);
+    IReadOnlyList<(Vec2 A, Vec2 B)> Tangents);
 
 public enum BendAllowanceMethod
 {
@@ -169,7 +169,7 @@ public static class SheetUnfold
                     }
             (Vec2, Vec2) At(double s) => (p2 + a2 * h0 + w2 * s, p2 + a2 * h1 + w2 * s);
             var (a, b) = At(th * neutral / 2);
-            return new FlatBend(a, b, th, innerRadius, up, th * neutral, At(0), At(th * neutral));
+            return new FlatBend(a, b, th, innerRadius, up, th * neutral, new[] { At(0), At(th * neutral) });
         }
 
         /// <summary>The largest angle of the face's boundary from the entry line: the bend angle.</summary>
@@ -292,17 +292,29 @@ public static class SheetUnfold
     static FlatBend Clip(FlatBend b, List<ProfileLoop> loops)
     {
         var (a, c) = Clip((b.A, b.B), loops);
-        return b with { A = a, B = c, Tangent1 = Clip(b.Tangent1, loops), Tangent2 = Clip(b.Tangent2, loops) };
+        // a tangent line is drawn only where there is material (it may leave and enter it again at a notch)
+        return b with { A = a, B = c, Tangents = b.Tangents.SelectMany(x => Inside(x, loops)).ToList() };
     }
 
+    /// <summary>A centerline from where it first enters the material to where it last leaves it (one line, as other systems' DXF).</summary>
     static (Vec2 A, Vec2 B) Clip((Vec2 A, Vec2 B) seg, List<ProfileLoop> loops)
     {
-        var b = seg;
-        var d = b.B - b.A; var len = d.Length;
-        if (len < 1e-12) return b;
+        var pieces = Inside(seg, loops);
+        return pieces.Count == 0 ? seg : (pieces[0].A, pieces[^1].B);
+    }
+
+    /// <summary>
+    /// The pieces of a segment inside the material: split where it meets the outline, each piece kept when its
+    /// middle is inside (even-odd over all loops). Robust where the segment runs through outline vertices, as a
+    /// tangent line does where a bend's end meets a wall (a crossing count would see such a vertex twice).
+    /// </summary>
+    static List<(Vec2 A, Vec2 B)> Inside((Vec2 A, Vec2 B) seg, List<ProfileLoop> loops)
+    {
+        var d = seg.B - seg.A; var len = d.Length;
+        var res = new List<(Vec2 A, Vec2 B)>();
+        if (len < 1e-12) return res;
         var u = d * (1 / len);
-        // parameters along the line where it crosses the outline (the loops' points, arcs as their facets)
-        var ts = new List<double>();
+        var ts = new List<double> { 0, len };
         foreach (var l in loops)
         {
             var v = l.Verts;
@@ -311,22 +323,25 @@ public static class SheetUnfold
                 var p = v[i].P; var q = v[(i + 1) % v.Count].P;
                 var e = q - p;
                 var den = Vec2.Cross(u, e);
-                if (Math.Abs(den) < 1e-15) continue;
-                var w = p - b.A;
-                var s = Vec2.Cross(w, u) / den; // along the segment
-                if (s < 0 || s > 1) continue;
-                ts.Add(Vec2.Cross(w, e) / den);
+                if (Math.Abs(den) < 1e-15) continue; // parallel: its ends are other segments' ends
+                var w = p - seg.A;
+                var s = Vec2.Cross(w, u) / den; // along the outline segment
+                if (s < -1e-9 || s > 1 + 1e-9) continue;
+                var t = Vec2.Cross(w, e) / den;  // along ours
+                if (t > 0 && t < len) ts.Add(t);
             }
         }
         ts.Sort();
-        // inside between consecutive crossings (even-odd); keep the inside spans that overlap the bend
-        double lo = double.MaxValue, hi = double.MinValue;
-        for (int i = 0; i + 1 < ts.Count; i += 2)
+        bool In(Vec2 p) => loops.Count(l => l.Contains(p)) % 2 == 1;
+        for (int i = 0; i + 1 < ts.Count; i++)
         {
-            double a = Math.Max(ts[i], 0), c = Math.Min(ts[i + 1], len);
-            if (c - a > 1e-9) { lo = Math.Min(lo, a); hi = Math.Max(hi, c); }
+            double a = ts[i], c = ts[i + 1];
+            if (c - a < 1e-9 * Math.Max(1, len) || !In(seg.A + u * (0.5 * (a + c)))) continue;
+            // join with the previous piece when they touch
+            if (res.Count > 0 && Vec2.Distance(res[^1].B, seg.A + u * a) < 1e-9 * Math.Max(1, len)) res[^1] = (res[^1].A, seg.A + u * c);
+            else res.Add((seg.A + u * a, seg.A + u * c));
         }
-        return lo < hi ? (b.A + u * lo, b.A + u * hi) : b;
+        return res;
     }
 
     /// <summary>

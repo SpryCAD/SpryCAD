@@ -166,25 +166,21 @@ public partial class MainWindow : Window
     /// <summary>Pushes the current rebuild result (or rolled back / preview state) into the viewport.</summary>
     /// <summary>
     /// Bend and bend tangent lines of the bodies shown flat (a body is its flat pattern's own solid: no feature after
-    /// the Flat Pattern changed it), on both faces of the sheet.
+    /// the Flat Pattern changed it), on the unfolded face; the viewport puts them on the face toward the viewer.
     /// </summary>
-    static List<(Vec3 a, Vec3 b, ViewportControl.BendLineKind kind)> BendLinesOf(ModelState state)
+    static List<ViewportControl.BendLine> BendLinesOf(ModelState state)
     {
-        var lines = new List<(Vec3, Vec3, ViewportControl.BendLineKind)>();
+        var lines = new List<ViewportControl.BendLine>();
         foreach (var body in state.Bodies)
         {
             if (!state.Flats.TryGetValue(body.Id, out var flat) || !ReferenceEquals(body.Solid.Native, flat.Body)) continue;
             var fr = flat.Frame;
-            var lift = Math.Max(flat.Thickness * 0.01, 1e-4); // just off the faces
-            foreach (var z in new[] { lift, -flat.Thickness - lift })
+            Vec3 P(Vec2 p) => fr.ToWorld(p.X, p.Y, 0);
+            foreach (var bend in flat.Bends)
             {
-                Vec3 P(Vec2 p) => fr.ToWorld(p.X, p.Y, z);
-                foreach (var bend in flat.Bends)
-                {
-                    lines.Add((P(bend.A), P(bend.B), bend.Up ? ViewportControl.BendLineKind.BendUp : ViewportControl.BendLineKind.BendDown));
-                    lines.Add((P(bend.Tangent1.A), P(bend.Tangent1.B), ViewportControl.BendLineKind.Tangent));
-                    lines.Add((P(bend.Tangent2.A), P(bend.Tangent2.B), ViewportControl.BendLineKind.Tangent));
-                }
+                ViewportControl.BendLine L(Vec2 a, Vec2 b, ViewportControl.BendLineKind kind) => new(P(a), P(b), kind, fr.Normal, flat.Thickness, bend.Allowance);
+                lines.Add(L(bend.A, bend.B, bend.Up ? ViewportControl.BendLineKind.BendUp : ViewportControl.BendLineKind.BendDown));
+                foreach (var (a, b) in bend.Tangents) lines.Add(L(a, b, ViewportControl.BendLineKind.Tangent));
             }
         }
         return lines;
