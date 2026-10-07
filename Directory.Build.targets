@@ -1,0 +1,9 @@
+<Project>
+  <!-- Point git at the repo's tracked hooks (.githooks) so fresh clones get them on first build. -->
+  <Target Name="InstallGitHooks" BeforeTargets="Build"
+          Condition="Exists('$(MSBuildThisFileDirectory).git') And Exists('$(MSBuildThisFileDirectory).githooks')">
+    <Exec Command="git config core.hooksPath .githooks"
+          WorkingDirectory="$(MSBuildThisFileDirectory)"
+          ContinueOnError="true" StandardOutputImportance="low" />
+  </Target>
+</Project>

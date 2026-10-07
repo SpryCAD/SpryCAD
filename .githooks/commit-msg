@@ -1,0 +1,8 @@
+#!/bin/sh
+# Reject commits whose message carries AI co-author attribution.
+# Enable with: git config core.hooksPath .githooks
+
+if grep -iqE '^[[:space:]]*co-authored-by:.*(claude|anthropic)' "$1"; then
+    echo "commit-msg: remove the 'Co-Authored-By: Claude' trailer from the commit message." >&2
+    exit 1
+fi
