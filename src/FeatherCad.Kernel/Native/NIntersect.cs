@@ -101,6 +101,25 @@ public static class NIntersect
                 if (t >= lo - 1e-12 && t <= hi + 1e-12) res.Add(Math.Clamp(t, lo, hi));
             }
         }
+        else if (s.Kind == SurfaceKind.Screw)
+        {
+            // a screw surface's signed distance jumps between its turns (no Lipschitz bound to prune with): sign changes
+            // on a fine scan (an eighth of the lead or of the radius), each checked to lie on the surface
+            var sc = s.Screw!;
+            var step = Math.Max(1e-9, Math.Min(Math.Abs(sc.Motion.Lead) > 0 ? Math.Abs(sc.Motion.Lead) / 8 : double.MaxValue, Math.Max(sc.MaxRadius, 1e-3) / 8));
+            int n = Math.Clamp((int)Math.Ceiling(ArcBound(c, lo, hi) / step), 16, 20000);
+            double pt = lo, pf = F(lo);
+            for (int i = 1; i <= n; i++)
+            {
+                var t = lo + (hi - lo) * i / n; var f = F(t);
+                if (pf * f < 0)
+                {
+                    var r = Roots.Bisect(F, pt, t);
+                    if (Math.Abs(F(r)) < tol * 1e3) res.Add(r);
+                }
+                pt = t; pf = f;
+            }
+        }
         else
         {
             double total = ArcBound(c, lo, hi);

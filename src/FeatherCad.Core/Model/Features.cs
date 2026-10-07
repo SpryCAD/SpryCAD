@@ -55,6 +55,8 @@ public sealed class DirRef
 [JsonDerivedType(typeof(ExtrudeFeature), "extrude")]
 [JsonDerivedType(typeof(RevolveFeature), "revolve")]
 [JsonDerivedType(typeof(SweepFeature), "sweep")]
+[JsonDerivedType(typeof(HelicalSweepFeature), "helicalSweep")]
+[JsonDerivedType(typeof(ThreadFeature), "thread")]
 [JsonDerivedType(typeof(FilletFeature), "fillet")]
 [JsonDerivedType(typeof(ChamferFeature), "chamfer")]
 [JsonDerivedType(typeof(HoleFeature), "hole")]
@@ -121,6 +123,47 @@ public sealed class SweepFeature : Feature
     public bool IsCut { get; set; }
     public bool Merge { get; set; } = true;
     public override IEnumerable<string> Consumes => new[] { ProfileSketchId, PathSketchId };
+}
+
+/// <summary>
+/// A closed profile swept along a helix about a centerline of its sketch (threads, springs, worms): turning while it
+/// advances Pitch per turn along the centerline.
+/// </summary>
+public sealed class HelicalSweepFeature : Feature
+{
+    public override string Kind => IsCut ? "Cut-Helical" : "Helical";
+    public string SketchId { get; set; } = "";
+    /// <summary>Sketch line used as axis (0 = first centerline).</summary>
+    public int AxisEntity { get; set; }
+    public string Pitch { get; set; } = "5";
+    public string Revolutions { get; set; } = "3";
+    public bool LeftHand { get; set; }
+    /// <summary>Advance against the centerline's direction.</summary>
+    public bool Reverse { get; set; }
+    public bool IsCut { get; set; }
+    public bool Merge { get; set; } = true;
+    public override IEnumerable<string> Consumes => new[] { SketchId };
+}
+
+/// <summary>
+/// A modelled thread on a cylindrical face: external on a shaft, internal in a hole (ISO metric, 60° profile), from
+/// the end nearest the picked point, with a fit clearance for printed parts.
+/// </summary>
+public sealed class ThreadFeature : Feature
+{
+    public override string Kind => "Thread";
+    public FaceRef Face { get; set; } = new();
+    /// <summary>"Auto" (the size fitting the face), a metric size such as "M10", or "Custom" (Pitch, and the face as major/minor diameter).</summary>
+    public string Size { get; set; } = "Auto";
+    /// <summary>Pitch for a custom thread.</summary>
+    public string Pitch { get; set; } = "1.5";
+    /// <summary>Thread length from the start end (blank: the whole face).</summary>
+    public string Length { get; set; } = "";
+    /// <summary>Extra room on the flanks and root (mm), for 3D printed threads.</summary>
+    public string Clearance { get; set; } = "0";
+    public bool LeftHand { get; set; }
+    /// <summary>Start from the other end of the face.</summary>
+    public bool Reverse { get; set; }
 }
 
 public sealed class FilletFeature : Feature

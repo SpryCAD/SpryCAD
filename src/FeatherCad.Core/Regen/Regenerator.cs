@@ -200,6 +200,8 @@ public sealed class Regenerator
                 case ExtrudeFeature e: DoExtrude(e); break;
                 case RevolveFeature r: DoRevolve(r); break;
                 case SweepFeature sw: DoSweep(sw); break;
+                case HelicalSweepFeature hs: DoHelical(hs); break;
+                case ThreadFeature th: DoThread(th); break;
                 case FilletFeature fi: DoBlend(fi.Edges, Positive(fi.Radius, "Radius"), true, fi.TangentPropagation, fi.Overflow); break;
                 case ChamferFeature ch: { var cs = ChamferSizeOf(ch); DoBlend(ch.Edges, cs.D1, false, ch.TangentPropagation, ch.Overflow, cs); break; }
                 case HoleFeature h: DoHole(h); break;
@@ -318,6 +320,100 @@ public sealed class Regenerator
             if (tool.Native == null && tool.Volume() < 0) tool = tool.Flipped(); // native revolves are oriented by construction
             ApplyTool(tool, r.IsCut, r.Merge);
             State.Tools[f.Id] = new ToolInfo(tool, r.IsCut, r.Merge);
+        }
+
+        void DoHelical(HelicalSweepFeature h)
+        {
+            var sk = GetSketch(h.SketchId);
+            SkLine? axis = h.AxisEntity != 0 ? sk.Sketch.Entity(h.AxisEntity) as SkLine : null;
+            axis ??= sk.Sketch.Entities.OfType<SkLine>().FirstOrDefault(l => l.Construction);
+            if (axis == null) throw new FeatureException("Draw a centerline in the profile's sketch: the helix's axis.");
+            var regions = axis.Construction ? sk.Regions : ProfileExtractor.Extract(sk.Sketch, out _, new HashSet<int> { axis.Id });
+            if (regions.Count == 0) throw new FeatureException("The sketch has no closed profile.");
+            var pitch = Positive(h.Pitch, "Pitch");
+            var turns = Positive(h.Revolutions, "Revolutions");
+            var a = sk.Frame.ToWorld(sk.Sketch.P(axis.P1)); var b = sk.Frame.ToWorld(sk.Sketch.P(axis.P2));
+            var dir = (b - a).Normalized;
+            if (h.Reverse) dir = -dir;
+            Solid tool;
+            try
+            {
+                var nb = Kernel.Native.NHelical.Sweep(regions, sk.Frame, a, dir, h.LeftHand ? -pitch : pitch, turns * 2 * Math.PI, f.Id);
+                if (nb.Validate() is { } bad) throw new FeatureException("The helical sweep is not a valid solid: " + bad);
+                tool = Kernel.Native.NTess.ToSolid(nb);
+            }
+            catch (ArgumentException ex) { throw new FeatureException(char.ToUpper(ex.Message[0]) + ex.Message[1..] + "."); }
+            ApplyTool(tool, h.IsCut, h.Merge);
+            State.Tools[f.Id] = new ToolInfo(tool, h.IsCut, h.Merge);
+        }
+
+        void DoThread(ThreadFeature t)
+        {
+            if (string.IsNullOrEmpty(t.Face.Name)) throw new FeatureException("Select the cylindrical face to thread (a shaft or a hole).");
+            var hit = Resolver.NativeFace(t.Face, State) ?? throw new FeatureException("The face to thread could not be found.");
+            var face = hit.face;
+            if (face.Surface.Kind != SurfaceKind.Cylinder) throw new FeatureException("Threads go on cylindrical faces: select a shaft or a hole.");
+            var s = face.Surface;
+            var axisDir = s.Axis.Normalized; var axisO = s.Origin; var surfaceR = s.R;
+            // a shaft's face looks away from the axis, a hole's towards it
+            bool external = face.Sense;
+            // the face's extent along the axis
+            double hmin = double.MaxValue, hmax = double.MinValue;
+            foreach (var c in face.Coedges)
+                foreach (var p in c.Edge.Samples(1e-3)) { var hh = Vec3.Dot(p - axisO, axisDir); hmin = Math.Min(hmin, hh); hmax = Math.Max(hmax, hh); }
+            // size: a standard one (or the one fitting the face), or the face itself with a given pitch
+            double major, pitch;
+            if (t.Size == "Custom")
+            {
+                pitch = Positive(t.Pitch, "Pitch");
+                major = external ? surfaceR : surfaceR + 5 * Threads.H(pitch) / 8;
+            }
+            else
+            {
+                var std = t.Size == "Auto" ? Threads.Fit(2 * surfaceR, external) : Threads.MetricCoarse.FirstOrDefault(x => x.name == t.Size);
+                if (std.name == null) throw new FeatureException($"Unknown thread size '{t.Size}'.");
+                pitch = std.p;
+                major = std.d / 2;
+                if (external && Math.Abs(major - surfaceR) > 0.15 * major)
+                    status.Warnings.Add($"The shaft is {2 * surfaceR:0.###} mm across, {std.name} is {std.d:0.###} mm: the thread follows the shaft.");
+                if (external) major = surfaceR;
+            }
+            var clearance = Num(t.Clearance, "Clearance");
+            if (clearance < 0) throw new FeatureException("The clearance cannot be negative.");
+            var faceLen = hmax - hmin;
+            var length = string.IsNullOrWhiteSpace(t.Length) ? faceLen : Positive(t.Length, "Length");
+            // from the end nearest the picked point (or the other one), running into the face
+            var hs = Vec3.Dot(t.Face.Hint - axisO, axisDir);
+            bool fromMin = Math.Abs(hs - hmin) <= Math.Abs(hs - hmax);
+            if (t.Reverse) fromMin = !fromMin;
+            var dir = fromMin ? axisDir : -axisDir;
+            var hStart = fromMin ? hmin : hmax;
+            // the tool starts a pitch outside the end (the thread runs out cleanly through it)
+            var origin = axisO + axisDir * hStart - dir * pitch;
+            var radial = s.F.XDir;
+            var frame = new Frame(origin, radial, dir, Vec3.Cross(radial, dir));
+            var (groove, turn) = Threads.Groove(external, surfaceR, major, pitch, clearance);
+            var region = new ProfileRegion(ProfileLoop.Polygon(groove, "G"));
+            var run = Math.Min(length, faceLen + pitch) + pitch; // along the axis, from the tool's start
+            Solid tool;
+            try
+            {
+                // a clearance too large for the standard crest: the shaft turned down (the hole bored out) over the
+                // thread first, a ring from a pitch outside the end to the thread's end
+                if (turn is { } rt)
+                {
+                    double r0 = external ? rt : surfaceR - 0.1 * pitch, r1 = external ? surfaceR + 0.1 * pitch : rt;
+                    var ring = new ProfileRegion(ProfileLoop.Polygon(new[] { new Vec2(r0, 0), new Vec2(r1, 0), new Vec2(r1, run - pitch / 2), new Vec2(r0, run - pitch / 2) }, "T"));
+                    var turned = Kernel.Native.NBuild.Revolve(new[] { ring }, frame, Vec2.Zero, new Vec2(0, 1), 2 * Math.PI, f.Id + ".Turn");
+                    ApplyTool(Kernel.Native.NTess.ToSolid(turned), true, true);
+                }
+                var nb = Kernel.Native.NHelical.Sweep(new[] { region }, frame, origin, dir, t.LeftHand ? -pitch : pitch, run / pitch * 2 * Math.PI, f.Id);
+                if (nb.Validate() is { } bad) throw new FeatureException("The thread is not a valid solid: " + bad);
+                tool = Kernel.Native.NTess.ToSolid(nb);
+            }
+            catch (ArgumentException ex) { throw new FeatureException(char.ToUpper(ex.Message[0]) + ex.Message[1..] + "."); }
+            ApplyTool(tool, true, true);
+            State.Tools[f.Id] = new ToolInfo(tool, true, true);
         }
 
         void DoSweep(SweepFeature s)
@@ -655,7 +751,7 @@ public sealed class Regenerator
             foreach (var seedId in seeds)
             {
                 if (!State.Tools.TryGetValue(seedId, out var tool))
-                    throw new FeatureException("Only extrude, revolve, sweep, hole, fillet, chamfer, pattern and mirror features can be patterned.");
+                    throw new FeatureException("Only extrude, revolve, sweep, helical sweep, thread, hole, fillet, chamfer, pattern and mirror features can be patterned.");
                 var copies = new List<(int i, Solid tool)>();
                 // instances whose blend is solved again (their edges are not the seed's edges moved)
                 var toSolve = new List<(int i, Body body, List<Kernel.Native.NEdge> edges, double tol)>();

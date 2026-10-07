@@ -84,3 +84,112 @@ static class HelicalTests
         });
     }
 }
+
+/// <summary>The Helical Sweep and Thread features in documents.</summary>
+static class ThreadFeatureTests
+{
+    static FeatherCad.Core.Sketching.Sketch CircleAt(Vec2 c, double r)
+    {
+        var sk = new FeatherCad.Core.Sketching.Sketch();
+        var cp = Vec2.Distance(c, Vec2.Zero) < 1e-12 ? sk.Point(FeatherCad.Core.Sketching.Sketch.OriginId)! : sk.AddPoint(c);
+        sk.Add(new FeatherCad.Core.Sketching.SkCircle { Center = cp.Id, R = r });
+        return sk;
+    }
+
+    // ∫ r dA of a polygon in the (r, z) half plane
+    static double FirstMoment(IReadOnlyList<Vec2> p)
+    {
+        double m = 0;
+        for (int i = 0; i < p.Count; i++) { var a = p[i]; var b = p[(i + 1) % p.Count]; m += (a.X + b.X) * (a.X * b.Y - b.X * a.Y); }
+        return Math.Abs(m) / 6;
+    }
+
+    // the part of a convex polygon on one side of r = R
+    static List<Vec2> Clip(IReadOnlyList<Vec2> p, double R, bool inside)
+    {
+        var res = new List<Vec2>();
+        for (int i = 0; i < p.Count; i++)
+        {
+            var a = p[i]; var b = p[(i + 1) % p.Count];
+            bool ai = inside ? a.X <= R : a.X >= R, bi = inside ? b.X <= R : b.X >= R;
+            if (ai) res.Add(a);
+            if (ai != bi) res.Add(a + (b - a) * ((R - a.X) / (b.X - a.X)));
+        }
+        return res;
+    }
+
+    public static void Run(TestRunner t)
+    {
+        t.Test("Helical Sweep feature: a coil spring from a sketch (circle and centerline), saved and loaded", () =>
+        {
+            var doc = new FeatherCad.Core.Model.CadDocument();
+            var sk = CircleAt(new Vec2(12, 0), 1.5);
+            var a = sk.AddPoint(new Vec2(0, -5)); var b = sk.AddPoint(new Vec2(0, 5));
+            sk.Add(new FeatherCad.Core.Sketching.SkLine { P1 = a.Id, P2 = b.Id, Construction = true });
+            var s = doc.AddFeature(new FeatherCad.Core.Model.SketchFeature { Plane = FeatherCad.Core.Model.PlaneRef.Front, Sketch = sk });
+            var hs = doc.AddFeature(new FeatherCad.Core.Model.HelicalSweepFeature { SketchId = s.Id, Pitch = "4", Revolutions = "5" });
+            t.Eq(hs.Name, "Helical1");
+            var r = new FeatherCad.Core.Regen.Regenerator().Rebuild(doc);
+            t.True(r.Status[hs.Id].Ok, r.Status[hs.Id].Error ?? "");
+            double v = 5 * 2 * Math.PI * (Math.PI * 2.25) * 12;
+            t.True(Math.Abs(KernelTests.Vex(r.State.Bodies[0].Solid) - v) < 1e-7 * v, "Pappus volume");
+            var again = FeatherCad.Core.Model.CadDocument.FromJson(doc.ToJson());
+            var r2 = new FeatherCad.Core.Regen.Regenerator().Rebuild(again);
+            t.True(Math.Abs(KernelTests.Vex(r2.State.Bodies[0].Solid) - v) < 1e-7 * v, "same after loading");
+        });
+
+        t.Test("Thread feature: M10 on a shaft and in a hole (auto size), clearance removes more, saved and loaded", () =>
+        {
+            foreach (var external in new[] { true, false })
+            {
+                var doc = new FeatherCad.Core.Model.CadDocument();
+                FeatherCad.Core.Model.Feature body;
+                double surfaceR;
+                if (external)
+                {
+                    // a 10 mm shaft, 30 long along +Z
+                    var s = doc.AddFeature(new FeatherCad.Core.Model.SketchFeature { Plane = FeatherCad.Core.Model.PlaneRef.Front, Sketch = CircleAt(Vec2.Zero, 5) });
+                    body = doc.AddFeature(new FeatherCad.Core.Model.ExtrudeFeature { SketchId = s.Id, Depth = "30" });
+                    surfaceR = 5;
+                }
+                else
+                {
+                    // a 30 × 30 × 30 block with a hole of the M10 minor diameter through it along +Z
+                    var s = doc.AddFeature(new FeatherCad.Core.Model.SketchFeature { Plane = FeatherCad.Core.Model.PlaneRef.Front, Sketch = CoreTests.Rect(30, 30) });
+                    doc.AddFeature(new FeatherCad.Core.Model.ExtrudeFeature { SketchId = s.Id, Depth = "30" });
+                    surfaceR = FeatherCad.Core.Regen.Threads.MinorDiameter(10, 1.5) / 2;
+                    var h = doc.AddFeature(new FeatherCad.Core.Model.SketchFeature { Plane = FeatherCad.Core.Model.PlaneRef.Front, Sketch = CircleAt(new Vec2(15, 15), surfaceR) });
+                    body = doc.AddFeature(new FeatherCad.Core.Model.ExtrudeFeature { SketchId = h.Id, IsCut = true, End = FeatherCad.Core.Model.EndCondition.ThroughAllBoth });
+                }
+                var before = new FeatherCad.Core.Regen.Regenerator().Rebuild(doc);
+                var cylFace = before.State.Bodies[0].Solid.Native!.Faces.First(f => f.Surface.Kind == SurfaceKind.Cylinder);
+                var axisPoint = external ? Vec3.Zero : new Vec3(15, 15, 0);
+                var hint = axisPoint + new Vec3(surfaceR, 0, 28); // near the far end (z = 30)
+                double Removed(string clearance)
+                {
+                    var d = FeatherCad.Core.Model.CadDocument.FromJson(doc.ToJson());
+                    var th = d.AddFeature(new FeatherCad.Core.Model.ThreadFeature
+                    {
+                        Face = new FeatherCad.Core.Model.FaceRef { Name = cylFace.Tag.Name, Hint = hint }, Length = "15", Clearance = clearance,
+                    });
+                    var r = new FeatherCad.Core.Regen.Regenerator().Rebuild(d);
+                    t.True(r.Status[th.Id].Ok, $"{(external ? "external" : "internal")}: {r.Status[th.Id].Error}");
+                    t.Eq(r.State.Bodies[0].Solid.Topology.OpenHalfEdges, 0);
+                    // saved and loaded, the same
+                    var r2 = new FeatherCad.Core.Regen.Regenerator().Rebuild(FeatherCad.Core.Model.CadDocument.FromJson(d.ToJson()));
+                    var v = KernelTests.Vex(r.State.Bodies[0].Solid);
+                    t.True(Math.Abs(KernelTests.Vex(r2.State.Bodies[0].Solid) - v) < 1e-9 * v, "same after loading");
+                    return KernelTests.Vex(before.State.Bodies[0].Solid) - v;
+                }
+                var removed = Removed("0");
+                // the groove's cross-section in the material, swept between 15 mm ± a pitch of thread
+                var groove = FeatherCad.Core.Regen.Threads.Groove(external, surfaceR, 5, 1.5, 0).groove;
+                var m = FirstMoment(Clip(groove, surfaceR, external));
+                double lo = 2 * Math.PI * m * (15 - 1.5) / 1.5, hi = 2 * Math.PI * m * (15 + 1.5) / 1.5;
+                t.True(removed > lo && removed < hi, $"{(external ? "external" : "internal")}: removed {removed:0.###} within {lo:0.###}..{hi:0.###}");
+                var looser = Removed("0.2");
+                t.True(looser > removed + 1, $"clearance removes more: {looser:0.###} vs {removed:0.###}");
+            }
+        });
+    }
+}
