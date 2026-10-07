@@ -22,7 +22,7 @@ namespace FeatherCad.App;
 public partial class MainWindow
 {
     Window? _massWindow;
-    StackPanel? _massReport;
+    SelectableTextBlock? _massReport;
     DocumentSession? _massSession;
     string _massText = "";
 
@@ -36,7 +36,6 @@ public partial class MainWindow
     const string CustomMaterial = "Custom";
     const double KgM3ToLbIn3 = 3.6127292e-5;
 
-    static readonly IBrush SectionBrush = new SolidColorBrush(Color.FromRgb(29, 53, 87));
     static readonly IBrush LabelBrush = new SolidColorBrush(Color.FromRgb(90, 100, 115));
 
     void MassPropertiesCommand()
@@ -87,42 +86,46 @@ public partial class MainWindow
         dens.KeyDown += (_, e) => { if (e.Key == Key.Enter) { ApplyDensity(); e.Handled = true; } };
         Fill();
 
-        var materialRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-        materialRow.Children.Add(new TextBlock { Text = "Material", VerticalAlignment = VerticalAlignment.Center, Foreground = LabelBrush });
-        materialRow.Children.Add(combo);
-        materialRow.Children.Add(new TextBlock { Text = "Density", VerticalAlignment = VerticalAlignment.Center, Foreground = LabelBrush, Margin = new Thickness(8, 0, 0, 0) });
-        materialRow.Children.Add(dens);
-        materialRow.Children.Add(unit);
+        var materialRow = new DockPanel();
+        var options = new Button { Content = "Options...", MinWidth = 80, HorizontalContentAlignment = HorizontalAlignment.Center };
+        options.Click += async (_, _) => { if (_massWindow != null && await MassOptions(_massWindow)) UpdateMassProperties(); };
+        DockPanel.SetDock(options, Dock.Right);
+        materialRow.Children.Add(options);
+        var mat = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        mat.Children.Add(new TextBlock { Text = "Material", VerticalAlignment = VerticalAlignment.Center, Foreground = LabelBrush });
+        mat.Children.Add(combo);
+        mat.Children.Add(new TextBlock { Text = "Density", VerticalAlignment = VerticalAlignment.Center, Foreground = LabelBrush, Margin = new Thickness(8, 0, 0, 0) });
+        mat.Children.Add(dens);
+        mat.Children.Add(unit);
+        materialRow.Children.Add(mat);
 
-        // report options (as SolidWorks' Options...): decimal places, scientific notation
-        var decimals = new NumericUpDown { Minimum = 0, Maximum = 8, Increment = 1, Value = _massDecimals, FormatString = "0", Width = 110 };
-        decimals.ValueChanged += (_, e) => { _massDecimals = (int)(e.NewValue ?? 4); UpdateMassProperties(); };
-        var sci = new CheckBox { Content = "Scientific notation", IsChecked = _massScientific, Margin = new Thickness(12, 0, 0, 0) };
-        sci.IsCheckedChanged += (_, _) => { _massScientific = sci.IsChecked == true; UpdateMassProperties(); };
-        var optionsRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-        optionsRow.Children.Add(new TextBlock { Text = "Decimal places", VerticalAlignment = VerticalAlignment.Center, Foreground = LabelBrush });
-        optionsRow.Children.Add(decimals);
-        optionsRow.Children.Add(sci);
-
-        _massReport = new StackPanel { Spacing = 2 };
-        var copy = new Button { Content = "Copy" };
+        // the report: plain text on white, as a printout (SolidWorks' report box)
+        _massReport = new SelectableTextBlock { FontFamily = new FontFamily("Consolas, Menlo, monospace"), FontSize = 12, Foreground = Brushes.Black };
+        var reportBox = new Border
+        {
+            Background = Brushes.White, BorderBrush = new SolidColorBrush(Color.FromRgb(171, 179, 191)), BorderThickness = new Thickness(1),
+            Child = new ScrollViewer
+            {
+                Content = new Border { Padding = new Thickness(10, 8), Child = _massReport },
+                MaxHeight = 560, HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto,
+            },
+        };
+        var copy = new Button { Content = "Copy to Clipboard" };
         copy.Click += (_, _) => { if (_massText.Length > 0) _ = Clipboard?.SetTextAsync(_massText); };
         var close = new Button { Content = "Close", IsCancel = true };
-        var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 12, 0, 0) };
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, HorizontalAlignment = HorizontalAlignment.Right };
         foreach (var b in new[] { copy, close }) { b.MinWidth = 80; b.HorizontalContentAlignment = HorizontalAlignment.Center; buttons.Children.Add(b); }
 
         var content = new StackPanel { Spacing = 10 };
         content.Children.Add(materialRow);
-        content.Children.Add(optionsRow);
-        content.Children.Add(new Border { Height = 1, Background = new SolidColorBrush(Color.FromRgb(214, 220, 228)) });
-        content.Children.Add(_massReport);
+        content.Children.Add(reportBox);
         content.Children.Add(buttons);
         var w = new Window
         {
             Title = "Mass Properties - " + Session.Title.TrimEnd(' ', '*'),
-            Width = 660, SizeToContent = SizeToContent.Height, CanResize = false,
+            Width = 640, SizeToContent = SizeToContent.Height, CanResize = false,
             WindowStartupLocation = WindowStartupLocation.CenterOwner, ShowInTaskbar = false,
-            Content = new Border { Padding = new Thickness(16), Child = content },
+            Content = new Border { Padding = new Thickness(12), Child = content },
         };
         close.Click += (_, _) => w.Close();
         w.Closed += (_, _) => EndMassProperties();
@@ -149,19 +152,65 @@ public partial class MainWindow
         _massWindow = null; _massReport = null; _massSession = null; _massText = "";
     }
 
-    // report formatting (as SolidWorks' Options): decimal places and scientific notation; kept while the app runs
+    // report formatting (the Options dialog, as SolidWorks'): decimal places, scientific notation; kept while the app runs
     static int _massDecimals = 4;
     static bool _massScientific;
+
+    /// <summary>The report options. True when they changed.</summary>
+    static async Task<bool> MassOptions(Window owner)
+    {
+        var decimals = new NumericUpDown { Minimum = 0, Maximum = 8, Increment = 1, Value = _massDecimals, FormatString = "0", Width = 110 };
+        var sci = new CheckBox { Content = "Scientific notation", IsChecked = _massScientific };
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        row.Children.Add(new TextBlock { Text = "Decimal places", VerticalAlignment = VerticalAlignment.Center });
+        row.Children.Add(decimals);
+        var ok = new Button { Content = "OK", IsDefault = true, MinWidth = 80, HorizontalContentAlignment = HorizontalAlignment.Center };
+        var cancel = new Button { Content = "Cancel", IsCancel = true, MinWidth = 80, HorizontalContentAlignment = HorizontalAlignment.Center };
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 8, 0, 0) };
+        buttons.Children.Add(ok); buttons.Children.Add(cancel);
+        var sp = new StackPanel { Spacing = 10 };
+        sp.Children.Add(new TextBlock { Text = "Report", FontWeight = FontWeight.SemiBold });
+        sp.Children.Add(row); sp.Children.Add(sci); sp.Children.Add(buttons);
+        var w = new Window
+        {
+            Title = "Mass Properties Options", Width = 300, SizeToContent = SizeToContent.Height, CanResize = false,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner, ShowInTaskbar = false,
+            Content = new Border { Padding = new Thickness(14), Child = sp },
+        };
+        var changed = false;
+        ok.Click += (_, _) =>
+        {
+            var d = (int)(decimals.Value ?? 4);
+            changed = d != _massDecimals || (sci.IsChecked == true) != _massScientific;
+            _massDecimals = d; _massScientific = sci.IsChecked == true;
+            w.Close();
+        };
+        cancel.Click += (_, _) => w.Close();
+        await w.ShowDialog(owner);
+        return changed;
+    }
 
     void UpdateMassProperties()
     {
         if (_massReport == null) return;
-        _massReport.Children.Clear();
         var bodies = Session.DisplayResult?.State.Bodies ?? new List<Body>();
+        // the report as lines (bold: headings), shown on white in a fixed-width font and copied as text
+        var report = new List<(string text, bool bold)>();
+        void Show()
+        {
+            _massReport.Inlines!.Clear();
+            for (int i = 0; i < report.Count; i++)
+            {
+                if (i > 0) _massReport.Inlines.Add(new LineBreak());
+                _massReport.Inlines.Add(new Run(report[i].text) { FontWeight = report[i].bold ? FontWeight.Bold : FontWeight.Normal });
+            }
+            _massText = string.Join(Environment.NewLine, report.Select(x => x.text));
+        }
         if (bodies.Count == 0)
         {
-            _massReport.Children.Add(new TextBlock { Text = "No solid bodies.", Foreground = LabelBrush });
-            Viewport.CenterOfMass = null; _massText = "";
+            report.Add(("No solid bodies.", false));
+            Show();
+            Viewport.CenterOfMass = null;
             return;
         }
         var mp = new MassProps();
@@ -179,87 +228,77 @@ public partial class MainWindow
         var dec = _massDecimals;
         string F(double v)
         {
-            if (_massScientific) return v == 0 ? 0.ToString("0." + new string('0', Math.Max(1, dec)) + "E+0", CultureInfo.InvariantCulture)
-                : v.ToString("0." + new string('0', Math.Max(1, dec)) + "E+0", CultureInfo.InvariantCulture);
+            if (_massScientific) return v.ToString("0." + new string('0', Math.Max(1, dec)) + "E+0", CultureInfo.InvariantCulture);
             var r = Math.Round(v, dec);
             if (r == 0) r = 0; // -0
             return r.ToString(dec == 0 ? "0" : "0." + new string('0', dec), CultureInfo.InvariantCulture);
         }
-        // in scientific notation, noise is not rounded away: clear values far below the part's own scale
+        // values far below the part's own scale are noise: 0 (rounding does not hide it in scientific notation)
         double Clean(double v, double scale) => Math.Abs(v) < 1e-9 * Math.Max(scale, 1e-300) ? 0 : v;
 
-        var text = new System.Text.StringBuilder();
-        text.AppendLine($"Mass properties of {Session.Title.TrimEnd(' ', '*')}");
-        void Section(string title, string? sub = null)
+        void Line(string s = "", bool bold = false) => report.Add((s, bold));
+        // rows of cells, each column padded to its widest cell so the columns line up
+        void Columns(IEnumerable<string[]> rows, string indent = "    ")
         {
-            var sp = new StackPanel { Margin = new Thickness(0, 10, 0, 2) };
-            sp.Children.Add(new TextBlock { Text = title, FontWeight = FontWeight.SemiBold, Foreground = SectionBrush });
-            if (sub != null) sp.Children.Add(new TextBlock { Text = sub, FontSize = 11, Foreground = LabelBrush });
-            _massReport.Children.Add(sp);
-            text.AppendLine().AppendLine(title + (sub != null ? "  " + sub : ""));
-        }
-        // cells "Name = value" in even columns
-        void Cells(IEnumerable<string[]> rows, int columns, double width = 200)
-        {
-            var g = new Grid { Margin = new Thickness(12, 0, 0, 0) };
-            for (int c = 0; c < columns; c++) g.ColumnDefinitions.Add(new ColumnDefinition(width, GridUnitType.Pixel));
-            int r = 0;
-            foreach (var row in rows)
-            {
-                g.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
-                for (int c = 0; c < row.Length; c++)
-                {
-                    var tb = new SelectableTextBlock { Text = row[c], Margin = new Thickness(0, 1, 12, 1), FontFamily = new FontFamily("Consolas, Menlo, monospace") };
-                    Grid.SetRow(tb, r); Grid.SetColumn(tb, c); g.Children.Add(tb);
-                }
-                text.AppendLine("  " + string.Join("   ", row));
-                r++;
-            }
-            _massReport.Children.Add(g);
+            var list = rows.ToList();
+            var widths = Enumerable.Range(0, list.Max(r => r.Length)).Select(c => list.Max(r => c < r.Length ? r[c].Length : 0)).ToArray();
+            foreach (var r in list)
+                Line(indent + string.Join("    ", r.Select((cell, c) => c < r.Length - 1 ? cell.PadRight(widths[c]) : cell)));
         }
 
-        var mass = mp.Volume * density;
-        Section("Overview");
-        Cells(new[]
-        {
-            new[] { $"Density = {(ips ? kgm3 * KgM3ToLbIn3 : kgm3).ToString(ips ? "0.######" : "0.##", CultureInfo.InvariantCulture)} {(ips ? "lb/in³" : "kg/m³")}" },
-            new[] { $"Mass = {F(mass)} {massUnit}" },
-            new[] { $"Volume = {F(mp.Volume)} {u}³" },
-            new[] { $"Surface area = {F(mp.SurfaceArea)} {u}²" },
-            new[] { $"Bounding box = {F(bb.Size.X)} × {F(bb.Size.Y)} × {F(bb.Size.Z)} {u}" },
-        }.Concat(bodies.Count > 1 ? new[] { new[] { $"Bodies = {bodies.Count}" } } : Array.Empty<string[]>()), 1, 600);
+        var dShown = (ips ? kgm3 * KgM3ToLbIn3 : kgm3).ToString(ips ? "0.######" : "0.##", CultureInfo.InvariantCulture);
+        Line($"Mass properties of {Session.Title.TrimEnd(' ', '*')}", true);
+        Line($"    Material: {Session.Doc.Material ?? Materials[0].name}{(Session.Doc.Density == null ? " (default)" : "")}");
+        if (bodies.Count > 1) Line($"    Bodies: {bodies.Count}");
+        Line();
+        Line($"Density = {dShown} {(ips ? "lb/in³" : "kg/m³")}");
+        Line($"Mass = {F(mp.Volume * density)} {massUnit}");
+        Line($"Volume = {F(mp.Volume)} {u}³");
+        Line($"Surface area = {F(mp.SurfaceArea)} {u}²");
+        Line($"Bounding box = {F(bb.Size.X)} × {F(bb.Size.Y)} × {F(bb.Size.Z)} {u}");
 
         var c0 = mp.Center;
         var size = Math.Max(bb.Diagonal, 1e-9);
-        Section($"Center of mass ({u})");
-        Cells(new[] { new[] { $"X = {F(Clean(c0.X, size))}", $"Y = {F(Clean(c0.Y, size))}", $"Z = {F(Clean(c0.Z, size))}" } }, 3);
+        Line();
+        Line($"Center of mass: ({u})", true);
+        Line($"    X = {F(Clean(c0.X, size))}");
+        Line($"    Y = {F(Clean(c0.Y, size))}");
+        Line($"    Z = {F(Clean(c0.Z, size))}");
 
-        Section($"Principal axes of inertia and principal moments ({iu})", "Taken at the center of mass.");
+        Line();
+        Line($"Principal axes of inertia and principal moments of inertia: ({iu})", true);
+        Line("Taken at the center of mass.");
         string[] pn = { "Ix", "Iy", "Iz" }, pm = { "Px", "Py", "Pz" };
         var biggest = Math.Max(mp.Principal.Max(Math.Abs), 1e-300) * density;
-        Cells(Enumerable.Range(0, 3).Select(i =>
+        string A(double v) => (v >= 0 ? " " : "") + F(Clean(v, 1)); // signs in their own place, so the axes line up
+        Columns(Enumerable.Range(0, 3).Select(i =>
         {
             var a = mp.Axes[i];
-            return new[] { $"{pn[i]} = ({F(Clean(a.X, 1))}, {F(Clean(a.Y, 1))}, {F(Clean(a.Z, 1))})", $"{pm[i]} = {F(Clean(mp.Principal[i] * density, biggest))}" };
-        }), 2, 300);
+            return new[] { $"{pn[i]} = ({A(a.X)}, {A(a.Y)}, {A(a.Z)})", $"{pm[i]} = {F(Clean(mp.Principal[i] * density, biggest))}" };
+        }));
 
         // as SolidWorks shows them: moments on the diagonal, products of inertia (∫xy dm) off it
         void Tensor(double[,] t, string p)
         {
             var scale = Math.Max(Math.Max(Math.Abs(t[0, 0]), Math.Abs(t[1, 1])), Math.Abs(t[2, 2])) * density;
             string[] ax = { "x", "y", "z" };
-            Cells(Enumerable.Range(0, 3).Select(i => Enumerable.Range(0, 3)
-                .Select(j => $"{p}{ax[i]}{ax[j]} = {F(Clean((i == j ? t[i, j] : -t[i, j]) * density, scale))}").ToArray()), 3);
+            Columns(Enumerable.Range(0, 3).Select(i => Enumerable.Range(0, 3)
+                .Select(j => $"{p}{ax[i]}{ax[j]} = {F(Clean((i == j ? t[i, j] : -t[i, j]) * density, scale))}").ToArray()));
         }
-        Section($"Moments of inertia ({iu})", "Taken at the center of mass and aligned with the world axes.");
+        Line();
+        Line($"Moments of inertia: ({iu})", true);
+        Line("Taken at the center of mass and aligned with the world axes.");
         Tensor(mp.AtCenter, "L");
-        Section($"Moments of inertia ({iu})", "Taken at the origin, world axes.");
+        Line();
+        Line($"Moments of inertia: ({iu})", true);
+        Line("Taken at the origin, world axes.");
         Tensor(mp.AtOrigin, "I");
 
-        var note = "Products of inertia (Lxy etc.) are ∫xy dm. Computed on the display mesh, which follows the exact surfaces.";
-        if (bodies.Any(b => b.Solid.Topology.OpenHalfEdges != 0)) note = "⚠ A body is not closed (watertight): these results are not reliable.  " + note;
-        _massReport.Children.Add(new TextBlock { Text = note, FontSize = 11, Foreground = LabelBrush, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 10, 0, 0) });
-        _massText = text.ToString();
+        Line();
+        if (bodies.Any(b => b.Solid.Topology.OpenHalfEdges != 0)) Line("⚠ A body is not closed (watertight): these results are not reliable.");
+        Line("Products of inertia (Lxy etc.) are ∫xy dm.");
+        Line("Computed on the display mesh, which follows the exact surfaces.");
+        Show();
         if (_massWindow != null) _massWindow.Title = "Mass Properties - " + Session.Title.TrimEnd(' ', '*');
         // the center of mass symbol, and the principal axes a quarter of the part's size to either side
         Viewport.CenterOfMass = (c0, mp.Axes, Math.Max(bb.Diagonal * 0.25, 1e-6));
