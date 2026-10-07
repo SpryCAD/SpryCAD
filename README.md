@@ -37,7 +37,7 @@ natively on **Windows, Linux and macOS** with no browser, no Electron and no nat
 | Relations | Automatic while drawing (coincident, horizontal/vertical, midpoint, on-entity) — also to the **existing model**: model vertices (coincident), model edges (on edge), edge midpoints and hole/boss centers, all associative (they follow model changes); dashed inference lines to sketch points and model vertices. Plus Horizontal, Vertical, Parallel, Perpendicular, Collinear, Equal, Tangent, Concentric, Coincident, Midpoint, Symmetric, Fix |
 | Dimensions | Smart Dimension: length, horizontal/vertical/aligned distance, point–line, parallel lines, radius, diameter, angle; driven (reference) dims; expressions |
 | Solver | Numerical constraint solver with minimum-change dragging and degrees-of-freedom analysis (under / fully / over defined) |
-| Features | Extruded Boss/Base & Cut (Blind, Through All, Through All–Both, Mid Plane, two directions, merge result), Revolved Boss & Cut, Swept Boss & Cut (a profile along tangent lines and arcs, or a circle; exact planes, cylinders, cones, spheres and tori), Helical Boss & Cut (a profile swept along a helix about a centerline: springs, coils; exact screw surfaces), Thread (ISO metric on a shaft or in a hole: Blind, Up To Next, Through All, a lead-in chamfer, a fit clearance for 3D printing), Fillet, Chamfer, Hole Wizard (simple, counterbore, countersink, standard metric sizes, drill point), Shell, Linear Pattern (2 directions), Circular Pattern, Mirror, Reference Plane, Combine (add/subtract/common) |
+| Features | Extruded Boss/Base & Cut (Blind, Through All, Through All–Both, Mid Plane, two directions, merge result), Revolved Boss & Cut, Swept Boss & Cut (a profile along tangent lines and arcs, or a circle; exact planes, cylinders, cones, spheres and tori), Helical Boss & Cut (a profile swept along a helix about a centerline: springs, coils; exact screw surfaces; an optional straight run-out at the end), Thread (ISO metric on a shaft or in a hole: Blind, Up To Next, Through All, a lead-in chamfer, a relief groove or a run-out out of the side, a fit clearance for 3D printing), Fillet, Chamfer, Hole Wizard (simple, counterbore, countersink, standard metric sizes, drill point), Shell, Linear Pattern (2 directions), Circular Pattern, Mirror, Reference Plane, Combine (add/subtract/common) |
 | Booleans | Union, subtract, intersect between bodies; multi-body parts |
 | Tools | Equations / global variables, Mass Properties (volume, area, mass, center of mass, bounding box), Options (units MMGS/IPS, part color, wheel direction, perspective) |
 | Files | `.fcad` open/save, autosave + recovery, exact STEP (analytic surfaces) and STL export |
@@ -272,7 +272,7 @@ Check items off as they land.
 ### Modelling
 
 - [x] Sweep along a tangent path of lines and arcs (or a circle), boss and cut
-- [x] Helical sweeps and modelled threads (exact screw surfaces; ISO metric, end conditions, lead-in chamfers, fit clearance)
+- [x] Helical sweeps and modelled threads (exact screw surfaces; ISO metric, end conditions, lead-in chamfers, relief grooves and run-outs, fit clearance)
 - [ ] Sweep along splines and 3D paths, twist and guide curves; loft (sections, guide curves)
 - [ ] Cosmetic threads (annotation only), thread standards beyond ISO coarse (fine, UNC/UNF, pipe), tapered threads
 - [ ] Draft (including parting line)

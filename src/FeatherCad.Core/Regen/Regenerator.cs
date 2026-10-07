@@ -355,7 +355,28 @@ public sealed class Regenerator
             Solid tool;
             try
             {
-                var nb = Kernel.Native.NHelical.Sweep(regions, sk.Frame, a, dir, h.LeftHand ? -pitch : pitch, turns * 2 * Math.PI, f.Id);
+                // a run-out: a given length, or (a cut) out past the farthest corner of the model's bounds from the axis
+                double exitR = 0, exitL = 0;
+                if (h.RunOut)
+                {
+                    if (!string.IsNullOrWhiteSpace(h.RunOutLength)) exitL = Positive(h.RunOutLength, "Run-out length");
+                    else if (!h.IsCut) throw new FeatureException("Give the run-out's length (a boss has nothing to run out of).");
+                    else
+                    {
+                        foreach (var body in State.Bodies)
+                        {
+                            var bb = body.Solid.Bounds;
+                            for (int k = 0; k < 8; k++)
+                            {
+                                var c = new Vec3((k & 1) == 0 ? bb.Min.X : bb.Max.X, (k & 2) == 0 ? bb.Min.Y : bb.Max.Y, (k & 4) == 0 ? bb.Min.Z : bb.Max.Z) - a;
+                                exitR = Math.Max(exitR, (c - dir * Vec3.Dot(c, dir)).Length);
+                            }
+                        }
+                        if (exitR == 0) throw new FeatureException("There is no body to run out of: give the run-out's length.");
+                        exitR *= 1.01;
+                    }
+                }
+                var nb = Kernel.Native.NHelical.Sweep(regions, sk.Frame, a, dir, h.LeftHand ? -pitch : pitch, turns * 2 * Math.PI, f.Id, exitR, exitL);
                 if (nb.Validate() is { } bad) throw new FeatureException("The helical sweep is not a valid solid: " + bad);
                 tool = Kernel.Native.NTess.ToSolid(nb);
             }
@@ -414,16 +435,36 @@ public sealed class Regenerator
             // the far end at y = P + the face's length; the groove's centre runs from y = 0 to y = run, its turns
             // reaching half their widest width either side
             var halfWidth = groove.Max(q => Math.Abs(q.Y));
+            bool through = t.End == ThreadEnd.ThroughAll;
+            var runout = through ? ThreadRunout.None : t.Runout;
+            if (runout == ThreadRunout.Tangent && !external)
+            {
+                status.Warnings.Add("A thread runs out of the side of a shaft only: a hole's thread ends plainly.");
+                runout = ThreadRunout.None;
+            }
+            // the groove's deepest radius, and the radius the run-out leaves through
+            var grooveRoot = external ? groove.Min(q => q.X) : groove.Max(q => q.X);
+            var exitR = surfaceR + 0.1 * pitch;
+            // the relief groove: 2 P wide at the bottom, a little below the thread's root; the thread ends in its middle
+            const double reliefWidth = 2.0;
+            // up to the far end: the groove stops short of it, or ends inside the relief against it, or (running out)
+            // short of it by the run-out's advance along the axis as well
+            double upTo = runout switch
+            {
+                ThreadRunout.Relief => faceLen - reliefWidth / 2 * pitch,
+                ThreadRunout.Tangent => faceLen - halfWidth - 0.05 * pitch
+                    - Math.Sqrt(exitR * exitR - grooveRoot * grooveRoot) * pitch / (2 * Math.PI * groove.Average(q => q.X)),
+                _ => faceLen - halfWidth - 0.05 * pitch,
+            };
             double threadLen = t.End switch
             {
                 ThreadEnd.ThroughAll => faceLen + pitch,
                 ThreadEnd.Blind when !string.IsNullOrWhiteSpace(t.Length) => Positive(t.Length, "Length"),
-                _ => faceLen - halfWidth - 0.05 * pitch, // up to the far end, the groove stopping short of it
+                _ => upTo,
             };
             if (threadLen <= 0) throw new FeatureException("The face is too short for this thread.");
             var run = threadLen + pitch;
             double yStart = pitch, yFar = pitch + faceLen;
-            bool through = t.End == ThreadEnd.ThroughAll;
             Solid tool;
             try
             {
@@ -467,7 +508,23 @@ public sealed class Regenerator
                         ApplyTool(Kernel.Native.NTess.ToSolid(cone), true, true, warn: false);
                     }
                 }
-                var nb = Kernel.Native.NHelical.Sweep(new[] { region }, frame, origin, dir, t.LeftHand ? -pitch : pitch, run / pitch * 2 * Math.PI, f.Id);
+                // the relief: a ring from a little below the root out past the surface, square against the far end (or
+                // a pitch past the thread's end), its thread side sloping at 30° back to the surface
+                if (runout == ThreadRunout.Relief)
+                {
+                    var yb = Math.Min(run + reliefWidth / 2 * pitch, yFar);
+                    var ya = yb - reliefWidth * pitch;
+                    var rg = external ? grooveRoot - 0.15 * pitch : grooveRoot + 0.15 * pitch;
+                    var rs = external ? surfaceR + 0.1 * pitch : Math.Max(surfaceR - 0.1 * pitch, 1e-3 * surfaceR);
+                    var slope = Math.Abs(rs - rg) * Math.Tan(Math.PI / 6);
+                    var poly = new List<Vec2> { new(rg, ya), new(rg, yb), new(rs, yb), new(rs, ya - slope) };
+                    if (!external) poly.Reverse();
+                    var rr = new ProfileRegion(ProfileLoop.Polygon(poly, "R"));
+                    var relief = Kernel.Native.NBuild.Revolve(new[] { rr }, frame, Vec2.Zero, new Vec2(0, 1), 2 * Math.PI, f.Id + ".Relief");
+                    ApplyTool(Kernel.Native.NTess.ToSolid(relief), true, true, warn: false);
+                }
+                var nb = Kernel.Native.NHelical.Sweep(new[] { region }, frame, origin, dir, t.LeftHand ? -pitch : pitch, run / pitch * 2 * Math.PI, f.Id,
+                    exitRadius: runout == ThreadRunout.Tangent ? exitR : 0);
                 if (nb.Validate() is { } bad) throw new FeatureException("The thread is not a valid solid: " + bad);
                 tool = Kernel.Native.NTess.ToSolid(nb);
             }

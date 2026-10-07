@@ -141,6 +141,10 @@ public sealed class HelicalSweepFeature : Feature
     public bool LeftHand { get; set; }
     /// <summary>Advance against the centerline's direction.</summary>
     public bool Reverse { get; set; }
+    /// <summary>Run out at the end: straight on along the helix's tangent (a profile with arcs: the end's normal).</summary>
+    public bool RunOut { get; set; }
+    /// <summary>The run-out's length (blank, for a cut: until the profile is clear of the model).</summary>
+    public string RunOutLength { get; set; } = "";
     public bool IsCut { get; set; }
     public bool Merge { get; set; } = true;
     public override IEnumerable<string> Consumes => new[] { SketchId };
@@ -148,6 +152,12 @@ public sealed class HelicalSweepFeature : Feature
 
 /// <summary>Where a thread ends: a length from the start end, short of the face's far end, or out through it.</summary>
 public enum ThreadEnd { Blind, UpToNext, ThroughAll }
+
+/// <summary>
+/// How a thread that stops in the material ends: abruptly, in a relief groove (an undercut for the threading tool,
+/// DIN 76 style), or running out of the side along the helix's tangent (a shaft only).
+/// </summary>
+public enum ThreadRunout { None, Relief, Tangent }
 
 /// <summary>
 /// A modelled thread on a cylindrical face: external on a shaft, internal in a hole (ISO metric, 60° profile), from
@@ -167,6 +177,8 @@ public sealed class ThreadFeature : Feature
     public string Length { get; set; } = "";
     /// <summary>A 45° lead-in chamfer (countersink in a hole) at the start end, and at the far end of a through thread.</summary>
     public bool Chamfer { get; set; } = true;
+    /// <summary>How the far end of a thread that stops in the material ends (not used by Through All).</summary>
+    public ThreadRunout Runout { get; set; } = ThreadRunout.None;
     /// <summary>Extra room on the flanks and root (mm), for 3D printed threads.</summary>
     public string Clearance { get; set; } = "0";
     public bool LeftHand { get; set; }

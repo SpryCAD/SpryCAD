@@ -82,6 +82,35 @@ static class HelicalTests
             // the groove meets the cylinder along helices
             t.True(cut.Edges.Any(e => e.Curve is NHelix), "helical edges");
         });
+
+        t.Test("Helical sweep run-out: a round wire runs on along the end's normal; a V leaves a radius along the helix's tangent", () =>
+        {
+            // a circle profile: a right cylinder 5 long on the end (exact: Pappus + π r² · 5)
+            var coil = new ProfileRegion(ProfileLoop.Circle(new Vec2(10, 0), 2, "C"));
+            var b = NHelical.Sweep(new[] { coil }, Frame.Front, Vec3.Zero, Vec3.UnitY, 6, 3 * 2 * Math.PI, "S", exitLength: 5);
+            double v = 3 * 2 * Math.PI * (Math.PI * 4) * 10 + Math.PI * 4 * 5;
+            var got = Volume(t, b);
+            t.True(Math.Abs(got - v) < 1e-7 * v, $"volume {got:R} vs {v:R}");
+            t.True(b.Faces.Any(f => f.Tag.Name.StartsWith("S.X.") && f.Surface.Kind == SurfaceKind.Cylinder), "a cylinder on the end");
+            // a V thread in a 10 mm cylinder running out past r 11: the end cap clear of it, the cut valid
+            var frame = new Frame(Vec3.Zero, Vec3.UnitX, -Vec3.UnitZ, Vec3.UnitY);
+            var cyl = NBuild.Extrude(new[] { new ProfileRegion(ProfileLoop.Circle(Vec2.Zero, 10, "C")) }, frame, 0, 30, "Shaft");
+            double apexR = 8.4, outR = 10.9, h = (outR - apexR) * Math.Tan(Math.PI / 6);
+            var tri = new[] { new Vec2(apexR, 6), new Vec2(outR, 6 - h), new Vec2(outR, 6 + h) };
+            // (a left-hand one higher up, to run down inside the shaft)
+            foreach (var lead in new[] { 3.0, -3.0 })
+            {
+                var tri2 = tri.Select(q => q + new Vec2(0, lead < 0 ? 18 : 0)).ToArray();
+                var tool = NHelical.Sweep(new[] { new ProfileRegion(ProfileLoop.Polygon(tri2, "T")) }, Frame.Front, Vec3.Zero, Vec3.UnitY, lead, 4 * 2 * Math.PI, "Th", exitRadius: 11);
+                var tv = Volume(t, tool);
+                t.True(tv > 4 * 2 * Math.PI * FirstMoment(tri), "the run-out adds to the sweep");
+                var end = tool.Faces.Single(f => f.Tag.Name == "Th.End");
+                t.True(end.Coedges.All(co => new Vec2(co.Edge.V0.P.X, co.Edge.V0.P.Z).Length > 11 - 1e-9), "the end cap lies outside r 11");
+                t.True(tool.Faces.Count(f => f.Tag.Name.StartsWith("Th.X.")) == 3, "three run-out planes");
+                var cut = NBoolean.Run(cyl, tool, BoolOp.Subtract);
+                Volume(t, cut);
+            }
+        });
     }
 }
 
@@ -120,6 +149,48 @@ static class ThreadFeatureTests
 
     public static void Run(TestRunner t)
     {
+        t.Test("Helical Sweep feature: a cut running out of the side of a shaft (automatic and given lengths); a boss needs a length", () =>
+        {
+            // a 20 mm shaft along Z, 30 long; a V groove at z = 5 sketched on the Top plane (sketch y = -z), the helix advancing up Z
+            var doc = new FeatherCad.Core.Model.CadDocument();
+            var c = doc.AddFeature(new FeatherCad.Core.Model.SketchFeature { Plane = FeatherCad.Core.Model.PlaneRef.Front, Sketch = CircleAt(Vec2.Zero, 10) });
+            doc.AddFeature(new FeatherCad.Core.Model.ExtrudeFeature { SketchId = c.Id, Depth = "30" });
+            var before = KernelTests.Vex(new FeatherCad.Core.Regen.Regenerator().Rebuild(doc).State.Bodies[0].Solid);
+            FeatherCad.Core.Model.HelicalSweepFeature Add(FeatherCad.Core.Model.CadDocument d, bool cut, bool runOut, string len)
+            {
+                var sk = new FeatherCad.Core.Sketching.Sketch();
+                var p1 = sk.AddPoint(new Vec2(8.6, -5)); var p2 = sk.AddPoint(new Vec2(11, -5 - 1.4)); var p3 = sk.AddPoint(new Vec2(11, -5 + 1.4));
+                sk.Add(new FeatherCad.Core.Sketching.SkLine { P1 = p1.Id, P2 = p2.Id }); sk.Add(new FeatherCad.Core.Sketching.SkLine { P1 = p2.Id, P2 = p3.Id }); sk.Add(new FeatherCad.Core.Sketching.SkLine { P1 = p3.Id, P2 = p1.Id });
+                var a = sk.AddPoint(new Vec2(0, 0)); var b = sk.AddPoint(new Vec2(0, -30));
+                sk.Add(new FeatherCad.Core.Sketching.SkLine { P1 = a.Id, P2 = b.Id, Construction = true });
+                var s = d.AddFeature(new FeatherCad.Core.Model.SketchFeature { Plane = FeatherCad.Core.Model.PlaneRef.Top, Sketch = sk });
+                return d.AddFeature(new FeatherCad.Core.Model.HelicalSweepFeature { SketchId = s.Id, Pitch = "4", Revolutions = "4", IsCut = cut, RunOut = runOut, RunOutLength = len });
+            }
+            double Removed(bool runOut, string len)
+            {
+                var d = FeatherCad.Core.Model.CadDocument.FromJson(doc.ToJson());
+                var h = Add(d, true, runOut, len);
+                var r = new FeatherCad.Core.Regen.Regenerator().Rebuild(d);
+                t.True(r.Status[h.Id].Ok, r.Status[h.Id].Error ?? "");
+                t.Eq(r.Status[h.Id].Warnings.Count, 0);
+                t.Eq(r.State.Bodies[0].Solid.Topology.OpenHalfEdges, 0);
+                return before - KernelTests.Vex(r.State.Bodies[0].Solid);
+            }
+            var plain = Removed(false, "");
+            var auto = Removed(true, "");
+            var given = Removed(true, "2");
+            t.True(auto > plain && given > plain && auto > given, $"plain {plain:0.###}, 2 mm {given:0.###}, automatic {auto:0.###}");
+            // the round trip keeps the run-out
+            var d2 = FeatherCad.Core.Model.CadDocument.FromJson(doc.ToJson());
+            var h2 = Add(d2, true, true, "3");
+            var back = (FeatherCad.Core.Model.HelicalSweepFeature)FeatherCad.Core.Model.CadDocument.FromJson(d2.ToJson()).Find(h2.Id)!;
+            t.True(back.RunOut && back.RunOutLength == "3", "saved and loaded");
+            // a boss without a length is refused
+            var d3 = FeatherCad.Core.Model.CadDocument.FromJson(doc.ToJson());
+            var h3 = Add(d3, false, true, "");
+            t.True(!new FeatherCad.Core.Regen.Regenerator().Rebuild(d3).Status[h3.Id].Ok, "a boss needs a run-out length");
+        });
+
         t.Test("Helical Sweep feature: a coil spring from a sketch (circle and centerline), saved and loaded", () =>
         {
             var doc = new FeatherCad.Core.Model.CadDocument();
@@ -204,12 +275,14 @@ static class ThreadFeatureTests
             var before = new FeatherCad.Core.Regen.Regenerator().Rebuild(doc);
             var cylFace = before.State.Bodies[0].Solid.Native!.Faces.First(f => f.Surface.Kind == SurfaceKind.Cylinder && Math.Abs(f.Surface.R - 5) < 1e-9);
             var collarFaces = before.State.Bodies[0].Solid.Native!.Faces.Count(f => f.Surface.Kind == SurfaceKind.Cylinder && Math.Abs(f.Surface.R - 15) < 1e-9);
-            (double removed, FeatherCad.Kernel.Native.NBody body) Run(FeatherCad.Core.Model.ThreadEnd end, string length, bool chamfer, string clearance)
+            (double removed, FeatherCad.Kernel.Native.NBody body) Run(FeatherCad.Core.Model.ThreadEnd end, string length, bool chamfer, string clearance,
+                FeatherCad.Core.Model.ThreadRunout runout = FeatherCad.Core.Model.ThreadRunout.None)
             {
                 var d = FeatherCad.Core.Model.CadDocument.FromJson(doc.ToJson());
                 var th = d.AddFeature(new FeatherCad.Core.Model.ThreadFeature
                 {
                     Face = new FeatherCad.Core.Model.FaceRef { Name = cylFace.Tag.Name, Hint = new Vec3(5, 0, 24) }, End = end, Length = length, Chamfer = chamfer, Clearance = clearance,
+                    Runout = runout,
                 });
                 var r = new FeatherCad.Core.Regen.Regenerator().Rebuild(d);
                 t.True(r.Status[th.Id].Ok, $"{end}: {r.Status[th.Id].Error}");
@@ -238,6 +311,23 @@ static class ThreadFeatureTests
             var outer = g.Max(q => q.X);
             var cl = Run(FeatherCad.Core.Model.ThreadEnd.Blind, "12", true, "0.2").body;
             t.True(!cl.Faces.Any(f => f.Surface.Kind == SurfaceKind.Screw && f.Surface.Screw!.MinRadius > outer - 1e-6), "no buried groove");
+            // a relief groove against the shoulder: a cylinder below the root, the collar untouched, the thread ending in it
+            var rootR = g.Min(q => q.X);
+            var gr0 = FeatherCad.Core.Regen.Threads.Groove(true, 5, 5, 1.5, 0).groove.Min(q => q.X);
+            var rel = Run(FeatherCad.Core.Model.ThreadEnd.UpToNext, "", false, "0", FeatherCad.Core.Model.ThreadRunout.Relief);
+            t.True(rel.body.Faces.Any(f => f.Surface.Kind == SurfaceKind.Cylinder && Math.Abs(f.Surface.R - (gr0 - 0.15 * 1.5)) < 1e-6), "the relief's floor below the root");
+            t.Eq(rel.body.Faces.Count(f => f.Surface.Kind == SurfaceKind.Cylinder && Math.Abs(f.Surface.R - 15) < 1e-9), collarFaces);
+            t.True(rel.removed > upTo.removed, "the relief removes material");
+            // and along the shaft, after a blind thread
+            var relB = Run(FeatherCad.Core.Model.ThreadEnd.Blind, "8", false, "0", FeatherCad.Core.Model.ThreadRunout.Relief);
+            t.True(relB.removed > blind, "a relief after a blind thread");
+            // a tangent run-out: planes on the groove's end, the end cap clear of the shaft, more removed than plain
+            var tan = Run(FeatherCad.Core.Model.ThreadEnd.Blind, "8", false, "0", FeatherCad.Core.Model.ThreadRunout.Tangent);
+            t.True(tan.removed > blind, $"the run-out removes material ({tan.removed:0.###} vs {blind:0.###})");
+            t.True(tan.body.Faces.Any(f => f.Tag.Name.Contains(".X.")), "run-out faces");
+            var tanU = Run(FeatherCad.Core.Model.ThreadEnd.UpToNext, "", false, "0.2", FeatherCad.Core.Model.ThreadRunout.Tangent);
+            t.Eq(tanU.body.Faces.Count(f => f.Surface.Kind == SurfaceKind.Cylinder && Math.Abs(f.Surface.R - 15) < 1e-9), collarFaces);
+            t.True(tanU.body.Faces.Where(f => f.Tag.Name.Contains(".X.")).SelectMany(f => f.Coedges).All(co => co.Edge.V0.P.Z > 5 - 1e-6), "the run-out stops short of the shoulder");
         });
     }
 

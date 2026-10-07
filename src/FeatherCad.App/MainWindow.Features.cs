@@ -401,6 +401,10 @@ public partial class MainWindow
         page.Check(h, "Left hand", () => f.LeftHand, v => f.LeftHand = v);
         page.Check(h, "Reverse direction", () => f.Reverse, v => f.Reverse = v);
         page.Info(h, "The profile must not reach the axis, and (in a plane through the axis) must be shorter along it than the pitch.");
+        var ro = page.Section("Run-out");
+        page.Check(ro, "Run out at the end", () => f.RunOut, v => f.RunOut = v);
+        page.Number(ro, "Length", () => f.RunOutLength, v => f.RunOutLength = v, "dimension", optional: true);
+        page.Info(ro, "The end runs straight on along the helix's tangent. Blank length (cuts): until the profile is clear of the model.");
         if (!f.IsCut) page.Check(page.Section("Options"), "Merge result", () => f.Merge, v => f.Merge = v);
         if (!string.IsNullOrEmpty(f.SketchId)) page.Activate(null);
         BeginEdit(f, isNew, page, overlay: false, hint: string.IsNullOrEmpty(f.SketchId) ? "Select a sketch with a closed profile and a centerline." : null);
@@ -440,6 +444,11 @@ public partial class MainWindow
         page.Number(opt, "Clearance", () => f.Clearance, v => f.Clearance = v, "dimension");
         page.Info(opt, "Extra room on the flanks for 3D printed threads (0.1–0.3 mm is typical); the crest is lowered where it would get too narrow.");
         page.Check(opt, "Lead-in chamfer", () => f.Chamfer, v => f.Chamfer = v);
+        page.Combo(opt, "Thread end", new List<(ThreadRunout, string)>
+        {
+            (ThreadRunout.None, "Plain"), (ThreadRunout.Relief, "Relief groove (undercut)"), (ThreadRunout.Tangent, "Run out of the side (shafts)"),
+        }, () => f.Runout, v => f.Runout = v);
+        page.Info(opt, "Relief: a groove where the thread stops, room for the threading tool against a shoulder. Run out: the groove leaves the shaft along the helix's tangent.");
         page.Check(opt, "Left hand", () => f.LeftHand, v => f.LeftHand = v);
         page.Check(opt, "Start at the other end", () => f.Reverse, v => f.Reverse = v);
         if (!string.IsNullOrEmpty(f.Face.Name)) page.Activate(null);

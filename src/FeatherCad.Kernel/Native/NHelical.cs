@@ -13,8 +13,17 @@ public static class NHelical
     /// along <paramref name="axisDir"/>, turning <paramref name="angle"/> radians (positive) while advancing
     /// <paramref name="lead"/> per turn along the axis (negative: a left-hand helix). Faces: prefix.H.&lt;segment&gt;,
     /// caps prefix.Start and prefix.End.
+    /// <para>
+    /// A run-out: the end runs on in a straight line, <paramref name="exitLength"/> long, or until the whole profile
+    /// lies outside <paramref name="exitRadius"/> from the axis (a thread running out of the side of a shaft). The
+    /// profile's segments sweep faces prefix.X.&lt;segment&gt; (planes; cylinders for arcs) and the end cap moves out
+    /// with them. The line follows the helix's tangent at the profile's centre; a profile with arcs leaves along the
+    /// end cap's normal instead (an arc carried along a slanted line would sweep an elliptic cylinder), which differs
+    /// from the tangent by the helix angle.
+    /// </para>
     /// </summary>
-    public static NBody Sweep(IEnumerable<ProfileRegion> regions, Frame frame, Vec3 axisOrigin, Vec3 axisDir, double lead, double angle, string prefix)
+    public static NBody Sweep(IEnumerable<ProfileRegion> regions, Frame frame, Vec3 axisOrigin, Vec3 axisDir, double lead, double angle, string prefix,
+        double exitRadius = 0, double exitLength = 0)
     {
         if (!(angle > 0)) throw new ArgumentException("the sweep needs a positive number of turns");
         var regs = regions.Select(r => r.Normalized()).ToList();
@@ -49,7 +58,36 @@ public static class NHelical
         var body = new NBody();
         var startFace = new NFace(NSurface.FromPlane(Plane.FromPointNormal(frame.Origin, outStart)), true, new FaceTag(prefix + ".Start", SurfaceDef.PlaneDef));
         var endN = end.Vector(-outStart).Normalized;
-        var endFace = new NFace(NSurface.FromPlane(Plane.FromPointNormal(end.Point(frame.Origin), endN)), true, new FaceTag(prefix + ".End", SurfaceDef.PlaneDef));
+        // the run-out's direction and length (the motion moves nothing radially, so along the tangent the profile's
+        // point nearest the axis is the last one out)
+        Vec3 exitDir = Vec3.Zero; double exitLen = 0;
+        if (exitRadius > 0 || exitLength > 0)
+        {
+            bool arcs = loops.Any(l => l.segs.Any(s => s.Arc != null));
+            var c0 = Vec3.Zero; int nc = 0;
+            foreach (var (_, segs) in loops) foreach (var s in segs) { c0 += frame.ToWorld(s.A); nc++; }
+            c0 /= nc;
+            exitDir = arcs ? endN : motion.Velocity(angle, c0).Normalized;
+            if (exitLength > 0) exitLen = exitLength;
+            else
+            {
+                var dp = exitDir - a * Vec3.Dot(exitDir, a);
+                foreach (var (_, segs) in loops)
+                    foreach (var s in segs)
+                        foreach (var q2 in s.Arc == null ? new[] { s.A } : ArcPoints(s))
+                        {
+                            var q = end.Point(frame.ToWorld(q2)) - axisOrigin; var rq = q - a * Vec3.Dot(q, a);
+                            double qa = dp.LengthSq, qb = 2 * Vec3.Dot(rq, dp), qc = rq.LengthSq - exitRadius * exitRadius;
+                            if (qc >= 0) continue;
+                            if (qa < 1e-18) throw new ArgumentException("the run-out runs along the axis: it never leaves the radius");
+                            exitLen = Math.Max(exitLen, (-qb + Math.Sqrt(qb * qb - 4 * qa * qc)) / (2 * qa));
+                        }
+                // already clear: a short run-out all the same (the cap would otherwise sit on the part's surface)
+                exitLen = Math.Max(exitLen, 0.05 * scale);
+            }
+        }
+        var endAt = end.Point(frame.Origin) + exitDir * exitLen;
+        var endFace = new NFace(NSurface.FromPlane(Plane.FromPointNormal(endAt, endN)), true, new FaceTag(prefix + ".End", SurfaceDef.PlaneDef));
         var tags = new Dictionary<string, FaceTag>();
         foreach (var (_, segs) in loops)
         {
@@ -114,6 +152,62 @@ public static class NHelical
                 if (ccwUV != sense) Reverse(loop);
                 face.Loops.Add(loop);
                 body.Faces.Add(face);
+            }
+            if (exitLen > 0)
+            {
+                // the run-out: each segment of the end profile carried straight out, a plane (a cylinder for an arc)
+                // between it and its copy
+                var shift = Transform.Translation(exitDir * exitLen);
+                var v2 = new NVertex[m];
+                for (int i = 0; i < m; i++) v2[i] = new NVertex(v1[i].P + exitDir * exitLen);
+                var side = new NEdge[m];
+                for (int i = 0; i < m; i++) side[i] = new NEdge(new NLine(v1[i].P, exitDir), 0, exitLen, v1[i], v2[i]);
+                var nEnd = end.Vector(n).Normalized;
+                var far = new (NEdge e, bool fwd)[m];
+                for (int i = 0; i < m; i++)
+                {
+                    int j = (i + 1) % m;
+                    var te = top[i].e;
+                    far[i] = (new NEdge(te.Curve.Transformed(shift), te.T0, te.T1, ReferenceEquals(te.V0, v1[i]) ? v2[i] : v2[j], ReferenceEquals(te.V0, v1[i]) ? v2[j] : v2[i]), top[i].fwd);
+                    var s = segs[i];
+                    var name = prefix + ".X." + s.Name;
+                    NSurface surf; bool sense; Vec3? anchor = null;
+                    if (s.Arc == null)
+                    {
+                        // outward: across the line, away from the region (interior on the line's left about the moved normal)
+                        var d = v1[j].P - v1[i].P;
+                        var pn = Vec3.Cross(d, exitDir).Normalized;
+                        if (Vec3.Dot(pn, Vec3.Cross(d, nEnd)) < 0) pn = -pn;
+                        surf = NSurface.FromPlane(Plane.FromPointNormal(v1[i].P, pn));
+                        sense = true;
+                    }
+                    else
+                    {
+                        // exitDir is the cap's normal here: a right cylinder about the moved arc's centre
+                        var circle = (NCircle)te.Curve;
+                        var def = new SurfaceDef
+                        {
+                            Kind = SurfaceKind.Cylinder, Origin = circle.C, Axis = exitDir, RefDir = end.Vector(frame.XDir),
+                            Radius = s.Arc.Radius, Segments = s.Arc.Segments,
+                        };
+                        surf = new NSurface(def);
+                        sense = s.Ccw; // convex arcs face away from the axis
+                        anchor = te.Curve.Eval(0.5 * (te.T0 + te.T1)) + exitDir * (exitLen / 2);
+                    }
+                    if (!tags.TryGetValue(name, out var tag)) tags[name] = tag = new FaceTag(name, s.Arc == null ? SurfaceDef.PlaneDef : surf.Def);
+                    var face = new NFace(surf, sense, tag, anchor);
+                    // as an extrusion's sides: the segment (a → b), b's line out, the copy back, a's line in; counter-
+                    // clockwise about the outward normal when the run-out leaves along the moved sketch normal
+                    var loop = new NLoop();
+                    loop.Coedges.Add(new NCoedge(top[i].e, top[i].fwd));
+                    loop.Coedges.Add(new NCoedge(side[j], true));
+                    loop.Coedges.Add(new NCoedge(far[i].e, !far[i].fwd));
+                    loop.Coedges.Add(new NCoedge(side[i], false));
+                    if (Vec3.Dot(exitDir, nEnd) < 0) Reverse(loop);
+                    face.Loops.Add(loop);
+                    body.Faces.Add(face);
+                }
+                top = far;
             }
             // caps: the profile loops (counter-clockwise about the sketch normal for outer loops) about each cap's outward normal
             var sl = new NLoop(); var el = new NLoop();
