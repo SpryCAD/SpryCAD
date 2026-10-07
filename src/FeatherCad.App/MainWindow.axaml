@@ -49,7 +49,7 @@
       </DockPanel>
     </Border>
 
-    <Grid x:Name="MainGrid" ColumnDefinitions="290,4,*,0,0">
+    <Grid x:Name="MainGrid" ColumnDefinitions="290,4,*,0,0,Auto">
       <!-- Left panel: FeatureManager / PropertyManager -->
       <Border Grid.Column="0" Background="#FFF5F7FA" BorderBrush="#FFD5DCE6" BorderThickness="0,0,1,0">
         <DockPanel>
@@ -80,21 +80,13 @@
         <TextBlock x:Name="ViewName" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="96,0,0,8" Foreground="#FF5A6B85" FontStyle="Italic" />
       </Grid>
 
-      <!-- the list of open parts when docked at the right (MainWindow.Tabs.cs); the columns are 0 wide otherwise -->
-      <GridSplitter x:Name="PartsDockSplitter" Grid.Column="3" Background="#FFDDE3EA" ResizeDirection="Columns" IsVisible="False" />
-      <Border x:Name="PartsDock" Grid.Column="4" Background="#FFF5F7FA" BorderBrush="#FFD5DCE6" BorderThickness="1,0,0,0" IsVisible="False">
-        <DockPanel>
-          <Border DockPanel.Dock="Top" Background="#FFE8EDF3" BorderBrush="#FFD5DCE6" BorderThickness="0,0,0,1">
-            <DockPanel Margin="8,2,2,2">
-              <Button x:Name="PartsDockClose" DockPanel.Dock="Right" Content="✕" FontSize="11" Padding="6,1" MinHeight="0"
-                      Background="Transparent" BorderThickness="0" ToolTip.Tip="Hide the list (Ctrl+E shows it)" />
-              <Button x:Name="PartsDockFloat" DockPanel.Dock="Right" Padding="4,2" MinHeight="0" VerticalAlignment="Center"
-                      Background="Transparent" BorderThickness="0" ToolTip.Tip="Pop out: the list in a window of its own" />
-              <TextBlock Text="Open Parts" FontWeight="SemiBold" FontSize="12" VerticalAlignment="Center" />
-            </DockPanel>
-          </Border>
-          <ContentControl x:Name="PartsDockBody" />
-        </DockPanel>
+      <!-- the task pane (MainWindow.TaskPane.cs), as SolidWorks': unpinned, it slides out over the graphics area
+           (TaskOverlay); pinned, it takes the columns 3 and 4 (0 wide otherwise); its tabs are the strip at the right -->
+      <Panel x:Name="TaskOverlay" Grid.Column="2" ZIndex="10" />
+      <GridSplitter x:Name="TaskSplitter" Grid.Column="3" Background="#FFDDE3EA" ResizeDirection="Columns" IsVisible="False" />
+      <ContentControl x:Name="TaskPinHost" Grid.Column="4" />
+      <Border Grid.Column="5" Background="#FFE8EDF3" BorderBrush="#FFD5DCE6" BorderThickness="1,0,0,0">
+        <StackPanel x:Name="TaskStrip" Margin="2,4" Spacing="2" />
       </Border>
     </Grid>
   </DockPanel>

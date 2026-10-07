@@ -75,6 +75,11 @@ public static class Icons
         ["propsheet"] = ("M5 3h14v18H5z M8 8h2.5 M8 12h2.5 M8 16h2.5", "M13 7h3v2h-3z M13 11h3v2h-3z M13 15h3v2h-3z"),
         // pop out: a window with an arrow leaving it at the corner (the list of open parts to a window of its own)
         ["popout"] = ("M11 4H4v16h16v-7", "M14 3h7v7 M21 3l-9 9"),
+        // task pane: open parts (sheets stacked), the pin (upright: pinned open; leaning: slides away), collapse
+        ["parts"] = ("M8 3h12v14H8z", "M5 6v15h12"),
+        ["pinned"] = ("M9 3h6 M10 3v6l-3 4h10l-3-4V3 M12 13v8", null),
+        ["unpinned"] = ("M15 3l6 6 M16 4l-4 4-5 0 9 9 0-5 4-4 M8 16l-5 5", null),
+        ["collapse"] = ("M6 6l6 6-6 6 M12 6l6 6-6 6", null),
         // dock right: a window with a panel at its right, an arrow going into it (the floating list back to the dock)
         ["dockright"] = ("M3 4h18v16H3z M15 4v16", "M5 12h7 M9 9l3 3-3 3"),
         ["folder"] =("M3 6h6l2 2h10v11H3z", null),

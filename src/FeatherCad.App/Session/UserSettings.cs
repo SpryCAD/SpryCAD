@@ -27,11 +27,11 @@ public static class UserSettings
     public static RotateCenter RotateAbout { get; set; } = RotateCenter.Selection;
     /// <summary>Where the list of open parts was last (screen position and size); null: beside the tabs.</summary>
     public static (int x, int y, int w, int h)? PartsWindow { get; set; }
-    /// <summary>The list of open parts shows docked at the right of the main window (else in its window).</summary>
-    public static bool PartsDocked { get; set; }
-    /// <summary>The docked list was showing when the app last closed (it shows again at start).</summary>
-    public static bool PartsDockOpen { get; set; }
-    public static int PartsDockWidth { get; set; } = 300;
+    /// <summary>The task pane stays open beside the graphics area (else it slides out over it and tucks away).</summary>
+    public static bool TaskPinned { get; set; }
+    /// <summary>The task pane was open when the app last closed (pinned, it opens again at start).</summary>
+    public static bool TaskOpen { get; set; }
+    public static int TaskWidth { get; set; } = 300;
 
     public static void Load()
     {
@@ -49,9 +49,9 @@ public static class UserSettings
                 else if (k == nameof(RotateAbout) && Enum.TryParse<RotateCenter>(v, out var rc)) RotateAbout = rc;
                 else if (k == nameof(PartsWindow) && v.Split(',') is { Length: 4 } p && p.All(x => int.TryParse(x, out _)))
                     PartsWindow = (int.Parse(p[0]), int.Parse(p[1]), int.Parse(p[2]), int.Parse(p[3]));
-                else if (k == nameof(PartsDocked)) PartsDocked = v == "1";
-                else if (k == nameof(PartsDockOpen)) PartsDockOpen = v == "1";
-                else if (k == nameof(PartsDockWidth) && int.TryParse(v, out var dw)) PartsDockWidth = dw;
+                else if (k == nameof(TaskPinned)) TaskPinned = v == "1";
+                else if (k == nameof(TaskOpen)) TaskOpen = v == "1";
+                else if (k == nameof(TaskWidth) && int.TryParse(v, out var dw)) TaskWidth = dw;
             }
         }
         catch { /* defaults */ }
@@ -70,9 +70,9 @@ public static class UserSettings
                 $"{nameof(RotateAbout)}={RotateAbout}",
             };
             if (PartsWindow is { } pw) lines.Add($"{nameof(PartsWindow)}={pw.x},{pw.y},{pw.w},{pw.h}");
-            lines.Add($"{nameof(PartsDocked)}={(PartsDocked ? 1 : 0)}");
-            lines.Add($"{nameof(PartsDockOpen)}={(PartsDockOpen ? 1 : 0)}");
-            lines.Add($"{nameof(PartsDockWidth)}={PartsDockWidth}");
+            lines.Add($"{nameof(TaskPinned)}={(TaskPinned ? 1 : 0)}");
+            lines.Add($"{nameof(TaskOpen)}={(TaskOpen ? 1 : 0)}");
+            lines.Add($"{nameof(TaskWidth)}={TaskWidth}");
             File.WriteAllLines(StorePath, lines);
         }
         catch { /* preferences are a convenience only */ }

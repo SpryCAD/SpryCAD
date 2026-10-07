@@ -86,15 +86,9 @@ public partial class MainWindow
     void InitPartsList()
     {
         PartsButton.Click += (_, _) => ShowPartsList();
-        ToolTip.SetTip(PartsButton, "All open parts (Ctrl+E), docked at the right or in a window: arrow keys switch between them");
+        ToolTip.SetTip(PartsButton, "All open parts (Ctrl+E), in the task pane at the right: arrow keys switch between them");
         DocTabs.HiddenCountChanged += () => Avalonia.Threading.Dispatcher.UIThread.Post(UpdatePartsButton);
-        PartsDockFloat.Content = UI.Icons.Make("popout", 14);
-        PartsDockFloat.Click += (_, _) => { UserSettings.PartsDocked = false; UserSettings.Save(); MovePartsList(docked: false); };
-        PartsDockClose.Click += (_, _) => HidePartsList();
-        PartsDockSplitter.DragCompleted += (_, _) => { UserSettings.PartsDockWidth = (int)MainGrid.ColumnDefinitions[4].ActualWidth; UserSettings.Save(); };
         UpdatePartsButton();
-        // shown at start when it was docked when the app last closed
-        if (UserSettings.PartsDocked && UserSettings.PartsDockOpen) Avalonia.Threading.Dispatcher.UIThread.Post(() => MovePartsList(docked: true, focus: false));
     }
 
     void UpdatePartsButton()
@@ -112,22 +106,19 @@ public partial class MainWindow
     readonly Dictionary<PartTab, PartRow> _partRows = new();
     bool _partsSyncing;
 
-    /// <summary>The list is docked at the right of the main window (else floating, or not shown).</summary>
-    bool PartsDocked => PartsDock.IsVisible;
-
     /// <summary>
-    /// The list of every open part with a preview: docked at the right of the main window (its width set by the
-    /// splitter) or in a window of its own (moved and sized where it was last), as it was last. Selecting a part
-    /// (arrow keys, click) shows it right away, so a set of parts can be flipped through; typing jumps to a part by
-    /// name; Enter goes back to the part, Esc closes the window (or, docked, goes back to the part). A row's ✕ (on
-    /// the row under the mouse and the selected one), Delete or Ctrl+W close a part. It follows the parts as they
-    /// open, close, change and are switched to another way.
+    /// The list of every open part with a preview: in the task pane at the right (pinned or sliding out), or popped
+    /// out into a window of its own (moved and sized where it was last). Selecting a part (arrow keys, click) shows
+    /// it right away, so a set of parts can be flipped through; typing jumps to a part by name; Enter goes back to the
+    /// part, Esc too (tucking the sliding pane away, closing the window). A row's ✕ (on the row under the mouse and
+    /// the selected one), Delete or Ctrl+W close a part; right-click closes others or all. It follows the parts as
+    /// they open, close, change and are switched to another way.
     /// </summary>
     void ShowPartsList()
     {
         if (_partsWindow != null) { _partsWindow.Activate(); FocusPartsList(); return; }
-        if (PartsDocked) { FocusPartsList(); return; }
-        MovePartsList(UserSettings.PartsDocked);
+        if (PartsInTaskPane) { FocusPartsList(); return; }
+        ShowTaskPane(_partsPane, focus: true);
     }
 
     /// <summary>The list, made once and moved between the dock and the window.</summary>
@@ -157,7 +148,9 @@ public partial class MainWindow
         {
             if (e.Key == Key.Escape)
             {
-                if (_partsWindow != null) _partsWindow.Close(); else { Activate(); Viewport.Focus(); }
+                if (_partsWindow != null) _partsWindow.Close();
+                else if (_taskMode == TaskMode.Overlay) HideTaskPane();
+                else { Activate(); Viewport.Focus(); }
                 e.Handled = true;
             }
             else if (e.Key == Key.Enter) { Activate(); Viewport.Focus(); e.Handled = true; }
@@ -172,21 +165,18 @@ public partial class MainWindow
         return list;
     }
 
-    /// <summary>Shows the list docked at the right or in its window (taking it from where it is).</summary>
+    /// <summary>Shows the list in the task pane or popped out in its window (taking it from where it is).</summary>
     void MovePartsList(bool docked, bool focus = true)
     {
         var list = PartsListControl();
         // take it out of where it is (the window closes without dropping the list)
         if (_partsWindow is { } old) { _partsMoving = true; old.Close(); _partsMoving = false; }
-        if (PartsDocked) SetPartsDock(false);
+        if (PartsInTaskPane) PlaceTaskPane(TaskMode.Hidden);
         if (list.Parent is ContentControl host) host.Content = null;
 
         if (docked)
         {
-            list.Padding = new Thickness(0);
-            PartsDockBody.Content = list;
-            SetPartsDock(true);
-            if (focus) Avalonia.Threading.Dispatcher.UIThread.Post(FocusPartsList);
+            ShowTaskPane(_partsPane, focus);
             return;
         }
         var dock = new Button
@@ -195,7 +185,7 @@ public partial class MainWindow
             Background = Brushes.Transparent, BorderThickness = new Thickness(0),
             HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(8, 6, 6, 4),
         };
-        ToolTip.SetTip(dock, "Dock right: the list at the right of the main window");
+        ToolTip.SetTip(dock, "Back to the task pane at the right of the main window");
         var body = new ContentControl { Content = list };
         var content = new DockPanel { Children = { dock, body } };
         // a little room around the parts in the floating window, inside the scrolling area: the scroll bar stays at
@@ -221,7 +211,7 @@ public partial class MainWindow
             w.WindowStartupLocation = WindowStartupLocation.Manual;
             w.Position = new PixelPoint(corner.X - (int)(w.Width * RenderScaling), corner.Y + 4);
         }
-        dock.Click += (_, _) => { UserSettings.PartsDocked = true; UserSettings.Save(); MovePartsList(docked: true); };
+        dock.Click += (_, _) => MovePartsList(docked: true);
         if (focus) w.Opened += (_, _) => FocusPartsList();
         w.Closing += (_, _) =>
         {
@@ -261,31 +251,6 @@ public partial class MainWindow
         SetWindowLongPtr(hwnd, GWL_EXSTYLE, (IntPtr)((ex | WS_EX_TOOLWINDOW) & ~WS_EX_APPWINDOW));
         // the frame is drawn again with the new style
         SetWindowPos(hwnd, IntPtr.Zero, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
-    }
-
-    /// <summary>Opens or closes the dock column (its width kept between showings).</summary>
-    void SetPartsDock(bool open)
-    {
-        var cols = MainGrid.ColumnDefinitions;
-        if (!open && PartsDock.IsVisible) UserSettings.PartsDockWidth = (int)cols[4].ActualWidth;
-        cols[3].Width = new GridLength(open ? 4 : 0);
-        cols[4].Width = new GridLength(open ? Math.Clamp(UserSettings.PartsDockWidth, 180, 900) : 0);
-        cols[4].MinWidth = open ? 180 : 0;
-        PartsDockSplitter.IsVisible = open;
-        PartsDock.IsVisible = open;
-        UserSettings.PartsDockOpen = open;
-        UserSettings.Save();
-    }
-
-    /// <summary>Hides the list wherever it is.</summary>
-    void HidePartsList()
-    {
-        if (_partsWindow != null) { _partsWindow.Close(); return; }
-        if (!PartsDocked) return;
-        SetPartsDock(false);
-        PartsDockBody.Content = null;
-        DropPartsList();
-        Viewport.Focus();
     }
 
     void DropPartsList() { _partsList = null; _partRows.Clear(); }

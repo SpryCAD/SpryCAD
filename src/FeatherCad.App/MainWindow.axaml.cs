@@ -77,6 +77,7 @@ public partial class MainWindow : Window
         BuildQuickAccess();
         BuildCommandManager();
         InitPartsList();
+        BuildTaskPane();
         BuildHud();
         BuildTriadLabels();
         BuildPanelTabs();
