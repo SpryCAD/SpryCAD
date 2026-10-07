@@ -176,10 +176,11 @@ public partial class MainWindow
             if (focus) Avalonia.Threading.Dispatcher.UIThread.Post(FocusPartsList);
             return;
         }
-        var dock = new Button { Content = "Dock Right", FontSize = 11, Padding = new Thickness(8, 1), MinHeight = 0, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(4) };
+        var dock = new Button { Content = "Dock Right", FontSize = 11, Padding = new Thickness(8, 1), MinHeight = 0, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 0, 0, 6) };
         ToolTip.SetTip(dock, "Dock the list at the right of the main window");
         var body = new ContentControl { Content = list };
-        var content = new DockPanel { Children = { dock, body } };
+        // a little room around the contents of the floating window (the docked list runs to the panel's edges)
+        var content = new DockPanel { Children = { dock, body }, Margin = new Thickness(8) };
         DockPanel.SetDock(dock, Dock.Top);
         var w = new Window
         {
