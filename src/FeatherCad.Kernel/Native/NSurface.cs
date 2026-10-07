@@ -43,6 +43,11 @@ public sealed class NSurface
     public NurbsSurface? Nurbs => Def.Nurbs;
 
     public NSurface? Base => Def.Base;
+    public ScrewSurface? Screw => Def.Screw;
+
+    /// <summary>A screw surface (helical sweep of a line or arc).</summary>
+    public static NSurface ScrewOf(ScrewSurface s)
+        => new(new SurfaceDef { Kind = SurfaceKind.Screw, Origin = s.Motion.O, Axis = s.Motion.A, RefDir = s.Motion.X, Radius = s.MaxRadius, Screw = s });
 
     /// <summary>
     /// The surface moved by d along its natural normal: exact (analytic) for planes and surfaces of revolution and
@@ -61,6 +66,7 @@ public sealed class NSurface
     {
         SurfaceKind.BSpline => Nurbs!.Normal(FromFaceU(u), FromFaceV(v)),
         SurfaceKind.Offset => Base!.NormalAt(u, v),
+        SurfaceKind.Screw => Screw!.NormalAt(u, v),
         _ => Normal(Eval(u, v)),
     };
 
@@ -73,7 +79,7 @@ public sealed class NSurface
     public Vec3 Origin => F.Origin;
     public double R => Def.Radius;
     public double R2 => Def.Param2;
-    public bool PeriodicU => Kind switch { SurfaceKind.Plane => false, SurfaceKind.BSpline => Nurbs!.ClosedU, SurfaceKind.Offset => Base!.PeriodicU, _ => true };
+    public bool PeriodicU => Kind switch { SurfaceKind.Plane or SurfaceKind.Screw => false, SurfaceKind.BSpline => Nurbs!.ClosedU, SurfaceKind.Offset => Base!.PeriodicU, _ => true };
 
     // ---------------------------------------------------------------------------------------
     // parameterization
@@ -118,6 +124,7 @@ public sealed class NSurface
                     return new Vec2(Theta(l, uHint), double.IsNaN(vHint) ? phi : NCurve.Wrap(phi, vHint));
                 }
             case SurfaceKind.Pipe: return Spine!.UV(p, uHint);
+            case SurfaceKind.Screw: { var c = Screw!.Closest(p, uHint, vHint); return new Vec2(c.u, c.v); }
             case SurfaceKind.Offset: return Base!.UV(p, uHint, vHint);
             case SurfaceKind.BSpline:
                 {
@@ -170,6 +177,7 @@ public sealed class NSurface
                     return F.ToWorld(r * Math.Cos(u), r * Math.Sin(u), R2 * Math.Sin(v));
                 }
             case SurfaceKind.Pipe: return Spine!.Surface(u, v, R);
+            case SurfaceKind.Screw: return Screw!.Eval(u, v);
             case SurfaceKind.BSpline: return Nurbs!.Eval(FromFaceU(u), FromFaceV(v));
             case SurfaceKind.Offset: return Base!.Eval(u, v) + Base.NormalAt(u, v) * R;
         }
@@ -185,6 +193,7 @@ public sealed class NSurface
     public double F_(Vec3 p)
     {
         if (Kind == SurfaceKind.Pipe) return Spine!.Closest(p).dist - R;
+        if (Kind == SurfaceKind.Screw) return Screw!.SignedDistance(p);
         if (Kind == SurfaceKind.Offset) return Base!.F_(p) - R;
         if (Kind == SurfaceKind.BSpline)
         {
@@ -217,6 +226,7 @@ public sealed class NSurface
     {
         if (Kind == SurfaceKind.Plane) return F.Normal;
         if (Kind == SurfaceKind.Pipe) return Spine!.Normal(p);
+        if (Kind == SurfaceKind.Screw) return Screw!.Normal(p);
         if (Kind == SurfaceKind.BSpline) { var c = Nurbs!.Closest(p); return Nurbs.Normal(c.u, c.v); }
         if (Kind == SurfaceKind.Offset) return Base!.Grad(p);
         var l = F.ToLocal3(p);
@@ -279,11 +289,14 @@ public sealed class NSurface
     // ---------------------------------------------------------------------------------------
     // relations
 
-    public bool IsRevolution => Kind is not (SurfaceKind.Plane or SurfaceKind.Pipe or SurfaceKind.BSpline or SurfaceKind.Offset);
+    public bool IsRevolution => Kind is not (SurfaceKind.Plane or SurfaceKind.Pipe or SurfaceKind.BSpline or SurfaceKind.Offset or SurfaceKind.Screw);
 
     /// <summary>Same geometric surface (orientation ignored).</summary>
     public bool CoincidentWith(NSurface o, double tol)
     {
+        // a screw surface swept by a line parallel to its axis is a cylinder
+        if (Kind == SurfaceKind.Screw && o.Kind == SurfaceKind.Cylinder) return Screw!.IsCylinder(o.Origin, o.Axis, o.R, tol);
+        if (Kind == SurfaceKind.Cylinder && o.Kind == SurfaceKind.Screw) return o.Screw!.IsCylinder(Origin, Axis, R, tol);
         if (Kind != o.Kind) return false;
         if (Kind == SurfaceKind.Plane)
         {
@@ -292,6 +305,7 @@ public sealed class NSurface
             return Math.Abs(Math.Abs(d) - 1) < 1e-10 && Math.Abs(a.Distance(b.Origin)) < tol;
         }
         if (Kind == SurfaceKind.Pipe) return Math.Abs(R - o.R) < tol && Spine!.SameAs(o.Spine!, tol);
+        if (Kind == SurfaceKind.Screw) return ReferenceEquals(Screw, o.Screw) || Screw!.SameAs(o.Screw!, tol);
         if (Kind == SurfaceKind.BSpline) return Nurbs!.SameAs(o.Nurbs!, tol);
         if (Kind == SurfaceKind.Offset) return Math.Abs(R - o.R) < tol && Base!.CoincidentWith(o.Base!, tol);
         if (!SameAxisLine(o, tol)) return false;
@@ -327,6 +341,7 @@ public sealed class NSurface
     public List<double> RayHits(Vec3 o, Vec3 d)
     {
         if (Kind == SurfaceKind.Pipe) return Spine!.RayHits(o, d, R);
+        if (Kind == SurfaceKind.Screw) return Screw!.RayHits(o, d);
         if (Kind == SurfaceKind.BSpline) return Nurbs!.RayHits(o, d, F_);
         if (Kind == SurfaceKind.Offset) return RayHitsByDistance(o, d, Base!.Nurbs!.Box, Math.Abs(R));
         var res = new List<double>();
@@ -406,7 +421,7 @@ public sealed class NSurface
     /// <summary>The surface's profile about (origin, axis) if it is a surface of revolution about that axis.</summary>
     public Profile? ProfileAbout(Vec3 origin, Vec3 axis, double tol)
     {
-        if (Kind is SurfaceKind.Pipe or SurfaceKind.BSpline or SurfaceKind.Offset) return null;
+        if (Kind is SurfaceKind.Pipe or SurfaceKind.BSpline or SurfaceKind.Offset or SurfaceKind.Screw) return null;
         axis = axis.Normalized;
         double H(Vec3 p) => Vec3.Dot(p - origin, axis);
         bool OnAxis(Vec3 p) { var d = p - origin; return (d - axis * Vec3.Dot(d, axis)).Length < tol; }

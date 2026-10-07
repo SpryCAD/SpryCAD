@@ -245,11 +245,14 @@ public sealed class NBoolean
             Parallel.ForEach(toTrace, i =>
             {
                 var (fa, fb, _) = pairs[i];
+                // a screw surface's signed distance jumps between its turns: trace on the screw face instead, with the
+                // other surface's (smooth) distance
+                if (fb.Surface.Kind == SurfaceKind.Screw && fa.Surface.Kind != SurfaceKind.Screw) (fa, fb) = (fb, fa);
                 var swt = System.Diagnostics.Stopwatch.StartNew();
                 List<NCurve> c; using (Prof.Time(Prof.Enabled ? $"tr.{fa.Surface.Kind}x{fb.Surface.Kind}" : "")) c = NIntersect.Trace(fa, fb.Surface, traceTol, traceDoms[fa]).Cast<NCurve>().ToList();
                 if (Prof.Enabled && c.Count == 0) Prof.Add($"tr.empty.{fa.Surface.Kind}x{fb.Surface.Kind}", 0);
                 // traced from the other side too (small faces)
-                if (c.Count == 0) c = NIntersect.Trace(fb, fa.Surface, traceTol, traceDoms[fb]).Cast<NCurve>().ToList();
+                if (c.Count == 0 && fa.Surface.Kind != SurfaceKind.Screw) c = NIntersect.Trace(fb, fa.Surface, traceTol, traceDoms[fb]).Cast<NCurve>().ToList();
                 pairCurves[i] = c;
                 if (Trace != null && Environment.GetEnvironmentVariable("FC_TRACE_SLOW") != null)
                     T($"  trace {fa.Tag.Name}({fa.Surface.Kind}) x {fb.Tag.Name}({fb.Surface.Kind}): {c.Count} curves, {string.Join(" ", c.Select(x => x is NPolyline pl ? pl.Pts.Length + "pts" : x.GetType().Name))} in {swt.ElapsedMilliseconds} ms");

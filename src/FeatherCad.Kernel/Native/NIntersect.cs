@@ -113,8 +113,13 @@ public static class NIntersect
                 if (Math.Abs(fa) + Math.Abs(fb) > L * 1.001 + tol) return; // no root possible here
                 if (depth >= 48 || L < minL)
                 {
-                    // crossings only: pure tangential touches do not split edges (see the summary)
-                    if (fa * fb < 0) res.Add(Roots.Bisect(F, ta, tb));
+                    // crossings only: pure tangential touches do not split edges (see the summary); a screw surface's
+                    // signed distance also jumps (from one turn to the next) where nothing is crossed
+                    if (fa * fb < 0)
+                    {
+                        var r = Roots.Bisect(F, ta, tb);
+                        if (s.Kind != SurfaceKind.Screw || Math.Abs(F(r)) < tol * 1e3) res.Add(r);
+                    }
                     return;
                 }
                 var m = 0.5 * (ta + tb); var fm = F(m);
@@ -157,6 +162,7 @@ public static class NIntersect
             case NLine: return d;
             case NCircle ci: return ci.R * d;
             case NEllipse el: return Math.Max(el.A, el.B) * d;
+            case NHelix hx: return d * Math.Sqrt(hx.Radius * hx.Radius + hx.Motion.K * hx.Motion.K) * 1.000001 + 1e-12;
             default:
                 {
                     // splines/polylines: chord sum of samples with a safety factor
@@ -258,6 +264,8 @@ public static class NIntersect
         if (a.Kind == SurfaceKind.Plane && b.Kind == SurfaceKind.Plane) return PlanePlane(a.Plane!, b.Plane!);
         if (a.Kind == SurfaceKind.Pipe) return PipeOther(a, b, tol);
         if (b.Kind == SurfaceKind.Pipe) return PipeOther(b, a, tol);
+        if (a.Kind == SurfaceKind.Screw) return ScrewOther(a, b, tol);
+        if (b.Kind == SurfaceKind.Screw) return ScrewOther(b, a, tol);
 
         // coaxial surfaces of revolution (incl. planes perpendicular to the axis and spheres centred on it)
         foreach (var (o, ax) in CandidateAxes(a, b))
@@ -300,6 +308,36 @@ public static class NIntersect
     /// curves, which are edges of the blend already: no section), and a plane normal to the spine through a
     /// spine node cuts it in that node's circle. Anything else is traced.
     /// </summary>
+    /// <summary>
+    /// A screw surface and a cylinder on its axis meet along helices: where the generator's distance from the axis is
+    /// the cylinder's radius, each such generator point carried by the motion. Anything else: traced (null).
+    /// </summary>
+    static List<NCurve>? ScrewOther(NSurface screw, NSurface o, double tol)
+    {
+        if (o.Kind != SurfaceKind.Cylinder) return null;
+        var sc = screw.Screw!; var m = sc.Motion;
+        if (Vec3.Cross(o.Axis, m.A).Length > 1e-9 || Vec3.Cross(o.Origin - m.O, m.A).Length > tol) return null;
+        double Radial(double v) { var l = m.Local(sc.Gen.Eval(v)); return Math.Sqrt(l.X * l.X + l.Y * l.Y) - o.R; }
+        // the generator a little past the part that was swept (crossings at its very ends)
+        double pad = (sc.V1 - sc.V0) * 0.01 + 1e-9, v0 = sc.V0 - pad, v1 = sc.V1 + pad;
+        var res = new List<NCurve>();
+        const int n = 64;
+        double pv = v0, pf = Radial(v0);
+        for (int i = 1; i <= n; i++)
+        {
+            var v = v0 + (v1 - v0) * i / n; var f = Radial(v);
+            if (Math.Abs(pf) < tol * 1e-3 && Math.Abs(f) < tol * 1e-3) return null; // the generator lies on the cylinder: coincident
+            if (pf == 0 || pf * f < 0)
+            {
+                var r = pf == 0 ? pv : Roots.Bisect(Radial, pv, v);
+                if (res.Count == 0 || res[^1] is not NHelix last || Vec3.Distance(last.P0, sc.Gen.Eval(r)) > tol)
+                    res.Add(new NHelix(m, sc.Gen.Eval(r)));
+            }
+            pv = v; pf = f;
+        }
+        return res;
+    }
+
     static List<NCurve>? PipeOther(NSurface pipe, NSurface o, double tol)
     {
         var sp = pipe.Spine!;

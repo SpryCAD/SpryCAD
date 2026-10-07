@@ -127,6 +127,7 @@ static class Program
             PatternUnionTests.Run(t);
             SweepTests.Run(t);
             SweepFeatureTests.Run(t);
+            HelicalTests.Run(t);
             Console.WriteLine("Core");
             CoreTests.Run(t);
             Console.WriteLine($"\n{t.Passed} passed, {t.Failed} failed");

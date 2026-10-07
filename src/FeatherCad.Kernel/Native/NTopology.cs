@@ -249,7 +249,7 @@ public sealed class NBody
         var b = Box3.Empty;
         foreach (var e in Edges) b.Add(e.TightBounds());
         foreach (var f in Faces)
-            if (f.Surface.Kind is SurfaceKind.Sphere or SurfaceKind.Torus or SurfaceKind.Pipe or SurfaceKind.BSpline or SurfaceKind.Offset)
+            if (f.Surface.Kind is SurfaceKind.Sphere or SurfaceKind.Torus or SurfaceKind.Pipe or SurfaceKind.BSpline or SurfaceKind.Offset or SurfaceKind.Screw)
             {
                 var dom = NDomain.Of(f, 1e-4);
                 foreach (var q in dom.InteriorSamples(12))
@@ -349,14 +349,14 @@ public sealed class NBody
     {
         var tt = t;
         var mirror = t.IsMirror;
-        return Map(c => c.Transformed(tt), s => s.Transformed(tt), p => tt.Point(p), mirror, prefix);
+        return Map(c => c.Transformed(tt), s => s.Transformed(tt), p => tt.Point(p), mirror, prefix, mirrored: mirror);
     }
 
     /// <summary>A moved copy whose face names are given by <paramref name="rename"/> (e.g. one pattern instance's faces as another's).</summary>
     public NBody Transformed(in Transform t, Func<string, string> rename)
     {
         var tt = t;
-        return Map(c => c.Transformed(tt), s => s.Transformed(tt), p => tt.Point(p), t.IsMirror, null, rename);
+        return Map(c => c.Transformed(tt), s => s.Transformed(tt), p => tt.Point(p), t.IsMirror, null, rename, mirrored: t.IsMirror);
     }
 
     /// <summary>Reverses orientation (inside out): used for the B operand of a subtraction.</summary>
@@ -367,7 +367,7 @@ public sealed class NBody
         return b;
     }
 
-    NBody Map(Func<NCurve, NCurve> curve, Func<NSurface, NSurface> surf, Func<Vec3, Vec3> point, bool reverseLoops, string? prefix = null, Func<string, string>? rename = null)
+    NBody Map(Func<NCurve, NCurve> curve, Func<NSurface, NSurface> surf, Func<Vec3, Vec3> point, bool reverseLoops, string? prefix = null, Func<string, string>? rename = null, bool mirrored = false)
     {
         var vmap = new Dictionary<NVertex, NVertex>(ReferenceEqualityComparer.Instance);
         var emap = new Dictionary<NEdge, NEdge>(ReferenceEqualityComparer.Instance);
@@ -392,7 +392,8 @@ public sealed class NBody
                 tmap[f.Tag] = tag = ReferenceEquals(s, f.Surface) && name == f.Tag.Name ? f.Tag
                     : new FaceTag(name, s.Kind == SurfaceKind.Plane ? SurfaceDef.PlaneDef : s.Def, f.Tag.Seq);
             }
-            var nf = new NFace(s, f.Sense, tag, f.Anchor is { } an ? point(an) : null);
+            // a mirrored screw surface keeps its parameterization, so its natural normal (Su × Sv) turns to the other side
+            var nf = new NFace(s, mirrored && s.Kind == SurfaceKind.Screw ? !f.Sense : f.Sense, tag, f.Anchor is { } an ? point(an) : null);
             if (ReferenceEquals(s, f.Surface)) nf.BoundsCache = f.BoundsCache; // same geometry (clone / flip)
             foreach (var l in f.Loops)
             {

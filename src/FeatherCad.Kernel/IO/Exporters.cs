@@ -252,6 +252,7 @@ public static class StepWriter
                     return c.Add($"CONICAL_SURFACE('',#{Axis2(c, d.Origin + ax * hmax, ax, d.RefDir)},{R(r)},{R(d.Param2)})");
                 }
             case SurfaceKind.Pipe: return WriteBSplineSurface(c, PipeFit(f, b));
+            case SurfaceKind.Screw: return WriteBSplineSurface(c, ScrewFit(f, b));
             case SurfaceKind.BSpline:
             case SurfaceKind.Offset:
                 {
@@ -283,6 +284,27 @@ public static class StepWriter
     }
 
     /// <summary>No pipe surface in AP214: a bicubic B-spline fitted over the face's (angle, spine) box.</summary>
+    /// <summary>STEP has no helical surface: a B-spline fitted over the face's (u, v) box.</summary>
+    static BSplineSurface ScrewFit(ExactFace f, ExactBrep b)
+    {
+        var sc = f.Surface.Def.Screw!;
+        double u0 = double.MaxValue, u1 = double.MinValue, v0 = double.MaxValue, v1 = double.MinValue;
+        double hu = double.NaN, hv = double.NaN;
+        foreach (var p in BoundaryPoints(f, b))
+        {
+            var q = sc.Closest(p, hu, hv);
+            hu = q.u; hv = q.v;
+            u0 = Math.Min(u0, q.u); u1 = Math.Max(u1, q.u); v0 = Math.Min(v0, q.v); v1 = Math.Max(v1, q.v);
+        }
+        var du = (u1 - u0) * 0.01 + 1e-4; var dv = (v1 - v0) * 0.01 + 1e-4;
+        u0 -= du; u1 += du; v0 -= dv; v1 += dv;
+        // about 16 spans a turn around the axis; along a line generator a cubic is exact
+        const double fitTol = 1e-5;
+        int nu = Math.Max(4, (int)Math.Ceiling((u1 - u0) / (Math.PI / 8)));
+        int nv = sc.Gen is Native.NLine ? 4 : Math.Max(4, (int)Math.Ceiling((v1 - v0) / (Math.PI / 8)));
+        return BSplineSurface.Fit(sc.Eval, u0, u1, v0, v1, fitTol, nu, nv);
+    }
+
     static BSplineSurface PipeFit(ExactFace f, ExactBrep b)
     {
         var d = f.Surface.Def;

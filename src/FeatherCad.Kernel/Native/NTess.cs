@@ -172,6 +172,15 @@ public static class NTess
                     var hv = Math.Max(hc, (nb.V1 - nb.V0) * sv / Math.Max(1, nb.SpansV));
                     return (Math.Max(hu, 1e-6), Math.Max(hv, 1e-6));
                 }
+            case SurfaceKind.Screw:
+                {
+                    // around the axis at the largest radius; along the generator its own curvature (a line: long)
+                    var sc = s.Screw!;
+                    var r = Math.Max(sc.MaxRadius, 1e-3);
+                    var hu = Ang(r) * r;
+                    var hv = sc.Gen is NCircle gc ? Ang(gc.R) * gc.R : 1e6;
+                    return (hu, Math.Max(hv, 1e-6));
+                }
             case SurfaceKind.Pipe:
                 {
                     // around: the pipe radius; along: the tightest bend of the surface (inner side of the spine)
@@ -191,6 +200,7 @@ public static class NTess
         SurfaceKind.Sphere => (s.R, s.R),
         SurfaceKind.Torus => (s.R + s.R2, s.R2),
         SurfaceKind.Pipe => (s.R, 1),
+        SurfaceKind.Screw => (Math.Max(s.Screw!.MaxRadius, 1e-3), 1),
         SurfaceKind.BSpline => s.Nurbs!.MetricScale(),
         SurfaceKind.Offset => MetricScale(s.Base!),
         _ => (1, 1),
