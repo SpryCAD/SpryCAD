@@ -108,7 +108,7 @@ public static class NIntersect
             var sc = s.Screw!;
             var step = Math.Max(1e-9, Math.Min(Math.Abs(sc.Motion.Lead) > 0 ? Math.Abs(sc.Motion.Lead) / 8 : double.MaxValue, Math.Max(sc.MaxRadius, 1e-3) / 8));
             int n = Math.Clamp((int)Math.Ceiling(ArcBound(c, lo, hi) / step), 16, 20000);
-            double pt = lo, pf = F(lo);
+            double pt = lo, pf = F(lo), zeroSign = 0;
             for (int i = 1; i <= n; i++)
             {
                 var t = lo + (hi - lo) * i / n; var f = F(t);
@@ -117,6 +117,9 @@ public static class NIntersect
                     var r = Roots.Bisect(F, pt, t);
                     if (Math.Abs(F(r)) < tol * 1e3) res.Add(r);
                 }
+                // a crossing exactly at a sample (the scan steps are round fractions of the edge, like the crossings)
+                if (pf == 0 && i > 1 && zeroSign * f < 0) res.Add(pt);
+                if (f == 0 && pf != 0) zeroSign = pf;
                 pt = t; pf = f;
             }
         }
@@ -126,6 +129,9 @@ public static class NIntersect
             // leaves no shorter than this: two roots closer together are a tangential touch, which does not split
             // edges anyway, and an edge running alongside a surface would otherwise be subdivided into 1e5 pieces
             double minL = Math.Max(total * 1e-5, tol * 1000);
+            // the sign before a zero sample (a crossing exactly at a subdivision point, e.g. a helix crossing a plane
+            // at a whole turn): the leaves on either side of it meet there, in order (neither can be pruned)
+            double zeroT = double.NaN, zeroSign = 0;
             void Iso(double ta, double tb, double fa, double fb, int depth)
             {
                 var L = ArcBound(c, ta, tb);
@@ -139,6 +145,8 @@ public static class NIntersect
                         var r = Roots.Bisect(F, ta, tb);
                         if (s.Kind != SurfaceKind.Screw || Math.Abs(F(r)) < tol * 1e3) res.Add(r);
                     }
+                    if (fa == 0 && ta == zeroT && zeroSign * fb < 0) res.Add(ta);
+                    if (fb == 0 && fa != 0) { zeroT = tb; zeroSign = fa; }
                     return;
                 }
                 var m = 0.5 * (ta + tb); var fm = F(m);

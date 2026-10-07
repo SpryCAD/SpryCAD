@@ -111,6 +111,73 @@ static class HelicalTests
                 Volume(t, cut);
             }
         });
+
+        t.Test("Helical sweep: a V groove crossing the shaft's end face (out the top, out the bottom, in from below) cuts exactly", () =>
+        {
+            // cylinder r 10 along Y from y = 0 to 30; its seam at angle 0 (x = +10), where the sweep starts
+            var frame = new Frame(Vec3.Zero, Vec3.UnitX, -Vec3.UnitZ, Vec3.UnitY);
+            var cyl = NBuild.Extrude(new[] { new ProfileRegion(ProfileLoop.Circle(Vec2.Zero, 10, "C")) }, frame, 0, 30, "Shaft");
+            double apexR = 8.4, outR = 10.9, h = (outR - apexR) * Math.Tan(Math.PI / 6), turns = 4;
+            foreach (var (lead, y0) in new[] { (3.0, 24.0), (-3.0, 6.0), (3.0, -6.0) })
+            {
+                var tri = new[] { new Vec2(apexR, y0), new Vec2(outR, y0 - h), new Vec2(outR, y0 + h) };
+                var tool = NHelical.Sweep(new[] { new ProfileRegion(ProfileLoop.Polygon(tri, "T")) }, Frame.Front, Vec3.Zero, Vec3.UnitY, lead, turns * 2 * Math.PI, "Th");
+                var cut = NBoolean.Run(cyl, tool, BoolOp.Subtract);
+                // a profile point at height v sweeps through v .. v + turns·lead: it lies in the shaft over (2π/|lead|)·|that ∩ [0, 30]| of angle
+                var removed = SweptInside(ClipInside(tri, 10), lead, turns, 0, 30);
+                var expect = Math.PI * 100 * 30 - removed;
+                var got = Volume(t, cut);
+                t.True(Math.Abs(got - expect) < 1e-6 * expect, $"lead {lead}, y0 {y0}: volume {got:R} vs {expect:R} (removed {removed:R})");
+            }
+        });
+    }
+
+    // ∫ r · (2π/|lead|)·|[v, v + turns·lead] ∩ [lo, hi]| dA over a convex polygon in the (r, v) half plane: the overlap is linear in v
+    // between its kinks, so cut the polygon into bands there and integrate ∫ r dA and ∫ r v dA exactly on each
+    static double SweptInside(IReadOnlyList<Vec2> p, double lead, double turns, double lo, double hi)
+    {
+        double dv = turns * lead;
+        double Overlap(double v) => Math.Max(0, Math.Min(Math.Max(v, v + dv), hi) - Math.Max(Math.Min(v, v + dv), lo));
+        var cuts = new[] { lo, hi, lo - dv, hi - dv, double.NegativeInfinity, double.PositiveInfinity }.Distinct().OrderBy(c => c).ToArray();
+        double total = 0;
+        for (int k = 0; k + 1 < cuts.Length; k++)
+        {
+            var band = ClipBand(p, cuts[k], cuts[k + 1]);
+            if (band.Count < 3) continue;
+            double m1 = 0, m2 = 0;   // ∫ r dA, ∫ r v dA
+            for (int i = 0; i < band.Count; i++)
+            {
+                var a = band[i]; var b = band[(i + 1) % band.Count];
+                double c = a.X * b.Y - b.X * a.Y;
+                m1 += (a.X + b.X) * c / 6;
+                m2 += (a.X * (2 * a.Y + b.Y) + b.X * (a.Y + 2 * b.Y)) * c / 24;
+            }
+            if (m1 < 0) { m1 = -m1; m2 = -m2; }
+            // the overlap's line on this band from two sample heights
+            double v0 = band.Min(q => q.Y), v1 = band.Max(q => q.Y);
+            double o0 = Overlap(v0), o1 = Overlap(v1), slope = v1 > v0 ? (o1 - o0) / (v1 - v0) : 0;
+            total += (o0 - slope * v0) * m1 + slope * m2;
+        }
+        return 2 * Math.PI / Math.Abs(lead) * total;
+    }
+
+    // the part of a convex polygon with lo ≤ v ≤ hi
+    static List<Vec2> ClipBand(IReadOnlyList<Vec2> p, double lo, double hi)
+    {
+        List<Vec2> Half(IReadOnlyList<Vec2> q, Func<Vec2, double> f)
+        {
+            var res = new List<Vec2>();
+            for (int i = 0; i < q.Count; i++)
+            {
+                var a = q[i]; var b = q[(i + 1) % q.Count];
+                double fa = f(a), fb = f(b);
+                if (fa >= 0) res.Add(a);
+                if ((fa >= 0) != (fb >= 0)) res.Add(a + (b - a) * (fa / (fa - fb)));
+            }
+            return res;
+        }
+        var r = double.IsNegativeInfinity(lo) ? p.ToList() : Half(p, q => q.Y - lo);
+        return double.IsPositiveInfinity(hi) ? r : Half(r, q => hi - q.Y);
     }
 }
 
