@@ -124,6 +124,13 @@ public partial class MainWindow
 
     static readonly IBrush ErrorBrush = new SolidColorBrush(Color.Parse("#FFC62828"));
 
+    /// <summary>Red text for a part that could not be opened, else the normal color (cleared, not set to null: a null brush draws nothing).</summary>
+    static void SetErrorColor(TextBlock tb, bool error)
+    {
+        if (error) tb.Foreground = ErrorBrush;
+        else tb.ClearValue(TextBlock.ForegroundProperty);
+    }
+
     Window? _partsWindow;
     ListBox? _partsList;
     readonly Dictionary<PartTab, PartRow> _partRows = new();
@@ -363,7 +370,7 @@ public partial class MainWindow
                 if (!row.Item.IsPointerOver) row.Close.Opacity = t == _tab ? 1 : 0;
                 // could not be opened: the name in red, the problem instead of the path (in full on the tooltip)
                 var error = t.Error;
-                row.Title.Foreground = error != null ? ErrorBrush : null;
+                SetErrorColor(row.Title, error != null);
                 row.Path.Text = error ?? t.Session.FilePath ?? t.Source ?? "Not saved yet";
                 row.Path.Foreground = error != null ? ErrorBrush : Brushes.Gray;
                 row.Path.TextTrimming = error != null ? TextTrimming.CharacterEllipsis : TextTrimming.PathSegmentEllipsis;
@@ -550,7 +557,7 @@ public partial class MainWindow
     {
         t.Label.Text = t.Session.Title;
         t.Label.FontWeight = t == _tab ? FontWeight.SemiBold : FontWeight.Normal;
-        t.Label.Foreground = t.Error != null ? ErrorBrush : null;
+        SetErrorColor(t.Label, t.Error != null);
         t.Header.Background = t == _tab ? TabActiveBrush : TabInactiveBrush;
         ToolTip.SetTip(t.Header, t.Error is { } e ? $"Could not be opened: {e}" : t.Session.FilePath ?? t.Source ?? "Not saved yet");
         RefreshPartsList();
