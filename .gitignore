@@ -4,3 +4,14 @@ obj/
 *.user
 publish/
 *.swp
+
+# Claude Code worktrees and local settings
+.claude/
+# STEP files written next to the demos by `verify-demos`
+samples/demos/*.step
+# personal working parts (kept out of the repo)
+samples/FailedShell.fcad
+samples/bracket-kcj*.fcad
+samples/demos/spur-gear-chamfer.fcad
+samples/demos/spur-gear-nice.fcad
+samples/demos/spoked-handwheel-FilletAfter.fcad

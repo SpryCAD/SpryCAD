@@ -1,10 +1,12 @@
 # Draws FeatherCAD.ico, the app icon, at every size Windows uses: a white feather on the brand-red tile,
 # drawn with the round-capped strokes of the toolbar icons (src/FeatherCad.App/UI/Icons.cs).
+# Also writes the 256 px frame as the Linux desktop icon (installer/linux/feathercad.png).
 # Windows only (System.Drawing). Run from the repo root:
-#   build\make-icon.ps1 -Out src\FeatherCad.App\Assets\FeatherCAD.ico [-PreviewDir <folder for PNGs>]
-param([string]$Out = "src\FeatherCad.App\Assets\FeatherCAD.ico", [string]$PreviewDir)
+#   build\make-icon.ps1 [-Out src\FeatherCad.App\Assets\FeatherCAD.ico] [-Png installer\linux\feathercad.png] [-PreviewDir <folder for PNGs>]
+param([string]$Out = "src\FeatherCad.App\Assets\FeatherCAD.ico", [string]$Png = "installer\linux\feathercad.png", [string]$PreviewDir)
 Add-Type -AssemblyName System.Drawing
 $Out = [System.IO.Path]::GetFullPath($Out)
+$Png = [System.IO.Path]::GetFullPath($Png)
 
 function RoundRect($x, $y, $w, $h, $r) {
   $p = New-Object System.Drawing.Drawing2D.GraphicsPath
@@ -84,3 +86,6 @@ for ($i = 0; $i -lt $sizes.Count; $i++) {
 }
 foreach ($f in $frames) { $w.Write($f) }
 $w.Close()
+
+[System.IO.Directory]::CreateDirectory([System.IO.Path]::GetDirectoryName($Png)) | Out-Null
+[System.IO.File]::WriteAllBytes($Png, $frames[-1])
