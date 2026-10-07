@@ -353,41 +353,77 @@ public partial class MainWindow
     // ------------------------------------------------------------------------------------------
     // panel tabs (FeatureManager / PropertyManager)
 
-    Button? _fmTab, _pmTab;
+    /// <summary>A tab of the left panel: its header and the panel it shows.</summary>
+    sealed record PanelTab(string Key, TabStripItem Header, Control Content, Func<bool> Available);
+
+    readonly List<PanelTab> _panelTabs = new();
+    // the tab shown before a page opened, shown again when it closes
+    string _tabBeforePage = TreeTab;
+    bool _syncingTabs;
+    const string TreeTab = "tree", PropertyTab = "properties";
 
     void BuildPanelTabs()
     {
-        _fmTab = new Button { Classes = { "tb" }, Content = Icons.Make("part", 18) };
-        ToolTip.SetTip(_fmTab, "FeatureManager Design Tree");
-        _fmTab.Click += (_, _) => ShowPanel(tree: true);
-        _pmTab = new Button { Classes = { "tb" }, Content = Icons.Make("propsheet", 18) };
-        ToolTip.SetTip(_pmTab, "PropertyManager (the settings of the feature or sketch being edited)");
-        _pmTab.Click += (_, _) => ShowPanel(tree: false);
-        PanelTabs.Children.Add(_fmTab);
-        PanelTabs.Children.Add(_pmTab);
-        UpdatePanelTabs();
-    }
-
-    /// <summary>Shows the design tree, or (while a page is open) the PropertyManager.</summary>
-    void ShowPanel(bool tree)
-    {
-        if (!tree && _page == null) return;
-        Tree.IsVisible = tree;
-        PmHost.IsVisible = !tree;
-        UpdatePanelTabs();
+        AddPanelTab(TreeTab, "part", "FeatureManager Design Tree", Tree);
+        AddPanelTab(PropertyTab, "propsheet", "PropertyManager (the settings of the feature or sketch being edited)", PmHost,
+            available: () => _page != null);
+        PanelTabs.SelectionChanged += (_, _) =>
+        {
+            if (_syncingTabs) return;
+            if (PanelTabs.SelectedItem is TabStripItem { Tag: string key }) ShowPanel(key);
+        };
+        ShowPanel(TreeTab);
     }
 
     /// <summary>
-    /// The PropertyManager tab is there only while a page is open (editing a feature or sketch); the tab whose
-    /// panel is showing is drawn pressed.
+    /// Adds a tab to the left panel (e.g. a ConfigurationManager later): an icon header with a tooltip, and its
+    /// panel. <paramref name="available"/>: whether the tab is offered right now (always, by default).
+    /// </summary>
+    void AddPanelTab(string key, string icon, string tip, Control content, Func<bool>? available = null)
+    {
+        var header = new TabStripItem { Content = Icons.Make(icon, 18), Tag = key };
+        ToolTip.SetTip(header, tip);
+        if (content.Parent == null) PanelHost.Children.Add(content);
+        _panelTabs.Add(new PanelTab(key, header, content, available ?? (() => true)));
+        PanelTabs.Items.Add(header);
+    }
+
+    /// <summary>Shows a tab of the left panel (if it is offered now; otherwise the design tree).</summary>
+    void ShowPanel(string key)
+    {
+        var tab = _panelTabs.FirstOrDefault(t => t.Key == key && t.Available()) ?? _panelTabs[0];
+        foreach (var t in _panelTabs)
+        {
+            t.Header.IsVisible = t.Available();
+            t.Content.IsVisible = t == tab;
+        }
+        _syncingTabs = true;
+        PanelTabs.SelectedItem = tab.Header;
+        _syncingTabs = false;
+    }
+
+    /// <summary>
+    /// A page opened or closed: the PropertyManager tab comes and goes with it, and is shown while the page is
+    /// open; on close, the tab shown before it returns.
     /// </summary>
     void UpdatePanelTabs()
     {
-        if (_fmTab == null || _pmTab == null) return;
-        _pmTab.IsVisible = _page != null;
-        _fmTab.Classes.Set("active", Tree.IsVisible);
-        _pmTab.Classes.Set("active", PmHost.IsVisible);
+        if (_panelTabs.Count == 0) return;
+        var current = _panelTabs.FirstOrDefault(t => t.Content.IsVisible)?.Key ?? TreeTab;
+        var opened = _page != null && !_pageShown;
+        _pageShown = _page != null;
+        if (opened)
+        {
+            // a page opened: show it. A page rebuilt while open (the sketch page, on each selection) keeps the
+            // tab the user chose, so the tree can stay up mid-edit
+            if (current != PropertyTab) _tabBeforePage = current;
+            ShowPanel(PropertyTab);
+        }
+        else if (_page == null) ShowPanel(current == PropertyTab ? _tabBeforePage : current);
+        else ShowPanel(current);
     }
+
+    bool _pageShown;
 
     // ------------------------------------------------------------------------------------------
     // heads-up view toolbar

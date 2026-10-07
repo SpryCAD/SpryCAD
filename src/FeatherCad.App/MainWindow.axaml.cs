@@ -476,16 +476,12 @@ public partial class MainWindow : Window
         if (page == null)
         {
             PmHost.Content = null;
-            PmHost.IsVisible = false;
-            Tree.IsVisible = true;
             _modelMode.Filter = SelFilter.Any;
             Viewport.Emphasis = Array.Empty<SelItem>();
             UpdatePanelTabs();
             return;
         }
         PmHost.Content = page.View;
-        PmHost.IsVisible = true;
-        Tree.IsVisible = false;
         page.Lookup = Session.Lookup;
         page.ActiveBoxChanged += () => UpdateFilterFromPage();
         page.Changed += () => UpdateEmphasis();

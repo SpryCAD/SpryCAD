@@ -51,8 +51,9 @@
       <!-- Left panel: FeatureManager / PropertyManager -->
       <Border Grid.Column="0" Background="#FFF5F7FA" BorderBrush="#FFD5DCE6" BorderThickness="0,0,1,0">
         <DockPanel>
-          <StackPanel x:Name="PanelTabs" DockPanel.Dock="Top" Orientation="Horizontal" Background="#FFE8EDF3" />
-          <Panel>
+          <!-- the left panel's tabs (MainWindow.Commands.cs, AddPanelTab); all panels stay loaded, one shows -->
+          <TabStrip x:Name="PanelTabs" DockPanel.Dock="Top" Classes="paneltabs" />
+          <Panel x:Name="PanelHost">
             <ui:FeatureTree x:Name="Tree" />
             <ContentControl x:Name="PmHost" IsVisible="False" Background="#FFF5F7FA" />
           </Panel>
