@@ -37,6 +37,32 @@ public sealed class CadDocument
     /// <summary>How bends unfold in this part (null: K-factor 0.5); a Flat Pattern may override it.</summary>
     public SheetMetalSettings? SheetMetal { get; set; }
     /// <summary>
+    /// Sketches shown (true) or hidden (false) by the user, by feature id; a sketch not listed is shown while no
+    /// feature uses it. Display only: kept out of the features, so showing or hiding a sketch rebuilds nothing.
+    /// Null when nothing is set.
+    /// </summary>
+    public Dictionary<string, bool>? SketchVisibility { get; set; }
+
+    /// <summary>Whether a sketch shows in the graphics area: as the user set it, else while no active feature uses it.</summary>
+    public bool SketchShown(string id, bool consumed) => SketchVisibility?.TryGetValue(id, out var v) == true ? v : !consumed;
+
+    /// <summary>Shows or hides a sketch; the automatic choice (shown while unused) when that is what it would be anyway.</summary>
+    public void SetSketchShown(string id, bool shown, bool consumed)
+    {
+        if (shown == !consumed) SketchVisibility?.Remove(id);
+        else (SketchVisibility ??= new())[id] = shown;
+        if (SketchVisibility is { Count: 0 }) SketchVisibility = null;
+    }
+
+    /// <summary>The features an active, unsuppressed feature uses (sketches hidden by default).</summary>
+    public HashSet<string> ConsumedByActive()
+    {
+        var consumed = new HashSet<string>();
+        foreach (var f in Features.Take(ActiveCount)) if (!f.Suppressed) foreach (var c in f.Consumes) consumed.Add(c);
+        return consumed;
+    }
+
+    /// <summary>
     /// Index of the embedded files (name, size, SHA-256), written by <see cref="Save"/>; null when there are none.
     /// It keeps model.json self-describing (and a changed attachment visible in a diff).
     /// </summary>

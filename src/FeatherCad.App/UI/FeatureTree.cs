@@ -31,6 +31,8 @@ public sealed class FeatureTree : UserControl
     public event Action<int?>? RollbackRequested;
     /// <summary>Dragged feature id, target feature id (or "__rollback" for the bar), drop after the target.</summary>
     public event Action<string, string, bool>? MoveRequested;
+    /// <summary>A sketch's eye was clicked: show it if hidden, hide it if shown.</summary>
+    public event Action<string>? SketchVisibilityToggled;
 
     public FeatureTree()
     {
@@ -90,6 +92,10 @@ public sealed class FeatureTree : UserControl
             foreach (var c in f.Consumes)
                 if (!string.IsNullOrEmpty(c)) consumedBy[c] = f.Id;
 
+        // sketches: an eye shows whether each is shown in the graphics area (as set, else while unused)
+        var consumedActive = doc.ConsumedByActive();
+        bool? ShownOf(Feature f) => f is SketchFeature ? doc.SketchShown(f.Id, consumedActive.Contains(f.Id)) : null;
+
         var active = doc.ActiveCount;
         for (int i = 0; i < doc.Features.Count; i++)
         {
@@ -104,10 +110,12 @@ public sealed class FeatureTree : UserControl
                 foreach (var ch in children)
                     if (result?.Status.GetValueOrDefault(ch.Id) is { Ok: false } cs)
                         shown = new FeatureStatus { Error = $"{ch.Name}: {cs.Error}", Milliseconds = status?.Milliseconds ?? 0 };
-            AddRow(f.Id, Label(f, result), IconFor(f), 1, shown, suppressed: f.Suppressed || rolledBack, hasChildren: children.Count > 0);
+            AddRow(f.Id, Label(f, result), IconFor(f), 1, shown, suppressed: f.Suppressed || rolledBack, hasChildren: children.Count > 0,
+                sketchShown: rolledBack ? null : ShownOf(f));
             if (children.Count > 0 && _expanded.Contains(f.Id))
                 foreach (var ch in children)
-                    _childRows.Add(AddRow(ch.Id, Label(ch, result), IconFor(ch), 2, result?.Status.GetValueOrDefault(ch.Id), suppressed: ch.Suppressed || rolledBack));
+                    _childRows.Add(AddRow(ch.Id, Label(ch, result), IconFor(ch), 2, result?.Status.GetValueOrDefault(ch.Id), suppressed: ch.Suppressed || rolledBack,
+                        sketchShown: rolledBack ? null : ShownOf(ch)));
         }
         if (active >= doc.Features.Count) AddRollbackBar();
         Select(_selectedId);
@@ -239,7 +247,38 @@ public sealed class FeatureTree : UserControl
         _dropLine.IsVisible = false;
     }
 
-    Border AddRow(string id, string text, string icon, int indent, FeatureStatus? status, bool isHeader = false, bool suppressed = false, bool hasChildren = false)
+    // the eye of a sketch row: open (shown in the graphics area), or closed with a slash (hidden)
+    static readonly Geometry EyeOpen = Geometry.Parse("M2 12C5 7 8.5 5 12 5s7 2 10 7c-3 5-6.5 7-10 7s-7-2-10-7z M12 9a3 3 0 1 0 0.01 0z");
+    static readonly Geometry EyeShut = Geometry.Parse("M2 12C5 7 8.5 5 12 5s7 2 10 7c-3 5-6.5 7-10 7s-7-2-10-7z M4 4l16 16");
+
+    /// <summary>A sketch row's show/hide button (clicking it toggles, without selecting the row).</summary>
+    Control EyeButton(string id, bool shown)
+    {
+        var glyph = new Avalonia.Controls.Shapes.Path
+        {
+            Data = shown ? EyeOpen : EyeShut, Stroke = shown ? new SolidColorBrush(Color.FromRgb(45, 55, 72)) : Brushes.Gray,
+            StrokeThickness = 1.6, Stretch = Stretch.Uniform, Width = 14, Height = 14,
+        };
+        var b = new Border
+        {
+            Child = glyph, Padding = new Thickness(2), CornerRadius = new CornerRadius(3), Background = Brushes.Transparent,
+            VerticalAlignment = VerticalAlignment.Center, Cursor = new Cursor(StandardCursorType.Hand), Margin = new Thickness(2, 0, 0, 0),
+            Opacity = shown ? 1 : 0.7,
+        };
+        ToolTip.SetTip(b, shown ? "Hide the sketch" : "Show the sketch (e.g. to use it again in another feature)");
+        b.PointerEntered += (_, _) => b.Background = new SolidColorBrush(Color.FromArgb(40, 0, 90, 200));
+        b.PointerExited += (_, _) => b.Background = Brushes.Transparent;
+        b.PointerPressed += (_, e) =>
+        {
+            if (!e.GetCurrentPoint(b).Properties.IsLeftButtonPressed) return;
+            e.Handled = true; // not a row press (no selection, no drag)
+            SketchVisibilityToggled?.Invoke(id);
+        };
+        return b;
+    }
+
+    Border AddRow(string id, string text, string icon, int indent, FeatureStatus? status, bool isHeader = false, bool suppressed = false, bool hasChildren = false,
+        bool? sketchShown = null)
     {
         var sp = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, Margin = new Thickness(indent * 14, 0, 0, 0) };
         if (hasChildren)
@@ -277,6 +316,7 @@ public sealed class FeatureTree : UserControl
         if (status is { Ok: false }) sp.Children.Add(new TextBlock { Text = "✖", Foreground = Brushes.Red, VerticalAlignment = VerticalAlignment.Center });
         else if (status is { Warnings.Count: > 0 }) sp.Children.Add(new TextBlock { Text = "⚠", Foreground = Brushes.DarkOrange, VerticalAlignment = VerticalAlignment.Center });
         if (status != null && status.Milliseconds > 200) sp.Children.Add(new TextBlock { Text = $"{status.Milliseconds:0} ms", Foreground = Brushes.Gray, FontSize = 10, VerticalAlignment = VerticalAlignment.Center });
+        if (sketchShown is { } shownNow) sp.Children.Add(EyeButton(id, shownNow));
 
         var row = new Border { Classes = { "treerow" }, Child = sp, Tag = id };
         if (status is { Ok: false }) ToolTip.SetTip(row, status.Error);

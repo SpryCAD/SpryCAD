@@ -61,6 +61,7 @@ public partial class MainWindow : Window
         Tree.SelectedChanged += OnTreeSelected;
         Tree.EditRequested += id => EditFeature(id);
         Tree.ContextRequested += OnTreeContext;
+        Tree.SketchVisibilityToggled += id => SetSketchShown(id, null);
         Tree.HoverChanged += OnTreeHover;
         Tree.ExpandToggled += () => RebuildTree();
         Tree.RollbackTo += (id, after) => RollbackTo(id, after);
@@ -235,22 +236,37 @@ public partial class MainWindow : Window
         Viewport.Planes = planes;
         Viewport.ShowPlanes = _showPlanes || editingPlane || state.Bodies.Count == 0 && _sketch == null;
 
-        // visible sketches: not consumed by an active feature, or selected; a helical sweep's profile sketch while
-        // the sweep is edited (its centerline can be picked as the axis)
-        var consumed = new HashSet<string>();
-        foreach (var f in doc.Features.Take(doc.ActiveCount)) if (!f.Suppressed) foreach (var c in f.Consumes) consumed.Add(c);
-        if (_edit?.Feature is HelicalSweepFeature hsf) consumed.Remove(hsf.SketchId);
+        // visible sketches: as shown/hidden in the tree, else while no active feature uses them; also the selected
+        // ones, and those the feature being edited uses (to be picked again, e.g. a sweep's path or a helical
+        // sweep's centerline as the axis)
+        var consumed = doc.ConsumedByActive();
+        var editing = _edit?.Feature.Consumes.ToHashSet() ?? new HashSet<string>();
         var selectedSketches = Selection.Items.Where(s => s.Kind == SelKind.Sketch).Select(s => s.FeatureId).ToHashSet();
         var sk = new List<SketchDisplay>();
         foreach (var (id, sr) in state.Sketches)
         {
             if (_sketch != null && id == _sketch.Feature.Id) continue;
-            if (consumed.Contains(id) && !selectedSketches.Contains(id)) continue;
             if (doc.Find(id) is HoleFeature) continue;
+            if (!doc.SketchShown(id, consumed.Contains(id)) && !selectedSketches.Contains(id) && !editing.Contains(id)) continue;
             sk.Add(new SketchDisplay(id, sr));
         }
         Viewport.Sketches = sk;
         Viewport.Redraw();
+    }
+
+    /// <summary>
+    /// Shows or hides a sketch in the graphics area (null: the other way round from now), e.g. a sketch a feature
+    /// uses, to pick it again for a sweep; saved with the part, undoable, nothing rebuilt.
+    /// </summary>
+    void SetSketchShown(string id, bool? shown)
+    {
+        var doc = Session.Doc;
+        if (doc.Find(id) is not SketchFeature) return;
+        var consumed = doc.ConsumedByActive().Contains(id);
+        var show = shown ?? !doc.SketchShown(id, consumed);
+        if (show == doc.SketchShown(id, consumed)) return;
+        Session.Change(() => doc.SetSketchShown(id, show, consumed));
+        Status($"{doc.Find(id)!.Name} {(show ? "shown" : "hidden")}");
     }
 
     /// <summary>Exact geometry of a selected face/edge for the status bar (like SolidWorks).</summary>

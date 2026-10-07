@@ -631,6 +631,12 @@ public partial class MainWindow
             var sk = f.Consumes.FirstOrDefault(c => Session.Doc.Find(c) is SketchFeature);
             if (sk != null && f is not HoleFeature) menu.Items.Add(Item("Edit Sketch", () => EditFeature(sk), null, "sketch"));
             if (f is HoleFeature hf) menu.Items.Add(Item("Edit Hole Positions", () => EditFeature(hf.SketchId), null, "sketch"));
+            // a sketch shown or hidden in the graphics area (e.g. one a feature uses, to pick it again for a sweep)
+            if (f is SketchFeature)
+            {
+                var shown = Session.Doc.SketchShown(id, Session.Doc.ConsumedByActive().Contains(id));
+                menu.Items.Add(Item(shown ? "Hide" : "Show", () => SetSketchShown(id, !shown)));
+            }
             menu.Items.Add(new Separator());
             menu.Items.Add(Item(f.Suppressed ? "Unsuppress" : "Suppress", () => SetSuppressed(!f.Suppressed)));
             menu.Items.Add(Item("Rename", () => _ = RenameFeature(f), "F2"));
