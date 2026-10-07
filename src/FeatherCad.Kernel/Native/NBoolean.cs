@@ -15,7 +15,7 @@ public sealed class NBoolean
     static readonly object _traceLock = new();
     static void T(string m) { if (Trace != null) lock (_traceLock) Trace?.Invoke(m); }
     bool RollsOn(NSurface blend, NSurface s) => blend.Spine is { } sp
-        && (sp.SupportA is { } a && Same(a, s) || sp.SupportB is { } b && Same(b, s));
+        && (sp.SupportA is { } a && Same(a, s) || sp.SupportB is { } b && Same(b, s) || sp.Rolls.Any(r => Same(r, s)));
 
     // the same surface, or a piece of the same fillet (a blend rolling over a fillet rolls on that fillet merged into
     // one pipe, the body has its pieces)
@@ -412,48 +412,59 @@ public sealed class NBoolean
         List<(NFace f, Box3 box)> fboxes; using (Prof.Time("split.fboxes")) fboxes = ActiveFaces(Y).Select(f => (f, box: f.Bounds(_sampleTol * 500))).ToList();
         List<NVertex>? yVerts = null;
         var grazeNear = Math.Max(_onTol * 200, 1e3 * _tol);
+        // the edge/surface roots of every candidate pair, found in parallel (pure geometry); the splits are then
+        // made in order, as before
+        var cand = new List<(NEdge e, NFace f)>();
         foreach (var e in NearEdges(ActiveFaces(X)))
         {
             var eb = e.Bounds(_sampleTol * 500);
             foreach (var (f, box) in fboxes)
+                if (eb.Overlaps(box, _onTol)) cand.Add((e, f));
+        }
+        var found = new NIntersect.EdgeHits[cand.Count];
+        Parallel.For(0, cand.Count, k =>
+        {
+            var (e, f) = cand[k];
+            using (Prof.Time(Prof.Enabled ? $"split.{e.Curve.GetType().Name}x{f.Surface.Kind}" : "")) found[k] = NIntersect.EdgeSurface(e, f.Surface, _tol);
+        });
+        for (int k = 0; k < cand.Count; k++)
+        {
+            var (e, f) = cand[k];
+            var hits = found[k];
+            if (Trace != null && Environment.GetEnvironmentVariable("FC_TRACE_EDGE") is { } te && e.Mid.ToString().Contains(te))
+                T($"    edge {e.V0.P}->{e.V1.P} x {f.Tag.Name} ({f.Surface.Kind}): on={hits.OnSurface} hits {string.Join(" ", hits.Params.Select(t => $"{e.Curve.Eval(t)}/cls{Dom(f).Classify(f.Surface.Project(e.Curve.Eval(t)), _onTol)}"))}");
+            if (hits.OnSurface) { onSurface.Add((e, f)); continue; }
+            foreach (var t in hits.Params)
             {
-                if (!eb.Overlaps(box, _onTol)) continue;
-                NIntersect.EdgeHits hits; using (Prof.Time(Prof.Enabled ? $"split.{e.Curve.GetType().Name}x{f.Surface.Kind}" : "")) hits = NIntersect.EdgeSurface(e, f.Surface, _tol);
-                if (Trace != null && Environment.GetEnvironmentVariable("FC_TRACE_EDGE") is { } te && e.Mid.ToString().Contains(te))
-                    T($"    edge {e.V0.P}->{e.V1.P} x {f.Tag.Name} ({f.Surface.Kind}): on={hits.OnSurface} hits {string.Join(" ", hits.Params.Select(t => $"{e.Curve.Eval(t)}/cls{Dom(f).Classify(f.Surface.Project(e.Curve.Eval(t)), _onTol)}"))}");
-                if (hits.OnSurface) { onSurface.Add((e, f)); continue; }
-                foreach (var t in hits.Params)
+                var p = e.Curve.Eval(t);
+                // traced boundaries are splines fitted within _sampleTol * 5 of the exact curve: a point on
+                // the true boundary may sit that far outside the spline
+                if (Dom(f).Classify(f.Surface.Project(p), Math.Max(_onTol, _sampleTol * 12)) < 0) continue;
+                if (Vec3.Distance(p, e.V0.P) < _tol * 10 || Vec3.Distance(p, e.V1.P) < _tol * 10) continue;
+                // the edge runs along the surface here (e.g. a seam crossing a fillet's contact line): the hit is a
+                // double root, accurate only to about the square root of the solver tolerance. Where a vertex of the
+                // other body lies on the edge close by (the end of a blend's contact line on it), that is the point.
+                bool grazing = Math.Abs(Vec3.Dot(e.Curve.Deriv(t).Normalized, f.Surface.Normal(p))) < 0.05;
+                NVertex? w = null; double tw = t;
+                // a grazing touch this close to an end of the edge is that end
+                if (grazing && (Vec3.Distance(p, e.V0.P) < grazeNear || Vec3.Distance(p, e.V1.P) < grazeNear)) continue;
+                if (grazing)
                 {
-                    var p = e.Curve.Eval(t);
-                    // traced boundaries are splines fitted within _sampleTol * 5 of the exact curve: a point on
-                    // the true boundary may sit that far outside the spline
-                    if (Dom(f).Classify(f.Surface.Project(p), Math.Max(_onTol, _sampleTol * 12)) < 0) continue;
-                    if (Vec3.Distance(p, e.V0.P) < _tol * 10 || Vec3.Distance(p, e.V1.P) < _tol * 10) continue;
-                    // the edge runs along the surface here (e.g. a seam crossing a fillet's contact line): the hit is a
-                    // double root, accurate only to about the square root of the solver tolerance. Where a vertex of the
-                    // other body lies on the edge close by (the end of a blend's contact line on it), that is the point.
-                    bool grazing = Math.Abs(Vec3.Dot(e.Curve.Deriv(t).Normalized, f.Surface.Normal(p))) < 0.05;
-                    NVertex? w = null; double tw = t;
-                    // a grazing touch this close to an end of the edge is that end
-                    if (grazing && (Vec3.Distance(p, e.V0.P) < grazeNear || Vec3.Distance(p, e.V1.P) < grazeNear)) continue;
-                    if (grazing)
+                    yVerts ??= VerticesOf(NearEdges(ActiveFaces(Y)));
+                    foreach (var y in yVerts)
                     {
-                        yVerts ??= VerticesOf(NearEdges(ActiveFaces(Y)));
-                        foreach (var y in yVerts)
-                        {
-                            if (Vec3.Distance(y.P, p) > grazeNear || ReferenceEquals(y, e.V0) || ReferenceEquals(y, e.V1)) continue;
-                            var ty = Refine(e.Curve, y.P, t);
-                            if (Vec3.Distance(e.Curve.Eval(ty), y.P) > _tol * 10) continue;
-                            if (w == null || Vec3.Distance(y.P, p) < Vec3.Distance(w.P, p)) { w = y; tw = ty; }
-                        }
+                        if (Vec3.Distance(y.P, p) > grazeNear || ReferenceEquals(y, e.V0) || ReferenceEquals(y, e.V1)) continue;
+                        var ty = Refine(e.Curve, y.P, t);
+                        if (Vec3.Distance(e.Curve.Eval(ty), y.P) > _tol * 10) continue;
+                        if (w == null || Vec3.Distance(y.P, p) < Vec3.Distance(w.P, p)) { w = y; tw = ty; }
                     }
-                    var v = w ?? Snap(p);
-                    var ts = w != null ? tw : t;
-                    if (Vec3.Distance(v.P, e.V0.P) < _tol * 10 || Vec3.Distance(v.P, e.V1.P) < _tol * 10) continue;
-                    if (!splits.TryGetValue(e, out var l)) splits[e] = l = new();
-                    if (!l.Any(x => ReferenceEquals(x.Item2, v))) l.Add((ts, v));
-                    if (grazing && w == null) _grazing.Add(v);
                 }
+                var v = w ?? Snap(p);
+                var ts = w != null ? tw : t;
+                if (Vec3.Distance(v.P, e.V0.P) < _tol * 10 || Vec3.Distance(v.P, e.V1.P) < _tol * 10) continue;
+                if (!splits.TryGetValue(e, out var l)) splits[e] = l = new();
+                if (!l.Any(x => ReferenceEquals(x.Item2, v))) l.Add((ts, v));
+                if (grazing && w == null) _grazing.Add(v);
             }
         }
     }

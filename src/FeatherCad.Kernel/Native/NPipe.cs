@@ -13,6 +13,11 @@ public sealed class PipeSpine
     public double[] S { get; }
     public NSurface? SupportA { get; }
     public NSurface? SupportB { get; }
+    /// <summary>
+    /// Every surface the ball rolls on along its chain (a composite fillet switching from face to face): the blend of
+    /// one segment touches the others' surfaces tangentially where it switches and lies on their open side elsewhere.
+    /// </summary>
+    public IReadOnlyList<NSurface> Rolls { get; init; } = Array.Empty<NSurface>();
 
     const int Sub = 8;
     readonly Vec3[] _sp;      // dense samples
@@ -204,7 +209,7 @@ public sealed class PipeSpine
     {
         var tt = t;
         return new PipeSpine(P.Select(p => tt.Point(p)).ToList(), D.Select(d => tt.Vector(d)).ToList(),
-            SupportA?.Transformed(t), SupportB?.Transformed(t));
+            SupportA?.Transformed(t), SupportB?.Transformed(t)) { Rolls = Rolls.Select(s => s.Transformed(tt)).ToList() };
     }
 
     /// <summary>Same spine geometry (nodes and tangents within tol).</summary>

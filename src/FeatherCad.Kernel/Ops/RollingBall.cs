@@ -502,6 +502,8 @@ public static class RollingBall
         }
         catch (InvalidOperationException) { return Fail("the radius is larger than the curvature of a face it blends."); }
 
+        // every surface the ball rolls on along the chain (the boolean does not trace a segment's blend against them)
+        var rolls = support.Select(Sup).Distinct().ToList();
         // spine segments between consecutive events, on A's offset and the offset of the face the ball rolls on
         var spines = new PipeSpine[nseg]; var range = new (double s0, double s1)[nseg];
         for (int i = 0; i < nseg; i++)
@@ -516,7 +518,7 @@ public static class RollingBall
                 return Fail("could not follow the rolling ball along the edge (the faces turn too sharply for this radius).");
             }
             var (P, D, i0, i1) = m.Value;
-            var sp = new PipeSpine(P, D, SA, Sup(support[i]));
+            var sp = new PipeSpine(P, D, SA, Sup(support[i])) { Rolls = rolls };
             if (sp.MinCurvatureRadius < r * 1.02) { if (Debug != null) { var fam = walked.Concat(faB).Distinct().Where(f => Side(f, support[i])).ToList(); for (int q = 0; q <= 10; q++) { var c = sp.Eval(sp.S0 + (sp.S1 - sp.S0) * q / 10); var pb = Sup(support[i]).Project(c); Debug($"    foot {q}: {pb} on fillet faces {fam.Any(f => onFaces(f, pb))}, A {faA.Any(f => onFaces(f, SA.Project(c)))}"); } } Debug?.Invoke($"fold on segment {i}/{nseg} ({support[i].Tag.Name}:{support[i].Surface.Kind}) {ev[i].S} -> {ev[(i + 1) % ne].S}: min curvature radius {sp.MinCurvatureRadius:g3}, {P.Count} nodes"); return Fail("the radius is too large: the fillet would fold over itself."); }
             spines[i] = sp; range[i] = (sp.S[i0], sp.S[i1]);
         }
@@ -808,7 +810,7 @@ public static class RollingBall
         }
         // a closed fillet loop would join onto itself: keep the open chain (the ball does not go all the way round)
         if (P.Count < 2) return null;
-        try { return new PipeSpine(P, D, seed.SupportA, seed.SupportB); }
+        try { return new PipeSpine(P, D, seed.SupportA, seed.SupportB) { Rolls = seed.Rolls }; }
         catch (Exception) { return null; }
     }
 
