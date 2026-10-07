@@ -383,18 +383,41 @@ public partial class MainWindow
         var skBox = page.Selection(s0, "Sketch", SelFilter.Sketch, "Closed profile and a centerline (the helix's axis)", 1);
         if (!string.IsNullOrEmpty(f.SketchId)) skBox.Items.Add(new SelItem { Kind = SelKind.Sketch, FeatureId = f.SketchId });
         var axisSec = page.Section("Axis");
-        ComboBox? axisCombo = null;
-        void FillAxes()
+        // one box: a line of the profile's sketch, or an axis from the model (a cylindrical face, a straight or
+        // circular edge); the X / Y / Z buttons; empty: the sketch's first centerline
+        var st = StateForEdit(f, isNew);
+        var axBox = page.Selection(axisSec, "Axis", SelFilter.SketchSegment | SelFilter.Edge | SelFilter.Face,
+            "A centerline in the profile's sketch, a cylindrical face, a straight or circular edge, or an axis button", 1);
+        if (f.Axis != null) { if (DirItem(f.Axis, st) is { } ai) axBox.Items.Add(ai); }
+        else if (f.AxisEntity != 0) axBox.Items.Add(new SelItem { Kind = SelKind.SketchSegment, FeatureId = f.SketchId, SketchItem = f.AxisEntity });
+        var axisLbl = new TextBlock { FontSize = 11, Foreground = Avalonia.Media.Brushes.DimGray, TextWrapping = Avalonia.Media.TextWrapping.Wrap };
+        Action? axes = null;
+        void UpdAxis()
         {
-            if (axisCombo != null) axisSec.Children.Remove(axisCombo.Parent as Control ?? axisCombo);
-            var sk = Session.Doc.Find(f.SketchId) as SketchFeature;
-            var lines = sk?.Sketch.Entities.OfType<SkLine>().OrderByDescending(l => l.Construction).ToList() ?? new();
-            var opts = new List<(int, string)> { (0, "First centerline (auto)") };
-            opts.AddRange(lines.Select(l => (l.Id, (l.Construction ? "Centerline" : "Line") + l.Id)));
-            axisCombo = page.Combo(axisSec, "Axis", opts, () => f.AxisEntity, v => f.AxisEntity = v, "centerline");
+            axisLbl.Text = f.Axis?.Axis != null ? $"Using the {f.Axis.Axis} axis" : f.Axis == null && f.AxisEntity == 0 ? "Using the sketch's first centerline" : "";
+            axes?.Invoke();
         }
-        FillAxes();
-        skBox.Changed += () => { f.SketchId = skBox.Items.FirstOrDefault()?.FeatureId ?? ""; f.AxisEntity = 0; FillAxes(); };
+        axBox.Changed += () =>
+        {
+            var it = axBox.Items.FirstOrDefault();
+            if (it == null) { f.Axis = null; f.AxisEntity = 0; }
+            else if (it.Kind == SelKind.SketchSegment)
+            {
+                // a line of the profile's sketch only (another sketch's line is not tied to this one)
+                if (it.FeatureId == f.SketchId && Session.Doc.Find(f.SketchId) is SketchFeature sf && sf.Sketch.Entity(it.SketchItem) is SkLine)
+                { f.AxisEntity = it.SketchItem; f.Axis = null; }
+                else { axBox.Items.Clear(); axBox.Refresh(); Status("Pick a line in the profile's sketch, or an edge or face of the model."); }
+            }
+            else if (it.ToDirRef() is { } dr) { f.Axis = dr; f.AxisEntity = 0; }
+            UpdAxis();
+        };
+        axes = AxisButtons(page, axisSec, () => f.Axis?.Axis, ax => { f.Axis = new DirRef { Axis = ax }; f.AxisEntity = 0; axBox.Items.Clear(); axBox.Refresh(); UpdAxis(); });
+        axisSec.Children.Add(axisLbl); UpdAxis();
+        skBox.Changed += () =>
+        {
+            f.SketchId = skBox.Items.FirstOrDefault()?.FeatureId ?? "";
+            if (f.AxisEntity != 0) { f.AxisEntity = 0; axBox.Items.Clear(); axBox.Refresh(); UpdAxis(); }
+        };
         var h = page.Section("Helix");
         page.Number(h, "Pitch", () => f.Pitch, v => f.Pitch = v, "dimension");
         page.Number(h, "Revolutions", () => f.Revolutions, v => f.Revolutions = v, "helical");

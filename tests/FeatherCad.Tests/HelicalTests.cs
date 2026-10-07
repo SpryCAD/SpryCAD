@@ -191,6 +191,84 @@ static class ThreadFeatureTests
             t.True(!new FeatherCad.Core.Regen.Regenerator().Rebuild(d3).Status[h3.Id].Ok, "a boss needs a run-out length");
         });
 
+        t.Test("Helical Sweep feature: the axis from the model (a shaft's cylindrical face, the Z axis) instead of a centerline", () =>
+        {
+            // a 20 mm shaft along Z; a V groove at z = 5 on the Top plane (sketch y = -z), with or without a centerline
+            var doc = new FeatherCad.Core.Model.CadDocument();
+            var c = doc.AddFeature(new FeatherCad.Core.Model.SketchFeature { Plane = FeatherCad.Core.Model.PlaneRef.Front, Sketch = CircleAt(Vec2.Zero, 10) });
+            doc.AddFeature(new FeatherCad.Core.Model.ExtrudeFeature { SketchId = c.Id, Depth = "30" });
+            var r0 = new FeatherCad.Core.Regen.Regenerator().Rebuild(doc);
+            var before = KernelTests.Vex(r0.State.Bodies[0].Solid);
+            var cyl = r0.State.Bodies[0].Solid.Native!.Faces.First(f => f.Surface.Kind == SurfaceKind.Cylinder);
+            double Removed(bool centerline, FeatherCad.Core.Model.DirRef? axis)
+            {
+                var d = FeatherCad.Core.Model.CadDocument.FromJson(doc.ToJson());
+                var sk = new FeatherCad.Core.Sketching.Sketch();
+                var p1 = sk.AddPoint(new Vec2(8.6, -5)); var p2 = sk.AddPoint(new Vec2(11, -5 - 1.4)); var p3 = sk.AddPoint(new Vec2(11, -5 + 1.4));
+                sk.Add(new FeatherCad.Core.Sketching.SkLine { P1 = p1.Id, P2 = p2.Id }); sk.Add(new FeatherCad.Core.Sketching.SkLine { P1 = p2.Id, P2 = p3.Id }); sk.Add(new FeatherCad.Core.Sketching.SkLine { P1 = p3.Id, P2 = p1.Id });
+                if (centerline)
+                {
+                    var a = sk.AddPoint(new Vec2(0, 0)); var b = sk.AddPoint(new Vec2(0, -30));
+                    sk.Add(new FeatherCad.Core.Sketching.SkLine { P1 = a.Id, P2 = b.Id, Construction = true });
+                }
+                var s = d.AddFeature(new FeatherCad.Core.Model.SketchFeature { Plane = FeatherCad.Core.Model.PlaneRef.Top, Sketch = sk });
+                var h = d.AddFeature(new FeatherCad.Core.Model.HelicalSweepFeature { SketchId = s.Id, Pitch = "4", Revolutions = "4", IsCut = true, Axis = axis });
+                // saved and loaded with its axis
+                d = FeatherCad.Core.Model.CadDocument.FromJson(d.ToJson());
+                var r = new FeatherCad.Core.Regen.Regenerator().Rebuild(d);
+                t.True(r.Status[h.Id].Ok, r.Status[h.Id].Error ?? "");
+                t.Eq(r.State.Bodies[0].Solid.Topology.OpenHalfEdges, 0);
+                return before - KernelTests.Vex(r.State.Bodies[0].Solid);
+            }
+            var byLine = Removed(true, null);
+            var byFace = Removed(false, new FeatherCad.Core.Model.DirRef { Face = new FeatherCad.Core.Model.FaceRef { Name = cyl.Tag.Name, Hint = new Vec3(10, 0, 15) } });
+            var byZ = Removed(false, new FeatherCad.Core.Model.DirRef { Axis = "Z" });
+            t.True(byLine > 1, $"the groove removes material ({byLine:0.###})");
+            // the same groove whichever way the axis was given (the face's axis runs up Z, as the centerline does)
+            t.True(Math.Abs(byFace - byLine) < 1e-6 * byLine, $"by the face {byFace:0.######} vs the centerline {byLine:0.######}");
+            t.True(Math.Abs(byZ - byLine) < 1e-6 * byLine, $"by Z {byZ:0.######} vs the centerline {byLine:0.######}");
+        });
+
+        t.Test("Helical Sweep feature: a round-wire spring cut flat through its first turn stays two half-round faces (no tube face); its mesh lies on the wire", () =>
+        {
+            // wire r 1 on r 5, pitch 5, 3 turns and a 10 mm run-out; a through cut below y = 0 (the start's height)
+            // slices the first turn lengthwise. The two half-round faces met again past the cut and were merged
+            // into one face all the way round the wire, which tessellated with holes.
+            var doc = new FeatherCad.Core.Model.CadDocument();
+            var sk = CircleAt(new Vec2(5, 0), 1);
+            var a = sk.AddPoint(new Vec2(0, 0)); var b = sk.AddPoint(new Vec2(0, 6));
+            sk.Add(new FeatherCad.Core.Sketching.SkLine { P1 = a.Id, P2 = b.Id, Construction = true });
+            var s = doc.AddFeature(new FeatherCad.Core.Model.SketchFeature { Plane = FeatherCad.Core.Model.PlaneRef.Front, Sketch = sk });
+            var hs = doc.AddFeature(new FeatherCad.Core.Model.HelicalSweepFeature { SketchId = s.Id, Pitch = "5", Revolutions = "3", RunOut = true, RunOutLength = "10" });
+            var cs = new FeatherCad.Core.Sketching.Sketch();
+            var q0 = cs.Point(FeatherCad.Core.Sketching.Sketch.OriginId)!; var q1 = cs.AddPoint(new Vec2(7.7, 0)); var q2 = cs.AddPoint(new Vec2(7.7, -3.7)); var q3 = cs.AddPoint(new Vec2(0, -3.7));
+            foreach (var (p, q) in new[] { (q0, q1), (q1, q2), (q2, q3), (q3, q0) }) cs.Add(new FeatherCad.Core.Sketching.SkLine { P1 = p.Id, P2 = q.Id });
+            var c2 = doc.AddFeature(new FeatherCad.Core.Model.SketchFeature { Plane = FeatherCad.Core.Model.PlaneRef.Front, Sketch = cs });
+            var cut = doc.AddFeature(new FeatherCad.Core.Model.ExtrudeFeature { SketchId = c2.Id, IsCut = true, End = FeatherCad.Core.Model.EndCondition.ThroughAll, Reverse = true });
+            var r = new FeatherCad.Core.Regen.Regenerator().Rebuild(doc);
+            t.True(r.Status[hs.Id].Ok && r.Status[cut.Id].Ok, r.Status[cut.Id].Error ?? "");
+            var solid = r.State.Bodies[0].Solid;
+            t.Eq(solid.Native!.Validate(), null);
+            t.Eq(solid.Topology.OpenHalfEdges, 0);
+            t.Eq(solid.Native.Faces.Count(f => f.Surface.Kind == SurfaceKind.Screw), 2);
+            // the uncut spring less a sliver: 3 turns of π r² along the wire's helix, and the run-out
+            var vol = KernelTests.Vex(solid);
+            t.True(vol > 3 * 2 * Math.PI * 5 * Math.PI && vol < 3 * 2 * Math.PI * 5 * Math.PI + Math.PI * 10, $"volume {vol:0.###}");
+            // the display mesh of the wire's faces lies on the wire (long screw faces are tessellated in slabs: a bare
+            // chord across a slab cut sank half the wire's radius, a dark notch every quarter turn)
+            var dm = FeatherCad.Kernel.DisplayMesh.Build(solid);
+            double worst = 0;
+            foreach (var fr in dm.Faces.Where(fr => fr.Name.Contains(".H.")))
+                for (int ti = fr.IndexStart; ti < fr.IndexStart + fr.IndexCount; ti += 3)
+                {
+                    var c = Vec3.Zero;
+                    for (int q = 0; q < 3; q++) { var v = dm.Indices[ti + q]; c += new Vec3(dm.Positions[3 * v], dm.Positions[3 * v + 1], dm.Positions[3 * v + 2]) / 3; }
+                    var n = solid.Native.Faces.First(f => f.Tag.Name == fr.Name).Surface;
+                    worst = Math.Max(worst, n.Screw!.Closest(c).dist);
+                }
+            t.True(worst < 0.05, $"the wire's mesh lies within 0.05 of it (worst {worst:0.####})");
+        });
+
         t.Test("Helical Sweep feature: a coil spring from a sketch (circle and centerline), saved and loaded", () =>
         {
             var doc = new FeatherCad.Core.Model.CadDocument();

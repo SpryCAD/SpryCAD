@@ -235,9 +235,11 @@ public partial class MainWindow : Window
         Viewport.Planes = planes;
         Viewport.ShowPlanes = _showPlanes || editingPlane || state.Bodies.Count == 0 && _sketch == null;
 
-        // visible sketches: not consumed by an active feature, or selected
+        // visible sketches: not consumed by an active feature, or selected; a helical sweep's profile sketch while
+        // the sweep is edited (its centerline can be picked as the axis)
         var consumed = new HashSet<string>();
         foreach (var f in doc.Features.Take(doc.ActiveCount)) if (!f.Suppressed) foreach (var c in f.Consumes) consumed.Add(c);
+        if (_edit?.Feature is HelicalSweepFeature hsf) consumed.Remove(hsf.SketchId);
         var selectedSketches = Selection.Items.Where(s => s.Kind == SelKind.Sketch).Select(s => s.FeatureId).ToHashSet();
         var sk = new List<SketchDisplay>();
         foreach (var (id, sr) in state.Sketches)

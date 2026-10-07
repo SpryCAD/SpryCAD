@@ -116,6 +116,16 @@ public sealed class NDomain
                         if (Math.Abs(l[(i + 1) % l.Length].Y - l[i].Y) > Math.PI) wraps = true;
             if (wraps) throw new InvalidOperationException($"face {f.Tag.Name} wraps around its surface");
         }
+        else if (s.Kind == SurfaceKind.Screw && s.Screw!.Gen is NCircle)
+        {
+            // swept by a circle (round wire): v is the circle's angle, periodic although the surface is not marked
+            // so; a face all the way round the wire (a tube) wraps
+            bool wraps = VMax - VMin > 2 * Math.PI - 1e-9;
+            foreach (var l in Loops)
+                for (int i = 0; i < l.Length && !wraps; i++)
+                    if (Math.Abs(l[(i + 1) % l.Length].Y - l[i].Y) > Math.PI) wraps = true;
+            if (wraps) throw new InvalidOperationException($"face {f.Tag.Name} wraps around its surface");
+        }
     }
 
     public static NDomain Of(NFace f, double tol = 1e-3) => new(f, tol);

@@ -342,15 +342,26 @@ public sealed class Regenerator
         void DoHelical(HelicalSweepFeature h)
         {
             var sk = GetSketch(h.SketchId);
-            SkLine? axis = h.AxisEntity != 0 ? sk.Sketch.Entity(h.AxisEntity) as SkLine : null;
-            axis ??= sk.Sketch.Entities.OfType<SkLine>().FirstOrDefault(l => l.Construction);
-            if (axis == null) throw new FeatureException("Draw a centerline in the profile's sketch: the helix's axis.");
-            var regions = axis.Construction ? sk.Regions : ProfileExtractor.Extract(sk.Sketch, out _, new HashSet<int> { axis.Id });
+            List<ProfileRegion> regions;
+            Vec3 a, dir;
+            if (h.Axis != null)
+            {
+                // an axis from the model (a cylindrical face, an edge, X / Y / Z)
+                (a, dir) = Resolver.ResolveDir(h.Axis, State);
+                regions = sk.Regions;
+            }
+            else
+            {
+                SkLine? axis = h.AxisEntity != 0 ? sk.Sketch.Entity(h.AxisEntity) as SkLine : null;
+                axis ??= sk.Sketch.Entities.OfType<SkLine>().FirstOrDefault(l => l.Construction);
+                if (axis == null) throw new FeatureException("Select the helix's axis: a centerline in the profile's sketch, a cylindrical face or an edge.");
+                regions = axis.Construction ? sk.Regions : ProfileExtractor.Extract(sk.Sketch, out _, new HashSet<int> { axis.Id });
+                a = sk.Frame.ToWorld(sk.Sketch.P(axis.P1)); var b = sk.Frame.ToWorld(sk.Sketch.P(axis.P2));
+                dir = (b - a).Normalized;
+            }
             if (regions.Count == 0) throw new FeatureException("The sketch has no closed profile.");
             var pitch = Positive(h.Pitch, "Pitch");
             var turns = Positive(h.Revolutions, "Revolutions");
-            var a = sk.Frame.ToWorld(sk.Sketch.P(axis.P1)); var b = sk.Frame.ToWorld(sk.Sketch.P(axis.P2));
-            var dir = (b - a).Normalized;
             if (h.Reverse) dir = -dir;
             Solid tool;
             try

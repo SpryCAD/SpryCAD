@@ -57,7 +57,7 @@ public static class NTess
         }
 
         // long helical faces: in slabs (see Slabs); anything else: the whole face
-        if (f.Surface.Kind == SurfaceKind.Screw && Slabs(dom) is { } slabs)
+        if (f.Surface.Kind == SurfaceKind.Screw && Slabs(dom, tol) is { } slabs)
         {
             foreach (var (luv, l3) in slabs) Curved(f, dom, new[] { luv }, new[] { l3 }, tol, outFaces);
             return;
@@ -197,8 +197,11 @@ public static class NTess
     /// its own boundary points (one on each side, where the outline runs on along u), so the slabs share those points
     /// and nothing new appears on the face's boundary. Null when the face is short, has holes, or offers no clean
     /// cut. A single long thin outline triangulates into long fans the refinement then splits over and over.
+    /// The cuts are sampled on the surface to the chord tolerance (the same points for the slabs either side): a
+    /// cut is boundary to both, never refined, and a bare chord across a strongly curved face (round wire: half
+    /// the circle) would show as a flat crease.
     /// </summary>
-    static List<(Vec2[] uv, Vec3[] p3)>? Slabs(NDomain dom)
+    static List<(Vec2[] uv, Vec3[] p3)>? Slabs(NDomain dom, double tol)
     {
         if (dom.Loops.Count != 1) return null;
         var uv = dom.Loops[0]; var p3 = dom.Loops3[0];
@@ -229,19 +232,41 @@ public static class NTess
             cuts.Add((ja, jb));
         }
         if (cuts.Count == 0) return null;
-        var res = new List<(Vec2[], Vec3[])>();
-        int pa = 0, pb = 0;
-        foreach (var (ia, ib) in cuts.Append((a.Count - 1, b.Count - 1)))
+        // each cut's inner points, from side a to side b: halved in (u, v) while the surface leaves the chord
+        List<(Vec2 uv, Vec3 p)> Inner(int ia, int ib)
         {
-            // this slab: along side a from the previous cut to this one, back along side b
-            var idx = new List<int>();
-            for (int i = pa; i <= ia; i++) idx.Add(a[i]);
-            for (int i = ib; i >= pb; i--) if (idx.Count == 0 || idx[^1] != b[i]) idx.Add(b[i]);
-            if (idx.Count > 1 && idx[^1] == idx[0]) idx.RemoveAt(idx.Count - 1);
-            res.Add((idx.Select(i => uv[i]).ToArray(), idx.Select(i => p3[i]).ToArray()));
+            var res = new List<(Vec2, Vec3)>();
+            void Split(Vec2 q0, Vec3 p0, Vec2 q1, Vec3 p1, int depth)
+            {
+                var qm = (q0 + q1) * 0.5; var pm = dom.Eval(qm);
+                if (depth >= 10 || Vec3.Distance(pm, (p0 + p1) * 0.5) < tol && depth > 0) return;
+                Split(q0, p0, qm, pm, depth + 1);
+                res.Add((qm, pm));
+                Split(qm, pm, q1, p1, depth + 1);
+            }
+            Split(uv[a[ia]], p3[a[ia]], uv[b[ib]], p3[b[ib]], 0);
+            return res;
+        }
+        var inner = cuts.Select(c => Inner(c.ia, c.ib)).ToList();
+        var slabs = new List<(Vec2[], Vec3[])>();
+        int pa = 0, pb = 0;
+        for (int k = 0; k <= cuts.Count; k++)
+        {
+            var (ia, ib) = k < cuts.Count ? cuts[k] : (a.Count - 1, b.Count - 1);
+            // this slab: along side a from the previous cut to this one, across it, back along side b, back across
+            // the previous cut
+            var pts = new List<(Vec2 uv, Vec3 p)>();
+            int last = -1;
+            void Add(int i) { if (i != last) pts.Add((uv[i], p3[i])); last = i; }
+            for (int i = pa; i <= ia; i++) Add(a[i]);
+            if (k < cuts.Count) { pts.AddRange(inner[k]); last = -1; }
+            for (int i = ib; i >= pb; i--) Add(b[i]);
+            if (k > 0) pts.AddRange(Enumerable.Reverse(inner[k - 1]));
+            else if (pts.Count > 1 && last == a[pa]) pts.RemoveAt(pts.Count - 1);
+            slabs.Add((pts.Select(x => x.uv).ToArray(), pts.Select(x => x.p).ToArray()));
             pa = ia; pb = ib;
         }
-        return res;
+        return slabs;
     }
 
     /// <summary>Grid spacing (metric units) along u and v for a chord tolerance.</summary>

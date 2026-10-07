@@ -136,6 +136,8 @@ public sealed class HelicalSweepFeature : Feature
     public string SketchId { get; set; } = "";
     /// <summary>Sketch line used as axis (0 = first centerline).</summary>
     public int AxisEntity { get; set; }
+    /// <summary>An axis from the model instead of the sketch: a cylindrical face, a straight or circular edge, or X / Y / Z.</summary>
+    public DirRef? Axis { get; set; }
     public string Pitch { get; set; } = "5";
     public string Revolutions { get; set; } = "3";
     public bool LeftHand { get; set; }
