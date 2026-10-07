@@ -165,14 +165,19 @@ public partial class MainWindow
             "-",
             Sub("_Boss/Base",
                 Item("_Extrude...", () => ExtrudeCommand(false), null, "extrude"),
-                Item("_Revolve...", () => RevolveCommand(false), null, "revolve")),
+                Item("_Revolve...", () => RevolveCommand(false), null, "revolve"),
+                Item("S_wept...", () => SweepCommand(false), null, "sweep"),
+                Item("_Helical...", () => HelicalCommand(false), null, "helical")),
             Sub("_Cut",
                 Item("_Extrude...", () => ExtrudeCommand(true), null, "cut"),
-                Item("_Revolve...", () => RevolveCommand(true), null, "cutrevolve")),
+                Item("_Revolve...", () => RevolveCommand(true), null, "cutrevolve"),
+                Item("S_wept...", () => SweepCommand(true), null, "cutsweep"),
+                Item("_Helical...", () => HelicalCommand(true), null, "cuthelical")),
             Sub("_Features",
                 Item("_Fillet...", () => BlendCommand(true), null, "fillet"),
                 Item("_Chamfer...", () => BlendCommand(false), null, "chamfer"),
                 Item("_Hole Wizard...", HoleCommand, null, "hole"),
+                Item("_Thread...", ThreadCommand, null, "thread"),
                 Item("_Shell...", ShellCommand, null, "shell"),
                 Item("C_ombine...", CombineCommand, null, "combine")),
             Sub("_Pattern/Mirror",
@@ -250,10 +255,15 @@ public partial class MainWindow
             case "Features":
                 Cmd("extrude", "Extruded\nBoss/Base", () => ExtrudeCommand(false));
                 Cmd("revolve", "Revolved\nBoss/Base", () => RevolveCommand(false));
+                Cmd("sweep", "Swept\nBoss/Base", () => SweepCommand(false));
+                Cmd("helical", "Helical\nBoss/Base", () => HelicalCommand(false));
                 Sep();
                 Cmd("cut", "Extruded\nCut", () => ExtrudeCommand(true));
                 Cmd("cutrevolve", "Revolved\nCut", () => RevolveCommand(true));
+                Cmd("cutsweep", "Swept\nCut", () => SweepCommand(true));
+                Cmd("cuthelical", "Helical\nCut", () => HelicalCommand(true));
                 Cmd("hole", "Hole\nWizard", HoleCommand);
+                Cmd("thread", "Thread", ThreadCommand);
                 Sep();
                 Cmd("fillet", "Fillet", () => BlendCommand(true));
                 Cmd("chamfer", "Chamfer", () => BlendCommand(false));
@@ -284,6 +294,8 @@ public partial class MainWindow
                 Cmd("point", "Point", () => SetSketchTool(SketchTool.Point), SketchTool.Point);
                 Sep();
                 Cmd("trim", "Trim\nEntities", () => SetSketchTool(SketchTool.Trim), SketchTool.Trim);
+                Cmd("sketchfillet", "Sketch\nFillet", () => { if (_sketch == null) { SetSketchTool(SketchTool.Fillet); return; } _sketch.StartFillet(); UpdateToolButtons(); BuildSketchPage(); }, SketchTool.Fillet);
+                Cmd("mirror", "Mirror\nEntities", MirrorEntities);
                 Cmd("convert", "Convert\nEntities", ConvertEntities);
                 Cmd("construction", "Construction\nGeometry", ToggleConstruction);
                 Cmd("normalto", "Normal\nTo", NormalTo);
@@ -333,7 +345,12 @@ public partial class MainWindow
         ["Extruded Cut"] = "Extends a sketch profile to remove material.",
         ["Revolved Boss/Base"] = "Revolves a sketch profile about a centerline to add material.",
         ["Revolved Cut"] = "Revolves a sketch profile about a centerline to remove material.",
+        ["Swept Boss/Base"] = "Sweeps a closed profile along a path of lines and arcs to add material.",
+        ["Swept Cut"] = "Sweeps a closed profile along a path of lines and arcs to remove material.",
         ["Hole Wizard"] = "Simple, counterbored or countersunk holes placed on a face.",
+        ["Helical Boss/Base"] = "Sweeps a closed profile along a helix about a centerline of its sketch (springs, coils).",
+        ["Helical Cut"] = "Cuts a closed profile swept along a helix about a centerline of its sketch.",
+        ["Thread"] = "Models a metric thread on a shaft or in a hole, with a fit clearance for 3D printing.",
         ["Fillet"] = "Rounds the selected edges (tangent edges are included).",
         ["Chamfer"] = "Bevels the selected edges.",
         ["Shell"] = "Hollows the part, leaving the selected faces open.",
@@ -350,6 +367,8 @@ public partial class MainWindow
         ["Line"] = "Sketches lines. Snapping adds relations, also to model edges, midpoints and centers.",
         ["Convert Entities"] = "Projects the selected model edges into the sketch.",
         ["Trim Entities"] = "Trims sketch entities at their intersections.",
+        ["Sketch Fillet"] = "Rounds the corner where two lines meet. The lines stay as construction geometry (the virtual sharp); deleting the arc restores the corner.",
+        ["Mirror Entities"] = "Mirrors the selected entities about the selected centerline. The copies stay mirrored.",
         ["Construction Geometry"] = "Toggles the selected sketch entities to construction.",
         ["Measure"] = "Distance, angle, radius, length and area of the faces, edges and vertices you click.",
         ["Mass Properties"] = "Mass, volume, surface area, center of mass and moments of inertia, with the part's material.",

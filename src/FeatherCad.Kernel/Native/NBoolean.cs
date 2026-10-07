@@ -245,11 +245,14 @@ public sealed class NBoolean
             Parallel.ForEach(toTrace, i =>
             {
                 var (fa, fb, _) = pairs[i];
+                // a screw surface's signed distance jumps between its turns: trace on the screw face instead, with the
+                // other surface's (smooth) distance
+                if (fb.Surface.Kind == SurfaceKind.Screw && fa.Surface.Kind != SurfaceKind.Screw) (fa, fb) = (fb, fa);
                 var swt = System.Diagnostics.Stopwatch.StartNew();
                 List<NCurve> c; using (Prof.Time(Prof.Enabled ? $"tr.{fa.Surface.Kind}x{fb.Surface.Kind}" : "")) c = NIntersect.Trace(fa, fb.Surface, traceTol, traceDoms[fa]).Cast<NCurve>().ToList();
                 if (Prof.Enabled && c.Count == 0) Prof.Add($"tr.empty.{fa.Surface.Kind}x{fb.Surface.Kind}", 0);
                 // traced from the other side too (small faces)
-                if (c.Count == 0) c = NIntersect.Trace(fb, fa.Surface, traceTol, traceDoms[fb]).Cast<NCurve>().ToList();
+                if (c.Count == 0 && fa.Surface.Kind != SurfaceKind.Screw) c = NIntersect.Trace(fb, fa.Surface, traceTol, traceDoms[fb]).Cast<NCurve>().ToList();
                 pairCurves[i] = c;
                 if (Trace != null && Environment.GetEnvironmentVariable("FC_TRACE_SLOW") != null)
                     T($"  trace {fa.Tag.Name}({fa.Surface.Kind}) x {fb.Tag.Name}({fb.Surface.Kind}): {c.Count} curves, {string.Join(" ", c.Select(x => x is NPolyline pl ? pl.Pts.Length + "pts" : x.GetType().Name))} in {swt.ElapsedMilliseconds} ms");
@@ -527,10 +530,20 @@ public sealed class NBoolean
 
     readonly Dictionary<(NEdge, NEdge), List<(double, double, Vec3, double)>> _crossings = new();
 
+    // edges in the order this boolean first met them: a deterministic order for unordered pairs (object hash codes
+    // differ from run to run, and the crossing computation is not symmetric in its last bits)
+    readonly Dictionary<NEdge, int> _edgeOrder = new(ReferenceEqualityComparer.Instance);
+    int Order(NEdge e)
+    {
+        if (!_edgeOrder.TryGetValue(e, out var o)) _edgeOrder[e] = o = _edgeOrder.Count;
+        return o;
+    }
+
     /// <summary>Crossings of an unordered pair of edges, computed once (the same answer whichever edge is on the face).</summary>
     List<(double ta, double tb, Vec3 p, double reach)> Crossings(NEdge e, NEdge g)
     {
-        bool swap = System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(e) > System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(g);
+        int oe = Order(e), og = Order(g);
+        bool swap = oe > og;
         var key = swap ? (g, e) : (e, g);
         if (!_crossings.TryGetValue(key, out var r))
         {

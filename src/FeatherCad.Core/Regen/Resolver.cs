@@ -48,7 +48,7 @@ public static class Resolver
     /// Native face by name nearest the hint, else a planar face with the reference normal through the hint.
     /// Null when the bodies are not native or nothing matches.
     /// </summary>
-    static (Body body, Kernel.Native.NFace face)? NativeFace(FaceRef r, ModelState st)
+    internal static (Body body, Kernel.Native.NFace face)? NativeFace(FaceRef r, ModelState st)
     {
         var bodies = OrderBodies(st, r.Body).ToList();
         if (bodies.Count == 0 || bodies.Any(b => b.Solid.Native == null)) return null;

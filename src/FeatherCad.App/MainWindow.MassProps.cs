@@ -213,9 +213,15 @@ public partial class MainWindow
             Viewport.CenterOfMass = null;
             return;
         }
+        // exact (integrated on the B-rep) for native bodies; the display mesh for any other
         var mp = new MassProps();
         var bb = Box3.Empty;
-        foreach (var b in bodies) { mp.Add(b.Mesh.Positions, b.Mesh.Indices); bb.Add(b.Mesh.Bounds); }
+        foreach (var b in bodies)
+        {
+            if (b.Solid.Native is { } nb && FeatherCad.Kernel.Native.NMass.Integrate(nb) is { } ex) mp.AddIntegrals(ex.S, ex.Area);
+            else mp.Add(b.Mesh.Positions, b.Mesh.Indices);
+            bb.Add(b.Mesh.Bounds);
+        }
         mp.Finish();
 
         var ips = Session.Doc.Units == UnitSystem.IPS;

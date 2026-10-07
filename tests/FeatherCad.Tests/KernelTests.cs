@@ -7,8 +7,12 @@ static class KernelTests
 {
     static double PolyCircleArea(double r, int n) => 0.5 * n * r * r * Math.Sin(2 * Math.PI / n);
 
-    /// <summary>Volume of the exact geometry (fine tessellation of the native B-rep when present).</summary>
-    internal static double Vex(Solid s) => s.Native != null ? FeatherCad.Kernel.Native.NTess.ToSolid(s.Native, 2e-4).Volume() : s.Volume();
+    /// <summary>
+    /// Volume of the exact geometry: integrated on the native B-rep when present (a fine tessellation where a face
+    /// cannot be integrated), else the facets'.
+    /// </summary>
+    internal static double Vex(Solid s) => s.Native == null ? s.Volume()
+        : FeatherCad.Kernel.Native.NMass.Integrate(s.Native) is { } ex ? ex.S[0] : FeatherCad.Kernel.Native.NTess.ToSolid(s.Native, 2e-4).Volume();
 
     public static void Run(TestRunner t)
     {

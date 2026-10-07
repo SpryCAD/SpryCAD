@@ -184,6 +184,10 @@ public sealed class Regenerator
 
     // ------------------------------------------------------------------------------------------
 
+    /// <summary>Tests: whether unions of touching pattern copies may reuse a rotated earlier union, and how many did.</summary>
+    public static bool ReusePatternUnions = true;
+    public static int PatternUnionsReused;
+
     sealed class Ctx(CadDocument doc, ModelState state, Func<string, double?> lookup, FeatureStatus status, Feature f)
     {
         public ModelState State = state;
@@ -211,6 +215,9 @@ public sealed class Regenerator
                 case SketchFeature s: DoSketch(s); break;
                 case ExtrudeFeature e: DoExtrude(e); break;
                 case RevolveFeature r: DoRevolve(r); break;
+                case SweepFeature sw: DoSweep(sw); break;
+                case HelicalSweepFeature hs: DoHelical(hs); break;
+                case ThreadFeature th: DoThread(th); break;
                 case FilletFeature fi: DoBlend(fi.Edges, Positive(fi.Radius, "Radius"), true, fi.TangentPropagation, fi.Overflow); break;
                 case ChamferFeature ch: { var cs = ChamferSizeOf(ch); DoBlend(ch.Edges, cs.D1, false, ch.TangentPropagation, ch.Overflow, cs); break; }
                 case HoleFeature h: DoHole(h); break;
@@ -264,7 +271,8 @@ public sealed class Regenerator
             var res = SketchSolver.Solve(sk);
             if (res.Status == SketchStatus.OverDefined) status.Warnings.Add("Sketch is over defined or cannot be solved.");
             var regions = ProfileExtractor.Extract(sk, out var warns);
-            status.Warnings.AddRange(warns);
+            // a sweep's path is open by design: no profile warnings for it
+            if (!doc.Features.OfType<SweepFeature>().Any(w => w.PathSketchId == s.Id)) status.Warnings.AddRange(warns);
             State.Sketches[s.Id] = new SketchResult { Frame = frame, Sketch = sk, Regions = regions, Solve = res };
             State.Planes[s.Id] = frame;
         }
@@ -329,6 +337,136 @@ public sealed class Regenerator
             if (tool.Native == null && tool.Volume() < 0) tool = tool.Flipped(); // native revolves are oriented by construction
             ApplyTool(tool, r.IsCut, r.Merge);
             State.Tools[f.Id] = new ToolInfo(tool, r.IsCut, r.Merge);
+        }
+
+        void DoHelical(HelicalSweepFeature h)
+        {
+            var sk = GetSketch(h.SketchId);
+            SkLine? axis = h.AxisEntity != 0 ? sk.Sketch.Entity(h.AxisEntity) as SkLine : null;
+            axis ??= sk.Sketch.Entities.OfType<SkLine>().FirstOrDefault(l => l.Construction);
+            if (axis == null) throw new FeatureException("Draw a centerline in the profile's sketch: the helix's axis.");
+            var regions = axis.Construction ? sk.Regions : ProfileExtractor.Extract(sk.Sketch, out _, new HashSet<int> { axis.Id });
+            if (regions.Count == 0) throw new FeatureException("The sketch has no closed profile.");
+            var pitch = Positive(h.Pitch, "Pitch");
+            var turns = Positive(h.Revolutions, "Revolutions");
+            var a = sk.Frame.ToWorld(sk.Sketch.P(axis.P1)); var b = sk.Frame.ToWorld(sk.Sketch.P(axis.P2));
+            var dir = (b - a).Normalized;
+            if (h.Reverse) dir = -dir;
+            Solid tool;
+            try
+            {
+                var nb = Kernel.Native.NHelical.Sweep(regions, sk.Frame, a, dir, h.LeftHand ? -pitch : pitch, turns * 2 * Math.PI, f.Id);
+                if (nb.Validate() is { } bad) throw new FeatureException("The helical sweep is not a valid solid: " + bad);
+                tool = Kernel.Native.NTess.ToSolid(nb);
+            }
+            catch (ArgumentException ex) { throw new FeatureException(char.ToUpper(ex.Message[0]) + ex.Message[1..] + "."); }
+            ApplyTool(tool, h.IsCut, h.Merge);
+            State.Tools[f.Id] = new ToolInfo(tool, h.IsCut, h.Merge);
+        }
+
+        void DoThread(ThreadFeature t)
+        {
+            if (string.IsNullOrEmpty(t.Face.Name)) throw new FeatureException("Select the cylindrical face to thread (a shaft or a hole).");
+            var hit = Resolver.NativeFace(t.Face, State) ?? throw new FeatureException("The face to thread could not be found.");
+            var face = hit.face;
+            if (face.Surface.Kind != SurfaceKind.Cylinder) throw new FeatureException("Threads go on cylindrical faces: select a shaft or a hole.");
+            var s = face.Surface;
+            var axisDir = s.Axis.Normalized; var axisO = s.Origin; var surfaceR = s.R;
+            // a shaft's face looks away from the axis, a hole's towards it
+            bool external = face.Sense;
+            // the face's extent along the axis
+            double hmin = double.MaxValue, hmax = double.MinValue;
+            foreach (var c in face.Coedges)
+                foreach (var p in c.Edge.Samples(1e-3)) { var hh = Vec3.Dot(p - axisO, axisDir); hmin = Math.Min(hmin, hh); hmax = Math.Max(hmax, hh); }
+            // size: a standard one (or the one fitting the face), or the face itself with a given pitch
+            double major, pitch;
+            if (t.Size == "Custom")
+            {
+                pitch = Positive(t.Pitch, "Pitch");
+                major = external ? surfaceR : surfaceR + 5 * Threads.H(pitch) / 8;
+            }
+            else
+            {
+                var std = t.Size == "Auto" ? Threads.Fit(2 * surfaceR, external) : Threads.MetricCoarse.FirstOrDefault(x => x.name == t.Size);
+                if (std.name == null) throw new FeatureException($"Unknown thread size '{t.Size}'.");
+                pitch = std.p;
+                major = std.d / 2;
+                if (external && Math.Abs(major - surfaceR) > 0.15 * major)
+                    status.Warnings.Add($"The shaft is {2 * surfaceR:0.###} mm across, {std.name} is {std.d:0.###} mm: the thread follows the shaft.");
+                if (external) major = surfaceR;
+            }
+            var clearance = Num(t.Clearance, "Clearance");
+            if (clearance < 0) throw new FeatureException("The clearance cannot be negative.");
+            var faceLen = hmax - hmin;
+            var length = string.IsNullOrWhiteSpace(t.Length) ? faceLen : Positive(t.Length, "Length");
+            // from the end nearest the picked point (or the other one), running into the face
+            var hs = Vec3.Dot(t.Face.Hint - axisO, axisDir);
+            bool fromMin = Math.Abs(hs - hmin) <= Math.Abs(hs - hmax);
+            if (t.Reverse) fromMin = !fromMin;
+            var dir = fromMin ? axisDir : -axisDir;
+            var hStart = fromMin ? hmin : hmax;
+            // the tool starts a pitch outside the end (the thread runs out cleanly through it)
+            var origin = axisO + axisDir * hStart - dir * pitch;
+            var radial = s.F.XDir;
+            var frame = new Frame(origin, radial, dir, Vec3.Cross(radial, dir));
+            var (groove, turn) = Threads.Groove(external, surfaceR, major, pitch, clearance);
+            var region = new ProfileRegion(ProfileLoop.Polygon(groove, "G"));
+            var run = Math.Min(length, faceLen + pitch) + pitch; // along the axis, from the tool's start
+            Solid tool;
+            try
+            {
+                // a clearance too large for the standard crest: the shaft turned down (the hole bored out) over the
+                // thread first, a ring from a pitch outside the end to the thread's end
+                if (turn is { } rt)
+                {
+                    double r0 = external ? rt : surfaceR - 0.1 * pitch, r1 = external ? surfaceR + 0.1 * pitch : rt;
+                    var ring = new ProfileRegion(ProfileLoop.Polygon(new[] { new Vec2(r0, 0), new Vec2(r1, 0), new Vec2(r1, run - pitch / 2), new Vec2(r0, run - pitch / 2) }, "T"));
+                    var turned = Kernel.Native.NBuild.Revolve(new[] { ring }, frame, Vec2.Zero, new Vec2(0, 1), 2 * Math.PI, f.Id + ".Turn");
+                    ApplyTool(Kernel.Native.NTess.ToSolid(turned), true, true);
+                }
+                var nb = Kernel.Native.NHelical.Sweep(new[] { region }, frame, origin, dir, t.LeftHand ? -pitch : pitch, run / pitch * 2 * Math.PI, f.Id);
+                if (nb.Validate() is { } bad) throw new FeatureException("The thread is not a valid solid: " + bad);
+                tool = Kernel.Native.NTess.ToSolid(nb);
+            }
+            catch (ArgumentException ex) { throw new FeatureException(char.ToUpper(ex.Message[0]) + ex.Message[1..] + "."); }
+            ApplyTool(tool, true, true);
+            State.Tools[f.Id] = new ToolInfo(tool, true, true);
+        }
+
+        void DoSweep(SweepFeature s)
+        {
+            if (string.IsNullOrEmpty(s.ProfileSketchId)) throw new FeatureException("Select the profile sketch.");
+            if (string.IsNullOrEmpty(s.PathSketchId)) throw new FeatureException("Select the path sketch.");
+            if (s.ProfileSketchId == s.PathSketchId) throw new FeatureException("The profile and the path must be different sketches.");
+            var prof = GetSketch(s.ProfileSketchId);
+            var path = GetSketch(s.PathSketchId);
+            var regions = prof.Regions;
+            if (regions.Count == 0) throw new FeatureException("The profile sketch has no closed profile.");
+            var frame = prof.Frame;
+            // the profile's centre (in world space): picks where a closed path or a circle starts
+            var centre = Vec3.Zero; int n = 0;
+            foreach (var r in regions) foreach (var v in r.Outer.Verts) { centre += frame.ToWorld(v.P); n++; }
+            centre /= Math.Max(1, n);
+            var segs = SweepPath.Build(path, frame.Plane, centre);
+            var t0 = segs[0].StartTangent;
+            var dot = Vec3.Dot(t0, frame.Normal);
+            if (Math.Abs(dot) < 1 - 1e-6) throw new FeatureException("The profile's sketch must be perpendicular to the path where the path starts.");
+            if (dot < 0)
+            {
+                // the path leaves against the sketch normal: the same profile seen from the other side (x and y swapped)
+                frame = new Frame(frame.Origin, frame.YDir, frame.XDir, -frame.Normal);
+                regions = regions.Select(r => new ProfileRegion(r.Outer.Transformed(p => new Vec2(p.Y, p.X), true), r.Holes.Select(h => h.Transformed(p => new Vec2(p.Y, p.X), true)))).ToList();
+            }
+            Solid tool;
+            try
+            {
+                var nb = Kernel.Native.NSweep.Sweep(regions, frame, segs, f.Id);
+                if (nb.Validate() is { } bad) throw new FeatureException("The sweep is not a valid solid: " + bad);
+                tool = Kernel.Native.NTess.ToSolid(nb);
+            }
+            catch (ArgumentException ex) { throw new FeatureException(char.ToUpper(ex.Message[0]) + ex.Message[1..] + "."); }
+            ApplyTool(tool, s.IsCut, s.Merge);
+            State.Tools[f.Id] = new ToolInfo(tool, s.IsCut, s.Merge);
         }
 
         /// <summary>Whether a boolean changed the body (native: topology counts, so no tessellation is needed).</summary>
@@ -659,7 +797,7 @@ public sealed class Regenerator
             foreach (var seedId in seeds)
             {
                 if (!State.Tools.TryGetValue(seedId, out var tool))
-                    throw new FeatureException("Only extrude, revolve, hole, fillet, chamfer, pattern and mirror features can be patterned.");
+                    throw new FeatureException("Only extrude, revolve, sweep, helical sweep, thread, hole, fillet, chamfer, pattern and mirror features can be patterned.");
                 var copies = new List<(int i, Solid tool)>();
                 // instances whose blend is solved again (their edges are not the seed's edges moved)
                 var toSolve = new List<(int i, Body body, List<Kernel.Native.NEdge> edges, double tol)>();
@@ -752,7 +890,7 @@ public sealed class Regenerator
                     try
                     {
                         Csg.NoFallback = true;
-                        var all = Csg.UnionAll(copies.Select(c => c.tool).ToList());
+                        var all = PatternUnion(copies, transforms, tool.Tool);
                         ApplyTool(all, tool.IsCut, true);
                         everything.Add(all);
                     }
@@ -918,6 +1056,69 @@ public sealed class Regenerator
                 }
             }
             finally { Csg.NoFallback = old; }
+        }
+
+        /// <summary>
+        /// The union of pattern copies (instance i is the seed tool moved by transforms[i]), as a balanced tree like
+        /// <see cref="Csg.UnionAll"/>; a union whose instances are those of a union already made, all moved by one
+        /// rigid motion (copies 2-3 are copies 0-1 turned by two steps), is that union moved, its faces renamed to
+        /// the instances it stands for, instead of a boolean.
+        /// </summary>
+        Solid PatternUnion(List<(int i, Solid tool)> copies, IReadOnlyList<Transform> transforms, Solid seed)
+        {
+            var solids = copies.Select(c => c.tool).ToList();
+            // copies apart from each other (or not all exact, or mirrored): nothing to reuse
+            if (!ReusePatternUnions || copies.Count < 3 || solids.Any(x => x.Native == null) || copies.Any(c => transforms[c.i].IsMirror)
+                || !Enumerable.Range(0, solids.Count - 1).Any(k => solids[k].Bounds.Overlaps(solids[k + 1].Bounds, 1e-6)))
+                return Csg.UnionAll(solids);
+            // probe points of the seed (its box corners): two placements agree when they move these alike
+            var sb = seed.Bounds;
+            var probes = new List<Vec3>();
+            for (int k = 0; k < 8; k++) probes.Add(new Vec3((k & 1) == 0 ? sb.Min.X : sb.Max.X, (k & 2) == 0 ? sb.Min.Y : sb.Max.Y, (k & 4) == 0 ? sb.Min.Z : sb.Max.Z));
+            var tol = 1e-9 * Math.Max(1, sb.Diagonal + transforms.Max(t => t.T.Length));
+            bool Same(Transform a, Transform b) => probes.All(q => Vec3.Distance(a.Point(q), b.Point(q)) <= tol);
+            var prefix = f.Id + ".";
+            var made = new List<(List<int> members, Solid solid)>();
+            (List<int> members, Solid solid) Join((List<int> members, Solid solid) a, (List<int> members, Solid solid) b)
+            {
+                var members = a.members.Concat(b.members).ToList();
+                foreach (var (ms, solid) in made)
+                {
+                    if (ms.Count != members.Count || solid.Native == null) continue;
+                    // the motion taking the made union's first instance onto this one's, and every other instance alike
+                    var g = transforms[members[0]] * transforms[ms[0]].RigidInverse();
+                    if (!Enumerable.Range(0, ms.Count).All(k => Same(g * transforms[ms[k]], transforms[members[k]]))) continue;
+                    // faces of instance ms[k] (named "<pattern>.<ms[k] + 1>.…") become those of members[k]
+                    var map = Enumerable.Range(0, ms.Count).ToDictionary(k => ms[k] + 1, k => members[k] + 1);
+                    bool ok = true;
+                    string Rename(string name)
+                    {
+                        if (name.StartsWith(prefix, StringComparison.Ordinal))
+                        {
+                            int dot = name.IndexOf('.', prefix.Length);
+                            if (dot > 0 && int.TryParse(name.AsSpan(prefix.Length, dot - prefix.Length), out var n) && map.TryGetValue(n, out var m))
+                                return prefix + m + name[dot..];
+                        }
+                        ok = false;
+                        return name;
+                    }
+                    var moved = solid.Native.Transformed(g, Rename);
+                    if (!ok) break; // a face not named after an instance: make the union instead
+                    Interlocked.Increment(ref PatternUnionsReused);
+                    return (members, Kernel.Native.NTess.ToSolid(moved));
+                }
+                var u = Csg.Union(a.solid, b.solid);
+                made.Add((members, u));
+                return (members, u);
+            }
+            var level = copies.Select(c => (members: new List<int> { c.i }, solid: c.tool)).ToList();
+            while (level.Count > 1)
+            {
+                var next = new List<(List<int> members, Solid solid)>((level.Count + 1) / 2);
+                for (int k = 0; k < level.Count; k += 2) next.Add(k + 1 < level.Count ? Join(level[k], level[k + 1]) : level[k]);
+                level = next;
+            }
+            return level[0].solid;
         }
 
         string Describe(string featureId) => doc.Features.FirstOrDefault(x => x.Id == featureId)?.Name ?? featureId;

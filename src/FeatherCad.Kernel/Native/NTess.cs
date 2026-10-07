@@ -56,12 +56,27 @@ public static class NTess
             return;
         }
 
-        // curved: triangulate the UV domain, refine interior edges against the surface
-        var uv = dom.Loops.SelectMany(l => l).ToList();
-        var p3 = dom.Loops3.SelectMany(l => l).ToList();
+        // long helical faces: in slabs (see Slabs); anything else: the whole face
+        if (f.Surface.Kind == SurfaceKind.Screw && Slabs(dom) is { } slabs)
+        {
+            foreach (var (luv, l3) in slabs) Curved(f, dom, new[] { luv }, new[] { l3 }, tol, outFaces);
+            return;
+        }
+        Curved(f, dom, dom.Loops, dom.Loops3, tol, outFaces);
+    }
+
+    /// <summary>
+    /// A curved face's triangles: its (u, v) loops triangulated, inner points on a grid spaced from the surface's
+    /// curvature, interior edges refined against the surface. <paramref name="loopsUv"/> are the face's loops, or a
+    /// piece of them (<see cref="Slabs"/>).
+    /// </summary>
+    static void Curved(NFace f, NDomain dom, IReadOnlyList<Vec2[]> loopsUv, IReadOnlyList<Vec3[]> loops3, double tol, List<Face> outFaces)
+    {
+        var uv = loopsUv.SelectMany(l => l).ToList();
+        var p3 = loops3.SelectMany(l => l).ToList();
         var boundary = new HashSet<(int, int)>();
         int offs = 0;
-        foreach (var l in dom.Loops)
+        foreach (var l in loopsUv)
         {
             for (int i = 0; i < l.Length; i++)
             {
@@ -70,7 +85,7 @@ public static class NTess
             }
             offs += l.Length;
         }
-        var idx = Triangulator.Triangulate(dom.Loops);
+        var idx = Triangulator.Triangulate(loopsUv);
         var tris = new List<(int, int, int)>();
         for (int i = 0; i + 2 < idx.Count; i += 3) tris.Add((idx[i], idx[i + 1], idx[i + 2]));
         // metric so that UV distances approximate surface distances (Delaunay quality)
@@ -80,17 +95,21 @@ public static class NTess
         mesh.MakeDelaunay();
         // interior points on a grid spaced from the surface curvature
         var (hu, hv) = Spacing(f.Surface, tol);
-        double mu = (dom.UMax - dom.UMin) * su, mv = (dom.VMax - dom.VMin) * sv;
-        int nu = (int)Math.Clamp(Math.Ceiling(mu / hu), 1, 400), nv = (int)Math.Clamp(Math.Ceiling(mv / hv), 1, 400);
+        double uMin = uv.Min(q => q.X), uMax = uv.Max(q => q.X), vMin = uv.Min(q => q.Y), vMax = uv.Max(q => q.Y);
+        double mu = (uMax - uMin) * su, mv = (vMax - vMin) * sv;
+        // a helical face runs many turns along u and little along v: its grid may be long in u (within the same node
+        // budget), else the refinement below has to split coarse cells over and over
+        int capU = f.Surface.Kind == SurfaceKind.Screw ? 40000 : 400;
+        int nu = (int)Math.Clamp(Math.Ceiling(mu / hu), 1, capU), nv = (int)Math.Clamp(Math.Ceiling(mv / hv), 1, 400);
         if ((long)nu * nv > 40000) { var k = Math.Sqrt(40000.0 / ((long)nu * nv)); nu = Math.Max(1, (int)(nu * k)); nv = Math.Max(1, (int)(nv * k)); }
         var minGap = 0.45 * Math.Min(mu / nu, mv / nv);
         for (int i = 1; i < nu; i++)
             for (int j = 1; j < nv; j++)
             {
-                var q = new Vec2(dom.UMin + (dom.UMax - dom.UMin) * i / nu, dom.VMin + (dom.VMax - dom.VMin) * j / nv);
-                if (!dom.ContainsUV(q)) continue;
+                var q = new Vec2(uMin + (uMax - uMin) * i / nu, vMin + (vMax - vMin) * j / nv);
+                if (!ContainsUV(loopsUv, q)) continue;
                 var pq = dom.Eval(q);
-                if (dom.BoundaryDistance(pq) < minGap) continue;
+                if (BoundaryDistance(loops3, pq) < minGap) continue;
                 uv.Add(q); p3.Add(pq); metric.Add(new Vec2(q.X * su, q.Y * sv));
                 if (!mesh.Insert(uv.Count - 1)) { uv.RemoveAt(uv.Count - 1); p3.RemoveAt(p3.Count - 1); metric.RemoveAt(metric.Count - 1); }
             }
@@ -147,6 +166,84 @@ public static class NTess
         }
     }
 
+    static bool ContainsUV(IReadOnlyList<Vec2[]> loops, Vec2 p)
+    {
+        bool inside = false;
+        foreach (var poly in loops)
+            for (int i = 0, j = poly.Length - 1; i < poly.Length; j = i++)
+            {
+                var a = poly[i]; var b = poly[j];
+                if ((a.Y > p.Y) != (b.Y > p.Y) && p.X < (b.X - a.X) * (p.Y - a.Y) / (b.Y - a.Y) + a.X) inside = !inside;
+            }
+        return inside;
+    }
+
+    static double BoundaryDistance(IReadOnlyList<Vec3[]> loops, Vec3 p)
+    {
+        double best = double.MaxValue;
+        foreach (var l in loops)
+            for (int i = 0; i < l.Length; i++)
+            {
+                var a = l[i]; var b = l[(i + 1) % l.Length];
+                var d = b - a; var l2 = d.LengthSq;
+                var t = l2 > 0 ? Math.Clamp(Vec3.Dot(p - a, d) / l2, 0, 1) : 0;
+                best = Math.Min(best, (a + d * t - p).Length);
+            }
+        return best;
+    }
+
+    /// <summary>
+    /// A long helical face (many turns along u) in slabs of about half a turn: its one loop cut by diagonals between
+    /// its own boundary points (one on each side, where the outline runs on along u), so the slabs share those points
+    /// and nothing new appears on the face's boundary. Null when the face is short, has holes, or offers no clean
+    /// cut. A single long thin outline triangulates into long fans the refinement then splits over and over.
+    /// </summary>
+    static List<(Vec2[] uv, Vec3[] p3)>? Slabs(NDomain dom)
+    {
+        if (dom.Loops.Count != 1) return null;
+        var uv = dom.Loops[0]; var p3 = dom.Loops3[0];
+        int n = uv.Length;
+        if (n < 8 || dom.UMax - dom.UMin < 1.5 * Math.PI) return null;
+        int s = 0, e = 0;
+        for (int i = 1; i < n; i++) { if (uv[i].X < uv[s].X) s = i; if (uv[i].X > uv[e].X) e = i; }
+        // the loop runs s → e along one side and e → s along the other
+        var a = new List<int>(); for (int i = s; ; i = (i + 1) % n) { a.Add(i); if (i == e) break; }
+        var b = new List<int>(); for (int i = e; ; i = (i + 1) % n) { b.Add(i); if (i == s) break; }
+        b.Reverse();
+        // where a side runs on along u (increasing over a few samples around k)
+        bool Runs(List<int> c, int k)
+        {
+            if (k < 3 || k > c.Count - 4) return false;
+            for (int i = k - 3; i < k + 3; i++) if (!(uv[c[i + 1]].X > uv[c[i]].X)) return false;
+            return true;
+        }
+        var cuts = new List<(int ia, int ib)>();
+        double step = Math.PI / 2, umin = uv[s].X, umax = uv[e].X;
+        int ja = 0, jb = 0;
+        for (double cu = umin + step; cu < umax - step / 2; cu += step)
+        {
+            while (ja < a.Count - 1 && uv[a[ja]].X < cu) ja++;
+            while (jb < b.Count - 1 && uv[b[jb]].X < cu) jb++;
+            if (!Runs(a, ja) || !Runs(b, jb) || Math.Abs(uv[a[ja]].X - uv[b[jb]].X) > step / 4) continue;
+            if (cuts.Count > 0 && (ja <= cuts[^1].ia || jb <= cuts[^1].ib)) continue;
+            cuts.Add((ja, jb));
+        }
+        if (cuts.Count == 0) return null;
+        var res = new List<(Vec2[], Vec3[])>();
+        int pa = 0, pb = 0;
+        foreach (var (ia, ib) in cuts.Append((a.Count - 1, b.Count - 1)))
+        {
+            // this slab: along side a from the previous cut to this one, back along side b
+            var idx = new List<int>();
+            for (int i = pa; i <= ia; i++) idx.Add(a[i]);
+            for (int i = ib; i >= pb; i--) if (idx.Count == 0 || idx[^1] != b[i]) idx.Add(b[i]);
+            if (idx.Count > 1 && idx[^1] == idx[0]) idx.RemoveAt(idx.Count - 1);
+            res.Add((idx.Select(i => uv[i]).ToArray(), idx.Select(i => p3[i]).ToArray()));
+            pa = ia; pb = ib;
+        }
+        return res;
+    }
+
     /// <summary>Grid spacing (metric units) along u and v for a chord tolerance.</summary>
     static (double hu, double hv) Spacing(NSurface s, double tol)
     {
@@ -172,6 +269,17 @@ public static class NTess
                     var hv = Math.Max(hc, (nb.V1 - nb.V0) * sv / Math.Max(1, nb.SpansV));
                     return (Math.Max(hu, 1e-6), Math.Max(hv, 1e-6));
                 }
+            case SurfaceKind.Screw:
+                {
+                    // around the axis at the largest radius; along the generator its own curvature (a line: long)
+                    var sc = s.Screw!;
+                    var r = Math.Max(sc.MaxRadius, 1e-3);
+                    var hu = Ang(r) * r;
+                    // a line generator is straight, but the strip needs interior rows (as fine as across) to triangulate
+                    // into well-shaped triangles: a bare boundary of a long strip fans into long diagonals
+                    var hv = sc.Gen is NCircle gc ? Math.Min(Ang(gc.R) * gc.R, hu) : hu;
+                    return (hu, Math.Max(hv, 1e-6));
+                }
             case SurfaceKind.Pipe:
                 {
                     // around: the pipe radius; along: the tightest bend of the surface (inner side of the spine)
@@ -191,6 +299,7 @@ public static class NTess
         SurfaceKind.Sphere => (s.R, s.R),
         SurfaceKind.Torus => (s.R + s.R2, s.R2),
         SurfaceKind.Pipe => (s.R, 1),
+        SurfaceKind.Screw => (Math.Max(s.Screw!.MaxRadius, 1e-3), 1),
         SurfaceKind.BSpline => s.Nurbs!.MetricScale(),
         SurfaceKind.Offset => MetricScale(s.Base!),
         _ => (1, 1),

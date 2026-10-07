@@ -68,7 +68,7 @@ public static class NBuild
         a == null ? b == null : b != null && Vec2.Distance(a.Center, b.Center) < 1e-9 && Math.Abs(a.Radius - b.Radius) < 1e-9;
 
     /// <summary>Builds a circle edge between two vertices on the circle (ccw about axis if ccw).</summary>
-    static (NEdge edge, bool forward) ArcEdge(NCircle circle, NVertex a, NVertex b, bool ccw)
+    internal static (NEdge edge, bool forward) ArcEdge(NCircle circle, NVertex a, NVertex b, bool ccw)
     {
         // canonical edge runs counter-clockwise about the circle axis
         var (from, to) = ccw ? (a, b) : (b, a);

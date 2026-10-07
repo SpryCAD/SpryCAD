@@ -20,6 +20,17 @@ public sealed class MassProps
     public Vec3[] Axes = { new(1, 0, 0), new(0, 1, 0), new(0, 0, 1) };
 
     readonly double[] _sum = new double[10];
+    readonly double[] _exact = new double[10];
+
+    /// <summary>
+    /// Adds integrals taken elsewhere (V, ∫x, ∫y, ∫z, ∫x², ∫y², ∫z², ∫xy, ∫yz, ∫zx over the solid) and its surface
+    /// area: exact mass properties of a B-rep (<see cref="Native.NMass"/>).
+    /// </summary>
+    public void AddIntegrals(double[] integrals, double area)
+    {
+        for (int i = 0; i < 10; i++) _exact[i] += integrals[i];
+        SurfaceArea += area;
+    }
 
     /// <summary>Adds a closed mesh's triangles (outward facing; a mesh facing inward counts negative).</summary>
     public void Add(float[] positions, int[] indices) => Add(positions, indices, 0, indices.Length);
@@ -57,7 +68,7 @@ public sealed class MassProps
     {
         double[] mult = { 1 / 6.0, 1 / 24.0, 1 / 24.0, 1 / 24.0, 1 / 60.0, 1 / 60.0, 1 / 60.0, 1 / 120.0, 1 / 120.0, 1 / 120.0 };
         var s = new double[10];
-        for (int i = 0; i < 10; i++) s[i] = _sum[i] * mult[i];
+        for (int i = 0; i < 10; i++) s[i] = _sum[i] * mult[i] + _exact[i];
         if (s[0] < 0) for (int i = 0; i < 10; i++) s[i] = -s[i]; // inward-facing mesh
         Volume = s[0];
         if (Volume < 1e-300) return this;

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using FeatherCad.Kernel.Native;
 using FeatherCad.Core.Model;
 using FeatherCad.Core.Regen;
 using FeatherCad.Kernel;
@@ -168,6 +169,209 @@ static class Bench
             }
         }
     }
+
+    /// <summary>
+    /// <c>-- determinism file.fcad runs [Name=expr ...]</c>: rebuilds the model several times (equations set as
+    /// given) and fingerprints every feature's bodies (face, edge and vertex counts, face names, a sum of the
+    /// vertices, edge curves, face surfaces and anchors, edge sample caches); prints the features whose result differs
+    /// between runs. FC_DET_FACES=1 also tessellates the final body as the demo check measures volume (2e-4, slow) and
+    /// prints the faces whose tessellated volume differs. 0 when every run matched.
+    /// </summary>
+    public static int Determinism(string file, int runs, string[] equations)
+    {
+        var json = CadDocument.Load(file).ToJson();
+        var prints = new List<List<string>>();
+        var faceVols = new List<Dictionary<string, (double vol, int n)>>();
+        List<string> names = new();
+        for (int run = 0; run < runs; run++)
+        {
+            var doc = CadDocument.FromJson(json);
+            foreach (var eq in equations)
+            {
+                var kv = eq.Split('=', 2);
+                doc.Equations.First(q => q.Name == kv[0]).Expr = kv[1];
+            }
+            Csg.ClearCache();
+            var r = new Regenerator().Rebuild(doc);
+            names = doc.Features.Select(f => f.Name).ToList();
+            var fp = r.States.Select(Fingerprint).ToList();
+            if (Environment.GetEnvironmentVariable("FC_DET_FACES") != null)
+            {
+                // the final body tessellated as the demo check measures volume, per face
+                var facets = NTess.Facets(r.State.Bodies[0].Solid.Native!, 2e-4);
+                // faces sharing a name: told apart by their order of appearance
+                var tagKey = new Dictionary<FaceTag, string>(ReferenceEqualityComparer.Instance);
+                var perName = new Dictionary<string, int>();
+                foreach (var f in facets)
+                    if (!tagKey.ContainsKey(f.Tag)) { perName[f.Tag.Name] = perName.GetValueOrDefault(f.Tag.Name) + 1; tagKey[f.Tag] = $"{f.Tag.Name}#{perName[f.Tag.Name]}"; }
+                faceVols.Add(facets.GroupBy(f => tagKey[f.Tag]).ToDictionary(g => g.Key, g => (g.Sum(FacetVolume), g.Count())));
+                Console.Write($"[{faceVols[^1].Values.Sum(v => v.Item1):R}]");
+            }
+            prints.Add(fp);
+            Console.Write(".");
+        }
+        Console.WriteLine();
+        int bad = 0;
+        for (int k = 0; k < names.Count; k++)
+        {
+            var distinct = prints.Select(p => p[k]).Distinct().ToList();
+            if (distinct.Count == 1) continue;
+            bad++;
+            Console.WriteLine($"{names[k]}: {distinct.Count} different results in {runs} runs");
+            foreach (var d in distinct) Console.WriteLine($"    x{prints.Count(p => p[k] == d)}  {d}");
+        }
+        foreach (var key in faceVols.SelectMany(d => d.Keys).Distinct().OrderBy(k => k, StringComparer.Ordinal))
+        {
+            var vals = faceVols.Select(d => d.TryGetValue(key, out var v) ? $"{v.vol:R}/{v.n}" : "missing").ToList();
+            if (vals.Distinct().Count() > 1) Console.WriteLine($"  face {key}: {string.Join("  ", vals.GroupBy(v => v).Select(g => $"x{g.Count()} {g.Key}"))}");
+        }
+        // per feature, a short hash of its result (compare between processes)
+        for (int k = 0; k < names.Count; k++) Console.WriteLine($"  {names[k],-20} {(uint)StableHash(prints[0][k]):X8}");
+        Console.WriteLine(bad == 0 ? "every run matched" : $"{bad} features differ");
+        return bad == 0 ? 0 : 1;
+    }
+
+    /// <summary>
+    /// <c>-- demoprints name</c>: the demo check's sequence for one demo (built in code, each variant in turn, one
+    /// process), printing a hash of every variant's final body: compare the output of several processes.
+    /// </summary>
+    public static int DemoPrints(string name)
+    {
+        foreach (var (file, build) in Demos.All.Where(x => x.file.Contains(name)))
+        {
+            var doc = build();
+            foreach (var variant in new[] { Array.Empty<(string, string)>() }.Concat(Demos.Variants[file]))
+            {
+                var d = CadDocument.FromJson(doc.ToJson());
+                foreach (var (n, e) in variant) d.Equations.First(q => q.Name == n).Expr = e;
+                Csg.ClearCache();
+                var r = new Regenerator().Rebuild(d);
+                var label = variant.Length == 0 ? "as designed" : string.Join(", ", variant.Select(v => $"{v.Item1}={v.Item2}"));
+                Console.WriteLine($"{file} {label}");
+                for (int k = 0; k < d.Features.Count; k++) Console.WriteLine($"  {d.Features[k].Name,-20} {(uint)StableHash(Fingerprint(r.States[k])):X8}");
+            }
+        }
+        return 0;
+    }
+
+    /// <summary>
+    /// <c>-- massprops file.fcad [Name=expr ...]</c>: exact mass properties of each body (integrated on the B-rep)
+    /// against the mesh's (display mesh, and finer tessellations), with times.
+    /// </summary>
+    public static int MassPropsTool(string file, string[] equations)
+    {
+        var doc = CadDocument.Load(file);
+        foreach (var eq in equations) { var kv = eq.Split('=', 2); doc.Equations.First(q => q.Name == kv[0]).Expr = kv[1]; }
+        var r = new Regenerator().Rebuild(doc);
+        foreach (var b in r.State.Bodies)
+        {
+            if (b.Solid.Native is not { } nb) { Console.WriteLine("  (not a native body)"); continue; }
+            var sw = Stopwatch.StartNew();
+            var ex = NMass.Of(nb);
+            var ms = sw.Elapsed.TotalMilliseconds;
+            if (ex == null) { Console.WriteLine($"  exact: not integrable ({ms:0} ms)"); continue; }
+            Console.WriteLine($"  exact      vol {ex.Volume:R}  area {ex.SurfaceArea:0.000000}  centre {ex.Center}  Ixx {ex.AtCenter[0, 0]:0.###}  ({ms:0} ms, {nb.Faces.Count} faces)");
+            foreach (var tol in new[] { 0.0, 1e-3, 2e-4 })
+            {
+                sw.Restart();
+                var mp = new MassProps();
+                if (tol == 0) mp.Add(b.Mesh.Positions, b.Mesh.Indices);
+                else foreach (var f in NTess.Facets(nb.Clone(), tol)) foreach (var tr in Triangulator.TriangulateFace(f)) mp.AddTriangle(tr.A, tr.B, tr.C);
+                mp.Finish();
+                Console.WriteLine($"  mesh {(tol == 0 ? "display" : tol.ToString("0e0")),-7} vol {mp.Volume:R}  area {mp.SurfaceArea:0.000000}  rel {(mp.Volume - ex.Volume) / ex.Volume:e2}  ({sw.ElapsedMilliseconds} ms)");
+            }
+        }
+        return 0;
+    }
+
+    /// <summary>
+    /// <c>-- tessrepeat file.fcad n [Name=expr ...]</c>: rebuilds once, then tessellates the final body n times (as
+    /// the demo check measures volume): a race inside tessellation shows up as different volumes.
+    /// </summary>
+    public static int TessRepeat(string file, int n, string[] equations, bool fresh)
+    {
+        var doc = CadDocument.Load(file);
+        foreach (var eq in equations) { var kv = eq.Split('=', 2); doc.Equations.First(q => q.Name == kv[0]).Expr = kv[1]; }
+        var r = new Regenerator().Rebuild(doc);
+        var body = r.State.Bodies[0].Solid.Native!;
+        var seen = new Dictionary<double, int>();
+        for (int k = 0; k < n; k++)
+        {
+            var sw = Stopwatch.StartNew();
+            var v = NTess.ToSolid(fresh ? body.Clone() : body, 2e-4).Volume();
+            seen[v] = seen.GetValueOrDefault(v) + 1;
+            Console.WriteLine($"{k}: {v:R}  ({sw.ElapsedMilliseconds} ms)");
+        }
+        Console.WriteLine(seen.Count == 1 ? "all the same" : $"{seen.Count} different volumes");
+        return seen.Count == 1 ? 0 : 1;
+    }
+
+    internal static string Fingerprint(ModelState s)
+    {
+        var parts = new List<string>();
+        foreach (var b in s.Bodies)
+        {
+            if (b.Solid.Native is not { } nb) { parts.Add("facets"); continue; }
+            var verts = nb.Faces.SelectMany(f => f.Coedges).Select(c => c.Edge.V0).Distinct().ToList();
+            double sx = 0, sy = 0, sz = 0;
+            foreach (var v in verts) { sx += v.P.X; sy += v.P.Y; sz += v.P.Z; }
+            var faceNames = string.Join(",", nb.Faces.Select(f => f.Tag.Name).OrderBy(n => n, StringComparer.Ordinal));
+            var tols = string.Join(",", nb.Edges.Select(e => e.SampledTol).GroupBy(t => t).OrderBy(g => g.Key).Select(g => $"{g.Key:g3}x{g.Count()}"))
+                + $" order#{(uint)StableHash(string.Join(",", nb.Edges.Select(e => e.SampledTol.ToString("R")))):X8}"
+                + $" points#{PointsHash(nb):X16} curves#{CurvesHash(nb):X16} faces#{FacesHash(nb):X16}";
+            parts.Add($"{nb.Faces.Count}f {nb.Edges.Count()}e {verts.Count}v sum({sx:0.######},{sy:0.######},{sz:0.######}) names#{faceNames.Length}:{(uint)StableHash(faceNames):X8} samples[{tols}]");
+        }
+        return string.Join(" | ", parts);
+    }
+
+    static double FacetVolume(Face f)
+    {
+        double v = 0;
+        foreach (var l in f.Loops)
+            for (int i = 1; i + 1 < l.Length; i++) v += Vec3.Dot(l[0], Vec3.Cross(l[i], l[i + 1]));
+        return v / 6;
+    }
+
+    // every edge's curve evaluated along it (not from caches): fitted section curves can differ where no vertex moves
+    static ulong CurvesHash(NBody nb)
+    {
+        ulong h = 14695981039346656037;
+        foreach (var e in nb.Edges)
+            for (int k = 0; k <= 8; k++)
+            {
+                var q = e.Curve.Eval(e.T0 + (e.T1 - e.T0) * k / 8);
+                foreach (var x in new[] { q.X, q.Y, q.Z }) h = (h ^ (ulong)BitConverter.DoubleToInt64Bits(x)) * 1099511628211;
+            }
+        return h;
+    }
+
+    // what tessellation reads from each face besides its edges: anchor, sense, the surface at a few parameters
+    static ulong FacesHash(NBody nb)
+    {
+        ulong h = 14695981039346656037;
+        void H(double x) => h = (h ^ (ulong)BitConverter.DoubleToInt64Bits(x)) * 1099511628211;
+        foreach (var f in nb.Faces)
+        {
+            H(f.Sense ? 1 : 0);
+            if (f.Anchor is { } an) { H(an.X); H(an.Y); H(an.Z); } else H(-1);
+            for (int k = 0; k < 3; k++) { var q = f.Surface.Eval(0.1 + 0.3 * k, 0.2 + 0.25 * k); H(q.X); H(q.Y); H(q.Z); }
+        }
+        return h;
+    }
+
+    static ulong PointsHash(NBody nb)
+    {
+        ulong h = 14695981039346656037;
+        foreach (var e in nb.Edges)
+        {
+            if (double.IsNaN(e.SampledTol)) continue;
+            foreach (var q in e.Samples(e.SampledTol))
+                foreach (var x in new[] { q.X, q.Y, q.Z }) h = (h ^ (ulong)BitConverter.DoubleToInt64Bits(x)) * 1099511628211;
+        }
+        return h;
+    }
+
+        static int StableHash(string s) { unchecked { int h = 17; foreach (var c in s) h = h * 31 + c; return h; } }
 
     /// <summary>
     /// <c>-- cases</c>: the handwheel at awkward parameters (off-grid spokes; the grips-last model with 8 spokes):

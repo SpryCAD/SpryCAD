@@ -103,6 +103,8 @@ public static class NShell
             case SurfaceKind.BSpline:
             case SurfaceKind.Offset:
                 return NSurface.OffsetOf(s, d);
+            case SurfaceKind.Screw:
+                throw new InvalidOperationException("shell: helical faces cannot be offset yet");
         }
         throw new NotSupportedException();
     }

@@ -4,7 +4,8 @@ namespace FeatherCad.Kernel;
 
 /// <summary>Pipe: the canal surface of a ball rolling along a spine curve (rolling-ball blends).</summary>
 /// <summary>Offset: the base surface moved by Radius along its normal (offsets of B-spline surfaces).</summary>
-public enum SurfaceKind { Plane, Cylinder, Cone, Sphere, Torus, Pipe, BSpline, Offset }
+/// <summary>Screw: a line or arc carried by a screw motion (helical sweeps: threads, springs).</summary>
+public enum SurfaceKind { Plane, Cylinder, Cone, Sphere, Torus, Pipe, BSpline, Offset, Screw }
 
 /// <summary>
 /// The exact ("true") geometry a face was created from. Faces are stored as exact planar
@@ -30,6 +31,8 @@ public sealed record SurfaceDef
     public NurbsSurface? Nurbs { get; init; }
     /// <summary>Base surface of an offset surface (Radius is the distance along its normal).</summary>
     public NSurface? Base { get; init; }
+    /// <summary>Screw surface geometry.</summary>
+    public ScrewSurface? Screw { get; init; }
     /// <summary>Facet count used for a full revolution.</summary>
     public int Segments { get; init; }
 
@@ -42,7 +45,7 @@ public sealed record SurfaceDef
         if (Kind == SurfaceKind.Plane) return this;
         var axis = t.Normal(Axis);
         var refd = t.Normal(RefDir);
-        return this with { Origin = t.Point(Origin), Axis = axis, RefDir = refd, Spine = Spine?.Transformed(t), Nurbs = Nurbs?.Transformed(t), Base = Base?.Transformed(t) };
+        return this with { Origin = t.Point(Origin), Axis = axis, RefDir = refd, Spine = Spine?.Transformed(t), Nurbs = Nurbs?.Transformed(t), Base = Base?.Transformed(t), Screw = Screw?.Transformed(t) };
     }
 
     /// <summary>Analytic outward normal at p, given the facet normal (used to pick the side).</summary>
@@ -90,6 +93,9 @@ public sealed record SurfaceDef
                 }
             case SurfaceKind.Offset:
                 n = Base!.Grad(p);
+                break;
+            case SurfaceKind.Screw:
+                n = Screw!.Normal(p);
                 break;
             default:
                 return facetNormal;

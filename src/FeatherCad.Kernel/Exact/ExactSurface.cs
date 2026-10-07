@@ -59,6 +59,8 @@ public sealed class ExactSurface
                 }
             case SurfaceKind.Pipe:
                 return Def.Spine!.Project(p, Def.Radius);
+            case SurfaceKind.Screw:
+                return Def.Screw!.Closest(p).c;
             case SurfaceKind.BSpline:
                 return Def.Nurbs!.Closest(p).c;
             case SurfaceKind.Offset:
@@ -104,6 +106,8 @@ public sealed class ExactSurface
                 }
             case SurfaceKind.Pipe:
                 return Def.Spine!.Normal(p);
+            case SurfaceKind.Screw:
+                return Def.Screw!.Normal(p);
             case SurfaceKind.BSpline:
                 {
                     var c = Def.Nurbs!.Closest(p);
@@ -140,6 +144,7 @@ public sealed class ExactSurface
             SurfaceKind.Cone => $"Cone {2 * Def.Param2 * 180 / Math.PI:0.##}°",
             SurfaceKind.Torus => $"Torus R{Def.Radius:0.###} r{Def.Param2:0.###}",
             SurfaceKind.Pipe => $"Fillet R{Def.Radius:0.###}",
+            SurfaceKind.Screw => $"Helical, lead {Math.Abs(Def.Screw!.Motion.Lead):0.###}",
             SurfaceKind.BSpline => "B-spline surface",
             SurfaceKind.Offset => $"Offset surface {Def.Radius:0.###}",
             _ => Def.Kind.ToString(),
