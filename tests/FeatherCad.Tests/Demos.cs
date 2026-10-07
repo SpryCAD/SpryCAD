@@ -24,6 +24,7 @@ static class Demos
         ("hand-wheel.fcad", HandWheel),
         ("spoked-handwheel.fcad", SpokedWheel),
         ("bent-tube.fcad", BentTube),
+        ("bolt-and-nut.fcad", BoltAndNut),
     };
 
     /// <summary>Equation changes each demo must survive (shows what the parameters do).</summary>
@@ -34,6 +35,7 @@ static class Demos
         ["heat-sink.fcad"] = new[] { new[] { ("N", "20"), ("T", "1.2") }, new[] { ("L", "120"), ("FinH", "40") }, new[] { ("N", "8"), ("T", "3") } },
         ["stepped-shaft.fcad"] = new[] { new[] { ("D2", "50"), ("KeyW", "14") }, new[] { ("L2", "100"), ("KeyL", "60") }, new[] { ("D1", "35"), ("Rs", "2"), ("C", "2") } },
         ["hand-wheel.fcad"] = new[] { new[] { ("NS", "3") }, new[] { ("Dish", "45"), ("SpokeD", "16") }, new[] { ("D", "260"), ("NS", "6"), ("KnobL", "60") } },
+        ["bolt-and-nut.fcad"] = new[] { new[] { ("D", "12"), ("P", "1.75"), ("S", "19") }, new[] { ("L", "45"), ("Clr", "0.3") }, new[] { ("NutH", "10"), ("Clr", "0") } },
         ["bent-tube.fcad"] = new[] { new[] { ("R", "80"), ("L1", "120") }, new[] { ("OD", "40"), ("ID", "34"), ("FlangeD", "100"), ("PCD", "75") }, new[] { ("N", "6"), ("L2", "100") } },
         ["spoked-handwheel.fcad"] = new[] { new[] { ("NS", "6") }, new[] { ("D", "300"), ("RimT", "26"), ("NG", "4") }, new[] { ("NS", "4"), ("SpokeD", "20"), ("Rf", "3") } },
         ["spur-gear.fcad"] = new[] { new[] { ("z", "48") }, new[] { ("m", "2.5"), ("z", "30") }, new[] { ("PA", "25"), ("b", "20") } },
@@ -713,6 +715,52 @@ static class Demos
         var hs = d.AddFeature(new SketchFeature { Name = "Bolt hole", Plane = PlaneRef.Right, Sketch = h.S });
         var cut = d.AddFeature(new ExtrudeFeature { Name = "Bolt hole", SketchId = hs.Id, IsCut = true, Depth = "FlangeT", Reverse = true });
         d.AddFeature(new CircularPatternFeature { Name = "Bolt circle", Seeds = { cut.Id }, Axis = new DirRef { Axis = "X" }, Count = "N" });
+        return d;
+    }
+
+    /// <summary>
+    /// A printable M10 bolt and nut: hex head and threaded shank, and a hex nut (a separate body) threaded through
+    /// its hole of the minor diameter; both threads ISO (size fitted to the faces) with a fit clearance Clr.
+    /// </summary>
+    static CadDocument BoltAndNut()
+    {
+        var d = Doc(("D", "10"), ("P", "1.5"), ("L", "30"), ("S", "16"), ("HeadH", "6.4"), ("NutH", "8"), ("Gap", "30"), ("Clr", "0.15"));
+        int[] Hex(Sk k, string x0)
+        {
+            string X(string e) => x0 == "0" ? e : $"{x0}+{e}";
+            return new[]
+            {
+                k.P(X("S/2"), "S/(2*sqrt(3))"), k.P(X("0"), "S/sqrt(3)"), k.P(X("-S/2"), "S/(2*sqrt(3))"),
+                k.P(X("-S/2"), "-S/(2*sqrt(3))"), k.P(X("0"), "-S/sqrt(3)"), k.P(X("S/2"), "-S/(2*sqrt(3))"),
+            };
+        }
+        // bolt: head on Front, shank on a plane at the head's top
+        var h = new Sk(d);
+        h.Poly(Hex(h, "0"));
+        var hs = d.AddFeature(new SketchFeature { Name = "Head", Plane = PlaneRef.Front, Sketch = h.S });
+        d.AddFeature(new ExtrudeFeature { Name = "Head", SketchId = hs.Id, Depth = "HeadH" });
+        var top = d.AddFeature(new PlaneFeature { Name = "Head top", Base = PlaneRef.Front, Offset = "HeadH" });
+        var sh = new Sk(d);
+        var shc = sh.Circle(Sketch.OriginId, "D");
+        var shs = d.AddFeature(new SketchFeature { Name = "Shank", Plane = new PlaneRef { Feature = top.Id }, Sketch = sh.S });
+        var shank = d.AddFeature(new ExtrudeFeature { Name = "Shank", SketchId = shs.Id, Depth = "L" });
+        double V(string e) => sh.Eval(e);
+        d.AddFeature(new ThreadFeature
+        {
+            Name = "Bolt thread", Length = "L-3", Clearance = "Clr",
+            Face = new FaceRef { Name = $"{shank.Id}.S.C{shc}", Hint = new Vec3(V("D/2"), 0, V("HeadH+L-1")) },
+        });
+        // nut: a separate body beside the bolt, its hole the thread's minor diameter
+        var n = new Sk(d);
+        n.Poly(Hex(n, "Gap"));
+        var hole = n.Circle(n.P("Gap", "0"), "D-1.0825*P");
+        var ns = d.AddFeature(new SketchFeature { Name = "Nut", Plane = PlaneRef.Front, Sketch = n.S });
+        var nut = d.AddFeature(new ExtrudeFeature { Name = "Nut", SketchId = ns.Id, Depth = "NutH", Merge = false });
+        d.AddFeature(new ThreadFeature
+        {
+            Name = "Nut thread", Clearance = "Clr",
+            Face = new FaceRef { Name = $"{nut.Id}.S.C{hole}", Hint = new Vec3(V("Gap+(D-1.0825*P)/2"), 0, V("NutH-0.5")) },
+        });
         return d;
     }
 

@@ -170,6 +170,8 @@ public partial class MainWindow
             case ExtrudeFeature e: OpenExtrudePage((ExtrudeFeature)e.Clone(), false); break;
             case RevolveFeature rv: OpenRevolvePage((RevolveFeature)rv.Clone(), false); break;
             case SweepFeature sw: OpenSweepPage((SweepFeature)sw.Clone(), false); break;
+            case HelicalSweepFeature hs: OpenHelicalPage((HelicalSweepFeature)hs.Clone(), false); break;
+            case ThreadFeature th: OpenThreadPage((ThreadFeature)th.Clone(), false); break;
             case FilletFeature fi: OpenBlendPage(fi.Clone(), false); break;
             case ChamferFeature ch: OpenBlendPage(ch.Clone(), false); break;
             case HoleFeature h: OpenHolePage((HoleFeature)h.Clone(), false); break;
@@ -362,6 +364,80 @@ public partial class MainWindow
         page.Activate(string.IsNullOrEmpty(f.ProfileSketchId) ? profBox : string.IsNullOrEmpty(f.PathSketchId) ? pathBox : null);
         BeginEdit(f, isNew, page, overlay: false,
             hint: string.IsNullOrEmpty(f.ProfileSketchId) ? "Select the profile sketch, then the path sketch." : string.IsNullOrEmpty(f.PathSketchId) ? "Select the path sketch." : null);
+    }
+
+    // ------------------------------------------------------------------------------------------
+    // Helical sweep
+
+    void HelicalCommand(bool cut)
+    {
+        if (_sketch != null) ExitSketch(true);
+        OpenHelicalPage(new HelicalSweepFeature { SketchId = SketchFromSelection() ?? "", IsCut = cut }, true);
+    }
+
+    void OpenHelicalPage(HelicalSweepFeature f, bool isNew)
+    {
+        var page = new PmPage(f.IsCut ? "Cut-Helical" : "Helical", f.IsCut ? "cuthelical" : "helical");
+        var s0 = page.Section("Profile");
+        var skBox = page.Selection(s0, "Sketch", SelFilter.Sketch, "Closed profile and a centerline (the helix's axis)", 1);
+        if (!string.IsNullOrEmpty(f.SketchId)) skBox.Items.Add(new SelItem { Kind = SelKind.Sketch, FeatureId = f.SketchId });
+        var axisSec = page.Section("Axis");
+        ComboBox? axisCombo = null;
+        void FillAxes()
+        {
+            if (axisCombo != null) axisSec.Children.Remove(axisCombo.Parent as Control ?? axisCombo);
+            var sk = Session.Doc.Find(f.SketchId) as SketchFeature;
+            var lines = sk?.Sketch.Entities.OfType<SkLine>().OrderByDescending(l => l.Construction).ToList() ?? new();
+            var opts = new List<(int, string)> { (0, "First centerline (auto)") };
+            opts.AddRange(lines.Select(l => (l.Id, (l.Construction ? "Centerline" : "Line") + l.Id)));
+            axisCombo = page.Combo(axisSec, "Axis", opts, () => f.AxisEntity, v => f.AxisEntity = v, "centerline");
+        }
+        FillAxes();
+        skBox.Changed += () => { f.SketchId = skBox.Items.FirstOrDefault()?.FeatureId ?? ""; f.AxisEntity = 0; FillAxes(); };
+        var h = page.Section("Helix");
+        page.Number(h, "Pitch", () => f.Pitch, v => f.Pitch = v, "dimension");
+        page.Number(h, "Revolutions", () => f.Revolutions, v => f.Revolutions = v, "helical");
+        page.Check(h, "Left hand", () => f.LeftHand, v => f.LeftHand = v);
+        page.Check(h, "Reverse direction", () => f.Reverse, v => f.Reverse = v);
+        page.Info(h, "The profile must not reach the axis, and (in a plane through the axis) must be shorter along it than the pitch.");
+        if (!f.IsCut) page.Check(page.Section("Options"), "Merge result", () => f.Merge, v => f.Merge = v);
+        if (!string.IsNullOrEmpty(f.SketchId)) page.Activate(null);
+        BeginEdit(f, isNew, page, overlay: false, hint: string.IsNullOrEmpty(f.SketchId) ? "Select a sketch with a closed profile and a centerline." : null);
+    }
+
+    // ------------------------------------------------------------------------------------------
+    // Thread
+
+    void ThreadCommand()
+    {
+        var face = Selection.Items.FirstOrDefault(s => s.Kind == SelKind.Face);
+        var f = new ThreadFeature();
+        if (face != null) f.Face = face.ToFaceRef();
+        OpenThreadPage(f, true);
+    }
+
+    void OpenThreadPage(ThreadFeature f, bool isNew)
+    {
+        var page = new PmPage("Thread", "thread");
+        var s0 = page.Section("Face");
+        var box = page.Selection(s0, "Face", SelFilter.Face, "Cylindrical face: a shaft (external) or a hole (internal); the thread starts at the end nearest where you click", 1);
+        if (!string.IsNullOrEmpty(f.Face.Name)) box.Items.Add(FaceItem(f.Face));
+        box.Changed += () => f.Face = box.Items.FirstOrDefault()?.ToFaceRef() ?? new FaceRef();
+        var spec = page.Section("Specification");
+        var sizes = new List<(string, string)> { ("Auto", "Auto (fits the face)") };
+        sizes.AddRange(FeatherCad.Core.Regen.Threads.MetricCoarse.Select(x => (x.name, $"{x.name} × {x.p}")));
+        sizes.Add(("Custom", "Custom pitch"));
+        page.Combo(spec, "Size", sizes, () => f.Size, v => f.Size = v, "thread");
+        page.Number(spec, "Pitch (custom)", () => f.Pitch, v => f.Pitch = v, "dimension");
+        page.Number(spec, "Length", () => f.Length, v => f.Length = v, "dimension", optional: true);
+        page.Info(spec, "Leave the length empty to thread the whole face.");
+        var opt = page.Section("Options");
+        page.Number(opt, "Clearance", () => f.Clearance, v => f.Clearance = v, "dimension");
+        page.Info(opt, "Extra room on the flanks for 3D printed threads (0.1–0.3 mm is typical); the crest is lowered where it would get too narrow.");
+        page.Check(opt, "Left hand", () => f.LeftHand, v => f.LeftHand = v);
+        page.Check(opt, "Start at the other end", () => f.Reverse, v => f.Reverse = v);
+        if (!string.IsNullOrEmpty(f.Face.Name)) page.Activate(null);
+        BeginEdit(f, isNew, page, overlay: true, hint: string.IsNullOrEmpty(f.Face.Name) ? "Select a cylindrical face near the end where the thread starts." : null);
     }
 
     // ------------------------------------------------------------------------------------------

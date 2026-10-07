@@ -165,15 +165,18 @@ public partial class MainWindow
             Sub("_Boss/Base",
                 Item("_Extrude...", () => ExtrudeCommand(false), null, "extrude"),
                 Item("_Revolve...", () => RevolveCommand(false), null, "revolve"),
-                Item("S_wept...", () => SweepCommand(false), null, "sweep")),
+                Item("S_wept...", () => SweepCommand(false), null, "sweep"),
+                Item("_Helical...", () => HelicalCommand(false), null, "helical")),
             Sub("_Cut",
                 Item("_Extrude...", () => ExtrudeCommand(true), null, "cut"),
                 Item("_Revolve...", () => RevolveCommand(true), null, "cutrevolve"),
-                Item("S_wept...", () => SweepCommand(true), null, "cutsweep")),
+                Item("S_wept...", () => SweepCommand(true), null, "cutsweep"),
+                Item("_Helical...", () => HelicalCommand(true), null, "cuthelical")),
             Sub("_Features",
                 Item("_Fillet...", () => BlendCommand(true), null, "fillet"),
                 Item("_Chamfer...", () => BlendCommand(false), null, "chamfer"),
                 Item("_Hole Wizard...", HoleCommand, null, "hole"),
+                Item("_Thread...", ThreadCommand, null, "thread"),
                 Item("_Shell...", ShellCommand, null, "shell"),
                 Item("C_ombine...", CombineCommand, null, "combine")),
             Sub("_Pattern/Mirror",
@@ -249,11 +252,14 @@ public partial class MainWindow
                 Cmd("extrude", "Extruded\nBoss/Base", () => ExtrudeCommand(false));
                 Cmd("revolve", "Revolved\nBoss/Base", () => RevolveCommand(false));
                 Cmd("sweep", "Swept\nBoss/Base", () => SweepCommand(false));
+                Cmd("helical", "Helical\nBoss/Base", () => HelicalCommand(false));
                 Sep();
                 Cmd("cut", "Extruded\nCut", () => ExtrudeCommand(true));
                 Cmd("cutrevolve", "Revolved\nCut", () => RevolveCommand(true));
                 Cmd("cutsweep", "Swept\nCut", () => SweepCommand(true));
+                Cmd("cuthelical", "Helical\nCut", () => HelicalCommand(true));
                 Cmd("hole", "Hole\nWizard", HoleCommand);
+                Cmd("thread", "Thread", ThreadCommand);
                 Sep();
                 Cmd("fillet", "Fillet", () => BlendCommand(true));
                 Cmd("chamfer", "Chamfer", () => BlendCommand(false));
@@ -332,6 +338,9 @@ public partial class MainWindow
         ["Swept Boss/Base"] = "Sweeps a closed profile along a path of lines and arcs to add material.",
         ["Swept Cut"] = "Sweeps a closed profile along a path of lines and arcs to remove material.",
         ["Hole Wizard"] = "Simple, counterbored or countersunk holes placed on a face.",
+        ["Helical Boss/Base"] = "Sweeps a closed profile along a helix about a centerline of its sketch (springs, coils).",
+        ["Helical Cut"] = "Cuts a closed profile swept along a helix about a centerline of its sketch.",
+        ["Thread"] = "Models a metric thread on a shaft or in a hole, with a fit clearance for 3D printing.",
         ["Fillet"] = "Rounds the selected edges (tangent edges are included).",
         ["Chamfer"] = "Bevels the selected edges.",
         ["Shell"] = "Hollows the part, leaving the selected faces open.",
