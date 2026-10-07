@@ -138,6 +138,23 @@ public sealed class SkConstraint
 
 public enum SketchStatus { UnderDefined, FullyDefined, OverDefined, Failed }
 
+/// <summary>
+/// A sketch fillet between two lines meeting at a corner. The original lines (<see cref="LineA"/>,
+/// <see cref="LineB"/>) stay, ending at the corner, as construction geometry: the virtual sharp, so dimensions
+/// to them and to the corner keep their meaning. The profile follows the trimmed lines
+/// (<see cref="TrimA"/>, <see cref="TrimB"/>, collinear with the originals) and the tangent <see cref="Arc"/>.
+/// Deleting the arc restores the lines (<see cref="Sketch.DeleteEntity"/>).
+/// </summary>
+public sealed class SkFillet
+{
+    public int Arc { get; set; }
+    public int LineA { get; set; }
+    public int LineB { get; set; }
+    public int TrimA { get; set; }
+    public int TrimB { get; set; }
+    public SkFillet Clone() => (SkFillet)MemberwiseClone();
+}
+
 public sealed class Sketch
 {
     public const int OriginId = 0;
@@ -145,6 +162,8 @@ public sealed class Sketch
     public List<SkPoint> Points { get; set; } = new() { new SkPoint { Id = OriginId, Fixed = true } };
     public List<SkEntity> Entities { get; set; } = new();
     public List<SkConstraint> Constraints { get; set; } = new();
+    /// <summary>Sketch fillets (null when none, so sketches without them are saved as before).</summary>
+    public List<SkFillet>? Fillets { get; set; }
     public int NextId { get; set; } = 1;
 
     public int NewId() => NextId++;
@@ -178,6 +197,7 @@ public sealed class Sketch
         Points = Points.Select(p => p.Clone()).ToList(),
         Entities = Entities.Select(e => e.Clone()).ToList(),
         Constraints = Constraints.Select(c => c.Clone()).ToList(),
+        Fillets = Fillets?.Select(f => f.Clone()).ToList(),
         NextId = NextId,
     };
 
@@ -200,8 +220,53 @@ public sealed class Sketch
             c.Type is CType.Distance or CType.HDistance or CType.VDistance or CType.Coincident or CType.Horizontal or CType.Vertical);
     }
 
-    /// <summary>Deletes an entity, its now-unused points, and constraints referencing them.</summary>
+    /// <summary>
+    /// Deletes an entity, its now-unused points, and constraints referencing them. A fillet's arc takes the fillet
+    /// with it: its trimmed lines go and the original lines are solid again (the corner as before). Deleting
+    /// another piece of a fillet leaves the rest as plain geometry.
+    /// </summary>
     public void DeleteEntity(int id)
+    {
+        if (Fillets?.FirstOrDefault(f => f.Arc == id) is { } fillet) { RemoveFillet(fillet); return; }
+        // another piece of a fillet: the fillets using it become plain geometry
+        if (Fillets != null)
+        {
+            Fillets.RemoveAll(f => f.TrimA == id || f.TrimB == id || f.LineA == id || f.LineB == id);
+            if (Fillets.Count == 0) Fillets = null;
+        }
+        DeleteEntityOnly(id);
+    }
+
+    /// <summary>
+    /// Removes a fillet, restoring its corner: each trimmed line ends at the corner again, and when no other
+    /// fillet trims it, it goes and the original line is solid again.
+    /// </summary>
+    void RemoveFillet(SkFillet f)
+    {
+        Fillets!.Remove(f);
+        if (Fillets.Count == 0) Fillets = null;
+        if (Entity(f.Arc) is SkArc arc && Entity(f.LineA) is SkLine la && Entity(f.LineB) is SkLine lb)
+        {
+            var corner = la.P1 == lb.P1 || la.P1 == lb.P2 ? la.P1 : la.P2 == lb.P1 || la.P2 == lb.P2 ? la.P2 : -1;
+            foreach (var (orig, trimId) in new[] { (la, f.TrimA), (lb, f.TrimB) })
+            {
+                if (corner < 0 || Entity(trimId) is not SkLine trim) continue;
+                // the trimmed line's end at this fillet's tangent point goes back to the corner
+                if (trim.P1 == arc.Start || trim.P1 == arc.End) trim.P1 = corner;
+                else if (trim.P2 == arc.Start || trim.P2 == arc.End) trim.P2 = corner;
+                // spanning the whole original again (no other fillet on it): the original is the line again
+                var whole = (trim.P1 == orig.P1 && trim.P2 == orig.P2) || (trim.P1 == orig.P2 && trim.P2 == orig.P1);
+                if (whole && Fillets?.Any(o => o.TrimA == trimId || o.TrimB == trimId) != true)
+                {
+                    DeleteEntityOnly(trimId);
+                    orig.Construction = false;
+                }
+            }
+        }
+        DeleteEntityOnly(f.Arc); // with its center and tangent points, and their relations
+    }
+
+    void DeleteEntityOnly(int id)
     {
         var e = Entity(id);
         if (e == null) return;

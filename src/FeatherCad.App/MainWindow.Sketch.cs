@@ -249,6 +249,17 @@ public partial class MainWindow
             if (ed.PointsOnly)
                 page.Info(s, "Click on the face to place hole centers. Add dimensions (Smart Dimension) to locate them, then click OK.");
             // settings of the tool in use (a finished polygon is plain lines: its sides are set while drawing it)
+            if (ed.Tool == SketchTool.Fillet)
+            {
+                var fs = page.Section("Sketch Fillet");
+                page.Number(fs, "Radius", () => Expr.Format(ed.FilletRadius), v =>
+                {
+                    // only the value: the field applies on every change, also as the panel is built, so anything
+                    // that rebuilds the panel from here would loop
+                    if (Expr.TryEval(v, Session.Lookup, out var r, out _) && r > 0) ed.FilletRadius = r;
+                }, "sketchfillet");
+                page.Info(fs, "Click corners where two lines meet (or the two lines). The lines stay as construction geometry, so dimensions to the sharp corner remain; delete the fillet's arc to restore the corner.");
+            }
             if (ed.Tool == SketchTool.Polygon)
             {
                 var poly = page.Section("Polygon");
@@ -406,6 +417,14 @@ public partial class MainWindow
         if (edges.Count == 0) { Status("Select model edges or faces first (click them in the graphics area)."); return; }
         _sketch.ConvertEdges(edges.Distinct(), Viewport.Bodies);
         Selection.Clear();
+    }
+
+    void MirrorEntities()
+    {
+        if (_sketch == null) { Status("Mirror Entities works in a sketch: edit or start a sketch first."); return; }
+        var err = _sketch.MirrorSelection();
+        Status(err ?? "Mirrored. The copies stay symmetric about the centerline.");
+        BuildSketchPage();
     }
 
     void ToggleConstruction()

@@ -280,6 +280,8 @@ public partial class MainWindow
                 Cmd("point", "Point", () => SetSketchTool(SketchTool.Point), SketchTool.Point);
                 Sep();
                 Cmd("trim", "Trim\nEntities", () => SetSketchTool(SketchTool.Trim), SketchTool.Trim);
+                Cmd("sketchfillet", "Sketch\nFillet", () => { if (_sketch == null) { SetSketchTool(SketchTool.Fillet); return; } _sketch.StartFillet(); UpdateToolButtons(); BuildSketchPage(); }, SketchTool.Fillet);
+                Cmd("mirror", "Mirror\nEntities", MirrorEntities);
                 Cmd("convert", "Convert\nEntities", ConvertEntities);
                 Cmd("construction", "Construction\nGeometry", ToggleConstruction);
                 Cmd("normalto", "Normal\nTo", NormalTo);
@@ -337,6 +339,8 @@ public partial class MainWindow
         ["Line"] = "Sketches lines. Snapping adds relations, also to model edges, midpoints and centers.",
         ["Convert Entities"] = "Projects the selected model edges into the sketch.",
         ["Trim Entities"] = "Trims sketch entities at their intersections.",
+        ["Sketch Fillet"] = "Rounds the corner where two lines meet. The lines stay as construction geometry (the virtual sharp); deleting the arc restores the corner.",
+        ["Mirror Entities"] = "Mirrors the selected entities about the selected centerline. The copies stay mirrored.",
         ["Construction Geometry"] = "Toggles the selected sketch entities to construction.",
         ["Measure"] = "Distance, angle, radius, length and area of the faces, edges and vertices you click.",
         ["Mass Properties"] = "Mass, volume, surface area, center of mass and moments of inertia, with the part's material.",

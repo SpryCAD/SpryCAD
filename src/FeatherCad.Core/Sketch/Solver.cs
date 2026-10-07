@@ -194,6 +194,24 @@ public static class SketchSolver
                         var (a, b) = Line(s, r[li]); var ci = r[1 - li];
                         var cen = CenterOf(s, ci); var rad = s.RRefs[ci];
                         var sign = c.Sign;
+                        // the line and an arc meeting at an end (fillets, tangent arcs, slots): the radius at that
+                        // point is perpendicular to the line. The same geometry as the distance form below, but it
+                        // pins the touching point (to the distance form, a point on both the line and the circle can
+                        // slide along the line to first order, and is reported free)
+                        if (s.Sketch.Entity(r[li]) is SkLine sl && s.Sketch.Entity(ci) is SkArc sa)
+                        {
+                            var shared = new[] { sl.P1, sl.P2 }.FirstOrDefault(p => p == sa.Start || p == sa.End, -1);
+                            if (shared >= 0)
+                            {
+                                var tp = s.PRefs[shared];
+                                AddEq(s, id, x =>
+                                {
+                                    var d = b.Get(x) - a.Get(x);
+                                    return Vec2.Dot(d, tp.Get(x) - cen.Get(x)) / Math.Max(d.Length, 1e-12);
+                                }, a, b, cen, tp);
+                                break;
+                            }
+                        }
                         AddEqV(s, id, x =>
                         {
                             var d = b.Get(x) - a.Get(x);

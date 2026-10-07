@@ -143,6 +143,107 @@ static class CoreTests
             t.Eq(regs[0].Holes.Count, 1);
         });
 
+        t.Test("Sketch fillet keeps the virtual sharp, follows the dimensions, and deleting it restores the corner", () =>
+        {
+            double Volume(Sketch sk)
+            {
+                var doc = new CadDocument();
+                var s = doc.AddFeature(new SketchFeature { Plane = PlaneRef.Front, Sketch = sk });
+                doc.AddFeature(new ExtrudeFeature { SketchId = s.Id, Depth = "20" });
+                var r = new Regenerator().Rebuild(doc);
+                t.True(r.Status.Values.All(x => x.Ok), "rebuild: " + string.Join("; ", r.Status.Values.Select(x => x.Error)));
+                return r.State.Bodies.Single().Mesh.Volume;
+            }
+            var sk = Rect(80, 40);
+            var corner = sk.Points.First(p => Math.Abs(p.X - 80) < 1e-9 && Math.Abs(p.Y) < 1e-9).Id;
+            var widthDim = sk.Constraints.First(c => c.IsDimension && Math.Abs(c.Value - 80) < 1e-9);
+            t.True(SketchOps.Fillet(sk, corner, 10) == null, "fillet made");
+            var res = SketchSolver.Solve(sk);
+            t.True(res.Status == SketchStatus.FullyDefined, "still fully defined, not over defined: " + res.Status);
+            var f = sk.Fillets!.Single();
+            var arc = (SkArc)sk.Entity(f.Arc)!;
+            t.Near(sk.ArcRadius(arc), 10, 1e-6);
+            // the originals are construction, still ending at the corner (dimensions to them unchanged)
+            t.True(sk.Entity(f.LineA)!.Construction && sk.Entity(f.LineB)!.Construction, "originals as reference geometry");
+            t.True(sk.Point(corner) != null && sk.EntitiesUsing(corner).Count() == 2, "the corner (virtual sharp) is kept");
+            var tangents = new[] { arc.Start, arc.End }.Select(sk.P).OrderBy(p => p.X).ToList();
+            t.Near(tangents[0].X, 70, 1e-6); t.Near(tangents[0].Y, 0, 1e-6); t.Near(tangents[1].X, 80, 1e-6); t.Near(tangents[1].Y, 10, 1e-6);
+            // a 10 mm round off one corner: 20 deep
+            t.Near(Volume(sk.Clone()), (80 * 40 - (100 - Math.PI * 100 / 4)) * 20, 10); // the mesh's arc is within ~0.01%
+            // the width changes: the fillet follows the corner
+            widthDim.Value = 100; widthDim.Expr = "100";
+            SketchSolver.Solve(sk);
+            var moved = new[] { arc.Start, arc.End }.Select(sk.P).OrderBy(p => p.X).ToList();
+            t.Near(moved[0].X, 90, 1e-6); t.Near(moved[1].X, 100, 1e-6); t.Near(sk.ArcRadius(arc), 10, 1e-6);
+            // deleting the arc: the lines are solid again, the corner sharp, nothing left of the fillet
+            sk.DeleteEntity(f.Arc);
+            t.True(sk.Fillets == null, "fillet record gone");
+            t.Eq(sk.Entities.Count, 4);
+            t.True(sk.Entities.All(e => !e.Construction), "lines solid again");
+            t.True(SketchSolver.Solve(sk).Status == SketchStatus.FullyDefined, "fully defined again");
+            t.Near(Volume(sk.Clone()), 100 * 40 * 20, 1);
+            // a radius that does not fit is refused
+            t.True(SketchOps.Fillet(sk, corner, 45) != null, "too big refused");
+
+            // all four corners, one after the other (each next to a filleted one), with a construction diagonal at
+            // two of them (as a center rectangle has): every corner takes its fillet
+            var all = Rect(80, 40);
+            var corners = all.Points.Where(p => p.Id != Sketch.OriginId || true).Select(p => p.Id).Where(id => all.EntitiesUsing(id).Count() == 2).ToList();
+            var c0 = all.Points.First(p => p.X == 0 && p.Y == 0).Id; var c2 = all.Points.First(p => p.X == 80 && p.Y == 40).Id;
+            all.Add(new SkLine { P1 = c0, P2 = c2, Construction = true });
+            t.Eq(corners.Count, 4);
+            foreach (var cid in corners) t.True(SketchOps.Fillet(all, cid, 5) is null, "corner filleted: " + SketchOps.Fillet(all.Clone(), cid, 5));
+            t.Eq(all.Fillets!.Count, 4);
+            var resAll = SketchSolver.Solve(all);
+            t.True(resAll.Status == SketchStatus.FullyDefined, "four fillets: fully defined, not over: " + resAll.Status);
+            // one solid line per side, between the two tangent points
+            t.Eq(all.Entities.Count(e => e is SkLine { Construction: false }), 4);
+            t.Near(Volume(all.Clone()), (80 * 40 - 4 * (25 - Math.PI * 25 / 4)) * 20, 10);
+            // removing one fillet gives back that corner only; removing all gives the rectangle
+            var first = all.Fillets[0];
+            all.DeleteEntity(first.Arc);
+            t.Eq(all.Fillets!.Count, 3);
+            t.True(SketchSolver.Solve(all).Status == SketchStatus.FullyDefined, "three fillets: fully defined");
+            t.Near(Volume(all.Clone()), (80 * 40 - 3 * (25 - Math.PI * 25 / 4)) * 20, 10);
+            foreach (var fr in all.Fillets.ToList()) all.DeleteEntity(fr.Arc);
+            t.True(all.Fillets == null, "all fillets gone");
+            t.Eq(all.Entities.Count(e => e is SkLine { Construction: false }), 4);
+            t.Eq(all.Entities.Count(e => e is SkLine { Construction: true }), 1); // just the diagonal
+            t.Near(Volume(all.Clone()), 80 * 40 * 20, 1);
+        });
+
+        t.Test("Sketch mirror: a half profile about a centerline closes, and the copy follows the original", () =>
+        {
+            var sk = new Sketch();
+            var o = Sketch.OriginId;
+            var top = sk.AddPoint(new Vec2(0, 50));
+            var axis = sk.Add(new SkLine { P1 = o, P2 = top.Id, Construction = true });
+            sk.AddConstraint(CType.Vertical, axis.Id);
+            var p1 = sk.AddPoint(new Vec2(30, 0)); var p2 = sk.AddPoint(new Vec2(30, 20)); var p3 = sk.AddPoint(new Vec2(0, 40));
+            var l1 = sk.Add(new SkLine { P1 = o, P2 = p1.Id });
+            var l2 = sk.Add(new SkLine { P1 = p1.Id, P2 = p2.Id });
+            var l3 = sk.Add(new SkLine { P1 = p2.Id, P2 = p3.Id });
+            var hole = sk.AddPoint(new Vec2(10, 15));
+            var circle = sk.Add(new SkCircle { Center = hole.Id, R = 3 });
+            var made = SketchOps.Mirror(sk, new[] { l1.Id, l2.Id, l3.Id, circle.Id }, axis.Id);
+            t.Eq(made.Count, 4);
+            var res = SketchSolver.Solve(sk);
+            t.True(res.Status != SketchStatus.OverDefined && res.Status != SketchStatus.Failed, "solves: " + res.Status);
+            // the points on the axis are shared: the outline closes (a 900 mm² half twice, less two holes)
+            var doc = new CadDocument();
+            var s = doc.AddFeature(new SketchFeature { Plane = PlaneRef.Front, Sketch = sk.Clone() });
+            doc.AddFeature(new ExtrudeFeature { SketchId = s.Id, Depth = "10" });
+            var r = new Regenerator().Rebuild(doc);
+            t.True(r.Status.Values.All(x => x.Ok), "rebuild: " + string.Join("; ", r.Status.Values.Select(x => x.Error)));
+            t.Near(r.State.Bodies.Single().Mesh.Volume, (2 * 900 - 2 * Math.PI * 9) * 10, 5);
+            // moving an original point moves its mirror image; the copied circle keeps the original's radius
+            SketchSolver.Solve(sk, new Dictionary<int, Vec2> { [p2.Id] = new Vec2(35, 25) });
+            var image = sk.Points.Single(p => Math.Abs(p.X + sk.P(p2.Id).X) < 1e-6 && Math.Abs(p.Y - sk.P(p2.Id).Y) < 1e-6 && p.Id != p2.Id);
+            t.True(image != null, "mirror image followed");
+            var copyCircle = sk.Entities.OfType<SkCircle>().Single(c => c.Id != circle.Id);
+            t.Near(copyCircle.R, circle.R, 1e-9); t.Near(sk.P(copyCircle.Center).X, -sk.P(hole.Id).X, 1e-6);
+        });
+
         t.Test("Sketch relations to model geometry are associative (midpoint of edge, model center)", () =>
         {
             var doc = new CadDocument();

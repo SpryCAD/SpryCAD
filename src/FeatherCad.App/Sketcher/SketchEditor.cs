@@ -15,7 +15,7 @@ namespace FeatherCad.App.Sketcher;
 
 public enum SketchTool
 {
-    Select, Line, Centerline, Rectangle, CenterRectangle, Circle, CenterArc, ThreePointArc, TangentArc, Point, Polygon, Slot, SmartDimension, Trim,
+    Select, Line, Centerline, Rectangle, CenterRectangle, Circle, CenterArc, ThreePointArc, TangentArc, Point, Polygon, Slot, SmartDimension, Trim, Fillet,
 }
 
 public enum SkRefKind { Point, Entity, Constraint }
@@ -99,6 +99,7 @@ public sealed partial class SketchEditor : IViewportMode
         if (PointsOnly && t is not (SketchTool.Point or SketchTool.Select or SketchTool.SmartDimension)) t = SketchTool.Point;
         CancelOperation();
         Tool = t;
+        _filletFirstLine = -1;
         ToolChanged?.Invoke();
         Message?.Invoke(t switch
         {
@@ -115,6 +116,7 @@ public sealed partial class SketchEditor : IViewportMode
             SketchTool.Slot => "Straight Slot: click the first center, the second center, then the width.",
             SketchTool.SmartDimension => "Smart Dimension: select one or two entities, then click to place the dimension.",
             SketchTool.Trim => "Trim: click the part of an entity to delete (between intersections).",
+            SketchTool.Fillet => $"Sketch Fillet (R {Expr.Format(FilletRadius)}): click corners where two lines meet, or two lines. Deleting a fillet's arc restores the corner.",
             _ => "Select sketch entities. Drag to move; double-click a dimension to edit it.",
         });
         _vp.Cursor = Cursor;
@@ -426,7 +428,7 @@ public sealed partial class SketchEditor : IViewportMode
             if (!_dragging && d > 4) BeginDrag();
             if (_dragging) { UpdateDrag(p); return; }
         }
-        if (Tool == SketchTool.Select || Tool == SketchTool.SmartDimension || Tool == SketchTool.Trim)
+        if (Tool is SketchTool.Select or SketchTool.SmartDimension or SketchTool.Trim or SketchTool.Fillet)
         {
             var h = HitTest(p.X, p.Y);
             if (h != _hover) { _hover = h; }
@@ -498,6 +500,9 @@ public sealed partial class SketchEditor : IViewportMode
                 break;
             case SketchTool.Trim:
                 TrimAt(p);
+                break;
+            case SketchTool.Fillet:
+                FilletAt(p);
                 break;
             default:
                 if (p.ClickCount >= 2 && (Tool is SketchTool.Line or SketchTool.Centerline)) { EndChain(); return; }
@@ -586,11 +591,14 @@ public sealed partial class SketchEditor : IViewportMode
             return pe != null ? new SkRef(SkRefKind.Entity, pe.Id) : best;
         }
         bestD = tolPx;
+        // where geometry overlaps (a fillet's trimmed line over its construction original), the solid line is the one
+        // seen, so it wins: construction and model reference geometry counts a little farther away
         foreach (var e in Sk.Entities)
         {
+            var penalty = e.Construction || e.IsReference ? 2.0 : 0;
             foreach (var (a, b) in SketchDrawing.Segments2D(Sk, e))
             {
-                var d = SegDistPx(a, b, sx, sy);
+                var d = SegDistPx(a, b, sx, sy) + penalty;
                 if (d < bestD) { bestD = d; best = new SkRef(SkRefKind.Entity, e.Id); }
             }
         }
@@ -1500,7 +1508,7 @@ public sealed partial class SketchEditor : IViewportMode
 
     void DrawPreview(DynamicGeometry g)
     {
-        if (Tool is SketchTool.Select or SketchTool.SmartDimension or SketchTool.Trim) return;
+        if (Tool is SketchTool.Select or SketchTool.SmartDimension or SketchTool.Trim or SketchTool.Fillet) return;
         var f = Frame; var px = Px;
         var pc = new Rgba(0.95f, 0.55f, 0.1f);
         var m = _snap.P;
@@ -1800,7 +1808,7 @@ public sealed partial class SketchEditor : IViewportMode
     void UpdateSnapLabel()
     {
         if (Overlay == null) return;
-        var text = Tool is SketchTool.Select or SketchTool.SmartDimension or SketchTool.Trim ? null : SnapText(_snap);
+        var text = Tool is SketchTool.Select or SketchTool.SmartDimension or SketchTool.Trim or SketchTool.Fillet ? null : SnapText(_snap);
         if (text == null) { if (_snapLabel != null) _snapLabel.IsVisible = false; return; }
         if (_snapLabel == null) { _snapLabel = MakeLabel(); Overlay.Children.Add(_snapLabel); }
         SetLabel(_snapLabel, text, Brushes.DarkMagenta, _snap.P + new Vec2(Px * 40, -Px * 18));
