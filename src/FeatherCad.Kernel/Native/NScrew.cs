@@ -125,6 +125,12 @@ public sealed class ScrewSurface
     /// </summary>
     public (double u, double v, Vec3 c, double dist) Closest(Vec3 p, double uHint = double.NaN, double vHint = double.NaN)
     {
+        // a hint next to a point on the surface (walking along an edge): Newton from it lands on the point itself
+        if (!double.IsNaN(uHint) && !double.IsNaN(vHint))
+        {
+            var h = Fix(Solve(uHint, vHint, p));
+            if (h.dist < 1e-9 * Math.Max(1, MaxRadius)) return h;
+        }
         var lp = Motion.Local(p);
         double angP = Math.Atan2(lp.Y, lp.X);
         var seeds = new List<(double u, double v, double d2)>();
@@ -147,27 +153,38 @@ public sealed class ScrewSurface
         (double u, double v, Vec3 c, double dist) best = (0, 0, p, double.MaxValue);
         foreach (var (su0, sv0, _) in seeds.Take(3))
         {
-            double u = su0, v = sv0;
-            for (int it = 0; it < 30; it++)
-            {
-                var (s, a, b) = Partials(u, v);
-                var e = s - p;
-                double aa = Vec3.Dot(a, a), ab = Vec3.Dot(a, b), bb = Vec3.Dot(b, b);
-                double ga = Vec3.Dot(a, e), gb = Vec3.Dot(b, e);
-                var det = aa * bb - ab * ab;
-                if (det < 1e-300) break;
-                var du = -(bb * ga - ab * gb) / det; var dv = -(aa * gb - ab * ga) / det;
-                // damped where a full step would leave the seed's turn
-                var lim = Math.PI / 2;
-                if (Math.Abs(du) > lim) { var k = lim / Math.Abs(du); du *= k; dv *= k; }
-                u += du; v += dv;
-                if (Math.Abs(du) < 1e-15 * (1 + Math.Abs(u)) && Math.Abs(dv) < 1e-15 * (1 + Math.Abs(v))) break;
-            }
-            var c = Eval(u, v); var d = Vec3.Distance(c, p);
-            if (d < best.dist) best = (u, v, c, d);
+            var r = Solve(su0, sv0, p);
+            if (r.dist < best.dist) best = r;
         }
-        // a generator line along the axis sweeps a cylinder: (u + 2π, v ∓ lead) is the same point. Of those, the one on
-        // the generator's swept range (the face's), not wherever the search ended
+        return Fix(best);
+    }
+
+    // Gauss-Newton for the foot point of p from (u, v)
+    (double u, double v, Vec3 c, double dist) Solve(double u, double v, Vec3 p)
+    {
+        for (int it = 0; it < 30; it++)
+        {
+            var (s, a, b) = Partials(u, v);
+            var e = s - p;
+            double aa = Vec3.Dot(a, a), ab = Vec3.Dot(a, b), bb = Vec3.Dot(b, b);
+            double ga = Vec3.Dot(a, e), gb = Vec3.Dot(b, e);
+            var det = aa * bb - ab * ab;
+            if (det < 1e-300) break;
+            var du = -(bb * ga - ab * gb) / det; var dv = -(aa * gb - ab * ga) / det;
+            // damped where a full step would leave the seed's turn
+            var lim = Math.PI / 2;
+            if (Math.Abs(du) > lim) { var k = lim / Math.Abs(du); du *= k; dv *= k; }
+            u += du; v += dv;
+            if (Math.Abs(du) < 1e-15 * (1 + Math.Abs(u)) && Math.Abs(dv) < 1e-15 * (1 + Math.Abs(v))) break;
+        }
+        var c = Eval(u, v);
+        return (u, v, c, Vec3.Distance(c, p));
+    }
+
+    // a generator line along the axis sweeps a cylinder: (u + 2π, v ∓ lead) is the same point. Of those, the one on
+    // the generator's swept range (the face's), not wherever the search ended
+    (double u, double v, Vec3 c, double dist) Fix((double u, double v, Vec3 c, double dist) best)
+    {
         if (Gen is NLine gl && Math.Abs(Vec3.Dot(gl.D, Motion.A)) > 1 - 1e-12 && Math.Abs(Motion.K) > 1e-12)
         {
             var step = Math.Sign(Vec3.Dot(gl.D, Motion.A)) * Motion.K * 2 * Math.PI; // v shift for one more turn of u
