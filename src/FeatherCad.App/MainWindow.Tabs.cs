@@ -86,9 +86,14 @@ public partial class MainWindow
     void InitPartsList()
     {
         PartsButton.Click += (_, _) => ShowPartsList();
-        ToolTip.SetTip(PartsButton, "All open parts (Ctrl+E), in a window of their own: arrow keys switch between them");
+        ToolTip.SetTip(PartsButton, "All open parts (Ctrl+E), docked at the right or in a window: arrow keys switch between them");
         DocTabs.HiddenCountChanged += () => Avalonia.Threading.Dispatcher.UIThread.Post(UpdatePartsButton);
+        PartsDockFloat.Click += (_, _) => { UserSettings.PartsDocked = false; UserSettings.Save(); MovePartsList(docked: false); };
+        PartsDockClose.Click += (_, _) => HidePartsList();
+        PartsDockSplitter.DragCompleted += (_, _) => { UserSettings.PartsDockWidth = (int)MainGrid.ColumnDefinitions[4].ActualWidth; UserSettings.Save(); };
         UpdatePartsButton();
+        // shown at start when it was docked when the app last closed
+        if (UserSettings.PartsDocked && UserSettings.PartsDockOpen) Avalonia.Threading.Dispatcher.UIThread.Post(() => MovePartsList(docked: true, focus: false));
     }
 
     void UpdatePartsButton()
@@ -106,25 +111,79 @@ public partial class MainWindow
     readonly Dictionary<PartTab, PartRow> _partRows = new();
     bool _partsSyncing;
 
+    /// <summary>The list is docked at the right of the main window (else floating, or not shown).</summary>
+    bool PartsDocked => PartsDock.IsVisible;
+
     /// <summary>
-    /// The list of every open part with a preview, in a window of its own beside the part (moved and sized where it
-    /// was last). Selecting a part (arrow keys, click) shows it right away, so a set of parts can be flipped through;
-    /// typing jumps to a part by name; Enter goes back to the part, Esc closes the list. A row's ✕ (on the row under
-    /// the mouse and the selected one), Delete or Ctrl+W close a part. It follows the parts as they open, close,
-    /// change and are switched to another way.
+    /// The list of every open part with a preview: docked at the right of the main window (its width set by the
+    /// splitter) or in a window of its own (moved and sized where it was last), as it was last. Selecting a part
+    /// (arrow keys, click) shows it right away, so a set of parts can be flipped through; typing jumps to a part by
+    /// name; Enter goes back to the part, Esc closes the window (or, docked, goes back to the part). A row's ✕ (on
+    /// the row under the mouse and the selected one), Delete or Ctrl+W close a part. It follows the parts as they
+    /// open, close, change and are switched to another way.
     /// </summary>
     void ShowPartsList()
     {
-        if (_partsWindow != null)
+        if (_partsWindow != null) { _partsWindow.Activate(); FocusPartsList(); return; }
+        if (PartsDocked) { FocusPartsList(); return; }
+        MovePartsList(UserSettings.PartsDocked);
+    }
+
+    /// <summary>The list, made once and moved between the dock and the window.</summary>
+    ListBox PartsListControl()
+    {
+        if (_partsList != null) return _partsList;
+        var list = new ListBox { Background = Brushes.White, BorderThickness = new Thickness(0) };
+        list.SelectionChanged += async (_, _) =>
         {
-            _partsWindow.Activate();
-            FocusPartsList();
+            if (_partsSyncing || list.SelectedItem is not ListBoxItem { Tag: PartTab t } || t == _tab) return;
+            // leaving the current part may be cancelled (a pending edit): the list then shows it again
+            await SwitchTo(t);
+            RefreshPartsList();
+        };
+        list.KeyDown += (_, e) =>
+        {
+            if (e.Key == Key.Escape)
+            {
+                if (_partsWindow != null) _partsWindow.Close(); else { Activate(); Viewport.Focus(); }
+                e.Handled = true;
+            }
+            else if (e.Key == Key.Enter) { Activate(); Viewport.Focus(); e.Handled = true; }
+            else if (e.Key == Key.Delete || (e.Key == Key.W && e.KeyModifiers.HasFlag(KeyModifiers.Control)))
+            {
+                if (list.SelectedItem is ListBoxItem { Tag: PartTab t }) ClosePartFromList(t);
+                e.Handled = true;
+            }
+        };
+        _partsList = list;
+        RefreshPartsList();
+        return list;
+    }
+
+    /// <summary>Shows the list docked at the right or in its window (taking it from where it is).</summary>
+    void MovePartsList(bool docked, bool focus = true)
+    {
+        var list = PartsListControl();
+        // take it out of where it is (the window closes without dropping the list)
+        if (_partsWindow is { } old) { _partsMoving = true; old.Close(); _partsMoving = false; }
+        if (PartsDocked) SetPartsDock(false);
+        if (list.Parent is ContentControl host) host.Content = null;
+
+        if (docked)
+        {
+            PartsDockBody.Content = list;
+            SetPartsDock(true);
+            if (focus) Avalonia.Threading.Dispatcher.UIThread.Post(FocusPartsList);
             return;
         }
-        var list = new ListBox { Background = Brushes.White, BorderThickness = new Thickness(0) };
+        var dock = new Button { Content = "Dock Right", FontSize = 11, Padding = new Thickness(8, 1), MinHeight = 0, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(4) };
+        ToolTip.SetTip(dock, "Dock the list at the right of the main window");
+        var body = new ContentControl { Content = list };
+        var content = new DockPanel { Children = { dock, body } };
+        DockPanel.SetDock(dock, Dock.Top);
         var w = new Window
         {
-            Title = "Open Parts", Content = list, ShowInTaskbar = false, CanResize = true,
+            Title = "Open Parts", Content = content, ShowInTaskbar = false, CanResize = true,
             MinWidth = 220, MinHeight = 120, Width = 360, Height = 520,
         };
         // where it was last, else beside the button, below the tabs
@@ -139,40 +198,58 @@ public partial class MainWindow
             w.WindowStartupLocation = WindowStartupLocation.Manual;
             w.Position = new PixelPoint(corner.X - (int)(w.Width * RenderScaling), corner.Y + 4);
         }
-        list.SelectionChanged += async (_, _) =>
-        {
-            if (_partsSyncing || list.SelectedItem is not ListBoxItem { Tag: PartTab t } || t == _tab) return;
-            // leaving the current part may be cancelled (a pending edit): the list then shows it again
-            await SwitchTo(t);
-            RefreshPartsList();
-        };
-        list.KeyDown += (_, e) =>
-        {
-            if (e.Key == Key.Escape) { w.Close(); e.Handled = true; }
-            else if (e.Key == Key.Enter) { Activate(); Viewport.Focus(); e.Handled = true; }
-            else if (e.Key == Key.Delete || (e.Key == Key.W && e.KeyModifiers.HasFlag(KeyModifiers.Control)))
-            {
-                if (list.SelectedItem is ListBoxItem { Tag: PartTab t }) ClosePartFromList(t);
-                e.Handled = true;
-            }
-        };
-        w.Opened += (_, _) => FocusPartsList();
+        dock.Click += (_, _) => { UserSettings.PartsDocked = true; UserSettings.Save(); MovePartsList(docked: true); };
+        if (focus) w.Opened += (_, _) => FocusPartsList();
         w.Closing += (_, _) =>
         {
             UserSettings.PartsWindow = (w.Position.X, w.Position.Y, (int)w.Width, (int)w.Height);
             UserSettings.Save();
         };
-        w.Closed += (_, _) => { _partsWindow = null; _partsList = null; _partRows.Clear(); };
-        _partsWindow = w; _partsList = list;
-        RefreshPartsList();
+        w.Closed += (_, _) =>
+        {
+            body.Content = null;
+            _partsWindow = null;
+            if (!_partsMoving) DropPartsList();
+        };
+        _partsWindow = w;
         w.Show(this);
     }
+
+    bool _partsMoving;
+
+    /// <summary>Opens or closes the dock column (its width kept between showings).</summary>
+    void SetPartsDock(bool open)
+    {
+        var cols = MainGrid.ColumnDefinitions;
+        if (!open && PartsDock.IsVisible) UserSettings.PartsDockWidth = (int)cols[4].ActualWidth;
+        cols[3].Width = new GridLength(open ? 4 : 0);
+        cols[4].Width = new GridLength(open ? Math.Clamp(UserSettings.PartsDockWidth, 180, 900) : 0);
+        cols[4].MinWidth = open ? 180 : 0;
+        PartsDockSplitter.IsVisible = open;
+        PartsDock.IsVisible = open;
+        UserSettings.PartsDockOpen = open;
+        UserSettings.Save();
+    }
+
+    /// <summary>Hides the list wherever it is.</summary>
+    void HidePartsList()
+    {
+        if (_partsWindow != null) { _partsWindow.Close(); return; }
+        if (!PartsDocked) return;
+        SetPartsDock(false);
+        PartsDockBody.Content = null;
+        DropPartsList();
+        Viewport.Focus();
+    }
+
+    void DropPartsList() { _partsList = null; _partRows.Clear(); }
 
     /// <summary>Closes a part from the list (asking to save its changes, as its tab's ✕), the list keeping the keyboard.</summary>
     async void ClosePartFromList(PartTab t)
     {
         await CloseTab(t);
-        if (_partsWindow != null) { _partsWindow.Activate(); FocusPartsList(); }
+        _partsWindow?.Activate();
+        FocusPartsList();
     }
 
     void FocusPartsList()

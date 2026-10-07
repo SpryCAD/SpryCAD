@@ -49,7 +49,7 @@
       </DockPanel>
     </Border>
 
-    <Grid ColumnDefinitions="290,4,*">
+    <Grid x:Name="MainGrid" ColumnDefinitions="290,4,*,0,0">
       <!-- Left panel: FeatureManager / PropertyManager -->
       <Border Grid.Column="0" Background="#FFF5F7FA" BorderBrush="#FFD5DCE6" BorderThickness="0,0,1,0">
         <DockPanel>
@@ -79,6 +79,23 @@
         <TextBlock x:Name="BusyText" Text="Rebuilding…" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,10,8" Foreground="#FF5A6B85" IsVisible="False" />
         <TextBlock x:Name="ViewName" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="96,0,0,8" Foreground="#FF5A6B85" FontStyle="Italic" />
       </Grid>
+
+      <!-- the list of open parts when docked at the right (MainWindow.Tabs.cs); the columns are 0 wide otherwise -->
+      <GridSplitter x:Name="PartsDockSplitter" Grid.Column="3" Background="#FFDDE3EA" ResizeDirection="Columns" IsVisible="False" />
+      <Border x:Name="PartsDock" Grid.Column="4" Background="#FFF5F7FA" BorderBrush="#FFD5DCE6" BorderThickness="1,0,0,0" IsVisible="False">
+        <DockPanel>
+          <Border DockPanel.Dock="Top" Background="#FFE8EDF3" BorderBrush="#FFD5DCE6" BorderThickness="0,0,0,1">
+            <DockPanel Margin="8,2,2,2">
+              <Button x:Name="PartsDockClose" DockPanel.Dock="Right" Content="✕" FontSize="11" Padding="6,1" MinHeight="0"
+                      Background="Transparent" BorderThickness="0" ToolTip.Tip="Hide the list (Ctrl+E shows it)" />
+              <Button x:Name="PartsDockFloat" DockPanel.Dock="Right" Content="Float" FontSize="11" Padding="6,1" MinHeight="0"
+                      Background="Transparent" BorderThickness="0" ToolTip.Tip="Show the list in a window of its own" />
+              <TextBlock Text="Open Parts" FontWeight="SemiBold" FontSize="12" VerticalAlignment="Center" />
+            </DockPanel>
+          </Border>
+          <ContentControl x:Name="PartsDockBody" />
+        </DockPanel>
+      </Border>
     </Grid>
   </DockPanel>
 </Window>

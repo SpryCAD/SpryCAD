@@ -27,6 +27,11 @@ public static class UserSettings
     public static RotateCenter RotateAbout { get; set; } = RotateCenter.Selection;
     /// <summary>Where the list of open parts was last (screen position and size); null: beside the tabs.</summary>
     public static (int x, int y, int w, int h)? PartsWindow { get; set; }
+    /// <summary>The list of open parts shows docked at the right of the main window (else in its window).</summary>
+    public static bool PartsDocked { get; set; }
+    /// <summary>The docked list was showing when the app last closed (it shows again at start).</summary>
+    public static bool PartsDockOpen { get; set; }
+    public static int PartsDockWidth { get; set; } = 300;
 
     public static void Load()
     {
@@ -44,6 +49,9 @@ public static class UserSettings
                 else if (k == nameof(RotateAbout) && Enum.TryParse<RotateCenter>(v, out var rc)) RotateAbout = rc;
                 else if (k == nameof(PartsWindow) && v.Split(',') is { Length: 4 } p && p.All(x => int.TryParse(x, out _)))
                     PartsWindow = (int.Parse(p[0]), int.Parse(p[1]), int.Parse(p[2]), int.Parse(p[3]));
+                else if (k == nameof(PartsDocked)) PartsDocked = v == "1";
+                else if (k == nameof(PartsDockOpen)) PartsDockOpen = v == "1";
+                else if (k == nameof(PartsDockWidth) && int.TryParse(v, out var dw)) PartsDockWidth = dw;
             }
         }
         catch { /* defaults */ }
@@ -62,6 +70,9 @@ public static class UserSettings
                 $"{nameof(RotateAbout)}={RotateAbout}",
             };
             if (PartsWindow is { } pw) lines.Add($"{nameof(PartsWindow)}={pw.x},{pw.y},{pw.w},{pw.h}");
+            lines.Add($"{nameof(PartsDocked)}={(PartsDocked ? 1 : 0)}");
+            lines.Add($"{nameof(PartsDockOpen)}={(PartsDockOpen ? 1 : 0)}");
+            lines.Add($"{nameof(PartsDockWidth)}={PartsDockWidth}");
             File.WriteAllLines(StorePath, lines);
         }
         catch { /* preferences are a convenience only */ }
