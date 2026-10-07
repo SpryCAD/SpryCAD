@@ -285,14 +285,17 @@ public static class NIntersect
     /// <summary>
     /// Exact intersection curves of two analytic surfaces, or null when no closed form is implemented
     /// (the caller then traces the intersection). Coincident surfaces must be handled by the caller.
+    /// <paramref name="chordTol"/>: the chord error of curves given as exact points (a screw surface across a coaxial
+    /// plane or cone), as for traced curves (default 25 × <paramref name="tol"/>).
     /// </summary>
-    public static List<NCurve>? Analytic(NSurface a, NSurface b, double tol)
+    public static List<NCurve>? Analytic(NSurface a, NSurface b, double tol, double chordTol = 0)
     {
+        if (chordTol <= 0) chordTol = 25 * tol;
         if (a.Kind == SurfaceKind.Plane && b.Kind == SurfaceKind.Plane) return PlanePlane(a.Plane!, b.Plane!);
         if (a.Kind == SurfaceKind.Pipe) return PipeOther(a, b, tol);
         if (b.Kind == SurfaceKind.Pipe) return PipeOther(b, a, tol);
-        if (a.Kind == SurfaceKind.Screw) return ScrewOther(a, b, tol);
-        if (b.Kind == SurfaceKind.Screw) return ScrewOther(b, a, tol);
+        if (a.Kind == SurfaceKind.Screw) return ScrewOther(a, b, tol, chordTol);
+        if (b.Kind == SurfaceKind.Screw) return ScrewOther(b, a, tol, chordTol);
 
         // coaxial surfaces of revolution (incl. planes perpendicular to the axis and spheres centred on it)
         foreach (var (o, ax) in CandidateAxes(a, b))
@@ -337,10 +340,19 @@ public static class NIntersect
     /// </summary>
     /// <summary>
     /// A screw surface and a cylinder on its axis meet along helices: where the generator's distance from the axis is
-    /// the cylinder's radius, each such generator point carried by the motion. Anything else: traced (null).
+    /// the cylinder's radius, each such generator point carried by the motion. A plane square to the axis or a cone
+    /// on it: one curve, each generator point meeting it at one turn (<see cref="ScrewAcross"/>). Anything else:
+    /// traced (null).
     /// </summary>
-    static List<NCurve>? ScrewOther(NSurface screw, NSurface o, double tol)
+    static List<NCurve>? ScrewOther(NSurface screw, NSurface o, double tol, double chordTol)
     {
+        // a plane along the axis farther from it than the surface reaches (a nut's flats about its thread): nothing
+        if (o.Kind == SurfaceKind.Plane && Math.Abs(Vec3.Dot(o.Plane!.Normal, screw.Screw!.Motion.A)) < 1e-12
+            && Math.Abs(o.Plane.Distance(screw.Screw.Motion.O)) > screw.Screw.MaxRadius * 1.01 + tol)
+            return new List<NCurve>();
+        if (o.Kind is SurfaceKind.Plane or SurfaceKind.Cone)
+            return Math.Abs(screw.Screw!.Motion.K) > 1e-12 && o.ProfileAbout(screw.Screw.Motion.O, screw.Screw.Motion.A, tol) is { } prof
+                ? ScrewAcross(screw.Screw, prof, chordTol) : null;
         if (o.Kind != SurfaceKind.Cylinder) return null;
         var sc = screw.Screw!; var m = sc.Motion;
         if (Vec3.Cross(o.Axis, m.A).Length > 1e-9 || Vec3.Cross(o.Origin - m.O, m.A).Length > tol) return null;
@@ -363,6 +375,55 @@ public static class NIntersect
             pv = v; pf = f;
         }
         return res;
+    }
+
+    /// <summary>
+    /// A screw surface across a coaxial plane (h = H) or cone (a line in the (r, h) half plane): the motion keeps a
+    /// point's distance r from the axis and raises it K·u, so the generator point at v (radius r, height z) meets
+    /// it at the one turn u = (h(r) − z) / K. The curve as exact points, halved in v to the chord tolerance: no
+    /// marching, no projections. Null when the cone's line runs parallel to the axis (a cylinder: helices).
+    /// </summary>
+    static List<NCurve>? ScrewAcross(ScrewSurface sc, NSurface.Profile prof, double chordTol)
+    {
+        var m = sc.Motion;
+        if (prof is NSurface.SLine sl0 && Math.Abs(sl0.Dir.X) < 1e-12) return null;
+        Vec3 At(double v)
+        {
+            var g = sc.Gen.Eval(v);
+            var l = m.Local(g);
+            var r = Math.Sqrt(l.X * l.X + l.Y * l.Y);
+            double h = prof switch
+            {
+                NSurface.HLine hl => hl.H,
+                NSurface.SLine sl => sl.P.Y + (r - sl.P.X) / sl.Dir.X * sl.Dir.Y,
+                _ => throw new InvalidOperationException(),
+            };
+            return m.Move((h - l.Z) / m.K, g);
+        }
+        // the generator a little past the part that was swept (crossings at its very ends), as for helices
+        double pad = (sc.V1 - sc.V0) * 0.01 + 1e-9, v0 = sc.V0 - pad, v1 = sc.V1 + pad;
+        var pts = new List<Vec3>();
+        void Sub(double va, Vec3 pa, double vb, Vec3 pb, int depth)
+        {
+            if (depth > 14) return;
+            var vm = 0.5 * (va + vb); var pm = At(vm);
+            if (depth > 0 && Vec3.Distance(pm, (pa + pb) * 0.5) < chordTol) return;
+            Sub(va, pa, vm, pm, depth + 1);
+            pts.Add(pm);
+            Sub(vm, pm, vb, pb, depth + 1);
+        }
+        const int n0 = 16;
+        var prev = At(v0);
+        for (int i = 0; i < n0; i++)
+        {
+            double va = v0 + (v1 - v0) * i / n0, vb = v0 + (v1 - v0) * (i + 1) / n0;
+            var pb = At(vb);
+            pts.Add(prev);
+            Sub(va, prev, vb, pb, 0);
+            prev = pb;
+        }
+        pts.Add(prev);
+        return new List<NCurve> { new NPolyline(pts, false) };
     }
 
     static List<NCurve>? PipeOther(NSurface pipe, NSurface o, double tol)

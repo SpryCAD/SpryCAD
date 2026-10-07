@@ -83,6 +83,35 @@ static class HelicalTests
             t.True(cut.Edges.Any(e => e.Curve is NHelix), "helical edges");
         });
 
+        t.Test("Screw surface across a coaxial plane and cone: one curve of exact points (no tracing)", () =>
+        {
+            // a thread flank (a line in a plane through the Y axis) swept 4 turns, lead 3
+            var sc = new ScrewSurface(ScrewMotion.About(Vec3.Zero, Vec3.UnitY, 3, Vec3.UnitX), new NLine(new Vec3(8.4, 6, 0), new Vec3(2.5, -1.44, 0)), 0, 2.9, 0, 8 * Math.PI);
+            var screw = NSurface.ScrewOf(sc);
+            var plane = NSurface.FromPlane(Plane.FromPointNormal(new Vec3(0, 9, 0), Vec3.UnitY));
+            var cone = new NSurface(new SurfaceDef { Kind = SurfaceKind.Cone, Origin = new Vec3(0, 2, 0), Axis = Vec3.UnitY, RefDir = Vec3.UnitX, Radius = 8, Param2 = Math.PI / 4 });
+            foreach (var (o, name) in new[] { (plane, "plane"), (cone, "cone") })
+            {
+                var cs = NIntersect.Analytic(screw, o, 1e-6, 1e-3);
+                t.True(cs != null && cs.Count == 1 && cs[0] is NPolyline, $"{name}: one curve");
+                var pl = (NPolyline)cs![0];
+                double worst = 0;
+                foreach (var p in pl.Pts) worst = Math.Max(worst, Math.Max(Math.Abs(o.F_(p)), sc.Closest(p).dist));
+                t.True(worst < 1e-9, $"{name}: points on both surfaces ({worst:E2})");
+                // the chord tolerance holds between the points
+                double sag = 0;
+                for (int i = 0; i + 1 < pl.Pts.Length; i++)
+                {
+                    var m = (pl.Pts[i] + pl.Pts[i + 1]) * 0.5;
+                    sag = Math.Max(sag, sc.Closest(m).dist);
+                }
+                t.True(sag < 2e-3, $"{name}: chords within the tolerance ({sag:E2})");
+            }
+            // a plane along the axis, out of reach: nothing
+            var far = NSurface.FromPlane(Plane.FromPointNormal(new Vec3(20, 0, 0), Vec3.UnitX));
+            t.Eq(NIntersect.Analytic(screw, far, 1e-6)!.Count, 0);
+        });
+
         t.Test("Helical sweep run-out: a round wire runs on along the end's normal; a V leaves a radius along the helix's tangent", () =>
         {
             // a circle profile: a right cylinder 5 long on the end (exact: Pappus + π r² · 5)

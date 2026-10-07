@@ -230,7 +230,7 @@ public sealed class NBoolean
                 // blend face (imprinted as an edge lying on the other face): tracing that tangency is slow and noisy
                 if (RollsOn(pairs[i].fa.Surface, pairs[i].fb.Surface) || RollsOn(pairs[i].fb.Surface, pairs[i].fa.Surface)
                     || Continues(pairs[i].fa.Surface, pairs[i].fb.Surface) || PipesApart(pairs[i].fa.Surface, pairs[i].fb.Surface)) { pairCurves[i] = new(); continue; }
-                var an = NIntersect.Analytic(pairs[i].fa.Surface, pairs[i].fb.Surface, _tol * 10);
+                var an = NIntersect.Analytic(pairs[i].fa.Surface, pairs[i].fb.Surface, _tol * 10, _sampleTol * 50 * 0.25);
                 if (an != null) pairCurves[i] = an; else toTrace.Add(i);
             }
         using (Prof.Time("sec.trace"))
