@@ -47,13 +47,16 @@
     <Setter Property="BorderBrush" Value="#FF5C9AE0" />
   </Style>
 
-  <!-- the buttons of a card (UI/Card.cs): the one with the keyboard has a clear blue ring (Enter presses it) -->
+  <!-- the buttons of a card (UI/Card.cs): the one with the keyboard has a blue ring (Enter presses it). The ring is
+       the border's color plus a thin halo outside it (a shadow, which takes no room): the border keeps its
+       thickness, so the button keeps its size and nothing moves when the ring goes from button to button -->
   <Style Selector="Button.card:focus /template/ ContentPresenter">
     <Setter Property="BorderBrush" Value="#FF2F7BD6" />
-    <Setter Property="BorderThickness" Value="2" />
+    <Setter Property="BoxShadow" Value="0 0 0 1 #802F7BD6" />
   </Style>
   <Style Selector="Button.card.accent:focus /template/ ContentPresenter">
     <Setter Property="BorderBrush" Value="#FF8EC0FF" />
+    <Setter Property="BoxShadow" Value="0 0 0 1 #FF2F7BD6" />
   </Style>
 
   <!-- CommandManager tabs -->
