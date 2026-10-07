@@ -184,8 +184,10 @@ public partial class MainWindow
         var w = new Window
         {
             Title = "Open Parts", Content = content, ShowInTaskbar = false, CanResize = true,
+            CanMinimize = false, CanMaximize = false,
             MinWidth = 220, MinHeight = 120, Width = 360, Height = 520,
         };
+        w.Opened += (_, _) => ToolWindowStyle(w);
         // where it was last, else beside the button, below the tabs
         if (UserSettings.PartsWindow is { } b && b.w > 0)
         {
@@ -216,6 +218,29 @@ public partial class MainWindow
     }
 
     bool _partsMoving;
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
+    static extern IntPtr GetWindowLongPtr(IntPtr hwnd, int index);
+    [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")]
+    static extern IntPtr SetWindowLongPtr(IntPtr hwnd, int index, IntPtr value);
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    static extern bool SetWindowPos(IntPtr hwnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
+
+    /// <summary>
+    /// Windows: a tool window's title bar (no app icon, only the close button), as floating palettes have; minimize
+    /// and maximize are off on every platform (CanMinimize / CanMaximize).
+    /// </summary>
+    static void ToolWindowStyle(Window w)
+    {
+        if (!OperatingSystem.IsWindows() || w.TryGetPlatformHandle()?.Handle is not { } hwnd || hwnd == IntPtr.Zero) return;
+        const int GWL_EXSTYLE = -20;
+        const long WS_EX_TOOLWINDOW = 0x80, WS_EX_APPWINDOW = 0x40000;
+        const uint SWP_NOMOVE = 0x2, SWP_NOSIZE = 0x1, SWP_NOZORDER = 0x4, SWP_NOACTIVATE = 0x10, SWP_FRAMECHANGED = 0x20;
+        var ex = (long)GetWindowLongPtr(hwnd, GWL_EXSTYLE);
+        SetWindowLongPtr(hwnd, GWL_EXSTYLE, (IntPtr)((ex | WS_EX_TOOLWINDOW) & ~WS_EX_APPWINDOW));
+        // the frame is drawn again with the new style
+        SetWindowPos(hwnd, IntPtr.Zero, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+    }
 
     /// <summary>Opens or closes the dock column (its width kept between showings).</summary>
     void SetPartsDock(bool open)
