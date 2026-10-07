@@ -134,5 +134,34 @@ static class Bench
         Console.WriteLine($"trace: {log.Count} lines -> %TEMP%/fc-repro-trace.txt");
     }
 
+    /// <summary>
+    /// <c>-- featprof file.fcad Feature [runs]</c>: the time of one feature (everything before it cached), with the
+    /// profile of its last run.
+    /// </summary>
+    public static void FeatureProfile(string file, string name, int runs)
+    {
+        var doc = CadDocument.Load(file);
+        int idx = doc.Features.FindLastIndex(f => f.Name == name);
+        if (idx < 0) { Console.WriteLine($"no feature {name}"); return; }
+        var times = new List<double>();
+        for (int run = 0; run <= runs; run++)
+        {
+            Csg.ClearCache();
+            var reg = new Regenerator();
+            reg.Rebuild(doc, idx);
+            Prof.Reset(); Prof.Enabled = run == runs;
+            var sw = Stopwatch.StartNew();
+            var r = reg.Rebuild(doc, idx + 1);
+            Prof.Enabled = false;
+            if (run > 0) times.Add(sw.Elapsed.TotalMilliseconds);
+            if (run == runs)
+            {
+                var st = r.Status[doc.Features[idx].Id];
+                Console.WriteLine($"{name}: median {Median(times):0.0} ms {st.Error}");
+                foreach (var (n, pms, calls) in Prof.Results().Take(40)) Console.WriteLine($"  {n,-28} {pms,8:0.0} ms  x{calls}");
+            }
+        }
+    }
+
     static double Median(List<double> l) { var s = l.OrderBy(x => x).ToList(); return s[s.Count / 2]; }
 }

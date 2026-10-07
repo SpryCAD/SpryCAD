@@ -146,11 +146,7 @@ public sealed class NBoolean
     NDomain Build(NFace f, double tol)
     {
         if (!Local) return NDomain.Of(f, tol);
-        var sig = f.LoopSignature();
-        if (f.DomainCache is { } dc && dc.Tol <= tol * 1.0001 && dc.Sig == sig) return dc.Dom;
-        var d = NDomain.Of(f, tol);
-        f.DomainCache = new(d, tol, sig);
-        return d;
+        return NDomain.Cached(f, tol);
     }
 
     NBody Execute(NBody A, NBody B, BoolOp op)

@@ -456,7 +456,7 @@ static class CoreTests
             doc.Equations[0].Expr = "120";
             r = regen.Rebuild(doc);
             foreach (var f in doc.Features) t.True(r.Status[f.Id].Ok, $"{f.Name} after W=120: {r.Status[f.Id].Error}");
-            t.Near(r.State.Bodies[0].Solid.Bounds.Size.X, 120, 1e-6);
+            t.Near(r.State.Bodies[0].Solid.TightBounds().Size.X, 120, 1e-6);
 
             // save / load round trip
             var json = doc.ToJson();

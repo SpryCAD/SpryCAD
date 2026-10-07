@@ -181,7 +181,7 @@ public static class Dialogs
         {
             // the refined display mesh follows the exact surfaces, so its volume is near exact
             var v = b.Mesh.Volume; vol += v; area += b.Solid.SurfaceArea();
-            c += b.Solid.Centroid() * v; bb.Add(b.Solid.Bounds);
+            c += b.Solid.Centroid() * v; bb.Add(b.Solid.TightBounds());
         }
         if (Math.Abs(vol) > 1e-12) c /= vol;
         var ips = owner.Session.Doc.Units == UnitSystem.IPS;

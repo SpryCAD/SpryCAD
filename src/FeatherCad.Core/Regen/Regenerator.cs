@@ -432,7 +432,7 @@ public sealed class Regenerator
             var byBody = new Dictionary<string, List<Kernel.Native.NEdge>>();
             foreach (var r in refs)
             {
-                var hit = Resolver.ResolveNativeEdge(r, State);
+                (Body, Kernel.Native.NEdge)? hit; using (Prof.Time("blend.resolve")) hit = Resolver.ResolveNativeEdge(r, State);
                 if (hit == null) return false;
                 var (b, e) = hit.Value;
                 if (!byBody.TryGetValue(b.Id, out var l)) byBody[b.Id] = l = new();
@@ -445,8 +445,9 @@ public sealed class Regenerator
             foreach (var b in State.Bodies)
             {
                 if (!byBody.TryGetValue(b.Id, out var seeds)) { bodies.Add(b); continue; }
-                var edges = NativeBlend.Expand(b.Solid.Native!, seeds, propagate);
-                blended.AddRange(edges.Select(EdgePoints)); blendedLength += edges.Sum(TrueLength);
+                List<Kernel.Native.NEdge> edges; using (Prof.Time("blend.expand")) edges = NativeBlend.Expand(b.Solid.Native!, seeds, propagate);
+                using (Prof.Time("blend.snapshot")) { blended.AddRange(edges.Select(EdgePoints)); blendedLength += edges.Sum(TrueLength); }
+                using var _bt = Prof.Time("blend.total");
                 var r = NativeBlend.Apply(b.Solid, edges, size, fillet, f.Id, errors, overflow, status.ProblemEdges, applied, chamfer);
                 bodies.Add(new Body { Id = b.Id, Solid = r });
             }

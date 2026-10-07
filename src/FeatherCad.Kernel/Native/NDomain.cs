@@ -120,6 +120,19 @@ public sealed class NDomain
 
     public static NDomain Of(NFace f, double tol = 1e-3) => new(f, tol);
 
+    /// <summary>
+    /// The face's domain at <paramref name="tol"/> or finer, kept on the face (it survives cloning, and is rebuilt
+    /// when the loops' geometry changed): repeated point tests on the same faces build it once.
+    /// </summary>
+    public static NDomain Cached(NFace f, double tol)
+    {
+        var sig = f.LoopSignature();
+        if (f.DomainCache is { } dc && dc.Tol <= tol * 1.0001 && dc.Sig == sig) return dc.Dom;
+        var d = new NDomain(f, tol);
+        f.DomainCache = new(d, tol, sig);
+        return d;
+    }
+
     /// <summary>UV' coordinates of a 3D point (u wrapped into this domain's range).</summary>
     public Vec2 Map(Vec3 p)
     {

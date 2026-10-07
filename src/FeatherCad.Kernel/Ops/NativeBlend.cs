@@ -52,7 +52,8 @@ public static class NativeBlend
             }
             try
             {
-                var (tools, convex, fits) = ForceRollingBall ? (null, false, false)
+                List<Solid>? tools; bool convex, fits;
+                using (Prof.Time("blend.tools")) (tools, convex, fits) = ForceRollingBall ? (null, false, false)
                     : e.Curve is NCircle ? ArcTools(group, size, fillet, name, ch, RefIsFirst) : LineTool(e, size, fillet, name, ch, RefIsFirst);
                 if (tools == null && fillet)
                 {
@@ -82,6 +83,7 @@ public static class NativeBlend
                 if (tools == null) { Fail("unsupported edge geometry."); continue; }
                 if (!fits)
                 {
+                    using var _tr = Prof.Time("blend.trim");
                     var trimmed = overflow ? TrimToEdge(body, tools, convex, group, fa, fb) : null;
                     if (trimmed == null)
                     {
@@ -546,7 +548,7 @@ public static class NativeBlend
 
     static bool Fits(NFace f, Vec3 p, double tol)
     {
-        var dom = NDomain.Of(f, 1e-3);
+        var dom = NDomain.Cached(f, 1e-3);
         return dom.Classify(f.Surface.Project(p), Math.Max(tol, 1e-4)) >= 0;
     }
 

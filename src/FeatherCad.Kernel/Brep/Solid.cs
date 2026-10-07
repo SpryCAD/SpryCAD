@@ -113,18 +113,30 @@ public sealed class Solid
 
     public bool IsEmpty => _faces == null && Native != null ? Native.Faces.Count == 0 : Faces.Count == 0;
 
-    Box3? _bounds;
+    Box3? _bounds, _tight;
+    /// <summary>
+    /// A box around the solid, for overlap tests and view fitting: for an exact body the union of its faces' cached
+    /// boxes (they survive edits elsewhere, so this costs little), at most a sampling tolerance larger than tight.
+    /// </summary>
     public Box3 Bounds
     {
         get
         {
             if (_bounds is { } b) return b;
-            if (_faces == null && Native != null) return (_bounds = Native.TightBounds()).Value;
+            if (_faces == null && Native != null) return (_bounds = Native.Bounds).Value;
             var bb = Box3.Empty;
             foreach (var f in Faces) foreach (var l in f.Loops) foreach (var p in l) bb.Add(p);
             _bounds = bb;
             return bb;
         }
+    }
+
+    /// <summary>The smallest box around the exact solid (Mass Properties): slower than <see cref="Bounds"/>.</summary>
+    public Box3 TightBounds()
+    {
+        if (_tight is { } t) return t;
+        if (Native != null) return (_tight = Native.TightBounds()).Value;
+        return (_tight = Bounds).Value;
     }
 
     public Solid Transformed(in Transform t, string? prefix = null)

@@ -33,10 +33,11 @@ public static class Csg
     {
         if (UseNative && a.Native != null && b.Native != null && !a.IsEmpty && !b.IsEmpty)
         {
-            if (!a.Bounds.Overlaps(b.Bounds, 1e-6))
+            bool apart; using (Prof.Time("csg.bounds")) apart = !a.Bounds.Overlaps(b.Bounds, 1e-6);
+            if (apart)
                 return op switch { BoolOp.Union => Solid.Combine(new[] { a, b }), BoolOp.Subtract => a, _ => Solid.Empty };
             // identical operands (e.g. unchanged tools after an upstream edit) reuse the earlier result
-            var key = (a.Native.ContentHash, b.Native.ContentHash, op);
+            (ulong, ulong, BoolOp) key; using (Prof.Time("csg.hash")) key = (a.Native.ContentHash, b.Native.ContentHash, op);
             if (UseCache && Cache.TryGet(key, out var hit)) { Interlocked.Increment(ref CacheHits); return hit; }
             try
             {
