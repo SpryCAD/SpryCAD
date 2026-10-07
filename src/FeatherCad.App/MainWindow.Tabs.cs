@@ -26,6 +26,9 @@ public partial class MainWindow
         /// request number, not a flag: an earlier, empty result can arrive first and must not use up the fit.
         /// </summary>
         public int? FitAfterLoad;
+        /// <summary>Preview for the list of parts, and the rebuild it shows (re-rendered when the part rebuilds).</summary>
+        public Avalonia.Media.Imaging.Bitmap? Thumb;
+        public int ThumbRevision = -1;
     }
 
     readonly List<PartTab> _parts = new();
@@ -73,7 +76,95 @@ public partial class MainWindow
         _parts.Add(t);
         DocTabs.Children.Add(t.Header);
         UpdateTabHeader(t);
+        UpdatePartsButton();
         return t;
+    }
+
+    // ------------------------------------------------------------------------------------------
+    // the list of all open parts (the button at the right end of the tabs, Ctrl+E)
+
+    void InitPartsList()
+    {
+        PartsButton.Click += (_, _) => ShowPartsList();
+        ToolTip.SetTip(PartsButton, "All open parts (Ctrl+E): arrow keys switch between them");
+        DocTabs.HiddenCountChanged += () => Avalonia.Threading.Dispatcher.UIThread.Post(UpdatePartsButton);
+        UpdatePartsButton();
+    }
+
+    void UpdatePartsButton()
+    {
+        var hidden = DocTabs.HiddenCount;
+        PartsButton.Content = hidden > 0 ? $"+{hidden} more ▾" : $"{_parts.Count} part{(_parts.Count == 1 ? "" : "s")} ▾";
+        PartsButton.FontWeight = hidden > 0 ? FontWeight.SemiBold : FontWeight.Normal;
+    }
+
+    /// <summary>
+    /// A drop-down list of every open part with a preview. Selecting one (arrow keys, click) shows it right away, so
+    /// a set of parts can be flipped through; Enter or Esc closes the list. Typing jumps to a part by name.
+    /// </summary>
+    void ShowPartsList()
+    {
+        var list = new ListBox { MaxHeight = 560, Width = 360, Background = Brushes.White };
+        var images = new List<(PartTab tab, Image image)>();
+        foreach (var t in _parts)
+        {
+            var img = new Image { Width = 64, Height = 64, Stretch = Stretch.Uniform, Source = t.Thumb };
+            var title = new TextBlock { Text = t.Session.Title, FontSize = 13, FontWeight = t == _tab ? FontWeight.SemiBold : FontWeight.Normal, TextTrimming = TextTrimming.CharacterEllipsis };
+            var path = new TextBlock { Text = t.Session.FilePath ?? "Not saved yet", FontSize = 11, Foreground = Brushes.Gray, TextTrimming = TextTrimming.PathSegmentEllipsis };
+            var text = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Spacing = 2, Margin = new Thickness(10, 0, 0, 0), Children = { title, path } };
+            var row = new DockPanel { Children = { img, text } };
+            DockPanel.SetDock(img, Dock.Left);
+            var item = new ListBoxItem { Content = row, Tag = t, Padding = new Thickness(6, 4) };
+            Avalonia.Controls.Primitives.TextSearch.SetText(item, t.Session.Title);
+            list.Items.Add(item);
+            images.Add((t, img));
+        }
+        var flyout = new Flyout { Content = list, Placement = PlacementMode.BottomEdgeAlignedRight, ShowMode = FlyoutShowMode.Standard };
+        list.SelectedIndex = _parts.IndexOf(_tab);
+        bool reverting = false;
+        list.SelectionChanged += async (_, _) =>
+        {
+            if (reverting || list.SelectedItem is not ListBoxItem { Tag: PartTab t } || t == _tab) return;
+            if (!await SwitchTo(t))
+            {
+                // leaving the current part was cancelled (a pending edit): the selection goes back to it
+                reverting = true; list.SelectedIndex = _parts.IndexOf(_tab); reverting = false;
+            }
+            foreach (var it in list.Items.OfType<ListBoxItem>())
+                if (it.Content is DockPanel { Children: [_, StackPanel { Children: [TextBlock tb, ..] }] })
+                    tb.FontWeight = it.Tag == _tab ? FontWeight.SemiBold : FontWeight.Normal;
+        };
+        list.KeyDown += (_, e) =>
+        {
+            if (e.Key is Key.Enter or Key.Escape) { flyout.Hide(); e.Handled = true; }
+        };
+        flyout.Opened += (_, _) =>
+        {
+            var i = Math.Max(0, list.SelectedIndex);
+            list.ScrollIntoView(i);
+            (list.ContainerFromIndex(i) ?? (Control)list).Focus(NavigationMethod.Directional);
+        };
+        flyout.ShowAt(PartsButton);
+        foreach (var (t, img) in images) _ = LoadThumb(t, img);
+    }
+
+    /// <summary>The part's preview (rendered off the UI thread when the part has rebuilt since the last one).</summary>
+    async Task LoadThumb(PartTab t, Image img)
+    {
+        var s = t.Session;
+        var result = s.Result;
+        var rev = s.ResultRevision;
+        if (result == null || (t.Thumb != null && t.ThumbRevision == rev)) return;
+        var color = s.Doc.Color;
+        var png = await Task.Run(() =>
+        {
+            try { return result.State.Bodies.Count == 0 ? null : Kernel.Thumbnail.Render(result.State.Bodies.Select(b => (b.Mesh, color)), 128); }
+            catch { return null; } // a preview is never worth an error
+        });
+        if (png == null) return;
+        t.Thumb = new Avalonia.Media.Imaging.Bitmap(new MemoryStream(png));
+        t.ThumbRevision = rev;
+        img.Source = t.Thumb;
     }
 
     void UpdateTabHeader(PartTab t)
@@ -119,7 +210,7 @@ public partial class MainWindow
         Session = t.Session;
         UpdateTabHeader(old);
         UpdateTabHeader(t);
-        t.Header.BringIntoView();
+        DocTabs.Active = t.Header; // shown even when the tabs before it fill the strip
 
         StatusRebuild.Text = "";
         BusyText.IsVisible = Session.Busy;
@@ -161,5 +252,6 @@ public partial class MainWindow
     {
         _parts.Remove(t);
         DocTabs.Children.Remove(t.Header);
+        UpdatePartsButton();
     }
 }

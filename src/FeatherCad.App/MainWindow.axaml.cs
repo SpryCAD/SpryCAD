@@ -76,6 +76,7 @@ public partial class MainWindow : Window
         BuildMenu();
         BuildQuickAccess();
         BuildCommandManager();
+        InitPartsList();
         BuildHud();
         BuildTriadLabels();
         BuildPanelTabs();
@@ -382,6 +383,7 @@ public partial class MainWindow : Window
                 case Key.Q: Session.ForceRebuild(); break;
                 case Key.W or Key.F4: _ = CloseTab(_tab); break;
                 case Key.Tab: _ = CycleTab(shift ? -1 : 1); break;
+                case Key.E: ShowPartsList(); break;
                 case Key.D1: Viewport.StandardView("Front"); break;
                 case Key.D2: Viewport.StandardView("Back"); break;
                 case Key.D3: Viewport.StandardView("Left"); break;
