@@ -153,7 +153,9 @@ public sealed class NFace
     public IEnumerable<NCoedge> Coedges => Loops.SelectMany(l => l.Coedges);
 
     // last computed bounds (faces keep their shape once built: splitting edges or cloning does not change it)
-    internal (double tol, Box3 box)? BoundsCache;
+    internal sealed record BoundsEntry(double tol, Box3 box);
+    // one reference: faces are read by parallel workers, a reader must never see half of a box
+    internal BoundsEntry? BoundsCache;
 
     // a domain built for this face (or the face it was cloned from), valid while the loops have the same geometry
     internal sealed record DomainEntry(NDomain Dom, double Tol, double Sig);
@@ -180,7 +182,7 @@ public sealed class NFace
         // a box sampled at a finer (or slightly coarser) tolerance is as good for overlap tests
         if (BoundsCache is { } bc && bc.tol <= tol * 4) return bc.box;
         var b = ComputeBounds(tol);
-        BoundsCache = (tol, b);
+        BoundsCache = new(tol, b);
         return b;
     }
 
@@ -225,9 +227,10 @@ public sealed class NBody
         return groups.Values.ToList();
     }
 
-    ulong? _hash;
+    // one reference: a body may be hashed by parallel workers (the hash keys the boolean result cache)
+    System.Runtime.CompilerServices.StrongBox<ulong>? _hash;
     /// <summary>Content hash (cached: bodies are not modified once built; operations work on clones).</summary>
-    public ulong ContentHash => _hash ??= NHash.Of(this);
+    public ulong ContentHash => (_hash ??= new(NHash.Of(this))).Value;
     public IEnumerable<NVertex> Vertices => Edges.SelectMany(e => new[] { e.V0, e.V1 }).Distinct();
 
     public Box3 Bounds
@@ -293,7 +296,10 @@ public sealed class NBody
     }
 
     /// <summary>A copy with new topology objects (operations edit clones); edge samples and face domains carry over.</summary>
-    public NBody Clone()
+    public NBody Clone() => Clone(out _);
+
+    /// <summary>A copy (see <see cref="Clone()"/>) and which of its edges each of this body's edges became.</summary>
+    public NBody Clone(out Dictionary<NEdge, NEdge> edgeMap)
     {
         // the hot path of every operation: presized maps, no per-element delegates, linked while copying
         int n = 0;
@@ -330,6 +336,7 @@ public sealed class NBody
             }
             b.Faces.Add(nf);
         }
+        edgeMap = emap;
         return b;
     }
 

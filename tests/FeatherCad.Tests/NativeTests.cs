@@ -217,6 +217,27 @@ static class NativeBoolTests
             foreach (var tr in ts) t.Near(new Vec3(tr.Point(c).X, 0, tr.Point(c).Z).Length, new Vec3(c.X, 0, c.Z).Length, 1e-9);
         });
 
+        t.Test("Pattern: instance blends solved in parallel give the same result every time", () =>
+        {
+            // spokes off the grip grid: several instances' spoke fillets are solved again (in parallel, on copies of
+            // the body); the outcome must not depend on scheduling
+            var dir = AppContext.BaseDirectory;
+            while (dir != null && !Directory.Exists(Path.Combine(dir, "samples"))) dir = Path.GetDirectoryName(dir);
+            var file = Path.Combine(dir!, "samples", "demos", "spoked-handwheel.fcad");
+            string? first = null;
+            for (int run = 0; run < 3; run++)
+            {
+                var doc = CadDocument.Load(file);
+                doc.Features.OfType<CircularPatternFeature>().First(f => f.Name == "Spokes").Angle = "150";
+                Csg.ClearCache();
+                var r = new Regenerator().Rebuild(doc);
+                var body = r.State.Bodies[0].Solid;
+                var sig = $"{body.Volume():0.###} {body.Native!.Faces.Count} | " + string.Join(" | ", doc.Features.SelectMany(f => r.Status[f.Id].Warnings));
+                t.True(doc.Features.All(f => r.Status[f.Id].Ok), "rebuilds");
+                if (first == null) first = sig; else t.Eq(sig, first);
+            }
+        });
+
         t.Test("Native bool: overlapping boxes", () =>
         {
             var a = NativeTests.Box(new Vec3(0, 0, 0), new Vec3(10, 10, 10), "A");

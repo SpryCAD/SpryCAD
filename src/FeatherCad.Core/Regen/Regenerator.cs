@@ -615,46 +615,87 @@ public sealed class Regenerator
                 if (!State.Tools.TryGetValue(seedId, out var tool))
                     throw new FeatureException("Only extrude, revolve, hole, fillet, chamfer, pattern and mirror features can be patterned.");
                 var copies = new List<(int i, Solid tool)>();
-                // instances solved again: their edges and tools, reused for instances whose edges are theirs moved
-                // (e.g. every grip that lands just left of a spoke)
-                var solved = new List<(Transform t, List<Vec3> points, double length, List<Solid> tools)>();
+                // instances whose blend is solved again (their edges are not the seed's edges moved)
+                var toSolve = new List<(int i, Body body, List<Kernel.Native.NEdge> edges, double tol)>();
                 for (int i = 0; i < transforms.Count; i++)
                 {
                     if (skipped.Contains(i)) continue;
                     Cancel.ThrowIfCancellationRequested();
                     Detail?.Invoke($"{Describe(seedId)}, instance {i + 2} of {transforms.Count + 1}");
-                    // a blend whose instance edges are not the seed's edges moved is solved again there
-                    if (tool.Blend is { } bs && InstanceEdges(bs, seeds, transforms[i], i) is { } inst && !inst.same)
+                    if (tool.Blend is { } bs0 && InstanceEdges(bs0, seeds, transforms[i], i) is { } inst && !inst.same)
                     {
-                        var ti = transforms[i];
-                        var reuse = solved.FindIndex(sv =>
-                        {
-                            var rel = ti * sv.t.RigidInverse();
-                            return MatchEdges(inst.edges, sv.points.Select(p => rel.Point(p)), sv.length, inst.tol);
-                        });
-                        if (reuse >= 0)
-                        {
-                            var rel = ti * solved[reuse].t.RigidInverse();
-                            copies.AddRange(solved[reuse].tools.Select(x => (i, x.Transformed(rel, $"{f.Id}.{i + 1}."))));
-                            continue;
-                        }
-                        var points = inst.edges.SelectMany(EdgePoints).ToList();
-                        var length = inst.edges.Sum(TrueLength);
-                        List<Solid> tools; bool sameKind;
-                        var at = State;
-                        try { (tools, sameKind) = ReapplyBlend(bs, inst.body, inst.edges, i, seedId, tool.IsCut); }
-                        catch (Exception ex) when (ex is FeatureException or InvalidOperationException or Kernel.Native.NBooleanException)
-                        {
-                            State = at;
-                            status.Warnings.Add($"Instance {i + 2} is not {(bs.Fillet ? "filleted" : "chamfered")}: {ex.Message}");
-                            continue;
-                        }
-                        everything.AddRange(tools);
-                        if (tools.Count > 0 && sameKind) solved.Add((ti, points, length, tools));
+                        toSolve.Add((i, inst.body, inst.edges, inst.tol));
                         continue;
                     }
                     copies.Add((i, tool.Tool.Transformed(transforms[i], $"{f.Id}.{i + 1}.")));
                 }
+                // instances solved again: one solve per distinct configuration (instances whose edges are another's
+                // moved reuse its tools), solved in parallel, each on its own copy of the body (nothing shared is
+                // written), then applied below with the copies' one-at-a-time fallback
+                var resolved = new List<(int i, List<(Solid tool, bool cut)> tools, bool trimmed)>();
+                if (toSolve.Count > 0 && tool.Blend is { } bs)
+                {
+                    var rep = new int[toSolve.Count];
+                    var points = toSolve.Select(x => x.edges.SelectMany(EdgePoints).ToList()).ToList();
+                    var lengths = toSolve.Select(x => x.edges.Sum(TrueLength)).ToList();
+                    for (int k = 0; k < toSolve.Count; k++)
+                    {
+                        rep[k] = k;
+                        for (int q = 0; q < k; q++)
+                        {
+                            if (rep[q] != q) continue;
+                            var rel = transforms[toSolve[k].i] * transforms[toSolve[q].i].RigidInverse();
+                            if (MatchEdges(toSolve[k].edges, points[q].Select(pt => rel.Point(pt)), lengths[q], toSolve[k].tol)) { rep[k] = q; break; }
+                        }
+                    }
+                    var reps = Enumerable.Range(0, toSolve.Count).Where(k => rep[k] == k).ToList();
+                    var built = new (List<(Solid tool, bool cut)>? tools, string? error, List<Vec3[]> problems, bool trimmed)[toSolve.Count];
+                    var opts = new ParallelOptions { CancellationToken = Cancel };
+                    using var _ps = Prof.Time("pattern.solve");
+                    Parallel.ForEach(reps, opts, k =>
+                    {
+                        var (i, body, edges, _) = toSolve[k];
+                        Detail?.Invoke($"{Describe(seedId)}: solving instance {i + 2} ({reps.Count} distinct of {toSolve.Count})");
+                        var problems = new List<Vec3[]>();
+                        Csg.NoFallback = true; // this worker's thread: exact or skipped, never the slow faceted fallback
+                        try
+                        {
+                            var copy = body.Solid.Native!.Clone(out var map);
+                            var mine = edges.Select(e => map.TryGetValue(e, out var m) ? m : null).ToList();
+                            if (mine.Any(e => e == null)) { built[k] = (null, "its edges are not on the body", problems, false); return; }
+                            var errors = new List<string>();
+                            var applied = new List<(Solid tool, bool cut)>();
+                            var trimmed = new System.Runtime.CompilerServices.StrongBox<bool>();
+                            NativeBlend.Apply(Kernel.Native.NTess.ToSolid(copy), mine!, bs.Size, bs.Fillet, $"{f.Id}.{i + 1}.{seedId}", errors, bs.Overflow,
+                                problems, applied, bs.Chamfer, buildOnly: true, trimmedOut: trimmed);
+                            built[k] = errors.Count > 0 ? (null, errors[0], problems, false) : (applied, null, problems, trimmed.Value);
+                        }
+                        catch (Exception ex) when (ex is FeatureException or InvalidOperationException or Kernel.Native.NBooleanException)
+                        {
+                            built[k] = (null, ex.Message, problems, false);
+                        }
+                        finally { Csg.NoFallback = false; }
+                    });
+                    for (int k = 0; k < toSolve.Count; k++)
+                    {
+                        var (i, _, _, _) = toSolve[k];
+                        var b = built[rep[k]];
+                        if (b.tools == null)
+                        {
+                            status.Warnings.Add($"Instance {i + 2} is not {(bs.Fillet ? "filleted" : "chamfered")}: {b.error}");
+                            if (rep[k] == k) status.ProblemEdges.AddRange(b.problems);
+                            continue;
+                        }
+                        if (rep[k] == k) { resolved.Add((i, b.tools, b.trimmed)); continue; }
+                        var rel = transforms[i] * transforms[toSolve[rep[k]].i].RigidInverse();
+                        var moved = b.tools.Select(x => (x.tool.Transformed(rel, $"{f.Id}.{i + 1}."), x.cut)).ToList();
+                        // the same blend moved: with the copies (one boolean for all), unless its tools must go one at a time
+                        if (!b.trimmed && moved.All(x => x.cut == tool.IsCut)) copies.AddRange(moved.Select(x => (i, x.Item1)));
+                        else resolved.Add((i, moved, b.trimmed));
+                    }
+                }
+                // (the instances solved again first, as when they were solved one by one)
+                if (resolved.Count > 0) ApplySolved(resolved, seedId, transforms.Count + 1, everything);
                 everything.Add(tool.Tool);
                 if (copies.Count > 0)
                 {
@@ -780,29 +821,60 @@ public sealed class Regenerator
 
         static Vec3[] EdgePoints(Kernel.Native.NEdge e) => Enumerable.Range(0, 9).Select(k => k == 0 ? e.V0.P : k == 8 ? e.V1.P : e.At(k / 8.0)).ToArray();
 
-        string Describe(string featureId) => doc.Features.FirstOrDefault(x => x.Id == featureId)?.Name ?? featureId;
-
-        /// <summary>Solves a patterned blend on instance i's own edges; returns the tools it applied.</summary>
-        (List<Solid> tools, bool sameKind) ReapplyBlend(BlendSpec bs, Body body, List<Kernel.Native.NEdge> edges, int i, string seedId, bool cut)
+        /// <summary>
+        /// Applies blends solved for pattern instances, each the way the blend itself applies its tools: trimmed tools
+        /// (they may touch each other) one at a time, the instance failing as a whole if one fails; other tools as
+        /// one union per kind; instance by instance, as before they were solved in parallel (a failed attempt to apply
+        /// them all at once costs more than it saves). An instance that fails is left out with a warning. Exact
+        /// booleans only.
+        /// </summary>
+        void ApplySolved(List<(int i, List<(Solid tool, bool cut)> tools, bool trimmed)> resolved, string seedId, int count, List<Solid> everything)
         {
-            var errors = new List<string>();
-            var applied = new List<(Solid tool, bool cut)>();
-            Solid r;
-            // an instance's blend either works exactly or is skipped: no slow faceted fallback
-            var oldFallback = Csg.NoFallback;
+            var old = Csg.NoFallback;
             Csg.NoFallback = true;
-            try { r = NativeBlend.Apply(body.Solid, edges, bs.Size, bs.Fillet, $"{f.Id}.{i + 1}.{seedId}", errors, bs.Overflow, status.ProblemEdges, applied, bs.Chamfer); }
-            finally { Csg.NoFallback = oldFallback; }
-            // one instance whose own geometry cannot take the blend (e.g. it lands where the radius folds over itself)
-            // does not fail the whole pattern: that instance is left without it and named in a warning
-            if (errors.Count > 0)
+            try
             {
-                status.Warnings.Add($"Instance {i + 2} is not {(bs.Fillet ? "filleted" : "chamfered")}: {errors[0]}");
-                return (new List<Solid>(), false);
+                bool Union(IEnumerable<(Solid tool, bool cut)> ts)
+                {
+                    var at = State;
+                    try
+                    {
+                        foreach (var kind in new[] { true, false })
+                        {
+                            var group = ts.Where(x => x.cut == kind).Select(x => x.tool).ToList();
+                            if (group.Count > 0) ApplyTool(group.Count == 1 ? group[0] : Csg.UnionAll(group), kind, true);
+                        }
+                        return true;
+                    }
+                    catch (Exception ex) when (ex is FeatureException or InvalidOperationException or Kernel.Native.NBooleanException)
+                    {
+                        State = at;
+                        return false;
+                    }
+                }
+                bool OneByOne(List<(Solid tool, bool cut)> ts)
+                {
+                    var at = State;
+                    // cuts first, then additions, as the blend applies them
+                    foreach (var t in ts.Where(x => x.cut).Concat(ts.Where(x => !x.cut)))
+                        if (!Union(new[] { t })) { State = at; return false; }
+                    return true;
+                }
+                var kindName = doc.Features.FirstOrDefault(x => x.Id == seedId) is ChamferFeature ? "chamfered" : "filleted";
+                foreach (var (i, tools, trimmed) in resolved)
+                {
+                    Cancel.ThrowIfCancellationRequested();
+                    Detail?.Invoke($"{Describe(seedId)}, instance {i + 2} of {count}");
+                    if (trimmed ? OneByOne(tools) : Union(tools)) everything.AddRange(tools.Select(x => x.tool));
+                    else status.Warnings.Add(trimmed
+                        ? $"Instance {i + 2} is not {kindName}: the blends that run into neighbouring geometry also run into each other where both are tangent to the same face; that corner cannot be blended yet."
+                        : $"Instance {i + 2} of {Describe(seedId)} is skipped: its blend cannot be applied.");
+                }
             }
-            State = State.With(State.Bodies.Select(b => b.Id == body.Id ? new Body { Id = b.Id, Solid = r } : b).ToList());
-            return (applied.Select(a => a.tool).ToList(), applied.All(a => a.cut == cut));
+            finally { Csg.NoFallback = old; }
         }
+
+        string Describe(string featureId) => doc.Features.FirstOrDefault(x => x.Id == featureId)?.Name ?? featureId;
 
         void DoLinearPattern(LinearPatternFeature lp) => ApplyInstances(lp.Seeds, PatternTransforms(lp, State, lookup)!, lp.Skip);
 

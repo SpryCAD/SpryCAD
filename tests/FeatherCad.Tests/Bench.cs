@@ -125,7 +125,7 @@ static class Bench
         if (prof)
         {
             Prof.Enabled = false;
-            foreach (var (name, pms, calls) in Prof.Results().Take(30)) Console.WriteLine($"      {name,-24} {pms,8:0.0} ms  x{calls}");
+            foreach (var (name, pms, calls) in Prof.Results().Take(200)) Console.WriteLine($"      {name,-24} {pms,8:0.0} ms  x{calls}");
         }
         FeatherCad.Kernel.Native.NBoolean.Trace = null;
         foreach (var ff in doc.Features) Console.WriteLine($"  {ff.Name,-16} {r.Status[ff.Id].Milliseconds,8:0} ms {r.Status[ff.Id].Error} {string.Join("; ", r.Status[ff.Id].Warnings)}");
@@ -159,6 +159,41 @@ static class Bench
                 var st = r.Status[doc.Features[idx].Id];
                 Console.WriteLine($"{name}: median {Median(times):0.0} ms {st.Error}");
                 foreach (var (n, pms, calls) in Prof.Results().Take(40)) Console.WriteLine($"  {n,-28} {pms,8:0.0} ms  x{calls}");
+            }
+        }
+    }
+
+    /// <summary>
+    /// <c>-- cases</c>: the handwheel at awkward parameters (off-grid spokes; the grips-last model with 8 spokes):
+    /// per case the time, volume, errors and warnings, one line each (compare two builds by diffing the output).
+    /// </summary>
+    public static void Cases(string root)
+    {
+        var cur = Path.Combine(root, "samples", "demos", "spoked-handwheel.fcad");
+        var old = Path.Combine(root, "tests", "FeatherCad.Tests", "models", "spoked-handwheel-grips-last.fcad");
+        var cases = new List<(string name, string file, Action<CadDocument> edit)>();
+        foreach (var a in new[] { "90", "150", "210", "230", "250", "270", "300", "340" })
+            cases.Add(($"spokes {a}", cur, d => d.Features.OfType<CircularPatternFeature>().First(f => f.Name == "Spokes").Angle = a));
+        cases.Add(("old NS=8", old, d => d.Equations.First(e => e.Name == "NS").Expr = "8"));
+        foreach (var a in new[] { "226", "236", "250", "300" })
+            cases.Add(($"old spokes {a}", old, d => d.Features.OfType<CircularPatternFeature>().First(f => f.Name == "Spokes").Angle = a));
+        foreach (var (name, file, edit) in cases)
+        {
+            var doc = CadDocument.Load(file);
+            edit(doc);
+            Csg.ClearCache();
+            var sw = Stopwatch.StartNew();
+            var r = new Regenerator().Rebuild(doc);
+            var ms = sw.Elapsed.TotalMilliseconds;
+            var errs = doc.Features.Where(f => r.Status[f.Id].Error != null).Select(f => f.Name).ToList();
+            int warns = doc.Features.Sum(f => r.Status[f.Id].Warnings.Count);
+            var vol = r.State.Bodies.Count > 0 ? r.State.Bodies.Sum(b => b.Solid.Volume()) : 0;
+            Console.WriteLine($"{name,-18} {ms,8:0} ms  vol {vol,10:0}  warnings {warns,2}  errors [{string.Join(", ", errs)}]");
+            if (Environment.GetEnvironmentVariable("FC_CASES_STEP") is { } outDir && r.State.Bodies.Count > 0)
+            {
+                Directory.CreateDirectory(outDir);
+                using var fs = File.Create(Path.Combine(outDir, name.Replace(" ", "_").Replace("=", "") + ".step"));
+                FeatherCad.Kernel.StepWriter.Write(fs, r.State.Bodies.Select(b => (b.Id, b.Solid)), name);
             }
         }
     }

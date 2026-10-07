@@ -434,7 +434,7 @@ public sealed class NurbsSurface
     /// <summary>Smallest radius of curvature over the grid (rough), for tessellation spacing.</summary>
     public double MinCurvatureRadius()
     {
-        if (_minRho is { } cached) return cached;
+        if (_minRho is { } cached) return cached.Value;
         // derivative sizes over the patch, to recognise degenerate samples (poles, collapsed edges) whose
         // curvature estimate is meaningless
         const int n = 8;
@@ -460,10 +460,10 @@ public sealed class NurbsSurface
         // never finer than a thousandth of the patch: the mesh refines locally where it needs to anyway
         var rho = kmax > 1e-12 ? 1 / kmax : double.PositiveInfinity;
         rho = Math.Max(rho, 1e-3 * _scale);
-        _minRho = rho;
+        _minRho = new System.Runtime.CompilerServices.StrongBox<double>(rho);
         return rho;
     }
-    double? _minRho;
+    System.Runtime.CompilerServices.StrongBox<double>? _minRho; // one reference: safe to publish across threads
 
     /// <summary>Average lengths of Su and Sv (parameter to distance scale).</summary>
     public (double su, double sv) MetricScale()

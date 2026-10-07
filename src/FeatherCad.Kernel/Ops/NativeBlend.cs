@@ -17,7 +17,8 @@ public static class NativeBlend
     /// <paramref name="problemEdges"/>.
     /// </summary>
     public static Solid Apply(Solid body, IReadOnlyList<NEdge> edges, double size, bool fillet, string prefix, List<string> errors,
-        bool overflow = true, List<Vec3[]>? problemEdges = null, List<(Solid tool, bool cut)>? applied = null, ChamferSize? chamfer = null)
+        bool overflow = true, List<Vec3[]>? problemEdges = null, List<(Solid tool, bool cut)>? applied = null, ChamferSize? chamfer = null,
+        bool buildOnly = false, System.Runtime.CompilerServices.StrongBox<bool>? trimmedOut = null)
     {
         if (size <= 0) { errors.Add("Size must be greater than zero."); return body; }
         body.Native!.Link();
@@ -99,6 +100,10 @@ public static class NativeBlend
             }
             catch (Exception ex) { Fail(ex.Message); }
         }
+        // the tools only (in applied): the caller applies them (e.g. pattern instances built in parallel)
+        // (trimmedOut: whether they must be applied one at a time, as below)
+        if (trimmedOut != null) trimmedOut.Value = anyTrimmed;
+        if (buildOnly) return body;
         var result = body;
         if (anyTrimmed)
         {

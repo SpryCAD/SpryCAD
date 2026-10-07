@@ -203,7 +203,7 @@ public sealed class NDomain
         return a / 2;
     }
 
-    Vec3? _interior;
+    System.Runtime.CompilerServices.StrongBox<Vec3>? _interior; // one reference: safe to publish across threads
 
     /// <summary>
     /// A point deep inside the face: among triangle centroids and their sub-points, the one farthest
@@ -211,7 +211,7 @@ public sealed class NDomain
     /// </summary>
     public Vec3 InteriorPoint()
     {
-        if (_interior is { } cached) return cached;
+        if (_interior is { } cached) return cached.Value;
         var all = Loops.SelectMany(l => l).ToArray();
         var cands = new List<Vec2>();
         // a coarse grid first (cheap even for faces with many holes)
@@ -250,7 +250,7 @@ public sealed class NDomain
             var d = BoundaryDistance(p);
             if (d > bestD) { bestD = d; best = p; }
         }
-        _interior = best;
+        _interior = new System.Runtime.CompilerServices.StrongBox<Vec3>(best);
         return best;
     }
 
