@@ -32,6 +32,9 @@ public static class Icons
         ["mirror"] = ("M3 18L10 6v12z M21 18L14 6v12z", "M12 2v20"),
         ["plane"] = ("M2 17l5-10h15l-5 10z", null),
         ["combine"] = ("M9 12m-6 0a6 6 0 1 0 12 0a6 6 0 1 0-12 0 M15 12m-6 0a6 6 0 1 0 12 0a6 6 0 1 0-12 0", null),
+        // sheet metal: a bent sheet unrolled flat, its bend line dashed; flatten: folded and flat with an arrow
+        ["flatpattern"] = ("M2 17h20v3H2z", "M8 17v3 M16 17v3 M4 4v7a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3V4"),
+        ["flatten"] = ("M3 20h18 M3 4v6a3 3 0 0 0 3 3h3", "M14 6l5 5 M19 6v5h-5"),
         ["equations"] = ("M4 8h16 M4 16h16", "M9 3l-2 18 M17 3l-2 18"),
         ["mass"] = ("M5 8h14l2 13H3z M9 8a3 3 0 0 1 6 0", null),
         // Measure: a ruler with ticks

@@ -132,6 +132,62 @@ static class SheetMetalTests
             using (var fs = File.Create(Path.Combine(dir, "flat-bend-hole.step"))) StepWriter.Write(fs, new[] { ("flat", NTess.ToSolid(f.Body)), ("folded", NTess.ToSolid(b)) }, "flat");
         });
 
+        t.Test("Sheet metal: Flat Pattern feature on a shelled, filleted part", () =>
+        {
+            // box 100 x 60 x 40 → shell open at the top and both ends (a U channel) → bends by fillets → flat
+            var doc = new Core.Model.CadDocument();
+            var s1 = doc.AddFeature(new Core.Model.SketchFeature { Plane = Core.Model.PlaneRef.Front, Sketch = CoreTests.Rect(100, 60) });
+            doc.AddFeature(new Core.Model.ExtrudeFeature { SketchId = s1.Id, Depth = "40" });
+            Core.Model.FaceRef Face(Vec3 hint, Vec3 n) => new() { Hint = hint, Normal = n };
+            doc.AddFeature(new Core.Model.ShellFeature
+            {
+                Thickness = "2",
+                Faces = { Face(new Vec3(50, 30, 40), Vec3.UnitZ), Face(new Vec3(0, 30, 20), -Vec3.UnitX), Face(new Vec3(100, 30, 20), Vec3.UnitX) },
+            });
+            var regen = new Core.Regen.Regenerator();
+            var r = regen.Rebuild(doc);
+            Core.Model.EdgeRef Edge(Core.Regen.RegenResult res, double y, double z)
+            {
+                var e = res.State.Bodies[0].Solid.Topology.Edges.First(x => x.IsLinear && Math.Abs(x.Start.Y - y) < 1e-6 && Math.Abs(x.Start.Z - z) < 1e-6
+                    && Math.Abs(x.End.Y - y) < 1e-6 && Math.Abs(x.End.Z - z) < 1e-6);
+                return new Core.Model.EdgeRef { A = e.FaceA, B = e.FaceB, Hint = e.Midpoint };
+            }
+            doc.AddFeature(new Core.Model.FilletFeature { Radius = "3", Edges = { Edge(r, 0, 0), Edge(r, 60, 0) } });
+            doc.AddFeature(new Core.Model.FilletFeature { Radius = "1", Edges = { Edge(r, 2, 2), Edge(r, 58, 2) } });
+            var fp = (Core.Model.FlatPatternFeature)doc.AddFeature(new Core.Model.FlatPatternFeature());
+            r = regen.Rebuild(doc);
+            foreach (var f in doc.Features) t.True(r.Status[f.Id].Ok, $"{f.Name}: {r.Status[f.Id].Error}");
+            // folded: the flat pattern is computed but the part stays as it is
+            var folded = KernelTests.Vex(r.State.Bodies[0].Solid);
+            t.Eq(r.State.Flats.Count, 1);
+            t.Eq(r.State.Flats.Values.First().Bends.Count, 2);
+            t.True(r.State.Bodies[0].Solid.TightBounds().Size.Z > 30, "still folded");
+
+            fp.Flatten = true;
+            fp.KFactor = "0.5";
+            r = regen.Rebuild(doc);
+            t.True(r.Status[fp.Id].Ok, r.Status[fp.Id].Error ?? "");
+            var size = r.State.Bodies[0].Solid.TightBounds().Size;
+            t.Near(Math.Min(size.X, Math.Min(size.Y, size.Z)), 2, 1e-6);
+            t.Eq(r.State.Bodies[0].Solid.Native!.Faces.Count, 6);
+            t.Near(KernelTests.Vex(r.State.Bodies[0].Solid), 100 * 2 * (128 + 2 * Math.PI), 1e-3);
+            t.Near(KernelTests.Vex(r.State.Bodies[0].Solid), folded, 0.2); // K = 0.5 keeps the volume (the folded bends are faceted)
+
+            // a K-factor that is not a fraction fails the feature
+            fp.KFactor = "1.5";
+            r = regen.Rebuild(doc);
+            t.True(!r.Status[fp.Id].Ok, "K-factor 1.5 accepted");
+
+            // the feature survives a save / load
+            fp.KFactor = "0.3";
+            var doc2 = Core.Model.CadDocument.FromJson(doc.ToJson());
+            var fp2 = doc2.Features.OfType<Core.Model.FlatPatternFeature>().Single();
+            t.True(fp2.Flatten && fp2.KFactor == "0.3", "round trip");
+            r = new Core.Regen.Regenerator().Rebuild(doc2);
+            t.True(r.Status[fp2.Id].Ok, r.Status[fp2.Id].Error ?? "");
+            t.Near(KernelTests.Vex(r.State.Bodies[0].Solid), 100 * 2 * (128 + Math.PI * 1.6), 1e-3);
+        });
+
         t.Test("Sheet metal: a plain block unfolds to its face", () =>
         {
             // every face has an opposite face but no bend joins them: the flat is the fixed face, as thick as the block

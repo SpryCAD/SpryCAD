@@ -205,6 +205,7 @@ public sealed class Regenerator
                 case PlaneFeature p: DoPlane(p); break;
                 case CombineFeature c: DoCombine(c); break;
                 case ImportFeature im: DoImport(im); break;
+                case FlatPatternFeature fp: DoFlatPattern(fp); break;
             }
         }
 
@@ -596,6 +597,36 @@ public sealed class Regenerator
             }
             catch (ShellFailedException ex) { throw new FeatureException(ex.Message); }
             State = State.With(bodies);
+        }
+
+        // ---- sheet metal ----
+
+        void DoFlatPattern(FlatPatternFeature fp)
+        {
+            var k = Num(fp.KFactor, "K-factor");
+            if (k < 0 || k > 1) throw new FeatureException("The K-factor must be between 0 and 1.");
+            if (State.Bodies.Count == 0) throw new FeatureException("There is no body to flatten.");
+            var targets = new List<(Body body, Kernel.Native.NFace? face)>();
+            if (fp.FixedFace != null)
+            {
+                var (b, name) = Resolver.ResolveFaceName(fp.FixedFace, State);
+                var face = b.Solid.Native?.Faces.FirstOrDefault(x => x.Tag.Name == name);
+                if (face != null && face.Surface.Kind != SurfaceKind.Plane) throw new FeatureException("The fixed face must be planar.");
+                targets.Add((b, face));
+            }
+            else targets.AddRange(State.Bodies.Select(b => (b, (Kernel.Native.NFace?)null)));
+
+            var bodies = new List<Body>(State.Bodies);
+            foreach (var (body, face) in targets)
+            {
+                var native = body.Solid.Native ?? throw new FeatureException("The body has no exact geometry to unfold.");
+                FlatPattern flat;
+                try { flat = SheetUnfold.Unfold(native, k, face, f.Id); }
+                catch (UnfoldException ex) { throw new FeatureException(targets.Count > 1 ? $"{body.Id}: {ex.Message}" : ex.Message); }
+                State.Flats[body.Id] = flat;
+                if (fp.Flatten) bodies[bodies.IndexOf(body)] = new Body { Id = body.Id, Solid = Kernel.Native.NTess.ToSolid(flat.Body) };
+            }
+            if (fp.Flatten) State = State.With(bodies);
         }
 
         // ---- patterns / mirror ----

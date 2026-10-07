@@ -64,6 +64,7 @@ public sealed class DirRef
 [JsonDerivedType(typeof(PlaneFeature), "plane")]
 [JsonDerivedType(typeof(CombineFeature), "combine")]
 [JsonDerivedType(typeof(ImportFeature), "import")]
+[JsonDerivedType(typeof(FlatPatternFeature), "flatPattern")]
 public abstract class Feature
 {
     public string Id { get; set; } = "";
@@ -277,6 +278,20 @@ public sealed class ImportFeature : Feature
     public string File { get; set; } = "";
     /// <summary>SHA-256 of the embedded file when it was imported (a replaced file rebuilds).</summary>
     public string Sha256 { get; set; } = "";
+}
+
+/// <summary>
+/// The flat pattern of sheet metal bodies (any body of uniform thickness whose bends are cylinders), unfolded about
+/// a fixed face. It is always computed (for DXF export); <see cref="Flatten"/> shows the part flat.
+/// </summary>
+public sealed class FlatPatternFeature : Feature
+{
+    public override string Kind => "Flat-Pattern";
+    /// <summary>The planar face that stays in place; none: every body about its largest planar face.</summary>
+    public FaceRef? FixedFace { get; set; }
+    /// <summary>Where the neutral fiber lies in a bend, as a fraction of the thickness from the inside (0..1).</summary>
+    public string KFactor { get; set; } = "0.5";
+    public bool Flatten { get; set; }
 }
 
 public sealed class Equation

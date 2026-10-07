@@ -178,6 +178,7 @@ public partial class MainWindow
             case MirrorFeature m: OpenMirrorPage((MirrorFeature)m.Clone(), false); break;
             case PlaneFeature p: OpenPlanePage((PlaneFeature)p.Clone(), false); break;
             case CombineFeature c: OpenCombinePage((CombineFeature)c.Clone(), false); break;
+            case FlatPatternFeature fp: OpenFlatPatternPage((FlatPatternFeature)fp.Clone(), false); break;
         }
     }
 
@@ -529,6 +530,42 @@ public partial class MainWindow
         foreach (var fr in f.Faces) box.Items.Add(FaceItem(fr));
         box.Changed += () => { f.Faces = box.Items.Select(i => i.ToFaceRef()).ToList(); };
         BeginEdit(f, isNew, page, overlay: true, hint: f.Faces.Count == 0 ? "Select the faces to remove." : null);
+    }
+
+    // ------------------------------------------------------------------------------------------
+    // Sheet metal
+
+    /// <summary>Edits the part's Flat Pattern feature, or inserts one (at the end, unfolded about the selected planar face).</summary>
+    void FlatPatternCommand()
+    {
+        if (Session.Doc.Features.OfType<FlatPatternFeature>().FirstOrDefault() is { } existing) { EditFeature(existing.Id); return; }
+        var face = Selection.Items.FirstOrDefault(s => s.Kind == SelKind.Face && s.Planar)?.ToFaceRef();
+        OpenFlatPatternPage(new FlatPatternFeature { FixedFace = face }, true);
+    }
+
+    void OpenFlatPatternPage(FlatPatternFeature f, bool isNew)
+    {
+        var page = new PmPage("Flat-Pattern", "flatpattern");
+        var p = page.Section("Parameters");
+        var box = page.Selection(p, "Fixed face", SelFilter.Face, "Face that stays in place (none: the largest planar face)", max: 1, accept: s => s.Planar);
+        if (f.FixedFace != null) box.Items.Add(FaceItem(f.FixedFace));
+        box.Changed += () => { f.FixedFace = box.Items.FirstOrDefault()?.ToFaceRef(); };
+        page.Number(p, "K-factor", () => f.KFactor, v => f.KFactor = v);
+        page.Check(p, "Flatten", () => f.Flatten, v => f.Flatten = v);
+        page.Info(p, "Bends unroll by angle × (inner radius + K-factor × thickness). Any part of uniform thickness whose bends are round unfolds: shelled and filleted parts, imported sheet metal.");
+        BeginEdit(f, isNew, page, overlay: false);
+    }
+
+    /// <summary>Shows the part flat or folded (the Flat Pattern feature's Flatten option, undoable).</summary>
+    void ToggleFlatten()
+    {
+        if (Session.Doc.Features.OfType<FlatPatternFeature>().FirstOrDefault() is not { } fp)
+        {
+            Status("Insert a Flat Pattern first.");
+            return;
+        }
+        Session.Change(() => fp.Flatten = !fp.Flatten);
+        Status(fp.Flatten ? "Flattened." : "Folded.");
     }
 
     // ------------------------------------------------------------------------------------------

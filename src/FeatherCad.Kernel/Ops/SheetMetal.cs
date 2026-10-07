@@ -227,9 +227,33 @@ public static class SheetUnfold
                 c = byStart.TryGetValue(c.End, out var next) ? next.FirstOrDefault(x => !used.Contains(x)) : null;
             }
             if (!ReferenceEquals(last.End, first.Start)) throw new UnfoldException("The flat outline does not close.");
+            MergeCollinear(loop, tol);
             if (loop.Verts.Count >= 2) loops.Add(loop);
         }
         return loops;
+    }
+
+    /// <summary>
+    /// Joins straight segments that continue each other (a side of the sheet runs across walls and bends: one edge
+    /// in the flat, named after its first piece).
+    /// </summary>
+    static void MergeCollinear(ProfileLoop loop, double tol)
+    {
+        var v = loop.Verts;
+        for (bool changed = true; changed && v.Count > 3;)
+        {
+            changed = false;
+            for (int i = 0; i < v.Count && v.Count > 3; i++)
+            {
+                var prev = v[(i - 1 + v.Count) % v.Count]; var cur = v[i]; var next = v[(i + 1) % v.Count];
+                if (prev.Arc != null || cur.Arc != null) continue;
+                var d = next.P - prev.P;
+                if (d.Length < 1e-12 || Vec2.Dot(cur.P - prev.P, d) <= 0 || Vec2.Dot(next.P - cur.P, d) <= 0) continue;
+                if (Math.Abs(Vec2.Cross(d, cur.P - prev.P)) / d.Length > Math.Max(tol, 1e-9)) continue;
+                v.RemoveAt(i--);
+                changed = true;
+            }
+        }
     }
 
     static void AddCoedge(ProfileLoop loop, NCoedge c, FaceMap m, double sampleTol, double tol)

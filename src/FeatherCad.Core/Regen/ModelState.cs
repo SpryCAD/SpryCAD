@@ -50,6 +50,8 @@ public sealed class ModelState
     public Dictionary<string, Frame> Planes { get; init; } = new();
     public Dictionary<string, ToolInfo> Tools { get; init; } = new();
     public Dictionary<string, SketchResult> Sketches { get; init; } = new();
+    /// <summary>Flat patterns by body id (made by a Flat Pattern feature, whether the part shows flat or folded).</summary>
+    public Dictionary<string, FlatPattern> Flats { get; init; } = new();
 
     public static ModelState Initial() => new();
 
@@ -59,6 +61,7 @@ public sealed class ModelState
         Planes = Planes,
         Tools = Tools,
         Sketches = Sketches,
+        Flats = Flats,
     };
 
     public ModelState Copy() => new()
@@ -67,6 +70,7 @@ public sealed class ModelState
         Planes = new Dictionary<string, Frame>(Planes),
         Tools = new Dictionary<string, ToolInfo>(Tools),
         Sketches = new Dictionary<string, SketchResult>(Sketches),
+        Flats = new Dictionary<string, FlatPattern>(Flats),
     };
 
     public Box3 Bounds

@@ -141,6 +141,7 @@ public sealed class FeatureTree : UserControl
         MirrorFeature => "mirror",
         PlaneFeature => "plane",
         CombineFeature => "combine",
+        FlatPatternFeature => "flatpattern",
         _ => "part",
     };
 

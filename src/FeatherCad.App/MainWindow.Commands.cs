@@ -120,6 +120,7 @@ public partial class MainWindow
             Item("_Import STEP...", () => _ = ImportDialog(), "Ctrl+I", "open"),
             Item("Export _STEP...", () => _ = Export("step"), null, "export"),
             Item("Export S_TL...", () => _ = Export("stl"), null, "export"),
+            Item("Export Flat Pattern _DXF...", () => _ = ExportDxf(), null, "export"),
             "-",
             Item("Recover Autosave", () => RecoverAutosave()),
             "-",
@@ -179,7 +180,10 @@ public partial class MainWindow
                 Item("_Circular Pattern...", CircularPatternCommand, null, "cpattern"),
                 Item("_Mirror...", MirrorCommand, null, "mirror")),
             Sub("_Reference Geometry",
-                Item("_Plane...", PlaneCommand, null, "plane"))));
+                Item("_Plane...", PlaneCommand, null, "plane")),
+            Sub("Sheet _Metal",
+                Item("_Flat Pattern...", FlatPatternCommand, null, "flatpattern"),
+                Item("Fla_tten", ToggleFlatten, null, "flatten"))));
         MainMenu.Items.Add(Sub("_Tools",
             Item("_Equations...", () => _ = Dialogs.Equations(this), null, "equations"),
             Item("Mea_sure...", MeasureCommand, null, "measure"),
@@ -225,7 +229,7 @@ public partial class MainWindow
 
     void BuildCommandManager()
     {
-        foreach (var name in new[] { "Features", "Sketch", "Evaluate" })
+        foreach (var name in new[] { "Features", "Sketch", "Sheet Metal", "Evaluate" })
         {
             var t = new ToggleButton { Content = name, Classes = { "tab" } };
             t.Click += (_, _) => ShowTab(name);
@@ -284,6 +288,12 @@ public partial class MainWindow
                 Cmd("construction", "Construction\nGeometry", ToggleConstruction);
                 Cmd("normalto", "Normal\nTo", NormalTo);
                 break;
+            case "Sheet Metal":
+                Cmd("flatpattern", "Flat\nPattern", FlatPatternCommand);
+                Cmd("flatten", "Flatten", ToggleFlatten);
+                Sep();
+                Cmd("export", "Export\nDXF", () => _ = ExportDxf());
+                break;
             case "Evaluate":
                 Cmd("measure", "Measure", MeasureCommand);
                 Cmd("mass", "Mass\nProperties", MassPropertiesCommand);
@@ -332,6 +342,9 @@ public partial class MainWindow
         ["Mirror"] = "Mirrors features about a plane or planar face.",
         ["Reference Plane"] = "Creates a plane offset from a plane or planar face.",
         ["Combine"] = "Adds, subtracts or intersects bodies.",
+        ["Flat Pattern"] = "Unfolds the sheet metal part about a fixed face (bend allowance from the K-factor).",
+        ["Flatten"] = "Shows the part flat or folded.",
+        ["Export DXF"] = "Writes the flat pattern outline and bend lines as a DXF file.",
         ["Sketch"] = "Starts a sketch on the selected plane or planar face.",
         ["Smart Dimension"] = "Dimensions sketch entities and model edges/vertices.",
         ["Line"] = "Sketches lines. Snapping adds relations, also to model edges, midpoints and centers.",
@@ -820,6 +833,42 @@ public partial class MainWindow
                 else StlWriter.Write(fs, bodies.Select(b => b.Solid), scale);
             });
             Status($"Exported {path} ({sw.ElapsedMilliseconds} ms)");
+        }
+        catch (Exception ex) { await Dialogs.Message(this, "Export failed", ex.Message); }
+    }
+
+    /// <summary>Writes the flat pattern (of each body a Flat Pattern feature unfolded) as DXF, in millimetres.</summary>
+    async Task ExportDxf()
+    {
+        var flats = Session.Result?.State.Flats;
+        if (flats == null || flats.Count == 0)
+        {
+            await Dialogs.Message(this, "Export DXF", "There is no flat pattern: insert a Flat Pattern (Sheet Metal tab) first.");
+            return;
+        }
+        var baseName = Session.FilePath != null ? Path.GetFileNameWithoutExtension(Session.FilePath) : Session.UntitledName;
+        var f = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+        {
+            Title = "Export Flat Pattern DXF",
+            DefaultExtension = "dxf",
+            SuggestedFileName = baseName + ".dxf",
+            FileTypeChoices = new[] { new FilePickerFileType("DXF") { Patterns = new[] { "*.dxf" } } },
+        });
+        var path = f?.TryGetLocalPath();
+        if (path == null) return;
+        try
+        {
+            var scale = Session.Doc.Units == UnitSystem.IPS ? 25.4 : 1.0;
+            var written = new List<string>();
+            foreach (var (bodyId, flat) in flats)
+            {
+                // one file per body: the chosen name for a single body, the body id added for several
+                var p = flats.Count == 1 ? path : Path.Combine(Path.GetDirectoryName(path)!, $"{Path.GetFileNameWithoutExtension(path)}-{bodyId}.dxf");
+                using var fs = File.Create(p);
+                DxfWriter.Write(fs, flat, scale);
+                written.Add(p);
+            }
+            Status($"Exported {string.Join(", ", written)}");
         }
         catch (Exception ex) { await Dialogs.Message(this, "Export failed", ex.Message); }
     }
