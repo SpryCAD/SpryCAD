@@ -75,6 +75,8 @@ public static class Icons
         ["propsheet"] = ("M5 3h14v18H5z M8 8h2.5 M8 12h2.5 M8 16h2.5", "M13 7h3v2h-3z M13 11h3v2h-3z M13 15h3v2h-3z"),
         // pop out: a window with an arrow leaving it at the corner (the list of open parts to a window of its own)
         ["popout"] = ("M11 4H4v16h16v-7", "M14 3h7v7 M21 3l-9 9"),
+        // dock right: a window with a panel at its right, an arrow going into it (the floating list back to the dock)
+        ["dockright"] = ("M3 4h18v16H3z M15 4v16", "M5 12h7 M9 9l3 3-3 3"),
         ["folder"] =("M3 6h6l2 2h10v11H3z", null),
         ["rollback"] = ("M3 12h18", "M8 8l-4 4 4 4"),
         ["warning"] = ("M12 3L2 21h20z M12 10v5 M12 18v.5", null),
