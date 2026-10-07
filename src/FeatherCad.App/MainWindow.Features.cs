@@ -550,9 +550,18 @@ public partial class MainWindow
         var box = page.Selection(p, "Fixed face", SelFilter.Face, "Face that stays in place (none: the largest planar face)", max: 1, accept: s => s.Planar);
         if (f.FixedFace != null) box.Items.Add(FaceItem(f.FixedFace));
         box.Changed += () => { f.FixedFace = box.Items.FirstOrDefault()?.ToFaceRef(); };
-        page.Number(p, "K-factor", () => f.KFactor, v => f.KFactor = v);
+        var part = Session.Doc.SheetMetal ?? new SheetMetalSettings();
+        var partText = part.Method == BendAllowanceMethod.Din6935 ? "DIN 6935" : $"K-factor {part.KFactor}";
+        var ba = page.Section("Bend Allowance");
+        page.Combo<BendAllowanceMethod?>(ba, "Method", new (BendAllowanceMethod?, string)[]
+        {
+            (null, $"Part setting ({partText})"), (BendAllowanceMethod.KFactor, "K-factor"), (BendAllowanceMethod.Din6935, "DIN 6935"),
+        }, () => f.Method, v => f.Method = v);
+        var k = page.Number(ba, "K-factor", () => f.KFactor ?? "", v => f.KFactor = string.IsNullOrWhiteSpace(v) ? null : v, unit: "", optional: true);
+        k.Watermark = part.KFactor;
+        page.Info(ba, "K-factor: a bend is angle × (inner radius + K × thickness) long in the flat. DIN 6935: K = (0.65 + ½ log₁₀(r/s)) / 2, ½ from r/s = 5; bends under 15° need no allowance. The part setting is under Tools > Options.");
         page.Check(p, "Flatten", () => f.Flatten, v => f.Flatten = v);
-        page.Info(p, "Bends unroll by angle × (inner radius + K-factor × thickness). Any part of uniform thickness whose bends are round unfolds: shelled and filleted parts, imported sheet metal.");
+        page.Info(p, "Any part of uniform thickness whose bends are round unfolds: shelled and filleted parts, imported sheet metal.");
         BeginEdit(f, isNew, page, overlay: false);
     }
 

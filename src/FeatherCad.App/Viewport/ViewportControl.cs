@@ -239,6 +239,7 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         if (AxisPreview is { } ap) DrawAxisPreview(_dyn, ap.dir, ap.color);
         DrawMeasureLines(_dyn);
         if (CenterOfMass is { } com) DrawCenterOfMass(_dyn, com.center, com.axes, com.length);
+        DrawBendLines(_dyn);
         if (Hover is { Kind: SelKind.Vertex, FeatureId: null } hv) DrawPointHover(_dyn, hv);
         if (_nav == Nav.Rotate) DrawPivot(_dyn, _pivot);
         else if (Spinning) DrawPivot(_dyn, _spinPivot);
@@ -412,6 +413,42 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
             }
         for (int i = 0; i < 4 * n; i++)
             g.Line(At(i * Math.PI / (2 * n), r), At((i + 1) * Math.PI / (2 * n), r), dark, top: true);
+    }
+
+    /// <summary>A line of a flattened sheet metal part.</summary>
+    public enum BendLineKind { BendUp, BendDown, Tangent }
+
+    /// <summary>
+    /// The bend lines (centerlines: up bends green, down bends red, dash-dot) and bend tangent lines (gray, dashed) of
+    /// the part shown flat; drawn on both faces of the sheet, just off them so the faces do not hide them.
+    /// </summary>
+    public IReadOnlyList<(Vec3 a, Vec3 b, BendLineKind kind)> BendLines
+    {
+        get => _bendLines;
+        set { _bendLines = value; Redraw(); }
+    }
+    IReadOnlyList<(Vec3 a, Vec3 b, BendLineKind kind)> _bendLines = Array.Empty<(Vec3, Vec3, BendLineKind)>();
+
+    void DrawBendLines(DynamicGeometry g)
+    {
+        var px = Camera.PixelSize;
+        foreach (var (a, b, kind) in _bendLines)
+        {
+            if (kind == BendLineKind.Tangent) { g.Dashed(a, b, new Rgba(0.45f, 0.47f, 0.52f), px * 4); continue; }
+            var c = kind == BendLineKind.BendUp ? new Rgba(0.05f, 0.55f, 0.20f) : new Rgba(0.80f, 0.12f, 0.12f);
+            // dash-dot, like a centerline
+            var len = Vec3.Distance(a, b);
+            if (len < 1e-12) continue;
+            var d = (b - a) / len;
+            double dash = px * 14, gap = px * 4, dot = px * 2;
+            if (len / (dash + dot + 2 * gap) > 2000) { g.Line(a, b, c); continue; }
+            for (double t = 0; t < len; t += dash + dot + 2 * gap)
+            {
+                g.Line(a + d * t, a + d * Math.Min(t + dash, len), c);
+                var t2 = t + dash + gap;
+                if (t2 < len) g.Line(a + d * t2, a + d * Math.Min(t2 + dot, len), c);
+            }
+        }
     }
 
     /// <summary>How a Measure line is drawn.</summary>

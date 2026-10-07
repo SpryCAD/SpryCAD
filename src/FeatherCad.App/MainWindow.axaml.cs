@@ -164,6 +164,32 @@ public partial class MainWindow : Window
     void RebuildTree() => Tree.Rebuild(Session.Doc, Session.Title.TrimEnd(' ', '*'), Session.Result);
 
     /// <summary>Pushes the current rebuild result (or rolled back / preview state) into the viewport.</summary>
+    /// <summary>
+    /// Bend and bend tangent lines of the bodies shown flat (a body is its flat pattern's own solid: no feature after
+    /// the Flat Pattern changed it), on both faces of the sheet.
+    /// </summary>
+    static List<(Vec3 a, Vec3 b, ViewportControl.BendLineKind kind)> BendLinesOf(ModelState state)
+    {
+        var lines = new List<(Vec3, Vec3, ViewportControl.BendLineKind)>();
+        foreach (var body in state.Bodies)
+        {
+            if (!state.Flats.TryGetValue(body.Id, out var flat) || !ReferenceEquals(body.Solid.Native, flat.Body)) continue;
+            var fr = flat.Frame;
+            var lift = Math.Max(flat.Thickness * 0.01, 1e-4); // just off the faces
+            foreach (var z in new[] { lift, -flat.Thickness - lift })
+            {
+                Vec3 P(Vec2 p) => fr.ToWorld(p.X, p.Y, z);
+                foreach (var bend in flat.Bends)
+                {
+                    lines.Add((P(bend.A), P(bend.B), bend.Up ? ViewportControl.BendLineKind.BendUp : ViewportControl.BendLineKind.BendDown));
+                    lines.Add((P(bend.Tangent1.A), P(bend.Tangent1.B), ViewportControl.BendLineKind.Tangent));
+                    lines.Add((P(bend.Tangent2.A), P(bend.Tangent2.B), ViewportControl.BendLineKind.Tangent));
+                }
+            }
+        }
+        return lines;
+    }
+
     public void RefreshScene()
     {
         var doc = Session.Doc;
@@ -190,6 +216,7 @@ public partial class MainWindow : Window
 
         Viewport.Bodies = state.Bodies;
         Viewport.PreviewBodies = preview;
+        Viewport.BendLines = BendLinesOf(state);
 
         // planes
         var b = state.Bounds;

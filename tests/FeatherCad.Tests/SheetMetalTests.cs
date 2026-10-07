@@ -35,6 +35,34 @@ static class SheetMetalTests
             }
             // K = 0.5: the neutral fiber is the middle, the flat has the folded volume (walls 47·2 + 27·2, bend π/4 (3² - 1²))
             t.Near(Volume(SheetUnfold.Unfold(b, 0.5).Body), 40 * (148 + 2 * Math.PI), 1e-6);
+
+            // the tangent lines bound the bend: parallel to its centerline, one allowance apart, the centerline halfway
+            var fb = SheetUnfold.Unfold(b, 0.3).Bends[0];
+            var dir = (fb.B - fb.A) * (1 / Vec2.Distance(fb.A, fb.B));
+            double Offset((Vec2 A, Vec2 B) l) => Vec2.Cross(dir, l.A - fb.A);
+            t.Near(Math.Abs(Offset(fb.Tangent1) - Offset(fb.Tangent2)), Math.PI / 2 * (1 + 0.3 * 2), 1e-9);
+            t.Near(Offset(fb.Tangent1) + Offset(fb.Tangent2), 0, 1e-9);
+            t.Near(fb.Allowance, Math.PI / 2 * (1 + 0.3 * 2), 1e-9);
+
+            // DIN 6935: r/s = 0.5, k = 0.65 + ½ log₁₀ 0.5; the neutral fiber at k s/2
+            var din = SheetUnfold.Unfold(b, new BendRule(BendAllowanceMethod.Din6935));
+            var kd = 0.65 + 0.5 * Math.Log10(0.5);
+            t.Near(Area(din), (74 + Math.PI / 2 * (1 + kd * 2 / 2)) * 40, 1e-6);
+        });
+
+        t.Test("Sheet metal: DIN 6935 bend allowance", () =>
+        {
+            var din = new BendRule(BendAllowanceMethod.Din6935);
+            // k = 1 from r/s = 5 (the middle of the sheet); below, 0.65 + ½ log₁₀(r/s)
+            t.Near(BendRule.DinK(10, 2), 1, 0);
+            t.Near(BendRule.DinK(2, 2), 0.65, 1e-12);
+            t.Near(din.Allowance(Math.PI / 2, 10, 2), Math.PI / 2 * 11, 1e-12);
+            t.Near(din.Allowance(Math.PI / 2, 2, 2), Math.PI / 2 * (2 + 0.65), 1e-12);
+            // an opening angle over 165° (a bend under 15°) needs no compensation: the bend is the outer lengths to the corner
+            var a = 10 * Math.PI / 180;
+            t.Near(din.Allowance(a, 2, 2), 2 * 4 * Math.Tan(a / 2), 1e-12);
+            // a very tight bend: k does not go below 0
+            t.Near(BendRule.DinK(0.01, 2), 0, 0);
         });
 
         t.Test("Sheet metal: U channel with a hole keeps the hole round", () =>
@@ -170,6 +198,19 @@ static class SheetMetalTests
             var size = r.State.Bodies[0].Solid.TightBounds().Size;
             t.Near(Math.Min(size.X, Math.Min(size.Y, size.Z)), 2, 1e-6);
             t.Eq(r.State.Bodies[0].Solid.Native!.Faces.Count, 6);
+            // what the viewport draws the bend lines on: the body shown is the flat's own solid, the lines lie on it
+            var shown = r.State.Flats[r.State.Bodies[0].Id];
+            t.True(ReferenceEquals(r.State.Bodies[0].Solid.Native, shown.Body), "flat shown");
+            var bb = r.State.Bodies[0].Solid.TightBounds();
+            foreach (var bend in shown.Bends)
+                foreach (var p in new[] { bend.A, bend.B, bend.Tangent1.A, bend.Tangent1.B, bend.Tangent2.A, bend.Tangent2.B })
+                {
+                    var w = shown.Frame.ToWorld(p.X, p.Y, 0);
+                    t.True(w.X >= bb.Min.X - 1e-6 && w.X <= bb.Max.X + 1e-6 && w.Y >= bb.Min.Y - 1e-6 && w.Y <= bb.Max.Y + 1e-6
+                        && w.Z >= bb.Min.Z - 1e-6 && w.Z <= bb.Max.Z + 1e-6, $"bend line point {w} off the flat {bb.Min}..{bb.Max}");
+                }
+            t.Near(Vec2.Distance(shown.Bends[0].Tangent1.A, shown.Bends[0].Tangent1.B), 100, 1e-6);
+            t.Near(Vec2.Distance(shown.Bends[0].Tangent1.A, shown.Bends[0].Tangent2.A), Math.PI, 1e-6); // allowance π/2 (1 + 0.5·2)
             t.Near(KernelTests.Vex(r.State.Bodies[0].Solid), 100 * 2 * (128 + 2 * Math.PI), 1e-3);
             t.Near(KernelTests.Vex(r.State.Bodies[0].Solid), folded, 0.2); // K = 0.5 keeps the volume (the folded bends are faceted)
 
@@ -177,6 +218,23 @@ static class SheetMetalTests
             fp.KFactor = "1.5";
             r = regen.Rebuild(doc);
             t.True(!r.Status[fp.Id].Ok, "K-factor 1.5 accepted");
+
+            // the part's setting applies when the Flat Pattern sets none, and changing it alone rebuilds the flat
+            fp.KFactor = null;
+            doc.SheetMetal = new Core.Model.SheetMetalSettings { KFactor = "0.3" };
+            r = regen.Rebuild(doc);
+            t.True(r.Status[fp.Id].Ok, r.Status[fp.Id].Error ?? "");
+            t.Near(KernelTests.Vex(r.State.Bodies[0].Solid), 100 * 2 * (128 + Math.PI * 1.6), 1e-3);
+            doc.SheetMetal.Method = BendAllowanceMethod.Din6935; // r/s = 0.5: k = 0.65 + ½ log₁₀ 0.5
+            r = regen.Rebuild(doc);
+            var kd = 0.65 + 0.5 * Math.Log10(0.5);
+            t.Near(KernelTests.Vex(r.State.Bodies[0].Solid), 100 * 2 * (128 + Math.PI * (1 + kd)), 1e-3);
+            t.Eq(r.State.Flats.Values.First().Rule.Method, BendAllowanceMethod.Din6935);
+            // the feature's own K-factor overrides the part's method too
+            fp.Method = BendAllowanceMethod.KFactor; fp.KFactor = "0.5";
+            r = regen.Rebuild(doc);
+            t.Near(KernelTests.Vex(r.State.Bodies[0].Solid), 100 * 2 * (128 + 2 * Math.PI), 1e-3);
+            doc.SheetMetal = null; fp.Method = null;
 
             // the feature survives a save / load
             fp.KFactor = "0.3";

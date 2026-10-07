@@ -280,6 +280,15 @@ public sealed class ImportFeature : Feature
     public string Sha256 { get; set; } = "";
 }
 
+/// <summary>A part's sheet metal settings: how long its bends are in the flat.</summary>
+public sealed class SheetMetalSettings
+{
+    public BendAllowanceMethod Method { get; set; } = BendAllowanceMethod.KFactor;
+    /// <summary>Where the neutral fiber lies in a bend, as a fraction of the thickness from the inside (0..1).</summary>
+    public string KFactor { get; set; } = "0.5";
+    public SheetMetalSettings Clone() => (SheetMetalSettings)MemberwiseClone();
+}
+
 /// <summary>
 /// The flat pattern of sheet metal bodies (any body of uniform thickness whose bends are cylinders), unfolded about
 /// a fixed face. It is always computed (for DXF export); <see cref="Flatten"/> shows the part flat.
@@ -289,8 +298,10 @@ public sealed class FlatPatternFeature : Feature
     public override string Kind => "Flat-Pattern";
     /// <summary>The planar face that stays in place; none: every body about its largest planar face.</summary>
     public FaceRef? FixedFace { get; set; }
-    /// <summary>Where the neutral fiber lies in a bend, as a fraction of the thickness from the inside (0..1).</summary>
-    public string KFactor { get; set; } = "0.5";
+    /// <summary>Overrides the part's bend allowance method (null: the part's, <see cref="CadDocument.SheetMetal"/>).</summary>
+    public BendAllowanceMethod? Method { get; set; }
+    /// <summary>Overrides the part's K-factor (null or blank: the part's).</summary>
+    public string? KFactor { get; set; }
     public bool Flatten { get; set; }
 }
 

@@ -37,6 +37,8 @@ public sealed class Regenerator
         {
             var f = doc.Features[i];
             key = Hash(key, JsonSerializer.Serialize(f, typeof(Feature), Serialization.Options));
+            // a flat pattern also depends on the part's sheet metal settings
+            if (f is FlatPatternFeature) key = Hash(key, JsonSerializer.Serialize(doc.SheetMetal, Serialization.Options));
             if (i < _cache.Count && _cache[i].Key == key)
             {
                 state = _cache[i].State;
@@ -85,6 +87,20 @@ public sealed class Regenerator
     }
 
     public void Invalidate() => _cache.Clear();
+
+    /// <summary>
+    /// The bend rule of a flat pattern: its own method and K-factor where it sets them, else the part's
+    /// (<see cref="CadDocument.SheetMetal"/>, K-factor 0.5 when unset).
+    /// </summary>
+    public static BendRule RuleOf(CadDocument doc, FlatPatternFeature fp, Func<string?, string, double> eval)
+    {
+        var part = doc.SheetMetal ?? new SheetMetalSettings();
+        var method = fp.Method ?? part.Method;
+        var kExpr = string.IsNullOrWhiteSpace(fp.KFactor) ? part.KFactor : fp.KFactor;
+        var k = method == BendAllowanceMethod.KFactor ? eval(kExpr, "K-factor") : 0.5;
+        if (k < 0 || k > 1) throw new FeatureException("The K-factor must be between 0 and 1.");
+        return new BendRule(method, k);
+    }
 
     /// <summary>
     /// The transforms of a linear or circular pattern's instances 2, 3, … (the seed is instance 1), evaluated
@@ -603,8 +619,7 @@ public sealed class Regenerator
 
         void DoFlatPattern(FlatPatternFeature fp)
         {
-            var k = Num(fp.KFactor, "K-factor");
-            if (k < 0 || k > 1) throw new FeatureException("The K-factor must be between 0 and 1.");
+            var rule = RuleOf(doc, fp, Num);
             if (State.Bodies.Count == 0) throw new FeatureException("There is no body to flatten.");
             var targets = new List<(Body body, Kernel.Native.NFace? face)>();
             if (fp.FixedFace != null)
@@ -621,7 +636,7 @@ public sealed class Regenerator
             {
                 var native = body.Solid.Native ?? throw new FeatureException("The body has no exact geometry to unfold.");
                 FlatPattern flat;
-                try { flat = SheetUnfold.Unfold(native, k, face, f.Id); }
+                try { flat = SheetUnfold.Unfold(native, rule, face, f.Id); }
                 catch (UnfoldException ex) { throw new FeatureException(targets.Count > 1 ? $"{body.Id}: {ex.Message}" : ex.Message); }
                 State.Flats[body.Id] = flat;
                 if (fp.Flatten) bodies[bodies.IndexOf(body)] = new Body { Id = body.Id, Solid = Kernel.Native.NTess.ToSolid(flat.Body) };

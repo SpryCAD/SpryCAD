@@ -182,6 +182,11 @@ public static class Dialogs
         };
         var container = new CheckBox { Content = "Always save parts as containers (with a preview image)", IsChecked = Session.UserSettings.SaveContainer };
         var color = new TextBox { Text = string.Join(", ", s.Doc.Color.Select(c => ((int)(c * 255)).ToString())) };
+        var sheet = s.Doc.SheetMetal ?? new SheetMetalSettings();
+        var bendMethod = new ComboBox { ItemsSource = new[] { "K-factor", "DIN 6935" }, SelectedIndex = sheet.Method == BendAllowanceMethod.Din6935 ? 1 : 0, HorizontalAlignment = HorizontalAlignment.Stretch };
+        var kFactor = new TextBox { Text = sheet.KFactor };
+        bendMethod.SelectionChanged += (_, _) => kFactor.IsEnabled = bendMethod.SelectedIndex == 0;
+        kFactor.IsEnabled = bendMethod.SelectedIndex == 0;
         var ok = new Button { Content = "OK", IsDefault = true };
         var cancel = new Button { Content = "Cancel", IsCancel = true };
         var sp = new StackPanel { Spacing = 8 };
@@ -190,6 +195,14 @@ public static class Dialogs
         sp.Children.Add(new TextBlock { Text = "In IPS, values are inches; STEP/STL exports are converted to millimetres.", FontSize = 11, Foreground = Brushes.DimGray, TextWrapping = TextWrapping.Wrap });
         sp.Children.Add(new TextBlock { Text = "Part color (R, G, B 0-255)", FontWeight = FontWeight.SemiBold });
         sp.Children.Add(color);
+        sp.Children.Add(new TextBlock { Text = "Sheet metal bend allowance", FontWeight = FontWeight.SemiBold });
+        var bendRow = new Grid { ColumnDefinitions = new ColumnDefinitions("*,8,Auto,4,70") };
+        bendRow.Children.Add(bendMethod);
+        var kLabel = new TextBlock { Text = "K-factor", VerticalAlignment = VerticalAlignment.Center };
+        Grid.SetColumn(kLabel, 2); bendRow.Children.Add(kLabel);
+        Grid.SetColumn(kFactor, 4); bendRow.Children.Add(kFactor);
+        sp.Children.Add(bendRow);
+        sp.Children.Add(new TextBlock { Text = "For this part's flat patterns (a Flat Pattern can override it). K-factor 0 to 1, or an expression.", FontSize = 11, Foreground = Brushes.DimGray, TextWrapping = TextWrapping.Wrap });
         sp.Children.Add(new TextBlock { Text = "View", FontWeight = FontWeight.SemiBold });
         sp.Children.Add(wheel); sp.Children.Add(persp);
         sp.Children.Add(pivot);
@@ -212,8 +225,14 @@ public static class Dialogs
             var newUnits = units.SelectedIndex == 1 ? UnitSystem.IPS : UnitSystem.MMGS;
             var parts = (color.Text ?? "").Split(',').Select(p => double.TryParse(p.Trim(), out var v) ? Math.Clamp(v / 255, 0, 1) : -1).ToArray();
             var newColor = parts.Length == 3 && parts.All(p => p >= 0) ? parts : s.Doc.Color;
-            if (newUnits != s.Doc.Units || !newColor.SequenceEqual(s.Doc.Color))
-                s.Change(() => { s.Doc.Units = newUnits; s.Doc.Color = newColor; });
+            // sheet metal: kept as typed when it is a valid K-factor (0..1, an expression of the part's variables)
+            var newSheet = new SheetMetalSettings { Method = bendMethod.SelectedIndex == 1 ? BendAllowanceMethod.Din6935 : BendAllowanceMethod.KFactor, KFactor = sheet.KFactor };
+            var kText = (kFactor.Text ?? "").Trim();
+            if (Expr.TryEval(kText, s.Lookup, out var kv, out _) && kv >= 0 && kv <= 1) newSheet.KFactor = kText;
+            var oldSheet = s.Doc.SheetMetal ?? new SheetMetalSettings();
+            bool sheetChanged = newSheet.Method != oldSheet.Method || newSheet.KFactor != oldSheet.KFactor;
+            if (newUnits != s.Doc.Units || !newColor.SequenceEqual(s.Doc.Color) || sheetChanged)
+                s.Change(() => { s.Doc.Units = newUnits; s.Doc.Color = newColor; if (sheetChanged) s.Doc.SheetMetal = newSheet; });
             owner.Viewport.Redraw();
             w.Close();
         };

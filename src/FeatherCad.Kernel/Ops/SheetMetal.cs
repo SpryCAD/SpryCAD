@@ -2,9 +2,42 @@ using FeatherCad.Kernel.Native;
 
 namespace FeatherCad.Kernel;
 
-/// <summary>A bend of a flat pattern: its centerline in the flat, the bend angle (radians) and inner radius.</summary>
+/// <summary>
+/// A bend of a flat pattern: its centerline in the flat, the bend angle (radians), inner radius and length in the
+/// flat (the bend allowance), and its two tangent lines (where the bend meets the walls).
+/// </summary>
 /// <param name="Up">The bend folds toward the flat's normal (the unfolded side is the bend's inside).</param>
-public sealed record FlatBend(Vec2 A, Vec2 B, double Angle, double InnerRadius, bool Up);
+public sealed record FlatBend(Vec2 A, Vec2 B, double Angle, double InnerRadius, bool Up, double Allowance,
+    (Vec2 A, Vec2 B) Tangent1, (Vec2 A, Vec2 B) Tangent2);
+
+public enum BendAllowanceMethod
+{
+    /// <summary>The neutral fiber at K × thickness from the inside of the bend.</summary>
+    KFactor,
+    /// <summary>DIN 6935: k = 0.65 + ½ log₁₀(r/s) (1 from r/s = 5), neutral fiber at k × s/2; bends under 15° need none.</summary>
+    Din6935,
+}
+
+/// <summary>How long a bend is in the flat.</summary>
+public sealed record BendRule(BendAllowanceMethod Method, double K = 0.5)
+{
+    public static readonly BendRule Default = new(BendAllowanceMethod.KFactor, 0.5);
+
+    /// <summary>The bend allowance: the length in the flat of a bend of <paramref name="angle"/> (radians), inner radius r, thickness t.</summary>
+    public double Allowance(double angle, double r, double t)
+    {
+        if (Method == BendAllowanceMethod.KFactor) return angle * (r + K * t);
+        // DIN 6935: the compensation v is 0 for opening angles over 165°: the flat is the outer lengths to the
+        // sharp corner, 2 (r + s) tan(θ/2) for the bend
+        if (angle < 15 * Math.PI / 180) return 2 * (r + t) * Math.Tan(angle / 2);
+        return angle * (r + DinK(r, t) * t / 2);
+    }
+
+    /// <summary>DIN 6935's correction factor k (relative to half the thickness).</summary>
+    public static double DinK(double r, double t) => r >= 5 * t ? 1 : Math.Clamp(0.65 + 0.5 * Math.Log10(r / t), 0, 1);
+
+    public override string ToString() => Method == BendAllowanceMethod.KFactor ? $"K-factor {K:0.###}" : "DIN 6935";
+}
 
 /// <summary>
 /// The flat pattern of a sheet metal body: the outline in the plane of the fixed face (2D in <see cref="Frame"/>,
@@ -13,7 +46,7 @@ public sealed record FlatBend(Vec2 A, Vec2 B, double Angle, double InnerRadius, 
 public sealed class FlatPattern
 {
     public required double Thickness { get; init; }
-    public required double KFactor { get; init; }
+    public required BendRule Rule { get; init; }
     public required Frame Frame { get; init; }
     public required List<ProfileRegion> Regions { get; init; }
     public required List<FlatBend> Bends { get; init; }
@@ -31,10 +64,14 @@ public sealed class UnfoldException(string message) : Exception(message);
 /// </summary>
 public static class SheetUnfold
 {
-    /// <summary>Unfolds <paramref name="body"/> about <paramref name="fixedFace"/> (a planar face; the largest one when null).</summary>
+    /// <summary>Unfolds with a K-factor (see <see cref="Unfold(NBody, BendRule, NFace?, string)"/>).</summary>
     public static FlatPattern Unfold(NBody body, double kFactor = 0.5, NFace? fixedFace = null, string prefix = "Flat")
+        => Unfold(body, new BendRule(BendAllowanceMethod.KFactor, kFactor), fixedFace, prefix);
+
+    /// <summary>Unfolds <paramref name="body"/> about <paramref name="fixedFace"/> (a planar face; the largest one when null).</summary>
+    public static FlatPattern Unfold(NBody body, BendRule rule, NFace? fixedFace = null, string prefix = "Flat")
     {
-        if (kFactor < 0 || kFactor > 1) throw new UnfoldException("The K-factor must be between 0 and 1.");
+        if (rule.Method == BendAllowanceMethod.KFactor && (rule.K < 0 || rule.K > 1)) throw new UnfoldException("The K-factor must be between 0 and 1.");
         body.Link();
         var scale = Math.Max(body.Bounds.Diagonal, 1e-9);
         var tol = 1e-7 * scale;
@@ -65,7 +102,7 @@ public static class SheetUnfold
                 if (Vec3.Dot(Outward(f, mid), Outward(g, mid)) < 1 - 1e-6) continue; // a sharp edge: the side of the sheet
                 // a bend split in pieces (e.g. by a hole) and reached again from its other side is still one bend
                 maps[g] = g.Surface.Kind == SurfaceKind.Cylinder && maps.Values.OfType<BendMap>().FirstOrDefault(b => Coaxial(g.Surface, b, tol)) is { } same
-                    ? same : Continue(f, m, g, c.Edge, t, kFactor, tol);
+                    ? same : Continue(f, m, g, c.Edge, t, rule, tol);
                 queue.Enqueue(g);
             }
         }
@@ -81,7 +118,7 @@ public static class SheetUnfold
 
         var bends = maps.Values.OfType<BendMap>().Distinct()
             .Select(b => Clip(b.Line(maps.Where(kv => kv.Value == b).Select(kv => kv.Key)), loops)).ToList();
-        return new FlatPattern { Thickness = t, KFactor = kFactor, Frame = frame, Regions = regions, Bends = bends, Body = flat };
+        return new FlatPattern { Thickness = t, Rule = rule, Frame = frame, Regions = regions, Bends = bends, Body = flat };
     }
 
     // ---- maps from the folded faces to the flat ----
@@ -130,13 +167,23 @@ public static class SheetUnfold
                         var h = Vec3.Dot(p - C, Axis);
                         h0 = Math.Min(h0, h); h1 = Math.Max(h1, h);
                     }
-            var s = w2 * (th * neutral / 2);
-            return new FlatBend(p2 + a2 * h0 + s, p2 + a2 * h1 + s, th, innerRadius, up);
+            (Vec2, Vec2) At(double s) => (p2 + a2 * h0 + w2 * s, p2 + a2 * h1 + w2 * s);
+            var (a, b) = At(th * neutral / 2);
+            return new FlatBend(a, b, th, innerRadius, up, th * neutral, At(0), At(th * neutral));
+        }
+
+        /// <summary>The largest angle of the face's boundary from the entry line: the bend angle.</summary>
+        public double Angle(NFace f)
+        {
+            double th = 0;
+            foreach (var co in f.Coedges)
+                foreach (var p in co.Edge.Samples(1e-3)) th = Math.Max(th, Theta(p));
+            return th;
         }
     }
 
     /// <summary>The map of face g, tangent to the mapped face f across edge e.</summary>
-    static FaceMap Continue(NFace f, FaceMap m, NFace g, NEdge e, double t, double k, double tol)
+    static FaceMap Continue(NFace f, FaceMap m, NFace g, NEdge e, double t, BendRule rule, double tol)
     {
         var p = e.V0.P;
         var gs = g.Surface;
@@ -184,7 +231,11 @@ public static class SheetUnfold
         var convex = Vec3.Dot(Outward(g, p), r0) > 0;
         var inner = convex ? radius - t : radius;
         if (inner < -tol) throw new UnfoldException($"Bend {g.Tag.Name} is sharper than the sheet is thick.");
-        return new BendMap(foot, axis, r0, d3, radius, inner, inner + k * t, !convex, p2, a2, d2);
+        inner = Math.Max(inner, 0);
+        // the neutral radius makes the bend as long as the rule says (it depends on the angle for DIN 6935)
+        var angle = new BendMap(foot, axis, r0, d3, radius, inner, 1, !convex, p2, a2, d2).Angle(g);
+        var neutral = angle > 1e-9 ? rule.Allowance(angle, inner, t) / angle : inner + t / 2;
+        return new BendMap(foot, axis, r0, d3, radius, inner, neutral, !convex, p2, a2, d2);
     }
 
     static bool Coaxial(NSurface s, BendMap b, double tol)
@@ -235,11 +286,18 @@ public static class SheetUnfold
     }
 
     /// <summary>
-    /// The bend line where there is material: from the first to the last crossing of the outline within the bend's
-    /// width (reliefs and notches at the ends of a bend shorten it, as in other CAD systems' flat patterns).
+    /// The bend's lines where there is material: from the first to the last crossing of the outline within the
+    /// bend's width (reliefs and notches at the ends of a bend shorten them, as in other CAD systems' flat patterns).
     /// </summary>
     static FlatBend Clip(FlatBend b, List<ProfileLoop> loops)
     {
+        var (a, c) = Clip((b.A, b.B), loops);
+        return b with { A = a, B = c, Tangent1 = Clip(b.Tangent1, loops), Tangent2 = Clip(b.Tangent2, loops) };
+    }
+
+    static (Vec2 A, Vec2 B) Clip((Vec2 A, Vec2 B) seg, List<ProfileLoop> loops)
+    {
+        var b = seg;
         var d = b.B - b.A; var len = d.Length;
         if (len < 1e-12) return b;
         var u = d * (1 / len);
@@ -268,7 +326,7 @@ public static class SheetUnfold
             double a = Math.Max(ts[i], 0), c = Math.Min(ts[i + 1], len);
             if (c - a > 1e-9) { lo = Math.Min(lo, a); hi = Math.Max(hi, c); }
         }
-        return lo < hi ? b with { A = b.A + u * lo, B = b.A + u * hi } : b;
+        return lo < hi ? (b.A + u * lo, b.A + u * hi) : b;
     }
 
     /// <summary>

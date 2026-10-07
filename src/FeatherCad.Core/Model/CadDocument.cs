@@ -34,6 +34,8 @@ public sealed class CadDocument
     /// <summary>Density in kg/m³ (null: steel, 7850).</summary>
     public double? Density { get; set; }
     public const double DefaultDensity = 7850;
+    /// <summary>How bends unfold in this part (null: K-factor 0.5); a Flat Pattern may override it.</summary>
+    public SheetMetalSettings? SheetMetal { get; set; }
     /// <summary>
     /// Index of the embedded files (name, size, SHA-256), written by <see cref="Save"/>; null when there are none.
     /// It keeps model.json self-describing (and a changed attachment visible in a diff).
