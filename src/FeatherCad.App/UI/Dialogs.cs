@@ -13,15 +13,14 @@ public static class Dialogs
 {
     static Window MakeWindow(string title, Control content, double width = 420)
     {
-        return new Window
+        return new ToolWindow
         {
             Title = title,
             Width = width,
             SizeToContent = SizeToContent.Height,
             CanResize = false,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            Content = new Border { Padding = new Thickness(14), Child = content },
-            ShowInTaskbar = false,
+            Body = new Border { Padding = new Thickness(14), Child = content },
         };
     }
 

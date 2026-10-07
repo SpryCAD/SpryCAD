@@ -120,12 +120,12 @@ public partial class MainWindow
         content.Children.Add(materialRow);
         content.Children.Add(reportBox);
         content.Children.Add(buttons);
-        var w = new Window
+        var w = new UI.ToolWindow
         {
             Title = "Mass Properties - " + Session.Title.TrimEnd(' ', '*'),
             Width = 640, SizeToContent = SizeToContent.Height, CanResize = false,
-            WindowStartupLocation = WindowStartupLocation.CenterOwner, ShowInTaskbar = false,
-            Content = new Border { Padding = new Thickness(12), Child = content },
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Body = new Border { Padding = new Thickness(12), Child = content },
         };
         close.Click += (_, _) => w.Close();
         w.Closed += (_, _) => EndMassProperties();
@@ -171,11 +171,11 @@ public partial class MainWindow
         var sp = new StackPanel { Spacing = 10 };
         sp.Children.Add(new TextBlock { Text = "Report", FontWeight = FontWeight.SemiBold });
         sp.Children.Add(row); sp.Children.Add(sci); sp.Children.Add(buttons);
-        var w = new Window
+        var w = new UI.ToolWindow
         {
             Title = "Mass Properties Options", Width = 300, SizeToContent = SizeToContent.Height, CanResize = false,
-            WindowStartupLocation = WindowStartupLocation.CenterOwner, ShowInTaskbar = false,
-            Content = new Border { Padding = new Thickness(14), Child = sp },
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Body = new Border { Padding = new Thickness(14), Child = sp },
         };
         var changed = false;
         ok.Click += (_, _) =>
