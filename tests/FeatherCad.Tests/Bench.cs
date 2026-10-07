@@ -177,6 +177,9 @@ static class Bench
         cases.Add(("old NS=8", old, d => d.Equations.First(e => e.Name == "NS").Expr = "8"));
         foreach (var a in new[] { "226", "236", "250", "300" })
             cases.Add(($"old spokes {a}", old, d => d.Features.OfType<CircularPatternFeature>().First(f => f.Name == "Spokes").Angle = a));
+        // a local working part, when present (not in the repository)
+        var local = Path.Combine(root, "samples", "demos", "spoked-handwheel-FilletAfter.fcad");
+        if (File.Exists(local)) cases.Add(("fillet after", local, _ => { }));
         foreach (var (name, file, edit) in cases)
         {
             var doc = CadDocument.Load(file);

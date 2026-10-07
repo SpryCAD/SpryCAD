@@ -15,7 +15,11 @@ public sealed class NBoolean
     static readonly object _traceLock = new();
     static void T(string m) { if (Trace != null) lock (_traceLock) Trace?.Invoke(m); }
     bool RollsOn(NSurface blend, NSurface s) => blend.Spine is { } sp
-        && (sp.SupportA is { } a && (ReferenceEquals(a, s) || a.CoincidentWith(s, _tol * 10)) || sp.SupportB is { } b && (ReferenceEquals(b, s) || b.CoincidentWith(s, _tol * 10)));
+        && (sp.SupportA is { } a && Same(a, s) || sp.SupportB is { } b && Same(b, s));
+
+    // the same surface, or a piece of the same fillet (a blend rolling over a fillet rolls on that fillet merged into
+    // one pipe, the body has its pieces)
+    bool Same(NSurface support, NSurface s) => ReferenceEquals(support, s) || support.CoincidentWith(s, _tol * 10) || Continues(support, s);
 
     /// <summary>
     /// Two pieces of one fillet (pipes of the same radius whose spines join at a node with the same tangent): they
@@ -33,6 +37,35 @@ public sealed class NBoolean
 
     /// <summary>How far a fitted curve may be from the exact one (0 for exact curves).</summary>
     static double FitTol(NCurve c) => c is NSpline ns ? ns.FitTol : 0;
+
+    /// <summary>
+    /// Two pipes that cannot meet: every point of a pipe is its radius from its spine, so spines further apart than
+    /// the two radii (with a margin for the spine polylines' chord error) keep the surfaces apart. Proving that by
+    /// tracing samples the whole overlap of the faces' boxes.
+    /// </summary>
+    static bool PipesApart(NSurface a, NSurface b)
+    {
+        if (a.Spine is not { } sa || b.Spine is not { } sb) return false;
+        double Chord(PipeSpine sp)
+        {
+            // a Hermite segment strays from its chord by at most about h^2 / (8 R) (R: smallest curvature radius)
+            double worst = 0;
+            for (int i = 1; i < sp.P.Length; i++) worst = Math.Max(worst, Vec3.Distance(sp.P[i - 1], sp.P[i]));
+            var r = double.IsFinite(sp.MinCurvatureRadius) ? sp.MinCurvatureRadius : 1e300;
+            return Math.Min(worst * worst / (8 * r), worst);
+        }
+        var margin = 2 * (Chord(sa) + Chord(sb)) + 1e-6 * (a.R + b.R + 1);
+        var need = a.R + b.R + margin;
+        if (!sa.Box.Overlaps(sb.Box, need)) return true;
+        for (int i = 1; i < sa.P.Length; i++)
+        {
+            var bi = Box3.Empty; bi.Add(sa.P[i - 1]); bi.Add(sa.P[i]);
+            if (!bi.Overlaps(sb.Box, need)) continue;
+            for (int j = 1; j < sb.P.Length; j++)
+                if (SegSeg(sa.P[i - 1], sa.P[i], sb.P[j - 1], sb.P[j]).d <= need) return false;
+        }
+        return true;
+    }
 
     static int Id(object o) => System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(o) % 100000;
     static string Dump(IEnumerable<NFace> fs) => string.Join(", ", fs.GroupBy(f => f.Tag.Name).Select(g => $"{g.Key}x{g.Count()}[{string.Join("/", g.Select(f => f.Loops.Count))}]"));
@@ -196,7 +229,7 @@ public sealed class NBoolean
                 // a blend and the surface its ball rolls on touch along the contact curve, which is an edge of the
                 // blend face (imprinted as an edge lying on the other face): tracing that tangency is slow and noisy
                 if (RollsOn(pairs[i].fa.Surface, pairs[i].fb.Surface) || RollsOn(pairs[i].fb.Surface, pairs[i].fa.Surface)
-                    || Continues(pairs[i].fa.Surface, pairs[i].fb.Surface)) { pairCurves[i] = new(); continue; }
+                    || Continues(pairs[i].fa.Surface, pairs[i].fb.Surface) || PipesApart(pairs[i].fa.Surface, pairs[i].fb.Surface)) { pairCurves[i] = new(); continue; }
                 var an = NIntersect.Analytic(pairs[i].fa.Surface, pairs[i].fb.Surface, _tol * 10);
                 if (an != null) pairCurves[i] = an; else toTrace.Add(i);
             }
