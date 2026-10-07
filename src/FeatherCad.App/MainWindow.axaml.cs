@@ -135,7 +135,7 @@ public partial class MainWindow : Window
         UpdateProblemEdges();
         if (_firstRebuild) { _firstRebuild = false; }
         if (_tab.FitAfterLoad is { } fitRev && Session.ResultRevision >= fitRev && !Session.PreviewActive)
-        { _tab.FitAfterLoad = null; Viewport.StandardView("Trimetric", fit: true); }
+        { _tab.FitAfterLoad = null; Viewport.StandardView("Trimetric", fit: true, animate: false); } // a part just opened or shown: at once
     }
 
     /// <summary>

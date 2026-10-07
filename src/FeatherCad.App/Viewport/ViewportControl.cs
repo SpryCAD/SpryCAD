@@ -712,20 +712,37 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
     }
 
     /// <summary>Turns to a named standard view, zoomed to fit (as SolidWorks' standard views).</summary>
-    public void StandardView(string name, bool fit = true) => OrientTo(Camera.StandardViews[name], fit);
+    public void StandardView(string name, bool fit = true, bool animate = true) => OrientTo(Camera.StandardViews[name], fit, animate);
 
     /// <summary>Turns the view to an orientation, optionally zooming to fit the model as seen from there.</summary>
-    void OrientTo(Quaternion q, bool fit)
+    void OrientTo(Quaternion q, bool fit, bool animate = true)
     {
+        Vector3? target = null; float? halfHeight = null;
         if (fit)
         {
             var tmp = new Camera { Width = Camera.Width, Height = Camera.Height, Rotation = q };
             var b = SceneBounds();
             if (b.IsEmpty) { b.Add(new Vec3(-50, -50, -50)); b.Add(new Vec3(50, 50, 50)); }
             tmp.Fit(b);
-            AnimateTo(q, tmp.Target, tmp.HalfHeight);
+            (target, halfHeight) = (tmp.Target, tmp.HalfHeight);
         }
-        else AnimateTo(q);
+        if (animate) { AnimateTo(q, target, halfHeight); return; }
+        // at once (e.g. a part just switched to): no animation from the previous part's view
+        _animating = false;
+        Camera.Rotation = q;
+        if (target is { } t) Camera.Target = t;
+        if (halfHeight is { } h) Camera.HalfHeight = h;
+        Redraw();
+    }
+
+    /// <summary>
+    /// The view as it is meant to be: where a running animation is going (the camera is still on its way), else the
+    /// camera's. Stops the animation (the view is about to be replaced, e.g. by another part's).
+    /// </summary>
+    public (Quaternion rotation, Vector3 target, float halfHeight) SettleView()
+    {
+        if (_animating) { _animating = false; return (_animToQ, _animToT, _animToH); }
+        return (Camera.Rotation, Camera.Target, Camera.HalfHeight);
     }
 
     /// <summary>

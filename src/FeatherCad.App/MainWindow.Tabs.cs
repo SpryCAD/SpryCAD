@@ -483,7 +483,11 @@ public partial class MainWindow
         _viewSelector.Close();
         StopArrowSpin();
         var cam = Viewport.Camera;
-        _tab.View = (cam.Rotation, cam.Target, cam.HalfHeight);
+        // the view is the part's only once it was fitted to it: left before its model arrived (flipping through
+        // parts quickly), it is still to be fitted when shown again. Left while the view animates, the view it was
+        // going to (and the animation stops: it must not carry on into the next part's view)
+        var settled = Viewport.SettleView();
+        _tab.View = _tab.FitAfterLoad == null ? settled : null;
         Selection.Clear();
         Viewport.ClearPivot();
 
@@ -503,7 +507,12 @@ public partial class MainWindow
         OnDocumentChanged();
         OnRebuilt();
         if (t.View is { } v) { cam.Rotation = v.rotation; cam.Target = v.target; cam.HalfHeight = v.halfHeight; Viewport.Redraw(); }
-        else if (Session.Result != null) Viewport.StandardView("Trimetric", fit: true);
+        else if (Session.Result != null && (t.FitAfterLoad == null || Session.ResultRevision >= t.FitAfterLoad))
+        {
+            // built meanwhile (in the background): fitted now, at once, and not again at the next rebuild
+            t.FitAfterLoad = null;
+            Viewport.StandardView("Trimetric", fit: true, animate: false);
+        }
         else t.FitAfterLoad = t.Session.RequestedRevision;
         if (loadError != null)
         {
