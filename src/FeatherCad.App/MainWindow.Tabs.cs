@@ -88,6 +88,7 @@ public partial class MainWindow
         PartsButton.Click += (_, _) => ShowPartsList();
         ToolTip.SetTip(PartsButton, "All open parts (Ctrl+E), docked at the right or in a window: arrow keys switch between them");
         DocTabs.HiddenCountChanged += () => Avalonia.Threading.Dispatcher.UIThread.Post(UpdatePartsButton);
+        PartsDockFloat.Content = UI.Icons.Make("popout", 14);
         PartsDockFloat.Click += (_, _) => { UserSettings.PartsDocked = false; UserSettings.Save(); MovePartsList(docked: false); };
         PartsDockClose.Click += (_, _) => HidePartsList();
         PartsDockSplitter.DragCompleted += (_, _) => { UserSettings.PartsDockWidth = (int)MainGrid.ColumnDefinitions[4].ActualWidth; UserSettings.Save(); };
@@ -134,6 +135,17 @@ public partial class MainWindow
     {
         if (_partsList != null) return _partsList;
         var list = new ListBox { Background = Brushes.White, BorderThickness = new Thickness(0) };
+        // right-click: close this part, the others, or all (the part under the mouse is selected, so shown, first)
+        PartTab? Picked() => list.SelectedItem is ListBoxItem { Tag: PartTab t } ? t : null;
+        var closeOne = new MenuItem { Header = "_Close", InputGesture = new KeyGesture(Key.Delete) };
+        closeOne.Click += (_, _) => { if (Picked() is { } t) ClosePartFromList(t); };
+        var closeOthers = new MenuItem { Header = "Close _Others" };
+        closeOthers.Click += async (_, _) => { if (Picked() is { } t) { await CloseTabs(_parts.Where(p => p != t).ToList()); FocusPartsList(); } };
+        var closeAll = new MenuItem { Header = "Close _All" };
+        closeAll.Click += async (_, _) => { await CloseTabs(_parts.ToList()); FocusPartsList(); };
+        var menu = new ContextMenu { Items = { closeOne, closeOthers, new Separator(), closeAll } };
+        menu.Opening += (_, _) => { closeOne.IsEnabled = Picked() != null; closeOthers.IsEnabled = Picked() != null && _parts.Count > 1; };
+        list.ContextMenu = menu;
         list.SelectionChanged += async (_, _) =>
         {
             if (_partsSyncing || list.SelectedItem is not ListBoxItem { Tag: PartTab t } || t == _tab) return;
@@ -430,6 +442,20 @@ public partial class MainWindow
         if (_parts.Count < 2) return;
         var i = _parts.IndexOf(_tab);
         await SwitchTo(_parts[((i + step) % _parts.Count + _parts.Count) % _parts.Count]);
+    }
+
+    /// <summary>
+    /// Closes several tabs: those with nothing to save at once (without showing each), then the others one by one,
+    /// each shown while its changes are asked about; Cancel stops there (the rest stay open). False if cancelled.
+    /// </summary>
+    async Task<bool> CloseTabs(IReadOnlyCollection<PartTab> tabs)
+    {
+        // nothing to ask: removed straight away (the active one goes last, through CloseTab, as it is shown)
+        foreach (var t in tabs.Where(t => t != _tab && !t.Session.Dirty).ToList()) RemoveTab(t);
+        foreach (var t in tabs.Where(t => _parts.Contains(t) && t != _tab).ToList())
+            if (!await CloseTab(t)) return false;
+        if (tabs.Contains(_tab)) return await CloseTab(_tab);
+        return true;
     }
 
     /// <summary>

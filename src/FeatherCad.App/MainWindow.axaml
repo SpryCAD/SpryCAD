@@ -88,8 +88,8 @@
             <DockPanel Margin="8,2,2,2">
               <Button x:Name="PartsDockClose" DockPanel.Dock="Right" Content="✕" FontSize="11" Padding="6,1" MinHeight="0"
                       Background="Transparent" BorderThickness="0" ToolTip.Tip="Hide the list (Ctrl+E shows it)" />
-              <Button x:Name="PartsDockFloat" DockPanel.Dock="Right" Content="Float" FontSize="11" Padding="6,1" MinHeight="0"
-                      Background="Transparent" BorderThickness="0" ToolTip.Tip="Show the list in a window of its own" />
+              <Button x:Name="PartsDockFloat" DockPanel.Dock="Right" Padding="4,2" MinHeight="0" VerticalAlignment="Center"
+                      Background="Transparent" BorderThickness="0" ToolTip.Tip="Pop out: the list in a window of its own" />
               <TextBlock Text="Open Parts" FontWeight="SemiBold" FontSize="12" VerticalAlignment="Center" />
             </DockPanel>
           </Border>

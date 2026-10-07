@@ -73,7 +73,9 @@ public static class Icons
         ["part"] = ("M3 8l9-5 9 5v8l-9 5-9-5z M3 8l9 5 9-5 M12 13v8", null),
         // PropertyManager: a settings sheet, labels and their value fields
         ["propsheet"] = ("M5 3h14v18H5z M8 8h2.5 M8 12h2.5 M8 16h2.5", "M13 7h3v2h-3z M13 11h3v2h-3z M13 15h3v2h-3z"),
-        ["folder"] = ("M3 6h6l2 2h10v11H3z", null),
+        // pop out: a window with an arrow leaving it at the corner (the list of open parts to a window of its own)
+        ["popout"] = ("M11 4H4v16h16v-7", "M14 3h7v7 M21 3l-9 9"),
+        ["folder"] =("M3 6h6l2 2h10v11H3z", null),
         ["rollback"] = ("M3 12h18", "M8 8l-4 4 4 4"),
         ["warning"] = ("M12 3L2 21h20z M12 10v5 M12 18v.5", null),
     };
