@@ -236,16 +236,20 @@ public sealed class NBoolean
         using (Prof.Time("sec.trace"))
         {
             var traceTol = _sampleTol * 50;
-            // sample the traced faces' edges first, single-threaded: parallel tracing then only reads the caches
-            foreach (var i in toTrace) { NDomain.Of(pairs[i].fa, Math.Max(traceTol, 1e-3)); NDomain.Of(pairs[i].fb, Math.Max(traceTol, 1e-3)); }
+            // the traced faces' domains, built first and single-threaded (sampling their edges): parallel tracing
+            // then only reads them; a face is in many pairs
+            var traceDoms = new Dictionary<NFace, NDomain>(ReferenceEqualityComparer.Instance);
+            foreach (var i in toTrace)
+                foreach (var f in new[] { pairs[i].fa, pairs[i].fb })
+                    if (!traceDoms.ContainsKey(f)) traceDoms[f] = NDomain.Of(f, Math.Max(traceTol, 1e-3));
             Parallel.ForEach(toTrace, i =>
             {
                 var (fa, fb, _) = pairs[i];
                 var swt = System.Diagnostics.Stopwatch.StartNew();
-                List<NCurve> c; using (Prof.Time(Prof.Enabled ? $"tr.{fa.Surface.Kind}x{fb.Surface.Kind}" : "")) c = NIntersect.Trace(fa, fb.Surface, traceTol).Cast<NCurve>().ToList();
+                List<NCurve> c; using (Prof.Time(Prof.Enabled ? $"tr.{fa.Surface.Kind}x{fb.Surface.Kind}" : "")) c = NIntersect.Trace(fa, fb.Surface, traceTol, traceDoms[fa]).Cast<NCurve>().ToList();
                 if (Prof.Enabled && c.Count == 0) Prof.Add($"tr.empty.{fa.Surface.Kind}x{fb.Surface.Kind}", 0);
                 // traced from the other side too (small faces)
-                if (c.Count == 0) c = NIntersect.Trace(fb, fa.Surface, traceTol).Cast<NCurve>().ToList();
+                if (c.Count == 0) c = NIntersect.Trace(fb, fa.Surface, traceTol, traceDoms[fb]).Cast<NCurve>().ToList();
                 pairCurves[i] = c;
                 if (Trace != null && Environment.GetEnvironmentVariable("FC_TRACE_SLOW") != null)
                     T($"  trace {fa.Tag.Name}({fa.Surface.Kind}) x {fb.Tag.Name}({fb.Surface.Kind}): {c.Count} curves, {string.Join(" ", c.Select(x => x is NPolyline pl ? pl.Pts.Length + "pts" : x.GetType().Name))} in {swt.ElapsedMilliseconds} ms");

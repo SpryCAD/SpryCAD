@@ -11,7 +11,8 @@ public sealed record BSplineSurface(int DegreeU, int DegreeV, Vec3[,] Poles, dou
         u = Math.Clamp(u, KnotsU[DegreeU], KnotsU[nu + 1]);
         v = Math.Clamp(v, KnotsV[DegreeV], KnotsV[nv + 1]);
         int su = BSplineCurve.FindSpan(nu, DegreeU, u, KnotsU), sv = BSplineCurve.FindSpan(nv, DegreeV, v, KnotsV);
-        var Nu = BSplineCurve.Basis(su, u, DegreeU, KnotsU); var Nv = BSplineCurve.Basis(sv, v, DegreeV, KnotsV);
+        Span<double> Nu = stackalloc double[DegreeU + 1], Nv = stackalloc double[DegreeV + 1];
+        BSplineCurve.Basis(su, u, DegreeU, KnotsU, Nu); BSplineCurve.Basis(sv, v, DegreeV, KnotsV, Nv);
         var r = Vec3.Zero;
         for (int i = 0; i <= DegreeU; i++)
             for (int j = 0; j <= DegreeV; j++) r += Poles[su - DegreeU + i, sv - DegreeV + j] * (Nu[i] * Nv[j]);

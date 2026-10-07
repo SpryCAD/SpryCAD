@@ -22,9 +22,13 @@ static class Bench
             Csg.ClearCache(); // measure real computation, not cache hits across runs
             GC.Collect(); GC.WaitForPendingFinalizers();
             Prof.Reset(); Prof.Enabled = i > 0;
+            using var allocs = i == runs && Environment.GetEnvironmentVariable("FC_ALLOC") != null ? new AllocSampler() : null;
+            int gc0 = GC.CollectionCount(0), gc1 = GC.CollectionCount(1), gc2 = GC.CollectionCount(2);
+            long alloc = GC.GetTotalAllocatedBytes();
             var sw = Stopwatch.StartNew();
             var r = new Regenerator().Rebuild(doc);
             var ms = sw.Elapsed.TotalMilliseconds;
+            var gcText = $"{(GC.GetTotalAllocatedBytes() - alloc) / 1e6:0} MB allocated, collections gen0 {GC.CollectionCount(0) - gc0} gen1 {GC.CollectionCount(1) - gc1} gen2 {GC.CollectionCount(2) - gc2}";
             var tsw = Stopwatch.StartNew();
             int facets = r.State.Bodies.Sum(b => b.Solid.Faces.Count); // what the viewport needs
             tessTimes.Add(tsw.Elapsed.TotalMilliseconds);
@@ -42,6 +46,8 @@ static class Bench
             if (i == runs)
             {
                 Console.WriteLine($"  warm full rebuild: median {Median(times):0.0} ms (min {times.Min():0.0}), + display tessellation median {Median(tessTimes):0.0} ms + display mesh {Median(meshTimes):0.0} ms");
+                Console.WriteLine($"  rebuild (last run): {gcText}");
+                allocs?.Print(25);
                 foreach (var (name, l) in perFeature) Console.WriteLine($"    {name,-20} {Median(l),8:0.0} ms");
                 Console.WriteLine("  profile (last run):");
                 foreach (var (name, pms, calls) in Prof.Results()) Console.WriteLine($"    {name,-24} {pms,8:0.0} ms  x{calls}");
@@ -223,4 +229,39 @@ static class Bench
     }
 
     static double Median(List<double> l) { var s = l.OrderBy(x => x).ToList(); return s[s.Count / 2]; }
+}
+
+/// <summary>
+/// <c>FC_ALLOC=1</c>: samples allocations (the runtime's AllocationTick, about one event per 100 KB) by type
+/// during the last benchmark run.
+/// </summary>
+sealed class AllocSampler : System.Diagnostics.Tracing.EventListener
+{
+    readonly System.Collections.Concurrent.ConcurrentDictionary<string, long> _bytes = new();
+    bool _on = true;
+
+    protected override void OnEventSourceCreated(System.Diagnostics.Tracing.EventSource source)
+    {
+        if (source.Name == "Microsoft-Windows-DotNETRuntime")
+            EnableEvents(source, System.Diagnostics.Tracing.EventLevel.Verbose, (System.Diagnostics.Tracing.EventKeywords)0x1);
+    }
+
+    protected override void OnEventWritten(System.Diagnostics.Tracing.EventWrittenEventArgs e)
+    {
+        if (!_on || e.EventName == null || !e.EventName.StartsWith("GCAllocationTick") || e.Payload == null) return;
+        int ti = e.PayloadNames!.IndexOf("TypeName"), ai = e.PayloadNames.IndexOf("AllocationAmount64");
+        if (ti < 0) return;
+        var name = e.Payload[ti] as string ?? "?";
+        long amount = ai >= 0 ? Convert.ToInt64(e.Payload[ai]) : 100_000;
+        _bytes.AddOrUpdate(name, amount, (_, v) => v + amount);
+    }
+
+    public void Print(int top)
+    {
+        _on = false;
+        var total = _bytes.Values.Sum();
+        Console.WriteLine($"  allocations sampled: {total / 1e6:0} MB");
+        foreach (var (name, b) in _bytes.OrderByDescending(x => x.Value).Take(top))
+            Console.WriteLine($"    {b / 1e6,8:0.0} MB  {name}");
+    }
 }

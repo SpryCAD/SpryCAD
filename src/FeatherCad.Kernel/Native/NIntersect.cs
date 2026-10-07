@@ -479,38 +479,51 @@ public static class NIntersect
     /// Traces SA ∩ SB inside the UV box of face A (marching squares on SB's implicit function evaluated on
     /// SA), then projects every point onto the exact intersection. Returns polylines of exact points.
     /// </summary>
-    public static List<NPolyline> Trace(NFace fa, NSurface sb, double tol)
+    [ThreadStatic] static double[]? _grid;
+    [ThreadStatic] static int[]? _gridStamp;
+    [ThreadStatic] static int _stamp;
+
+    public static List<NPolyline> Trace(NFace fa, NSurface sb, double tol, NDomain? domain = null)
     {
-        var dom = NDomain.Of(fa, Math.Max(tol, 1e-3));
+        // (domain: fa's domain at max(tol, 1e-3), when the caller has it)
+        var dom = domain ?? NDomain.Of(fa, Math.Max(tol, 1e-3));
         var sa = fa.Surface;
         double du = dom.UMax - dom.UMin, dv = dom.VMax - dom.VMin;
         double mu = du * 0.02 + 1e-9, mv = dv * 0.02 + 1e-9;
         double u0 = dom.UMin - mu, u1 = dom.UMax + mu, v0 = dom.VMin - mv, v1 = dom.VMax + mv;
         const int nu = 96, nv = 96, block = 8;
         Vec2 UV(int i, int j) => new(u0 + (u1 - u0) * i / nu, v0 + (v1 - v0) * j / nv);
-        // fine grid values are computed on demand: only blocks that may contain the curve are visited
-        var g = new double[nu + 1, nv + 1];
-        var have = new bool[nu + 1, nv + 1];
+        // fine grid values are computed on demand: only blocks that may contain the curve are visited (in this
+        // thread's grid, valid where stamped with this trace's number: nothing is allocated or cleared per trace)
+        var g = _grid ??= new double[(nu + 1) * (nv + 1)];
+        var have = _gridStamp ??= new int[(nu + 1) * (nv + 1)];
+        if (++_stamp == int.MaxValue) { Array.Clear(have); _stamp = 1; }
+        int stamp = _stamp;
         double G(int i, int j)
         {
-            if (have[i, j]) return g[i, j];
+            int k = i * (nv + 1) + j;
+            if (have[k] == stamp) return g[k];
             var v = sb.F_(dom.Eval(UV(i, j)));
-            have[i, j] = true;
-            return g[i, j] = v == 0 ? 1e-300 : v;
+            have[k] = stamp;
+            return g[k] = v == 0 ? 1e-300 : v;
         }
         var pg = Prof.Time("trace.grid");
         // a block can hold a zero only if |F(centre)| ≤ its 3D radius (F_ grows no faster than distance)
         int nb = nu / block;
-        var active = new bool[nb, nb];
+        Span<bool> active = stackalloc bool[nb * nb];
         for (int bi = 0; bi < nb; bi++)
             for (int bj = 0; bj < nb; bj++)
             {
                 int i0 = bi * block, j0 = bj * block, i1 = i0 + block, j1 = j0 + block;
                 var c = dom.Eval(Vec2.Lerp(UV(i0, j0), UV(i1, j1), 0.5));
                 double r = 0;
-                foreach (var (ii, jj) in new[] { (i0, j0), (i1, j0), (i0, j1), (i1, j1), ((i0 + i1) / 2, j0), ((i0 + i1) / 2, j1), (i0, (j0 + j1) / 2), (i1, (j0 + j1) / 2) })
+                int im = (i0 + i1) / 2, jm = (j0 + j1) / 2;
+                for (int q = 0; q < 8; q++)
+                {
+                    var (ii, jj) = q switch { 0 => (i0, j0), 1 => (i1, j0), 2 => (i0, j1), 3 => (i1, j1), 4 => (im, j0), 5 => (im, j1), 6 => (i0, jm), _ => (i1, jm) };
                     r = Math.Max(r, Vec3.Distance(c, dom.Eval(UV(ii, jj))));
-                active[bi, bj] = Math.Abs(sb.F_(c)) <= r * 1.25 + 1e-9;
+                }
+                active[bi * nb + bj] = Math.Abs(sb.F_(c)) <= r * 1.25 + 1e-9;
             }
         pg.Dispose();
         var pm = Prof.Time("trace.march");
@@ -532,7 +545,7 @@ public static class NIntersect
         for (int bi = 0; bi < nb; bi++)
             for (int bj = 0; bj < nb; bj++)
             {
-                if (!active[bi, bj]) continue;
+                if (!active[bi * nb + bj]) continue;
                 for (int i = bi * block; i < (bi + 1) * block; i++)
                     for (int j = bj * block; j < (bj + 1) * block; j++)
                     {

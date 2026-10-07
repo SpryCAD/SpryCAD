@@ -66,7 +66,8 @@ public sealed record BSplineCurve(int Degree, Vec3[] Poles, double[] Knots) : Ex
         int p = Degree, n = Poles.Length - 1;
         u = Math.Clamp(u, Knots[p], Knots[n + 1]);
         int span = FindSpan(n, p, u, Knots);
-        var N = Basis(span, u, p, Knots);
+        Span<double> N = stackalloc double[p + 1];
+        Basis(span, u, p, Knots, N);
         var r = Vec3.Zero;
         for (int i = 0; i <= p; i++) r += Poles[span - p + i] * N[i];
         return r;
@@ -96,7 +97,17 @@ public sealed record BSplineCurve(int Degree, Vec3[] Poles, double[] Knots) : Ex
 
     internal static double[] Basis(int i, double u, int p, double[] U)
     {
-        var N = new double[p + 1]; var left = new double[p + 1]; var right = new double[p + 1];
+        var N = new double[p + 1];
+        Basis(i, u, p, U, N);
+        return N;
+    }
+
+    /// <summary>The p + 1 non-zero basis functions at u in span i (Piegl &amp; Tiller A2.2), into N.</summary>
+    internal static void Basis(int i, double u, int p, double[] U, Span<double> N)
+    {
+        // evaluated per point (curves, surfaces): scratch on the stack
+        Span<double> left = p < 16 ? stackalloc double[p + 1] : new double[p + 1];
+        Span<double> right = p < 16 ? stackalloc double[p + 1] : new double[p + 1];
         N[0] = 1;
         for (int j = 1; j <= p; j++)
         {
@@ -112,7 +123,6 @@ public sealed record BSplineCurve(int Degree, Vec3[] Poles, double[] Knots) : Ex
             }
             N[j] = saved;
         }
-        return N;
     }
 
     /// <summary>Global interpolation through points (Piegl &amp; Tiller A9.1), chord-length parameters.</summary>
