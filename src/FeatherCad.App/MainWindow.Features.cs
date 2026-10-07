@@ -430,11 +430,16 @@ public partial class MainWindow
         sizes.Add(("Custom", "Custom pitch"));
         page.Combo(spec, "Size", sizes, () => f.Size, v => f.Size = v, "thread");
         page.Number(spec, "Pitch (custom)", () => f.Pitch, v => f.Pitch = v, "dimension");
-        page.Number(spec, "Length", () => f.Length, v => f.Length = v, "dimension", optional: true);
-        page.Info(spec, "Leave the length empty to thread the whole face.");
+        page.Combo(spec, "End", new List<(ThreadEnd, string)>
+        {
+            (ThreadEnd.Blind, "Blind"), (ThreadEnd.UpToNext, "Up To Next (stop short of a shoulder)"), (ThreadEnd.ThroughAll, "Through All (run out of the far end)"),
+        }, () => f.End, v => f.End = v);
+        page.Number(spec, "Length (blind)", () => f.Length, v => f.Length = v, "dimension", optional: true);
+        page.Info(spec, "Bolts: Up To Next stops before the head. Nuts and through holes: Through All.");
         var opt = page.Section("Options");
         page.Number(opt, "Clearance", () => f.Clearance, v => f.Clearance = v, "dimension");
         page.Info(opt, "Extra room on the flanks for 3D printed threads (0.1–0.3 mm is typical); the crest is lowered where it would get too narrow.");
+        page.Check(opt, "Lead-in chamfer", () => f.Chamfer, v => f.Chamfer = v);
         page.Check(opt, "Left hand", () => f.LeftHand, v => f.LeftHand = v);
         page.Check(opt, "Start at the other end", () => f.Reverse, v => f.Reverse = v);
         if (!string.IsNullOrEmpty(f.Face.Name)) page.Activate(null);

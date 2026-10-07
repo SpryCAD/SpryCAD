@@ -170,7 +170,7 @@ static class ThreadFeatureTests
                     var d = FeatherCad.Core.Model.CadDocument.FromJson(doc.ToJson());
                     var th = d.AddFeature(new FeatherCad.Core.Model.ThreadFeature
                     {
-                        Face = new FeatherCad.Core.Model.FaceRef { Name = cylFace.Tag.Name, Hint = hint }, Length = "15", Clearance = clearance,
+                        Face = new FeatherCad.Core.Model.FaceRef { Name = cylFace.Tag.Name, Hint = hint }, Length = "15", Clearance = clearance, Chamfer = false,
                     });
                     var r = new FeatherCad.Core.Regen.Regenerator().Rebuild(d);
                     t.True(r.Status[th.Id].Ok, $"{(external ? "external" : "internal")}: {r.Status[th.Id].Error}");
@@ -191,5 +191,54 @@ static class ThreadFeatureTests
                 t.True(looser > removed + 1, $"clearance removes more: {looser:0.###} vs {removed:0.###}");
             }
         });
+
+        t.Test("Thread feature: blind, up to next and through all; lead-in chamfers; no buried groove where a turned-down thread ends", () =>
+        {
+            // a 10 mm shaft 20 long on a 30 mm collar 5 thick (the shoulder the thread must not cut)
+            var doc = new FeatherCad.Core.Model.CadDocument();
+            var c = doc.AddFeature(new FeatherCad.Core.Model.SketchFeature { Plane = FeatherCad.Core.Model.PlaneRef.Front, Sketch = CircleAt(Vec2.Zero, 15) });
+            doc.AddFeature(new FeatherCad.Core.Model.ExtrudeFeature { SketchId = c.Id, Depth = "5" });
+            var top = doc.AddFeature(new FeatherCad.Core.Model.PlaneFeature { Base = FeatherCad.Core.Model.PlaneRef.Front, Offset = "5" });
+            var s = doc.AddFeature(new FeatherCad.Core.Model.SketchFeature { Plane = new FeatherCad.Core.Model.PlaneRef { Feature = top.Id }, Sketch = CircleAt(Vec2.Zero, 5) });
+            var shaft = doc.AddFeature(new FeatherCad.Core.Model.ExtrudeFeature { SketchId = s.Id, Depth = "20" });
+            var before = new FeatherCad.Core.Regen.Regenerator().Rebuild(doc);
+            var cylFace = before.State.Bodies[0].Solid.Native!.Faces.First(f => f.Surface.Kind == SurfaceKind.Cylinder && Math.Abs(f.Surface.R - 5) < 1e-9);
+            var collarFaces = before.State.Bodies[0].Solid.Native!.Faces.Count(f => f.Surface.Kind == SurfaceKind.Cylinder && Math.Abs(f.Surface.R - 15) < 1e-9);
+            (double removed, FeatherCad.Kernel.Native.NBody body) Run(FeatherCad.Core.Model.ThreadEnd end, string length, bool chamfer, string clearance)
+            {
+                var d = FeatherCad.Core.Model.CadDocument.FromJson(doc.ToJson());
+                var th = d.AddFeature(new FeatherCad.Core.Model.ThreadFeature
+                {
+                    Face = new FeatherCad.Core.Model.FaceRef { Name = cylFace.Tag.Name, Hint = new Vec3(5, 0, 24) }, End = end, Length = length, Chamfer = chamfer, Clearance = clearance,
+                });
+                var r = new FeatherCad.Core.Regen.Regenerator().Rebuild(d);
+                t.True(r.Status[th.Id].Ok, $"{end}: {r.Status[th.Id].Error}");
+                t.Eq(r.State.Bodies.Count, 1);
+                t.Eq(r.State.Bodies[0].Solid.Topology.OpenHalfEdges, 0);
+                return (KernelTests.Vex(before.State.Bodies[0].Solid) - KernelTests.Vex(r.State.Bodies[0].Solid), r.State.Bodies[0].Solid.Native!);
+            }
+            var blind = Run(FeatherCad.Core.Model.ThreadEnd.Blind, "8", false, "0").removed;
+            var upTo = Run(FeatherCad.Core.Model.ThreadEnd.UpToNext, "", false, "0");
+            t.True(upTo.removed > blind * 1.8, $"up to next ({upTo.removed:0.##}) threads about the whole 20 mm (blind 8: {blind:0.##})");
+            // the collar (the shoulder) is untouched: its cylinder is still one face, and no screw face reaches it
+            t.Eq(upTo.body.Faces.Count(f => f.Surface.Kind == SurfaceKind.Cylinder && Math.Abs(f.Surface.R - 15) < 1e-9), collarFaces);
+            t.True(upTo.body.Faces.Where(f => f.Surface.Kind == SurfaceKind.Screw).SelectMany(f => f.Coedges).All(co => co.Edge.V0.P.Z > 5 - 1e-6), "the groove stops short of the shoulder");
+            // through all runs into the collar (as a nut's thread runs out of its far face)
+            var thru = Run(FeatherCad.Core.Model.ThreadEnd.ThroughAll, "", false, "0").removed;
+            t.True(thru > upTo.removed, $"through all ({thru:0.##}) removes more than up to next ({upTo.removed:0.##})");
+            // a lead-in chamfer: a cone at the start end
+            var ch = Run(FeatherCad.Core.Model.ThreadEnd.UpToNext, "", true, "0");
+            t.True(ch.removed > upTo.removed, "the chamfer removes material");
+            t.True(ch.body.Faces.Any(f => f.Surface.Kind == SurfaceKind.Cone), "a conical lead-in");
+            // with a clearance the shaft is turned down over the thread: the groove's outer flat lies above the turned
+            // surface all along, so none of it is left (where the turning stopped short, it ran on buried in the shaft:
+            // a tunnel under the surface)
+            var (g, turn) = FeatherCad.Core.Regen.Threads.Groove(true, 5, 5, 1.5, 0.2);
+            t.True(turn != null, "0.2 mm clearance turns an M10 shaft down");
+            var outer = g.Max(q => q.X);
+            var cl = Run(FeatherCad.Core.Model.ThreadEnd.Blind, "12", true, "0.2").body;
+            t.True(!cl.Faces.Any(f => f.Surface.Kind == SurfaceKind.Screw && f.Surface.Screw!.MinRadius > outer - 1e-6), "no buried groove");
+        });
     }
+
 }

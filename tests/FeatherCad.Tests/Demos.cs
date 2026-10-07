@@ -719,8 +719,9 @@ static class Demos
     }
 
     /// <summary>
-    /// A printable M10 bolt and nut: hex head and threaded shank, and a hex nut (a separate body) threaded through
-    /// its hole of the minor diameter; both threads ISO (size fitted to the faces) with a fit clearance Clr.
+    /// A printable M10 bolt and nut: hex head and threaded shank (up to the head, lead-in chamfer), and a hex nut (a
+    /// separate body) threaded through its hole of the minor diameter (countersunk both sides); both threads ISO (size
+    /// fitted to the faces) with a fit clearance Clr.
     /// </summary>
     static CadDocument BoltAndNut()
     {
@@ -747,7 +748,7 @@ static class Demos
         double V(string e) => sh.Eval(e);
         d.AddFeature(new ThreadFeature
         {
-            Name = "Bolt thread", Length = "L-3", Clearance = "Clr",
+            Name = "Bolt thread", End = ThreadEnd.UpToNext, Clearance = "Clr",
             Face = new FaceRef { Name = $"{shank.Id}.S.C{shc}", Hint = new Vec3(V("D/2"), 0, V("HeadH+L-1")) },
         });
         // nut: a separate body beside the bolt, its hole the thread's minor diameter
@@ -758,7 +759,7 @@ static class Demos
         var nut = d.AddFeature(new ExtrudeFeature { Name = "Nut", SketchId = ns.Id, Depth = "NutH", Merge = false });
         d.AddFeature(new ThreadFeature
         {
-            Name = "Nut thread", Clearance = "Clr",
+            Name = "Nut thread", End = ThreadEnd.ThroughAll, Clearance = "Clr",
             Face = new FaceRef { Name = $"{nut.Id}.S.C{hole}", Hint = new Vec3(V("Gap+(D-1.0825*P)/2"), 0, V("NutH-0.5")) },
         });
         return d;

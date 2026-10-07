@@ -398,7 +398,6 @@ public sealed class Regenerator
             var clearance = Num(t.Clearance, "Clearance");
             if (clearance < 0) throw new FeatureException("The clearance cannot be negative.");
             var faceLen = hmax - hmin;
-            var length = string.IsNullOrWhiteSpace(t.Length) ? faceLen : Positive(t.Length, "Length");
             // from the end nearest the picked point (or the other one), running into the face
             var hs = Vec3.Dot(t.Face.Hint - axisO, axisDir);
             bool fromMin = Math.Abs(hs - hmin) <= Math.Abs(hs - hmax);
@@ -411,18 +410,62 @@ public sealed class Regenerator
             var frame = new Frame(origin, radial, dir, Vec3.Cross(radial, dir));
             var (groove, turn) = Threads.Groove(external, surfaceR, major, pitch, clearance);
             var region = new ProfileRegion(ProfileLoop.Polygon(groove, "G"));
-            var run = Math.Min(length, faceLen + pitch) + pitch; // along the axis, from the tool's start
+            // in the tool's frame (x: radius, y: along the thread from the tool's start), the start end is at y = P and
+            // the far end at y = P + the face's length; the groove's centre runs from y = 0 to y = run, its turns
+            // reaching half their widest width either side
+            var halfWidth = groove.Max(q => Math.Abs(q.Y));
+            double threadLen = t.End switch
+            {
+                ThreadEnd.ThroughAll => faceLen + pitch,
+                ThreadEnd.Blind when !string.IsNullOrWhiteSpace(t.Length) => Positive(t.Length, "Length"),
+                _ => faceLen - halfWidth - 0.05 * pitch, // up to the far end, the groove stopping short of it
+            };
+            if (threadLen <= 0) throw new FeatureException("The face is too short for this thread.");
+            var run = threadLen + pitch;
+            double yStart = pitch, yFar = pitch + faceLen;
+            bool through = t.End == ThreadEnd.ThroughAll;
             Solid tool;
             try
             {
                 // a clearance too large for the standard crest: the shaft turned down (the hole bored out) over the
-                // thread first, a ring from a pitch outside the end to the thread's end
+                // whole groove first (the groove would otherwise run on below the surface where the turning ends,
+                // a closed tunnel), not past the far end unless the thread runs out through it
                 if (turn is { } rt)
                 {
                     double r0 = external ? rt : surfaceR - 0.1 * pitch, r1 = external ? surfaceR + 0.1 * pitch : rt;
-                    var ring = new ProfileRegion(ProfileLoop.Polygon(new[] { new Vec2(r0, 0), new Vec2(r1, 0), new Vec2(r1, run - pitch / 2), new Vec2(r0, run - pitch / 2) }, "T"));
+                    var y1 = run + halfWidth + 0.05 * pitch;
+                    if (!through) y1 = Math.Min(y1, yFar);
+                    var ring = new ProfileRegion(ProfileLoop.Polygon(new[] { new Vec2(r0, 0), new Vec2(r1, 0), new Vec2(r1, y1), new Vec2(r0, y1) }, "T"));
                     var turned = Kernel.Native.NBuild.Revolve(new[] { ring }, frame, Vec2.Zero, new Vec2(0, 1), 2 * Math.PI, f.Id + ".Turn");
-                    ApplyTool(Kernel.Native.NTess.ToSolid(turned), true, true);
+                    ApplyTool(Kernel.Native.NTess.ToSolid(turned), true, true, warn: false);
+                }
+                // lead-in chamfers: 45° from the root (a shaft) or to the root (a countersunk hole), past the end and
+                // the surface (clean crossings)
+                if (t.Chamfer)
+                {
+                    // from a little past the root: a circle on the root itself would touch the groove's root edge
+                    var rootR = external ? groove.Min(q => q.X) - 0.1 * pitch : groove.Max(q => q.X) + 0.1 * pitch;
+                    var e = 0.2 * pitch;
+                    List<Vec2> Corner(double yEnd, double inward)
+                    {
+                        // inward: +1 when the part lies at larger y than the end (the start end), -1 at the far end
+                        Vec2 P(double r, double y) => new(r, yEnd + inward * y);
+                        if (external)
+                        {
+                            var big = surfaceR + e;
+                            return new List<Vec2> { P(rootR - e, -e), P(big, -e), P(big, big - rootR) };
+                        }
+                        var small = Math.Max(surfaceR - e, 1e-3 * surfaceR);
+                        return new List<Vec2> { P(rootR + e, -e), P(small, -e), P(small, rootR - small) };
+                    }
+                    var ends = through ? new[] { (yStart, 1.0), (yFar, -1.0) } : new[] { (yStart, 1.0) };
+                    int k = 0;
+                    foreach (var (ye, inward) in ends)
+                    {
+                        var c = new ProfileRegion(ProfileLoop.Polygon(Corner(ye, inward), "K"));
+                        var cone = Kernel.Native.NBuild.Revolve(new[] { c }, frame, Vec2.Zero, new Vec2(0, 1), 2 * Math.PI, f.Id + ".Chamfer" + (k++ == 0 ? "" : "2"));
+                        ApplyTool(Kernel.Native.NTess.ToSolid(cone), true, true, warn: false);
+                    }
                 }
                 var nb = Kernel.Native.NHelical.Sweep(new[] { region }, frame, origin, dir, t.LeftHand ? -pitch : pitch, run / pitch * 2 * Math.PI, f.Id);
                 if (nb.Validate() is { } bad) throw new FeatureException("The thread is not a valid solid: " + bad);
@@ -480,7 +523,7 @@ public sealed class Regenerator
         }
 
         /// <summary>Adds (fuses) or removes (cuts) a tool solid from the bodies.</summary>
-        void ApplyTool(Solid tool, bool cut, bool merge)
+        void ApplyTool(Solid tool, bool cut, bool merge, bool warn = true)
         {
             if (tool.IsEmpty) throw new FeatureException("The feature produced no geometry.");
             var bodies = new List<Body>();
@@ -495,7 +538,7 @@ public sealed class Regenerator
                     if (!r.IsEmpty) bodies.Add(new Body { Id = b.Id, Solid = r });
                 }
                 if (State.Bodies.Count == 0) throw new FeatureException("There is no body to cut.");
-                if (!any) status.Warnings.Add("The cut does not intersect the model.");
+                if (!any && warn) status.Warnings.Add("The cut does not intersect the model.");
             }
             else if (merge)
             {

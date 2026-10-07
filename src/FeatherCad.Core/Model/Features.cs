@@ -146,6 +146,9 @@ public sealed class HelicalSweepFeature : Feature
     public override IEnumerable<string> Consumes => new[] { SketchId };
 }
 
+/// <summary>Where a thread ends: a length from the start end, short of the face's far end, or out through it.</summary>
+public enum ThreadEnd { Blind, UpToNext, ThroughAll }
+
 /// <summary>
 /// A modelled thread on a cylindrical face: external on a shaft, internal in a hole (ISO metric, 60° profile), from
 /// the end nearest the picked point, with a fit clearance for printed parts.
@@ -158,8 +161,12 @@ public sealed class ThreadFeature : Feature
     public string Size { get; set; } = "Auto";
     /// <summary>Pitch for a custom thread.</summary>
     public string Pitch { get; set; } = "1.5";
-    /// <summary>Thread length from the start end (blank: the whole face).</summary>
+    /// <summary>Blind (Length), up to the face's far end (stopping short of a shoulder), or through it (nuts, through holes).</summary>
+    public ThreadEnd End { get; set; } = ThreadEnd.Blind;
+    /// <summary>Thread length from the start end for a blind thread (blank: up to the face's far end).</summary>
     public string Length { get; set; } = "";
+    /// <summary>A 45° lead-in chamfer (countersink in a hole) at the start end, and at the far end of a through thread.</summary>
+    public bool Chamfer { get; set; } = true;
     /// <summary>Extra room on the flanks and root (mm), for 3D printed threads.</summary>
     public string Clearance { get; set; } = "0";
     public bool LeftHand { get; set; }
