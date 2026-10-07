@@ -89,10 +89,7 @@ public static class Dialogs
         string? result = null;
         var tb = new TextBox { Text = value };
         if (Card.ShowAsync(owner, CardKind.Info, title, new Control[] { Card.Text(label), tb }, new[] { "OK", "Cancel" }, 0, 1, focus: tb) is { } shown)
-        {
-            tb.AttachedToVisualTree += (_, _) => tb.SelectAll();
-            return await shown == 0 ? tb.Text : null;
-        }
+            return await shown == 0 ? tb.Text : null; // the card focuses the box with its text selected
         var ok = new Button { Content = "OK", IsDefault = true };
         var cancel = new Button { Content = "Cancel", IsCancel = true };
         var sp = new StackPanel { Spacing = 6 };

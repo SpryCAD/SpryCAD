@@ -99,15 +99,45 @@ public static class Card
             tcs.SetResult(i);
         }
         for (int i = 0; i < btns.Count; i++) { var k = i; btns[i].Click += (_, _) => Close(k); }
-        // keys stay in the card: Enter, Esc, Tab between its buttons; nothing reaches the window's shortcuts
+
+        // the keyboard is the card's: what can take it, in order (the input box first, then the buttons)
+        var stops = new List<Control>();
+        if (focus != null) stops.Add(focus);
+        stops.AddRange(btns);
+        void Move(int step)
+        {
+            var at = stops.FindIndex(c => c.IsFocused);
+            var next = at < 0 ? 0 : ((at + step) % stops.Count + stops.Count) % stops.Count;
+            stops[next].Focus(NavigationMethod.Tab); // Tab: the focus outline shows
+        }
         backdrop.AddHandler(InputElement.KeyDownEvent, (_, e) =>
         {
-            if (e.Key == Key.Enter && e.Source is not TextBox { AcceptsReturn: true } && e.Source is not Button) { Close(defaultIndex); e.Handled = true; }
-            else if (e.Key == Key.Escape && cancelIndex >= 0) { Close(cancelIndex); e.Handled = true; }
+            var inText = e.Source is TextBox;
+            switch (e.Key)
+            {
+                case Key.Enter:
+                    // the focused button; from the input box (or nowhere), the default one
+                    Close(e.Source is Button b && btns.IndexOf(b) is var i and >= 0 ? i : defaultIndex);
+                    break;
+                case Key.Escape when cancelIndex >= 0: Close(cancelIndex); break;
+                // between the card's buttons (not out of the card into the window behind it)
+                case Key.Tab: Move(e.KeyModifiers.HasFlag(KeyModifiers.Shift) ? -1 : 1); break;
+                case Key.Right or Key.Down when !inText: Move(1); break;
+                case Key.Left or Key.Up when !inText: Move(-1); break;
+                default: return;
+            }
+            e.Handled = true;
         }, RoutingStrategies.Tunnel);
         _open++;
         layer.Children.Add(backdrop);
-        Avalonia.Threading.Dispatcher.UIThread.Post(() => (focus ?? (defaultIndex >= 0 && defaultIndex < btns.Count ? btns[defaultIndex] : null))?.Focus(), Avalonia.Threading.DispatcherPriority.Input);
+        // the default answer (or the input box) has the keyboard once the card is laid out
+        var first = focus ?? (defaultIndex >= 0 && defaultIndex < btns.Count ? btns[defaultIndex] : null);
+        if (first != null)
+            card.Loaded += (_, _) =>
+            {
+                first.Focus(NavigationMethod.Tab);
+                if (first is TextBox tb) tb.SelectAll();
+            };
         return tcs.Task;
     }
 }
