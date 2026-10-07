@@ -179,6 +179,28 @@ static class ImportTests
             t.Near(Vol(r.State.Bodies[0].Solid), volume / Math.Pow(25.4, 3), volume / Math.Pow(25.4, 3) * 1e-4);
         });
 
+        t.Test("STEP round trip: a round-wire spring keeps its half-round helical faces apart (each its own B-spline patch)", () =>
+        {
+            // the two halves of the wire share a name and a screw surface; joined across their seams for STEP they
+            // made one face all the way round the wire on a B-spline that does not close (Inventor: flared sheets)
+            var nb = NHelical.Sweep(new[] { new ProfileRegion(ProfileLoop.Circle(new Vec2(5, 0), 1, "C")) }, Frame.Front, Vec3.Zero, Vec3.UnitY, 5, 3 * 2 * Math.PI, "S", exitLength: 10);
+            var solid = NTess.ToSolid(nb);
+            using var ms = new MemoryStream();
+            StepWriter.Write(ms, new[] { ("spring", solid) }, "spring");
+            t.Eq(StepWriter.LastError, null);
+            var text = System.Text.Encoding.ASCII.GetString(ms.ToArray());
+            t.Eq(System.Text.RegularExpressions.Regex.Matches(text, "B_SPLINE_SURFACE").Count, 2);
+            var r = new Regenerator().Rebuild(ImportDoc(ms.ToArray()));
+            var s = r.Status.Values.First();
+            t.True(s.Ok, s.Error ?? "");
+            var b = r.State.Bodies.Single().Solid;
+            t.True(b.Native != null && b.Topology.OpenHalfEdges == 0, "not closed");
+            // both sides tessellated alike (the chord errors nearly cancel); exactly: Pappus and π r² · 10
+            var volume = NTess.ToSolid(nb, 5e-3).Volume();
+            t.Near(volume, 3 * 2 * Math.PI * Math.PI * 5 + Math.PI * 10, 2.0);
+            t.Near(NTess.ToSolid(b.Native!, 5e-3).Volume(), volume, volume * 1e-3);
+        });
+
         t.Test("STEP import: B-spline blend faces (spoked wheel round trip)", () =>
         {
             var original = new Regenerator().Rebuild(Demos.All.First(d => d.file == "spoked-handwheel.fcad").build()).State.Bodies.Single().Solid;

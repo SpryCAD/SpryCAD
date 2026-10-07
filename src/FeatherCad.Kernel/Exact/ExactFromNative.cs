@@ -24,6 +24,9 @@ public sealed partial class ExactBrepFactory
             if (e.Uses.Count != 2) continue;
             var f = e.Uses[0].Face; var g = e.Uses[1].Face;
             if (ReferenceEquals(f, g) || f.Sense != g.Sense || f.Tag.Name != g.Tag.Name) continue;
+            // helical faces stay as they are: written as B-splines fitted over each face, which do not close on
+            // themselves (two halves of round wire joined would make one face all the way round an open patch)
+            if (f.Surface.Kind == SurfaceKind.Screw) continue;
             if (!ReferenceEquals(f.Surface, g.Surface) && !f.Surface.CoincidentWith(g.Surface, tol * 10)) continue;
             parent[Find(index[f])] = Find(index[g]);
         }
