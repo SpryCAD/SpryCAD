@@ -99,7 +99,7 @@ public partial class MainWindow
         RefreshPartsList();
     }
 
-    sealed record PartRow(ListBoxItem Item, TextBlock Title, TextBlock Path, Image Image);
+    sealed record PartRow(ListBoxItem Item, TextBlock Title, TextBlock Path, Image Image, Button Close);
 
     Window? _partsWindow;
     ListBox? _partsList;
@@ -109,8 +109,9 @@ public partial class MainWindow
     /// <summary>
     /// The list of every open part with a preview, in a window of its own beside the part (moved and sized where it
     /// was last). Selecting a part (arrow keys, click) shows it right away, so a set of parts can be flipped through;
-    /// typing jumps to a part by name; Enter goes back to the part, Esc closes the list. It follows the parts as
-    /// they open, close, change and are switched to another way.
+    /// typing jumps to a part by name; Enter goes back to the part, Esc closes the list. A row's ✕ (on the row under
+    /// the mouse and the selected one), Delete or Ctrl+W close a part. It follows the parts as they open, close,
+    /// change and are switched to another way.
     /// </summary>
     void ShowPartsList()
     {
@@ -149,6 +150,11 @@ public partial class MainWindow
         {
             if (e.Key == Key.Escape) { w.Close(); e.Handled = true; }
             else if (e.Key == Key.Enter) { Activate(); Viewport.Focus(); e.Handled = true; }
+            else if (e.Key == Key.Delete || (e.Key == Key.W && e.KeyModifiers.HasFlag(KeyModifiers.Control)))
+            {
+                if (list.SelectedItem is ListBoxItem { Tag: PartTab t }) ClosePartFromList(t);
+                e.Handled = true;
+            }
         };
         w.Opened += (_, _) => FocusPartsList();
         w.Closing += (_, _) =>
@@ -160,6 +166,13 @@ public partial class MainWindow
         _partsWindow = w; _partsList = list;
         RefreshPartsList();
         w.Show(this);
+    }
+
+    /// <summary>Closes a part from the list (asking to save its changes, as its tab's ✕), the list keeping the keyboard.</summary>
+    async void ClosePartFromList(PartTab t)
+    {
+        await CloseTab(t);
+        if (_partsWindow != null) { _partsWindow.Activate(); FocusPartsList(); }
     }
 
     void FocusPartsList()
@@ -194,9 +207,22 @@ public partial class MainWindow
                     var title = new TextBlock { FontSize = 13, TextTrimming = TextTrimming.CharacterEllipsis };
                     var path = new TextBlock { FontSize = 11, Foreground = Brushes.Gray, TextTrimming = TextTrimming.PathSegmentEllipsis };
                     var text = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Spacing = 2, Margin = new Thickness(10, 0, 0, 0), Children = { title, path } };
-                    var dock = new DockPanel { Children = { img, text } };
+                    var close = new Button
+                    {
+                        Content = "✕", FontSize = 12, Padding = new Thickness(6, 2), MinHeight = 0, MinWidth = 0, Margin = new Thickness(6, 0, 0, 0),
+                        Background = Brushes.Transparent, BorderThickness = new Thickness(0), VerticalAlignment = VerticalAlignment.Center,
+                        Opacity = 0, Focusable = false,
+                    };
+                    ToolTip.SetTip(close, "Close (Delete, Ctrl+W)");
+                    close.Click += (_, _) => ClosePartFromList(t);
+                    var dock = new DockPanel { Children = { img, close, text } };
                     DockPanel.SetDock(img, Dock.Left);
-                    row = new PartRow(new ListBoxItem { Content = dock, Tag = t, Padding = new Thickness(6, 4) }, title, path, img);
+                    DockPanel.SetDock(close, Dock.Right);
+                    var item = new ListBoxItem { Content = dock, Tag = t, Padding = new Thickness(6, 4) };
+                    // the ✕ on the row under the mouse (and the selected one, see below)
+                    item.PointerEntered += (_, _) => close.Opacity = 1;
+                    item.PointerExited += (_, _) => close.Opacity = t == _tab ? 1 : 0;
+                    row = new PartRow(item, title, path, img, close);
                     _partRows[t] = row;
                     list.Items.Insert(Math.Min(i, list.Items.Count), row.Item);
                     _ = LoadThumb(t, img);
@@ -204,6 +230,7 @@ public partial class MainWindow
                 else if (list.Items.IndexOf(row.Item) != i) { list.Items.Remove(row.Item); list.Items.Insert(i, row.Item); }
                 row.Title.Text = t.Session.Title;
                 row.Title.FontWeight = t == _tab ? FontWeight.SemiBold : FontWeight.Normal;
+                if (!row.Item.IsPointerOver) row.Close.Opacity = t == _tab ? 1 : 0;
                 row.Path.Text = t.Session.FilePath ?? "Not saved yet";
                 Avalonia.Controls.Primitives.TextSearch.SetText(row.Item, t.Session.Title);
             }
