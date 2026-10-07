@@ -124,6 +124,7 @@ static class Program
             NativeRevolveTests.Run(t);
             ExactMassTests.Run(t);
             DeterminismTests.Run(t);
+            PatternUnionTests.Run(t);
             Console.WriteLine("Core");
             CoreTests.Run(t);
             Console.WriteLine($"\n{t.Passed} passed, {t.Failed} failed");

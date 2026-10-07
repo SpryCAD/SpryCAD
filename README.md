@@ -260,6 +260,7 @@ Check items off as they land.
       bounds are reused)
 - [ ] Analytic intersections for more pairs (plane/torus, cylinder/sphere, oblique cone/plane, ...)
 - [ ] Pattern copies that do not touch: copy the topology instead of running booleans
+- [x] Pattern copies that touch: a union of copies that is an earlier union moved (copies 2-3 are 0-1 turned) is moved and renamed, not made again
 - [ ] Recognise B-spline faces that are planes, cylinders or cones on import (sheet-metal STEP files)
 - [ ] Faster B-spline closest point (better seeds, fewer Newton steps) and adaptive traces between B-splines
 - [ ] Display normals from the tessellator's parameters; reuse unchanged faces' meshes; level of detail

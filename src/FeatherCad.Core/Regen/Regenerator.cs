@@ -168,6 +168,10 @@ public sealed class Regenerator
 
     // ------------------------------------------------------------------------------------------
 
+    /// <summary>Tests: whether unions of touching pattern copies may reuse a rotated earlier union, and how many did.</summary>
+    public static bool ReusePatternUnions = true;
+    public static int PatternUnionsReused;
+
     sealed class Ctx(CadDocument doc, ModelState state, Func<string, double?> lookup, FeatureStatus status, Feature f)
     {
         public ModelState State = state;
@@ -706,7 +710,7 @@ public sealed class Regenerator
                     try
                     {
                         Csg.NoFallback = true;
-                        var all = Csg.UnionAll(copies.Select(c => c.tool).ToList());
+                        var all = PatternUnion(copies, transforms, tool.Tool);
                         ApplyTool(all, tool.IsCut, true);
                         everything.Add(all);
                     }
@@ -872,6 +876,69 @@ public sealed class Regenerator
                 }
             }
             finally { Csg.NoFallback = old; }
+        }
+
+        /// <summary>
+        /// The union of pattern copies (instance i is the seed tool moved by transforms[i]), as a balanced tree like
+        /// <see cref="Csg.UnionAll"/>; a union whose instances are those of a union already made, all moved by one
+        /// rigid motion (copies 2-3 are copies 0-1 turned by two steps), is that union moved, its faces renamed to
+        /// the instances it stands for, instead of a boolean.
+        /// </summary>
+        Solid PatternUnion(List<(int i, Solid tool)> copies, IReadOnlyList<Transform> transforms, Solid seed)
+        {
+            var solids = copies.Select(c => c.tool).ToList();
+            // copies apart from each other (or not all exact, or mirrored): nothing to reuse
+            if (!ReusePatternUnions || copies.Count < 3 || solids.Any(x => x.Native == null) || copies.Any(c => transforms[c.i].IsMirror)
+                || !Enumerable.Range(0, solids.Count - 1).Any(k => solids[k].Bounds.Overlaps(solids[k + 1].Bounds, 1e-6)))
+                return Csg.UnionAll(solids);
+            // probe points of the seed (its box corners): two placements agree when they move these alike
+            var sb = seed.Bounds;
+            var probes = new List<Vec3>();
+            for (int k = 0; k < 8; k++) probes.Add(new Vec3((k & 1) == 0 ? sb.Min.X : sb.Max.X, (k & 2) == 0 ? sb.Min.Y : sb.Max.Y, (k & 4) == 0 ? sb.Min.Z : sb.Max.Z));
+            var tol = 1e-9 * Math.Max(1, sb.Diagonal + transforms.Max(t => t.T.Length));
+            bool Same(Transform a, Transform b) => probes.All(q => Vec3.Distance(a.Point(q), b.Point(q)) <= tol);
+            var prefix = f.Id + ".";
+            var made = new List<(List<int> members, Solid solid)>();
+            (List<int> members, Solid solid) Join((List<int> members, Solid solid) a, (List<int> members, Solid solid) b)
+            {
+                var members = a.members.Concat(b.members).ToList();
+                foreach (var (ms, solid) in made)
+                {
+                    if (ms.Count != members.Count || solid.Native == null) continue;
+                    // the motion taking the made union's first instance onto this one's, and every other instance alike
+                    var g = transforms[members[0]] * transforms[ms[0]].RigidInverse();
+                    if (!Enumerable.Range(0, ms.Count).All(k => Same(g * transforms[ms[k]], transforms[members[k]]))) continue;
+                    // faces of instance ms[k] (named "<pattern>.<ms[k] + 1>.…") become those of members[k]
+                    var map = Enumerable.Range(0, ms.Count).ToDictionary(k => ms[k] + 1, k => members[k] + 1);
+                    bool ok = true;
+                    string Rename(string name)
+                    {
+                        if (name.StartsWith(prefix, StringComparison.Ordinal))
+                        {
+                            int dot = name.IndexOf('.', prefix.Length);
+                            if (dot > 0 && int.TryParse(name.AsSpan(prefix.Length, dot - prefix.Length), out var n) && map.TryGetValue(n, out var m))
+                                return prefix + m + name[dot..];
+                        }
+                        ok = false;
+                        return name;
+                    }
+                    var moved = solid.Native.Transformed(g, Rename);
+                    if (!ok) break; // a face not named after an instance: make the union instead
+                    Interlocked.Increment(ref PatternUnionsReused);
+                    return (members, Kernel.Native.NTess.ToSolid(moved));
+                }
+                var u = Csg.Union(a.solid, b.solid);
+                made.Add((members, u));
+                return (members, u);
+            }
+            var level = copies.Select(c => (members: new List<int> { c.i }, solid: c.tool)).ToList();
+            while (level.Count > 1)
+            {
+                var next = new List<(List<int> members, Solid solid)>((level.Count + 1) / 2);
+                for (int k = 0; k < level.Count; k += 2) next.Add(k + 1 < level.Count ? Join(level[k], level[k + 1]) : level[k]);
+                level = next;
+            }
+            return level[0].solid;
         }
 
         string Describe(string featureId) => doc.Features.FirstOrDefault(x => x.Id == featureId)?.Name ?? featureId;

@@ -352,6 +352,13 @@ public sealed class NBody
         return Map(c => c.Transformed(tt), s => s.Transformed(tt), p => tt.Point(p), mirror, prefix);
     }
 
+    /// <summary>A moved copy whose face names are given by <paramref name="rename"/> (e.g. one pattern instance's faces as another's).</summary>
+    public NBody Transformed(in Transform t, Func<string, string> rename)
+    {
+        var tt = t;
+        return Map(c => c.Transformed(tt), s => s.Transformed(tt), p => tt.Point(p), t.IsMirror, null, rename);
+    }
+
     /// <summary>Reverses orientation (inside out): used for the B operand of a subtraction.</summary>
     public NBody Flipped()
     {
@@ -360,7 +367,7 @@ public sealed class NBody
         return b;
     }
 
-    NBody Map(Func<NCurve, NCurve> curve, Func<NSurface, NSurface> surf, Func<Vec3, Vec3> point, bool reverseLoops, string? prefix = null)
+    NBody Map(Func<NCurve, NCurve> curve, Func<NSurface, NSurface> surf, Func<Vec3, Vec3> point, bool reverseLoops, string? prefix = null, Func<string, string>? rename = null)
     {
         var vmap = new Dictionary<NVertex, NVertex>(ReferenceEqualityComparer.Instance);
         var emap = new Dictionary<NEdge, NEdge>(ReferenceEqualityComparer.Instance);
@@ -381,8 +388,9 @@ public sealed class NBody
             if (!smap.TryGetValue(f.Surface, out var s)) smap[f.Surface] = s = surf(f.Surface);
             if (!tmap.TryGetValue(f.Tag, out var tag))
             {
-                tmap[f.Tag] = tag = ReferenceEquals(s, f.Surface) && prefix == null ? f.Tag
-                    : new FaceTag(prefix == null ? f.Tag.Name : prefix + f.Tag.Name, s.Kind == SurfaceKind.Plane ? SurfaceDef.PlaneDef : s.Def, f.Tag.Seq);
+                var name = rename != null ? rename(f.Tag.Name) : prefix == null ? f.Tag.Name : prefix + f.Tag.Name;
+                tmap[f.Tag] = tag = ReferenceEquals(s, f.Surface) && name == f.Tag.Name ? f.Tag
+                    : new FaceTag(name, s.Kind == SurfaceKind.Plane ? SurfaceDef.PlaneDef : s.Def, f.Tag.Seq);
             }
             var nf = new NFace(s, f.Sense, tag, f.Anchor is { } an ? point(an) : null);
             if (ReferenceEquals(s, f.Surface)) nf.BoundsCache = f.BoundsCache; // same geometry (clone / flip)
