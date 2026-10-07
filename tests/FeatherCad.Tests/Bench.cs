@@ -198,5 +198,26 @@ static class Bench
         }
     }
 
+    /// <summary><c>-- markertime file.fcad</c>: what showing a pattern's instance markers costs (the app does it on the UI thread).</summary>
+    public static void MarkerTime(string file)
+    {
+        var doc = CadDocument.Load(file);
+        var r = new Regenerator().Rebuild(doc);
+        Func<string, double?> lookup = n => r.EquationValues.TryGetValue(n, out var v) ? v : null;
+        for (int i = 0; i < doc.Features.Count; i++)
+        {
+            if (doc.Features[i] is not (CircularPatternFeature or LinearPatternFeature)) continue;
+            var f = doc.Features[i];
+            var st = r.States[i - 1];
+            var seeds = f is CircularPatternFeature cp ? cp.Seeds : ((LinearPatternFeature)f).Seeds;
+            var sw = Stopwatch.StartNew();
+            var box = Box3.Empty;
+            foreach (var id in seeds) if (st.Tools.TryGetValue(id, out var t)) box.Add(t.Tool.Bounds);
+            var t1 = sw.Elapsed.TotalMilliseconds;
+            var ts = Regenerator.PatternTransforms(f, st, lookup);
+            Console.WriteLine($"{f.Name}: seed tools {t1:0.0} ms, transforms {sw.Elapsed.TotalMilliseconds - t1:0.0} ms ({ts!.Count} instances)");
+        }
+    }
+
     static double Median(List<double> l) { var s = l.OrderBy(x => x).ToList(); return s[s.Count / 2]; }
 }
