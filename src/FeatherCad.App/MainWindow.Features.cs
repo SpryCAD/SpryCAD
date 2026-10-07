@@ -427,7 +427,7 @@ public partial class MainWindow
         var ro = page.Section("Run-out");
         page.Check(ro, "Run out at the end", () => f.RunOut, v => f.RunOut = v);
         page.Number(ro, "Length", () => f.RunOutLength, v => f.RunOutLength = v, "dimension", optional: true);
-        page.Info(ro, "The end runs straight on along the helix's tangent. Blank length (cuts): until the profile is clear of the model.");
+        page.Info(ro, "The end runs straight on along the helix's tangent. Blank length: until the profile is clear of the model (cuts), one pitch (bosses).");
         if (!f.IsCut) page.Check(page.Section("Options"), "Merge result", () => f.Merge, v => f.Merge = v);
         if (!string.IsNullOrEmpty(f.SketchId)) page.Activate(null);
         BeginEdit(f, isNew, page, overlay: false, hint: string.IsNullOrEmpty(f.SketchId) ? "Select a sketch with a closed profile and a centerline." : null);

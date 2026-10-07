@@ -145,7 +145,7 @@ public sealed class HelicalSweepFeature : Feature
     public bool Reverse { get; set; }
     /// <summary>Run out at the end: straight on along the helix's tangent (a profile with arcs: the end's normal).</summary>
     public bool RunOut { get; set; }
-    /// <summary>The run-out's length (blank, for a cut: until the profile is clear of the model).</summary>
+    /// <summary>The run-out's length (blank: for a cut until the profile is clear of the model, for a boss one pitch).</summary>
     public string RunOutLength { get; set; } = "";
     public bool IsCut { get; set; }
     public bool Merge { get; set; } = true;

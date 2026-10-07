@@ -371,7 +371,7 @@ public sealed class Regenerator
                 if (h.RunOut)
                 {
                     if (!string.IsNullOrWhiteSpace(h.RunOutLength)) exitL = Positive(h.RunOutLength, "Run-out length");
-                    else if (!h.IsCut) throw new FeatureException("Give the run-out's length (a boss has nothing to run out of).");
+                    else if (!h.IsCut) exitL = pitch; // a boss has nothing to run out of: a pitch long
                     else
                     {
                         foreach (var body in State.Bodies)

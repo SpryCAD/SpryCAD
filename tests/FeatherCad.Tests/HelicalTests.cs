@@ -216,7 +216,7 @@ static class ThreadFeatureTests
 
     public static void Run(TestRunner t)
     {
-        t.Test("Helical Sweep feature: a cut running out of the side of a shaft (automatic and given lengths); a boss needs a length", () =>
+        t.Test("Helical Sweep feature: a cut running out of the side of a shaft (automatic and given lengths); a boss runs out a pitch by default", () =>
         {
             // a 20 mm shaft along Z, 30 long; a V groove at z = 5 sketched on the Top plane (sketch y = -z), the helix advancing up Z
             var doc = new FeatherCad.Core.Model.CadDocument();
@@ -252,10 +252,12 @@ static class ThreadFeatureTests
             var h2 = Add(d2, true, true, "3");
             var back = (FeatherCad.Core.Model.HelicalSweepFeature)FeatherCad.Core.Model.CadDocument.FromJson(d2.ToJson()).Find(h2.Id)!;
             t.True(back.RunOut && back.RunOutLength == "3", "saved and loaded");
-            // a boss without a length is refused
+            // a boss without a length runs out a pitch
             var d3 = FeatherCad.Core.Model.CadDocument.FromJson(doc.ToJson());
             var h3 = Add(d3, false, true, "");
-            t.True(!new FeatherCad.Core.Regen.Regenerator().Rebuild(d3).Status[h3.Id].Ok, "a boss needs a run-out length");
+            var r3 = new FeatherCad.Core.Regen.Regenerator().Rebuild(d3);
+            t.True(r3.Status[h3.Id].Ok, r3.Status[h3.Id].Error ?? "");
+            t.True(r3.State.Bodies[0].Solid.Native!.Faces.Any(f => f.Tag.Name.Contains(".X.")), "a boss's run-out");
         });
 
         t.Test("Helical Sweep feature: the axis from the model (a shaft's cylindrical face, the Z axis) instead of a centerline", () =>
