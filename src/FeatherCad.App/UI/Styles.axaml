@@ -47,6 +47,15 @@
     <Setter Property="BorderBrush" Value="#FF5C9AE0" />
   </Style>
 
+  <!-- the buttons of a card (UI/Card.cs): the one with the keyboard has a clear blue ring (Enter presses it) -->
+  <Style Selector="Button.card:focus /template/ ContentPresenter">
+    <Setter Property="BorderBrush" Value="#FF2F7BD6" />
+    <Setter Property="BorderThickness" Value="2" />
+  </Style>
+  <Style Selector="Button.card.accent:focus /template/ ContentPresenter">
+    <Setter Property="BorderBrush" Value="#FF8EC0FF" />
+  </Style>
+
   <!-- CommandManager tabs -->
   <Style Selector="ToggleButton.tab">
     <Setter Property="Background" Value="Transparent" />

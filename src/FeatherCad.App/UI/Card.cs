@@ -43,7 +43,12 @@ public static class Card
         if (buttons is { Count: > 0 })
         {
             var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 8, 0, 0) };
-            foreach (var b in buttons) { b.MinWidth = 80; b.HorizontalContentAlignment = HorizontalAlignment.Center; row.Children.Add(b); }
+            foreach (var b in buttons)
+            {
+                b.MinWidth = 80; b.HorizontalContentAlignment = HorizontalAlignment.Center;
+                b.Classes.Add("card"); // a clear ring when it has the keyboard (Styles.axaml)
+                row.Children.Add(b);
+            }
             stack.Children.Add(row);
         }
         return new Border
@@ -138,6 +143,8 @@ public static class Card
         tcs.Task.ContinueWith(_ => Avalonia.Threading.Dispatcher.UIThread.Post(() => owner.RemoveHandler(InputElement.KeyDownEvent, OnKey)));
         _open++;
         layer.Children.Add(backdrop);
+        // the keyboard goes to this window (it may be with another one, e.g. the popped-out list of open parts)
+        if (!owner.IsActive) owner.Activate();
         // the default answer (or the input box) has the keyboard: when the card is laid out, and again once it is
         // drawn (a focus asked for too early does not take)
         var first = focus ?? (defaultIndex >= 0 && defaultIndex < btns.Count ? btns[defaultIndex] : null);
