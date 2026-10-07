@@ -808,14 +808,14 @@ public sealed class NBoolean
         using (Prof.Time("sec.domains")) { domA = Dom(fa); domB = Dom(fb); }
         var dbgPair = Trace != null && Environment.GetEnvironmentVariable("FC_TRACE_PAIR") is { } tp && (fa.Tag.Name + "|" + fb.Tag.Name).Contains(tp);
         if (dbgPair) T($"  pair {fa.Tag.Name} x {fb.Tag.Name}: {curves.Count} curves ({string.Join(",", curves.Select(c => c.GetType().Name))}), breakpoints {string.Join(" ", bps.Select(v => v.P))}");
-        if (dbgPair) foreach (var c in curves.OfType<NPolyline>()) T($"    polyline {c.Pts[0]} .. {c.Pts[^1]} ({c.Pts.Length} pts, closed={c.IsClosed}), onTol={_onTol}, breakpoint distances {string.Join(" ", bps.Select(v => Vec3.Distance(c.Eval(c.Param(v.P)), v.P).ToString("0.######")))}");
+        if (dbgPair) foreach (var c in curves.OfType<NPolyline>()) T($"    polyline {c.Pts[0]} .. {c.Pts[^1]} ({c.Pts.Length} pts, closed={c.IsClosed}), breakpoint tolerance {PolylineOnTol}, breakpoint distances {string.Join(" ", bps.Select(v => Vec3.Distance(c.Eval(c.Param(v.P)), v.P).ToString("0.######")))}");
         foreach (var c in curves)
         {
             var on = new List<(double t, NVertex v)>();
             // traced curves are exact at their samples but can pass a singular point (two surfaces tangent
             // there, e.g. crossing fillets) at up to the trace tolerance; the edge is pinned to the vertex anyway
             // (breakpoints lie exactly on both surfaces, so a traced curve passing this close does go through them)
-            var onTol = c is NPolyline ? Math.Max(_onTol * 4, _sampleTol * 500) : _onTol * 4;
+            var onTol = c is NPolyline ? PolylineOnTol : _onTol * 4;
             foreach (var v in bps)
             {
                 var t = c.Param(v.P);
@@ -859,6 +859,9 @@ public sealed class NBoolean
             }
         }
     }
+
+    /// <summary>How far a traced section's polyline may pass from a breakpoint that it goes through.</summary>
+    double PolylineOnTol => Math.Max(_onTol * 4, _sampleTol * 500);
 
     static double Mod(double t, double p) { t %= p; return t < 0 ? t + p : t; }
 
