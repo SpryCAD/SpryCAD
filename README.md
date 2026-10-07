@@ -294,7 +294,7 @@ Check items off as they land.
 
 ### Analysis
 
-- [ ] Exact mass properties (integrated on the surfaces, not the mesh)
+- [x] Exact mass properties (integrated on the surfaces, not the mesh)
 - [ ] Minimum distance, curvature analysis, interference detection
 - [ ] Section views / exact planar slices
 
