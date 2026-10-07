@@ -43,7 +43,17 @@ public partial class MainWindow
 
     readonly List<PartTab> _parts = new();
     PartTab _tab;
-    int _untitledCount;
+    /// <summary>
+    /// The name of a new part: the lowest "PartN" no open part goes by (a new part's name, or a saved one's file
+    /// name), so closing Part1 and starting a new part gives Part1 again.
+    /// </summary>
+    string NextUntitledName()
+    {
+        var taken = new HashSet<string>(_parts.Select(t => t.Session.FilePath is { } p ? Path.GetFileNameWithoutExtension(p) : t.Session.UntitledName),
+            StringComparer.OrdinalIgnoreCase);
+        for (int n = 1; ; n++)
+            if (!taken.Contains("Part" + n)) return "Part" + n;
+    }
 
     static readonly IBrush TabActiveBrush = Brushes.White;
     static readonly IBrush TabInactiveBrush = new SolidColorBrush(Color.Parse("#FFDCE3EC"));
@@ -53,7 +63,7 @@ public partial class MainWindow
     /// <summary>Adds a tab for a session (not activated). Its events reach the window only while it is active.</summary>
     PartTab AddTab(DocumentSession s)
     {
-        s.UntitledName = "Part" + ++_untitledCount;
+        s.UntitledName = NextUntitledName();
         var t = new PartTab(s);
         s.Rebuilt += () =>
         {
@@ -649,11 +659,14 @@ public partial class MainWindow
         if (!await ConfirmDiscard()) return false;
         var i = _parts.IndexOf(t);
         PartTab next;
-        if (_parts.Count > 1) next = _parts[i > 0 ? i - 1 : 1];
+        bool fresh = _parts.Count == 1;
+        if (!fresh) next = _parts[i > 0 ? i - 1 : 1];
         else { next = AddTab(new DocumentSession()); next.Session.New(); }
         // the closed part's edits were resolved by ConfirmDiscard: switching away cannot be cancelled
         await SwitchTo(next);
         RemoveTab(t);
+        // the new empty part takes the closed one's name when free (closing Part1 leaves Part1, not Part2)
+        if (fresh) { next.Session.UntitledName = NextUntitledName(); UpdateTabHeader(next); }
         return true;
     }
 

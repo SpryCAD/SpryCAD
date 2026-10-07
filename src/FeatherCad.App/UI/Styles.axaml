@@ -52,7 +52,7 @@
        thickness, so the button keeps its size and nothing moves when the ring goes from button to button -->
   <Style Selector="Button.card:focus /template/ ContentPresenter">
     <Setter Property="BorderBrush" Value="#FF2F7BD6" />
-    <Setter Property="BoxShadow" Value="0 0 0 1 #802F7BD6" />
+    <Setter Property="BoxShadow" Value="0 0 0 1 #CC2F7BD6" />
   </Style>
   <Style Selector="Button.card.accent:focus /template/ ContentPresenter">
     <Setter Property="BorderBrush" Value="#FF8EC0FF" />
