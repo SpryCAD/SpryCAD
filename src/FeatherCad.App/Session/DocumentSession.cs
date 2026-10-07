@@ -53,6 +53,45 @@ public sealed class DocumentSession
 
     public string Title => (FilePath != null ? Path.GetFileNameWithoutExtension(FilePath) : UntitledName) + (Dirty ? " *" : "");
 
+    /// <summary>
+    /// A file not read yet: parts opened in a batch get their tabs at once and are read when first shown (or when
+    /// the list's previews are made). The tab shows the file's name meanwhile.
+    /// </summary>
+    public string? PendingPath { get; private set; }
+    public bool IsPending => PendingPath != null;
+    /// <summary>The file the part comes from: its own, or the STEP model (or part) still to be read.</summary>
+    public string? SourcePath => PendingPath ?? FilePath;
+
+    /// <summary>Marks the session as the given file, to be read later (<see cref="TakePending"/>).</summary>
+    public void Defer(string path)
+    {
+        PendingPath = path;
+        UntitledName = Path.GetFileNameWithoutExtension(path);
+        DocumentChanged?.Invoke();
+    }
+
+    /// <summary>The file to read now (the caller loads or imports it); null when nothing is pending.</summary>
+    public string? TakePending() { var p = PendingPath; PendingPath = null; return p; }
+
+    /// <summary>
+    /// Drops the built model (geometry, display meshes, the rebuild cache) to save memory; the document, its unsaved
+    /// changes and undo history stay, and it is built again when shown (<see cref="EnsureBuilt"/>). False (nothing
+    /// dropped) while a rebuild is running or waiting.
+    /// </summary>
+    public bool Unload()
+    {
+        lock (_lock) if (_running || _pendingReal != null || Result == null) return false;
+        Result = null; PreviewResult = null;
+        _regen.Invalidate();
+        return true;
+    }
+
+    /// <summary>Starts a rebuild if the model was dropped (<see cref="Unload"/>) and is not being built.</summary>
+    public void EnsureBuilt()
+    {
+        if (Result == null && !IsPending && !Busy) RequestRebuild();
+    }
+
     public void New()
     {
         Doc = NewDocument(); FilePath = null; Dirty = false;

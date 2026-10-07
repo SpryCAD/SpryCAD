@@ -651,27 +651,32 @@ public partial class MainWindow
     /// </summary>
     void ImportFile(string path)
     {
+        if (ImportInto(_tab, path) is { } err) { _ = Dialogs.Message(this, "Import failed", err); return; }
+        Status("Imported " + Path.GetFileName(path));
+    }
+
+    /// <summary>Imports a STEP file into a tab's part (shown or not); the problem when it cannot, else null.</summary>
+    string? ImportInto(PartTab t, string path)
+    {
+        var s = t.Session;
         byte[] data;
         try { data = File.ReadAllBytes(path); }
-        catch (Exception ex) { _ = Dialogs.Message(this, "Import failed", ex.Message); return; }
+        catch (Exception ex) { return ex.Message; }
         if (!System.Text.Encoding.ASCII.GetString(data, 0, Math.Min(64, data.Length)).TrimStart().StartsWith("ISO-10303-21"))
-        {
-            _ = Dialogs.Message(this, "Import failed", Path.GetFileName(path) + " is not a STEP file.");
-            return;
-        }
+            return Path.GetFileName(path) + " is not a STEP file.";
         var hash = DocumentContainer.Hash(data);
         var baseName = Path.GetFileName(path);
         // same name, different content (another version of the file): keep both
         var name = "imports/" + baseName;
-        for (int k = 2; Session.Doc.Files.TryGetValue(name, out var existing) && DocumentContainer.Hash(existing) != hash; k++)
+        for (int k = 2; s.Doc.Files.TryGetValue(name, out var existing) && DocumentContainer.Hash(existing) != hash; k++)
             name = $"imports/{Path.GetFileNameWithoutExtension(baseName)} ({k}){Path.GetExtension(baseName)}";
-        Session.Change(() =>
+        s.Change(() =>
         {
-            Session.Doc.AddFile(name, data);
-            Session.Doc.AddFeature(new ImportFeature { Name = Path.GetFileNameWithoutExtension(baseName), File = name, Sha256 = hash });
+            s.Doc.AddFile(name, data);
+            s.Doc.AddFeature(new ImportFeature { Name = Path.GetFileNameWithoutExtension(baseName), File = name, Sha256 = hash });
         });
-        _tab.FitAfterLoad = Session.RequestedRevision; // the rebuild with the import in it
-        Status("Imported " + baseName);
+        t.FitAfterLoad = s.RequestedRevision; // the rebuild with the import in it
+        return null;
     }
 
     /// <summary>A sketch or feature edit that is not in the document yet.</summary>
@@ -725,11 +730,39 @@ public partial class MainWindow
             FileTypeFilter = new[] { OpenableType, FcadType, StepType },
             AllowMultiple = true,
         });
-        foreach (var f in files)
-            if (f.TryGetLocalPath() is { } path && !await OpenFileAsync(path)) break;
+        await OpenFilesAsync(files.Select(f => f.TryGetLocalPath()).OfType<string>().ToList());
     }
 
     public void OpenFile(string path) => _ = OpenFileAsync(path);
+
+    /// <summary>
+    /// Opens files. Several get their tabs (and rows in the list of open parts) at once, without reading them; the
+    /// first is shown, each other part is read when it is first shown, and the list's previews are made in the
+    /// background, one part at a time. One file opens as <see cref="OpenFileAsync"/>.
+    /// </summary>
+    public async Task OpenFilesAsync(IReadOnlyList<string> paths)
+    {
+        if (paths.Count == 0) return;
+        if (paths.Count == 1) { await OpenFileAsync(paths[0]); return; }
+        var blank = IsUntouched(_tab) ? _tab : null; // the empty part the window started with: not needed
+        PartTab? first = null;
+        foreach (var path in paths)
+        {
+            if (FindOpen(path) is { } open) { first ??= open; continue; }
+            var t = AddTab(new DocumentSession());
+            t.Source = path;
+            t.Session.Defer(path);
+            first ??= t;
+        }
+        if (first == null) return;
+        if (await SwitchTo(first) && blank != null && blank != first && _tab != blank) RemoveTab(blank);
+        Status($"Opened {paths.Count} files: each part is read when shown; previews are made in the background.");
+        StartPreviews();
+    }
+
+    /// <summary>The tab of a file already open (a part's own file, or the STEP model it was made from).</summary>
+    PartTab? FindOpen(string path) =>
+        _parts.FirstOrDefault(t => (t.Session.SourcePath ?? t.Source) is { } p && SamePath(p, path));
 
     /// <summary>
     /// Opens a part (or a STEP model, as a new part holding it) in a tab of its own: the tab already showing it
@@ -737,7 +770,7 @@ public partial class MainWindow
     /// </summary>
     public async Task<bool> OpenFileAsync(string path)
     {
-        if (_parts.FirstOrDefault(t => t.Session.FilePath is { } p && SamePath(p, path)) is { } open)
+        if (FindOpen(path) is { } open)
             return await SwitchTo(open);
         var created = false;
         if (IsUntouched(_tab)) { if (!await ResolvePendingEdit()) return false; LeaveModes(); }
@@ -747,6 +780,7 @@ public partial class MainWindow
         {
             // the STEP model, imported into a new part named after it (a later Save As suggests that name)
             Session.UntitledName = Path.GetFileNameWithoutExtension(path);
+            _tab.Source = path;
             Session.New();
             ImportFile(path);
             Session.MarkClean();

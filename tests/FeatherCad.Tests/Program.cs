@@ -67,6 +67,31 @@ static class Program
                 }
             return 0;
         }
+        if (args.Length > 1 && args[0] == "memload")
+        {
+            // what keeping STEP parts open costs: each imported, rebuilt and meshed as the app does, all kept
+            static long Managed() { GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect(); return GC.GetTotalMemory(true); }
+            var kept = new List<(FeatherCad.Core.Regen.Regenerator regen, FeatherCad.Core.Regen.RegenResult result)>();
+            var files = args.Skip(1).SelectMany(a => Directory.Exists(a) ? Directory.GetFiles(a).Where(f => f.EndsWith(".step", StringComparison.OrdinalIgnoreCase) || f.EndsWith(".stp", StringComparison.OrdinalIgnoreCase)) : new[] { a }).ToList();
+            var before = Managed();
+            foreach (var file in files)
+            {
+                var data = File.ReadAllBytes(file);
+                var doc = new FeatherCad.Core.Model.CadDocument();
+                doc.AddFile("imports/m.step", data);
+                doc.AddFeature(new FeatherCad.Core.Model.ImportFeature { File = "imports/m.step", Sha256 = FeatherCad.Core.Model.DocumentContainer.Hash(data) });
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                var regen = new FeatherCad.Core.Regen.Regenerator();
+                var r = regen.Rebuild(doc);
+                foreach (var b in r.State.Bodies) _ = b.Mesh;
+                var ms = sw.ElapsedMilliseconds;
+                var m0 = Managed();
+                kept.Add((regen, r));
+                Console.WriteLine($"{Path.GetFileName(file),-28} {ms,5} ms  managed {(m0 - before) / 1048576.0,8:0.0} MB total, {(m0 - before) / 1048576.0 / kept.Count,6:0.0} MB/part");
+            }
+            GC.KeepAlive(kept);
+            return 0;
+        }
         if (args.Length > 1 && args[0] == "nurbsprobe")
         {
             var res = FeatherCad.Kernel.StepImport.Read(File.ReadAllBytes(args[1]), "F1.");

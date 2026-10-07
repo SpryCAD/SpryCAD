@@ -29,6 +29,10 @@ public partial class MainWindow
         /// <summary>Preview for the list of parts, and the rebuild it shows (re-rendered when the part rebuilds).</summary>
         public Avalonia.Media.Imaging.Bitmap? Thumb;
         public int ThumbRevision = -1;
+        /// <summary>The file the part was opened from (its STEP model, which a new part does not keep as its path).</summary>
+        public string? Source;
+        /// <summary>No preview can be made (the part is empty or could not be read): the background pass skips it.</summary>
+        public bool NoPreview;
     }
 
     readonly List<PartTab> _parts = new();
@@ -45,7 +49,12 @@ public partial class MainWindow
     {
         s.UntitledName = "Part" + ++_untitledCount;
         var t = new PartTab(s);
-        s.Rebuilt += () => { if (s == Session) OnRebuilt(); if (_partRows.TryGetValue(t, out var row)) _ = LoadThumb(t, row.Image); };
+        s.Rebuilt += () =>
+        {
+            if (s == Session) OnRebuilt();
+            // the preview follows the part (new ones are the background pass's job while it runs)
+            if (_partRows.TryGetValue(t, out var row) && (!_previewsRunning || t.Thumb != null)) _ = LoadThumb(t, row.Image);
+        };
         s.DocumentChanged += () => { UpdateTabHeader(t); if (s == Session) OnDocumentChanged(); };
         s.BusyChanged += busy => { if (s == Session) { BusyText.IsVisible = busy; BusyText.Text = "Rebuilding…"; } };
         s.Progress += p => { if (s == Session && s.Busy) BusyText.Text = p.Text; };
@@ -319,7 +328,7 @@ public partial class MainWindow
                 row.Title.Text = t.Session.Title;
                 row.Title.FontWeight = t == _tab ? FontWeight.SemiBold : FontWeight.Normal;
                 if (!row.Item.IsPointerOver) row.Close.Opacity = t == _tab ? 1 : 0;
-                row.Path.Text = t.Session.FilePath ?? "Not saved yet";
+                row.Path.Text = t.Session.FilePath ?? t.Source ?? "Not saved yet";
                 Avalonia.Controls.Primitives.TextSearch.SetText(row.Item, t.Session.Title);
             }
             if (_partRows.TryGetValue(_tab, out var active) && !ReferenceEquals(list.SelectedItem, active.Item))
@@ -332,7 +341,7 @@ public partial class MainWindow
     }
 
     /// <summary>The part's preview (rendered off the UI thread when the part has rebuilt since the last one).</summary>
-    async Task LoadThumb(PartTab t, Image img)
+    async Task LoadThumb(PartTab t, Image? img = null)
     {
         var s = t.Session;
         var result = s.Result;
@@ -347,7 +356,96 @@ public partial class MainWindow
         if (png == null) return;
         t.Thumb = new Avalonia.Media.Imaging.Bitmap(new MemoryStream(png));
         t.ThumbRevision = rev;
-        img.Source = t.Thumb;
+        // the row now (it may have been made while the preview was rendered)
+        if (_partRows.TryGetValue(t, out var row)) row.Image.Source = t.Thumb;
+        else if (img != null) img.Source = t.Thumb;
+    }
+
+    // ------------------------------------------------------------------------------------------
+    // parts opened in a batch: read when first shown; previews made in the background; memory kept down
+
+    /// <summary>How many parts keep their built model when not shown (the most recently shown): flipping back is instant.</summary>
+    const int KeepLoaded = 6;
+    readonly List<PartTab> _recent = new();
+    bool _previewsRunning;
+
+    /// <summary>Reads a part opened in a batch, the first time it is needed; the problem when it cannot be read.</summary>
+    string? LoadPending(PartTab t)
+    {
+        if (t.Session.TakePending() is not { } path) return null;
+        var s = t.Session;
+        if (IsStep(path))
+        {
+            s.New();
+            var err = ImportInto(t, path);
+            s.MarkClean();
+            return err;
+        }
+        try
+        {
+            s.Load(path);
+            if (!IsAutosave(path)) RecentFiles.Add(path);
+            t.FitAfterLoad = s.RequestedRevision;
+            return null;
+        }
+        catch (Exception ex) { return ex.Message; }
+    }
+
+    /// <summary>
+    /// A part was shown: it goes first among the recently shown; the parts shown longest ago drop their built model
+    /// (not their document, changes or undo history) and are built again when shown.
+    /// </summary>
+    void TouchRecent(PartTab t)
+    {
+        _recent.Remove(t);
+        _recent.Insert(0, t);
+        foreach (var old in _recent.Skip(KeepLoaded).ToList())
+            if (old != _tab && (old.Session.Unload() || old.Session.Result == null)) _recent.Remove(old);
+    }
+
+    /// <summary>
+    /// Makes the previews of the list of open parts in the background, one part at a time (reading parts not read
+    /// yet, building those whose model was dropped), dropping each built model again unless it was shown recently.
+    /// Parts that cannot be read are closed, and named in the status bar.
+    /// </summary>
+    async void StartPreviews()
+    {
+        if (_previewsRunning) return;
+        _previewsRunning = true;
+        var failed = new List<string>();
+        try
+        {
+            while (_parts.FirstOrDefault(p => p.Thumb == null && !p.NoPreview) is { } t)
+            {
+                if (LoadPending(t) is { } err)
+                {
+                    failed.Add($"{Path.GetFileName(t.Source)} ({err})");
+                    t.NoPreview = true;
+                    if (t != _tab) RemoveTab(t);
+                    continue;
+                }
+                t.Session.EnsureBuilt();
+                if (await WaitBuilt(t)) await LoadThumb(t);
+                if (t.Thumb == null) t.NoPreview = true; // an empty part, or one that failed to rebuild
+                if (t != _tab && !_recent.Contains(t)) t.Session.Unload();
+                await Task.Yield();
+            }
+        }
+        finally { _previewsRunning = false; }
+        if (failed.Count > 0) Status($"Could not open {failed.Count} file{(failed.Count == 1 ? "" : "s")}: {string.Join("; ", failed)}");
+    }
+
+    /// <summary>Waits until the part's latest rebuild has a result (false if the tab closed or it takes over two minutes).</summary>
+    async Task<bool> WaitBuilt(PartTab t)
+    {
+        var s = t.Session;
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        while (_parts.Contains(t) && (s.Result == null || s.ResultRevision < s.RequestedRevision || s.Busy))
+        {
+            if (sw.Elapsed.TotalMinutes > 2) return false;
+            await Task.Delay(30);
+        }
+        return _parts.Contains(t) && s.Result != null;
     }
 
     void UpdateTabHeader(PartTab t)
@@ -362,7 +460,7 @@ public partial class MainWindow
     /// <summary>An unsaved new part nobody has worked on: opening a file reuses its tab instead of adding one.</summary>
     bool IsUntouched(PartTab t) =>
         t.Session.FilePath == null && !t.Session.Dirty && !t.Session.CanUndo && t.Session.Doc.Features.Count == 0
-        && !(t == _tab && HasPendingEdit);
+        && !t.Session.IsPending && !(t == _tab && HasPendingEdit);
 
     /// <summary>Opens an empty tab and makes it active (null if leaving the current one was cancelled).</summary>
     async Task<PartTab?> NewTab()
@@ -392,6 +490,10 @@ public partial class MainWindow
         var old = _tab;
         _tab = t;
         Session = t.Session;
+        // opened in a batch and not read yet, or its built model dropped to save memory: read / built now
+        var loadError = LoadPending(t);
+        t.Session.EnsureBuilt();
+        TouchRecent(t);
         UpdateTabHeader(old);
         UpdateTabHeader(t);
         DocTabs.Active = t.Header; // shown even when the tabs before it fill the strip
@@ -403,6 +505,11 @@ public partial class MainWindow
         if (t.View is { } v) { cam.Rotation = v.rotation; cam.Target = v.target; cam.HalfHeight = v.halfHeight; Viewport.Redraw(); }
         else if (Session.Result != null) Viewport.StandardView("Trimetric", fit: true);
         else t.FitAfterLoad = t.Session.RequestedRevision;
+        if (loadError != null)
+        {
+            await UI.Dialogs.Message(this, "Open failed", $"{Path.GetFileName(t.Source)}: {loadError}");
+            await CloseTab(t);
+        }
         return true;
     }
 
@@ -434,6 +541,8 @@ public partial class MainWindow
     /// </summary>
     async Task<bool> CloseTab(PartTab t)
     {
+        // a part not read yet has nothing to ask about (and need not be read to be closed)
+        if (t != _tab && t.Session.IsPending) { RemoveTab(t); return true; }
         if (!await SwitchTo(t)) return false;
         if (!await ConfirmDiscard()) return false;
         var i = _parts.IndexOf(t);
@@ -449,6 +558,7 @@ public partial class MainWindow
     void RemoveTab(PartTab t)
     {
         _parts.Remove(t);
+        _recent.Remove(t);
         DocTabs.Children.Remove(t.Header);
         UpdatePartsButton();
     }

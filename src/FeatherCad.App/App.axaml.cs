@@ -51,10 +51,6 @@ public partial class App : Application
         base.OnFrameworkInitializationCompleted();
     }
 
-    /// <summary>Opens files one after another (each may ask a question first), stopping if one is cancelled.</summary>
-    static async Task OpenFiles(MainWindow w, IEnumerable<string> files)
-    {
-        foreach (var f in files)
-            if (!await w.OpenFileAsync(f)) break;
-    }
+    /// <summary>Opens files: several at once each in a tab, read when shown (MainWindow.OpenFilesAsync).</summary>
+    static Task OpenFiles(MainWindow w, IEnumerable<string> files) => w.OpenFilesAsync(files.ToList());
 }
