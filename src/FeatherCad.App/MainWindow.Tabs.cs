@@ -21,8 +21,11 @@ public partial class MainWindow
         public TextBlock Label = null!;
         /// <summary>The camera when last left; null until then (the view is fitted to the part instead).</summary>
         public (System.Numerics.Quaternion rotation, System.Numerics.Vector3 target, float halfHeight)? View;
-        /// <summary>Fit the view once the part's next rebuild finishes (just opened or imported).</summary>
-        public bool FitAfterLoad;
+        /// <summary>
+        /// Fit the view once this rebuild request's result arrives (just opened or imported); null for none. A
+        /// request number, not a flag: an earlier, empty result can arrive first and must not use up the fit.
+        /// </summary>
+        public int? FitAfterLoad;
     }
 
     readonly List<PartTab> _parts = new();
@@ -124,7 +127,7 @@ public partial class MainWindow
         OnRebuilt();
         if (t.View is { } v) { cam.Rotation = v.rotation; cam.Target = v.target; cam.HalfHeight = v.halfHeight; Viewport.Redraw(); }
         else if (Session.Result != null) Viewport.StandardView("Trimetric", fit: true);
-        else t.FitAfterLoad = true;
+        else t.FitAfterLoad = t.Session.RequestedRevision;
         return true;
     }
 

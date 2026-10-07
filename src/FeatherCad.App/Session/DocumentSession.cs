@@ -30,6 +30,14 @@ public sealed class DocumentSession
     readonly object _lock = new();
     // separate slots: a live-preview request must never replace a pending real rebuild
     CadDocument? _pendingReal, _pendingPreview;
+    // real rebuild requests are numbered: what a result answers, so a caller can wait for the one it asked for
+    int _requested, _pendingRealRev;
+
+    /// <summary>The number of the latest real rebuild request (see <see cref="ResultRevision"/>).</summary>
+    public int RequestedRevision { get { lock (_lock) return _requested; } }
+    /// <summary>The request the current <see cref="Result"/> was built for: an earlier result can arrive after a
+    /// later request was made (e.g. an empty new part's, just before its STEP import's).</summary>
+    public int ResultRevision { get; private set; }
     bool _running;
     // the running rebuild: cancelled when a newer request of the same kind (or any real rebuild) supersedes it
     CancellationTokenSource? _runningCts;
@@ -206,7 +214,7 @@ public sealed class DocumentSession
     {
         lock (_lock)
         {
-            if (preview) _pendingPreview = snapshot; else _pendingReal = snapshot;
+            if (preview) _pendingPreview = snapshot; else { _pendingReal = snapshot; _pendingRealRev = ++_requested; }
             if (preview) PreviewActive = true;
             // a newer preview makes the running preview pointless; a real rebuild goes before any preview, and a
             // newer real rebuild replaces the running one (its result would not be shown)
@@ -223,11 +231,11 @@ public sealed class DocumentSession
     {
         while (true)
         {
-            CadDocument doc; bool preview;
+            CadDocument doc; bool preview; int rev = 0;
             lock (_lock)
             {
                 // the real model first: the tree, status and selection depend on it
-                if (_pendingReal != null) { doc = _pendingReal; preview = false; _pendingReal = null; }
+                if (_pendingReal != null) { doc = _pendingReal; preview = false; rev = _pendingRealRev; _pendingReal = null; }
                 else if (_pendingPreview != null) { doc = _pendingPreview; preview = true; _pendingPreview = null; }
                 else { _running = false; break; }
             }
@@ -267,7 +275,7 @@ public sealed class DocumentSession
             Dispatcher.UIThread.Post(() =>
             {
                 if (preview) { if (PreviewActive) PreviewResult = r; }
-                else Result = r;
+                else { Result = r; ResultRevision = rev; }
                 Rebuilt?.Invoke();
             });
         }

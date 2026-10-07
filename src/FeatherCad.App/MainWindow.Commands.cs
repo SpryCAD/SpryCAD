@@ -621,7 +621,7 @@ public partial class MainWindow
             Session.Doc.AddFile(name, data);
             Session.Doc.AddFeature(new ImportFeature { Name = Path.GetFileNameWithoutExtension(baseName), File = name, Sha256 = hash });
         });
-        _tab.FitAfterLoad = true;
+        _tab.FitAfterLoad = Session.RequestedRevision; // the rebuild with the import in it
         Status("Imported " + baseName);
     }
 
@@ -709,7 +709,7 @@ public partial class MainWindow
             Session.Load(path);
             if (!IsAutosave(path)) RecentFiles.Add(path);
             Status("Opened " + path);
-            _tab.FitAfterLoad = true;
+            _tab.FitAfterLoad = Session.RequestedRevision;
             return true;
         }
         catch (Exception ex)

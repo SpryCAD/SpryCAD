@@ -131,7 +131,8 @@ public partial class MainWindow : Window
         }
         UpdateProblemEdges();
         if (_firstRebuild) { _firstRebuild = false; }
-        if (_tab.FitAfterLoad && !Session.PreviewActive) { _tab.FitAfterLoad = false; Viewport.StandardView("Trimetric", fit: true); }
+        if (_tab.FitAfterLoad is { } fitRev && Session.ResultRevision >= fitRev && !Session.PreviewActive)
+        { _tab.FitAfterLoad = null; Viewport.StandardView("Trimetric", fit: true); }
     }
 
     /// <summary>
