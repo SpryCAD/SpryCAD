@@ -64,7 +64,7 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
     bool _ghosted;
     const float GhostAlpha = 0.3f;
     /// <summary>What the view rotates about unless a rotation center was set by middle-clicking the model.</summary>
-    public RotateCenter RotateAbout = RotateCenter.ModelCenter;
+    public RotateCenter RotateAbout = RotateCenter.Selection;
 
     // highlight state
     public SelItem? Hover { get; set; }

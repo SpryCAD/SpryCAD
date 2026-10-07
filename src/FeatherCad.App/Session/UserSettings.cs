@@ -23,7 +23,8 @@ public static class UserSettings
     /// parts with embedded files. On by default.
     /// </summary>
     public static bool SaveContainer { get; set; } = true;
-    public static RotateCenter RotateAbout { get; set; } = RotateCenter.ModelCenter;
+    /// <summary>What the view rotates about: by default the selection (its last vertex, edge or face), else the model's middle.</summary>
+    public static RotateCenter RotateAbout { get; set; } = RotateCenter.Selection;
 
     public static void Load()
     {

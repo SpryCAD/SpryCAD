@@ -220,10 +220,10 @@ public static class Dialogs
         var units = new ComboBox { ItemsSource = new[] { "MMGS (millimeter, gram, second)", "IPS (inch, pound, second)" }, SelectedIndex = s.Doc.Units == UnitSystem.IPS ? 1 : 0, HorizontalAlignment = HorizontalAlignment.Stretch };
         var wheel = new CheckBox { Content = "Reverse mouse wheel zoom direction", IsChecked = owner.Viewport.ReverseWheel };
         var persp = new CheckBox { Content = "Perspective view", IsChecked = owner.Viewport.Camera.Perspective };
-        var pivots = new[] { Session.RotateCenter.ModelCenter, Session.RotateCenter.Selection, Session.RotateCenter.UnderCursor };
+        var pivots = new[] { Session.RotateCenter.Selection, Session.RotateCenter.ModelCenter, Session.RotateCenter.UnderCursor };
         var pivot = new ComboBox
         {
-            ItemsSource = new[] { "Rotate about the model center", "Rotate about the selection", "Rotate about the point under the cursor" },
+            ItemsSource = new[] { "Rotate about the selection (default)", "Rotate about the model center", "Rotate about the point under the cursor" },
             SelectedIndex = Array.IndexOf(pivots, owner.Viewport.RotateAbout), HorizontalAlignment = HorizontalAlignment.Stretch,
         };
         var container = new CheckBox { Content = "Always save parts as containers (with a preview image)", IsChecked = Session.UserSettings.SaveContainer };
