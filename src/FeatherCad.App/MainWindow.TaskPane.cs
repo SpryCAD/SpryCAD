@@ -157,7 +157,9 @@ public partial class MainWindow
         TaskSplitter.IsVisible = pinned;
         if (pinned)
         {
+            // the whole column (not the list's own width at the right, as when sliding out)
             _taskPanel.Width = double.NaN;
+            _taskPanel.HorizontalAlignment = HorizontalAlignment.Stretch;
             _taskPanel.BoxShadow = default;
             TaskPinHost.Content = _taskPanel;
         }
