@@ -33,6 +33,12 @@ public partial class MainWindow
         public string? Source;
         /// <summary>No preview can be made (the part is empty or could not be read): the background pass skips it.</summary>
         public bool NoPreview;
+        /// <summary>The part's file could not be read (missing, not a STEP file, a broken part file).</summary>
+        public string? LoadError;
+        /// <summary>The file was read but its model could not be imported (the Imported feature failed); kept when the model is dropped.</summary>
+        public string? ImportError;
+        /// <summary>Why the part could not be opened, if it could not: shown in red on its tab and row, and over the view.</summary>
+        public string? Error => LoadError ?? ImportError;
     }
 
     readonly List<PartTab> _parts = new();
@@ -51,6 +57,12 @@ public partial class MainWindow
         var t = new PartTab(s);
         s.Rebuilt += () =>
         {
+            // an import that failed (an unsupported STEP model): the part is marked, as one whose file could not be read
+            if (s.Result is { } r)
+            {
+                var err = s.Doc.Features.OfType<Core.Model.ImportFeature>().Select(f => r.Status.GetValueOrDefault(f.Id)?.Error).FirstOrDefault(e => e != null);
+                if (err != t.ImportError) { t.ImportError = err; UpdateTabHeader(t); if (t == _tab) UpdateLoadBanner(); }
+            }
             if (s == Session) OnRebuilt();
             // the preview follows the part (new ones are the background pass's job while it runs)
             if (_partRows.TryGetValue(t, out var row) && (!_previewsRunning || t.Thumb != null)) _ = LoadThumb(t, row.Image);
@@ -108,7 +120,9 @@ public partial class MainWindow
         RefreshPartsList();
     }
 
-    sealed record PartRow(ListBoxItem Item, TextBlock Title, TextBlock Path, Image Image, Button Close);
+    sealed record PartRow(ListBoxItem Item, TextBlock Title, TextBlock Path, Image Image, Control Warning, Button Close);
+
+    static readonly IBrush ErrorBrush = new SolidColorBrush(Color.Parse("#FFC62828"));
 
     Window? _partsWindow;
     ListBox? _partsList;
@@ -143,8 +157,22 @@ public partial class MainWindow
         closeOthers.Click += async (_, _) => { if (Picked() is { } t) { await CloseTabs(_parts.Where(p => p != t).ToList()); FocusPartsList(); } };
         var closeAll = new MenuItem { Header = "Close _All" };
         closeAll.Click += async (_, _) => { await CloseTabs(_parts.ToList()); FocusPartsList(); };
-        var menu = new ContextMenu { Items = { closeOne, closeOthers, new Separator(), closeAll } };
-        menu.Opening += (_, _) => { closeOne.IsEnabled = Picked() != null; closeOthers.IsEnabled = Picked() != null && _parts.Count > 1; };
+        // the part's file (or the STEP model it was made from), as text on the clipboard
+        string? PathOf(PartTab t) => t.Session.SourcePath ?? t.Source;
+        var copyPath = new MenuItem { Header = "Copy File _Path" };
+        copyPath.Click += async (_, _) =>
+        {
+            if (Picked() is not { } t || PathOf(t) is not { } p || TopLevel.GetTopLevel(list)?.Clipboard is not { } clip) return;
+            await clip.SetTextAsync(p);
+            Status("Copied " + p);
+        };
+        var menu = new ContextMenu { Items = { copyPath, new Separator(), closeOne, closeOthers, new Separator(), closeAll } };
+        menu.Opening += (_, _) =>
+        {
+            closeOne.IsEnabled = Picked() != null;
+            closeOthers.IsEnabled = Picked() != null && _parts.Count > 1;
+            copyPath.IsEnabled = Picked() is { } t && PathOf(t) != null; // a new part has no file yet
+        };
         list.ContextMenu = menu;
         list.SelectionChanged += async (_, _) =>
         {
@@ -312,14 +340,19 @@ public partial class MainWindow
                     };
                     ToolTip.SetTip(close, "Close (Delete, Ctrl+W)");
                     close.Click += (_, _) => ClosePartFromList(t);
-                    var dock = new DockPanel { Children = { img, close, text } };
-                    DockPanel.SetDock(img, Dock.Left);
+                    // a part that could not be opened: a red warning sign where its preview would be
+                    var warning = UI.Icons.Make("warning", 36, ErrorBrush);
+                    warning.HorizontalAlignment = HorizontalAlignment.Center; warning.VerticalAlignment = VerticalAlignment.Center;
+                    warning.IsVisible = false;
+                    var picture = new Panel { Width = 64, Height = 64, Children = { img, warning } };
+                    var dock = new DockPanel { Children = { picture, close, text } };
+                    DockPanel.SetDock(picture, Dock.Left);
                     DockPanel.SetDock(close, Dock.Right);
                     var item = new ListBoxItem { Content = dock, Tag = t, Padding = new Thickness(6, 4) };
                     // the ✕ on the row under the mouse (and the selected one, see below)
                     item.PointerEntered += (_, _) => close.Opacity = 1;
                     item.PointerExited += (_, _) => close.Opacity = t == _tab ? 1 : 0;
-                    row = new PartRow(item, title, path, img, close);
+                    row = new PartRow(item, title, path, img, warning, close);
                     _partRows[t] = row;
                     list.Items.Insert(Math.Min(i, list.Items.Count), row.Item);
                     _ = LoadThumb(t, img);
@@ -328,7 +361,14 @@ public partial class MainWindow
                 row.Title.Text = t.Session.Title;
                 row.Title.FontWeight = t == _tab ? FontWeight.SemiBold : FontWeight.Normal;
                 if (!row.Item.IsPointerOver) row.Close.Opacity = t == _tab ? 1 : 0;
-                row.Path.Text = t.Session.FilePath ?? t.Source ?? "Not saved yet";
+                // could not be opened: the name in red, the problem instead of the path (in full on the tooltip)
+                var error = t.Error;
+                row.Title.Foreground = error != null ? ErrorBrush : null;
+                row.Path.Text = error ?? t.Session.FilePath ?? t.Source ?? "Not saved yet";
+                row.Path.Foreground = error != null ? ErrorBrush : Brushes.Gray;
+                row.Path.TextTrimming = error != null ? TextTrimming.CharacterEllipsis : TextTrimming.PathSegmentEllipsis;
+                row.Warning.IsVisible = error != null && t.Thumb == null;
+                ToolTip.SetTip(row.Item, error != null ? $"Could not be opened: {error}\n{t.Source ?? t.Session.FilePath}" : null);
                 Avalonia.Controls.Primitives.TextSearch.SetText(row.Item, t.Session.Title);
             }
             if (_partRows.TryGetValue(_tab, out var active) && !ReferenceEquals(list.SelectedItem, active.Item))
@@ -419,9 +459,12 @@ public partial class MainWindow
             {
                 if (LoadPending(t) is { } err)
                 {
+                    // kept, marked red (its error shows when it is selected)
                     failed.Add($"{Path.GetFileName(t.Source)} ({err})");
                     t.NoPreview = true;
-                    if (t != _tab) RemoveTab(t);
+                    t.LoadError = err;
+                    UpdateTabHeader(t);
+                    if (t == _tab) UpdateLoadBanner();
                     continue;
                 }
                 t.Session.EnsureBuilt();
@@ -433,6 +476,61 @@ public partial class MainWindow
         }
         finally { _previewsRunning = false; }
         if (failed.Count > 0) Status($"Could not open {failed.Count} file{(failed.Count == 1 ? "" : "s")}: {string.Join("; ", failed)}");
+    }
+
+    Border? _loadBanner;
+    TextBlock _bannerTitle = null!, _bannerError = null!, _bannerPath = null!;
+
+    /// <summary>
+    /// Over the view of a part that could not be opened: why, the file, and Retry (after fixing or replacing it).
+    /// Hidden for parts that opened.
+    /// </summary>
+    void UpdateLoadBanner()
+    {
+        if (_tab.Error is not { } error) { if (_loadBanner != null) _loadBanner.IsVisible = false; return; }
+        if (_loadBanner == null)
+        {
+            _bannerTitle = new TextBlock { FontSize = 14, FontWeight = FontWeight.SemiBold, Foreground = ErrorBrush, VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.Wrap };
+            _bannerError = new TextBlock { FontSize = 12, TextWrapping = TextWrapping.Wrap };
+            _bannerPath = new TextBlock { FontSize = 11, Foreground = Brushes.Gray, TextWrapping = TextWrapping.Wrap };
+            var retry = new Button { Content = "Retry", HorizontalAlignment = HorizontalAlignment.Right, Padding = new Thickness(14, 3), Margin = new Thickness(0, 6, 0, 0) };
+            ToolTip.SetTip(retry, "Read the file again (e.g. after fixing or replacing it)");
+            retry.Click += (_, _) => RetryLoad(_tab);
+            var icon = UI.Icons.Make("warning", 22, ErrorBrush);
+            var head = new DockPanel { Children = { icon, _bannerTitle } };
+            DockPanel.SetDock(icon, Dock.Left);
+            _bannerTitle.Margin = new Thickness(8, 0, 0, 0);
+            _loadBanner = new Border
+            {
+                Background = Brushes.White, BorderBrush = ErrorBrush, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(6),
+                Padding = new Thickness(16, 12), MaxWidth = 520, Margin = new Thickness(24),
+                HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
+                BoxShadow = BoxShadows.Parse("0 4 16 0 #30000000"),
+                Child = new StackPanel { Spacing = 6, Children = { head, _bannerError, _bannerPath, retry } },
+            };
+            GraphicsArea.Children.Add(_loadBanner);
+        }
+        _bannerTitle.Text = $"{_tab.Session.Title.TrimEnd(' ', '*')} could not be opened";
+        _bannerError.Text = error;
+        _bannerPath.Text = _tab.Source ?? _tab.Session.FilePath ?? "";
+        _loadBanner.IsVisible = true;
+    }
+
+    /// <summary>Reads a part that could not be opened again (from its file, now; or when it is next shown).</summary>
+    void RetryLoad(PartTab t)
+    {
+        if ((t.Source ?? t.Session.FilePath) is not { } path) return;
+        t.LoadError = null; t.ImportError = null; t.NoPreview = false; t.Thumb = null;
+        t.Session.Defer(path);
+        if (t == _tab)
+        {
+            if (LoadPending(t) is { } err) t.LoadError = err;
+            t.Session.EnsureBuilt();
+            t.FitAfterLoad = t.Session.RequestedRevision;
+            UpdateLoadBanner();
+        }
+        UpdateTabHeader(t);
+        StartPreviews();
     }
 
     /// <summary>Waits until the part's latest rebuild has a result (false if the tab closed or it takes over two minutes).</summary>
@@ -452,15 +550,16 @@ public partial class MainWindow
     {
         t.Label.Text = t.Session.Title;
         t.Label.FontWeight = t == _tab ? FontWeight.SemiBold : FontWeight.Normal;
+        t.Label.Foreground = t.Error != null ? ErrorBrush : null;
         t.Header.Background = t == _tab ? TabActiveBrush : TabInactiveBrush;
-        ToolTip.SetTip(t.Header, t.Session.FilePath ?? "Not saved yet");
+        ToolTip.SetTip(t.Header, t.Error is { } e ? $"Could not be opened: {e}" : t.Session.FilePath ?? t.Source ?? "Not saved yet");
         RefreshPartsList();
     }
 
     /// <summary>An unsaved new part nobody has worked on: opening a file reuses its tab instead of adding one.</summary>
     bool IsUntouched(PartTab t) =>
         t.Session.FilePath == null && !t.Session.Dirty && !t.Session.CanUndo && t.Session.Doc.Features.Count == 0
-        && !t.Session.IsPending && !(t == _tab && HasPendingEdit);
+        && !t.Session.IsPending && t.Error == null && !(t == _tab && HasPendingEdit);
 
     /// <summary>Opens an empty tab and makes it active (null if leaving the current one was cancelled).</summary>
     async Task<PartTab?> NewTab()
@@ -495,7 +594,7 @@ public partial class MainWindow
         _tab = t;
         Session = t.Session;
         // opened in a batch and not read yet, or its built model dropped to save memory: read / built now
-        var loadError = LoadPending(t);
+        if (LoadPending(t) is { } loadError) t.LoadError = loadError;
         t.Session.EnsureBuilt();
         TouchRecent(t);
         UpdateTabHeader(old);
@@ -514,11 +613,7 @@ public partial class MainWindow
             Viewport.StandardView("Trimetric", fit: true, animate: false);
         }
         else t.FitAfterLoad = t.Session.RequestedRevision;
-        if (loadError != null)
-        {
-            await UI.Dialogs.Message(this, "Open failed", $"{Path.GetFileName(t.Source)}: {loadError}");
-            await CloseTab(t);
-        }
+        UpdateLoadBanner(); // a part that could not be opened says why, over the view
         return true;
     }
 

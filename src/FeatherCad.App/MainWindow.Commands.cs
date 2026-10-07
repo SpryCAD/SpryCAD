@@ -748,7 +748,7 @@ public partial class MainWindow
         PartTab? first = null;
         foreach (var path in paths)
         {
-            if (FindOpen(path) is { } open) { first ??= open; continue; }
+            if (FindOpen(path) is { } open) { if (open.Error != null) RetryLoad(open); first ??= open; continue; }
             var t = AddTab(new DocumentSession());
             t.Source = path;
             t.Session.Defer(path);
@@ -771,19 +771,24 @@ public partial class MainWindow
     public async Task<bool> OpenFileAsync(string path)
     {
         if (FindOpen(path) is { } open)
+        {
+            // opened again after it could not be: read it again (the file may have been fixed or replaced)
+            if (open.Error != null) RetryLoad(open);
             return await SwitchTo(open);
-        var created = false;
+        }
         if (IsUntouched(_tab)) { if (!await ResolvePendingEdit()) return false; LeaveModes(); }
         else if (await NewTab() is null) return false;
-        else created = true;
         if (IsStep(path))
         {
             // the STEP model, imported into a new part named after it (a later Save As suggests that name)
             Session.UntitledName = Path.GetFileNameWithoutExtension(path);
             _tab.Source = path;
             Session.New();
-            ImportFile(path);
+            // a file that cannot be read stays open, marked, saying why (as in a batch)
+            if (ImportInto(_tab, path) is { } err) { _tab.LoadError = err; UpdateTabHeader(_tab); }
+            else Status("Imported " + Path.GetFileName(path));
             Session.MarkClean();
+            UpdateLoadBanner();
             return true;
         }
         try
@@ -797,9 +802,13 @@ public partial class MainWindow
         }
         catch (Exception ex)
         {
-            if (created) await CloseTab(_tab); // nothing to show for it
-            await Dialogs.Message(this, "Open failed", ex.Message);
-            return false;
+            // the part stays open, marked, saying why (Retry reads it again)
+            _tab.Source = path;
+            Session.UntitledName = Path.GetFileNameWithoutExtension(path);
+            _tab.LoadError = ex.Message;
+            UpdateTabHeader(_tab);
+            UpdateLoadBanner();
+            return true;
         }
     }
 
