@@ -199,6 +199,7 @@ public sealed class Regenerator
                 case SketchFeature s: DoSketch(s); break;
                 case ExtrudeFeature e: DoExtrude(e); break;
                 case RevolveFeature r: DoRevolve(r); break;
+                case SweepFeature sw: DoSweep(sw); break;
                 case FilletFeature fi: DoBlend(fi.Edges, Positive(fi.Radius, "Radius"), true, fi.TangentPropagation, fi.Overflow); break;
                 case ChamferFeature ch: { var cs = ChamferSizeOf(ch); DoBlend(ch.Edges, cs.D1, false, ch.TangentPropagation, ch.Overflow, cs); break; }
                 case HoleFeature h: DoHole(h); break;
@@ -251,7 +252,8 @@ public sealed class Regenerator
             var res = SketchSolver.Solve(sk);
             if (res.Status == SketchStatus.OverDefined) status.Warnings.Add("Sketch is over defined or cannot be solved.");
             var regions = ProfileExtractor.Extract(sk, out var warns);
-            status.Warnings.AddRange(warns);
+            // a sweep's path is open by design: no profile warnings for it
+            if (!doc.Features.OfType<SweepFeature>().Any(w => w.PathSketchId == s.Id)) status.Warnings.AddRange(warns);
             State.Sketches[s.Id] = new SketchResult { Frame = frame, Sketch = sk, Regions = regions, Solve = res };
             State.Planes[s.Id] = frame;
         }
@@ -316,6 +318,42 @@ public sealed class Regenerator
             if (tool.Native == null && tool.Volume() < 0) tool = tool.Flipped(); // native revolves are oriented by construction
             ApplyTool(tool, r.IsCut, r.Merge);
             State.Tools[f.Id] = new ToolInfo(tool, r.IsCut, r.Merge);
+        }
+
+        void DoSweep(SweepFeature s)
+        {
+            if (string.IsNullOrEmpty(s.ProfileSketchId)) throw new FeatureException("Select the profile sketch.");
+            if (string.IsNullOrEmpty(s.PathSketchId)) throw new FeatureException("Select the path sketch.");
+            if (s.ProfileSketchId == s.PathSketchId) throw new FeatureException("The profile and the path must be different sketches.");
+            var prof = GetSketch(s.ProfileSketchId);
+            var path = GetSketch(s.PathSketchId);
+            var regions = prof.Regions;
+            if (regions.Count == 0) throw new FeatureException("The profile sketch has no closed profile.");
+            var frame = prof.Frame;
+            // the profile's centre (in world space): picks where a closed path or a circle starts
+            var centre = Vec3.Zero; int n = 0;
+            foreach (var r in regions) foreach (var v in r.Outer.Verts) { centre += frame.ToWorld(v.P); n++; }
+            centre /= Math.Max(1, n);
+            var segs = SweepPath.Build(path, frame.Plane, centre);
+            var t0 = segs[0].StartTangent;
+            var dot = Vec3.Dot(t0, frame.Normal);
+            if (Math.Abs(dot) < 1 - 1e-6) throw new FeatureException("The profile's sketch must be perpendicular to the path where the path starts.");
+            if (dot < 0)
+            {
+                // the path leaves against the sketch normal: the same profile seen from the other side (x and y swapped)
+                frame = new Frame(frame.Origin, frame.YDir, frame.XDir, -frame.Normal);
+                regions = regions.Select(r => new ProfileRegion(r.Outer.Transformed(p => new Vec2(p.Y, p.X), true), r.Holes.Select(h => h.Transformed(p => new Vec2(p.Y, p.X), true)))).ToList();
+            }
+            Solid tool;
+            try
+            {
+                var nb = Kernel.Native.NSweep.Sweep(regions, frame, segs, f.Id);
+                if (nb.Validate() is { } bad) throw new FeatureException("The sweep is not a valid solid: " + bad);
+                tool = Kernel.Native.NTess.ToSolid(nb);
+            }
+            catch (ArgumentException ex) { throw new FeatureException(char.ToUpper(ex.Message[0]) + ex.Message[1..] + "."); }
+            ApplyTool(tool, s.IsCut, s.Merge);
+            State.Tools[f.Id] = new ToolInfo(tool, s.IsCut, s.Merge);
         }
 
         /// <summary>Whether a boolean changed the body (native: topology counts, so no tessellation is needed).</summary>
@@ -617,7 +655,7 @@ public sealed class Regenerator
             foreach (var seedId in seeds)
             {
                 if (!State.Tools.TryGetValue(seedId, out var tool))
-                    throw new FeatureException("Only extrude, revolve, hole, fillet, chamfer, pattern and mirror features can be patterned.");
+                    throw new FeatureException("Only extrude, revolve, sweep, hole, fillet, chamfer, pattern and mirror features can be patterned.");
                 var copies = new List<(int i, Solid tool)>();
                 // instances whose blend is solved again (their edges are not the seed's edges moved)
                 var toSolve = new List<(int i, Body body, List<Kernel.Native.NEdge> edges, double tol)>();

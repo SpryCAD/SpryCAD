@@ -164,10 +164,12 @@ public partial class MainWindow
             "-",
             Sub("_Boss/Base",
                 Item("_Extrude...", () => ExtrudeCommand(false), null, "extrude"),
-                Item("_Revolve...", () => RevolveCommand(false), null, "revolve")),
+                Item("_Revolve...", () => RevolveCommand(false), null, "revolve"),
+                Item("S_wept...", () => SweepCommand(false), null, "sweep")),
             Sub("_Cut",
                 Item("_Extrude...", () => ExtrudeCommand(true), null, "cut"),
-                Item("_Revolve...", () => RevolveCommand(true), null, "cutrevolve")),
+                Item("_Revolve...", () => RevolveCommand(true), null, "cutrevolve"),
+                Item("S_wept...", () => SweepCommand(true), null, "cutsweep")),
             Sub("_Features",
                 Item("_Fillet...", () => BlendCommand(true), null, "fillet"),
                 Item("_Chamfer...", () => BlendCommand(false), null, "chamfer"),
@@ -246,9 +248,11 @@ public partial class MainWindow
             case "Features":
                 Cmd("extrude", "Extruded\nBoss/Base", () => ExtrudeCommand(false));
                 Cmd("revolve", "Revolved\nBoss/Base", () => RevolveCommand(false));
+                Cmd("sweep", "Swept\nBoss/Base", () => SweepCommand(false));
                 Sep();
                 Cmd("cut", "Extruded\nCut", () => ExtrudeCommand(true));
                 Cmd("cutrevolve", "Revolved\nCut", () => RevolveCommand(true));
+                Cmd("cutsweep", "Swept\nCut", () => SweepCommand(true));
                 Cmd("hole", "Hole\nWizard", HoleCommand);
                 Sep();
                 Cmd("fillet", "Fillet", () => BlendCommand(true));
@@ -325,6 +329,8 @@ public partial class MainWindow
         ["Extruded Cut"] = "Extends a sketch profile to remove material.",
         ["Revolved Boss/Base"] = "Revolves a sketch profile about a centerline to add material.",
         ["Revolved Cut"] = "Revolves a sketch profile about a centerline to remove material.",
+        ["Swept Boss/Base"] = "Sweeps a closed profile along a path of lines and arcs to add material.",
+        ["Swept Cut"] = "Sweeps a closed profile along a path of lines and arcs to remove material.",
         ["Hole Wizard"] = "Simple, counterbored or countersunk holes placed on a face.",
         ["Fillet"] = "Rounds the selected edges (tangent edges are included).",
         ["Chamfer"] = "Bevels the selected edges.",

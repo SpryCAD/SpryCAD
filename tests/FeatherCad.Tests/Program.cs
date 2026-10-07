@@ -125,6 +125,8 @@ static class Program
             ExactMassTests.Run(t);
             DeterminismTests.Run(t);
             PatternUnionTests.Run(t);
+            SweepTests.Run(t);
+            SweepFeatureTests.Run(t);
             Console.WriteLine("Core");
             CoreTests.Run(t);
             Console.WriteLine($"\n{t.Passed} passed, {t.Failed} failed");

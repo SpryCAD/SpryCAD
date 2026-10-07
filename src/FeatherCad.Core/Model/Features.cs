@@ -54,6 +54,7 @@ public sealed class DirRef
 [JsonDerivedType(typeof(SketchFeature), "sketch")]
 [JsonDerivedType(typeof(ExtrudeFeature), "extrude")]
 [JsonDerivedType(typeof(RevolveFeature), "revolve")]
+[JsonDerivedType(typeof(SweepFeature), "sweep")]
 [JsonDerivedType(typeof(FilletFeature), "fillet")]
 [JsonDerivedType(typeof(ChamferFeature), "chamfer")]
 [JsonDerivedType(typeof(HoleFeature), "hole")]
@@ -109,6 +110,17 @@ public sealed class RevolveFeature : Feature
     public bool Reverse { get; set; }
     public bool Merge { get; set; } = true;
     public override IEnumerable<string> Consumes => new[] { SketchId };
+}
+
+/// <summary>A closed profile swept along a path (a chain of lines and arcs, or a circle) from where the path meets the profile's plane.</summary>
+public sealed class SweepFeature : Feature
+{
+    public override string Kind => IsCut ? "Cut-Sweep" : "Sweep";
+    public string ProfileSketchId { get; set; } = "";
+    public string PathSketchId { get; set; } = "";
+    public bool IsCut { get; set; }
+    public bool Merge { get; set; } = true;
+    public override IEnumerable<string> Consumes => new[] { ProfileSketchId, PathSketchId };
 }
 
 public sealed class FilletFeature : Feature

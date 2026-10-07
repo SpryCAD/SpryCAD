@@ -132,6 +132,7 @@ public sealed class FeatureTree : UserControl
         SketchFeature => "sketch",
         ExtrudeFeature e => e.IsCut ? "cut" : "extrude",
         RevolveFeature r => r.IsCut ? "cutrevolve" : "revolve",
+        SweepFeature s => s.IsCut ? "cutsweep" : "sweep",
         FilletFeature => "fillet",
         ChamferFeature => "chamfer",
         HoleFeature => "hole",

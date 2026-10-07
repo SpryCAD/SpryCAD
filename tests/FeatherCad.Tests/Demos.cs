@@ -23,6 +23,7 @@ static class Demos
         ("spur-gear.fcad", Gear),
         ("hand-wheel.fcad", HandWheel),
         ("spoked-handwheel.fcad", SpokedWheel),
+        ("bent-tube.fcad", BentTube),
     };
 
     /// <summary>Equation changes each demo must survive (shows what the parameters do).</summary>
@@ -33,6 +34,7 @@ static class Demos
         ["heat-sink.fcad"] = new[] { new[] { ("N", "20"), ("T", "1.2") }, new[] { ("L", "120"), ("FinH", "40") }, new[] { ("N", "8"), ("T", "3") } },
         ["stepped-shaft.fcad"] = new[] { new[] { ("D2", "50"), ("KeyW", "14") }, new[] { ("L2", "100"), ("KeyL", "60") }, new[] { ("D1", "35"), ("Rs", "2"), ("C", "2") } },
         ["hand-wheel.fcad"] = new[] { new[] { ("NS", "3") }, new[] { ("Dish", "45"), ("SpokeD", "16") }, new[] { ("D", "260"), ("NS", "6"), ("KnobL", "60") } },
+        ["bent-tube.fcad"] = new[] { new[] { ("R", "80"), ("L1", "120") }, new[] { ("OD", "40"), ("ID", "34"), ("FlangeD", "100"), ("PCD", "75") }, new[] { ("N", "6"), ("L2", "100") } },
         ["spoked-handwheel.fcad"] = new[] { new[] { ("NS", "6") }, new[] { ("D", "300"), ("RimT", "26"), ("NG", "4") }, new[] { ("NS", "4"), ("SpokeD", "20"), ("Rf", "3") } },
         ["spur-gear.fcad"] = new[] { new[] { ("z", "48") }, new[] { ("m", "2.5"), ("z", "30") }, new[] { ("PA", "25"), ("b", "20") } },
         ["l-bracket.fcad"] = new[] { new[] { ("Wb", "90"), ("HoleSp", "60") }, new[] { ("A", "100"), ("Bh", "80"), ("Gs", "40") }, new[] { ("T", "10"), ("Rb", "4") } },
@@ -683,6 +685,36 @@ static class Demos
     // helpers
 
     static EdgeRef E(string a, string b, Vec3 hint) => new() { A = a, B = b, Hint = hint };
+
+    /// <summary>
+    /// A tube swept along a straight leg, a 90° bend and a second leg, with a bolted flange at its start: the
+    /// profile (two circles) on Right, the path on Top starting at the origin.
+    /// </summary>
+    static CadDocument BentTube()
+    {
+        var d = Doc(("OD", "30"), ("ID", "24"), ("L1", "80"), ("R", "50"), ("L2", "60"),
+                    ("FlangeD", "80"), ("FlangeT", "8"), ("PCD", "60"), ("BoltD", "8"), ("N", "4"));
+        var p = new Sk(d);
+        p.Circle(Sketch.OriginId, "OD"); p.Circle(Sketch.OriginId, "ID");
+        var prof = d.AddFeature(new SketchFeature { Name = "Tube section", Plane = PlaneRef.Right, Sketch = p.S });
+        // the path: along +x, a quarter turn about (L1, R), then along +y (Top: sketch y is world -z)
+        var w = new Sk(d);
+        int a = w.P("L1", "0"), c = w.P("L1", "R"), b = w.P("L1+R", "R"), e = w.P("L1+R", "R+L2");
+        w.Line(Sketch.OriginId, a); w.Arc(c, a, b); w.Line(b, e);
+        var path = d.AddFeature(new SketchFeature { Name = "Centreline", Plane = PlaneRef.Top, Sketch = w.S });
+        d.AddFeature(new SweepFeature { Name = "Tube", ProfileSketchId = prof.Id, PathSketchId = path.Id });
+        // the flange behind the tube's start, and its bolt holes around the tube's axis (X)
+        var f = new Sk(d);
+        f.Circle(Sketch.OriginId, "FlangeD"); f.Circle(Sketch.OriginId, "ID");
+        var fs = d.AddFeature(new SketchFeature { Name = "Flange", Plane = PlaneRef.Right, Sketch = f.S });
+        d.AddFeature(new ExtrudeFeature { Name = "Flange", SketchId = fs.Id, Depth = "FlangeT", Reverse = true });
+        var h = new Sk(d);
+        h.Circle(h.P("0", "PCD/2"), "BoltD");
+        var hs = d.AddFeature(new SketchFeature { Name = "Bolt hole", Plane = PlaneRef.Right, Sketch = h.S });
+        var cut = d.AddFeature(new ExtrudeFeature { Name = "Bolt hole", SketchId = hs.Id, IsCut = true, Depth = "FlangeT", Reverse = true });
+        d.AddFeature(new CircularPatternFeature { Name = "Bolt circle", Seeds = { cut.Id }, Axis = new DirRef { Axis = "X" }, Count = "N" });
+        return d;
+    }
 
     static CadDocument Doc(params (string name, string expr)[] eqs)
     {

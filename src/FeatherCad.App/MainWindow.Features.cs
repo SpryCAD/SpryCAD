@@ -169,6 +169,7 @@ public partial class MainWindow
                 }
             case ExtrudeFeature e: OpenExtrudePage((ExtrudeFeature)e.Clone(), false); break;
             case RevolveFeature rv: OpenRevolvePage((RevolveFeature)rv.Clone(), false); break;
+            case SweepFeature sw: OpenSweepPage((SweepFeature)sw.Clone(), false); break;
             case FilletFeature fi: OpenBlendPage(fi.Clone(), false); break;
             case ChamferFeature ch: OpenBlendPage(ch.Clone(), false); break;
             case HoleFeature h: OpenHolePage((HoleFeature)h.Clone(), false); break;
@@ -332,6 +333,35 @@ public partial class MainWindow
         if (!f.IsCut) page.Check(page.Section("Options"), "Merge result", () => f.Merge, v => f.Merge = v);
         if (!string.IsNullOrEmpty(f.SketchId)) page.Activate(null);
         BeginEdit(f, isNew, page, overlay: false);
+    }
+
+    // ------------------------------------------------------------------------------------------
+    // Sweep
+
+    void SweepCommand(bool cut)
+    {
+        if (_sketch != null) ExitSketch(true);
+        // selected sketches: the first is the profile, the second the path (the sketch just finished: the profile)
+        var sketches = Selection.Items.Where(s => s.Kind == SelKind.Sketch).Select(s => s.FeatureId).Distinct().ToList();
+        if (sketches.Count == 0 && SketchFromSelection() is { } last) sketches.Add(last);
+        OpenSweepPage(new SweepFeature { ProfileSketchId = sketches.ElementAtOrDefault(0) ?? "", PathSketchId = sketches.ElementAtOrDefault(1) ?? "", IsCut = cut }, true);
+    }
+
+    void OpenSweepPage(SweepFeature f, bool isNew)
+    {
+        var page = new PmPage(f.IsCut ? "Cut-Sweep" : "Sweep", f.IsCut ? "cutsweep" : "sweep");
+        var sec = page.Section("Profile and Path");
+        var profBox = page.Selection(sec, "Profile", SelFilter.Sketch, "Closed profile sketch, perpendicular to the path where it starts", 1);
+        if (!string.IsNullOrEmpty(f.ProfileSketchId)) profBox.Items.Add(new SelItem { Kind = SelKind.Sketch, FeatureId = f.ProfileSketchId });
+        profBox.Changed += () => f.ProfileSketchId = profBox.Items.FirstOrDefault()?.FeatureId ?? "";
+        var pathBox = page.Selection(sec, "Path", SelFilter.Sketch, "Path sketch: tangent lines and arcs, or a circle, starting on the profile's plane", 1);
+        if (!string.IsNullOrEmpty(f.PathSketchId)) pathBox.Items.Add(new SelItem { Kind = SelKind.Sketch, FeatureId = f.PathSketchId });
+        pathBox.Changed += () => f.PathSketchId = pathBox.Items.FirstOrDefault()?.FeatureId ?? "";
+        page.Info(sec, "The profile keeps its orientation to the path. Round sharp corners of the path with sketch fillets.");
+        if (!f.IsCut) page.Check(page.Section("Options"), "Merge result", () => f.Merge, v => f.Merge = v);
+        page.Activate(string.IsNullOrEmpty(f.ProfileSketchId) ? profBox : string.IsNullOrEmpty(f.PathSketchId) ? pathBox : null);
+        BeginEdit(f, isNew, page, overlay: false,
+            hint: string.IsNullOrEmpty(f.ProfileSketchId) ? "Select the profile sketch, then the path sketch." : string.IsNullOrEmpty(f.PathSketchId) ? "Select the path sketch." : null);
     }
 
     // ------------------------------------------------------------------------------------------
