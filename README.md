@@ -117,6 +117,18 @@ The Windows setup installs per user by default and opens `.fcad` files with Feat
 tarball and run `./install.sh`: it installs into `~/.local/share/feathercad` with a menu entry, icon, `.fcad`
 file type and a `feathercad` command (`./uninstall.sh` removes them).
 
+CI (`.github/workflows/packages.yml`) publishes every push to master to the **dev** channel and every version tag
+to **stable**: a signed apt repository, the downloads, and an update feed (`updates/<channel>.json`), all on
+Cloudflare R2; GitHub releases link to the files there. On Debian or Ubuntu (`dev` in place of `stable` for the
+latest master build):
+
+```bash
+sudo install -d -m 0755 /etc/apt/keyrings
+curl -fsSL https://<packages-host>/apt/feathercad-archive-keyring.gpg | sudo tee /etc/apt/keyrings/feathercad.gpg > /dev/null
+echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/feathercad.gpg] https://<packages-host>/apt stable main" | sudo tee /etc/apt/sources.list.d/feathercad.list
+sudo apt update && sudo apt install feathercad
+```
+
 ### Tests
 
 ```bash
