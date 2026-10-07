@@ -107,6 +107,13 @@ public sealed class Topology
             var outLoops = new List<int[]>();
             foreach (var ids in fl)
             {
+                // nothing to insert or drop (the usual case for native tessellations): the welded loop as it is
+                if (segIndex == null)
+                {
+                    bool repeats = false;
+                    for (int i = 0; i < ids.Length && !repeats; i++) repeats = ids[i] == ids[(i + 1) % ids.Length];
+                    if (!repeats) { outLoops.Add(ids); continue; }
+                }
                 var l = new List<int>(ids.Length);
                 for (int i = 0; i < ids.Length; i++)
                 {
@@ -125,7 +132,9 @@ public sealed class Topology
         ptj.Dispose();
         using var prest = Prof.Time("topo.edges");
         // half-edge map
-        var owner = new Dictionary<(int, int), int>(); // -> face index
+        int halfEdges = 0;
+        foreach (var fl in t.FaceLoops) foreach (var l in fl) halfEdges += l.Length;
+        var owner = new Dictionary<(int, int), int>(halfEdges); // -> face index
         for (int fi = 0; fi < t.FaceLoops.Count; fi++)
             foreach (var l in t.FaceLoops[fi])
                 for (int i = 0; i < l.Length; i++)

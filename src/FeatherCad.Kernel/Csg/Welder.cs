@@ -28,9 +28,14 @@ public sealed class VertexWelder
     int AddNear(Vec3 p)
     {
         var (kx, ky, kz) = Key(p);
-        for (long x = kx - 1; x <= kx + 1; x++)
-            for (long y = ky - 1; y <= ky + 1; y++)
-                for (long z = kz - 1; z <= kz + 1; z++)
+        // a neighbouring cell can only hold a match if p is within the tolerance of the wall between them
+        var reach = _tol * (1 + 1e-9);
+        long x0 = p.X - kx * _cell <= reach ? kx - 1 : kx, x1 = (kx + 1) * _cell - p.X <= reach ? kx + 1 : kx;
+        long y0 = p.Y - ky * _cell <= reach ? ky - 1 : ky, y1 = (ky + 1) * _cell - p.Y <= reach ? ky + 1 : ky;
+        long z0 = p.Z - kz * _cell <= reach ? kz - 1 : kz, z1 = (kz + 1) * _cell - p.Z <= reach ? kz + 1 : kz;
+        for (long x = x0; x <= x1; x++)
+            for (long y = y0; y <= y1; y++)
+                for (long z = z0; z <= z1; z++)
                     if (_grid.TryGetValue((x, y, z), out var list))
                         foreach (var i in list)
                             if ((Points[i] - p).LengthSq <= _tol2) return i;

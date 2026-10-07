@@ -186,28 +186,38 @@ public sealed class DisplayMesh
 
         // ---- emit, ordered by face name so each UI face is contiguous
         using var pemit = Prof.Time("mesh.emit");
-        var pos = new List<float>(); var nrm = new List<float>(); var idxOut = new List<int>();
-        var byFacet = tris.GroupBy(t => t.face).ToDictionary(g => g.Key, g => g.ToList());
+        // each facet's triangles: a run in facet order (triangulation concatenates facets in order, refinement
+        // keeps a facet's triangles together); otherwise sorted, stably, into runs
+        for (int k = 1; k < tris.Count; k++)
+            if (tris[k].face < tris[k - 1].face) { tris = tris.OrderBy(t => t.face).ToList(); break; }
+        int nt = tris.Count;
+        var runStart = new int[nf + 1];
+        foreach (var t in tris) runStart[t.face + 1]++;
+        for (int fi = 0; fi < nf; fi++) runStart[fi + 1] += runStart[fi];
         var order = Enumerable.Range(0, nf).OrderBy(i => solid.Faces[i].Tag.Name, StringComparer.Ordinal).ToList();
-        // smooth normals of curved faces: once per vertex of each face (a vertex is shared by ~6 triangles), faces
-        // in parallel (on free-form surfaces each normal is a closest-point search)
-        var normals = new Dictionary<int, Vec3>[nf];
+        // smooth normals of curved faces at each triangle corner, faces in parallel (on free-form surfaces each
+        // normal is a closest-point search)
+        var cornerN = new Vec3[3 * nt];
         Parallel.For(0, nf, fi =>
         {
             var f = solid.Faces[fi];
-            if (!f.Tag.Surface.IsCurved || !byFacet.TryGetValue(fi, out var list)) return;
-            var d = new Dictionary<int, Vec3>();
+            if (!f.Tag.Surface.IsCurved) return;
             var fn = f.Plane.Normal;
-            foreach (var (a, b, c, _) in list)
-                foreach (var k in new[] { a, b, c })
-                    if (!d.ContainsKey(k)) d[k] = f.Tag.Surface.NormalAt(pts[k], fn);
-            normals[fi] = d;
+            for (int k = runStart[fi]; k < runStart[fi + 1]; k++)
+            {
+                var (a, b, c, _) = tris[k];
+                cornerN[3 * k] = f.Tag.Surface.NormalAt(pts[a], fn);
+                cornerN[3 * k + 1] = f.Tag.Surface.NormalAt(pts[b], fn);
+                cornerN[3 * k + 2] = f.Tag.Surface.NormalAt(pts[c], fn);
+            }
         });
+        var pos = new float[9 * nt]; var nrm = new float[9 * nt]; var idxOut = new int[3 * nt];
+        int nv = 0;
         string? curName = null; int curStart = 0; SurfaceDef? curSurf = null; Plane? curPlane = null; var curBox = Box3.Empty;
         void Flush()
         {
-            if (curName != null && idxOut.Count > curStart)
-                m.Faces.Add(new FaceRange(curName, curStart, idxOut.Count - curStart, curSurf!, curPlane!, curBox));
+            if (curName != null && nv > curStart)
+                m.Faces.Add(new FaceRange(curName, curStart, nv - curStart, curSurf!, curPlane!, curBox));
         }
         double vol = 0;
         foreach (var fi in order)
@@ -216,23 +226,23 @@ public sealed class DisplayMesh
             if (f.Tag.Name != curName)
             {
                 Flush();
-                curName = f.Tag.Name; curStart = idxOut.Count; curSurf = f.Tag.Surface; curPlane = f.Plane; curBox = Box3.Empty;
+                curName = f.Tag.Name; curStart = nv; curSurf = f.Tag.Surface; curPlane = f.Plane; curBox = Box3.Empty;
             }
-            if (!byFacet.TryGetValue(fi, out var list)) continue;
             var fn = f.Plane.Normal;
             var curved = f.Tag.Surface.IsCurved;
-            var fnorm = normals[fi];
-            foreach (var (a, b, c, _) in list)
+            for (int k = runStart[fi]; k < runStart[fi + 1]; k++)
             {
+                var (a, b, c, _) = tris[k];
                 var pa = pts[a]; var pb = pts[b]; var pc = pts[c];
                 vol += Vec3.Dot(pa, Vec3.Cross(pb, pc));
-                foreach (var k in new[] { a, b, c })
+                for (int q = 0; q < 3; q++)
                 {
-                    var p = pts[k];
-                    idxOut.Add(pos.Count / 3);
-                    pos.Add((float)p.X); pos.Add((float)p.Y); pos.Add((float)p.Z);
-                    var n = curved && fnorm != null ? fnorm[k] : fn;
-                    nrm.Add((float)n.X); nrm.Add((float)n.Y); nrm.Add((float)n.Z);
+                    var p = q == 0 ? pa : q == 1 ? pb : pc;
+                    var n = curved ? cornerN[3 * k + q] : fn;
+                    idxOut[nv] = nv;
+                    pos[3 * nv] = (float)p.X; pos[3 * nv + 1] = (float)p.Y; pos[3 * nv + 2] = (float)p.Z;
+                    nrm[3 * nv] = (float)n.X; nrm[3 * nv + 1] = (float)n.Y; nrm[3 * nv + 2] = (float)n.Z;
+                    nv++;
                     curBox.Add(p);
                     m.Bounds.Add(p);
                 }
@@ -240,7 +250,7 @@ public sealed class DisplayMesh
         }
         Flush();
         m.Volume = vol / 6;
-        m.Positions = pos.ToArray(); m.Normals = nrm.ToArray(); m.Indices = idxOut.ToArray();
+        m.Positions = pos; m.Normals = nrm; m.Indices = idxOut;
 
         // ---- edge lines, refined with the same midpoints as the surfaces
         var lines = new List<float>();
