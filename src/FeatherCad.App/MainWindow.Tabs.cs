@@ -45,7 +45,7 @@ public partial class MainWindow
     {
         s.UntitledName = "Part" + ++_untitledCount;
         var t = new PartTab(s);
-        s.Rebuilt += () => { if (s == Session) OnRebuilt(); };
+        s.Rebuilt += () => { if (s == Session) OnRebuilt(); if (_partRows.TryGetValue(t, out var row)) _ = LoadThumb(t, row.Image); };
         s.DocumentChanged += () => { UpdateTabHeader(t); if (s == Session) OnDocumentChanged(); };
         s.BusyChanged += busy => { if (s == Session) { BusyText.IsVisible = busy; BusyText.Text = "Rebuilding…"; } };
         s.Progress += p => { if (s == Session && s.Busy) BusyText.Text = p.Text; };
@@ -86,7 +86,7 @@ public partial class MainWindow
     void InitPartsList()
     {
         PartsButton.Click += (_, _) => ShowPartsList();
-        ToolTip.SetTip(PartsButton, "All open parts (Ctrl+E): arrow keys switch between them");
+        ToolTip.SetTip(PartsButton, "All open parts (Ctrl+E), in a window of their own: arrow keys switch between them");
         DocTabs.HiddenCountChanged += () => Avalonia.Threading.Dispatcher.UIThread.Post(UpdatePartsButton);
         UpdatePartsButton();
     }
@@ -96,56 +96,124 @@ public partial class MainWindow
         var hidden = DocTabs.HiddenCount;
         PartsButton.Content = hidden > 0 ? $"+{hidden} more ▾" : $"{_parts.Count} part{(_parts.Count == 1 ? "" : "s")} ▾";
         PartsButton.FontWeight = hidden > 0 ? FontWeight.SemiBold : FontWeight.Normal;
+        RefreshPartsList();
     }
 
+    sealed record PartRow(ListBoxItem Item, TextBlock Title, TextBlock Path, Image Image);
+
+    Window? _partsWindow;
+    ListBox? _partsList;
+    readonly Dictionary<PartTab, PartRow> _partRows = new();
+    bool _partsSyncing;
+
     /// <summary>
-    /// A drop-down list of every open part with a preview. Selecting one (arrow keys, click) shows it right away, so
-    /// a set of parts can be flipped through; Enter or Esc closes the list. Typing jumps to a part by name.
+    /// The list of every open part with a preview, in a window of its own beside the part (moved and sized where it
+    /// was last). Selecting a part (arrow keys, click) shows it right away, so a set of parts can be flipped through;
+    /// typing jumps to a part by name; Enter goes back to the part, Esc closes the list. It follows the parts as
+    /// they open, close, change and are switched to another way.
     /// </summary>
     void ShowPartsList()
     {
-        var list = new ListBox { MaxHeight = 560, Width = 360, Background = Brushes.White };
-        var images = new List<(PartTab tab, Image image)>();
-        foreach (var t in _parts)
+        if (_partsWindow != null)
         {
-            var img = new Image { Width = 64, Height = 64, Stretch = Stretch.Uniform, Source = t.Thumb };
-            var title = new TextBlock { Text = t.Session.Title, FontSize = 13, FontWeight = t == _tab ? FontWeight.SemiBold : FontWeight.Normal, TextTrimming = TextTrimming.CharacterEllipsis };
-            var path = new TextBlock { Text = t.Session.FilePath ?? "Not saved yet", FontSize = 11, Foreground = Brushes.Gray, TextTrimming = TextTrimming.PathSegmentEllipsis };
-            var text = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Spacing = 2, Margin = new Thickness(10, 0, 0, 0), Children = { title, path } };
-            var row = new DockPanel { Children = { img, text } };
-            DockPanel.SetDock(img, Dock.Left);
-            var item = new ListBoxItem { Content = row, Tag = t, Padding = new Thickness(6, 4) };
-            Avalonia.Controls.Primitives.TextSearch.SetText(item, t.Session.Title);
-            list.Items.Add(item);
-            images.Add((t, img));
+            _partsWindow.Activate();
+            FocusPartsList();
+            return;
         }
-        var flyout = new Flyout { Content = list, Placement = PlacementMode.BottomEdgeAlignedRight, ShowMode = FlyoutShowMode.Standard };
-        list.SelectedIndex = _parts.IndexOf(_tab);
-        bool reverting = false;
+        var list = new ListBox { Background = Brushes.White, BorderThickness = new Thickness(0) };
+        var w = new Window
+        {
+            Title = "Open Parts", Content = list, ShowInTaskbar = false, CanResize = true,
+            MinWidth = 220, MinHeight = 120, Width = 360, Height = 520,
+        };
+        // where it was last, else beside the button, below the tabs
+        if (UserSettings.PartsWindow is { } b && b.w > 0)
+        {
+            w.WindowStartupLocation = WindowStartupLocation.Manual;
+            w.Position = new PixelPoint(b.x, b.y);
+            w.Width = b.w; w.Height = b.h;
+        }
+        else if (PartsButton.PointToScreen(new Point(PartsButton.Bounds.Width, PartsButton.Bounds.Height)) is var corner)
+        {
+            w.WindowStartupLocation = WindowStartupLocation.Manual;
+            w.Position = new PixelPoint(corner.X - (int)(w.Width * RenderScaling), corner.Y + 4);
+        }
         list.SelectionChanged += async (_, _) =>
         {
-            if (reverting || list.SelectedItem is not ListBoxItem { Tag: PartTab t } || t == _tab) return;
-            if (!await SwitchTo(t))
-            {
-                // leaving the current part was cancelled (a pending edit): the selection goes back to it
-                reverting = true; list.SelectedIndex = _parts.IndexOf(_tab); reverting = false;
-            }
-            foreach (var it in list.Items.OfType<ListBoxItem>())
-                if (it.Content is DockPanel { Children: [_, StackPanel { Children: [TextBlock tb, ..] }] })
-                    tb.FontWeight = it.Tag == _tab ? FontWeight.SemiBold : FontWeight.Normal;
+            if (_partsSyncing || list.SelectedItem is not ListBoxItem { Tag: PartTab t } || t == _tab) return;
+            // leaving the current part may be cancelled (a pending edit): the list then shows it again
+            await SwitchTo(t);
+            RefreshPartsList();
         };
         list.KeyDown += (_, e) =>
         {
-            if (e.Key is Key.Enter or Key.Escape) { flyout.Hide(); e.Handled = true; }
+            if (e.Key == Key.Escape) { w.Close(); e.Handled = true; }
+            else if (e.Key == Key.Enter) { Activate(); Viewport.Focus(); e.Handled = true; }
         };
-        flyout.Opened += (_, _) =>
+        w.Opened += (_, _) => FocusPartsList();
+        w.Closing += (_, _) =>
         {
-            var i = Math.Max(0, list.SelectedIndex);
-            list.ScrollIntoView(i);
-            (list.ContainerFromIndex(i) ?? (Control)list).Focus(NavigationMethod.Directional);
+            UserSettings.PartsWindow = (w.Position.X, w.Position.Y, (int)w.Width, (int)w.Height);
+            UserSettings.Save();
         };
-        flyout.ShowAt(PartsButton);
-        foreach (var (t, img) in images) _ = LoadThumb(t, img);
+        w.Closed += (_, _) => { _partsWindow = null; _partsList = null; _partRows.Clear(); };
+        _partsWindow = w; _partsList = list;
+        RefreshPartsList();
+        w.Show(this);
+    }
+
+    void FocusPartsList()
+    {
+        if (_partsList is not { } list) return;
+        var i = Math.Max(0, list.SelectedIndex);
+        list.ScrollIntoView(i);
+        (list.ContainerFromIndex(i) ?? (Control)list).Focus(NavigationMethod.Directional);
+    }
+
+    /// <summary>
+    /// Brings the list up to date in place (rows added, removed, renamed, the active part selected): rebuilding it
+    /// would lose the keyboard focus in the middle of flipping through parts.
+    /// </summary>
+    void RefreshPartsList()
+    {
+        if (_partsList is not { } list) return;
+        _partsSyncing = true;
+        try
+        {
+            foreach (var gone in _partRows.Keys.Where(t => !_parts.Contains(t)).ToList())
+            {
+                list.Items.Remove(_partRows[gone].Item);
+                _partRows.Remove(gone);
+            }
+            for (int i = 0; i < _parts.Count; i++)
+            {
+                var t = _parts[i];
+                if (!_partRows.TryGetValue(t, out var row))
+                {
+                    var img = new Image { Width = 64, Height = 64, Stretch = Stretch.Uniform, Source = t.Thumb };
+                    var title = new TextBlock { FontSize = 13, TextTrimming = TextTrimming.CharacterEllipsis };
+                    var path = new TextBlock { FontSize = 11, Foreground = Brushes.Gray, TextTrimming = TextTrimming.PathSegmentEllipsis };
+                    var text = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Spacing = 2, Margin = new Thickness(10, 0, 0, 0), Children = { title, path } };
+                    var dock = new DockPanel { Children = { img, text } };
+                    DockPanel.SetDock(img, Dock.Left);
+                    row = new PartRow(new ListBoxItem { Content = dock, Tag = t, Padding = new Thickness(6, 4) }, title, path, img);
+                    _partRows[t] = row;
+                    list.Items.Insert(Math.Min(i, list.Items.Count), row.Item);
+                    _ = LoadThumb(t, img);
+                }
+                else if (list.Items.IndexOf(row.Item) != i) { list.Items.Remove(row.Item); list.Items.Insert(i, row.Item); }
+                row.Title.Text = t.Session.Title;
+                row.Title.FontWeight = t == _tab ? FontWeight.SemiBold : FontWeight.Normal;
+                row.Path.Text = t.Session.FilePath ?? "Not saved yet";
+                Avalonia.Controls.Primitives.TextSearch.SetText(row.Item, t.Session.Title);
+            }
+            if (_partRows.TryGetValue(_tab, out var active) && !ReferenceEquals(list.SelectedItem, active.Item))
+            {
+                list.SelectedItem = active.Item;
+                list.ScrollIntoView(active.Item);
+            }
+        }
+        finally { _partsSyncing = false; }
     }
 
     /// <summary>The part's preview (rendered off the UI thread when the part has rebuilt since the last one).</summary>
@@ -173,6 +241,7 @@ public partial class MainWindow
         t.Label.FontWeight = t == _tab ? FontWeight.SemiBold : FontWeight.Normal;
         t.Header.Background = t == _tab ? TabActiveBrush : TabInactiveBrush;
         ToolTip.SetTip(t.Header, t.Session.FilePath ?? "Not saved yet");
+        RefreshPartsList();
     }
 
     /// <summary>An unsaved new part nobody has worked on: opening a file reuses its tab instead of adding one.</summary>

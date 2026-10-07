@@ -25,6 +25,8 @@ public static class UserSettings
     public static bool SaveContainer { get; set; } = true;
     /// <summary>What the view rotates about: by default the selection (its last vertex, edge or face), else the model's middle.</summary>
     public static RotateCenter RotateAbout { get; set; } = RotateCenter.Selection;
+    /// <summary>Where the list of open parts was last (screen position and size); null: beside the tabs.</summary>
+    public static (int x, int y, int w, int h)? PartsWindow { get; set; }
 
     public static void Load()
     {
@@ -40,6 +42,8 @@ public static class UserSettings
                 else if (k == nameof(Perspective)) Perspective = v == "1";
                 else if (k == nameof(SaveContainer)) SaveContainer = v == "1";
                 else if (k == nameof(RotateAbout) && Enum.TryParse<RotateCenter>(v, out var rc)) RotateAbout = rc;
+                else if (k == nameof(PartsWindow) && v.Split(',') is { Length: 4 } p && p.All(x => int.TryParse(x, out _)))
+                    PartsWindow = (int.Parse(p[0]), int.Parse(p[1]), int.Parse(p[2]), int.Parse(p[3]));
             }
         }
         catch { /* defaults */ }
@@ -50,13 +54,15 @@ public static class UserSettings
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(StorePath)!);
-            File.WriteAllLines(StorePath, new[]
+            var lines = new List<string>
             {
                 $"{nameof(ReverseWheel)}={(ReverseWheel ? 1 : 0)}",
                 $"{nameof(Perspective)}={(Perspective ? 1 : 0)}",
                 $"{nameof(SaveContainer)}={(SaveContainer ? 1 : 0)}",
                 $"{nameof(RotateAbout)}={RotateAbout}",
-            });
+            };
+            if (PartsWindow is { } pw) lines.Add($"{nameof(PartsWindow)}={pw.x},{pw.y},{pw.w},{pw.h}");
+            File.WriteAllLines(StorePath, lines);
         }
         catch { /* preferences are a convenience only */ }
     }
