@@ -172,20 +172,22 @@ static class ImportTests
             ("n-cyl.step", Math.PI * 100 * 30), ("n-cone.step", Math.PI * 100 * 20 / 3), ("n-sphere.step", 4.0 / 3 * Math.PI * 1000),
             ("n-torus.step", 2 * Math.PI * Math.PI * 20 * 25), ("n-boxhole.step", 40.0 * 40 * 10 - Math.PI * 36 * 10), ("occ-fillet.step", 53076.38),
         })
-            t.Test($"STEP import: B-spline surfaces from OCCT ({file})", () =>
-            {
-                var res = StepImport.Read(File.ReadAllBytes(Path.Combine(Models(), "step", file)), "F1.");
-                var body = res.Solids.Single().Body;
-                t.Eq(body.Validate(), null);
-                var solid = NTess.ToSolid(body);
-                t.True(solid.Topology.OpenHalfEdges == 0, "display mesh not closed");
-                t.Near(NTess.ToSolid(body, 1e-3).Volume(), exact, exact * 3e-4);
-            });
+            foreach (var recognize in new[] { false, true })
+                t.Test($"STEP import: B-spline surfaces from OCCT ({file}{(recognize ? ", recognized" : "")})", () =>
+                {
+                    var res = ReadModel(file, recognize);
+                    var body = res.Solids.Single().Body;
+                    t.Eq(body.Validate(), null);
+                    var solid = NTess.ToSolid(body);
+                    t.True(solid.Topology.OpenHalfEdges == 0, "display mesh not closed");
+                    t.Near(NTess.ToSolid(body, 1e-3).Volume(), exact, exact * 3e-4);
+                    if (recognize) Console.WriteLine($"        {string.Join(", ", body.Faces.GroupBy(f => f.Surface.Kind).Select(g => $"{g.Key} {g.Count()}"))}");
+                });
 
         // the same part as exact analytic geometry and as OCCT's NURBS conversion: shell and fillet must agree
         (Solid nurbs, Solid analytic) BoxHole()
         {
-            var res = StepImport.Read(File.ReadAllBytes(Path.Combine(Models(), "step", "n-boxhole.step")), "F1.");
+            var res = ReadModel("n-boxhole.step", recognize: false);
             var box = Builders.Box(new Vec3(-20, -20, 0), new Vec3(20, 20, 10), "Box");
             var an = Csg.Subtract(box, Builders.Cylinder(new Vec3(0, 0, -1), Vec3.UnitZ, 6, 12, "Hole"));
             return (NTess.ToSolid(res.Solids.Single().Body), an);
@@ -241,12 +243,21 @@ static class ImportTests
 
         t.Test("Boolean through imported B-spline geometry", () =>
         {
-            var res = StepImport.Read(File.ReadAllBytes(Path.Combine(Models(), "step", "n-cyl.step")), "F1.");
+            var res = ReadModel("n-cyl.step", recognize: false);
             var cyl = NTess.ToSolid(res.Solids.Single().Body);
             var cut = Csg.Subtract(cyl, Builders.Box(new Vec3(0, -20, 10), new Vec3(20, 20, 20), "Cut"));
             t.True(cut.Native != null && cut.Topology.OpenHalfEdges == 0, $"cut not exact/closed ({Csg.LastFallbackReason})");
             t.Near(NTess.ToSolid(cut.Native!, 1e-3).Volume(), Math.PI * 100 * 30 - Math.PI * 100 / 2 * 10, 5);
         });
+    }
+
+    /// <summary>A model file read as written (B-splines kept as B-splines) or with planes, cylinders, ... recognized.</summary>
+    static StepImportResult ReadModel(string file, bool recognize)
+    {
+        var was = StepImport.RecognizeAnalytic;
+        StepImport.RecognizeAnalytic = recognize;
+        try { return StepImport.Read(File.ReadAllBytes(Path.Combine(Models(), "step", file)), "F1."); }
+        finally { StepImport.RecognizeAnalytic = was; }
     }
 
     static string Models()

@@ -79,7 +79,8 @@ public static class SheetUnfold
         var frame = new Frame(o0, u0, v0, n0);
         var flat = NBuild.Extrude(regions, frame, -t, 0, prefix + ".");
 
-        var bends = maps.Values.OfType<BendMap>().Distinct().Select(b => b.Line(maps.Where(kv => kv.Value == b).Select(kv => kv.Key))).ToList();
+        var bends = maps.Values.OfType<BendMap>().Distinct()
+            .Select(b => Clip(b.Line(maps.Where(kv => kv.Value == b).Select(kv => kv.Key)), loops)).ToList();
         return new FlatPattern { Thickness = t, KFactor = kFactor, Frame = frame, Regions = regions, Bends = bends, Body = flat };
     }
 
@@ -231,6 +232,43 @@ public static class SheetUnfold
             if (loop.Verts.Count >= 2) loops.Add(loop);
         }
         return loops;
+    }
+
+    /// <summary>
+    /// The bend line where there is material: from the first to the last crossing of the outline within the bend's
+    /// width (reliefs and notches at the ends of a bend shorten it, as in other CAD systems' flat patterns).
+    /// </summary>
+    static FlatBend Clip(FlatBend b, List<ProfileLoop> loops)
+    {
+        var d = b.B - b.A; var len = d.Length;
+        if (len < 1e-12) return b;
+        var u = d * (1 / len);
+        // parameters along the line where it crosses the outline (the loops' points, arcs as their facets)
+        var ts = new List<double>();
+        foreach (var l in loops)
+        {
+            var v = l.Verts;
+            for (int i = 0; i < v.Count; i++)
+            {
+                var p = v[i].P; var q = v[(i + 1) % v.Count].P;
+                var e = q - p;
+                var den = Vec2.Cross(u, e);
+                if (Math.Abs(den) < 1e-15) continue;
+                var w = p - b.A;
+                var s = Vec2.Cross(w, u) / den; // along the segment
+                if (s < 0 || s > 1) continue;
+                ts.Add(Vec2.Cross(w, e) / den);
+            }
+        }
+        ts.Sort();
+        // inside between consecutive crossings (even-odd); keep the inside spans that overlap the bend
+        double lo = double.MaxValue, hi = double.MinValue;
+        for (int i = 0; i + 1 < ts.Count; i += 2)
+        {
+            double a = Math.Max(ts[i], 0), c = Math.Min(ts[i + 1], len);
+            if (c - a > 1e-9) { lo = Math.Min(lo, a); hi = Math.Max(hi, c); }
+        }
+        return lo < hi ? b with { A = b.A + u * lo, B = b.A + u * hi } : b;
     }
 
     /// <summary>

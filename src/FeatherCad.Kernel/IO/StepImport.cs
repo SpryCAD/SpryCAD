@@ -23,6 +23,9 @@ public sealed class StepImportResult
 public static class StepImport
 {
     /// <param name="mmToUnits">Scale from millimetres to the document's length unit.</param>
+    /// <summary>Read B-spline surfaces and curves that are exactly planes, cylinders, lines or circles as those.</summary>
+    public static bool RecognizeAnalytic = true;
+
     public static StepImportResult Read(byte[] data, string prefix, double mmToUnits = 1)
     {
         var f = StepFile.Parse(data);
@@ -132,6 +135,8 @@ public static class StepImport
         readonly Dictionary<int, NVertex> _vertices = new();
         readonly Dictionary<int, List<NEdge>> _edges = new();
         readonly Dictionary<int, NSurface?> _surfaces = new();
+        /// <summary>B-spline surfaces read as analytic ones whose natural normal is the other way.</summary>
+        readonly HashSet<int> _flipped = new();
 
         public Ctx(StepFile f, double scale, double angle, string prefix, List<string> warnings)
         {
@@ -303,7 +308,7 @@ public static class StepImport
         {
             // ADVANCED_FACE / FACE_SURFACE (name, bounds, surface, same_sense)
             var surf = Surface(face.Args[2]);
-            var sense = face.Args[3] is StepEnum { Value: "T" };
+            var sense = face.Args[3] is StepEnum { Value: "T" } ^ _flipped.Contains(_f.Get(face.Args[2]).Id);
             var tag = new FaceTag($"{_prefix}I{face.Id}", surf.Kind == SurfaceKind.Plane ? SurfaceDef.PlaneDef : surf.Def);
             var nf = new NFace(surf, sense, tag);
             foreach (var b in (List<object?>)face.Args[1])
@@ -374,7 +379,15 @@ public static class StepImport
                         break;
                     }
             }
-            if (res == null && (s.Is("B_SPLINE_SURFACE_WITH_KNOTS") || s.Is("B_SPLINE_SURFACE"))) res = NSurface.BSpline(SplineSurface(s));
+            if (res == null && (s.Is("B_SPLINE_SURFACE_WITH_KNOTS") || s.Is("B_SPLINE_SURFACE")))
+            {
+                // planes and cylinders written as B-splines are read as what they are
+                var nb = SplineSurface(s);
+                bool flip = false;
+                res = RecognizeAnalytic ? NRecognize.Surface(nb, 1e-7 * Math.Max(1, nb.Box.Diagonal), out flip) : null;
+                if (res != null && flip) _flipped.Add(s.Id);
+                res ??= NSurface.BSpline(nb);
+            }
             if (res == null && s.Type == "OFFSET_SURFACE")
             {
                 // OFFSET_SURFACE(name, basis, distance, self_intersect): along the basis' normal
@@ -525,6 +538,14 @@ public static class StepImport
                 Array.Reverse(poles);
                 U = U.Reverse().Select(k => 1 - k).ToArray();
                 if (w != null) Array.Reverse(w);
+            }
+            if (RecognizeAnalytic)
+            {
+                // lines and circles written as B-splines
+                var span = poles.Max(p => Vec3.Distance(p, poles[0]));
+                var bc = new BSplineCurve(degree, poles, U);
+                var exact = NRecognize.Curve(w == null ? bc.Eval : t => Rational(degree, poles, w, U, t), 1e-7 * Math.Max(1, span));
+                if (exact != null) return exact;
             }
             if (w == null) return new NSpline(new BSplineCurve(degree, poles, U));
             // rational: interpolated by a cubic through enough exact points (within 1e-8 of the size)

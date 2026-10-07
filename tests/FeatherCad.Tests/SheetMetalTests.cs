@@ -188,6 +188,54 @@ static class SheetMetalTests
             t.Near(KernelTests.Vex(r.State.Bodies[0].Solid), 100 * 2 * (128 + Math.PI * 1.6), 1e-3);
         });
 
+        t.Test("Recognize: B-spline planes, cylinders, lines and circles", () =>
+        {
+            const double tol = 1e-7;
+            // a bilinear patch in a tilted plane
+            var tilt = new Vec3(0, 1, 1).Normalized;
+            var plane = new NurbsSurface(1, 1, new[,] { { Vec3.Zero, tilt * 10 }, { new Vec3(20, 0, 0), new Vec3(20, 0, 0) + tilt * 10 } }, null, new double[] { 0, 0, 1, 1 }, new double[] { 0, 0, 1, 1 });
+            var ps = NRecognize.Surface(plane, tol, out var flip);
+            t.True(ps?.Kind == SurfaceKind.Plane && !flip, "plane");
+            // a quarter cylinder r = 5 about Z through (1, 2, 0): rational quadratic around, linear along
+            var c = new Vec3(1, 2, 0); const double r = 5, w = 0.7071067811865476;
+            Vec3[,] Quarter(double sign) => new[,]
+            {
+                { c + new Vec3(r, 0, 0), c + new Vec3(r, 0, 10) },
+                { c + new Vec3(r, r * sign, 0), c + new Vec3(r, r * sign, 10) },
+                { c + new Vec3(0, r * sign, 0), c + new Vec3(0, r * sign, 10) },
+            };
+            var weights = new double[,] { { 1, 1 }, { w, w }, { 1, 1 } };
+            foreach (var sign in new[] { 1.0, -1.0 })
+            {
+                var cyl = new NurbsSurface(2, 1, Quarter(sign), weights, new double[] { 0, 0, 0, 1, 1, 1 }, new double[] { 0, 0, 1, 1 });
+                var cs = NRecognize.Surface(cyl, tol, out flip);
+                t.True(cs?.Kind == SurfaceKind.Cylinder, "cylinder");
+                t.Near(cs!.R, r, 1e-9);
+                t.Near(Vec3.Cross(cs.Axis, Vec3.UnitZ).Length, 0, 1e-9);
+                var q = cs.Origin - c; t.Near((q - Vec3.UnitZ * q.Z).Length, 0, 1e-9);
+                // the face keeps its side: the analytic normal (flipped when told) is the spline's
+                var p = cyl.Eval(0.5, 0.5);
+                var n = cs.Normal(p) * (flip ? -1 : 1);
+                t.True(Vec3.Dot(n, cyl.Normal(0.5, 0.5)) > 0.999999, "same side");
+            }
+            // the same patch without weights is not round
+            var bulge = new NurbsSurface(2, 1, Quarter(1), null, new double[] { 0, 0, 0, 1, 1, 1 }, new double[] { 0, 0, 1, 1 });
+            t.True(NRecognize.Surface(bulge, tol, out _) == null, "a polynomial quarter is not a cylinder");
+
+            // curves: a straight cubic, a rational quarter circle (both directions), a wavy cubic
+            var line = new BSplineCurve(3, new[] { Vec3.Zero, new Vec3(1, 1, 0), new Vec3(2, 2, 0), new Vec3(3, 3, 0) }, new double[] { 0, 0, 0, 0, 1, 1, 1, 1 });
+            t.True(NRecognize.Curve(line.Eval, tol) is NLine, "line");
+            Vec3 Arc(double u) { var a = u * Math.PI / 2; return c + new Vec3(Math.Cos(a), Math.Sin(a), 0) * r; }
+            var arc = NRecognize.Curve(Arc, tol) as NCircle;
+            t.True(arc != null, "circle");
+            t.Near(arc!.R, r, 1e-9);
+            t.True(Vec3.Dot(arc.Axis, Vec3.UnitZ) > 0.999999, "counter-clockwise about +Z");
+            var back = NRecognize.Curve(u => Arc(1 - u), tol) as NCircle;
+            t.True(back != null && Vec3.Dot(back.Axis, Vec3.UnitZ) < -0.999999, "clockwise arc: axis -Z");
+            var wavy = new BSplineCurve(3, new[] { Vec3.Zero, new Vec3(1, 1, 0), new Vec3(2, -1, 0), new Vec3(3, 0, 0) }, new double[] { 0, 0, 0, 0, 1, 1, 1, 1 });
+            t.True(NRecognize.Curve(wavy.Eval, tol) == null, "free-form curve");
+        });
+
         t.Test("Sheet metal: a plain block unfolds to its face", () =>
         {
             // every face has an opposite face but no bend joins them: the flat is the fixed face, as thick as the block

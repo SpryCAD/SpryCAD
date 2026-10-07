@@ -44,6 +44,7 @@ static class Program
         if (args.Length > 7 && args[0] == "fillet") return Hang.Run(args);
         if (args.Length > 2 && args[0] == "rb") return RollingBallTool.Run(args);
         if (args.Length > 1 && args[0] == "import") return ImportTool.Run(args);
+        if (args.Length > 1 && args[0] == "unfold") return UnfoldTool.Run(args);
         if (args.Length > 1 && args[0] == "loadtime")
         {
             // what opening a STEP file in the app costs: rebuild of the importing part, then the display mesh
