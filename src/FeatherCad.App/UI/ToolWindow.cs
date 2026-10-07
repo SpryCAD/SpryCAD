@@ -64,14 +64,13 @@ public class ToolWindow : Window
         root.Children.Add(_bar);
         root.Children.Add(_body);
         // a thin border of our own, where the system does not draw one (see OnOpened)
-        // clipped to its corners: the close button's red square stays inside the rounded border
-        _frame = new Border { Child = root, BorderBrush = FrameBrush, BorderThickness = new Thickness(1), ClipToBounds = true };
+        _frame = new Border { Child = root, BorderBrush = FrameBrush, BorderThickness = new Thickness(1) };
         base.Content = _frame;
         _title.Text = Title;
     }
 
-    /// <summary>A neutral gray border like the context menus', a shade darker to show on a light desktop.</summary>
-    static readonly IBrush FrameBrush = new SolidColorBrush(Color.Parse("#FFB8B8B8"));
+    /// <summary>The context menus' border (black at about 20% over white).</summary>
+    static readonly IBrush FrameBrush = new SolidColorBrush(Color.Parse("#FFCCCCCC"));
     readonly Border _frame;
 
     /// <summary>The window's content, below the title bar.</summary>
@@ -89,9 +88,8 @@ public class ToolWindow : Window
     {
         base.OnOpened(e);
         _bar.IsVisible = IsExtendedIntoWindowDecorations;
-        // Windows 11 rounds the window (8 px): our border follows the corners. The system border color is not drawn
-        // once the client area covers the frame, so the border is always ours
-        if (RoundedFrame(this)) _frame.CornerRadius = new CornerRadius(8);
+        // Windows 11 rounds the window and draws its border itself (with the shadow, anti-aliased): ours then goes
+        if (RoundedFrame(this)) _frame.BorderThickness = new Thickness(0);
     }
 
     // ---- Windows 11: rounded corners and a border color, by the desktop window manager ----
