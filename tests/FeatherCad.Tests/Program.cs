@@ -118,6 +118,7 @@ static class Program
             ImportTests.Run(t);
             NativeBoolTests.Run(t);
             NativeRevolveTests.Run(t);
+            SheetMetalTests.Run(t);
             Console.WriteLine("Core");
             CoreTests.Run(t);
             Console.WriteLine($"\n{t.Passed} passed, {t.Failed} failed");
