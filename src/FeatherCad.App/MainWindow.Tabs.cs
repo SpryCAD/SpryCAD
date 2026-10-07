@@ -121,9 +121,9 @@ public partial class MainWindow
             return;
         }
         var list = new ListBox { Background = Brushes.White, BorderThickness = new Thickness(0) };
-        var w = new UI.ToolWindow
+        var w = new Window
         {
-            Title = "Open Parts", Body = list, CanResize = true,
+            Title = "Open Parts", Content = list, ShowInTaskbar = false, CanResize = true,
             MinWidth = 220, MinHeight = 120, Width = 360, Height = 520,
         };
         // where it was last, else beside the button, below the tabs
