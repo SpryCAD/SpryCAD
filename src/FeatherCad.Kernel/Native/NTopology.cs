@@ -22,6 +22,8 @@ public sealed class NEdge
     sealed record BoxCache(Box3 Box, double Tol);
     BoxCache? _box;
     SampleCache? _samples;
+    /// <summary>Diagnostics: the tolerance the cached samples were taken at (NaN: none).</summary>
+    public double SampledTol => _samples?.Tol ?? double.NaN;
 
     public NEdge(NCurve c, double t0, double t1, NVertex v0, NVertex v1)
     {

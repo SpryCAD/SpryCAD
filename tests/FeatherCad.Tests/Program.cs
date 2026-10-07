@@ -95,6 +95,9 @@ static class Program
         if (args.Length > 4 && args[0] == "repro") { Bench.Repro(args[1], args[2..]); return 0; }
         if (args.Length > 1 && args[0] == "markertime") { Bench.MarkerTime(args[1]); return 0; }
         if (args.Length > 1 && args[0] == "cases") { Bench.Cases(args[1]); return 0; }
+        if (args.Length > 2 && args[0] is "tessrepeat" or "tessrepeat-fresh") return Bench.TessRepeat(args[1], int.Parse(args[2]), args[3..], args[0] == "tessrepeat-fresh");
+        if (args.Length > 1 && args[0] == "demoprints") return Bench.DemoPrints(args[1]);
+        if (args.Length > 2 && args[0] == "determinism") return Bench.Determinism(args[1], int.Parse(args[2]), args[3..]);
         if (args.Length > 2 && args[0] == "featprof") { Bench.FeatureProfile(args[1], args[2], args.Length > 3 ? int.Parse(args[3]) : 3); return 0; }
         if (args.Length > 1 && args[0] == "localbench") return LocalBench.Run(args[1], args.Length > 2 ? int.Parse(args[2]) : 5);
         if (args.Length > 1 && args[0] == "bench")
