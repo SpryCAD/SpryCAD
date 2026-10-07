@@ -29,6 +29,11 @@ public sealed class CadDocument
     public Dictionary<string, int> NameCounters { get; set; } = new();
     /// <summary>Part appearance (RGB 0-1).</summary>
     public double[] Color { get; set; } = { 0.74, 0.76, 0.80 };
+    /// <summary>Material name, for mass properties (null: none set; steel's density is assumed).</summary>
+    public string? Material { get; set; }
+    /// <summary>Density in kg/m³ (null: steel, 7850).</summary>
+    public double? Density { get; set; }
+    public const double DefaultDensity = 7850;
     /// <summary>
     /// Index of the embedded files (name, size, SHA-256), written by <see cref="Save"/>; null when there are none.
     /// It keeps model.json self-describing (and a changed attachment visible in a diff).

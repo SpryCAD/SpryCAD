@@ -12,6 +12,46 @@ static class KernelTests
 
     public static void Run(TestRunner t)
     {
+        t.Test("Mass properties: box volume, center, inertia at center and origin, principal axes", () =>
+        {
+            // a 2 × 3 × 4 box (x, y, z) centered at (1, 2, 3), optionally turned about an axis through its center
+            MassProps Box(Func<Vec3, Vec3> place, bool inward = false)
+            {
+                var mp = new MassProps();
+                Vec3 C(int i) => place(new Vec3((i & 1) == 0 ? -1 : 1, (i & 2) == 0 ? -1.5 : 1.5, (i & 4) == 0 ? -2 : 2));
+                // the 6 faces as quads of corner indices, counter-clockwise from outside
+                int[][] quads = { new[] { 0, 2, 3, 1 }, new[] { 4, 5, 7, 6 }, new[] { 0, 1, 5, 4 }, new[] { 2, 6, 7, 3 }, new[] { 0, 4, 6, 2 }, new[] { 1, 3, 7, 5 } };
+                foreach (var q in quads)
+                {
+                    if (inward) { mp.AddTriangle(C(q[0]), C(q[2]), C(q[1])); mp.AddTriangle(C(q[0]), C(q[3]), C(q[2])); }
+                    else { mp.AddTriangle(C(q[0]), C(q[1]), C(q[2])); mp.AddTriangle(C(q[0]), C(q[2]), C(q[3])); }
+                }
+                return mp.Finish();
+            }
+            var c0 = new Vec3(1, 2, 3);
+            var b = Box(p => p + c0);
+            t.Near(b.Volume, 24, 1e-9); t.Near(b.SurfaceArea, 2 * (6 + 8 + 12), 1e-9);
+            t.Near(b.Center.X, 1, 1e-9); t.Near(b.Center.Y, 2, 1e-9); t.Near(b.Center.Z, 3, 1e-9);
+            // m(b² + c²)/12 about each axis through the center: 50, 40, 26; no products
+            t.Near(b.AtCenter[0, 0], 50, 1e-9); t.Near(b.AtCenter[1, 1], 40, 1e-9); t.Near(b.AtCenter[2, 2], 26, 1e-9);
+            t.Near(b.AtCenter[0, 1], 0, 1e-9); t.Near(b.AtCenter[1, 2], 0, 1e-9); t.Near(b.AtCenter[0, 2], 0, 1e-9);
+            // about the origin: parallel axis, Ixx + m(y² + z²), product -m x y
+            t.Near(b.AtOrigin[0, 0], 50 + 24 * (4 + 9), 1e-9); t.Near(b.AtOrigin[0, 1], -24 * 1 * 2, 1e-9);
+            t.Near(b.Principal[0], 26, 1e-9); t.Near(b.Principal[1], 40, 1e-9); t.Near(b.Principal[2], 50, 1e-9);
+            t.Near(Math.Abs(b.Axes[0].Z), 1, 1e-9); t.Near(Math.Abs(b.Axes[2].X), 1, 1e-9);
+            // turned 30° about Z: the same principal moments, the smallest still along Z, the largest along the turned X
+            var (cs, sn) = (Math.Cos(Math.PI / 6), Math.Sin(Math.PI / 6));
+            var r = Box(p => new Vec3(p.X * cs - p.Y * sn, p.X * sn + p.Y * cs, p.Z) + c0);
+            t.Near(r.Volume, 24, 1e-9); t.Near(r.Center.X, 1, 1e-9);
+            t.Near(r.Principal[0], 26, 1e-9); t.Near(r.Principal[1], 40, 1e-9); t.Near(r.Principal[2], 50, 1e-9);
+            t.True(Math.Abs(r.AtCenter[0, 1]) > 1, "turned: products of inertia appear");
+            t.Near(Math.Abs(Vec3.Dot(r.Axes[2], new Vec3(cs, sn, 0))), 1, 1e-9);
+            t.Near(Vec3.Dot(Vec3.Cross(r.Axes[0], r.Axes[1]), r.Axes[2]), 1, 1e-9);
+            // an inward-facing mesh gives the same results
+            var inv = Box(p => p + c0, inward: true);
+            t.Near(inv.Volume, 24, 1e-9); t.Near(inv.Center.Z, 3, 1e-9); t.Near(inv.AtCenter[0, 0], 50, 1e-9);
+        });
+
         t.Test("Measure: closest points between points, segments and triangles", () =>
         {
             MeasureShape Tri(double z) { var s = new MeasureShape(); s.Triangles.Add((new Vec3(0, 0, z), new Vec3(10, 0, z), new Vec3(0, 10, z))); return s; }

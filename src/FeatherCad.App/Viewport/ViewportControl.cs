@@ -238,6 +238,7 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         DrawPointAndSegmentHighlights(_dyn, hl);
         if (AxisPreview is { } ap) DrawAxisPreview(_dyn, ap.dir, ap.color);
         DrawMeasureLines(_dyn);
+        if (CenterOfMass is { } com) DrawCenterOfMass(_dyn, com.center, com.axes, com.length);
         if (Hover is { Kind: SelKind.Vertex, FeatureId: null } hv) DrawPointHover(_dyn, hv);
         if (_nav == Nav.Rotate) DrawPivot(_dyn, _pivot);
         else if (Spinning) DrawPivot(_dyn, _spinPivot);
@@ -377,6 +378,41 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
 
     /// <summary>An axis through the origin to show (e.g. while an X/Y/Z axis button is hovered), or null.</summary>
     public (Vec3 dir, Rgba color)? AxisPreview { get => _axisPreview; set { _axisPreview = value; Redraw(); } }
+
+    /// <summary>
+    /// The center of mass to show (Mass Properties): the point, and the principal axes of inertia through it (each
+    /// drawn <c>length</c> to either side). Null for none.
+    /// </summary>
+    public (Vec3 center, Vec3[] axes, double length)? CenterOfMass
+    {
+        get => _centerOfMass;
+        set { _centerOfMass = value; Redraw(); }
+    }
+    (Vec3 center, Vec3[] axes, double length)? _centerOfMass;
+
+    /// <summary>
+    /// The center of mass symbol (as SolidWorks: a circle in black and white quarters, facing the viewer, over the
+    /// model) and the principal axes, dashed.
+    /// </summary>
+    void DrawCenterOfMass(DynamicGeometry g, Vec3 c, Vec3[] axes, double length)
+    {
+        var px = Camera.PixelSize;
+        var axisColor = new Rgba(0.30f, 0.30f, 0.75f);
+        foreach (var a in axes) g.Dashed(c - a * length, c + a * length, axisColor, px * 6, top: true);
+        var right = Camera.V(Camera.Right); var up = Camera.V(Camera.Up);
+        const double r = 9; // pixels
+        Vec3 At(double ang, double rad) => c + (right * Math.Cos(ang) + up * Math.Sin(ang)) * (rad * px);
+        var dark = new Rgba(0.08f, 0.08f, 0.10f); var light = new Rgba(1, 1, 1);
+        const int n = 8; // triangles per quarter
+        for (int q = 0; q < 4; q++)
+            for (int i = 0; i < n; i++)
+            {
+                var a0 = (q + (double)i / n) * Math.PI / 2; var a1 = (q + (double)(i + 1) / n) * Math.PI / 2;
+                g.Tri(c, At(a0, r), At(a1, r), q % 2 == 0 ? dark : light, top: true);
+            }
+        for (int i = 0; i < 4 * n; i++)
+            g.Line(At(i * Math.PI / (2 * n), r), At((i + 1) * Math.PI / (2 * n), r), dark, top: true);
+    }
 
     /// <summary>How a Measure line is drawn.</summary>
     public enum MeasureStyle

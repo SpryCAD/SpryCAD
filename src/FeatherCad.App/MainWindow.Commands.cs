@@ -183,7 +183,7 @@ public partial class MainWindow
         MainMenu.Items.Add(Sub("_Tools",
             Item("_Equations...", () => _ = Dialogs.Equations(this), null, "equations"),
             Item("Mea_sure...", MeasureCommand, null, "measure"),
-            Item("_Mass Properties...", () => _ = Dialogs.MassProperties(this), null, "mass"),
+            Item("_Mass Properties...", MassPropertiesCommand, null, "mass"),
             "-",
             Item("_Options...", () => _ = Dialogs.Options(this), null, "options")));
         MainMenu.Items.Add(Sub("_Help",
@@ -286,7 +286,7 @@ public partial class MainWindow
                 break;
             case "Evaluate":
                 Cmd("measure", "Measure", MeasureCommand);
-                Cmd("mass", "Mass\nProperties", () => _ = Dialogs.MassProperties(this));
+                Cmd("mass", "Mass\nProperties", MassPropertiesCommand);
                 Cmd("equations", "Equations", () => _ = Dialogs.Equations(this));
                 Sep();
                 Cmd("export", "Export\nSTEP", () => _ = Export("step"));
@@ -339,7 +339,7 @@ public partial class MainWindow
         ["Trim Entities"] = "Trims sketch entities at their intersections.",
         ["Construction Geometry"] = "Toggles the selected sketch entities to construction.",
         ["Measure"] = "Distance, angle, radius, length and area of the faces, edges and vertices you click.",
-        ["Mass Properties"] = "Volume, mass, surface area and center of mass.",
+        ["Mass Properties"] = "Mass, volume, surface area, center of mass and moments of inertia, with the part's material.",
         ["Equations"] = "Global variables that drive dimensions.",
     };
 
