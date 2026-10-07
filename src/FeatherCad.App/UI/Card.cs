@@ -5,6 +5,7 @@ using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.VisualTree;
 
 namespace FeatherCad.App.UI;
 
@@ -110,9 +111,11 @@ public static class Card
             var next = at < 0 ? 0 : ((at + step) % stops.Count + stops.Count) % stops.Count;
             stops[next].Focus(NavigationMethod.Tab); // Tab: the focus outline shows
         }
-        backdrop.AddHandler(InputElement.KeyDownEvent, (_, e) =>
+        // the keys are taken at the window, wherever the focus is (a focus the card did not get must not leave
+        // the keys with the control behind it)
+        void OnKey(object? _, KeyEventArgs e)
         {
-            var inText = e.Source is TextBox;
+            var inText = e.Source is TextBox tbox && stops.Contains(tbox);
             switch (e.Key)
             {
                 case Key.Enter:
@@ -124,20 +127,28 @@ public static class Card
                 case Key.Tab: Move(e.KeyModifiers.HasFlag(KeyModifiers.Shift) ? -1 : 1); break;
                 case Key.Right or Key.Down when !inText: Move(1); break;
                 case Key.Left or Key.Up when !inText: Move(-1); break;
-                default: return;
+                default:
+                    // typing goes to the card's input box only; other keys go nowhere while the card is up
+                    if (!inText && !(e.Source is Control c && card.IsVisualAncestorOf(c))) break;
+                    return;
             }
             e.Handled = true;
-        }, RoutingStrategies.Tunnel);
+        }
+        owner.AddHandler(InputElement.KeyDownEvent, OnKey, RoutingStrategies.Tunnel);
+        tcs.Task.ContinueWith(_ => Avalonia.Threading.Dispatcher.UIThread.Post(() => owner.RemoveHandler(InputElement.KeyDownEvent, OnKey)));
         _open++;
         layer.Children.Add(backdrop);
-        // the default answer (or the input box) has the keyboard once the card is laid out
+        // the default answer (or the input box) has the keyboard: when the card is laid out, and again once it is
+        // drawn (a focus asked for too early does not take)
         var first = focus ?? (defaultIndex >= 0 && defaultIndex < btns.Count ? btns[defaultIndex] : null);
-        if (first != null)
-            card.Loaded += (_, _) =>
-            {
-                first.Focus(NavigationMethod.Tab);
-                if (first is TextBox tb) tb.SelectAll();
-            };
+        void TakeFocus()
+        {
+            if (first == null || tcs.Task.IsCompleted || stops.Any(s => s.IsFocused)) return;
+            first.Focus(NavigationMethod.Tab);
+            if (first is TextBox tb) tb.SelectAll();
+        }
+        card.Loaded += (_, _) => TakeFocus();
+        Avalonia.Threading.Dispatcher.UIThread.Post(TakeFocus, Avalonia.Threading.DispatcherPriority.Background);
         return tcs.Task;
     }
 }
