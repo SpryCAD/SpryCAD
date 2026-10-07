@@ -25,6 +25,10 @@ public sealed class PipeSpine
     readonly Vec3[] _n1;      // rotation-minimizing normal at the samples
     readonly Vec3[] _segC;    // bounding sphere per Hermite segment
     readonly double[] _segR;
+    // a bounding-sphere tree over the segments (node k: children 2k+1, 2k+2 or a leaf segment) for nearest-point searches
+    readonly Vec3[] _bvC;
+    readonly double[] _bvR;
+    readonly int[] _bvLo, _bvHi;
     public Box3 Box { get; }
     /// <summary>Smallest radius of curvature of the spine (from the samples).</summary>
     public double MinCurvatureRadius { get; }
@@ -87,6 +91,28 @@ public sealed class PipeSpine
         }
         foreach (var p in _sp) box.Add(p);
         Box = box;
+        int nodes = 1; while (nodes < 2 * nseg) nodes *= 2;
+        _bvC = new Vec3[nodes]; _bvR = new double[nodes]; _bvLo = new int[nodes]; _bvHi = new int[nodes];
+        BuildTree(0, 0, nseg);
+    }
+
+    void BuildTree(int k, int lo, int hi)
+    {
+        _bvLo[k] = lo; _bvHi[k] = hi;
+        if (hi - lo == 1) { _bvC[k] = _segC[lo]; _bvR[k] = _segR[lo]; return; }
+        int mid = (lo + hi) / 2;
+        BuildTree(2 * k + 1, lo, mid); BuildTree(2 * k + 2, mid, hi);
+        // the sphere enclosing both children's spheres
+        Vec3 ca = _bvC[2 * k + 1], cb = _bvC[2 * k + 2]; double ra = _bvR[2 * k + 1], rb = _bvR[2 * k + 2];
+        var d = Vec3.Distance(ca, cb);
+        if (d + rb <= ra) { _bvC[k] = ca; _bvR[k] = ra; }
+        else if (d + ra <= rb) { _bvC[k] = cb; _bvR[k] = rb; }
+        else
+        {
+            var r = 0.5 * (d + ra + rb);
+            _bvC[k] = ca + (cb - ca) * ((r - ra) / d);
+            _bvR[k] = r * (1 + 1e-12) + 1e-12;
+        }
     }
 
     public double S0 => S[0];
@@ -126,34 +152,83 @@ public sealed class PipeSpine
         return (P[i] * (12 * t - 6) + D[i] * (h * (6 * t - 4)) + P[i + 1] * (-12 * t + 6) + D[i + 1] * (h * (6 * t - 2))) / (h * h);
     }
 
+    /// <summary><see cref="Eval"/>, <see cref="Deriv"/> and <see cref="Deriv2"/> at once.</summary>
+    void Derivs(double s, out Vec3 c, out Vec3 d1, out Vec3 d2)
+    {
+        int i = Seg(s); var h = S[i + 1] - S[i];
+        var t = Math.Clamp((s - S[i]) / h, 0, 1);
+        double t2 = t * t, t3 = t2 * t;
+        c = P[i] * (2 * t3 - 3 * t2 + 1) + D[i] * (h * (t3 - 2 * t2 + t)) + P[i + 1] * (-2 * t3 + 3 * t2) + D[i + 1] * (h * (t3 - t2));
+        d1 = (P[i] * (6 * t2 - 6 * t) + D[i] * (h * (3 * t2 - 4 * t + 1)) + P[i + 1] * (-6 * t2 + 6 * t) + D[i + 1] * (h * (3 * t2 - 2 * t))) / h;
+        d2 = (P[i] * (12 * t - 6) + D[i] * (h * (6 * t - 4)) + P[i + 1] * (-12 * t + 6) + D[i + 1] * (h * (6 * t - 2))) / (h * h);
+    }
+
     /// <summary>Closest point of the spine to p: parameter, point and distance.</summary>
     public (double s, Vec3 c, double dist) Closest(Vec3 p)
     {
+        // the nearest sample (the first of equally near ones), nearer subtrees first
         double best = double.MaxValue; int bi = 0;
-        for (int i = 0; i < _segC.Length; i++)
+        Span<int> stack = stackalloc int[64];
+        int top = 0;
+        stack[top++] = 0;
+        while (top > 0)
         {
-            var lb = Vec3.Distance(p, _segC[i]) - _segR[i];
+            int k = stack[--top];
+            var lb = Vec3.Distance(p, _bvC[k]) - _bvR[k];
             if (lb > 0 && lb * lb > best) continue;
-            for (int j = i * Sub; j <= (i + 1) * Sub; j++)
+            if (_bvHi[k] - _bvLo[k] == 1)
             {
-                var d2 = (_sp[j] - p).LengthSq;
-                if (d2 < best) { best = d2; bi = j; }
+                int i = _bvLo[k];
+                for (int j = i * Sub; j <= (i + 1) * Sub; j++)
+                {
+                    var d2 = (_sp[j] - p).LengthSq;
+                    if (d2 < best || d2 == best && j < bi) { best = d2; bi = j; }
+                }
+                continue;
             }
+            int a = 2 * k + 1, b = 2 * k + 2;
+            // push the farther child first so the nearer is searched first
+            if ((p - _bvC[a]).LengthSq - _bvR[a] * _bvR[a] < (p - _bvC[b]).LengthSq - _bvR[b] * _bvR[b]) { stack[top++] = b; stack[top++] = a; }
+            else { stack[top++] = a; stack[top++] = b; }
         }
         double lo = _ss[Math.Max(0, bi - 1)], hi = _ss[Math.Min(_ss.Length - 1, bi + 1)];
         var s = _ss[bi];
-        for (int it = 0; it < 40; it++)
+        // g = (c - p)·c' and its derivative, from one segment lookup
+        double G(double t, out double gp)
         {
-            var c = Eval(s); var d1 = Deriv(s); var d2 = Deriv2(s);
+            Derivs(t, out var c, out var d1, out var d2);
             var e = c - p;
-            var g = Vec3.Dot(e, d1); var gp = Vec3.Dot(d1, d1) + Vec3.Dot(e, d2);
-            double sn;
-            if (gp <= 1e-12) sn = g > 0 ? lo : hi; // not convex here: move towards the descent end
-            else sn = s - g / gp;
-            sn = Math.Clamp(sn, lo, hi);
-            if (Math.Abs(sn - s) < 1e-15 * Math.Max(1, Math.Abs(s))) { s = sn; break; }
-            s = sn;
+            gp = Vec3.Dot(d1, d1) + Vec3.Dot(e, d2);
+            return Vec3.Dot(e, d1);
         }
+        if (G(lo, out _) < 0 && G(hi, out _) > 0)
+        {
+            // the root of g is bracketed: Newton kept inside the bracket, bisection where it would leave it (it
+            // converges slowly or not at all where the root sits at a node, across which c'' jumps)
+            var eps = 1e-12 * Math.Max(1, Math.Abs(s));
+            for (int it = 0; it < 80; it++)
+            {
+                var g = G(s, out var gp);
+                if (g == 0) break;
+                if (g < 0) lo = s; else hi = s;
+                var sn = gp > 1e-12 ? s - g / gp : 0.5 * (lo + hi);
+                if (!(sn > lo && sn < hi)) sn = 0.5 * (lo + hi);
+                bool done = Math.Abs(sn - s) < eps || hi - lo < eps;
+                s = sn;
+                if (done) break;
+            }
+        }
+        else
+            for (int it = 0; it < 40; it++)
+            {
+                var g = G(s, out var gp);
+                double sn;
+                if (gp <= 1e-12) sn = g > 0 ? lo : hi; // not convex here: move towards the descent end
+                else sn = s - g / gp;
+                sn = Math.Clamp(sn, lo, hi);
+                if (Math.Abs(sn - s) < 1e-15 * Math.Max(1, Math.Abs(s))) { s = sn; break; }
+                s = sn;
+            }
         // guard: Newton may stop at a bracket end that is worse than the best sample
         var cs = Eval(s);
         if ((cs - p).LengthSq > best) { s = _ss[bi]; cs = _sp[bi]; }
