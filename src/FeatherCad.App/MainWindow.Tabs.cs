@@ -502,7 +502,10 @@ public partial class MainWindow
             var retry = new Button { Content = "Retry" };
             ToolTip.SetTip(retry, "Read the file again (e.g. after fixing or replacing it)");
             retry.Click += (_, _) => RetryLoad(_tab);
-            _loadBanner = UI.Card.Make(UI.CardKind.Error, "", new Control[] { _bannerError, _bannerPath }, new[] { retry }, out _bannerTitle);
+            var close = new Button { Content = "Close" };
+            ToolTip.SetTip(close, "Close this part (Ctrl+W)");
+            close.Click += (_, _) => _ = CloseTab(_tab);
+            _loadBanner = UI.Card.Make(UI.CardKind.Error, "", new Control[] { _bannerError, _bannerPath }, new[] { retry, close }, out _bannerTitle);
             GraphicsArea.Children.Add(_loadBanner);
         }
         _bannerTitle.Text = $"{_tab.Session.Title.TrimEnd(' ', '*')} could not be opened";
