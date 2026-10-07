@@ -255,6 +255,36 @@ static class Bench
     }
 
     /// <summary>
+    /// <c>-- massprops file.fcad [Name=expr ...]</c>: exact mass properties of each body (integrated on the B-rep)
+    /// against the mesh's (display mesh, and finer tessellations), with times.
+    /// </summary>
+    public static int MassPropsTool(string file, string[] equations)
+    {
+        var doc = CadDocument.Load(file);
+        foreach (var eq in equations) { var kv = eq.Split('=', 2); doc.Equations.First(q => q.Name == kv[0]).Expr = kv[1]; }
+        var r = new Regenerator().Rebuild(doc);
+        foreach (var b in r.State.Bodies)
+        {
+            if (b.Solid.Native is not { } nb) { Console.WriteLine("  (not a native body)"); continue; }
+            var sw = Stopwatch.StartNew();
+            var ex = NMass.Of(nb);
+            var ms = sw.Elapsed.TotalMilliseconds;
+            if (ex == null) { Console.WriteLine($"  exact: not integrable ({ms:0} ms)"); continue; }
+            Console.WriteLine($"  exact      vol {ex.Volume:R}  area {ex.SurfaceArea:0.000000}  centre {ex.Center}  Ixx {ex.AtCenter[0, 0]:0.###}  ({ms:0} ms, {nb.Faces.Count} faces)");
+            foreach (var tol in new[] { 0.0, 1e-3, 2e-4 })
+            {
+                sw.Restart();
+                var mp = new MassProps();
+                if (tol == 0) mp.Add(b.Mesh.Positions, b.Mesh.Indices);
+                else foreach (var f in NTess.Facets(nb.Clone(), tol)) foreach (var tr in Triangulator.TriangulateFace(f)) mp.AddTriangle(tr.A, tr.B, tr.C);
+                mp.Finish();
+                Console.WriteLine($"  mesh {(tol == 0 ? "display" : tol.ToString("0e0")),-7} vol {mp.Volume:R}  area {mp.SurfaceArea:0.000000}  rel {(mp.Volume - ex.Volume) / ex.Volume:e2}  ({sw.ElapsedMilliseconds} ms)");
+            }
+        }
+        return 0;
+    }
+
+    /// <summary>
     /// <c>-- tessrepeat file.fcad n [Name=expr ...]</c>: rebuilds once, then tessellates the final body n times (as
     /// the demo check measures volume): a race inside tessellation shows up as different volumes.
     /// </summary>
@@ -276,7 +306,7 @@ static class Bench
         return seen.Count == 1 ? 0 : 1;
     }
 
-    static string Fingerprint(ModelState s)
+    internal static string Fingerprint(ModelState s)
     {
         var parts = new List<string>();
         foreach (var b in s.Bodies)
