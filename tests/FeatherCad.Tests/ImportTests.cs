@@ -74,6 +74,36 @@ static class ImportTests
             t.Near(NTess.ToSolid(body, 1e-3).Volume(), 4.0 / 3 * Math.PI * 1000, 2);
         });
 
+        t.Test("STEP import: instance numbers past 32 bits (SolidWorks' #18446744073709551615 for a missing reference)", () =>
+        {
+            // a point numbered 2^32 (any size is valid), and SolidWorks 2024's null reference: -1 as an unsigned 64-bit number
+            var step = """
+                ISO-10303-21;
+                HEADER; FILE_DESCRIPTION((''),'2;1'); FILE_NAME('s','',(''),(''),'','',''); FILE_SCHEMA(('CONFIG_CONTROL_DESIGN')); ENDSEC;
+                DATA;
+                #4294967296=CARTESIAN_POINT('',(0.,0.,0.));
+                #2=DIRECTION('',(0.,0.,1.));
+                #3=DIRECTION('',(1.,0.,0.));
+                #4=AXIS2_PLACEMENT_3D('',#4294967296,#2,#3);
+                #5=SPHERICAL_SURFACE('',#4,10.);
+                #6=CARTESIAN_POINT('',(0.,0.,10.));
+                #7=VERTEX_POINT('',#6);
+                #8=VERTEX_LOOP('',#7);
+                #9=FACE_BOUND('',#8,.T.);
+                #10=ADVANCED_FACE('',(#9),#5,.T.);
+                #11=CLOSED_SHELL('',(#10));
+                #12=MANIFOLD_SOLID_BREP('ball',#11);
+                #13=PERSON_AND_ORGANIZATION(#18446744073709551615,#18446744073709551615);
+                #14=PERSON_AND_ORGANIZATION(#18446744073709551615,#18446744073709551615);
+                ENDSEC;
+                END-ISO-10303-21;
+                """;
+            var res = StepImport.Read(System.Text.Encoding.ASCII.GetBytes(step), "F1.");
+            var body = res.Solids.Single().Body;
+            t.Eq(body.Validate(), null);
+            t.Near(NTess.ToSolid(body, 1e-3).Volume(), 4.0 / 3 * Math.PI * 1000, 2);
+        });
+
         t.Test("STEP import: a fillet on an imported edge, kept through save and reload", () =>
         {
             var (step, volume) = Exported("l-bracket.fcad");

@@ -154,12 +154,22 @@ public sealed class StepFile
             return _s[start.._i].ToUpperInvariant();
         }
 
+        /// <summary>Instance ids past int.MaxValue, numbered -1, -2, … (no real id is negative, so they never collide).</summary>
+        readonly Dictionary<string, int> _bigIds = new();
+
         public int ParseInstanceId()
         {
             Expect('#');
             int start = _i;
             while (_i < _s.Length && char.IsDigit(_s[_i])) _i++;
-            return int.Parse(_s.AsSpan(start, _i - start), CultureInfo.InvariantCulture);
+            var digits = _s.AsSpan(start, _i - start);
+            if (int.TryParse(digits, NumberStyles.None, CultureInfo.InvariantCulture, out var id)) return id;
+            if (digits.Length == 0) throw Error("expected an instance number");
+            // any size is valid Part 21; SolidWorks 2024 also writes a missing reference as #18446744073709551615 (-1
+            // as an unsigned 64-bit number), e.g. in PERSON_AND_ORGANIZATION: harmless unless followed
+            var key = digits.ToString();
+            if (!_bigIds.TryGetValue(key, out id)) _bigIds[key] = id = -(_bigIds.Count + 1);
+            return id;
         }
 
         public List<object?> ParseList()

@@ -8,6 +8,22 @@ static class UnfoldTool
 {
     public static int Run(string[] args)
     {
+        // a folder: every STEP file in it, compared with the DXF of the same name when there is one
+        if (Directory.Exists(args[1]))
+        {
+            int failed = 0;
+            foreach (var f in Directory.GetFiles(args[1]).Where(f => f.EndsWith(".step", StringComparison.OrdinalIgnoreCase) || f.EndsWith(".stp", StringComparison.OrdinalIgnoreCase)).Order())
+            {
+                Console.WriteLine($"=== {Path.GetFileName(f)}");
+                var dxf = Path.ChangeExtension(f, ".dxf");
+                var a = new List<string> { args[0], f };
+                a.AddRange(args.Skip(2).Where(x => !x.StartsWith("--compare=")));
+                if (File.Exists(dxf)) a.Add("--compare=" + dxf);
+                try { failed += Run(a.ToArray()) > 0 ? 1 : 0; }
+                catch (Exception ex) { Console.WriteLine("  failed: " + ex.Message); failed++; }
+            }
+            return failed;
+        }
         var file = args[1];
         var k = args.Length > 2 && double.TryParse(args[2], System.Globalization.CultureInfo.InvariantCulture, out var kk) ? kk : 0.5;
         var outDir = args.FirstOrDefault(a => a.StartsWith("--out="))?[6..] ?? Path.GetTempPath();
@@ -85,32 +101,29 @@ static class UnfoldTool
             return best;
         }
         static IEnumerable<Vec2> Dense(List<(Vec2 A, Vec2 B)> segs) => segs.SelectMany(x => Enumerable.Range(0, 4).Select(i => x.A + (x.B - x.A) * (i / 4.0)));
-        (double toRef, double toOurs, Vec2 worst) best = (double.MaxValue, 0, default);
-        foreach (var (sx, sy) in new[] { (1, 1), (-1, 1), (1, -1), (-1, -1) })
+        // the eight ways the flat may lie in the other DXF: mirrored in x and/or y, and turned 90°
+        var placements = new List<Func<Vec2, Vec2>>();
+        foreach (var swap in new[] { false, true })
+            foreach (var (sx, sy) in new[] { (1, 1), (-1, 1), (1, -1), (-1, -1) })
+                placements.Add(p => { var q = p - oc; if (swap) q = new Vec2(q.Y, q.X); return new Vec2(q.X * sx, q.Y * sy) + rc; });
+        (double toRef, double toOurs, Vec2 worst, List<(Vec2 A, Vec2 B)> mapped) best = (double.MaxValue, 0, default, new());
+        foreach (var M in placements)
         {
-            Vec2 M(Vec2 p) => new((p.X - oc.X) * sx + rc.X, (p.Y - oc.Y) * sy + rc.Y);
             var mapped = oursSegs.Select(x => (A: M(x.A), B: M(x.B))).ToList();
             double toRef = 0; Vec2 worst = default;
-            foreach (var p in Dense(mapped)) { var d = Dist(p, refSegs); if (d > toRef) { toRef = d; worst = p; } }
+            foreach (var p in Dense(mapped)) { var d = Dist(p, refSegs); if (d > toRef) { toRef = d; worst = p; } if (toRef >= best.toRef) break; }
             if (toRef >= best.toRef) continue;
             double toOurs = 0;
             foreach (var p in Dense(refSegs)) toOurs = Math.Max(toOurs, Dist(p, mapped));
-            best = (toRef, toOurs, worst);
+            best = (toRef, toOurs, worst, mapped);
         }
         Console.WriteLine($"  outline deviation: ours to reference {best.toRef:0.####}, reference to ours {best.toOurs:0.####} (worst near {best.worst - rc} from the center)");
         if (Environment.GetEnvironmentVariable("FC_DEV") != null)
         {
             // where ours is off by more than 0.01: grouped in 5 mm cells
-            foreach (var (sx, sy) in new[] { (1, 1), (-1, 1), (1, -1), (-1, -1) })
-            {
-                Vec2 M(Vec2 p) => new((p.X - oc.X) * sx + rc.X, (p.Y - oc.Y) * sy + rc.Y);
-                var mapped = oursSegs.Select(x => (A: M(x.A), B: M(x.B))).ToList();
-                var devs = Dense(mapped).Select(p => (p, d: Dist(p, refSegs))).ToList();
-                if (Math.Abs(devs.Max(x => x.d) - best.toRef) > 1e-9) continue;
-                foreach (var g in devs.Where(x => x.d > 0.01).GroupBy(x => (Math.Round((x.p.X - rc.X) / 5), Math.Round((x.p.Y - rc.Y) / 5))).OrderByDescending(g => g.Max(x => x.d)))
-                    Console.WriteLine($"    near ({g.Key.Item1 * 5}, {g.Key.Item2 * 5}): {g.Count()} points, max {g.Max(x => x.d):0.####}");
-                break;
-            }
+            var devs = Dense(best.mapped).Select(p => (p, d: Dist(p, refSegs))).ToList();
+            foreach (var g in devs.Where(x => x.d > 0.01).GroupBy(x => (Math.Round((x.p.X - rc.X) / 5), Math.Round((x.p.Y - rc.Y) / 5))).OrderByDescending(g => g.Max(x => x.d)).Take(12))
+                Console.WriteLine($"    near ({g.Key.Item1 * 5}, {g.Key.Item2 * 5}): {g.Count()} points, max {g.Max(x => x.d):0.####}");
         }
         return Math.Max(best.toRef, best.toOurs) > 0.05 ? 1 : 0;
     }
