@@ -497,24 +497,12 @@ public partial class MainWindow
         if (_tab.Error is not { } error) { if (_loadBanner != null) _loadBanner.IsVisible = false; return; }
         if (_loadBanner == null)
         {
-            _bannerTitle = new TextBlock { FontSize = 14, FontWeight = FontWeight.SemiBold, Foreground = ErrorBrush, VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.Wrap };
-            _bannerError = new TextBlock { FontSize = 12, TextWrapping = TextWrapping.Wrap };
-            _bannerPath = new TextBlock { FontSize = 11, Foreground = Brushes.Gray, TextWrapping = TextWrapping.Wrap };
-            var retry = new Button { Content = "Retry", HorizontalAlignment = HorizontalAlignment.Right, Padding = new Thickness(14, 3), Margin = new Thickness(0, 6, 0, 0) };
+            _bannerError = UI.Card.Text("");
+            _bannerPath = UI.Card.Text("", dim: true);
+            var retry = new Button { Content = "Retry" };
             ToolTip.SetTip(retry, "Read the file again (e.g. after fixing or replacing it)");
             retry.Click += (_, _) => RetryLoad(_tab);
-            var icon = UI.Icons.Make("warning", 22, ErrorBrush);
-            var head = new DockPanel { Children = { icon, _bannerTitle } };
-            DockPanel.SetDock(icon, Dock.Left);
-            _bannerTitle.Margin = new Thickness(8, 0, 0, 0);
-            _loadBanner = new Border
-            {
-                Background = Brushes.White, BorderBrush = ErrorBrush, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(6),
-                Padding = new Thickness(16, 12), MaxWidth = 520, Margin = new Thickness(24),
-                HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
-                BoxShadow = BoxShadows.Parse("0 4 16 0 #30000000"),
-                Child = new StackPanel { Spacing = 6, Children = { head, _bannerError, _bannerPath, retry } },
-            };
+            _loadBanner = UI.Card.Make(UI.CardKind.Error, "", new Control[] { _bannerError, _bannerPath }, new[] { retry }, out _bannerTitle);
             GraphicsArea.Children.Add(_loadBanner);
         }
         _bannerTitle.Text = $"{_tab.Session.Title.TrimEnd(' ', '*')} could not be opened";

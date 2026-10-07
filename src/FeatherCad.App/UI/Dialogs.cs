@@ -32,8 +32,11 @@ public static class Dialogs
         return sp;
     }
 
+    /// <summary>A message (a problem when the title says something failed): a card in the window, else a dialog window.</summary>
     public static async Task Message(Window owner, string title, string text)
     {
+        var kind = title.Contains("fail", StringComparison.OrdinalIgnoreCase) || title.Contains("error", StringComparison.OrdinalIgnoreCase) ? CardKind.Error : CardKind.Info;
+        if (Card.ShowAsync(owner, kind, title, new[] { Card.Text(text) }, new[] { "OK" }, 0, 0) is { } shown) { await shown; return; }
         var ok = new Button { Content = "OK", IsDefault = true };
         var sp = new StackPanel();
         sp.Children.Add(new TextBlock { Text = text, TextWrapping = TextWrapping.Wrap });
@@ -46,6 +49,8 @@ public static class Dialogs
     /// <summary>Returns true (yes), false (no) or null (cancel).</summary>
     public static async Task<bool?> YesNoCancel(Window owner, string title, string text, string yesText = "Save", string noText = "Don't Save")
     {
+        if (Card.ShowAsync(owner, CardKind.Question, text, Array.Empty<Control>(), new[] { yesText, noText, "Cancel" }, 0, 2) is { } shown)
+            return await shown switch { 0 => true, 1 => false, _ => (bool?)null };
         bool? result = null;
         var yes = new Button { Content = yesText, IsDefault = true };
         var no = new Button { Content = noText };
@@ -64,6 +69,8 @@ public static class Dialogs
     /// <summary>Two-button question; true for the first button.</summary>
     public static async Task<bool> YesNo(Window owner, string title, string text, string yesText = "OK", string noText = "Cancel")
     {
+        if (Card.ShowAsync(owner, CardKind.Question, title, new[] { Card.Text(text) }, new[] { yesText, noText }, 0, 1) is { } shown)
+            return await shown == 0;
         bool result = false;
         var yes = new Button { Content = yesText, IsDefault = true };
         var no = new Button { Content = noText, IsCancel = true };
@@ -81,6 +88,11 @@ public static class Dialogs
     {
         string? result = null;
         var tb = new TextBox { Text = value };
+        if (Card.ShowAsync(owner, CardKind.Info, title, new Control[] { Card.Text(label), tb }, new[] { "OK", "Cancel" }, 0, 1, focus: tb) is { } shown)
+        {
+            tb.AttachedToVisualTree += (_, _) => tb.SelectAll();
+            return await shown == 0 ? tb.Text : null;
+        }
         var ok = new Button { Content = "OK", IsDefault = true };
         var cancel = new Button { Content = "Cancel", IsCancel = true };
         var sp = new StackPanel { Spacing = 6 };
