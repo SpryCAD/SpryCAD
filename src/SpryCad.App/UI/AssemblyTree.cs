@@ -89,7 +89,10 @@ public sealed class AssemblyTree : DockPanel
             if (c.Suppressed) tags.Add("suppressed");
             var res = m.Resolution.Parts.GetValueOrDefault(ComponentResolver.Key(c.Part));
             var tip = c.Part.Embedded != null ? $"Embedded in the assembly ({c.Part.Embedded})" : res?.Path ?? $"Not found (last at {c.Part.AbsolutePath ?? c.Part.Path})";
-            AddRow(c.Id, 1, "part", $"{(c.Fixed ? "(f)" : "(-)")} {c.Name}", note: tags.Count > 0 ? string.Join(", ", tags) : null,
+            // a configured part: its configuration after the name ("Screw<2> (M4, Length 12)")
+            var config = c.Parameters != null ? m.ConfigLabel(c) : "";
+            if (config.Length > 0) tip += "\nConfigured: " + config;
+            AddRow(c.Id, 1, "part", $"{(c.Fixed ? "(f)" : "(-)")} {c.Name}" + (config.Length > 0 ? $" ({config})" : ""), note: tags.Count > 0 ? string.Join(", ", tags) : null,
                 bad: pd?.Problem != null, dim: c.Suppressed, tip: tip, menu: MenuFor(c));
         }
         // the mates, in their folder
@@ -234,6 +237,7 @@ public sealed class AssemblyTree : DockPanel
                 new Separator(),
                 I("_Fix", "fix", !c.Fixed), I("F_loat", "float", c.Fixed),
                 I(c.Lightweight ? "Set to _Resolved" : "Set to _Lightweight", "lightweight"),
+                I("_Configure...", "configure"),
                 new Separator(),
                 I("_Delete", "delete"),
             },

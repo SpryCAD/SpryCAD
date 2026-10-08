@@ -30,16 +30,26 @@ public sealed class Regenerator
         var (eqValues, eqErrors) = EvaluateEquations(doc);
         Func<string, double?> lookup = name => eqValues.TryGetValue(name, out var v) ? v : null;
 
-        ulong key = Hash(0xcbf29ce484222325UL, JsonSerializer.Serialize(doc.Equations, Serialization.Options));
+        // features see the equations (and design tables) only through their values: a description, a variable made
+        // user-facing or an expression giving the same value rebuilds nothing
+        ulong key = Hash(0xcbf29ce484222325UL, string.Join(";", eqValues.OrderBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(kv => kv.Key.ToLowerInvariant() + "=" + kv.Value.ToString("R", System.Globalization.CultureInfo.InvariantCulture))));
+        key = Hash(key, string.Join(";", eqErrors.Keys.Order(StringComparer.OrdinalIgnoreCase)));
         var state = ModelState.Initial();
         var states = new List<ModelState>();
         var status = new Dictionary<string, FeatureStatus>();
         int count = Math.Min(doc.ActiveCount, upTo ?? int.MaxValue);
         int rebuilt = 0;
+        // features not built (suppressed, by condition, or with a suppressed feature they use), by id and name
+        var off = new Dictionary<string, string>();
         for (int i = 0; i < count; i++)
         {
             var f = doc.Features[i];
-            key = Hash(key, JsonSerializer.Serialize(f, typeof(Feature), Serialization.Options));
+            var json = JsonSerializer.Serialize(f, typeof(Feature), Serialization.Options);
+            key = Hash(key, json);
+            // (the condition and what it uses are covered by the key: the equations and every feature before)
+            var (suppressed, by, condError) = SuppressionOf(f, json, off, lookup);
+            if (suppressed) off[f.Id] = f.Name;
             // a flat pattern also depends on the part's sheet metal settings
             if (f is FlatPatternFeature) key = Hash(key, JsonSerializer.Serialize(doc.SheetMetal, Serialization.Options));
             // a thread also on how threads are shown
@@ -53,10 +63,10 @@ public sealed class Regenerator
             }
             if (_cache.Count > i) _cache.RemoveRange(i, _cache.Count - i);
             cancel.ThrowIfCancellationRequested();
-            var st = new FeatureStatus();
+            var st = new FeatureStatus { Suppressed = suppressed, SuppressedBy = by, Error = condError };
             var fsw = Stopwatch.StartNew();
             progress?.Invoke(new RegenProgress(i, count, f.Id, f.Name, null));
-            if (!f.Suppressed)
+            if (!suppressed && condError == null)
             {
                 try
                 {
@@ -93,6 +103,54 @@ public sealed class Regenerator
     }
 
     public void Invalidate() => _cache.Clear();
+
+    /// <summary>
+    /// Whether a feature is built: not when suppressed by the user, while its Suppress When condition holds, or
+    /// when it uses a feature not built (<paramref name="off"/>, by id: name), found in its definition
+    /// (<paramref name="json"/>) as <see cref="CadDocument.DependentsOf"/> does; for a sketch, in its plane only
+    /// (converted model edges of a suppressed feature are left dangling). A condition that cannot be
+    /// evaluated is an error (the feature is not built either).
+    /// </summary>
+    static (bool suppressed, string? by, string? error) SuppressionOf(Feature f, string json, Dictionary<string, string> off, Func<string, double?> lookup)
+    {
+        if (f.Suppressed) return (true, null, null);
+        if (!string.IsNullOrWhiteSpace(f.SuppressWhen))
+        {
+            if (!Expr.TryEval(f.SuppressWhen, lookup, out var v, out var err)) return (false, null, "Suppress when: " + err);
+            if (Expr.Truthy(v)) return (true, "condition", null);
+        }
+        if (off.Count == 0) return (false, null, null);
+        // a sketch goes with the plane or face it is on; geometry it took from the model stays, dangling
+        if (f is SketchFeature sk) json = JsonSerializer.Serialize(sk.Plane, Serialization.Options);
+        foreach (var (id, name) in off)
+            if (CadDocument.Refers(json, id)) return (true, name, null);
+        return (false, null, null);
+    }
+
+    /// <summary>
+    /// Which features are not built, and why (null: by the user; "condition"; or the suppressed feature used),
+    /// without rebuilding: for the tree and dialogs before a rebuild has run.
+    /// </summary>
+    public static Dictionary<string, string?> SuppressedFeatures(CadDocument doc, Func<string, double?>? lookup = null)
+    {
+        lookup ??= EquationLookup(doc);
+        var off = new Dictionary<string, string>();
+        var result = new Dictionary<string, string?>();
+        foreach (var f in doc.Features)
+        {
+            var (s, by, _) = SuppressionOf(f, JsonSerializer.Serialize(f, typeof(Feature), Serialization.Options), off, lookup);
+            if (!s) continue;
+            off[f.Id] = f.Name; result[f.Id] = by;
+        }
+        return result;
+    }
+
+    /// <summary>The document's equation values as an expression lookup.</summary>
+    public static Func<string, double?> EquationLookup(CadDocument doc)
+    {
+        var values = EvaluateEquations(doc).values;
+        return n => values.TryGetValue(n, out var v) ? v : null;
+    }
 
     /// <summary>
     /// The bend rule of a flat pattern: its own method and K-factor where it sets them, else the part's
@@ -171,7 +229,23 @@ public sealed class Regenerator
     {
         var values = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
         var errors = new Dictionary<string, string>();
-        var pending = doc.Equations.Where(e => !string.IsNullOrWhiteSpace(e.Name)).ToList();
+        // design tables first: each its row number, and its columns the row's values; then the equations. A name
+        // given twice is an error at the second (the first keeps its value).
+        var all = new List<Equation>();
+        foreach (var t in doc.Tables ?? new())
+        {
+            if (string.IsNullOrWhiteSpace(t.Name) || t.Current is not { } row) continue;
+            all.Add(new Equation { Name = t.Name.Trim(), Expr = (t.Rows.IndexOf(row) + 1).ToString(System.Globalization.CultureInfo.InvariantCulture) });
+            for (int c = 0; c < t.Columns.Count; c++)
+                if (!string.IsNullOrWhiteSpace(t.Columns[c])) all.Add(new Equation { Name = t.Columns[c].Trim(), Expr = row.ValueAt(c) });
+        }
+        all.AddRange(doc.Equations.Where(e => !string.IsNullOrWhiteSpace(e.Name)));
+        var pending = new List<Equation>();
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var twice = new Dictionary<string, string>();
+        foreach (var e in all)
+            if (names.Add(e.Name.Trim())) pending.Add(e);
+            else twice[e.Name] = $"{e.Name.Trim()} is set twice (by a design table or another equation)";
         for (int pass = 0; pass < pending.Count + 1 && pending.Count > 0; pass++)
         {
             var next = new List<Equation>();
@@ -185,6 +259,7 @@ public sealed class Regenerator
             if (next.Count == pending.Count) break;
             pending = next;
         }
+        foreach (var (n, msg) in twice) errors[n] = msg;
         return (values, errors);
     }
 
@@ -335,31 +410,48 @@ public sealed class Regenerator
                 if (d2 > 0) z0 = -d2 * dir;
             }
             var tool = Builders.Extrude(sk.Regions, sk.Frame, Math.Min(z0, z1), Math.Max(z0, z1), f.Id);
-            // a draft: the side walls tapered from the sketch plane, narrowing along the extrusion (outward: widening)
+            // a draft: the side walls tapered from the sketch plane, narrowing along the extrusion (outward: widening);
+            // in two directions (Mid Plane, a second depth, Through All - Both) each side narrowing away from the sketch
+            // plane: the two halves drafted on their own and joined there
             if (!string.IsNullOrWhiteSpace(e.Draft) && Num(e.Draft, "Draft angle") is var draft && draft != 0)
             {
                 if (Math.Abs(draft) >= 89) throw new FeatureException("The draft angle must be below 89 degrees.");
-                if (z0 < 0 && z1 > 0) throw new FeatureException("Draft works on an extrude in one direction yet (not Mid Plane or two directions).");
                 // Through All: just past the far side of the part (drafted walls taken far enough would meet and cross)
+                var margin = Math.Max(0.1, 1e-3 * State.Bounds.Diagonal);
                 if (e.End == EndCondition.ThroughAll)
                 {
                     var reach = Reach(sk.Frame, dir);
                     if (reach <= 1e-9) throw new FeatureException("There is nothing beyond the sketch in that direction to go through.");
-                    z1 = (reach + Math.Max(0.1, 1e-3 * State.Bounds.Diagonal)) * dir;
-                    tool = Builders.Extrude(sk.Regions, sk.Frame, Math.Min(z0, z1), Math.Max(z0, z1), f.Id);
+                    z1 = (reach + margin) * dir;
                 }
-                var pull = sk.Frame.Normal * (z1 > 0 ? 1 : -1);
-                var neutral = Plane.FromPointNormal(sk.Frame.ToWorld(0, 0, 0), sk.Frame.Normal);
-                var sides = (tool.Native?.Faces.Select(x => x.Tag.Name) ?? Enumerable.Empty<string>())
-                    .Where(n => n != f.Id + ".Start" && n != f.Id + ".End").ToHashSet();
-                try { tool = DraftOp.Apply(tool, sides, neutral, pull, (e.DraftOutward ? -1 : 1) * draft * Math.PI / 180); }
-                catch (DraftFailedException ex)
+                else if (e.End == EndCondition.ThroughAllBoth)
                 {
-                    // (faces that cannot be drafted say so; otherwise the walls met: the profile closed up on the way)
-                    if (ex.Message.Contains("can be drafted")) throw new FeatureException(ex.Message);
-                    throw new FeatureException($"The drafted side walls meet before the end of the extrude ({Math.Abs(z1):0.###} mm): the profile closes up at this angle. " +
-                        "Use a smaller angle or depth, or Draft outward.");
+                    double up = Reach(sk.Frame, 1), down = Reach(sk.Frame, -1);
+                    if (up <= 1e-9 && down <= 1e-9) throw new FeatureException("There is nothing on either side of the sketch to go through.");
+                    z1 = up > 1e-9 ? up + margin : 0;
+                    z0 = down > 1e-9 ? -(down + margin) : 0;
                 }
+                double lo = Math.Min(z0, z1), hi = Math.Max(z0, z1);
+                var neutral = Plane.FromPointNormal(sk.Frame.ToWorld(0, 0, 0), sk.Frame.Normal);
+                var angle = (e.DraftOutward ? -1 : 1) * draft * Math.PI / 180;
+                // one half: extruded from the sketch plane to depth z, its sides drafted pulling away from the plane
+                Solid Half(double z, string prefix)
+                {
+                    var half = Builders.Extrude(sk.Regions, sk.Frame, Math.Min(0, z), Math.Max(0, z), prefix);
+                    var sides = (half.Native?.Faces.Select(x => x.Tag.Name) ?? Enumerable.Empty<string>())
+                        .Where(n => n != prefix + ".Start" && n != prefix + ".End").ToHashSet();
+                    try { return DraftOp.Apply(half, sides, neutral, sk.Frame.Normal * Math.Sign(z), angle); }
+                    catch (DraftFailedException ex)
+                    {
+                        // (faces that cannot be drafted say so; otherwise the walls met: the profile closed up on the way)
+                        if (ex.Message.Contains("can be drafted")) throw new FeatureException(ex.Message);
+                        throw new FeatureException($"The drafted side walls meet before the end of the extrude ({Math.Abs(z):0.###} mm from the sketch): " +
+                            "the profile closes up at this angle. Use a smaller angle or depth, or Draft outward.");
+                    }
+                }
+                // (a single direction keeps the extrude's face names; with two, the second half's are F<n>.2.…)
+                if (hi > 1e-9 && lo < -1e-9) tool = Csg.Union(Half(hi, f.Id), Half(lo, f.Id + ".2"));
+                else tool = Half(hi > 1e-9 ? hi : lo, f.Id);
             }
             ApplyTool(tool, e.IsCut, e.Merge);
             State.Tools[f.Id] = new ToolInfo(tool, e.IsCut, e.Merge);

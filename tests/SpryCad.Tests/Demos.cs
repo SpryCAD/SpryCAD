@@ -11,7 +11,7 @@ namespace SpryCad.Tests;
 /// expression of the part's global variables, so changing an equation regenerates the whole part.
 /// <c>-- demos [outDir]</c> writes them as .sprt files.
 /// </summary>
-static class Demos
+static partial class Demos
 {
     public static IEnumerable<(string file, Func<CadDocument> build)> All => new (string, Func<CadDocument>)[]
     {
@@ -26,6 +26,8 @@ static class Demos
         ("bent-tube.sprt", BentTube),
         ("bolt-and-nut.sprt", BoltAndNut),
         ("acme-lead-screw.sprt", AcmeLeadScrew),
+        ("configurable-gear.sprt", ConfigGear),
+        ("socket-screw.sprt", SocketScrew),
     };
 
     /// <summary>The demo assemblies (written with the parts by <see cref="Write"/>).</summary>
@@ -34,6 +36,7 @@ static class Demos
         ("hinge.sasm", Hinge),
         ("lead-screw.sasm", LeadScrewAssembly),
         ("gears.sasm", GearPair),
+        ("screw-sizes.sasm", ScrewSizes),
     };
 
     /// <summary>
@@ -46,13 +49,16 @@ static class Demos
     /// <summary>An assembly written as a STEP assembly (each part's solids once, each component placed).</summary>
     public static byte[] AssemblyStep(SpryCad.Core.Assembly.AssemblyModel m, string name)
     {
-        var keys = m.Doc.Components.Select(c => SpryCad.Core.Assembly.ComponentResolver.Key(c.Part)).Distinct().ToList();
+        // (each configuration of a part as a part of its own)
+        var keys = m.Doc.Components.Select(SpryCad.Core.Assembly.AssemblyModel.DisplayKey).Distinct().ToList();
         var parts = keys.Select(k =>
         {
             var bodies = new Regenerator().Rebuild(m.Parts[k].Doc!).State.Bodies.Select(b => (b.Id, b.Solid)).ToList();
-            return (m.ComponentsOf(k).First().Name.Split('<')[0], (IReadOnlyList<(string, Solid)>)bodies);
+            var first = m.ComponentsShowing(k).First();
+            var config = m.ConfigLabel(first);
+            return (first.Name.Split('<')[0] + (config.Length > 0 ? $" ({config})" : ""), (IReadOnlyList<(string, Solid)>)bodies);
         }).ToList();
-        var comps = m.Doc.Components.Select(c => (keys.IndexOf(SpryCad.Core.Assembly.ComponentResolver.Key(c.Part)), c.Name, c.Placement.ToTransform())).ToList();
+        var comps = m.Doc.Components.Select(c => (keys.IndexOf(SpryCad.Core.Assembly.AssemblyModel.DisplayKey(c)), c.Name, c.Placement.ToTransform())).ToList();
         using var ms = new MemoryStream();
         StepWriter.WriteAssembly(ms, name, parts, comps);
         return ms.ToArray();
@@ -210,6 +216,9 @@ static class Demos
         ["bent-tube.sprt"] = new[] { new[] { ("R", "80"), ("L1", "120") }, new[] { ("OD", "40"), ("ID", "34"), ("FlangeD", "100"), ("PCD", "75") }, new[] { ("N", "6"), ("L2", "100") } },
         ["spoked-handwheel.sprt"] = new[] { new[] { ("NS", "6") }, new[] { ("D", "300"), ("RimT", "26"), ("NG", "4") }, new[] { ("NS", "4"), ("SpokeD", "20"), ("Rf", "3") } },
         ["spur-gear.sprt"] = new[] { new[] { ("z", "48") }, new[] { ("m", "2.5"), ("z", "30") }, new[] { ("PA", "25"), ("b", "20") } },
+        // small: solid (the web recesses and lightening holes suppressed); large: both
+        ["configurable-gear.sprt"] = new[] { new[] { ("z", "20") }, new[] { ("z", "26") }, new[] { ("z", "60") } },
+        ["socket-screw.sprt"] = new[] { new[] { ("L", "60") }, new[] { ("Threaded", "0") } },
         ["l-bracket.sprt"] = new[] { new[] { ("Wb", "90"), ("HoleSp", "60") }, new[] { ("A", "100"), ("Bh", "80"), ("Gs", "40") }, new[] { ("T", "10"), ("Rb", "4") } },
     };
 

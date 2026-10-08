@@ -96,6 +96,18 @@ public sealed class FeatureTree : UserControl
         var consumedActive = doc.ConsumedByActive();
         bool? ShownOf(Feature f) => f is SketchFeature ? doc.SketchShown(f.Id, consumedActive.Contains(f.Id)) : null;
 
+        // suppressed by the user, by a Suppress When condition, or with a suppressed feature used
+        bool Off(Feature f) => f.Suppressed || result?.Status.GetValueOrDefault(f.Id)?.Suppressed == true;
+        string? ConditionTip(Feature f)
+        {
+            var st = result?.Status.GetValueOrDefault(f.Id);
+            var cond = string.IsNullOrWhiteSpace(f.SuppressWhen) ? null : $"Suppressed when {f.SuppressWhen}";
+            if (f.Suppressed) return cond == null ? null : cond + " (suppressed by hand now)";
+            if (st is { Suppressed: true, SuppressedBy: "condition" }) return cond + ": it holds, so suppressed.";
+            if (st is { Suppressed: true, SuppressedBy: { } by }) return $"Suppressed with {by}, which it uses." + (cond != null ? $"\n{cond}." : "");
+            return cond == null ? null : cond + ": it does not hold now.";
+        }
+
         var active = doc.ActiveCount;
         for (int i = 0; i < doc.Features.Count; i++)
         {
@@ -110,12 +122,12 @@ public sealed class FeatureTree : UserControl
                 foreach (var ch in children)
                     if (result?.Status.GetValueOrDefault(ch.Id) is { Ok: false } cs)
                         shown = new FeatureStatus { Error = $"{ch.Name}: {cs.Error}", Milliseconds = status?.Milliseconds ?? 0 };
-            AddRow(f.Id, Label(f, result), IconFor(f), 1, shown, suppressed: f.Suppressed || rolledBack, hasChildren: children.Count > 0,
-                sketchShown: rolledBack ? null : ShownOf(f));
+            AddRow(f.Id, Label(f, result), IconFor(f), 1, shown, suppressed: Off(f) || rolledBack, hasChildren: children.Count > 0,
+                sketchShown: rolledBack ? null : ShownOf(f), condition: ConditionTip(f));
             if (children.Count > 0 && _expanded.Contains(f.Id))
                 foreach (var ch in children)
-                    _childRows.Add(AddRow(ch.Id, Label(ch, result), IconFor(ch), 2, result?.Status.GetValueOrDefault(ch.Id), suppressed: ch.Suppressed || rolledBack,
-                        sketchShown: rolledBack ? null : ShownOf(ch)));
+                    _childRows.Add(AddRow(ch.Id, Label(ch, result), IconFor(ch), 2, result?.Status.GetValueOrDefault(ch.Id), suppressed: Off(ch) || rolledBack,
+                        sketchShown: rolledBack ? null : ShownOf(ch), condition: ConditionTip(ch)));
         }
         if (active >= doc.Features.Count) AddRollbackBar();
         Select(_selectedId);
@@ -279,7 +291,7 @@ public sealed class FeatureTree : UserControl
     }
 
     Border AddRow(string id, string text, string icon, int indent, FeatureStatus? status, bool isHeader = false, bool suppressed = false, bool hasChildren = false,
-        bool? sketchShown = null)
+        bool? sketchShown = null, string? condition = null)
     {
         var sp = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, Margin = new Thickness(indent * 14, 0, 0, 0) };
         if (hasChildren)
@@ -314,6 +326,13 @@ public sealed class FeatureTree : UserControl
         if (status is { Ok: false }) { tb.Foreground = Brushes.Red; ToolTip.SetTip(tb, status.Error); }
         else if (status is { Warnings.Count: > 0 }) { ToolTip.SetTip(tb, string.Join("\n", status.Warnings)); }
         sp.Children.Add(tb);
+        // a feature with a Suppress When condition, or suppressed with another: the reason as a tip on a small marker
+        if (condition != null)
+        {
+            var mark = new TextBlock { Text = "ƒ", FontStyle = FontStyle.Italic, FontSize = 12, Foreground = Brushes.SteelBlue, VerticalAlignment = VerticalAlignment.Center };
+            ToolTip.SetTip(mark, condition);
+            sp.Children.Add(mark);
+        }
         if (status is { Ok: false }) sp.Children.Add(new TextBlock { Text = "✖", Foreground = Brushes.Red, VerticalAlignment = VerticalAlignment.Center });
         else if (status is { Warnings.Count: > 0 }) sp.Children.Add(new TextBlock { Text = "⚠", Foreground = Brushes.DarkOrange, VerticalAlignment = VerticalAlignment.Center });
         if (status != null && status.Milliseconds > 200) sp.Children.Add(new TextBlock { Text = $"{status.Milliseconds:0} ms", Foreground = Brushes.Gray, FontSize = 10, VerticalAlignment = VerticalAlignment.Center });

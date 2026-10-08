@@ -47,6 +47,9 @@ public static class Icons
         ["flatpattern"] = ("M2 17h20v3H2z", "M8 17v3 M16 17v3 M4 4v7a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3V4"),
         ["flatten"] = ("M3 20h18 M3 4v6a3 3 0 0 0 3 3h3", "M14 6l5 5 M19 6v5h-5"),
         ["equations"] = ("M4 8h16 M4 16h16", "M9 3l-2 18 M17 3l-2 18"),
+        // design table: a grid with its header row; configure: sliders
+        ["table"] = ("M3 4h18v16H3z M3 14h18 M9 4v16 M15 4v16", "M3 9h18"),
+        ["configure"] = ("M4 6h16 M4 12h16 M4 18h16", "M9 4v4 M15 10v4 M7 16v4"),
         ["mass"] = ("M5 8h14l2 13H3z M9 8a3 3 0 0 1 6 0", null),
         // Measure: a ruler with ticks
         ["measure"] = ("M3 15l12-12 6 6-12 12z", "M7 11l2 2 M10 8l2 2 M13 5l2 2"),

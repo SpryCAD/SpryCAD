@@ -109,51 +109,89 @@ public static class Dialogs
     public static async Task Equations(MainWindow owner)
     {
         var session = owner.Session;
-        var rows = session.Doc.Equations.Select(e => new Equation { Name = e.Name, Expr = e.Expr }).ToList();
+        var rows = session.Doc.Equations.Select(Serialization.Clone).ToList();
+        var tables = session.Doc.Tables;
         var list = new StackPanel { Spacing = 3 };
-        var info = new TextBlock { FontSize = 11, Foreground = Brushes.DimGray, TextWrapping = TextWrapping.Wrap, Text = "Global variables usable in any dimension or feature value, e.g. W = 100, H = W/2. Trig functions use degrees; units like 1in are converted to mm." };
+        var info = new TextBlock
+        {
+            FontSize = 11, Foreground = Brushes.DimGray, TextWrapping = TextWrapping.Wrap,
+            Text = "Global variables usable in any dimension or feature value, e.g. W = 100, H = W/2. Trig functions use degrees; units like 1in are converted to mm. "
+                + "Conditions (Teeth < 30 and not Slots) give 1 or 0, for Suppress When. "
+                + "User-facing variables are what Configure shows (an assembly sets them per instance); the others are internal.",
+        };
+        // variables the design tables set (read only here)
+        var fromTables = (tables ?? new()).SelectMany(t => new[] { t.Name }.Concat(t.Columns)).Where(n => !string.IsNullOrWhiteSpace(n)).Select(n => n.Trim()).ToList();
+        var tableInfo = new TextBlock
+        {
+            FontSize = 11, Foreground = Brushes.DimGray, TextWrapping = TextWrapping.Wrap, IsVisible = fromTables.Count > 0,
+            Text = "Set by design tables (Tools > Design Table): " + string.Join(", ", fromTables) + ".",
+        };
+        const string cols = "120,*,90,44,150,56,56,30";
         var valueCells = new List<(Equation row, TextBlock cell)>();
+        (Dictionary<string, double>, Dictionary<string, string>) Evaluate() => Regenerator.EvaluateEquations(new CadDocument { Equations = rows, Tables = tables });
+        void Show(TextBlock cell, Equation r, Dictionary<string, double> vals, Dictionary<string, string> errs)
+        {
+            var name = r.Name.Trim();
+            // (an error of this row: one set twice has a value, from where it was set first)
+            var err = rows.Count(x => x.Name.Trim().Equals(name, StringComparison.OrdinalIgnoreCase)) > 1 || fromTables.Contains(name, StringComparer.OrdinalIgnoreCase)
+                ? $"{name} is set twice" : errs.GetValueOrDefault(r.Name);
+            cell.Text = err ?? (vals.TryGetValue(name, out var val) ? Expr.Format(val) : "");
+            if (err != null) cell.Foreground = Brushes.Red; else cell.ClearValue(TextBlock.ForegroundProperty);
+            ToolTip.SetTip(cell, err);
+        }
         // re-evaluate in place (rebuilding the rows would steal focus while tabbing between fields)
         void UpdateValues()
         {
-            var (vals, errs) = Regenerator.EvaluateEquations(new CadDocument { Equations = rows });
-            foreach (var (r, cell) in valueCells)
-            {
-                cell.Text = vals.TryGetValue(r.Name, out var val) ? Expr.Format(val) : errs.GetValueOrDefault(r.Name) ?? "";
-                cell.Foreground = errs.ContainsKey(r.Name) ? Brushes.Red : Brushes.Black;
-            }
+            var (vals, errs) = Evaluate();
+            foreach (var (r, cell) in valueCells) Show(cell, r, vals, errs);
+        }
+        static double? Number(string? text) => Expr.TryEval(text, null, out var v, out _) ? v : null;
+        TextBlock Head(string text, int col, string? tip = null)
+        {
+            var h = new TextBlock { Text = text, FontWeight = FontWeight.SemiBold, VerticalAlignment = VerticalAlignment.Bottom };
+            if (tip != null) ToolTip.SetTip(h, tip);
+            Grid.SetColumn(h, col);
+            return h;
         }
         void Refresh()
         {
             list.Children.Clear();
             valueCells.Clear();
-            var header = new Grid { ColumnDefinitions = new ColumnDefinitions("140,*,90,30") };
-            header.Children.Add(new TextBlock { Text = "Name", FontWeight = FontWeight.SemiBold });
-            var h2 = new TextBlock { Text = "Value / Equation", FontWeight = FontWeight.SemiBold }; Grid.SetColumn(h2, 1); header.Children.Add(h2);
-            var h3 = new TextBlock { Text = "Evaluates to", FontWeight = FontWeight.SemiBold }; Grid.SetColumn(h3, 2); header.Children.Add(h3);
+            var header = new Grid { ColumnDefinitions = new ColumnDefinitions(cols) };
+            header.Children.Add(Head("Name", 0));
+            header.Children.Add(Head("Value / Equation", 1));
+            header.Children.Add(Head("Evaluates to", 2));
+            header.Children.Add(Head("User", 3, "User-facing: shown in Configure, set per instance in assemblies"));
+            header.Children.Add(Head("Description", 4, "What Configure shows for it"));
+            header.Children.Add(Head("Min", 5, "Smallest value Configure accepts (blank: none); Min 0 and Max 1 make a checkbox"));
+            header.Children.Add(Head("Max", 6, "Largest value Configure accepts (blank: none)"));
             list.Children.Add(header);
-            var tmp = new CadDocument { Equations = rows };
-            var (vals, errs) = Regenerator.EvaluateEquations(tmp);
+            var (vals, errs) = Evaluate();
             foreach (var r in rows)
             {
-                var g = new Grid { ColumnDefinitions = new ColumnDefinitions("140,*,90,30") };
-                var n = new TextBox { Text = r.Name, Margin = new Thickness(0, 0, 4, 0) };
-                var e = new TextBox { Text = r.Expr, Margin = new Thickness(0, 0, 4, 0) };
-                var v = new TextBlock
-                {
-                    VerticalAlignment = VerticalAlignment.Center,
-                    Text = vals.TryGetValue(r.Name, out var val) ? Expr.Format(val) : errs.GetValueOrDefault(r.Name) ?? "",
-                    Foreground = errs.ContainsKey(r.Name) ? Brushes.Red : Brushes.Black,
-                    TextTrimming = TextTrimming.CharacterEllipsis,
-                };
+                var g = new Grid { ColumnDefinitions = new ColumnDefinitions(cols) };
+                var m = new Thickness(0, 0, 4, 0);
+                var n = new TextBox { Text = r.Name, Margin = m };
+                var e = new TextBox { Text = r.Expr, Margin = m };
+                var v = new TextBlock { VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis, Margin = m };
+                var user = new CheckBox { IsChecked = r.Exposed, HorizontalAlignment = HorizontalAlignment.Center };
+                var desc = new TextBox { Text = r.Description ?? "", Margin = m, IsEnabled = r.Exposed };
+                var lo = new TextBox { Text = r.Min is { } a ? Expr.Format(a) : "", Margin = m, IsEnabled = r.Exposed };
+                var hi = new TextBox { Text = r.Max is { } b ? Expr.Format(b) : "", Margin = m, IsEnabled = r.Exposed };
                 var del = new Button { Content = "✖", Padding = new Thickness(4, 0) };
+                ToolTip.SetTip(user, "User-facing: shown in Configure");
                 var rr = r;
                 valueCells.Add((rr, v));
+                Show(v, rr, vals, errs);
                 n.TextChanged += (_, _) => { rr.Name = n.Text?.Trim() ?? ""; UpdateValues(); };
                 e.TextChanged += (_, _) => { rr.Expr = e.Text?.Trim() ?? "0"; UpdateValues(); };
+                user.IsCheckedChanged += (_, _) => { rr.Exposed = user.IsChecked == true; desc.IsEnabled = lo.IsEnabled = hi.IsEnabled = rr.Exposed; };
+                desc.TextChanged += (_, _) => rr.Description = string.IsNullOrWhiteSpace(desc.Text) ? null : desc.Text.Trim();
+                lo.TextChanged += (_, _) => rr.Min = Number(lo.Text);
+                hi.TextChanged += (_, _) => rr.Max = Number(hi.Text);
                 del.Click += (_, _) => { rows.Remove(rr); Refresh(); };
-                Grid.SetColumn(e, 1); Grid.SetColumn(v, 2); Grid.SetColumn(del, 3);
-                g.Children.Add(n); g.Children.Add(e); g.Children.Add(v); g.Children.Add(del);
+                Control[] cells = { n, e, v, user, desc, lo, hi, del };
+                for (int i = 0; i < cells.Length; i++) { Grid.SetColumn(cells[i], i); g.Children.Add(cells[i]); }
                 list.Children.Add(g);
             }
         }
@@ -164,17 +202,379 @@ public static class Dialogs
         var cancel = new Button { Content = "Cancel", IsCancel = true };
         var sp = new StackPanel { Spacing = 8 };
         sp.Children.Add(info);
-        sp.Children.Add(new ScrollViewer { Content = list, MaxHeight = 400 });
+        sp.Children.Add(tableInfo);
+        sp.Children.Add(new ScrollViewer { Content = list, MaxHeight = 420 });
         sp.Children.Add(add);
         sp.Children.Add(Buttons(ok, cancel));
-        var w = MakeWindow("Equations, Global Variables", sp, 560);
+        var w = MakeWindow("Equations, Global Variables", sp, 900);
         ok.Click += (_, _) =>
         {
             w.Close();
+            foreach (var r in rows.Where(r => !r.Exposed)) { r.Description = null; r.Min = r.Max = null; }
             session.Change(() => session.Doc.Equations = rows.Where(r => !string.IsNullOrWhiteSpace(r.Name)).ToList());
         };
         cancel.Click += (_, _) => w.Close();
         await w.ShowDialog(owner);
+    }
+
+    /// <summary>
+    /// A feature's Suppress When condition: suppressed while it holds ("Teeth &lt; 30"), with what it gives now.
+    /// Blank removes the condition.
+    /// </summary>
+    public static async Task SuppressWhen(MainWindow owner, Feature f)
+    {
+        var session = owner.Session;
+        var lookup = session.Lookup;
+        var tb = new TextBox { Text = f.SuppressWhen ?? "", Watermark = "e.g. Teeth < 30 or Size == 2" };
+        var now = new TextBlock { FontSize = 11, TextWrapping = TextWrapping.Wrap };
+        void Update()
+        {
+            var text = tb.Text?.Trim() ?? "";
+            if (text.Length == 0) { now.Text = "No condition: the feature is built unless suppressed by hand."; now.Foreground = Brushes.DimGray; return; }
+            if (!Expr.TryEval(text, lookup, out var v, out var err)) { now.Text = err; now.Foreground = Brushes.Red; return; }
+            now.Text = Expr.Truthy(v) ? "Holds now: the feature is suppressed (and the features using it)." : "Does not hold now: the feature is built.";
+            now.Foreground = Brushes.DimGray;
+        }
+        tb.TextChanged += (_, _) => Update();
+        Update();
+        var names = Regenerator.EvaluateEquations(session.Doc).values.Keys.ToList();
+        var ok = new Button { Content = "OK", IsDefault = true };
+        var cancel = new Button { Content = "Cancel", IsCancel = true };
+        var sp = new StackPanel { Spacing = 6 };
+        sp.Children.Add(new TextBlock { Text = $"Suppress {f.Name} when", FontWeight = FontWeight.SemiBold });
+        sp.Children.Add(tb);
+        sp.Children.Add(now);
+        sp.Children.Add(new TextBlock
+        {
+            FontSize = 11, Foreground = Brushes.DimGray, TextWrapping = TextWrapping.Wrap,
+            Text = "Compare with < <= > >= == != and combine with and, or, not. "
+                + (names.Count > 0 ? "Variables: " + string.Join(", ", names) + "." : "Define variables in Equations first."),
+        });
+        sp.Children.Add(Buttons(ok, cancel));
+        var w = MakeWindow("Suppress When", sp, 420);
+        ok.Click += (_, _) =>
+        {
+            var text = tb.Text?.Trim() ?? "";
+            if (text.Length > 0 && !Expr.TryEval(text, lookup, out _, out _)) return; // (the error shows under the box)
+            w.Close();
+            var value = text.Length == 0 ? null : text;
+            if (value != f.SuppressWhen) session.Change(() => f.SuppressWhen = value);
+        };
+        cancel.Click += (_, _) => w.Close();
+        w.Opened += (_, _) => { tb.Focus(); tb.SelectAll(); };
+        await w.ShowDialog(owner);
+    }
+
+    /// <summary>
+    /// The part's design tables: for each, its name (the choice, and the variable holding the row number), whether
+    /// Configure shows it, its columns (the variables it sets) and rows (a key and a value per column), and the row in
+    /// use. Rows can be pasted from a spreadsheet (a header row of column names, the keys in the first column).
+    /// </summary>
+    public static async Task DesignTables(MainWindow owner)
+    {
+        var session = owner.Session;
+        var tables = (session.Doc.Tables ?? new()).Select(Serialization.Clone).ToList();
+        int current = 0;
+        var picker = new ComboBox { MinWidth = 160 };
+        var addTable = new Button { Content = "+ Table" };
+        var delTable = new Button { Content = "Delete Table" };
+        var body = new StackPanel { Spacing = 6 };
+        var error = new TextBlock { Foreground = Brushes.Red, FontSize = 11, TextWrapping = TextWrapping.Wrap };
+        bool picking = false;
+
+        static DesignTable NewTable(int n) => new()
+        {
+            Name = n == 1 ? "Size" : "Table" + n, Columns = { "D" },
+            Rows = { new DesignRow { Key = "A", Values = { "10" } }, new DesignRow { Key = "B", Values = { "20" } } },
+        };
+
+        void Pick()
+        {
+            picking = true;
+            picker.ItemsSource = tables.Select(t => string.IsNullOrWhiteSpace(t.Name) ? "(unnamed)" : t.Name).ToList();
+            picker.SelectedIndex = tables.Count == 0 ? -1 : Math.Clamp(current, 0, tables.Count - 1);
+            picking = false;
+            picker.IsEnabled = delTable.IsEnabled = tables.Count > 0;
+            Refresh();
+        }
+        picker.SelectionChanged += (_, _) => { if (!picking && picker.SelectedIndex >= 0) { current = picker.SelectedIndex; Refresh(); } };
+        addTable.Click += (_, _) => { tables.Add(NewTable(tables.Count + 1)); current = tables.Count - 1; Pick(); };
+        delTable.Click += (_, _) => { if (tables.Count > 0) { tables.RemoveAt(current); current = Math.Max(0, current - 1); Pick(); } };
+
+        void Refresh()
+        {
+            body.Children.Clear();
+            if (tables.Count == 0)
+            {
+                body.Children.Add(new TextBlock
+                {
+                    TextWrapping = TextWrapping.Wrap, Foreground = Brushes.DimGray,
+                    Text = "No design tables. A table gives rows of values for a set of variables, e.g. a screw's sizes M3, M4, M5 with D, Pitch and HeadD for each: "
+                        + "choosing a row sets them all. Add one with + Table, or paste a spreadsheet.",
+                });
+                return;
+            }
+            var t = tables[current];
+            var top = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,8,140,16,Auto,16,Auto,8,*") };
+            var name = new TextBox { Text = t.Name };
+            var user = new CheckBox { Content = "User-facing", IsChecked = t.Exposed };
+            var desc = new TextBox { Text = t.Description ?? "", Watermark = "Description for Configure" };
+            ToolTip.SetTip(name, "The choice, and a variable holding the number of the row in use (1 = the first), for conditions");
+            ToolTip.SetTip(user, "Shown in Configure as a list of the rows (an assembly chooses one per instance)");
+            name.TextChanged += (_, _) => { t.Name = name.Text?.Trim() ?? ""; };
+            name.LostFocus += (_, _) => Pick();
+            user.IsCheckedChanged += (_, _) => t.Exposed = user.IsChecked == true;
+            desc.TextChanged += (_, _) => t.Description = string.IsNullOrWhiteSpace(desc.Text) ? null : desc.Text.Trim();
+            var nl = new TextBlock { Text = "Name", VerticalAlignment = VerticalAlignment.Center };
+            var dl = new TextBlock { Text = "Description", VerticalAlignment = VerticalAlignment.Center };
+            Grid.SetColumn(name, 2); Grid.SetColumn(user, 4); Grid.SetColumn(dl, 6); Grid.SetColumn(desc, 8);
+            top.Children.Add(nl); top.Children.Add(name); top.Children.Add(user); top.Children.Add(dl); top.Children.Add(desc);
+            body.Children.Add(top);
+
+            // the grid: a key column, a column per variable, the row in use, delete
+            var defs = "110," + string.Join(",", t.Columns.Select(_ => "90")) + ",60,30";
+            var grid = new StackPanel { Spacing = 3 };
+            var head = new Grid { ColumnDefinitions = new ColumnDefinitions(defs) };
+            head.Children.Add(new TextBlock { Text = "Row", FontWeight = FontWeight.SemiBold, VerticalAlignment = VerticalAlignment.Center });
+            for (int c = 0; c < t.Columns.Count; c++)
+            {
+                int cc = c;
+                var cell = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), Margin = new Thickness(0, 0, 4, 0) };
+                var cn = new TextBox { Text = t.Columns[c], FontWeight = FontWeight.SemiBold };
+                ToolTip.SetTip(cn, "The variable this column sets");
+                cn.TextChanged += (_, _) => t.Columns[cc] = cn.Text?.Trim() ?? "";
+                var dc = new Button { Content = "✖", Padding = new Thickness(3, 0), FontSize = 9, VerticalAlignment = VerticalAlignment.Center };
+                ToolTip.SetTip(dc, "Delete this column");
+                dc.Click += (_, _) => { t.Columns.RemoveAt(cc); foreach (var r in t.Rows) if (cc < r.Values.Count) r.Values.RemoveAt(cc); Refresh(); };
+                Grid.SetColumn(dc, 1);
+                cell.Children.Add(cn); cell.Children.Add(dc);
+                Grid.SetColumn(cell, c + 1); head.Children.Add(cell);
+            }
+            var inUse = new TextBlock { Text = "In use", FontWeight = FontWeight.SemiBold, VerticalAlignment = VerticalAlignment.Center };
+            ToolTip.SetTip(inUse, "The row the part uses when nothing else is chosen");
+            Grid.SetColumn(inUse, t.Columns.Count + 1); head.Children.Add(inUse);
+            grid.Children.Add(head);
+            var selected = t.Current;
+            var group = "dt" + Guid.NewGuid().ToString("N");
+            foreach (var r in t.Rows)
+            {
+                var rr = r;
+                while (rr.Values.Count < t.Columns.Count) rr.Values.Add("0");
+                var g = new Grid { ColumnDefinitions = new ColumnDefinitions(defs) };
+                var key = new TextBox { Text = rr.Key, Margin = new Thickness(0, 0, 4, 0) };
+                key.TextChanged += (_, _) => { var was = rr.Key; rr.Key = key.Text?.Trim() ?? ""; if (t.Selected == was) t.Selected = rr.Key; };
+                g.Children.Add(key);
+                for (int c = 0; c < t.Columns.Count; c++)
+                {
+                    int cc = c;
+                    var v = new TextBox { Text = rr.Values[c], Margin = new Thickness(0, 0, 4, 0) };
+                    v.TextChanged += (_, _) => rr.Values[cc] = v.Text?.Trim() ?? "0";
+                    Grid.SetColumn(v, c + 1); g.Children.Add(v);
+                }
+                var use = new RadioButton { GroupName = group, IsChecked = ReferenceEquals(rr, selected), HorizontalAlignment = HorizontalAlignment.Center };
+                use.IsCheckedChanged += (_, _) => { if (use.IsChecked == true) t.Selected = rr.Key; };
+                var del = new Button { Content = "✖", Padding = new Thickness(4, 0) };
+                del.Click += (_, _) => { t.Rows.Remove(rr); Refresh(); };
+                Grid.SetColumn(use, t.Columns.Count + 1); Grid.SetColumn(del, t.Columns.Count + 2);
+                g.Children.Add(use); g.Children.Add(del);
+                grid.Children.Add(g);
+            }
+            body.Children.Add(new ScrollViewer { Content = grid, MaxHeight = 380, HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto });
+
+            var addRow = new Button { Content = "+ Row" };
+            addRow.Click += (_, _) =>
+            {
+                var last = t.Rows.LastOrDefault();
+                t.Rows.Add(new DesignRow { Key = "Row" + (t.Rows.Count + 1), Values = last?.Values.ToList() ?? t.Columns.Select(_ => "0").ToList() });
+                Refresh();
+            };
+            var addCol = new Button { Content = "+ Column" };
+            addCol.Click += (_, _) =>
+            {
+                int n = t.Columns.Count + 1;
+                while (t.Columns.Contains("Var" + n)) n++;
+                t.Columns.Add("Var" + n);
+                foreach (var r in t.Rows) r.Values.Add("0");
+                Refresh();
+            };
+            var paste = new Button { Content = "Paste from Spreadsheet" };
+            ToolTip.SetTip(paste, "Replaces the table with the copied cells: a header row (the first cell anything, then the variables), then a row per configuration (its key, then the values)");
+            paste.Click += async (_, _) =>
+            {
+                var text = owner.Clipboard is { } clip ? await clip.GetTextAsync() : null;
+                if (DesignTable.Parse(text) is not { } pasted) { error.Text = "The clipboard has no table: copy a header row and rows of cells from a spreadsheet."; return; }
+                t.Columns = pasted.Columns; t.Rows = pasted.Rows;
+                if (t.Row(t.Selected ?? "") == null) t.Selected = null;
+                error.Text = "";
+                Refresh();
+            };
+            var copy = new Button { Content = "Copy" };
+            ToolTip.SetTip(copy, "Copies the table as tab-separated cells, to edit in a spreadsheet");
+            copy.Click += (_, _) =>
+            {
+                var lines = new List<string> { string.Join("\t", new[] { t.Name }.Concat(t.Columns)) };
+                lines.AddRange(t.Rows.Select(r => string.Join("\t", new[] { r.Key }.Concat(t.Columns.Select((_, c) => r.ValueAt(c))))));
+                _ = owner.Clipboard?.SetTextAsync(string.Join("\n", lines));
+            };
+            var bar = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
+            bar.Children.Add(addRow); bar.Children.Add(addCol); bar.Children.Add(paste); bar.Children.Add(copy);
+            body.Children.Add(bar);
+        }
+
+        string? Problem()
+        {
+            var names = new HashSet<string>(session.Doc.Equations.Select(e => e.Name.Trim()), StringComparer.OrdinalIgnoreCase);
+            foreach (var t in tables)
+            {
+                if (!IsName(t.Name)) return $"'{t.Name}' is not a valid table name (letters, digits and _, starting with a letter).";
+                if (!names.Add(t.Name)) return $"{t.Name} is already a variable.";
+                foreach (var c in t.Columns)
+                {
+                    if (!IsName(c)) return $"{t.Name}: '{c}' is not a valid variable name.";
+                    if (!names.Add(c)) return $"{t.Name}: {c} is already a variable (in Equations or another table).";
+                }
+                if (t.Rows.Count == 0) return $"{t.Name} has no rows.";
+                var keys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var r in t.Rows)
+                    if (r.Key.Length == 0 || !keys.Add(r.Key)) return $"{t.Name}: each row needs a key of its own ('{r.Key}').";
+            }
+            return null;
+        }
+
+        Pick();
+        var ok = new Button { Content = "OK", IsDefault = true };
+        var cancel = new Button { Content = "Cancel", IsCancel = true };
+        var head = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
+        head.Children.Add(new TextBlock { Text = "Table", VerticalAlignment = VerticalAlignment.Center });
+        head.Children.Add(picker); head.Children.Add(addTable); head.Children.Add(delTable);
+        var sp = new StackPanel { Spacing = 8 };
+        sp.Children.Add(new TextBlock
+        {
+            FontSize = 11, Foreground = Brushes.DimGray, TextWrapping = TextWrapping.Wrap,
+            Text = "Rows of values for a set of variables; the row in use sets them all. Values may be expressions of the part's other variables. "
+                + "The table's name holds the number of the row in use (1 = the first), for conditions such as Size >= 3.",
+        });
+        sp.Children.Add(head);
+        sp.Children.Add(body);
+        sp.Children.Add(error);
+        sp.Children.Add(Buttons(ok, cancel));
+        var w = MakeWindow("Design Tables", sp, 760);
+        ok.Click += (_, _) =>
+        {
+            foreach (var t in tables) { t.Name = t.Name.Trim(); t.Description = string.IsNullOrWhiteSpace(t.Description) ? null : t.Description; }
+            if (Problem() is { } p) { error.Text = p; return; }
+            w.Close();
+            var json = System.Text.Json.JsonSerializer.Serialize(tables, Serialization.Options);
+            if (json != System.Text.Json.JsonSerializer.Serialize(session.Doc.Tables ?? new(), Serialization.Options))
+                session.Change(() => session.Doc.Tables = tables.Count == 0 ? null : tables);
+        };
+        cancel.Click += (_, _) => w.Close();
+        await w.ShowDialog(owner);
+    }
+
+    static bool IsName(string? s) => !string.IsNullOrEmpty(s) && (char.IsLetter(s[0]) || s[0] == '_') && s.All(c => char.IsLetterOrDigit(c) || c == '_') && !Expr.IsKeyword(s);
+
+    /// <summary>
+    /// The Configure dialog: the part's user-facing parameters (design tables as lists of their rows, variables as
+    /// values, 0..1 ones as checkboxes) set to <paramref name="current"/> (else the part's own). Returns every
+    /// parameter's value by name, or null when cancelled; with <paramref name="allText"/>, a checkbox (whether to set
+    /// them for all of the part's instances).
+    /// </summary>
+    public static async Task<(Dictionary<string, string> values, bool all)?> Configure(Window owner, CadDocument part, IReadOnlyDictionary<string, string>? current,
+        string title, string? note = null, string? allText = null)
+    {
+        var ps = part.UserParameters();
+        var values = part.Defaults();
+        if (current != null) foreach (var (k, v) in current) if (values.ContainsKey(k)) values[k] = v;
+        var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,12,*"), RowDefinitions = new RowDefinitions(string.Join(",", ps.Select(_ => "Auto,Auto"))) };
+        var errors = new Dictionary<string, TextBlock>();
+        var summary = new TextBlock { FontSize = 11, Foreground = Brushes.DimGray, TextWrapping = TextWrapping.Wrap };
+        void Summary()
+        {
+            // what the choices give: the internal values too, so a size can be checked before OK
+            var (vals, _) = Regenerator.EvaluateEquations(part.Configured(values));
+            var shown = vals.Where(kv => !ps.Any(p => p.Name.Equals(kv.Key, StringComparison.OrdinalIgnoreCase))).Take(12).Select(kv => $"{kv.Key} {Expr.Format(kv.Value)}");
+            summary.Text = string.Join(", ", shown);
+        }
+        for (int i = 0; i < ps.Count; i++)
+        {
+            var p = ps[i];
+            var label = new TextBlock { Text = p.Name, VerticalAlignment = VerticalAlignment.Center, FontWeight = FontWeight.SemiBold };
+            if (p.Description != null) ToolTip.SetTip(label, p.Description);
+            Control input;
+            if (p.IsChoice)
+            {
+                var cb = new ComboBox { ItemsSource = p.Choices, HorizontalAlignment = HorizontalAlignment.Stretch };
+                cb.SelectedItem = p.Choices!.FirstOrDefault(c => c.Equals(values[p.Name], StringComparison.OrdinalIgnoreCase)) ?? p.Default;
+                cb.SelectionChanged += (_, _) => { if (cb.SelectedItem is string s) { values[p.Name] = s; Summary(); } };
+                input = cb;
+            }
+            else if (p.IsToggle)
+            {
+                var on = Expr.TryEval(values[p.Name], null, out var b, out _) && Expr.Truthy(b);
+                var chk = new CheckBox { IsChecked = on, Content = p.Description ?? "" };
+                chk.IsCheckedChanged += (_, _) => { values[p.Name] = chk.IsChecked == true ? "1" : "0"; Summary(); };
+                input = chk;
+            }
+            else
+            {
+                var tb = new TextBox { Text = values[p.Name] };
+                if (p.Min != null || p.Max != null) tb.Watermark = $"{(p.Min is { } lo ? Expr.Format(lo) : "")} to {(p.Max is { } hi ? Expr.Format(hi) : "")}";
+                var err = new TextBlock { FontSize = 11, Foreground = Brushes.Red, TextWrapping = TextWrapping.Wrap };
+                errors[p.Name] = err;
+                tb.TextChanged += (_, _) =>
+                {
+                    values[p.Name] = tb.Text?.Trim() ?? "";
+                    err.Text = part.Check(p.Name, values[p.Name]) ?? "";
+                    if (err.Text.Length == 0) Summary();
+                };
+                Grid.SetRow(err, 2 * i + 1); Grid.SetColumn(err, 2);
+                grid.Children.Add(err);
+                input = tb;
+            }
+            if (p.Description != null && !p.IsToggle) ToolTip.SetTip(input, p.Description);
+            input.Margin = new Thickness(0, 3);
+            Grid.SetRow(label, 2 * i); Grid.SetRow(input, 2 * i); Grid.SetColumn(input, 2);
+            grid.Children.Add(label); grid.Children.Add(input);
+        }
+        Summary();
+        (Dictionary<string, string>, bool)? result = null;
+        var all = new CheckBox { Content = allText ?? "", IsVisible = allText != null };
+        var ok = new Button { Content = "OK", IsDefault = true };
+        var cancel = new Button { Content = "Cancel", IsCancel = true };
+        var sp = new StackPanel { Spacing = 8 };
+        if (note != null) sp.Children.Add(new TextBlock { Text = note, FontSize = 11, Foreground = Brushes.DimGray, TextWrapping = TextWrapping.Wrap });
+        sp.Children.Add(grid);
+        sp.Children.Add(summary);
+        sp.Children.Add(all);
+        sp.Children.Add(Buttons(ok, cancel));
+        var w = MakeWindow(title, sp, 400);
+        ok.Click += (_, _) =>
+        {
+            foreach (var p in ps)
+                if (part.Check(p.Name, values[p.Name]) is { } e) { if (errors.TryGetValue(p.Name, out var tb)) tb.Text = e; return; }
+            result = (values, all.IsChecked == true);
+            w.Close();
+        };
+        cancel.Click += (_, _) => w.Close();
+        await w.ShowDialog(owner);
+        return result;
+    }
+
+    /// <summary>Configure for the part open: its own values (the defaults assemblies start from) set.</summary>
+    public static async Task ConfigurePart(MainWindow owner)
+    {
+        var session = owner.Session;
+        if (session.Doc.UserParameters().Count == 0)
+        {
+            await Message(owner, "Configure", "This part has no user-facing parameters yet. Mark variables as User in Equations, or add a design table (Tools > Design Table).");
+            return;
+        }
+        var chosen = await Configure(owner, session.Doc, null, "Configure",
+            "The part's own values: what it is built with here, and what each new instance in an assembly starts from.");
+        if (chosen is not { } c) return;
+        var values = c.values;
+        if (session.Doc.Normalize(values) != null) session.Change(() => session.Doc.Apply(values));
     }
 
     public static async Task Options(MainWindow owner)

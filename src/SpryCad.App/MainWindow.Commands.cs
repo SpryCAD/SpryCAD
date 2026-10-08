@@ -197,6 +197,8 @@ public partial class MainWindow
                 Item("Fla_tten", ToggleFlatten, null, "flatten"))));
         MainMenu.Items.Add(Sub("_Tools",
             Item("_Equations...", () => _ = Dialogs.Equations(this), null, "equations"),
+            Item("_Design Table...", () => _ = Dialogs.DesignTables(this), null, "table"),
+            Item("_Configure...", () => _ = Dialogs.ConfigurePart(this), null, "configure"),
             Item("Mea_sure...", MeasureCommand, null, "measure"),
             Item("_Mass Properties...", MassPropertiesCommand, null, "mass"),
             "-",
@@ -322,6 +324,8 @@ public partial class MainWindow
                 Cmd("measure", "Measure", MeasureCommand);
                 Cmd("mass", "Mass\nProperties", MassPropertiesCommand);
                 Cmd("equations", "Equations", () => _ = Dialogs.Equations(this));
+                Cmd("table", "Design\nTable", () => _ = Dialogs.DesignTables(this));
+                Cmd("configure", "Configure", () => _ = Dialogs.ConfigurePart(this));
                 Sep();
                 Cmd("export", "Export\nSTEP", () => _ = Export("step"));
                 Cmd("export", "Export\nSTL", () => _ = Export("stl"));
@@ -386,7 +390,9 @@ public partial class MainWindow
         ["Construction Geometry"] = "Toggles the selected sketch entities to construction.",
         ["Measure"] = "Distance, angle, radius, length and area of the faces, edges and vertices you click.",
         ["Mass Properties"] = "Mass, volume, surface area, center of mass and moments of inertia, with the part's material.",
-        ["Equations"] = "Global variables that drive dimensions.",
+        ["Equations"] = "Global variables that drive dimensions; conditions on them suppress features (right-click a feature: Suppress When).",
+        ["Design Table"] = "Rows of values for sets of variables (a screw's sizes): choosing a row sets them all.",
+        ["Configure"] = "Sets the part's user-facing parameters: its design tables' rows and the variables marked User.",
     };
 
     void Sep() => CommandBar.Children.Add(new Border { Width = 1, Background = new SolidColorBrush(Color.FromRgb(210, 216, 225)), Margin = new Thickness(4, 6) });
@@ -653,6 +659,7 @@ public partial class MainWindow
             }
             menu.Items.Add(new Separator());
             menu.Items.Add(Item(f.Suppressed ? "Unsuppress" : "Suppress", () => SetSuppressed(!f.Suppressed)));
+            menu.Items.Add(Item(string.IsNullOrWhiteSpace(f.SuppressWhen) ? "Suppress When..." : "Edit Suppress Condition...", () => _ = Dialogs.SuppressWhen(this, f)));
             menu.Items.Add(Item("Rename", () => _ = RenameFeature(f), "F2"));
             menu.Items.Add(Item("Roll Back", () => RollbackTo(id, false), null, "rollback"));
             menu.Items.Add(Item("Delete", DeleteSelected));

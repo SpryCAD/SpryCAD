@@ -85,8 +85,8 @@ public sealed class AssemblyDocument
     /// <summary>The mates a component takes part in.</summary>
     public IEnumerable<Mate> MatesOf(string componentId) => Mates.Where(m => m.A.Component == componentId || m.B.Component == componentId);
 
-    /// <summary>The cache key of a part revision.</summary>
-    public static string CacheKey(string partId, string? revision) => partId + "/" + (revision ?? "none");
+    /// <summary>The cache key of a part revision, as configured (<see cref="Configurations.KeyOf"/>; "": as it is).</summary>
+    public static string CacheKey(string partId, string? revision, string config = "") => partId + "/" + (revision ?? "none") + (config.Length > 0 ? "|" + config : "");
 
     public string ToJson() => JsonSerializer.Serialize(this, Serialization.Options);
 
@@ -128,6 +128,12 @@ public sealed class Component
     public bool Lightweight { get; set; }
     /// <summary>Appearance override (RGB 0-1); null: the part's own color.</summary>
     public double[]? Color { get; set; }
+    /// <summary>
+    /// The part's configuration for this instance: values of its user-facing parameters (a design table's row, a
+    /// variable's value) by name, only those that differ from the part's own (<see cref="Configurations"/>). Null: the
+    /// part as it is.
+    /// </summary>
+    public Dictionary<string, string>? Parameters { get; set; }
 }
 
 /// <summary>

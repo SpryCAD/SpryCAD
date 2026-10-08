@@ -74,6 +74,12 @@ public abstract class Feature
     public string Id { get; set; } = "";
     public string Name { get; set; } = "";
     public bool Suppressed { get; set; }
+    /// <summary>
+    /// A condition on the equations ("Teeth &lt; 30"): the feature is suppressed while it holds (is not 0), as if
+    /// <see cref="Suppressed"/> were set. Null or blank: no condition. Features using a suppressed one are
+    /// suppressed with it.
+    /// </summary>
+    public string? SuppressWhen { get; set; }
     [JsonIgnore] public abstract string Kind { get; }
     /// <summary>Feature ids this feature consumes (e.g. the sketch of an extrude). Used for tree nesting.</summary>
     [JsonIgnore] public virtual IEnumerable<string> Consumes => Array.Empty<string>();
@@ -410,5 +416,16 @@ public sealed class FlatPatternFeature : Feature
 public sealed class Equation
 {
     public string Name { get; set; } = "";
+    /// <summary>The value or expression; for a user-facing variable, the default a configuration may replace.</summary>
     public string Expr { get; set; } = "0";
+    /// <summary>
+    /// User-facing: shown in the Configure dialog, where an assembly sets it for each instance of the part (a
+    /// screw's length). Otherwise internal: only the Equations dialog shows it.
+    /// </summary>
+    public bool Exposed { get; set; }
+    /// <summary>What the variable is, for the Configure dialog ("Length under the head").</summary>
+    public string? Description { get; set; }
+    /// <summary>Smallest and largest value Configure accepts (null: no limit). 0 and 1 make it a checkbox.</summary>
+    public double? Min { get; set; }
+    public double? Max { get; set; }
 }

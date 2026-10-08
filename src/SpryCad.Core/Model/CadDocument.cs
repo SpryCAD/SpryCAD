@@ -31,6 +31,8 @@ public sealed class CadDocument
     public string? DerivedFrom { get; set; }
     public UnitSystem Units { get; set; } = UnitSystem.MMGS;
     public List<Equation> Equations { get; set; } = new();
+    /// <summary>Design tables: rows of values for sets of variables, one row in use (<see cref="DesignTable"/>). Null when none.</summary>
+    public List<DesignTable>? Tables { get; set; }
     public List<Feature> Features { get; set; } = new();
     /// <summary>Number of active features (rollback bar position); null = all.</summary>
     public int? RollbackIndex { get; set; }

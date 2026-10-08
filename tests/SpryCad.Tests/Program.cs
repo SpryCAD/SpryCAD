@@ -161,6 +161,7 @@ static class Program
             AssemblyTests.Run(t);
             SketchVisibilityTests.Run(t);
             SketchConvertTests.Run(t);
+            ConfigTests.Run(t);
             Console.WriteLine("Core");
             CoreTests.Run(t);
             Console.WriteLine($"\n{t.Passed} passed, {t.Failed} failed");

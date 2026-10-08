@@ -4,7 +4,9 @@ namespace SpryCad.Core;
 
 /// <summary>
 /// Small expression evaluator for parameters and equations ("W/2 + 5", "sqrt(A^2+B^2)").
-/// Trig functions use degrees, like SolidWorks equations.
+/// Trig functions use degrees, like SolidWorks equations. Comparisons (<c>&lt; &lt;= &gt; &gt;= == !=</c>) and logic
+/// (<c>and or not</c>, or <c>&amp;&amp; || !</c>) give 1 for true and 0 for false ("Teeth &lt; 30 or Bore &gt; 20"),
+/// for conditions such as a feature's Suppress When; any value but 0 counts as true.
 /// </summary>
 public static class Expr
 {
@@ -41,6 +43,7 @@ public static class Expr
                 var id = text[s..i];
                 int j = i; while (j < text.Length && text[j] == ' ') j++;
                 if (j < text.Length && text[j] == '(') continue; // function call
+                if (IsKeyword(id)) continue;
                 yield return id;
             }
             else if (text[i] == '"')
@@ -54,6 +57,12 @@ public static class Expr
         }
     }
 
+    /// <summary>The logic words, never variable names.</summary>
+    public static bool IsKeyword(string id) => id.ToLowerInvariant() is "and" or "or" or "not";
+
+    /// <summary>Whether a condition holds (any value but 0).</summary>
+    public static bool Truthy(double v) => Math.Abs(v) > 1e-9;
+
     sealed class Parser(string s, Func<string, double?>? lookup)
     {
         int _i;
@@ -63,7 +72,76 @@ public static class Expr
         public void SkipWs() { while (_i < s.Length && char.IsWhiteSpace(s[_i])) _i++; }
         bool Eat(char c) { SkipWs(); if (_i < s.Length && s[_i] == c) { _i++; return true; } return false; }
 
-        public double ParseExpr()
+        bool EatOp(string op)
+        {
+            SkipWs();
+            if (string.CompareOrdinal(s, _i, op, 0, op.Length) != 0) return false;
+            _i += op.Length; return true;
+        }
+
+        // logic words: whole words only ("order" is a variable, not "or" and "der")
+        bool EatWord(string w)
+        {
+            SkipWs();
+            if (string.Compare(s, _i, w, 0, w.Length, StringComparison.OrdinalIgnoreCase) != 0) return false;
+            var after = _i + w.Length;
+            if (after < s.Length && (char.IsLetterOrDigit(s[after]) || s[after] is '_' or '.' or '@')) return false;
+            _i = after; return true;
+        }
+
+        static double B(bool b) => b ? 1 : 0;
+
+        // equal within rounding: 0.1 + 0.2 == 0.3, 25.4 == 1in
+        static double Tol(double a, double b) => 1e-9 * Math.Max(1, Math.Max(Math.Abs(a), Math.Abs(b)));
+
+        public double ParseExpr() => ParseOr();
+
+        double ParseOr()
+        {
+            var v = ParseAnd();
+            while (EatOp("||") || EatWord("or")) { var r = ParseAnd(); v = B(Truthy(v) || Truthy(r)); }
+            return v;
+        }
+
+        double ParseAnd()
+        {
+            var v = ParseNot();
+            while (EatOp("&&") || EatWord("and")) { var r = ParseNot(); v = B(Truthy(v) && Truthy(r)); }
+            return v;
+        }
+
+        double ParseNot()
+        {
+            SkipWs();
+            if (_i < s.Length && s[_i] == '!' && !(_i + 1 < s.Length && s[_i + 1] == '=')) { _i++; return B(!Truthy(ParseNot())); }
+            if (EatWord("not")) return B(!Truthy(ParseNot()));
+            return ParseCompare();
+        }
+
+        double ParseCompare()
+        {
+            var v = ParseSum();
+            while (true)
+            {
+                // (two-character operators first: "<=" is not "<" then "=")
+                string? op = EatOp("<=") ? "<=" : EatOp(">=") ? ">=" : EatOp("==") ? "==" : EatOp("!=") || EatOp("<>") ? "!="
+                    : EatOp("<") ? "<" : EatOp(">") ? ">" : EatOp("=") ? "==" : null;
+                if (op == null) return v;
+                var r = ParseSum();
+                var tol = Tol(v, r);
+                v = B(op switch
+                {
+                    "<" => v < r - tol,
+                    "<=" => v <= r + tol,
+                    ">" => v > r + tol,
+                    ">=" => v >= r - tol,
+                    "==" => Math.Abs(v - r) <= tol,
+                    _ => Math.Abs(v - r) > tol,
+                });
+            }
+        }
+
+        double ParseSum()
         {
             var v = ParseTerm();
             while (true)
@@ -217,7 +295,10 @@ public static class Expr
                 "log" => Math.Log(A(0)),
                 "log10" => Math.Log10(A(0)),
                 "pow" => Math.Pow(A(0), A(1)),
-                "if" => A(0) != 0 ? A(1) : A(2),
+                "if" => Truthy(A(0)) ? A(1) : A(2),
+                // choose(2, a, b, c) = b
+                "choose" => a.Count < 2 ? throw new ExprException("choose: needs an index and values")
+                    : (int)Math.Round(A(0)) is var k && k >= 1 && k < a.Count ? a[k] : throw new ExprException($"choose: index {Format(A(0))} is not 1 to {a.Count - 1}"),
                 _ => throw new ExprException($"Unknown function '{name}'"),
             };
         }

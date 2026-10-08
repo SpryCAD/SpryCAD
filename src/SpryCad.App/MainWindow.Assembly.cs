@@ -5,6 +5,7 @@ using SpryCad.App.Session;
 using SpryCad.App.UI;
 using SpryCad.App.Viewport;
 using SpryCad.Core.Assembly;
+using SpryCad.Core.Model;
 using SpryCad.Kernel;
 using Transform = SpryCad.Kernel.Transform;
 
@@ -68,13 +69,14 @@ public partial class MainWindow : IAssemblyHost
     }
 
     /// <summary>
-    /// Exports the assembly: STEP as an assembly (each part once, each component placed), STL as all the components'
+    /// Exports the assembly: STEP as an assembly (each part once, each configuration of it as a part of its own;
+    /// each component placed), STL as all the components'
     /// solids where they are. Parts shown only from the assembly's copy (missing, lightweight) cannot be written.
     /// </summary>
     async Task ExportAssembly(string kind)
     {
         if (Asm is not { } a) return;
-        var keys = a.Model.Doc.Components.Where(c => !c.Suppressed).Select(c => ComponentResolver.Key(c.Part)).Distinct().ToList();
+        var keys = a.Model.Doc.Components.Where(c => !c.Suppressed).Select(AssemblyModel.DisplayKey).Distinct().ToList();
         var missing = keys.Where(k => a.Model.Parts.GetValueOrDefault(k)?.Doc == null).ToList();
         if (keys.Count == 0) { await Dialogs.Message(this, "Export", "The assembly has no components to export."); return; }
         var type = kind == "step"
@@ -97,14 +99,16 @@ public partial class MainWindow : IAssemblyHost
                 var live = keys.Except(missing).ToList();
                 // each part's solids, built from its document
                 var solids = live.ToDictionary(k => k, k => new Core.Regen.Regenerator().Rebuild(model.Parts[k].Doc!).State.Bodies.Select(b => (b.Id, b.Solid)).ToList());
-                var comps = model.Doc.Components.Where(c => !c.Suppressed && live.Contains(ComponentResolver.Key(c.Part))).ToList();
+                var comps = model.Doc.Components.Where(c => !c.Suppressed && live.Contains(AssemblyModel.DisplayKey(c))).ToList();
                 using var fs = File.Create(path);
                 if (kind == "step")
                 {
-                    var parts = live.Select(k => (model.ComponentsOf(k).First().Name.Split('<')[0], (IReadOnlyList<(string, Solid)>)solids[k])).ToList();
-                    StepWriter.WriteAssembly(fs, baseName, parts, comps.Select(c => (live.IndexOf(ComponentResolver.Key(c.Part)), c.Name, c.Placement.ToTransform())).ToList());
+                    // (a configured part named with its configuration: "Screw (M4, Length 12)")
+                    string NameOf(Component c) { var l = model.ConfigLabel(c); return c.Name.Split('<')[0] + (l.Length > 0 ? $" ({l})" : ""); }
+                    var parts = live.Select(k => (NameOf(model.ComponentsShowing(k).First()), (IReadOnlyList<(string, Solid)>)solids[k])).ToList();
+                    StepWriter.WriteAssembly(fs, baseName, parts, comps.Select(c => (live.IndexOf(AssemblyModel.DisplayKey(c)), c.Name, c.Placement.ToTransform())).ToList());
                 }
-                else StlWriter.Write(fs, comps.SelectMany(c => solids[ComponentResolver.Key(c.Part)].Select(s => s.Solid.Transformed(c.Placement.ToTransform()))));
+                else StlWriter.Write(fs, comps.SelectMany(c => solids[AssemblyModel.DisplayKey(c)].Select(s => s.Solid.Transformed(c.Placement.ToTransform()))));
             });
             Status($"Exported {path}" + (missing.Count > 0 ? $" ({missing.Count} part(s) left out: shown only from the assembly's copy; resolve them first)" : ""));
         }
@@ -136,6 +140,7 @@ public partial class MainWindow : IAssemblyHost
                 case "fix": SetFixed(true); break;
                 case "float": SetFixed(false); break;
                 case "lightweight": ToggleLightweight(); break;
+                case "configure": _ = ConfigureComponent(); break;
                 case "delete": DeleteComponent(); break;
             }
         };
@@ -297,6 +302,8 @@ public partial class MainWindow : IAssemblyHost
         Tip("Float\nLets the selected component move: drag it in the graphics area (Shift+drag turns it).");
         Cmd("lightweight", "Lightweight", ToggleLightweight);
         Tip("Lightweight / Resolve\nShows the selected part's components from the assembly's copy (no rebuild: fast for big assemblies), or from the part again.");
+        Cmd("configure", "Configure", () => _ = ConfigureComponent());
+        Tip("Configure\nSets the selected component's part parameters for this instance: a design table's row (a screw's size), user-facing variables (its length). One part file, many configurations.");
         Sep();
         Cmd("open", "Open\nPart", () => { if (Asm?.Selected is { } id) OpenComponent(id); });
         Tip("Open Part\nOpens the selected component's part in a tab of its own (double-click does too).");
@@ -413,6 +420,36 @@ public partial class MainWindow : IAssemblyHost
         a.Model.LoadPart(key);
         a.EndChange();
         Status(light ? $"{c.Name}: lightweight (shown from the assembly's copy, no rebuild)." : $"{c.Name}: resolved from its part.");
+    }
+
+    /// <summary>
+    /// Configures the selected component (or all of its part's instances): the part's user-facing parameters for it,
+    /// its display built, the mates solved again (its faces may have moved).
+    /// </summary>
+    async Task ConfigureComponent()
+    {
+        if (Asm is not { } a || FindComponent(a.Selected) is not { } c) { Status("Select a component first."); return; }
+        var partName = c.Name.Split('<')[0];
+        if (a.Model.PartDocument(c) is not { } part) { await Dialogs.Message(this, "Configure", $"{c.Name}: its part was not found, so it cannot be configured."); return; }
+        if (part.UserParameters().Count == 0)
+        {
+            await Dialogs.Message(this, "Configure", $"{partName} has no user-facing parameters. Open the part and mark variables as User in Equations, or give it a design table.");
+            return;
+        }
+        var instances = a.Model.ComponentsOf(ComponentResolver.Key(c.Part)).ToList();
+        var chosen = await Dialogs.Configure(this, part, c.Parameters, $"Configure {c.Name}",
+            $"{partName} for this instance. Values left as the part's own follow the part when it changes.", instances.Count > 1 ? $"All {instances.Count} instances of {partName}" : null);
+        if (chosen is not { } ch) return;
+        var comps = ch.all ? instances : new List<Component> { c };
+        var config = Configurations.KeyOf(part.Normalize(ch.values));
+        if (comps.All(x => Configurations.KeyOf(x.Parameters) == config)) return;
+        a.BeginChange();
+        try { a.Model.Configure(comps, part, ch.values); }
+        catch (Exception ex) { a.AbandonChange(); await Dialogs.Message(this, "Configure failed", ex.Message); return; }
+        if (a.Model.Doc.Mates.Count > 0) a.Model.SolveMates();
+        a.EndChange();
+        var problem = a.Model.DisplayOf(c)?.Problem;
+        Status($"{(comps.Count > 1 ? $"{comps.Count} instances of {partName}" : c.Name)}: {part.Label(ch.values)}" + (problem != null ? $" (could not be built: {problem})" : "."));
     }
 
     void DeleteComponent()

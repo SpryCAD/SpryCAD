@@ -62,8 +62,9 @@ public sealed class AssemblySession
         Model.Doc.NextMateId = d.NextMateId;
         Model.Doc.MateCounters = d.MateCounters;
         // parts no component uses any more are not shown; parts used again are built again
-        foreach (var key in Model.Parts.Keys.Where(k => !Model.ComponentsOf(k).Any()).ToList()) Model.Parts.Remove(key);
-        foreach (var key in Model.Doc.Components.Select(c => ComponentResolver.Key(c.Part)).Distinct().Where(k => !Model.Parts.ContainsKey(k)).ToList())
+        // (and configurations: each configuration of a part has a display of its own)
+        foreach (var key in Model.Parts.Keys.Where(k => !Model.ComponentsShowing(k).Any()).ToList()) Model.Parts.Remove(key);
+        foreach (var key in Model.Doc.Components.Where(c => !Model.Parts.ContainsKey(AssemblyModel.DisplayKey(c))).Select(c => ComponentResolver.Key(c.Part)).Distinct().ToList())
             Model.LoadPart(key);
         if (Selected != null && Model.Doc.Find(Selected) == null) Selected = null;
         EndChange();

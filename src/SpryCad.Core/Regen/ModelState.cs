@@ -108,6 +108,13 @@ public sealed class FeatureStatus
     /// <summary>Model edges (polylines) the feature failed on, for highlighting.</summary>
     public List<Vec3[]> ProblemEdges { get; } = new();
     public bool Ok => Error == null;
+    /// <summary>
+    /// Not built: suppressed by the user, by its Suppress When condition, or with a suppressed feature it uses
+    /// (<see cref="SuppressedBy"/> says which).
+    /// </summary>
+    public bool Suppressed { get; set; }
+    /// <summary>Why it is suppressed: null (by the user), "condition", or the name of the suppressed feature it uses.</summary>
+    public string? SuppressedBy { get; set; }
 }
 
 public sealed class RegenResult

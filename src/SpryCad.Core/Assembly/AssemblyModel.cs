@@ -7,7 +7,10 @@ namespace SpryCad.Core.Assembly;
 /// <summary>Where a part's display came from.</summary>
 public enum PartSource { File, Embedded, Cache, None }
 
-/// <summary>One part as an assembly shows it: all its bodies as one display mesh, in its color.</summary>
+/// <summary>
+/// One part as an assembly shows it, as configured for the components showing it: all its bodies as one display
+/// mesh, in its color.
+/// </summary>
 public sealed class PartDisplay
 {
     public required DisplayMesh Mesh { get; init; }
@@ -15,8 +18,12 @@ public sealed class PartDisplay
     public required PartSource Source { get; init; }
     /// <summary>The part's revision (of its file or embedded copy; of the cache when shown from it).</summary>
     public string? Revision { get; init; }
-    /// <summary>The part's document when loaded (not when shown from the cache).</summary>
+    /// <summary>The document built when loaded (not when shown from the cache): the part as configured.</summary>
     public CadDocument? Doc { get; init; }
+    /// <summary>The part's own document when loaded (its parameters' own values): <see cref="Doc"/> unless configured.</summary>
+    public CadDocument? Part { get; init; }
+    /// <summary>The configuration shown (<see cref="Configurations.KeyOf"/>): "" for the part as it is.</summary>
+    public string Config { get; init; } = "";
     /// <summary>Why the part could not be shown as it is (missing, could not be read or rebuilt), if so.</summary>
     public string? Problem { get; init; }
 }
@@ -24,8 +31,9 @@ public sealed class PartDisplay
 /// <summary>
 /// An open assembly: its document, where its parts were found (<see cref="ComponentResolver"/>) and each part's
 /// display — built from the part's file or embedded copy, or taken from the assembly's cache when the part is
-/// missing or all its components are lightweight. <see cref="RefreshCaches"/> keeps the caches of the revisions in
-/// use (called before saving), so the assembly opens and shares without its parts.
+/// missing or all its components are lightweight. A part configured differently by some of its components
+/// (<see cref="Component.Parameters"/>) has a display per configuration. <see cref="RefreshCaches"/> keeps the caches
+/// of the revisions in use (called before saving), so the assembly opens and shares without its parts.
 /// </summary>
 public sealed class AssemblyModel
 {
@@ -33,7 +41,7 @@ public sealed class AssemblyModel
     public string? Path { get; private set; }
     public PartIndex? Index { get; }
     public ComponentResolver.ResolveResult Resolution { get; private set; } = new();
-    /// <summary>By part (<see cref="ComponentResolver.Key"/>).</summary>
+    /// <summary>By part and configuration (<see cref="DisplayKey"/>; the part's key when it is not configured).</summary>
     public Dictionary<string, PartDisplay> Parts { get; } = new();
     /// <summary>Lines for the user: parts found elsewhere, missing, given an identity.</summary>
     public List<string> Notes { get; } = new();
@@ -52,50 +60,128 @@ public sealed class AssemblyModel
 
     public static AssemblyModel New() => new(new AssemblyDocument(), null, null);
 
-    public PartDisplay? DisplayOf(Component c) => Parts.GetValueOrDefault(ComponentResolver.Key(c.Part));
+    /// <summary>
+    /// Which display a component shows: its part's key (<see cref="ComponentResolver.Key"/>), and its configuration
+    /// when it has one ("key|size=m4;length=12").
+    /// </summary>
+    public static string DisplayKey(Component c)
+    {
+        var config = Configurations.KeyOf(c.Parameters);
+        return ComponentResolver.Key(c.Part) + (config.Length > 0 ? "|" + config : "");
+    }
 
-    /// <summary>The components showing a part.</summary>
+    /// <summary>Whether a display key is one of a part's (the part as it is, or configured).</summary>
+    static bool OfPart(string displayKey, string partKey) => displayKey == partKey || displayKey.StartsWith(partKey + "|", StringComparison.Ordinal);
+
+    public PartDisplay? DisplayOf(Component c) => Parts.GetValueOrDefault(DisplayKey(c));
+
+    /// <summary>The components of a part (however configured).</summary>
     public IEnumerable<Component> ComponentsOf(string key) => Doc.Components.Where(c => ComponentResolver.Key(c.Part) == key);
 
-    /// <summary>(Re)builds a part's display: from its file or embedded copy, else from the cache.</summary>
+    /// <summary>The components showing a display (<see cref="DisplayKey"/>).</summary>
+    public IEnumerable<Component> ComponentsShowing(string displayKey) => Doc.Components.Where(c => DisplayKey(c) == displayKey);
+
+    /// <summary>
+    /// (Re)builds a part's displays, one per configuration its components use: from its file or embedded copy, else
+    /// from the cache. Displays of configurations no component uses any more are dropped.
+    /// </summary>
     public void LoadPart(string key)
     {
         var comps = ComponentsOf(key).ToList();
-        if (comps.Count == 0) { Parts.Remove(key); return; }
+        foreach (var k in Parts.Keys.Where(k => OfPart(k, key) && !comps.Any(c => DisplayKey(c) == k)).ToList()) Parts.Remove(k);
+        if (comps.Count == 0) return;
         var r = comps[0].Part;
-        var status = Resolution.Parts.GetValueOrDefault(key)?.Status;
-        // all its components lightweight, and a cache of the revision they last saw: no need to build it
-        bool light = comps.All(c => c.Lightweight) && CachedOf(r) != null;
-        string? problem = null;
-        if (!light)
+        var groups = comps.GroupBy(DisplayKey).ToList();
+        // the part read once (not at all when every configuration is lightweight and cached)
+        CadDocument? doc = null; PartSource src = PartSource.File; string? problem = null;
+        if (!groups.All(g => g.All(c => c.Lightweight) && CachedOf(g.First()) != null))
         {
             try
             {
-                CadDocument? doc = null; PartSource src = PartSource.File;
-                if (r.Embedded != null && Doc.Files.TryGetValue(r.Embedded, out var bytes)) { doc = DocumentContainer.Load(bytes, r.Embedded); src = PartSource.Embedded; }
-                else if (status is PartStatus.Found or PartStatus.Moved && Resolution.Parts[key].Path is { } file) doc = CadDocument.Load(file);
-                if (doc != null)
-                {
-                    var built = Build(doc);
-                    Parts[key] = new PartDisplay { Mesh = built, Color = doc.Color, Source = src, Revision = doc.Revision, Doc = doc };
-                    return;
-                }
-                problem = "not found";
+                doc = ReadPart(key, out src);
+                if (doc == null) problem = "not found";
             }
             catch (Exception ex) { problem = ex.Message; }
         }
-        // from the cache (lightweight, missing, or it could not be read)
-        if (CachedOf(r) is { } cache)
+        foreach (var g in groups)
         {
-            var e = MeshCache.Read(cache);
-            Parts[key] = new PartDisplay { Mesh = e.Mesh, Color = e.Color, Source = PartSource.Cache, Revision = r.Revision, Problem = problem };
-            return;
+            var first = g.First();
+            var config = Configurations.KeyOf(first.Parameters);
+            bool light = g.All(c => c.Lightweight) && CachedOf(first) != null;
+            string? why = problem;
+            if (!light && doc != null)
+            {
+                try
+                {
+                    var built = doc.Configured(first.Parameters);
+                    Parts[g.Key] = new PartDisplay { Mesh = Build(built), Color = doc.Color, Source = src, Revision = doc.Revision, Doc = built, Part = doc, Config = config };
+                    continue;
+                }
+                catch (Exception ex) { why = ex.Message; }
+            }
+            // from the cache (lightweight, missing, or it could not be read)
+            if (CachedOf(first) is { } cache)
+            {
+                var e = MeshCache.Read(cache);
+                Parts[g.Key] = new PartDisplay { Mesh = e.Mesh, Color = e.Color, Source = PartSource.Cache, Revision = r.Revision, Part = doc, Config = config, Problem = why };
+                continue;
+            }
+            Parts[g.Key] = new PartDisplay { Mesh = new DisplayMesh(), Color = new[] { 0.74, 0.76, 0.80 }, Source = PartSource.None, Part = doc, Config = config, Problem = why ?? "not found" };
         }
-        Parts[key] = new PartDisplay { Mesh = new DisplayMesh(), Color = new[] { 0.74, 0.76, 0.80 }, Source = PartSource.None, Problem = problem ?? "not found" };
     }
 
-    byte[]? CachedOf(PartRef r) =>
-        r.PartId != null && Doc.Caches.TryGetValue(AssemblyDocument.CacheKey(r.PartId, r.Revision), out var name) && Doc.Files.TryGetValue(name, out var data) ? data : null;
+    /// <summary>A part's document from its embedded copy or its file (null: not found).</summary>
+    CadDocument? ReadPart(string key, out PartSource source)
+    {
+        source = PartSource.File;
+        if (ComponentsOf(key).FirstOrDefault()?.Part is not { } r) return null;
+        if (r.Embedded != null && Doc.Files.TryGetValue(r.Embedded, out var bytes)) { source = PartSource.Embedded; return DocumentContainer.Load(bytes, r.Embedded); }
+        if (Resolution.Parts.GetValueOrDefault(key) is { Status: PartStatus.Found or PartStatus.Moved, Path: { } file }) return CadDocument.Load(file);
+        return null;
+    }
+
+    /// <summary>
+    /// The part document of a component as saved (its parameters' own values): from a display of its part when
+    /// loaded, else read from its file or embedded copy (lightweight components). Null when the part cannot be found.
+    /// </summary>
+    public CadDocument? PartDocument(Component c)
+    {
+        var key = ComponentResolver.Key(c.Part);
+        if (DisplayOf(c)?.Part is { } d) return d;
+        foreach (var (k, pd) in Parts) if (OfPart(k, key) && pd.Part != null) return pd.Part;
+        try { return ReadPart(key, out _); } catch { return null; }
+    }
+
+    /// <summary>
+    /// Configures components (a part's): each given the values that differ from its part's own (none: the part as
+    /// it is), and their displays built. Mates are not solved here.
+    /// </summary>
+    public void Configure(IEnumerable<Component> comps, CadDocument part, IReadOnlyDictionary<string, string>? values)
+    {
+        var keys = new HashSet<string>();
+        foreach (var c in comps)
+        {
+            c.Parameters = part.Normalize(values);
+            keys.Add(ComponentResolver.Key(c.Part));
+        }
+        foreach (var k in keys) LoadPart(k);
+    }
+
+    /// <summary>
+    /// A component's configuration as text ("M4, Length 12"): empty when its part has no user-facing parameters; the
+    /// values it sets when its part is not loaded (never read for this).
+    /// </summary>
+    public string ConfigLabel(Component c)
+    {
+        var key = ComponentResolver.Key(c.Part);
+        var part = DisplayOf(c)?.Part ?? Parts.Where(kv => OfPart(kv.Key, key)).Select(kv => kv.Value.Part).FirstOrDefault(p => p != null);
+        if (part == null) return c.Parameters == null ? "" : string.Join(", ", c.Parameters.Values);
+        return part.UserParameters().Count > 0 ? part.Label(c.Parameters) : "";
+    }
+
+    byte[]? CachedOf(Component c) =>
+        c.Part.PartId != null && Doc.Caches.TryGetValue(AssemblyDocument.CacheKey(c.Part.PartId, c.Part.Revision, Configurations.KeyOf(c.Parameters)), out var name)
+        && Doc.Files.TryGetValue(name, out var data) ? data : null;
 
     /// <summary>A part's display: its rebuilt bodies as one mesh.</summary>
     public static DisplayMesh Build(CadDocument doc)
@@ -163,7 +249,7 @@ public sealed class AssemblyModel
         if (!Parts.ContainsKey(key))
         {
             var mesh = Build(doc);
-            Parts[key] = new PartDisplay { Mesh = mesh, Color = doc.Color, Source = embed ? PartSource.Embedded : PartSource.File, Revision = doc.Revision, Doc = doc };
+            Parts[key] = new PartDisplay { Mesh = mesh, Color = doc.Color, Source = embed ? PartSource.Embedded : PartSource.File, Revision = doc.Revision, Doc = doc, Part = doc };
         }
         return c;
     }
@@ -190,7 +276,7 @@ public sealed class AssemblyModel
         var key = ComponentResolver.Key(r);
         if (!Resolution.Parts.ContainsKey(key)) Resolution.Parts[key] = new PartResolution(PartStatus.Embedded, null, false, null);
         if (!Parts.ContainsKey(key))
-            Parts[key] = new PartDisplay { Mesh = Build(doc), Color = doc.Color, Source = PartSource.Embedded, Revision = doc.Revision, Doc = doc };
+            Parts[key] = new PartDisplay { Mesh = Build(doc), Color = doc.Color, Source = PartSource.Embedded, Revision = doc.Revision, Doc = doc, Part = doc };
         return c;
     }
 
@@ -258,11 +344,9 @@ public sealed class AssemblyModel
         Doc.Components.Remove(c);
         Doc.Mates.RemoveAll(m => m.A.Component == c.Id || m.B.Component == c.Id);
         var key = ComponentResolver.Key(c.Part);
-        if (!ComponentsOf(key).Any())
-        {
-            Parts.Remove(key);
-            if (c.Part.Embedded != null) Doc.Files.Remove(c.Part.Embedded);
-        }
+        var shown = DisplayKey(c);
+        if (!ComponentsShowing(shown).Any()) Parts.Remove(shown);
+        if (!ComponentsOf(key).Any() && c.Part.Embedded != null) Doc.Files.Remove(c.Part.Embedded);
     }
 
     // ------------------------------------------------------------------------------------------
@@ -376,16 +460,18 @@ public sealed class AssemblyModel
         foreach (var (key, pd) in Parts)
         {
             if (pd.Source is not (PartSource.File or PartSource.Embedded) || pd.Doc?.Id is not { } id) continue;
-            var ck = AssemblyDocument.CacheKey(id, pd.Revision);
+            var ck = AssemblyDocument.CacheKey(id, pd.Revision, pd.Config);
             if (!Doc.Caches.ContainsKey(ck))
             {
-                var name = $"cache/{id}-{pd.Revision ?? "none"}.mesh";
+                // (a configuration's: named by a hash of it)
+                var config = pd.Config.Length > 0 ? "-" + DocumentContainer.Hash(System.Text.Encoding.UTF8.GetBytes(pd.Config))[..12] : "";
+                var name = $"cache/{id}-{pd.Revision ?? "none"}{config}.mesh";
                 Doc.Files[name] = MeshCache.Write(pd.Mesh, pd.Doc.Color);
                 Doc.Caches[ck] = name;
             }
-            foreach (var c in ComponentsOf(key)) c.Part.Revision = pd.Revision;
+            foreach (var c in ComponentsShowing(key)) c.Part.Revision = pd.Revision;
         }
-        var used = Doc.Components.Where(c => c.Part.PartId != null).Select(c => AssemblyDocument.CacheKey(c.Part.PartId!, c.Part.Revision)).ToHashSet();
+        var used = Doc.Components.Where(c => c.Part.PartId != null).Select(c => AssemblyDocument.CacheKey(c.Part.PartId!, c.Part.Revision, Configurations.KeyOf(c.Parameters))).ToHashSet();
         foreach (var (ck, name) in Doc.Caches.Where(kv => !used.Contains(kv.Key)).ToList())
         {
             Doc.Caches.Remove(ck);

@@ -13,7 +13,9 @@ natively on **Windows, Linux and macOS** with no browser, no Electron and no nat
   corner, heads-up view toolbar, translucent yellow previews, blue/black/red sketch definition colors,
   and SolidWorks mouse/keyboard navigation.
 - **Fully parametric**: every feature is regenerated from the history; dimensions and feature values accept
-  expressions and global variables (`W = 100`, `W/2 + 5`, `1in`, `sin(30)`).
+  expressions and global variables (`W = 100`, `W/2 + 5`, `1in`, `sin(30)`); conditions on them suppress features
+  (`Suppress When Teeth < 30`, and the features using them with them); design tables give rows of values (a
+  screw's sizes); user-facing parameters make one part file configurable per instance in assemblies.
 - **Fast**: incremental rebuilds (only features after the change are rebuilt), background rebuild thread so
   the UI never blocks, live preview while editing, ~1 s cold start for the ReadyToRun build. A 14-feature
   shelled part (fillets, counterbored holes, pattern, shell, chamfer) rebuilds in ~85 ms; editing one of its
@@ -40,7 +42,7 @@ natively on **Windows, Linux and macOS** with no browser, no Electron and no nat
 | Features | Extruded Boss/Base & Cut (Blind, Through All, Through All–Both, Mid Plane, two directions, merge result, drafted side walls), Revolved Boss & Cut, Swept Boss & Cut (a profile along tangent lines and arcs, or a circle; exact planes, cylinders, cones, spheres and tori), Helical Boss & Cut (a profile swept along a helix about a centerline, a cylindrical face, an edge or an axis: springs, coils; exact screw surfaces; an optional straight run-out at the end), Thread (ISO metric on a shaft or in a hole: Blind, Up To Next, Through All, a lead-in chamfer, a relief groove or a run-out out of the side, a fit clearance for 3D printing; modeled or cosmetic, with a View override for a lightweight display, exports always modeled), Fillet, Chamfer, Hole Wizard (simple, counterbore, countersink, standard metric sizes, drill point), Shell, Draft (neutral plane: planar faces and round faces along the pull direction, the face names kept), Linear Pattern (2 directions), Circular Pattern, Mirror, Reference Plane, Combine (add/subtract/common) |
 | Booleans | Union, subtract, intersect between bodies; multi-body parts |
 | Assemblies | `.sasm` assemblies in document tabs (as SolidWorks): components linked to part files or embedded (a small assembly in one file), fixed or floating, lightweight from the assembly's cache; **mates** (Coincident, Concentric, Parallel, Perpendicular, Tangent, Lock, Distance and Angle with optional limits; mechanical Gear, its ratio from the round faces' diameters, and Screw, its lead per turn; faces of components and the assembly's origin planes) solved together, components dragged only as their mates let them, conflicts shown in red. Parts are found by identity (a GUID each part keeps), wherever they went: renamed, moved, a folder moved; a missing part shows from the cache (its mates still solve) and is listed, never asked about; STEP assemblies open as assemblies (each part embedded once, each use placed as the file has it, locked to the first component) and assemblies export as STEP assemblies |
-| Tools | Equations / global variables, Mass Properties (volume, area, mass, center of mass, bounding box), Options (units MMGS/IPS, part color, wheel direction, perspective) |
+| Tools | Equations / global variables (internal or user-facing, with limits), Design Tables (pasted from a spreadsheet), Configure, Mass Properties (volume, area, mass, center of mass, bounding box), Options (units MMGS/IPS, part color, wheel direction, perspective) |
 | Files | `.sprt` parts and `.sasm` assemblies, open/save, autosave + recovery, exact STEP (analytic surfaces) and STL export |
 | View | Standard views (animated), Normal To, zoom to fit, Shaded With Edges / Shaded / Hidden Lines Visible / Wireframe, perspective, planes toggle |
 
@@ -95,6 +97,9 @@ as designed and with several variables changed, and exports to a valid exact STE
 | `hinge.sasm` | A hinge in one file: two of the same leaf (knuckle along half an edge, notched for the other's) and the pin, all embedded, printable clearances; mated so the second leaf swings about the pin (drag it) | `L`, `W`, `T`, `KD`, `PinD`, `Clr` (in the embedded Leaf) |
 | `lead-screw.sasm` | The three-start Acme screw and its nut as two parts (embedded), held by a Screw mate of the thread's 12 mm lead: drag the nut and it turns as it travels, fitting the thread all the way | (in the embedded parts) |
 | `gears.sasm` | Two spur gears meshing (0.1 mm backlash), their axes mated to the origin planes and a Gear mate between them: turn one and the other turns the other way | (in the embedded Gear) |
+| `configurable-gear.sprt` | The spur gear made configurable: `m`, `z`, `b`, `Bore` user-facing (Tools > Configure), the rest internal; the web recesses suppressed when the web is too narrow (`RimD - HubD < 4*m`), the lightening holes when too small (`LH < 2*m`, and their pattern with them), so small gears come out solid | `z` (20: solid, 26: recessed, 60: holes too) |
+| `socket-screw.sprt` | ISO 4762 socket head cap screw, M3 to M12 in one file: a design table of the sizes (`D`, `P`, `dk`, `k`, `s`, `t`), the length `L` and whether the thread shows user-facing | Configure: `Size`, `L`, `Threaded` |
+| `screw-sizes.sasm` | The socket screw once (embedded), seven components each configured its own size and length (right-click a component > Configure) | (Configure each component) |
 
 The demos are generated by `tests/SpryCad.Tests/Demos.cs` through the same document API the UI uses
 (`dotnet run --project tests/SpryCad.Tests -c Release -- demos samples/demos`).
@@ -284,7 +289,7 @@ Check items off as they land.
 - [ ] Sweep along splines and 3D paths, twist and guide curves; loft (sections, guide curves)
 - [ ] Cosmetic threads (annotation only), thread standards beyond ISO coarse (fine, UNC/UNF, pipe), tapered threads
 - [x] Draft (neutral plane; drafted extrudes)
-- [ ] Draft: parting line and step draft; drafting faces next to fillets with them; drafted mid-plane extrudes
+- [ ] Draft: parting line and step draft; drafting faces next to fillets with them
 - [ ] Smooth corner blends where three fillets meet (setback / vertex blends)
 - [x] Fillets along edges that run across tangent faces (the ball rolls from face to face in one tool)
 - [x] Patterned fillets solved again on instances whose geometry differs from the seed

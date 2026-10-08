@@ -147,7 +147,37 @@ static class DraftTests
             t.True(st is { Ok: false } && st.Error!.Contains("meet before the end"), $"closes up: {st.Error}");
         });
 
-        t.Test("Draft: what cannot be drafted says why (a face parallel to the neutral plane; a draft through a mid-plane extrude)", () =>
+        t.Test("Drafted extrudes both ways from the sketch: Mid Plane (two frustums, two cones), a second depth, a Through All - Both cut", () =>
+        {
+            var doc = new CadDocument();
+            var s = doc.AddFeature(new SketchFeature { Plane = PlaneRef.Front, Sketch = CoreTests.Rect(40, 30) });
+            var e = doc.AddFeature(new ExtrudeFeature { SketchId = s.Id, End = EndCondition.MidPlane, Depth = "20", Draft = "5" });
+            var mid = Body(doc);
+            t.Eq(mid.Validate(), null);
+            t.Near(Volume(mid), 2 * Frustum(40, 30, 10, T5), 1e-6);
+            t.True(mid.Faces.Any(f => f.Tag.Name.StartsWith(e.Id + ".2.")) && mid.Faces.All(f => f.Tag.Name != e.Id + ".Start"),
+                "the second half's faces named apart; the sketch plane inside");
+            // blind 20 one way and 6 the other
+            e.End = EndCondition.Blind; e.Depth2 = "6";
+            t.Near(Volume(Body(doc)), Frustum(40, 30, 20, T5) + Frustum(40, 30, 6, T5), 1e-6);
+
+            var boss = new CadDocument();
+            var c = boss.AddFeature(new SketchFeature { Plane = PlaneRef.Front, Sketch = Circle(0, 0, 10) });
+            boss.AddFeature(new ExtrudeFeature { SketchId = c.Id, End = EndCondition.MidPlane, Depth = "20", Draft = "5" });
+            t.Near(Volume(Body(boss)), 2 * Cone(10, 10 - 10 * T5, 10), 1e-6);
+
+            // a 10 mm plate on both sides of the sketch plane, a hole through it both ways: widest at the sketch plane
+            var plate = new CadDocument();
+            var p = plate.AddFeature(new SketchFeature { Plane = PlaneRef.Front, Sketch = CoreTests.Rect(60, 60) });
+            plate.AddFeature(new ExtrudeFeature { SketchId = p.Id, End = EndCondition.MidPlane, Depth = "10" });
+            var h = plate.AddFeature(new SketchFeature { Plane = PlaneRef.Front, Sketch = Circle(30, 30, 8) });
+            plate.AddFeature(new ExtrudeFeature { SketchId = h.Id, IsCut = true, End = EndCondition.ThroughAllBoth, Draft = "5" });
+            var cut = Body(plate);
+            t.Eq(cut.Validate(), null);
+            t.Near(Volume(cut), 60 * 60 * 10 - 2 * Cone(8, 8 - 5 * T5, 5), 1e-6);
+        });
+
+        t.Test("Draft: what cannot be drafted says why (a face parallel to the neutral plane)", () =>
         {
             var doc = new CadDocument();
             var s = doc.AddFeature(new SketchFeature { Plane = PlaneRef.Front, Sketch = CoreTests.Rect(40, 30) });
@@ -157,10 +187,6 @@ static class DraftTests
             var d = doc.AddFeature(new DraftFeature { Neutral = PlaneRef.Front, Faces = { RefTo(top) }, Angle = "5" });
             var r = new Regenerator().Rebuild(doc);
             t.True(r.Status[d.Id] is { Ok: false } st && st.Error!.Contains("parallel to the neutral plane"), $"parallel face: {r.Status[d.Id].Error}");
-            doc.Features.Remove(d);
-            e.End = EndCondition.MidPlane; e.Draft = "5";
-            r = new Regenerator().Rebuild(doc);
-            t.True(r.Status[e.Id] is { Ok: false } st2 && st2.Error!.Contains("one direction"), $"mid plane: {r.Status[e.Id].Error}");
         });
     }
 }
