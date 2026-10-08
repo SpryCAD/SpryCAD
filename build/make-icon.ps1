@@ -2,7 +2,8 @@
 #   src\SpryCad.App\Assets\SpryCAD.ico           the app: a white S drawn as a sketch spline, grips at its ends,
 #                                                   on the brand-teal tile
 #   src\SpryCad.App\Assets\SpryCADPart.ico       .sprt parts: a page with a block, the app's tile as a badge
-#   src\SpryCad.App\Assets\SpryCADAssembly.ico   .sasm assemblies: a page with two blocks put together
+#   src\SpryCad.App\Assets\SpryCADAssembly.ico   .sasm assemblies: a page with two blocks put together (orange, blue)
+#   (at 16 and 20 px no page, the blocks alone, so a part and an assembly still differ in Explorer's small views)
 # and their 256 px frames for Linux (installer\linux\sprycad.png, application-x-sprycad-part.png, -assembly.png).
 # Windows only (System.Drawing). Run from the repo root:
 #   build\make-icon.ps1 [-PreviewDir <folder for PNGs of every frame>]
@@ -70,16 +71,32 @@ function Block($g, $cx, $cy, $r, $top, $left, $right, $line) {
 # A file type's icon on the 128 grid: the page, its symbol, and the app's tile as a badge where it fits.
 function FileIcon($g, $px, $kind) {
   $line = [Math]::Max(1.0, $px * 128 / 28) / $px     # at least a pixel
+  # 16 and 20 px (Explorer's details and list views): no page, the blocks filling the square, so a part (one
+  # blue block) and an assembly (an orange and a blue) differ by their shape as well as their colors
+  if ($px * 128 -le 20) {
+    if ($kind -eq 'part') { Block $g 64 66 58 '#5FA3E0' '#2F75B8' '#1F5590' $line }
+    else {
+      Block $g 84 44 40 '#F2B35C' '#D9822B' '#AD621B' $line
+      Block $g 44 84 40 '#5FA3E0' '#2F75B8' '#1F5590' $line
+    }
+    return
+  }
   $page = [System.Drawing.PointF[]]@((Pt 20 4), (Pt 82 4), (Pt 110 32), (Pt 110 124), (Pt 20 124))
   $g.FillPolygon((Brush '#FBFCFE'), $page)
   $g.DrawPolygon((RoundPen '#6B7686' $line), $page)
   $fold = [System.Drawing.PointF[]]@((Pt 82 4), (Pt 82 32), (Pt 110 32))
   $g.FillPolygon((Brush '#D9DFE8'), $fold)
   $g.DrawPolygon((RoundPen '#6B7686' $line), $fold)
-  if ($kind -eq 'part') { Block $g 65 81 37 '#5FA3E0' '#2F75B8' '#1F5590' $line }
+  # 24 px: the blocks as big as the page allows, the assembly's two the same size (orange over blue)
+  $small = $px * 128 -le 24
+  if ($kind -eq 'part') { if ($small) { Block $g 65 80 42 '#5FA3E0' '#2F75B8' '#1F5590' $line } else { Block $g 65 81 37 '#5FA3E0' '#2F75B8' '#1F5590' $line } }
+  elseif ($small) {
+    Block $g 78 56 30 '#F2B35C' '#D9822B' '#AD621B' $line
+    Block $g 50 92 30 '#5FA3E0' '#2F75B8' '#1F5590' $line
+  }
   else {
-    Block $g 79 64 24 '#F2B35C' '#D9822B' '#AD621B' $line
-    Block $g 54 93 27 '#5FA3E0' '#2F75B8' '#1F5590' $line
+    Block $g 78 61 27 '#F2B35C' '#D9822B' '#AD621B' $line
+    Block $g 53 93 27 '#5FA3E0' '#2F75B8' '#1F5590' $line
   }
   if ($px * 128 -ge 32) {
     $state = $g.Save()
