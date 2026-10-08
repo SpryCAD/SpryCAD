@@ -291,6 +291,55 @@ static class AssemblyTests
             t.True(m.LastSolve!.Satisfied && Math.Abs(Z() - 10) < 1e-6 && coin.Name == dist.Name && coin.Id == dist.Id, $"no offset: touching ({Z():0.######}, {coin.Name})");
         });
 
+        t.Test("Mate solver (sparse): a tree of stacked sleeves and a separate pair solve, knocked askew, back onto their mates", () =>
+        {
+            // a fixed pin; on it a stack of 12 sleeves; from the 4th a branch of 6 more beside it (a Distance between
+            // axes); and a pair mated only to each other and an origin plane (a piece of the graph on its own)
+            var dir = NewDir("sparse");
+            string pp = Path.Combine(dir, "Pin.sprt");
+            Cylinder(pp, 5, 10);
+            var m = AssemblyModel.New();
+            var pin = m.Insert(pp, Transform.Identity);
+            MateRef R(Component c, string which) => m.RefTo(c.Id, FaceOf(m, c, which))!;
+            Component Stack(Component below, Vec3 at)
+            {
+                var c = m.Insert(pp, Transform.Translation(at));
+                c.Fixed = false;
+                m.AddMate(MateType.Concentric, R(c, "side"), R(below, "side"));
+                m.AddMate(MateType.Coincident, R(c, "start"), R(below, "end"));
+                return c;
+            }
+            var stack = new List<Component> { pin };
+            for (int i = 1; i <= 12; i++) stack.Add(Stack(stack[^1], new Vec3(0, 0, 10 * i)));
+            var branchBase = m.Insert(pp, Transform.Translation(new Vec3(30, 0, 30)));
+            branchBase.Fixed = false;
+            m.AddMate(MateType.Coincident, R(branchBase, "side"), R(stack[4], "side"), 30, x => x.Aligned = true);
+            m.AddMate(MateType.Coincident, R(branchBase, "start"), R(stack[3], "end"));
+            var branch = new List<Component> { branchBase };
+            for (int i = 1; i <= 6; i++) branch.Add(Stack(branch[^1], new Vec3(30, 0, 30 + 10 * i)));
+            var lone = m.Insert(pp, Transform.Translation(new Vec3(-50, 0, 0))); lone.Fixed = false;
+            var mate = m.Insert(pp, Transform.Translation(new Vec3(-50, 0, 10))); mate.Fixed = false;
+            m.AddMate(MateType.Coincident, R(lone, "start"), m.RefTo(null, "Front")!);
+            m.AddMate(MateType.Concentric, R(mate, "side"), R(lone, "side"));
+            m.AddMate(MateType.Coincident, R(mate, "start"), R(lone, "end"));
+            t.True(m.LastSolve!.Satisfied, "built satisfied");
+            var where = m.Doc.Components.ToDictionary(c => c.Id, c => c.Placement.ToTransform());
+            var rnd = new Random(7);
+            foreach (var c in m.Doc.Components.Where(c => !c.Fixed))
+                c.Placement = Placement.From(Transform.Translation(new Vec3(rnd.NextDouble() - 0.5, rnd.NextDouble() - 0.5, rnd.NextDouble() - 0.5))
+                    * Transform.Rotation(c.Placement.ToTransform().T, new Vec3(rnd.NextDouble(), rnd.NextDouble(), 1), 0.05 * rnd.NextDouble()) * c.Placement.ToTransform());
+            var solve = m.SolveMates();
+            t.True(solve.Satisfied, $"solved back ({solve.Iterations} iterations, worst {solve.Errors.Values.Max():E1})");
+            // the stack's axes back where they were (each may turn about its axis: nothing holds that; the branch may
+            // swing round the stack and the pair slide on the plane: they are only held to their mates)
+            var axisOff = stack.Max(c =>
+            {
+                var a = c.Placement.ToTransform(); var b = where[c.Id];
+                return Math.Max(Vec3.Distance(a.Point(Vec3.Zero), b.Point(Vec3.Zero)), Vec3.Distance(a.Point(new Vec3(0, 0, 10)), b.Point(new Vec3(0, 0, 10))));
+            });
+            t.True(axisOff < 1e-6, $"the stack's axes where they were (off by {axisOff:E1})");
+        });
+
         t.Test("Mates: concentric and coincident stack a sleeve on a pin; a distance lifts it; contradictions are reported", () =>
         {
             var (m, pin, sleeve, dir) = PinAndSleeve("mates");
