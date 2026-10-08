@@ -54,6 +54,78 @@ static class SlotDragTests
             Console.WriteLine($"      ({refused} drag steps refused to keep the shape)");
         });
 
+        t.Test("Sketch drag: a horizontal slot from the origin keeps its shape, and solves when the drag ends", () =>
+        {
+            for (int which = 0; which < 5; which++)
+            {
+                // as drawn: the first center on the origin, the centerline snapped horizontal
+                var sk = new Sketch();
+                var b0 = new Vec2(130, 0); const double r = 20;
+                int ca = Sketch.OriginId, cb = sk.AddPoint(b0).Id;
+                var axis = sk.Add(new SkLine { P1 = ca, P2 = cb, Construction = true });
+                sk.AddConstraint(CType.Horizontal, axis.Id);
+                var n = new Vec2(0, 1);
+                int p1 = sk.AddPoint(n * r).Id, p2 = sk.AddPoint(b0 + n * r).Id, p3 = sk.AddPoint(b0 - n * r).Id, p4 = sk.AddPoint(-n * r).Id;
+                var top = sk.Add(new SkLine { P1 = p1, P2 = p2 });
+                var bot = sk.Add(new SkLine { P1 = p3, P2 = p4 });
+                var arcB = sk.Add(new SkArc { Center = cb, Start = p3, End = p2 });
+                var arcA = sk.Add(new SkArc { Center = ca, Start = p1, End = p4 });
+                foreach (var (l, arc) in new[] { (top, arcB), (bot, arcA), (top, arcA), (bot, arcB) })
+                    SketchSolver.CaptureSign(sk, sk.AddConstraint(CType.Tangent, l.Id, arc.Id));
+                sk.AddConstraint(CType.Parallel, top.Id, axis.Id);
+                t.True(SketchSolver.Solve(sk).Converged, "as drawn");
+                var ends = new[] { p1, p2, p3, p4, cb };
+                var id = ends[which];
+                var start = sk.P(id);
+                for (int drag = 0; drag < 6; drag++)
+                {
+                    // a drag: many small moves, then the solve at its end
+                    var to = start + new Vec2(Math.Cos(drag * 1.1) * 90, Math.Sin(drag * 1.7) * 70);
+                    var from = sk.P(id);
+                    for (int step = 1; step <= 25; step++)
+                        SketchSolver.Solve(sk, new Dictionary<int, Vec2> { [id] = from + (to - from) * (step / 25.0) }, analyze: false);
+                    var end = SketchSolver.Solve(sk);
+                    t.True(end.Converged, $"point {which}, drag {drag}: not solved after the drag ({end.Status})");
+                    double Len(int line) { var l = (SkLine)sk.Entity(line)!; return Vec2.Distance(sk.P(l.P1), sk.P(l.P2)); }
+                    t.True(Len(top.Id) > 1e-3 && Len(bot.Id) > 1e-3, $"point {which}, drag {drag}: a side collapsed");
+                    t.Near(sk.P(cb).Y, 0, 1e-6);
+                    t.True(sk.P(p1).Y > 0 && sk.P(p2).Y > 0 && sk.P(p3).Y < 0 && sk.P(p4).Y < 0, $"point {which}, drag {drag}: turned inside out");
+                }
+            }
+        });
+
+        t.Test("Sketch drag: dragging a line from the origin leaves the origin where it is (the rest solved about it)", () =>
+        {
+            var sk = new Sketch();
+            var b0 = new Vec2(130, 25);
+            int cb = sk.AddPoint(b0).Id;
+            var axis = sk.Add(new SkLine { P1 = Sketch.OriginId, P2 = cb, Construction = true });
+            var u = b0.Normalized; var n = u.Perp; const double r = 20;
+            int p1 = sk.AddPoint(n * r).Id, p2 = sk.AddPoint(b0 + n * r).Id, p3 = sk.AddPoint(b0 - n * r).Id, p4 = sk.AddPoint(-n * r).Id;
+            var top = sk.Add(new SkLine { P1 = p1, P2 = p2 });
+            var bot = sk.Add(new SkLine { P1 = p3, P2 = p4 });
+            var arcB = sk.Add(new SkArc { Center = cb, Start = p3, End = p2 });
+            var arcA = sk.Add(new SkArc { Center = Sketch.OriginId, Start = p1, End = p4 });
+            foreach (var (l, arc) in new[] { (top, arcB), (bot, arcA), (top, arcA), (bot, arcB) })
+                SketchSolver.CaptureSign(sk, sk.AddConstraint(CType.Tangent, l.Id, arc.Id));
+            sk.AddConstraint(CType.Parallel, top.Id, axis.Id);
+            t.True(SketchSolver.Solve(sk).Converged, "as drawn");
+            // the centerline dragged as the editor drags a line: both its ends moved by the pointer's travel
+            var origins = new Dictionary<int, Vec2> { [Sketch.OriginId] = sk.P(Sketch.OriginId), [cb] = sk.P(cb) };
+            for (int step = 1; step <= 30; step++)
+            {
+                var delta = new Vec2(0, -1.6 * step);
+                SketchSolver.Solve(sk, origins.ToDictionary(kv => kv.Key, kv => kv.Value + delta), analyze: false);
+            }
+            t.True(SketchSolver.Solve(sk).Converged, "solved when the drag ends");
+            t.Near(sk.P(Sketch.OriginId).Length, 0, 1e-12);
+            // arc A still about the origin: its ends at its radius from it
+            t.Near(Vec2.Distance(sk.P(p1), Vec2.Zero), Vec2.Distance(sk.P(p4), Vec2.Zero), 1e-6);
+            // (its radius is not dimensioned: a drag may change it) and the slot still whole, its sides either side of the centerline
+            var d = sk.P(cb);
+            t.True(Vec2.Cross(d, sk.P(p1)) > 0 && Vec2.Cross(d, sk.P(p2)) > 0 && Vec2.Cross(d, sk.P(p3)) < 0 && Vec2.Cross(d, sk.P(p4)) < 0, "not turned inside out");
+        });
+
         t.Test("Sketch solve: dimensions change a slot without flipping its tangencies (each arc runs on past its sides)", () =>
         {
             var (sk, ca, cb, ends, top, bot) = Slot(new Vec2(0, 0), new Vec2(60, 10), 15);

@@ -449,6 +449,10 @@ public static class SketchSolver
     /// <summary>Solves the sketch in place. Optional drag targets move the given points.</summary>
     public static SolveResult Solve(Sketch sk, IReadOnlyDictionary<int, Vec2>? drag = null, bool analyze = true)
     {
+        // fixed points (the origin, points on the model) stay where they are, dragged with the rest or not: held at
+        // the pointer they would move the sketch about them, while they themselves are never moved
+        if (drag != null && drag.Keys.Any(id => sk.Point(id) is { Fixed: true }))
+            drag = drag.Where(kv => sk.Point(kv.Key) is not { Fixed: true }).ToDictionary(kv => kv.Key, kv => kv.Value);
         if (drag != null && drag.Count > 0)
         {
             // the shape before the drag: a step that turns it inside out is not taken (see SameShape)
