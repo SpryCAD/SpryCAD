@@ -71,6 +71,9 @@
         <Border Classes="hud" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,6,0,0">
           <StackPanel x:Name="HudBar" Orientation="Horizontal" />
         </Border>
+        <!-- the flyout design tree (MainWindow.FlyoutTree.cs): while the panel shows something else; no backing, as
+             SolidWorks', so only its rows take the mouse and the model shows through around them -->
+        <Border x:Name="FlyoutHost" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="8,6,0,0" IsVisible="False" />
         <!-- confirmation corner -->
         <Border x:Name="ConfirmCorner" Classes="hud" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,6,8,0" IsVisible="False">
           <StackPanel Orientation="Horizontal" x:Name="ConfirmBar" />

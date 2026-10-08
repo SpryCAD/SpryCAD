@@ -34,11 +34,27 @@ public sealed class FeatureTree : UserControl
     /// <summary>A sketch's eye was clicked: show it if hidden, hide it if shown.</summary>
     public event Action<string>? SketchVisibilityToggled;
 
+    /// <summary>
+    /// The flyout copy over the graphics area (MainWindow.FlyoutTree.cs), for picking from the tree while the panel shows
+    /// something else: closed to the part's row until its arrow opens it, and only selects and hovers (no editing,
+    /// reordering, rollback, menus or sketch eyes, which would cut across the command open in the panel).
+    /// </summary>
+    public bool Flyout { get; init; }
+
+    /// <summary>The flyout opened (its part row's arrow).</summary>
+    public bool FlyoutOpen => _expanded.Contains("__part");
+
+    /// <summary>Closes the flyout back to the part's row (shown again next time closed).</summary>
+    public void CloseFlyout() => _expanded.Remove("__part");
+
+    (CadDocument doc, string title, RegenResult? result)? _last;
+
     public FeatureTree()
     {
         _overlay.Children.Add(_dropLine);
-        var layers = new Grid { Children = { _rows, _overlay } };
-        Content = new ScrollViewer { Content = layers, HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto, Padding = new Thickness(2, 4) };
+        // the room around the rows on the rows (a scroll viewer's own padding cut the last row short)
+        var layers = new Grid { Children = { _rows, _overlay }, Margin = new Thickness(2, 4) };
+        Content = new ScrollViewer { Content = layers, HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled };
         // a hidden tree (a feature being edited) hovers nothing
         PropertyChanged += (_, e) => { if (e.Property == IsVisibleProperty && !IsVisible) SetHover(null); };
     }
@@ -75,12 +91,14 @@ public sealed class FeatureTree : UserControl
 
     public void Rebuild(CadDocument doc, string title, RegenResult? result)
     {
+        _last = (doc, title, result);
         SetHover(null); // the hovered row is going away
         _rows.Children.Clear();
         _rowById.Clear();
         _childRows.Clear();
         _pressId = null; _moving = false; _dropLine.IsVisible = false;
-        AddRow("__part", title, "part", 0, null, isHeader: true);
+        AddRow("__part", title, "part", 0, null, isHeader: true, hasChildren: Flyout);
+        if (Flyout && !FlyoutOpen) { Select(_selectedId); return; }
         AddRow("Origin", "Origin", "origin", 1, null);
         AddRow("Front", "Front Plane", "plane", 1, null);
         AddRow("Top", "Top Plane", "plane", 1, null);
@@ -111,7 +129,7 @@ public sealed class FeatureTree : UserControl
         var active = doc.ActiveCount;
         for (int i = 0; i < doc.Features.Count; i++)
         {
-            if (i == active && active < doc.Features.Count) AddRollbackBar();
+            if (i == active && active < doc.Features.Count && !Flyout) AddRollbackBar();
             var f = doc.Features[i];
             if (consumedBy.ContainsKey(f.Id) && doc.IndexOf(consumedBy[f.Id]) > i) continue;
             var status = result?.Status.GetValueOrDefault(f.Id);
@@ -129,7 +147,7 @@ public sealed class FeatureTree : UserControl
                     _childRows.Add(AddRow(ch.Id, Label(ch, result), IconFor(ch), 2, result?.Status.GetValueOrDefault(ch.Id), suppressed: Off(ch) || rolledBack,
                         sketchShown: rolledBack ? null : ShownOf(ch), condition: ConditionTip(ch)));
         }
-        if (active >= doc.Features.Count) AddRollbackBar();
+        if (active >= doc.Features.Count && !Flyout) AddRollbackBar();
         Select(_selectedId);
         Relate(_relatedId);
     }
@@ -294,34 +312,14 @@ public sealed class FeatureTree : UserControl
     Border AddRow(string id, string text, string icon, int indent, FeatureStatus? status, bool isHeader = false, bool suppressed = false, bool hasChildren = false,
         bool? sketchShown = null, string? condition = null)
     {
-        var sp = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, Margin = new Thickness(indent * 14, 0, 0, 0) };
-        if (hasChildren)
-        {
-            // an 18x18 hit area (transparent background so the whole square takes clicks), larger glyph, hover cue
-            var exp = new Border
-            {
-                Width = 18, Height = 18, CornerRadius = new CornerRadius(3), Background = Brushes.Transparent,
-                Cursor = new Cursor(StandardCursorType.Hand), VerticalAlignment = VerticalAlignment.Center,
-                Child = new TextBlock
-                {
-                    Text = _expanded.Contains(id) ? "▾" : "▸", FontSize = 14, Foreground = Palette.TextMuted,
-                    HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
-                },
-            };
-            ToolTip.SetTip(exp, _expanded.Contains(id) ? "Collapse" : "Expand");
-            exp.PointerEntered += (_, _) => exp.Background = Palette.SelectedBg;
-            exp.PointerExited += (_, _) => exp.Background = Brushes.Transparent;
-            exp.PointerPressed += (_, e) =>
-            {
-                if (!_expanded.Add(id)) _expanded.Remove(id);
-                e.Handled = true;
-                ExpandToggled?.Invoke();
-            };
-            sp.Children.Add(exp);
-        }
-        else sp.Children.Add(new Control { Width = 18 });
+        // as the assembly's tree (UI/TreeRow.cs): as wide as the tree, a long name trimmed, the markers after it kept
+        var sp = new TreeRowPanel { Margin = new Thickness(indent * 14, 0, 0, 0) };
+        sp.Children.Add(hasChildren
+            ? TreeRow.Expander(_expanded.Contains(id), () => ToggleExpanded(id))
+            : TreeRow.Spacer());
         sp.Children.Add(Icons.Make(icon, 16));
-        var tb = new TextBlock { Text = text, VerticalAlignment = VerticalAlignment.Center, FontSize = TypeScale.Body };
+        var tb = new TextBlock { Text = text, VerticalAlignment = VerticalAlignment.Center, FontSize = TypeScale.Body, TextTrimming = TextTrimming.CharacterEllipsis };
+        sp.Shrink.Add(tb);
         if (isHeader) tb.FontWeight = FontWeight.SemiBold;
         if (suppressed) tb.Foreground = Palette.TextDisabled;
         if (status is { Ok: false }) { tb.Foreground = Palette.Danger; ToolTip.SetTip(tb, status.Error); }
@@ -337,7 +335,7 @@ public sealed class FeatureTree : UserControl
         if (status is { Ok: false }) sp.Children.Add(new TextBlock { Text = "✖", Foreground = Palette.Danger, VerticalAlignment = VerticalAlignment.Center });
         else if (status is { Warnings.Count: > 0 }) sp.Children.Add(new TextBlock { Text = "⚠", Foreground = Palette.Warning, VerticalAlignment = VerticalAlignment.Center });
         if (status != null && status.Milliseconds > 200) sp.Children.Add(new TextBlock { Text = $"{status.Milliseconds:0} ms", Foreground = Palette.TextMuted, FontSize = TypeScale.Small, VerticalAlignment = VerticalAlignment.Center });
-        if (sketchShown is { } shownNow) sp.Children.Add(EyeButton(id, shownNow));
+        if (sketchShown is { } shownNow && !Flyout) sp.Children.Add(EyeButton(id, shownNow));
 
         var row = new Border { Classes = { "treerow" }, Child = sp, Tag = id };
         if (status is { Ok: false }) ToolTip.SetTip(row, status.Error);
@@ -345,6 +343,15 @@ public sealed class FeatureTree : UserControl
         row.PointerPressed += (_, e) =>
         {
             var pt = e.GetCurrentPoint(row);
+            if (Flyout)
+            {
+                // the flyout only picks: a left click selects (and goes to the open command's box, as the tree's does);
+                // its part row opens and closes it, the whole row (an easier target than the arrow)
+                if (id == "__part") { if (pt.Properties.IsLeftButtonPressed) ToggleExpanded(id); e.Handled = true; return; }
+                if (pt.Properties.IsLeftButtonPressed) { Select(id); SelectedChanged?.Invoke(id); }
+                e.Handled = true;
+                return;
+            }
             if (pt.Properties.IsRightButtonPressed)
             {
                 Select(id); SelectedChanged?.Invoke(id);
@@ -398,4 +405,12 @@ public sealed class FeatureTree : UserControl
     }
 
     public event Action? ExpandToggled;
+
+    /// <summary>A sketch nest (or the flyout) opened or closed: the main tree asks to be rebuilt, the flyout redraws itself.</summary>
+    void ToggleExpanded(string id)
+    {
+        if (!_expanded.Add(id)) _expanded.Remove(id);
+        if (!Flyout) { ExpandToggled?.Invoke(); return; }
+        if (_last is { } l) Rebuild(l.doc, l.title, l.result);
+    }
 }

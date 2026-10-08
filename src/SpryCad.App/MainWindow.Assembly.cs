@@ -220,6 +220,7 @@ public partial class MainWindow : IAssemblyHost
         bool asm = Asm != null;
         Tree.IsVisible = !asm;
         _asmTree.IsVisible = asm;
+        UpdateFlyoutTree();
         _asmMode ??= new AssemblyMode(this);
         Viewport.Mode = asm ? _asmMode : _modelMode;
         foreach (var (name, tab) in _tabs) tab.IsVisible = name is "Assembly" ? asm : !(asm && name is "Features" or "Sketch" or "Sheet Metal");

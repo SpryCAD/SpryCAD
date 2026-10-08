@@ -80,6 +80,7 @@ public partial class MainWindow : Window
         InitPartsList();
         BuildTaskPane();
         BuildHud();
+        BuildFlyoutTree();
         BuildTriadLabels();
         BuildPanelTabs();
         BuildGestures();
@@ -168,6 +169,7 @@ public partial class MainWindow : Window
     {
         if (Asm is { } a) { _asmTree.Show(a); return; }
         Tree.Rebuild(Session.Doc, Session.Title.TrimEnd(' ', '*'), Session.Result);
+        if (FlyoutHost.IsVisible) RebuildFlyoutTree();
     }
 
     /// <summary>Pushes the current rebuild result (or rolled back / preview state) into the viewport.</summary>
@@ -315,11 +317,16 @@ public partial class MainWindow : Window
         var s = Selection.First;
         if (_sketch == null)
         {
-            if (s == null) Tree.Select(null);
-            else if (s.Kind is SelKind.Sketch or SelKind.Feature) Tree.Select(s.FeatureId);
-            else if (s.Kind == SelKind.Plane) Tree.Select(s.FeatureId ?? s.Name);
-            // a picked face/edge shows which feature made it
-            Tree.Relate(s is { Kind: SelKind.Face or SelKind.Edge } ? s.OwningFeatureId : null);
+            // the tree and its flyout copy alike
+            foreach (var t in new[] { Tree, _flyTree })
+            {
+                if (t == null) continue;
+                if (s == null) t.Select(null);
+                else if (s.Kind is SelKind.Sketch or SelKind.Feature) t.Select(s.FeatureId);
+                else if (s.Kind == SelKind.Plane) t.Select(s.FeatureId ?? s.Name);
+                // a picked face/edge shows which feature made it
+                t.Relate(s is { Kind: SelKind.Face or SelKind.Edge } ? s.OwningFeatureId : null);
+            }
         }
         Status(s == null ? "Ready" : Selection.Count == 1 ? s.Label(Session.Doc) + " selected" + Describe(s) : $"{Selection.Count} items selected");
         RefreshScene();

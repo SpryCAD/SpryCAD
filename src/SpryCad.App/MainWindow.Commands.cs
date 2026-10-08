@@ -455,6 +455,7 @@ public partial class MainWindow
         _syncingTabs = true;
         PanelTabs.SelectedItem = tab.Header;
         _syncingTabs = false;
+        UpdateFlyoutTree();
     }
 
     /// <summary>

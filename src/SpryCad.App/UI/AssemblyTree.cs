@@ -18,7 +18,7 @@ namespace SpryCad.App.UI;
 /// </summary>
 public sealed class AssemblyTree : DockPanel
 {
-    readonly StackPanel _rows = new() { Spacing = 0 };
+    readonly StackPanel _rows = new() { Spacing = 0, Margin = new Thickness(2, 4) };
     readonly StackPanel _notes = new() { Spacing = 4, Margin = new Thickness(8, 6) };
     readonly Dictionary<string, Border> _rowById = new();
     string? _selected;        // a component's id, or "mate:" + a mate's
@@ -44,7 +44,7 @@ public sealed class AssemblyTree : DockPanel
         var notes = new ScrollViewer { Content = _notes, MaxHeight = 200 };
         SetDock(notes, Dock.Bottom);
         Children.Add(notes);
-        Children.Add(new ScrollViewer { Content = _rows, HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto, Padding = new Thickness(2, 4) });
+        Children.Add(new ScrollViewer { Content = _rows, HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled });
     }
 
     /// <summary>The mate selected in the tree (its id), if a mate's row is.</summary>
@@ -134,29 +134,25 @@ public sealed class AssemblyTree : DockPanel
     void AddRow(string key, int indent, string icon, string text, string? note = null, bool header = false, bool folder = false,
         bool bad = false, bool dim = false, string? tip = null, ContextMenu? menu = null)
     {
-        var sp = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, Margin = new Thickness(indent * 14, 0, 0, 0) };
-        if (folder)
-        {
-            var arrow = new Avalonia.Controls.Shapes.Path
-            {
-                Data = Geometry.Parse(_matesOpen ? "M4 6l4 4 4-4" : "M6 4l4 4-4 4"), Stroke = Dim, StrokeThickness = 1.6,
-                Width = 16, Height = 16, Stretch = Stretch.None,
-            };
-            var exp = new Border { Child = arrow, Width = 18, Height = 18, Background = Brushes.Transparent, Cursor = new Cursor(StandardCursorType.Hand), VerticalAlignment = VerticalAlignment.Center };
-            ToolTip.SetTip(exp, _matesOpen ? "Close the folder" : "Open the folder");
-            exp.PointerPressed += (_, e) => { e.Handled = true; ToggleMates(); };
-            sp.Children.Add(exp);
-        }
-        else sp.Children.Add(new Control { Width = 18 });
+        // as the part's tree (UI/TreeRow.cs): as wide as the tree, the grey note trimmed first when the row is too
+        // long, then the name; the whole of it on the row's tip
+        var sp = new TreeRowPanel { Margin = new Thickness(indent * 14, 0, 0, 0) };
+        sp.Children.Add(folder ? TreeRow.Expander(_matesOpen, ToggleMates) : TreeRow.Spacer());
         sp.Children.Add(Icons.Make(icon, 16));
-        var tb = new TextBlock { Text = text, VerticalAlignment = VerticalAlignment.Center, FontSize = TypeScale.Body };
+        var tb = new TextBlock { Text = text, VerticalAlignment = VerticalAlignment.Center, FontSize = TypeScale.Body, TextTrimming = TextTrimming.CharacterEllipsis };
         if (header) tb.FontWeight = FontWeight.SemiBold;
         if (bad) tb.Foreground = Red;
         else if (dim) tb.Foreground = Palette.TextDisabled;
         sp.Children.Add(tb);
-        if (note != null) sp.Children.Add(new TextBlock { Text = note, Foreground = Dim, FontSize = TypeScale.Small, VerticalAlignment = VerticalAlignment.Center });
+        if (note != null)
+        {
+            var nb = new TextBlock { Text = note, Foreground = Dim, FontSize = TypeScale.Small, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
+            sp.Children.Add(nb);
+            sp.Shrink.Add(nb);
+        }
+        sp.Shrink.Add(tb);
         var row = new Border { Classes = { "treerow" }, Child = sp, Tag = key, ContextMenu = menu };
-        if (tip != null) ToolTip.SetTip(row, tip);
+        if (tip != null || note != null) ToolTip.SetTip(row, (note != null ? $"{text}  {note}" : text) + (tip != null ? "\n" + tip : ""));
         row.PointerPressed += (_, e) =>
         {
             var pt = e.GetCurrentPoint(row).Properties;
