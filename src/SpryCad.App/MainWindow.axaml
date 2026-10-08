@@ -1,0 +1,93 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vp="using:SpryCad.App.Viewport"
+        xmlns:ui="using:SpryCad.App.UI"
+        x:Class="SpryCad.App.MainWindow"
+        Title="SpryCAD"
+        Icon="avares://SpryCAD/Assets/SpryCAD.ico"
+        Width="1400" Height="880"
+        MinWidth="800" MinHeight="500"
+        Background="#FFF3F5F8"
+        WindowStartupLocation="CenterScreen">
+  <DockPanel>
+    <!-- Menu bar + quick access -->
+    <Border DockPanel.Dock="Top" Background="#FFFFFFFF" BorderBrush="#FFD5DCE6" BorderThickness="0,0,0,1">
+      <DockPanel>
+        <TextBlock DockPanel.Dock="Left" Text="SpryCAD" FontWeight="Bold" Foreground="#FF0F9A83" VerticalAlignment="Center" Margin="10,0,8,0" FontSize="13" />
+        <StackPanel x:Name="QuickAccess" DockPanel.Dock="Right" Orientation="Horizontal" Margin="0,0,6,0" />
+        <Menu x:Name="MainMenu" />
+      </DockPanel>
+    </Border>
+
+    <!-- CommandManager -->
+    <Border DockPanel.Dock="Top" Background="#FFF8FAFC" BorderBrush="#FFD5DCE6" BorderThickness="0,0,0,1">
+      <DockPanel>
+        <StackPanel x:Name="CommandTabs" DockPanel.Dock="Bottom" Orientation="Horizontal" Background="#FFEDF1F6" />
+        <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
+          <StackPanel x:Name="CommandBar" Orientation="Horizontal" Height="62" Margin="4,3" />
+        </ScrollViewer>
+      </DockPanel>
+    </Border>
+
+    <!-- Status bar -->
+    <Border DockPanel.Dock="Bottom" Background="#FFE9EDF2" BorderBrush="#FFD0D7E1" BorderThickness="0,1,0,0" Height="24">
+      <DockPanel Margin="8,0">
+        <TextBlock x:Name="StatusUnits" DockPanel.Dock="Right" Text="MMGS" VerticalAlignment="Center" Margin="12,0,0,0" Foreground="#FF425066" />
+        <TextBlock x:Name="StatusSketch" DockPanel.Dock="Right" Text="" VerticalAlignment="Center" Margin="12,0,0,0" FontWeight="SemiBold" />
+        <TextBlock x:Name="StatusCoords" DockPanel.Dock="Right" Text="" VerticalAlignment="Center" Margin="12,0,0,0" Foreground="#FF425066" />
+        <TextBlock x:Name="StatusRebuild" DockPanel.Dock="Right" Text="" VerticalAlignment="Center" Margin="12,0,0,0" Foreground="#FF6A778A" />
+        <TextBlock x:Name="StatusText" Text="Ready" VerticalAlignment="Center" Foreground="#FF2B3645" TextTrimming="CharacterEllipsis" />
+      </DockPanel>
+    </Border>
+
+    <!-- Document tabs: one per open part, as many as fit; the button at the right lists them all (MainWindow.Tabs.cs) -->
+    <Border DockPanel.Dock="Top" Background="#FFE8EDF3" BorderBrush="#FFD5DCE6" BorderThickness="0,0,0,1">
+      <DockPanel>
+        <Button x:Name="PartsButton" DockPanel.Dock="Right" Margin="2,3,4,3" Padding="8,1" MinHeight="0" FontSize="12"
+                Background="Transparent" BorderThickness="1" BorderBrush="#FFC5CFDC" VerticalAlignment="Center" />
+        <ui:TabStripPanel x:Name="DocTabs" Margin="4,3,4,0" Spacing="2" ClipToBounds="True" />
+      </DockPanel>
+    </Border>
+
+    <Grid x:Name="MainGrid" ColumnDefinitions="290,4,*,0,0,Auto">
+      <!-- Left panel: FeatureManager / PropertyManager -->
+      <Border Grid.Column="0" Background="#FFF5F7FA" BorderBrush="#FFD5DCE6" BorderThickness="0,0,1,0">
+        <DockPanel>
+          <!-- the left panel's tabs (MainWindow.Commands.cs, AddPanelTab); all panels stay loaded, one shows -->
+          <TabStrip x:Name="PanelTabs" DockPanel.Dock="Top" Classes="paneltabs" />
+          <Panel x:Name="PanelHost">
+            <ui:FeatureTree x:Name="Tree" />
+            <ContentControl x:Name="PmHost" IsVisible="False" Background="#FFF5F7FA" />
+          </Panel>
+        </DockPanel>
+      </Border>
+      <GridSplitter Grid.Column="1" Background="#FFDDE3EA" ResizeDirection="Columns" />
+
+      <!-- Graphics area -->
+      <Grid Grid.Column="2" x:Name="GraphicsArea">
+        <vp:ViewportControl x:Name="Viewport" />
+        <Canvas x:Name="Overlay" ClipToBounds="True" />
+        <!-- heads-up view toolbar -->
+        <Border Classes="hud" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,6,0,0">
+          <StackPanel x:Name="HudBar" Orientation="Horizontal" />
+        </Border>
+        <!-- confirmation corner -->
+        <Border x:Name="ConfirmCorner" Classes="hud" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,6,8,0" IsVisible="False">
+          <StackPanel Orientation="Horizontal" x:Name="ConfirmBar" />
+        </Border>
+        <!-- triad labels + rebuild indicator -->
+        <TextBlock x:Name="BusyText" Text="Rebuilding…" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,10,8" Foreground="#FF5A6B85" IsVisible="False" />
+        <TextBlock x:Name="ViewName" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="96,0,0,8" Foreground="#FF5A6B85" FontStyle="Italic" />
+      </Grid>
+
+      <!-- the task pane (MainWindow.TaskPane.cs), as SolidWorks': unpinned, it slides out over the graphics area
+           (TaskOverlay); pinned, it takes the columns 3 and 4 (0 wide otherwise); its tabs are the strip at the right -->
+      <Panel x:Name="TaskOverlay" Grid.Column="2" ZIndex="10" />
+      <GridSplitter x:Name="TaskSplitter" Grid.Column="3" Background="#FFDDE3EA" ResizeDirection="Columns" IsVisible="False" />
+      <ContentControl x:Name="TaskPinHost" Grid.Column="4" />
+      <Border Grid.Column="5" Background="#FFE8EDF3" BorderBrush="#FFD5DCE6" BorderThickness="1,0,0,0">
+        <StackPanel x:Name="TaskStrip" Margin="2,4" Spacing="2" />
+      </Border>
+    </Grid>
+  </DockPanel>
+</Window>

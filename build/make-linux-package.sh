@@ -7,7 +7,7 @@
 # Usage:  build/make-linux-package.sh
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
-proj="$root/src/FeatherCad.App/FeatherCad.App.csproj"
+proj="$root/src/SpryCad.App/SpryCad.App.csproj"
 rid=linux-x64
 
 # 1) Version, always from git: the latest v<x.y.z> tag, and how many commits HEAD is past it. On the tag: 0.0.1;
@@ -31,7 +31,7 @@ dotnet publish "$proj" -c Release -r "$rid" --self-contained true -p:PublishRead
 demos="$root/publish/demos"
 rm -rf "$demos"
 echo "== generating demo parts into $demos =="
-dotnet run --project "$root/tests/FeatherCad.Tests" -c Release -- demos "$demos"
+dotnet run --project "$root/tests/SpryCad.Tests" -c Release -- demos "$demos"
 
 # 4) Stage: the app, samples, Linux desktop files and the license, in one top-level folder.
 name="SpryCAD-$ver-$rid"

@@ -8,7 +8,7 @@ if (-not $Rids -or $Rids.Count -eq 0) {
 }
 foreach ($rid in $Rids) {
     Write-Host "Publishing $rid ..."
-    dotnet publish "$PSScriptRoot/src/FeatherCad.App/FeatherCad.App.csproj" -c Release -r $rid --self-contained true `
+    dotnet publish "$PSScriptRoot/src/SpryCad.App/SpryCad.App.csproj" -c Release -r $rid --self-contained true `
         -p:PublishReadyToRun=true `
         -p:DebugType=none -o "$PSScriptRoot/publish/$rid"
 }

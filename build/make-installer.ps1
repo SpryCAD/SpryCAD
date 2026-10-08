@@ -6,7 +6,7 @@
 # Run from anywhere:  pwsh -File build\make-installer.ps1
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
-$proj = Join-Path $root 'src\FeatherCad.App\FeatherCad.App.csproj'
+$proj = Join-Path $root 'src\SpryCad.App\SpryCad.App.csproj'
 
 # 1) Version, always from git: the latest v<x.y.z> tag, and how many commits HEAD is past it. On the tag: 0.0.1;
 #    3 commits after it: 0.0.1-dev.3. Windows file versions are four numbers: 0.0.1.3.
@@ -51,12 +51,12 @@ if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed with exit code $LASTEXIT
 # 3b) The Explorer thumbnail handler, next to the app (the installer registers it for .sprt files).
 & (Join-Path $PSScriptRoot 'make-thumbs.ps1') -Out $out
 
-# 4) Generate the parametric demo parts fresh (tests/FeatherCad.Tests/Demos.cs), so the installer ships the
+# 4) Generate the parametric demo parts fresh (tests/SpryCad.Tests/Demos.cs), so the installer ships the
 #    current set rather than whatever was last written into samples\demos.
 $demos = Join-Path $root 'publish\demos'
 if (Test-Path $demos) { Remove-Item $demos -Recurse -Force }
 Write-Host "== generating demo parts into $demos ==" -ForegroundColor Cyan
-& dotnet run --project (Join-Path $root 'tests\FeatherCad.Tests') -c Release -- demos $demos
+& dotnet run --project (Join-Path $root 'tests\SpryCad.Tests') -c Release -- demos $demos
 if ($LASTEXITCODE -ne 0) { throw "demo generation failed with exit code $LASTEXITCODE" }
 
 # 5) Compile.

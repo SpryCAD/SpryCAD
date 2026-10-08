@@ -1,0 +1,114 @@
+using SpryCad.Core.Model;
+using SpryCad.Core.Regen;
+using SpryCad.Kernel;
+
+namespace SpryCad.Tests;
+
+/// <summary><c>-- validate file.sprt out.step</c>: rebuild, report watertightness/volumes, write the exact STEP.</summary>
+static class Validate
+{
+    public static int Run(string file, string step)
+    {
+        CadDocument doc;
+        if (Path.GetExtension(file).ToLowerInvariant() is ".step" or ".stp")
+        {
+            // a STEP file: a part importing it
+            doc = new CadDocument();
+            var data = File.ReadAllBytes(file);
+            doc.AddFile("imports/model.step", data);
+            doc.AddFeature(new ImportFeature { File = "imports/model.step", Sha256 = DocumentContainer.Hash(data) });
+        }
+        else doc = CadDocument.Load(file);
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var r = new Regenerator().Rebuild(doc);
+        Console.WriteLine($"  rebuild {sw.ElapsedMilliseconds} ms (last fallback: {Csg.LastFallbackReason})"); sw.Restart();
+        if (Environment.GetEnvironmentVariable("FC_NOCHECKS") == null)
+        {
+        foreach (var f in doc.Features) if (!r.Status[f.Id].Ok) Console.WriteLine($"  {f.Name}: {r.Status[f.Id].Error}");
+        if (Environment.GetEnvironmentVariable("FC_EDGES") is { } en)
+            foreach (var b in r.State.Bodies)
+                foreach (var e in b.Solid.Topology.Edges.Where(e => (e.FaceA + "|" + e.FaceB).Contains(en)))
+                    Console.WriteLine($"  display edge {e.FaceA} | {e.FaceB} ({e.Length:0.###} mm)");
+        foreach (var b in r.State.Bodies)
+            Console.WriteLine($"  body {b.Id}: native={b.Solid.Native != null} open={b.Solid.Topology.OpenHalfEdges} meshVolume={b.Mesh.Volume:0.###} exact={KernelTests.Vex(b.Solid):0.###}");
+        // FC_FACE=<face name>: tessellation diagnostics for that face
+        foreach (var b in Environment.GetEnvironmentVariable("FC_FACE") != null ? r.State.Bodies : new())
+        {
+            var fresh = SpryCad.Kernel.Native.NTess.ToSolid(b.Solid.Native!.Clone());
+            var deep = SpryCad.Kernel.Native.NBody.CopyFresh(b.Solid.Native!);
+            Console.WriteLine($"  re-tessellated clone: open={fresh.Topology.OpenHalfEdges}; rebuilt edges: open={SpryCad.Kernel.Native.NTess.ToSolid(deep).Topology.OpenHalfEdges}");
+            if (Environment.GetEnvironmentVariable("FC_FACE") is { } fn2)
+            {
+                var d2 = SpryCad.Kernel.Native.NBody.CopyFresh(b.Solid.Native!); d2.Link();
+                foreach (var e in d2.Edges) e.Samples(0.02);
+                foreach (var f in d2.Faces.Where(x => x.Tag.Name == fn2))
+                {
+                    var single = new SpryCad.Kernel.Native.NBody(); single.Faces.Add(f);
+                    var fac = SpryCad.Kernel.Native.NTess.Facets(single, 0.02);
+                    foreach (var c in f.Loops[0].Coedges.Where(c => c.Edge.Curve is SpryCad.Kernel.Native.NCircle))
+                    {
+                        var smp = c.Edge.Samples(0.02);
+                        bool On(Vec3 v) => smp.Any(p => Vec3.Distance(p, v) < 1e-9);
+                        var segs = new List<string>();
+                        foreach (var t in fac)
+                            foreach (var l in t.Loops)
+                                for (int i = 0; i < l.Length; i++)
+                                    if (On(l[i]) && On(l[(i + 1) % l.Length])) segs.Add($"{l[i].Y:0.###}>{l[(i + 1) % l.Length].Y:0.###}");
+                        var dm = SpryCad.Kernel.Native.NDomain.Of(f, 0.02);
+                        var idx = Triangulator.Triangulate(dm.Loops);
+                        var L0 = dm.Loops[0];
+                        int degen = 0;
+                        for (int q = 0; q + 2 < idx.Count; q += 3) { var A = L0[idx[q]]; var B = L0[idx[q + 1]]; var C = L0[idx[q + 2]]; if (Vec2.Cross(B - A, C - A) <= 0) degen++; }
+                        Console.WriteLine($"    triangulate: {L0.Length} pts -> {idx.Count / 3} tris ({degen} degenerate/inverted)");
+                        Console.WriteLine($"  face edge {c.Start.P}->{c.End.P} samples y: {string.Join(",", smp.Select(p => p.Y.ToString("0.###")))} | facet segs: {string.Join(" ", segs)}");
+                    }
+                }
+            }
+        }
+        if (Environment.GetEnvironmentVariable("FC_FACE") is { } fname)
+            foreach (var b in r.State.Bodies)
+            {
+                var nb = b.Solid.Native!; nb.Link();
+                var ids = new Dictionary<SpryCad.Kernel.Native.NEdge, int>(ReferenceEqualityComparer.Instance);
+                int Id(SpryCad.Kernel.Native.NEdge e) => ids.TryGetValue(e, out var i) ? i : ids[e] = ids.Count;
+                foreach (var f in nb.Faces.Where(x => x.Tag.Name == fname))
+                {
+                    Console.WriteLine($"face {f.Tag.Name} {f.Surface.Kind} sense={f.Sense} loops={f.Loops.Count}");
+                    var dom = SpryCad.Kernel.Native.NDomain.Of(f, 0.02);
+                    Console.WriteLine($"  uv [{dom.UMin:0.####},{dom.UMax:0.####}]x[{dom.VMin:0.####},{dom.VMax:0.####}] area {dom.SignedArea():0.######} spine [{f.Surface.Spine?.S0:0.###},{f.Surface.Spine?.S1:0.###}]");
+                    foreach (var dl in dom.Loops) Console.WriteLine("  domain: " + string.Join(" ", dl.Select(q => $"({q.X:0.###},{q.Y:0.###})")));
+                    var facets = new List<Face>();
+                    var single = new SpryCad.Kernel.Native.NBody(); single.Faces.Add(f);
+                    facets = SpryCad.Kernel.Native.NTess.Facets(single, 0.02);
+                    var verts = facets.SelectMany(x => x.Loops.SelectMany(l => l)).ToList();
+                    foreach (var c in f.Loops[0].Coedges.Where(c => c.Edge.Curve is SpryCad.Kernel.Native.NCircle))
+                    {
+                        var smp = c.Edge.Samples(0.02);
+                        Console.WriteLine($"  circle edge {c.Start.P}->{c.End.P}: {smp.Count} samples, in facets {smp.Count(p => verts.Any(v => Vec3.Distance(v, p) < 1e-9))}, T0={c.Edge.T0:0.####} T1={c.Edge.T1:0.####}");
+                    }
+                    foreach (var l in f.Loops)
+                        Console.WriteLine("  loop: " + string.Join(" ", l.Coedges.Select(c => $"e{Id(c.Edge)}{(c.Forward ? "+" : "-")}[{c.Edge.Curve.GetType().Name[1..]} {c.Start.P}->{c.End.P} uses={string.Join("/", c.Edge.Uses.Select(u => u.Face.Tag.Name))}]")));
+                }
+            }
+        foreach (var b in r.State.Bodies)
+        {
+            try
+            {
+                var brep = ExactBrep.Build(b.Solid);
+                Console.WriteLine($"  exact B-rep: {brep.Faces.Count} faces, warnings: {string.Join("; ", brep.Warnings)}");
+            }
+            catch (Exception ex) { Console.WriteLine("  exact B-rep failed: " + ex); }
+        }
+        }
+        Console.WriteLine($"  checks {sw.ElapsedMilliseconds} ms"); sw.Restart();
+        Prof.Reset(); Prof.Enabled = true;
+        if (Environment.GetEnvironmentVariable("FC_FIT") != null) BSplineSurface.Debug = m => { lock (Console.Out) Console.WriteLine("  " + m); };
+        using var fs = File.Create(step);
+        StepWriter.Write(fs, r.State.Bodies.Select(b => (b.Id, b.Solid)), Path.GetFileNameWithoutExtension(file));
+        if (StepWriter.LastError != null) Console.WriteLine("  STEP exact export failed: " + StepWriter.LastError);
+        Console.WriteLine($"  STEP export {sw.ElapsedMilliseconds} ms");
+        foreach (var (pn, pms, calls) in Prof.Results().OrderByDescending(x => x.ms).Take(8)) Console.WriteLine($"    {pn,-30} {pms,8:0} ms x{calls}");
+        Prof.Enabled = false;
+        return 0;
+    }
+}

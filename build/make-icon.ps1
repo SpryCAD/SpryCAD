@@ -1,8 +1,8 @@
 # Draws the SpryCAD icons at every size Windows uses, each an ICO of PNG frames:
-#   src\FeatherCad.App\Assets\SpryCAD.ico           the app: a white S drawn as a sketch spline, grips at its ends,
+#   src\SpryCad.App\Assets\SpryCAD.ico           the app: a white S drawn as a sketch spline, grips at its ends,
 #                                                   on the brand-teal tile
-#   src\FeatherCad.App\Assets\SpryCADPart.ico       .sprt parts: a page with a block, the app's tile as a badge
-#   src\FeatherCad.App\Assets\SpryCADAssembly.ico   .sasm assemblies: a page with two blocks put together
+#   src\SpryCad.App\Assets\SpryCADPart.ico       .sprt parts: a page with a block, the app's tile as a badge
+#   src\SpryCad.App\Assets\SpryCADAssembly.ico   .sasm assemblies: a page with two blocks put together
 # and their 256 px frames for Linux (installer\linux\sprycad.png, application-x-sprycad-part.png, -assembly.png).
 # Windows only (System.Drawing). Run from the repo root:
 #   build\make-icon.ps1 [-PreviewDir <folder for PNGs of every frame>]
@@ -128,7 +128,7 @@ function WriteIcon($frames, $ico, $png, $name) {
   Write-Host "$ico`n$png"
 }
 
-$assets = Join-Path $root 'src\FeatherCad.App\Assets'
+$assets = Join-Path $root 'src\SpryCad.App\Assets'
 $linux = Join-Path $root 'installer\linux'
 WriteIcon (Frames { param($g, $px) Logo $g $px }) (Join-Path $assets 'SpryCAD.ico') (Join-Path $linux 'sprycad.png') 'SpryCAD'
 WriteIcon (Frames { param($g, $px) FileIcon $g $px 'part' }) (Join-Path $assets 'SpryCADPart.ico') (Join-Path $linux 'application-x-sprycad-part.png') 'SpryCADPart'

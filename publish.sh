@@ -13,7 +13,7 @@ if [ ${#rids[@]} -eq 0 ]; then
 fi
 for rid in "${rids[@]}"; do
   echo "Publishing $rid ..."
-  dotnet publish src/FeatherCad.App/FeatherCad.App.csproj -c Release -r "$rid" --self-contained true \
+  dotnet publish src/SpryCad.App/SpryCad.App.csproj -c Release -r "$rid" --self-contained true \
     -p:PublishReadyToRun=true \
     -p:DebugType=none -o "publish/$rid"
 done
