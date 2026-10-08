@@ -138,11 +138,119 @@ public static class SketchSolver
 
     static double Wrap(double a) { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI) a += 2 * Math.PI; return a; }
 
+    /// <summary>
+    /// Offset: each copy at the distance from its original, on its side. Equations per copy point (two each, chosen
+    /// so they are never tangent to each other, which would hide the point's position from the analysis):
+    /// two lines meeting: the distance from each; a line and an arc meeting smoothly: the line distance and the
+    /// arc's radial line; meeting at an angle: the line distance and the radius; an open end: across from the
+    /// original's end (square to a line, on an arc's radial line). An arc copy shares its original's center, and
+    /// its end point takes its radius from the arc's own equal-radius equation, so it gets one equation less.
+    /// </summary>
+    static void AddOffset(System s, SkConstraint c)
+    {
+        var sk = s.Sketch; var r = c.Refs; int id = c.Id; var d = c.Value;
+        var sides = c.Sides ?? Array.Empty<int>();
+        // per copy point: its original point and the pairs it belongs to
+        var at = new Dictionary<int, (int orig, List<(SkEntity o, SkEntity q, int side)> pairs)>();
+        void Map(int q, int o, SkEntity oe, SkEntity qe, int side)
+        {
+            if (!at.TryGetValue(q, out var v)) at[q] = v = (o, new());
+            v.pairs.Add((oe, qe, side));
+        }
+        for (int k = 0; k + 1 < r.Length; k += 2)
+        {
+            int side = k / 2 < sides.Length ? sides[k / 2] : 1;
+            var o = sk.Entity(r[k]); var q = sk.Entity(r[k + 1]);
+            switch (o, q)
+            {
+                case (SkLine ol, SkLine ql): Map(ql.P1, ol.P1, ol, ql, side); Map(ql.P2, ol.P2, ol, ql, side); break;
+                case (SkArc oa, SkArc qa): Map(qa.Start, oa.Start, oa, qa, side); Map(qa.End, oa.End, oa, qa, side); break;
+                case (SkCircle oc, SkCircle qc):
+                    {
+                        var ro = s.RRefs[oc.Id]; var rq = s.RRefs[qc.Id]; var sd = side;
+                        AddEqV(s, id, x => rq.Get(x) - (ro.Get(x) + sd * d), Array.Empty<PRef>(), new[] { ro, rq });
+                        break;
+                    }
+            }
+        }
+        // the equations, by kind
+        void LineDist(int qp, SkLine o, int side)
+        {
+            var a = s.PRefs[o.P1]; var b = s.PRefs[o.P2]; var q = s.PRefs[qp];
+            AddEq(s, id, x => { var u = b.Get(x) - a.Get(x); return Vec2.Cross(u, q.Get(x) - a.Get(x)) / Math.Max(u.Length, 1e-12) - side * d; }, a, b, q);
+        }
+        void Square(int qp, int op, SkLine o)
+        {
+            var a = s.PRefs[o.P1]; var b = s.PRefs[o.P2]; var q = s.PRefs[qp]; var p = s.PRefs[op];
+            AddEq(s, id, x => { var u = b.Get(x) - a.Get(x); return Vec2.Dot(u, q.Get(x) - p.Get(x)) / Math.Max(u.Length, 1e-12); }, a, b, q, p);
+        }
+        void Radius(int qp, SkArc o, int side)
+        {
+            var cen = s.PRefs[o.Center]; var st = s.PRefs[o.Start]; var q = s.PRefs[qp];
+            AddEq(s, id, x => (q.Get(x) - cen.Get(x)).Length - ((st.Get(x) - cen.Get(x)).Length + side * d), cen, st, q);
+        }
+        void Radial(int qp, int op, SkArc o)
+        {
+            var cen = s.PRefs[o.Center]; var q = s.PRefs[qp]; var p = s.PRefs[op];
+            AddEq(s, id, x => { var w = p.Get(x) - cen.Get(x); return Vec2.Cross(q.Get(x) - cen.Get(x), w) / Math.Max(w.Length, 1e-12); }, cen, q, p);
+        }
+        // smooth joins, judged on the originals as they are
+        bool Smooth(SkEntity e1, SkEntity e2, int op)
+        {
+            var p = sk.P(op);
+            Vec2 Normal(SkEntity e) => e switch
+            {
+                SkLine l => (sk.P(l.P2) - sk.P(l.P1)).Normalized.Perp,
+                SkArc a => (p - sk.P(a.Center)).Normalized,
+                _ => default,
+            };
+            return Math.Abs(Vec2.Cross(Normal(e1), Normal(e2))) < 1e-6;
+        }
+        foreach (var (qp, (op, pairs)) in at)
+        {
+            var lines = pairs.Where(x => x.o is SkLine).ToList();
+            var arcEnds = pairs.Where(x => x.q is SkArc qa && qa.End == qp).ToList();
+            var arcStarts = pairs.Where(x => x.q is SkArc qa && qa.Start == qp).ToList();
+            if (arcEnds.Count > 0)
+            {
+                // the arc's own equation sets this end's radius: one more
+                var a = (SkArc)arcEnds[0].o;
+                if (lines.Count > 0) { if (Smooth(lines[0].o, a, op)) Radial(qp, op, a); else LineDist(qp, (SkLine)lines[0].o, lines[0].side); }
+                else if (arcStarts.Count > 0) { var b = (SkArc)arcStarts[0].o; if (Smooth(a, b, op)) Radial(qp, op, a); else Radius(qp, b, arcStarts[0].side); }
+                else if (arcEnds.Count == 1) Radial(qp, op, a);
+            }
+            else if (lines.Count >= 2)
+            {
+                LineDist(qp, (SkLine)lines[0].o, lines[0].side);
+                // two lines in line: their distances agree, so square across instead
+                if (Smooth(lines[0].o, lines[1].o, op)) Square(qp, op, (SkLine)lines[0].o);
+                else LineDist(qp, (SkLine)lines[1].o, lines[1].side);
+            }
+            else if (lines.Count == 1 && arcStarts.Count >= 1)
+            {
+                var l = (SkLine)lines[0].o; var a = (SkArc)arcStarts[0].o;
+                LineDist(qp, l, lines[0].side);
+                if (Smooth(l, a, op)) Radial(qp, op, a); else Radius(qp, a, arcStarts[0].side);
+            }
+            else if (lines.Count == 1) { LineDist(qp, (SkLine)lines[0].o, lines[0].side); Square(qp, op, (SkLine)lines[0].o); }
+            else if (arcStarts.Count >= 1)
+            {
+                var a = (SkArc)arcStarts[0].o;
+                Radius(qp, a, arcStarts[0].side);
+                if (arcStarts.Count >= 2 && !Smooth(a, arcStarts[1].o, op)) Radius(qp, (SkArc)arcStarts[1].o, arcStarts[1].side);
+                else Radial(qp, op, a);
+            }
+        }
+    }
+
     static void AddConstraint(System s, SkConstraint c)
     {
         var r = c.Refs; int id = c.Id;
         switch (c.Type)
         {
+            case CType.Offset:
+                AddOffset(s, c);
+                break;
             case CType.Horizontal:
             case CType.Vertical:
                 {
@@ -649,6 +757,15 @@ public static class SketchSolver
                     Vec2 a, b;
                     if (r.Length == 1) (a, b) = L(r[0]); else { a = P(r[0]); b = P(r[1]); }
                     return Math.Abs(c.Type == CType.HDistance ? b.X - a.X : b.Y - a.Y);
+                }
+            case CType.Offset:
+                {
+                    // the first pair: a line's copy from its original's line, a curve's radius difference
+                    if (r.Length < 2) return 0;
+                    var o = sk.Entity(r[0]); var q = sk.Entity(r[1]);
+                    if (o is SkLine && q is SkLine ql) { var (a, b) = L(r[0]); var d = b - a; return Math.Abs(Vec2.Cross(d, P(ql.P1) - a)) / d.Length; }
+                    if (o != null && q != null) return Math.Abs(sk.Radius(q) - sk.Radius(o));
+                    return 0;
                 }
             case CType.Radius: return sk.Radius(sk.Entity(r[0])!);
             case CType.Diameter: return 2 * sk.Radius(sk.Entity(r[0])!);

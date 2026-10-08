@@ -100,6 +100,7 @@ public enum CType
     HDistance, VDistance,           // p,p
     Radius, Diameter,               // circle/arc
     Angle,                          // line,line
+    Offset,                         // original, copy, original, copy, ... (Sides: the side of each copy); Value: the distance
 }
 
 public sealed class SkConstraint
@@ -119,6 +120,8 @@ public sealed class SkConstraint
     public int Flip { get; set; }
     /// <summary>Reference (driven) dimension: displays the value but does not constrain.</summary>
     public bool Driven { get; set; }
+    /// <summary>Offset: the side of each copy (+1 / -1; for a line, left of its direction; for an arc or circle, outward).</summary>
+    public int[]? Sides { get; set; }
     /// <summary>Dimension label offset in sketch coordinates relative to the anchor.</summary>
     public double LabelX { get; set; }
     public double LabelY { get; set; }
@@ -132,8 +135,8 @@ public sealed class SkConstraint
     /// <summary>Optional user name (e.g. D1) usable in equations as D1@Sketch1.</summary>
     public string? Name { get; set; }
 
-    [JsonIgnore] public bool IsDimension => Type is CType.Distance or CType.HDistance or CType.VDistance or CType.Radius or CType.Diameter or CType.Angle;
-    public SkConstraint Clone() { var c = (SkConstraint)MemberwiseClone(); c.Refs = (int[])Refs.Clone(); return c; }
+    [JsonIgnore] public bool IsDimension => Type is CType.Distance or CType.HDistance or CType.VDistance or CType.Radius or CType.Diameter or CType.Angle or CType.Offset;
+    public SkConstraint Clone() { var c = (SkConstraint)MemberwiseClone(); c.Refs = (int[])Refs.Clone(); c.Sides = (int[]?)Sides?.Clone(); return c; }
 }
 
 public enum SketchStatus { UnderDefined, FullyDefined, OverDefined, Failed }

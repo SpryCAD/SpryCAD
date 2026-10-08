@@ -305,6 +305,7 @@ public partial class MainWindow
                 Cmd("trim", "Trim\nEntities", () => SetSketchTool(SketchTool.Trim), SketchTool.Trim);
                 Cmd("sketchfillet", "Sketch\nFillet", () => { if (_sketch == null) { SetSketchTool(SketchTool.Fillet); return; } _sketch.StartFillet(); UpdateToolButtons(); BuildSketchPage(); }, SketchTool.Fillet);
                 Cmd("mirror", "Mirror\nEntities", MirrorEntities);
+                Cmd("offset", "Offset\nEntities", OffsetEntities);
                 Cmd("convert", "Convert\nEntities", ConvertEntities);
                 Cmd("construction", "Construction\nGeometry", ToggleConstruction);
                 Cmd("normalto", "Normal\nTo", NormalTo);
@@ -377,6 +378,7 @@ public partial class MainWindow
         ["Convert Entities"] = "Projects the selected model edges into the sketch.",
         ["Trim Entities"] = "Trims sketch entities at their intersections.",
         ["Sketch Fillet"] = "Rounds the corner where two lines meet. The lines stay as construction geometry (the virtual sharp); deleting the arc restores the corner.",
+        ["Offset Entities"] = "Offsets the selected sketch chain (lines, arcs, circles) by a distance. The copy follows the original; the distance is a dimension.",
         ["Mirror Entities"] = "Mirrors the selected entities about the selected centerline. The copies stay mirrored.",
         ["Construction Geometry"] = "Toggles the selected sketch entities to construction.",
         ["Measure"] = "Distance, angle, radius, length and area of the faces, edges and vertices you click.",

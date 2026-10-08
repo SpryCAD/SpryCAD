@@ -83,6 +83,172 @@ public static class SketchOps
     }
 
     /// <summary>
+    /// The chain through the given entities (lines and arcs end to end, as SolidWorks' "select chain"): grown along
+    /// shared end points while exactly two chain entities meet there. Construction lines are left out.
+    /// </summary>
+    public static List<int> Chain(Sketch sk, IEnumerable<int> start)
+    {
+        var set = new HashSet<int>(start.Where(id => sk.Entity(id) is SkLine or SkArc));
+        bool Joinable(SkEntity e) => e is SkLine or SkArc && !e.Construction;
+        IEnumerable<int> Ends(SkEntity e) => e switch { SkLine l => new[] { l.P1, l.P2 }, SkArc a => new[] { a.Start, a.End }, _ => Array.Empty<int>() };
+        for (bool grew = true; grew;)
+        {
+            grew = false;
+            foreach (var id in set.ToList())
+                foreach (var p in Ends(sk.Entity(id)!))
+                {
+                    var there = sk.EntitiesUsing(p).Where(e => Joinable(e) && Ends(e).Contains(p)).ToList();
+                    if (there.Count == 2)
+                        foreach (var e in there) if (set.Add(e.Id)) grew = true;
+                }
+        }
+        return set.Concat(start.Where(id => sk.Entity(id) is SkCircle)).Distinct().ToList();
+    }
+
+    /// <summary>
+    /// Offsets entities (lines and arcs end to end, and circles) by <paramref name="d"/>, associatively: the copies
+    /// are tied to the originals by one Offset relation whose value is the distance (a dimension), so they follow
+    /// the originals. A closed chain goes outward, an open one to the left of its direction from its first entity;
+    /// <paramref name="reverse"/> takes the other side. Returns the Offset constraint, or why it cannot be done.
+    /// </summary>
+    public static (SkConstraint? offset, string? error) Offset(Sketch sk, IEnumerable<int> entityIds, double d, bool reverse = false)
+    {
+        if (!(d > 0)) return (null, "Offset: the distance must be more than 0.");
+        var ents = entityIds.Distinct().Select(sk.Entity).OfType<SkEntity>().Where(e => e is SkLine or SkArc or SkCircle).ToList();
+        if (ents.Count == 0) return (null, "Offset: select lines, arcs or circles.");
+        var circles = ents.OfType<SkCircle>().ToList();
+        var curves = ents.Where(e => e is not SkCircle).ToList();
+        IEnumerable<int> Ends(SkEntity e) => e switch { SkLine l => new[] { l.P1, l.P2 }, SkArc a => new[] { a.Start, a.End }, _ => Array.Empty<int>() };
+        // order the chain: start at an end (a point only one of them uses), else anywhere (closed)
+        var use = curves.SelectMany(Ends).GroupBy(p => p).ToDictionary(g => g.Key, g => g.Count());
+        if (use.Values.Any(n => n > 2)) return (null, "Offset: the selection branches; select a single chain of lines and arcs.");
+        var order = new List<(SkEntity e, bool forward)>();
+        if (curves.Count > 0)
+        {
+            var closed = use.Values.All(n => n == 2);
+            var startEnt = closed ? curves[0] : curves.First(e => Ends(e).Any(p => use[p] == 1));
+            var entry = closed ? Ends(startEnt).First() : Ends(startEnt).First(p => use[p] == 1);
+            var left = new HashSet<SkEntity>(curves);
+            var cur = startEnt; var from = entry;
+            while (cur != null)
+            {
+                left.Remove(cur);
+                var ends = Ends(cur).ToArray();
+                order.Add((cur, ends[0] == from));
+                var to = ends[0] == from ? ends[1] : ends[0];
+                cur = left.FirstOrDefault(e => Ends(e).Contains(to));
+                from = to;
+            }
+            if (left.Count > 0) return (null, "Offset: the selection is not one connected chain; select a single chain of lines and arcs.");
+        }
+
+        // the side: left of the direction of travel; a closed chain outward (to the right when it runs counter-clockwise)
+        int global = 1;
+        if (curves.Count > 0 && use.Values.All(n => n == 2))
+        {
+            double area = 0;
+            foreach (var (e, fwd) in order)
+            {
+                var pts = Samples(sk, e);
+                if (!fwd) pts.Reverse();
+                for (int i = 0; i + 1 < pts.Count; i++) area += Vec2.Cross(pts[i], pts[i + 1]);
+            }
+            global = area > 0 ? -1 : 1;
+        }
+        if (reverse) global = -global;
+        // per entity: lines by their own direction (left +), arcs and circles by radius (outward +)
+        int SideOf(SkEntity e, bool fwd) => e switch
+        {
+            SkLine => fwd ? global : -global,
+            SkArc => fwd ? -global : global, // left of travel along a counter-clockwise arc is toward its center
+            _ => reverse ? -1 : 1,
+        };
+        // the left normal of travel at a point of an entity, for the first guess of the copies' positions
+        Vec2 LeftNormal(SkEntity e, bool fwd, Vec2 p) => e switch
+        {
+            SkLine l => (sk.P(l.P2) - sk.P(l.P1)).Normalized.Perp * (fwd ? 1 : -1),
+            SkArc a => (sk.P(a.Center) - p).Normalized * (fwd ? 1 : -1),
+            _ => default,
+        };
+
+        // copy points: each original end point once, placed near where it will settle (the solver finishes it)
+        var copyOf = new Dictionary<int, int>();
+        int CopyPoint(int p)
+        {
+            if (copyOf.TryGetValue(p, out var q)) return q;
+            var pos = sk.P(p);
+            var normals = order.Where(x => Ends(x.e).Contains(p)).Select(x => LeftNormal(x.e, x.forward, pos) * global).ToList();
+            Vec2 at;
+            if (normals.Count == 2)
+            {
+                var dot = Vec2.Dot(normals[0], normals[1]);
+                at = dot > -0.95 ? pos + (normals[0] + normals[1]) * (d / (1 + dot)) : pos + normals[0] * d;
+            }
+            else at = pos + normals[0] * d;
+            return copyOf[p] = sk.AddPoint(at).Id;
+        }
+        var refs = new List<int>(); var sides = new List<int>();
+        foreach (var (e, fwd) in order)
+        {
+            SkEntity copy = e switch
+            {
+                SkLine l => new SkLine { P1 = CopyPoint(l.P1), P2 = CopyPoint(l.P2) },
+                SkArc a => new SkArc { Center = a.Center, Start = CopyPoint(a.Start), End = CopyPoint(a.End) },
+                _ => null!,
+            };
+            sk.Add(copy);
+            refs.Add(e.Id); refs.Add(copy.Id); sides.Add(SideOf(e, fwd));
+        }
+        foreach (var ci in circles)
+        {
+            var side = SideOf(ci, true);
+            if (ci.R + side * d <= 0) return (null, $"Offset: a circle of radius {Expr.Format(ci.R)} cannot be offset {Expr.Format(d)} inward.");
+            var copy = sk.Add(new SkCircle { Center = ci.Center, R = ci.R + side * d });
+            refs.Add(ci.Id); refs.Add(copy.Id); sides.Add(side);
+        }
+        var c = new SkConstraint { Id = sk.NewId(), Type = CType.Offset, Refs = refs.ToArray(), Sides = sides.ToArray(), Value = d, Expr = Expr.Format(d) };
+        c.Name = "D" + (sk.Constraints.Count(x => x.IsDimension) + 1);
+        sk.Constraints.Add(c);
+        return (c, null);
+    }
+
+    /// <summary>Reverses an offset: its copies go to the other side.</summary>
+    public static void ReverseOffset(Sketch sk, SkConstraint offset)
+    {
+        if (offset.Sides == null) return;
+        for (int i = 0; i < offset.Sides.Length; i++) offset.Sides[i] = -offset.Sides[i];
+        // move the copies across (each copy point once, mirrored through its original), so the solver starts near
+        // the answer
+        var flip = new Dictionary<int, int>();
+        for (int k = 0; k + 1 < offset.Refs.Length; k += 2)
+        {
+            var o = sk.Entity(offset.Refs[k]); var q = sk.Entity(offset.Refs[k + 1]);
+            switch (o, q)
+            {
+                case (SkCircle oc, SkCircle qc): qc.R = Math.Max(1e-9, 2 * oc.R - qc.R); break;
+                case (SkLine ol, SkLine ql): flip[ql.P1] = ol.P1; flip[ql.P2] = ol.P2; break;
+                case (SkArc oa, SkArc qa): flip[qa.Start] = oa.Start; flip[qa.End] = oa.End; break;
+            }
+        }
+        foreach (var (qp, op) in flip) if (sk.Point(qp) is { } pt) pt.P = sk.P(op) * 2 - pt.P;
+    }
+
+    /// <summary>Points along a line or arc, start to end (for the area of a closed chain).</summary>
+    static List<Vec2> Samples(Sketch sk, SkEntity e)
+    {
+        if (e is SkLine l) return new() { sk.P(l.P1), sk.P(l.P2) };
+        if (e is SkArc a)
+        {
+            var c = sk.P(a.Center); var s = sk.P(a.Start) - c; var en = sk.P(a.End) - c;
+            var a0 = Math.Atan2(s.Y, s.X); var a1 = Math.Atan2(en.Y, en.X);
+            while (a1 <= a0) a1 += 2 * Math.PI;
+            var r = s.Length;
+            return Enumerable.Range(0, 17).Select(i => c + Vec2.FromAngle(a0 + (a1 - a0) * i / 16, r)).ToList();
+        }
+        return new();
+    }
+
+    /// <summary>
     /// Mirrors entities about a line: copies of lines, arcs, circles and points on the other side, each copied
     /// point tied to its original by a symmetric relation (and circles by equal radii), so they stay mirrored.
     /// Points on the mirror line are shared rather than copied (kept on it), so a half profile closes. Returns

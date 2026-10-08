@@ -372,6 +372,7 @@ public partial class MainWindow
                     vb.LostFocus += (_, _) => Apply();
                     page.ButtonRow(par, "Edit value…", () => ed.OpenModifyBox(dim));
                     page.Check(par, "Driven (reference)", () => dim.Driven, v => { dim.Driven = v; ed.Resolve(); Viewport.Redraw(); });
+                    if (dim.Type == CType.Offset) page.ButtonRow(par, "Reverse direction", () => { ed.ReverseOffset(dim); BuildSketchPage(); }, "offset");
                 }
             }
             page.ButtonRow(opt, "Delete", () => { ed.DeleteSelection(); BuildSketchPage(); });
@@ -417,6 +418,14 @@ public partial class MainWindow
         if (edges.Count == 0) { Status("Select model edges or faces first (click them in the graphics area)."); return; }
         _sketch.ConvertEdges(edges.Distinct(), Viewport.Bodies);
         Selection.Clear();
+    }
+
+    void OffsetEntities()
+    {
+        if (_sketch == null) { Status("Offset Entities works in a sketch: edit or start a sketch first."); return; }
+        var err = _sketch.OffsetSelection();
+        Status(err ?? "Offset made: type the distance (Enter). To put it on the other side, select its dimension and click Reverse direction.");
+        BuildSketchPage();
     }
 
     void MirrorEntities()

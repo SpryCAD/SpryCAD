@@ -1651,6 +1651,7 @@ public sealed partial class SketchEditor : IViewportMode
     /// <summary>The two measured points of a linear dimension.</summary>
     (Vec2 a, Vec2 b) DimPoints(SkConstraint c)
     {
+        if (c.Type == CType.Offset) return OffsetPoints(c);
         var r = c.Refs;
         if (r.Length == 1) return LinePts(r[0]);
         bool p0 = Sk.Point(r[0]) != null, p1 = Sk.Point(r[1]) != null;
@@ -1703,6 +1704,7 @@ public sealed partial class SketchEditor : IViewportMode
                 case CType.Distance:
                 case CType.HDistance:
                 case CType.VDistance:
+                case CType.Offset:
                     {
                         var (a, b) = DimPoints(c);
                         Vec2 dir, nrm;

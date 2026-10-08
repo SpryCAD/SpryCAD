@@ -212,6 +212,70 @@ static class CoreTests
             t.Near(Volume(all.Clone()), 80 * 40 * 20, 1);
         });
 
+        t.Test("Sketch offset: lines and arcs, outward and inward, follow the originals and the distance", () =>
+        {
+            double Ring(Sketch sk)
+            {
+                var doc = new CadDocument();
+                var s = doc.AddFeature(new SketchFeature { Plane = PlaneRef.Front, Sketch = sk.Clone() });
+                doc.AddFeature(new ExtrudeFeature { SketchId = s.Id, Depth = "10" });
+                var r = new Regenerator().Rebuild(doc);
+                t.True(r.Status.Values.All(x => x.Ok), "rebuild: " + string.Join("; ", r.Status.Values.Select(x => x.Error)));
+                return r.State.Bodies.Sum(b => b.Mesh.Volume);
+            }
+
+            // a rectangle outward by 5: a 90 × 50 outline around the 80 × 40; fully defined; follows the width
+            var sk = Rect(80, 40);
+            var (off, err) = SketchOps.Offset(sk, SketchOps.Chain(sk, new[] { sk.Entities[0].Id }), 5);
+            t.True(off != null, "offset: " + err);
+            var res = SketchSolver.Solve(sk);
+            t.True(res.Status == SketchStatus.FullyDefined, "rectangle offset: fully defined, not over: " + res.Status);
+            t.Near(Ring(sk), (90 * 50 - 80 * 40) * 10, 1);
+            t.True(sk.Points.Any(p => Math.Abs(p.X + 5) < 1e-6 && Math.Abs(p.Y + 5) < 1e-6), "outer corner at (-5, -5)");
+            var width = sk.Constraints.First(c => c.Type == CType.Distance && Math.Abs(c.Value - 80) < 1e-9);
+            width.Value = 100; width.Expr = "100";
+            SketchSolver.Solve(sk);
+            t.True(sk.Points.Any(p => Math.Abs(p.X - 105) < 1e-6 && Math.Abs(p.Y + 5) < 1e-6), "the offset follows the width");
+            off!.Value = 8; off.Expr = "8";
+            SketchSolver.Solve(sk);
+            t.True(sk.Points.Any(p => Math.Abs(p.X - 108) < 1e-6 && Math.Abs(p.Y + 8) < 1e-6), "the offset distance drives it");
+            t.Near(SketchSolver.Measure(sk, off), 8, 1e-9);
+            // reversed: inside
+            SketchOps.ReverseOffset(sk, off);
+            t.True(SketchSolver.Solve(sk).Status == SketchStatus.FullyDefined, "reversed: fully defined");
+            t.True(sk.Points.Any(p => Math.Abs(p.X - 8) < 1e-6 && Math.Abs(p.Y - 8) < 1e-6), "inner corner at (8, 8)");
+            t.Near(Ring(sk), (100 * 40 - 84 * 24) * 10, 1);
+
+            // a filleted rectangle (lines and tangent arcs) outward by 5: arcs concentric, radius 15
+            var rr = Rect(80, 40);
+            foreach (var cid in rr.Points.Select(p => p.Id).Where(id => rr.EntitiesUsing(id).Count() == 2).ToList()) SketchOps.Fillet(rr, cid, 10);
+            var arcs = rr.Entities.OfType<SkArc>().Select(a => a.Id).ToList();
+            var (off2, err2) = SketchOps.Offset(rr, SketchOps.Chain(rr, new[] { arcs[0] }), 5);
+            t.True(off2 != null, "offset of a rounded rectangle: " + err2);
+            var res2 = SketchSolver.Solve(rr);
+            t.True(res2.Status == SketchStatus.FullyDefined, "rounded offset: fully defined, not over: " + res2.Status);
+            t.True(rr.Entities.OfType<SkArc>().Count(a => !arcs.Contains(a.Id) && Math.Abs(rr.ArcRadius(a) - 15) < 1e-6) == 4, "four arcs of radius 15");
+            double Rounded(double w, double h, double r) => w * h - (4 - Math.PI) * r * r;
+            t.Near(Ring(rr), (Rounded(90, 50, 15) - Rounded(80, 40, 10)) * 10, 5);
+
+            // an open chain (an L) to the left: square ends; and a circle outward
+            var open = new Sketch();
+            var a0 = open.AddPoint(new Vec2(0, 0), fix: true); var a1 = open.AddPoint(new Vec2(50, 0), fix: true); var a2 = open.AddPoint(new Vec2(50, 30), fix: true);
+            var la = open.Add(new SkLine { P1 = a0.Id, P2 = a1.Id }); open.Add(new SkLine { P1 = a1.Id, P2 = a2.Id });
+            var (off3, err3) = SketchOps.Offset(open, SketchOps.Chain(open, new[] { la.Id }), 4);
+            t.True(off3 != null, "open chain: " + err3);
+            t.True(SketchSolver.Solve(open).Status == SketchStatus.FullyDefined, "open offset fully defined");
+            // left of travel from (0,0) toward (50,0) is up: the copy runs (0,4) → (46,4) → (46,30)
+            foreach (var want in new[] { new Vec2(0, 4), new Vec2(46, 4), new Vec2(46, 30) })
+                t.True(open.Points.Any(p => Vec2.Distance(p.P, want) < 1e-6), $"open offset point at {want.X}, {want.Y}");
+            var circ = new Sketch();
+            var cc = circ.Add(new SkCircle { Center = Sketch.OriginId, R = 10 });
+            circ.AddConstraint(CType.Radius, cc.Id).Value = 10;
+            var (off4, _) = SketchOps.Offset(circ, new[] { cc.Id }, 3);
+            SketchSolver.Solve(circ);
+            t.True(circ.Entities.OfType<SkCircle>().Any(c => c.Id != cc.Id && Math.Abs(c.R - 13) < 1e-9), "circle offset outward to R 13");
+        });
+
         t.Test("Sketch mirror: a half profile about a centerline closes, and the copy follows the original", () =>
         {
             var sk = new Sketch();

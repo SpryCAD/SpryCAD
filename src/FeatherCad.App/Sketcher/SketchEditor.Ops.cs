@@ -1,6 +1,7 @@
 using FeatherCad.Core;
 using FeatherCad.App.Viewport;
 using FeatherCad.Core.Sketching;
+using FeatherCad.Kernel;
 
 namespace FeatherCad.App.Sketcher;
 
@@ -76,6 +77,71 @@ public sealed partial class SketchEditor
         Resolve();
         Message?.Invoke(error ?? $"Filleted {done} corner{(done == 1 ? "" : "s")} (R {Expr.Format(FilletRadius)}). The original lines remain as construction geometry; delete the arc to restore the corner.");
         _vp.Redraw();
+    }
+
+    /// <summary>The distance Offset Entities uses (the last one entered).</summary>
+    public double OffsetDistance { get; set; } = 5;
+
+    /// <summary>
+    /// Offset Entities: offsets the selected lines, arcs and circles (and the chain they belong to), associatively,
+    /// then opens the distance for typing. Null when done, else why not.
+    /// </summary>
+    public string? OffsetSelection()
+    {
+        var ids = SelectedEntities.Where(e => e is SkLine or SkArc or SkCircle).Select(e => e.Id).ToList();
+        if (ids.Count == 0) return "Offset Entities: select a line, arc or circle (the chain it is part of is offset).";
+        Snapshot();
+        var (off, err) = SketchOps.Offset(Sk, SketchOps.Chain(Sk, ids), OffsetDistance);
+        if (off == null) { Undo(); _redo.Clear(); return err; }
+        Selected.Clear(); Selected.Add(new SkRef(SkRefKind.Constraint, off.Id));
+        SelectionChanged?.Invoke();
+        Resolve();
+        _vp.Redraw();
+        OpenModifyBox(off); // type the distance straight away
+        return null;
+    }
+
+    /// <summary>Puts an offset's copies on the other side.</summary>
+    public void ReverseOffset(SkConstraint offset)
+    {
+        Snapshot();
+        SketchOps.ReverseOffset(Sk, offset);
+        Resolve();
+        _vp.Redraw();
+    }
+
+    /// <summary>
+    /// Where an Offset dimension measures: from the middle of the first original to the copy, square across (a
+    /// line: to the copy line; an arc or circle: along its radius).
+    /// </summary>
+    (Vec2 a, Vec2 b) OffsetPoints(SkConstraint c)
+    {
+        if (c.Refs.Length < 2) return (Vec2.Zero, Vec2.Zero);
+        var o = Sk.Entity(c.Refs[0]); var q = Sk.Entity(c.Refs[1]);
+        switch (o, q)
+        {
+            case (SkLine ol, SkLine ql):
+                {
+                    var a = (Sk.P(ol.P1) + Sk.P(ol.P2)) * 0.5;
+                    var q1 = Sk.P(ql.P1); var d = Sk.P(ql.P2) - q1;
+                    return (a, d.LengthSq < 1e-18 ? q1 : q1 + d * (Vec2.Dot(a - q1, d) / d.LengthSq));
+                }
+            case (SkArc oa, SkArc qa):
+                {
+                    var cen = Sk.P(oa.Center);
+                    var s = Sk.P(oa.Start) - cen; var e = Sk.P(oa.End) - cen;
+                    var a0 = Math.Atan2(s.Y, s.X); var a1 = Math.Atan2(e.Y, e.X);
+                    while (a1 <= a0) a1 += 2 * Math.PI;
+                    var u = Vec2.FromAngle((a0 + a1) / 2, 1);
+                    return (cen + u * Sk.ArcRadius(oa), cen + u * Sk.ArcRadius(qa));
+                }
+            case (SkCircle oc, SkCircle qc):
+                {
+                    var cen = Sk.P(oc.Center); var u = new Vec2(Math.Sqrt(0.5), Math.Sqrt(0.5));
+                    return (cen + u * oc.R, cen + u * qc.R);
+                }
+        }
+        return (Vec2.Zero, Vec2.Zero);
     }
 
     /// <summary>

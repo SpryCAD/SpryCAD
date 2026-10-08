@@ -65,6 +65,8 @@ public static class Icons
         ["slot"] = ("M7 7h10a5 5 0 0 1 0 10H7a5 5 0 0 1 0-10z", "M7 12h10"),
         ["dimension"] = ("M3 6v12 M21 6v12 M3 12h18 M6 9l-3 3 3 3 M18 9l3 3-3 3", null),
         ["trim"] = ("M6 6l12 12 M18 6L6 18", "M3 12h18"),
+        // offset entities: a shape and a copy of it a little way out
+        ["offset"] = ("M6 18V10a4 4 0 0 1 4-4h8", "M2 18V10a8 8 0 0 1 8-8h8"),
         // sketch fillet: two lines and the rounded corner between them
         ["sketchfillet"] = ("M4 20V12 M12 4h8", "M4 12a8 8 0 0 1 8-8"),
         ["convert"] = ("M3 3h12v12H3z", "M10 10l11 11 M21 15v6h-6"),

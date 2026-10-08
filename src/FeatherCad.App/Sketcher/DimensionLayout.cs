@@ -66,7 +66,7 @@ public sealed partial class SketchEditor
                 var h = new Vec2(s.Width / 2 * px, s.Height / 2 * px);
                 box.Add(Frame.ToWorld(at - h)); box.Add(Frame.ToWorld(at + h));
                 box.Add(Frame.ToWorld(new Vec2(at.X - h.X, at.Y + h.Y))); box.Add(Frame.ToWorld(new Vec2(at.X + h.X, at.Y - h.Y)));
-                if (c.Type is CType.Distance or CType.HDistance or CType.VDistance)
+                if (c.Type is CType.Distance or CType.HDistance or CType.VDistance or CType.Offset)
                     try { var (a, b) = DimPoints(c); box.Add(Frame.ToWorld(a)); box.Add(Frame.ToWorld(b)); } catch { /* deleted */ }
             }
             return box.IsEmpty ? null : box;
@@ -198,7 +198,7 @@ public sealed partial class SketchEditor
         {
             return c.Type switch
             {
-                CType.Distance or CType.HDistance or CType.VDistance => (0, (DimPoints(c).b - DimPoints(c).a).Length),
+                CType.Distance or CType.HDistance or CType.VDistance or CType.Offset => (0, (DimPoints(c).b - DimPoints(c).a).Length),
                 CType.Radius or CType.Diameter => (1, Sk.Radius(Sk.Entity(c.Refs[0])!)),
                 _ => (2, 0),
             };
@@ -240,7 +240,7 @@ public sealed partial class SketchEditor
             foreach (var id in e.PointIds) if (Sk.Point(id) is { } pt) Add(pt.P);
         }
         foreach (var c in dims)
-            if (c.Type is CType.Distance or CType.HDistance or CType.VDistance)
+            if (c.Type is CType.Distance or CType.HDistance or CType.VDistance or CType.Offset)
                 try { var (p, q) = DimPoints(c); Add(p); Add(q); } catch { /* deleted mid-operation */ }
         if (x0 > x1) return null;
         var sketchSize = Math.Max(x1 - x0, y1 - y0);
@@ -299,6 +299,7 @@ public sealed partial class SketchEditor
                 case CType.Distance:
                 case CType.HDistance:
                 case CType.VDistance:
+                case CType.Offset:
                     {
                         var (a, b) = DimPoints(c);
                         // the dimension line runs along dir (as DrawDimension draws it), offset along nrm
