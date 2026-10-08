@@ -31,7 +31,7 @@ public static class ProfileExtractor
         var edges = new List<GEdge>();
         foreach (var e in sk.Entities)
         {
-            if (e.Construction || e.IsReference || (excludeEntities?.Contains(e.Id) ?? false)) continue;
+            if (e.Construction || e.IsReference || e.Dangling || (excludeEntities?.Contains(e.Id) ?? false)) continue;
             switch (e)
             {
                 case SkCircle c:

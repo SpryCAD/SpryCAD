@@ -1447,6 +1447,7 @@ public sealed partial class SketchEditor : IViewportMode
                 continue;
             }
             if (e is SkPointEntity pe) { SketchDrawing.PointMark(g, f, Sk.P(pe.P), c, px, 3.5); continue; }
+            if (e.Dangling && (c == Under || c == Full)) c = SketchDrawing.Dangling; // hovered or selected: as anything else
             foreach (var (a, b) in SketchDrawing.Segments2D(Sk, e))
             {
                 if (e.Construction) g.Dashed(f.ToWorld(a), f.ToWorld(b), e == null ? c : (c == Under || c == Full ? Constr : c), px * 6, top: true);
@@ -1881,13 +1882,14 @@ public sealed partial class SketchEditor : IViewportMode
             var s = Screen(at);
             var gb = new Border
             {
-                Background = new SolidColorBrush(Color.FromArgb(230, 210, 228, 250)),
-                BorderBrush = new SolidColorBrush(Color.FromRgb(70, 110, 170)), BorderThickness = new Thickness(1),
+                // dangling (its model edge gone): SolidWorks' dangling brown
+                Background = e.Dangling ? new SolidColorBrush(Color.FromArgb(230, 245, 225, 195)) : new SolidColorBrush(Color.FromArgb(230, 210, 228, 250)),
+                BorderBrush = e.Dangling ? new SolidColorBrush(Color.FromRgb(158, 102, 26)) : new SolidColorBrush(Color.FromRgb(70, 110, 170)), BorderThickness = new Thickness(1),
                 Padding = new Thickness(2, 0), CornerRadius = new CornerRadius(2),
-                Child = new TextBlock { Text = "⛓", FontSize = 9, Foreground = new SolidColorBrush(Color.FromRgb(40, 70, 130)) },
+                Child = new TextBlock { Text = "⛓", FontSize = 9, Foreground = e.Dangling ? new SolidColorBrush(Color.FromRgb(130, 80, 15)) : new SolidColorBrush(Color.FromRgb(40, 70, 130)) },
                 IsHitTestVisible = false,
             };
-            ToolTip.SetTip(gb, "On Edge: converted from the model, follows it");
+            ToolTip.SetTip(gb, e.Dangling ? "Dangling: its model edge is no longer in the model" : "On Edge: converted from the model, follows it");
             Canvas.SetLeft(gb, s.X + 4); Canvas.SetTop(gb, s.Y + 2);
             Overlay.Children.Add(gb);
             _glyphs.Add(gb);

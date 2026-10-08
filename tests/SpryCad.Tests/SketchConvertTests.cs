@@ -128,7 +128,7 @@ static class SketchConvertTests
             t.True(count.Values.Distinct().Count() == 3, "the tooth counts gave other outlines");
         });
 
-        t.Test("Convert Entities: re-converted edge by edge (relations on what stays kept, deletions kept); a suppressed face left out", () =>
+        t.Test("Convert Entities: re-converted edge by edge (relations on what stays kept, deletions kept); a face gone dangling", () =>
         {
             var dir = AppContext.BaseDirectory;
             while (dir != null && !Directory.Exists(Path.Combine(dir, "samples"))) dir = Path.GetDirectoryName(dir);
@@ -168,19 +168,19 @@ static class SketchConvertTests
                 t.Eq(r.State.Sketches[s.Id].Solve?.Status != SketchStatus.OverDefined, true);
             }
 
-            // the face suppressed (as a configuration might): its geometry left out of the rebuild; back with it
-            var boss = (ExtrudeFeature)doc.Find("F2")!;
-            var others = doc.Features.Where(f => f != boss && f.Id != plane.Id && f.Id != s.Id).ToList();
-            foreach (var f in others) f.Suppressed = true; // what is built on the gear's body goes with it
-            boss.Suppressed = true;
+            // the face gone from the model (the features making it deleted): its geometry dangling, out of the
+            // profile, kept in the saved sketch; back on its edges with them
+            var gone = doc.Features.Select((f, i) => (f, i)).Where(x => x.f.Id != plane.Id && x.f.Id != s.Id).ToList();
+            foreach (var (f, _) in gone) doc.Features.Remove(f);
             var off = regen.Rebuild(doc);
-            t.True(off.State.Sketches[s.Id].Sketch.Entities.All(e => e.Link == null), "left out");
-            t.True(off.Status[s.Id].Warnings.Any(w => w.Contains("left out")), "with a warning");
+            var offSk = off.State.Sketches[s.Id];
+            t.True(offSk.Sketch.Entities.Where(e => e.Link != null).All(e => e.Dangling) && offSk.Sketch.Entities.Any(e => e.Dangling), "dangling");
+            t.Eq(offSk.Regions.Count, 0); // only the user's open line is left to make one: none
+            t.True(off.Status[s.Id].Warnings.Any(w => w.Contains("dangling")), "with a warning");
             t.True(((SketchFeature)doc.Find(s.Id)!).Sketch.Entities.Any(e => e.Link != null), "the saved sketch keeps it");
-            boss.Suppressed = false;
-            foreach (var f in others) f.Suppressed = false;
+            foreach (var (f, i) in gone) doc.Features.Insert(i, f);
             var on = regen.Rebuild(doc).State.Sketches[s.Id].Sketch;
-            t.True(on.Entity(kept.Id) is SkLine { Link: not null } && on.Entity(mine.Id) != null, "back, the same geometry");
+            t.True(on.Entity(kept.Id) is SkLine { Link: not null, Dangling: false } && on.Entity(mine.Id) != null && !on.Entities.Any(e => e.Dangling), "back, the same geometry");
         });
 
         t.Test("Convert Entities: a hole's rim as a circle; a tilted circle as fitted arcs within tolerance", () =>

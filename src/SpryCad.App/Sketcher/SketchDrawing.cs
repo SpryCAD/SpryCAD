@@ -8,6 +8,9 @@ namespace SpryCad.App.Viewport;
 /// <summary>Tessellates sketch entities for display and picking.</summary>
 public static class SketchDrawing
 {
+    /// <summary>Converted geometry whose model face or edge is gone: SolidWorks' dangling brown.</summary>
+    public static readonly Rgba Dangling = new(0.62f, 0.4f, 0.1f);
+
     public static IEnumerable<Vec2> ArcPoints(Vec2 c, double r, double a0, double a1, int minSeg = 8)
     {
         while (a1 <= a0) a1 += 2 * Math.PI;
@@ -57,7 +60,7 @@ public static class SketchDrawing
             foreach (var (a, b) in Segments2D(r.Sketch, e))
             {
                 if (e.Construction) g.Dashed(f.ToWorld(a), f.ToWorld(b), color, pixelSize * 6, top: true);
-                else g.Line(f.ToWorld(a), f.ToWorld(b), color, top: true);
+                else g.Line(f.ToWorld(a), f.ToWorld(b), e.Dangling ? Dangling : color, top: true);
             }
         }
     }

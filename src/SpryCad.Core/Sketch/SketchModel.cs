@@ -89,6 +89,11 @@ public abstract class SkEntity
     [JsonIgnore] public bool IsReference => External != null;
     /// <summary>Converted from a model edge and kept on it (Convert Entities); null for drawn geometry.</summary>
     public SkConvertLink? Link { get; set; }
+    /// <summary>
+    /// Converted geometry whose model face or edge is no longer in the model (its feature deleted, say): shown as
+    /// dangling, not part of profiles. Found again on every rebuild, not saved.
+    /// </summary>
+    [JsonIgnore] public bool Dangling { get; set; }
     public abstract IEnumerable<int> PointIds { get; }
     public abstract SkEntity Clone();
     public abstract void RemapPoint(int from, int to);

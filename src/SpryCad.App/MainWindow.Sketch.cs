@@ -319,7 +319,15 @@ public partial class MainWindow
                     del.Click += (_, _) => { ed.UnlinkSelection(); BuildSketchPage(); };
                     DockPanel.SetDock(del, Dock.Right);
                     row.Children.Add(del);
-                    row.Children.Add(new TextBlock { Text = "⛓  On Edge" + (linked.Count > 1 ? $" ({linked.Count})" : ""), VerticalAlignment = VerticalAlignment.Center });
+                    var dangling = linked.Count(e => e.Dangling);
+                    var label = new TextBlock
+                    {
+                        Text = "⛓  On Edge" + (linked.Count > 1 ? $" ({linked.Count})" : "") + (dangling > 0 ? (dangling == linked.Count ? ", dangling" : $", {dangling} dangling") : ""),
+                        VerticalAlignment = VerticalAlignment.Center,
+                    };
+                    // dangling: its model edge no longer in the model
+                    if (dangling > 0) label.Foreground = new SolidColorBrush(Color.FromRgb(158, 102, 26));
+                    row.Children.Add(label);
                     ex.Children.Add(row);
                 }
                 foreach (var c in existing)

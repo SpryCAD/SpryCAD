@@ -270,7 +270,7 @@ public sealed class Regenerator
             var frame = Resolver.ResolvePlane(s.Plane, State);
             var sk = s.Sketch.Clone();
             SketchReferences.Update(sk, frame, State, status.Warnings);
-            SketchConvert.Update(sk, frame, State, status.Warnings, forRebuild: true); // converted entities follow their model edges
+            SketchConvert.Update(sk, frame, State, status.Warnings); // converted entities follow their model edges
             foreach (var c in sk.Constraints)
             {
                 if (!c.IsDimension || c.Driven || string.IsNullOrWhiteSpace(c.Expr)) continue;

@@ -144,12 +144,11 @@ public static class SketchConvert
     /// <summary>
     /// Places converted geometry where its edges are now. A face or chain converted as a whole is followed edge by
     /// edge: geometry on an edge still there is placed on it (relations to it kept), an edge gone takes its geometry
-    /// with it, a new edge (more teeth, a hole added) is converted, and geometry deleted stays deleted. With
-    /// <paramref name="forRebuild"/> (the rebuild's own copy of the sketch) geometry whose face or edge is not in the
-    /// model now (a feature suppressed, as in another configuration) is left out, with a warning; editing the sketch
-    /// it stays as it is.
+    /// with it, a new edge (more teeth, a hole added) is converted, and geometry deleted stays deleted. Geometry whose
+    /// face or edge is no longer in the model (its feature deleted, say) is dangling: kept
+    /// where it was and shown so, not part of profiles, with a warning; it is on its edges again once they are back.
     /// </summary>
-    public static void Update(Sketch sk, Frame frame, ModelState state, List<string> warnings, bool forRebuild = false)
+    public static void Update(Sketch sk, Frame frame, ModelState state, List<string> warnings)
     {
         var singles = sk.Entities.Where(x => x.Link is { Group: null }).GroupBy(x => x.Link!.Key).ToList();
         if (singles.Count == 0 && sk.ConvertGroups == null) return;
@@ -201,6 +200,8 @@ public static class SketchConvert
         // found where the neighbours now are
         var remove = new List<SkEntity>();
         var add = new List<(NEdge e, string? body, int? group)>();
+        foreach (var x in sk.Entities) x.Dangling = false;
+        int missing = 0;
         foreach (var g in singles)
         {
             var ents = g.ToList();
@@ -208,15 +209,16 @@ public static class SketchConvert
             var ne = Find(link.Edge);
             if (ne == null)
             {
-                warnings.Add(forRebuild ? "Converted sketch geometry: its model edge is not in the model (suppressed?); it is left out."
-                                        : "Converted sketch geometry: its model edge is not in the model (suppressed?).");
-                if (forRebuild) remove.AddRange(ents);
+                foreach (var x in ents) x.Dangling = true;
+                missing++;
                 continue;
             }
             var pieces = Pieces(frame, ne);
             if (Fits(ents, pieces)) PlaceAll(ents, RefOf(ne, link.Edge.Body ?? ""), pieces);
             else { remove.AddRange(ents); add.Add((ne, link.Edge.Body, null)); }
         }
+        if (missing > 0)
+            warnings.Add($"Converted sketch geometry is dangling: {(missing == 1 ? "its model edge is" : $"{missing} of its model edges are")} no longer in the model, so it is not part of the profile.");
         foreach (var grp in sk.ConvertGroups?.ToList() ?? new())
         {
             var mine = sk.Entities.Where(x => x.Link?.Group == grp.Id).GroupBy(x => x.Link!.Key).ToDictionary(x => x.Key, x => x.ToList());
@@ -226,10 +228,8 @@ public static class SketchConvert
                 : Find(grp.Chain!) is { } start ? TangentChain(nb, start) : new List<NEdge>();
             if (now.Count == 0)
             {
-                var what = grp.Face != null ? "face" : "edges";
-                warnings.Add(forRebuild ? $"Converted sketch geometry: its {what} is not in the model (suppressed?); it is left out."
-                                        : $"Converted sketch geometry: its {what} is not in the model (suppressed?).");
-                if (forRebuild) remove.AddRange(mine.Values.SelectMany(x => x));
+                warnings.Add($"Converted sketch geometry is dangling: its {(grp.Face != null ? "face" : "edges")} are no longer in the model, so it is not part of the profile.");
+                foreach (var x in mine.Values.SelectMany(x => x)) x.Dangling = true;
                 continue;
             }
             // each edge known, found again among the edges now (by the faces it joins, nearest where it was)
