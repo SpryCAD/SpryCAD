@@ -435,6 +435,31 @@ static class ThreadFeatureTests
             t.True(r.Status[pat.Id].Milliseconds < 3000, $"the pattern in {r.Status[pat.Id].Milliseconds:0} ms");
         });
 
+        t.Test("Acme lead screw demo: the multi-start nut moved onto the screw fits it with its clearance (no overlap); half a pitch out it clashes", () =>
+        {
+            foreach (var variant in new[] { Array.Empty<(string, string)>(), new[] { ("N", "2") }, new[] { ("D", "16"), ("P", "3"), ("N", "4") } })
+            {
+                var doc = Demos.All.First(x => x.file == "acme-lead-screw.fcad").build();
+                foreach (var (n, e) in variant) doc.Equations.First(q => q.Name == n).Expr = e;
+                var r = new FeatherCad.Core.Regen.Regenerator().Rebuild(doc);
+                var label = string.Join(", ", variant.Select(v => v.Item1 + "=" + v.Item2));
+                t.True(r.Status.Values.All(s => s.Ok && s.Warnings.Count == 0), $"{label}: {string.Join("; ", r.Status.Values.Select(s => s.Error ?? string.Join(",", s.Warnings)).Where(x => x != ""))}");
+                t.Eq(r.State.Bodies.Count, 2);
+                var screw = r.State.Bodies[0].Solid.Native!; var nut = r.State.Bodies[1].Solid.Native!;
+                var gap = r.EquationValues["Gap"]; var p = r.EquationValues["P"];
+                double Overlap(double dz)
+                {
+                    var moved = nut.Transformed(Transform.Translation(new Vec3(-gap, 0, dz)));
+                    var common = NBoolean.Run(screw, moved, BoolOp.Intersect);
+                    return common.Faces.Count == 0 ? 0 : NMass.Of(common)!.Volume;
+                }
+                // on the screw as it stands (the nut's spaces where the screw's teeth are): clear
+                t.True(Overlap(0) < 1e-6, $"{label}: the nut on the screw overlaps it by {Overlap(0):0.######} mm3");
+                // half a pitch out (its spaces over the screw's spaces): the teeth clash
+                t.True(Overlap(p / 2) > 1, $"{label}: half a pitch out it clashes ({Overlap(p / 2):0.###} mm3)");
+            }
+        });
+
         t.Test("Screw surfaces of the same helices meet along helices (or not at all); a plane through the axis cuts the generator's copies", () =>
         {
             var m = ScrewMotion.About(Vec3.Zero, Vec3.UnitY, 4, Vec3.UnitX);

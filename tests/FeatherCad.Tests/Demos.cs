@@ -770,11 +770,14 @@ static class Demos
     /// <summary>
     /// A multi-start Acme lead screw: a rod of diameter D with an N-start Acme thread of pitch P (29° included angle,
     /// basic depth P/2, flat at the root 0.3707 P) over its length L, a journal of diameter J at one end and a 45°
-    /// lead-in chamfer at the other. One helical cut of lead N·P, patterned N times about the axis.
+    /// lead-in chamfer at the other. One helical cut of lead N·P, patterned N times about the axis. Beside it, its
+    /// nut (a separate body): a hex across flats S, NutL long, its bore the minor diameter, threaded by the screw's
+    /// tooth with a clearance Clr all round, swept and patterned the same way about the bore's axis.
     /// </summary>
     static CadDocument AcmeLeadScrew()
     {
-        var d = Doc(("D", "20"), ("P", "4"), ("N", "3"), ("L", "80"), ("J", "12"), ("JL", "20"));
+        var d = Doc(("D", "20"), ("P", "4"), ("N", "3"), ("L", "80"), ("J", "12"), ("JL", "20"),
+                    ("S", "30"), ("NutL", "24"), ("Clr", "0.2"), ("Gap", "D+S"));
         // the rod on Front (along +Z), the journal on its far end
         var r = new Sk(d);
         var rc = r.Circle(Sketch.OriginId, "D");
@@ -800,6 +803,40 @@ static class Demos
         var gs = d.AddFeature(new SketchFeature { Name = "Thread space", Plane = PlaneRef.Top, Sketch = g.S });
         var groove = d.AddFeature(new HelicalSweepFeature { Name = "Thread", SketchId = gs.Id, IsCut = true, Pitch = "P*N", Revolutions = "(L+2*P)/(P*N)" });
         d.AddFeature(new CircularPatternFeature { Name = "Starts", Seeds = { groove.Id }, Axis = new DirRef { Axis = "Z" }, Count = "N" });
+
+        // the nut, Gap along X: a hex with a bore of the minor diameter (just clear of the screw's root), its ends
+        // chamfered into the bore
+        var n = new Sk(d);
+        n.Poly(n.P("Gap+S/2", "S/(2*sqrt(3))"), n.P("Gap", "S/sqrt(3)"), n.P("Gap-S/2", "S/(2*sqrt(3))"),
+               n.P("Gap-S/2", "-S/(2*sqrt(3))"), n.P("Gap", "-S/sqrt(3)"), n.P("Gap+S/2", "-S/(2*sqrt(3))"));
+        var bore = n.Circle(n.P("Gap", "0"), "D-P+2*Clr");
+        var ns = d.AddFeature(new SketchFeature { Name = "Nut", Plane = PlaneRef.Front, Sketch = n.S });
+        var nut = d.AddFeature(new ExtrudeFeature { Name = "Nut", SketchId = ns.Id, Depth = "NutL", Merge = false });
+        string boreFace = $"{nut.Id}.S.C{bore}";
+        d.AddFeature(new ChamferFeature
+        {
+            Name = "Nut lead-ins", Distance = "P/2",
+            Edges =
+            {
+                E(boreFace, $"{nut.Id}.Start", new Vec3(V("Gap+D/2-P/2+Clr"), 0, 0)),
+                E(boreFace, $"{nut.Id}.End", new Vec3(V("Gap+D/2-P/2+Clr"), 0, V("NutL"))),
+            },
+        });
+        // the nut's thread space is the screw's tooth (P - 0.3707 P wide at the screw's root, narrowing at 14.5° a
+        // side) with Clr all round: from inside the bore out to the screw's crest + Clr, centred half a pitch below
+        // the nut (where the screw's tooth is: the nut moved onto the screw's axis fits it as it stands)
+        var ng = new Sk(d);
+        string Ri = "D/2-P/2+Clr-0.5", Rn = "D/2+Clr";
+        string Hi = "0.31465*P-(Clr-0.5)*tan(14.5)+Clr", Hn = "0.31465*P-(P/2+Clr)*tan(14.5)+Clr";
+        ng.Poly(ng.P($"Gap+{Ri}", $"P/2-({Hi})"), ng.P($"Gap+{Rn}", $"P/2-({Hn})"), ng.P($"Gap+{Rn}", $"P/2+{Hn}"), ng.P($"Gap+{Ri}", $"P/2+{Hi}"));
+        ng.Centerline(ng.P("Gap", "0"), ng.P("Gap", "-NutL"));
+        var ngs = d.AddFeature(new SketchFeature { Name = "Nut thread space", Plane = PlaneRef.Top, Sketch = ng.S });
+        var nutGroove = d.AddFeature(new HelicalSweepFeature { Name = "Nut thread", SketchId = ngs.Id, IsCut = true, Pitch = "P*N", Revolutions = "(NutL+2*P)/(P*N)" });
+        d.AddFeature(new CircularPatternFeature
+        {
+            Name = "Nut starts", Seeds = { nutGroove.Id }, Count = "N",
+            Axis = new DirRef { Face = new FaceRef { Name = boreFace, Hint = new Vec3(V("Gap+D/2-P/2+Clr"), 0, V("NutL/2")) } },
+        });
         return d;
     }
 
