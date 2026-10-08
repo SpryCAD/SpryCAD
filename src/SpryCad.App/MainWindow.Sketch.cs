@@ -238,6 +238,8 @@ public partial class MainWindow
     void BuildSketchPage()
     {
         if (_sketch == null) return;
+        // the Convert Entities page stays up: what was selected in the sketch is picked into it
+        if (Converting) { TakeConvertPicks(); return; }
         var ed = _sketch;
         var page = new PmPage(ed.PointsOnly ? "Hole Positions" : "Sketch", "sketch") { OnOk = () => ExitSketch(true), OnCancel = DiscardSketch };
         if (ed.Selected.Count == 0)
@@ -271,7 +273,7 @@ public partial class MainWindow
             page.ButtonRow(t, "Auto Arrange Dimensions", () => AutoArrange(ed), "dimension");
             page.Info(t, "Dimension labels you place or drag stay where you put them; the others arrange themselves. Auto Arrange puts the placed ones back in the arrangement (select some dimensions first to arrange only those).");
             var m = page.Section("Model Edges");
-            page.Info(m, "Select model edges or faces (in Select mode) and use Convert Entities to project them into the sketch.");
+            page.Info(m, "Convert Entities projects model edges and faces into the sketch: exact lines, arcs and circles.");
             page.ButtonRow(m, "Convert Entities", ConvertEntities, "convert");
         }
         else
@@ -403,21 +405,114 @@ public partial class MainWindow
         }
     }
 
+    // ------------------------------------------------------------------------------------------
+    // Convert Entities (PropertyManager, as SolidWorks'): model edges and faces picked into its box, optionally
+    // followed along their tangent chains, projected into the sketch on OK
+
+    PmPage? _convertPage;
+    PmSelectionBox? _convertBox;
+    TextBlock? _convertCount;
+    bool _convertChain;
+
+    /// <summary>The Convert Entities page is the one shown (picks in the graphics area go into its box).</summary>
+    bool Converting => _convertPage != null && _page == _convertPage && _sketch != null;
+
     void ConvertEntities()
     {
         if (_sketch == null) { Status("Convert Entities works inside a sketch."); return; }
-        var edges = new List<TopoEdge>();
-        foreach (var s in Selection.Items)
+        if (Converting) { _convertPage!.Activate(_convertBox); return; }
+        _sketch.SetTool(SketchTool.Select);
+        var page = new PmPage("Convert Entities", "convert");
+        var s = page.Section("Entities to Convert");
+        var box = page.Selection(s, "Entities", SelFilter.Edge | SelFilter.Face,
+            "Click model edges (lines, arcs, curves) and faces (all their edges). Click one again to remove it.");
+        page.Check(s, "Select chain", () => _convertChain, v => { _convertChain = v; UpdateConvertCount(); });
+        page.Info(s, "Select chain: each edge picked brings the edges tangent to it, end to end (a filleted outline in one click).");
+        _convertCount = new TextBlock { FontSize = 11, Foreground = Brushes.DimGray, Margin = new Thickness(0, 4, 0, 0) };
+        s.Children.Add(_convertCount);
+        // model edges and faces selected already are what is converted
+        foreach (var it in Selection.Items.Where(i => i.Kind is SelKind.Edge or SelKind.Face).ToList()) box.Add(it);
+        Selection.Clear();
+        box.Changed += () => { UpdateConvertCount(); UpdateEmphasis(); };
+        page.OnOk = ConvertOk;
+        page.OnCancel = EndConvert;
+        _convertPage = page; _convertBox = box;
+        ShowPage(page);
+        ShowConfirmCorner(ConvertOk, EndConvert, "OK: convert (Enter)", "Cancel (Esc)");
+        UpdateConvertCount();
+        UpdateEmphasis();
+    }
+
+    void ConvertOk()
+    {
+        if (!Converting || _convertBox is not { } box) return;
+        var (exact, mesh) = ConvertTargets(box.Items, _convertChain);
+        if (exact.Count + mesh.Count == 0) { Status("Pick model edges or faces to convert."); return; }
+        _sketch!.ConvertEdges(exact, mesh);
+        EndConvert();
+    }
+
+    /// <summary>Back to the sketch's page and its corner (Exit Sketch).</summary>
+    void EndConvert()
+    {
+        if (!Converting) return;
+        _convertPage = null; _convertBox = null; _convertCount = null;
+        Viewport.Emphasis = Array.Empty<SelItem>();
+        ShowConfirmCorner(() => ExitSketch(true), DiscardSketch, "Exit Sketch", "Discard changes");
+        BuildSketchPage();
+        Viewport.Redraw();
+    }
+
+    /// <summary>Model edges and faces selected in the sketch go into the page's box (picked again: taken out).</summary>
+    void TakeConvertPicks()
+    {
+        var picks = Selection.Items.Where(i => i.Kind is SelKind.Edge or SelKind.Face).ToList();
+        if (picks.Count == 0) return;
+        foreach (var p in picks) _convertPage!.HandlePick(p);
+        Selection.Clear();
+        UpdateEmphasis();
+    }
+
+    void UpdateConvertCount()
+    {
+        if (_convertCount == null || _convertBox == null) return;
+        var (exact, mesh) = ConvertTargets(_convertBox.Items, _convertChain);
+        var n = exact.Count + mesh.Count;
+        _convertCount.Text = n == 0 ? "Nothing picked yet." : $"{n} edge{(n == 1 ? "" : "s")} to convert.";
+    }
+
+    /// <summary>
+    /// The model edges the picks stand for: exact ones (the bodies' curves) where the model has them, else the
+    /// display edges. A face gives all its edges; with <paramref name="chain"/> an edge brings its tangent chain.
+    /// </summary>
+    (List<Kernel.Native.NEdge> exact, List<TopoEdge> mesh) ConvertTargets(IEnumerable<SelItem> picks, bool chain)
+    {
+        var exact = new List<Kernel.Native.NEdge>();
+        var mesh = new List<TopoEdge>();
+        var st = Session.DisplayResult?.State;
+        foreach (var s in picks)
         {
             var body = Viewport.Bodies.FirstOrDefault(b => b.Id == s.BodyId);
             if (body == null) continue;
-            var topo = body.Solid.Topology;
-            if (s.Kind == SelKind.Edge && s.EdgeIndex >= 0 && s.EdgeIndex < topo.Edges.Count) edges.Add(topo.Edges[s.EdgeIndex]);
-            else if (s.Kind == SelKind.Face) edges.AddRange(topo.Edges.Where(e => e.FaceA == s.Name || e.FaceB == s.Name));
+            var nb = body.Solid.Native;
+            if (s.Kind == SelKind.Face)
+            {
+                if (nb != null)
+                {
+                    nb.Link();
+                    exact.AddRange(nb.Faces.Where(f => f.Tag.Name == s.Name).SelectMany(f => f.Coedges).Select(c => c.Edge));
+                }
+                else mesh.AddRange(body.Solid.Topology.Edges.Where(e => e.FaceA == s.Name || e.FaceB == s.Name));
+                continue;
+            }
+            if (s.Kind != SelKind.Edge) continue;
+            Kernel.Native.NEdge? ne = null;
+            if (nb != null && s.Edge != null && st != null)
+                try { ne = Resolver.ResolveNativeEdge(s.Edge, st)?.edge; } catch { /* not found: the display edge */ }
+            if (ne != null) exact.AddRange(chain ? SketchConvert.TangentChain(nb!, ne) : new[] { ne });
+            else if (s.EdgeIndex >= 0 && s.EdgeIndex < body.Solid.Topology.Edges.Count) mesh.Add(body.Solid.Topology.Edges[s.EdgeIndex]);
         }
-        if (edges.Count == 0) { Status("Select model edges or faces first (click them in the graphics area)."); return; }
-        _sketch.ConvertEdges(edges.Distinct(), Viewport.Bodies);
-        Selection.Clear();
+        return (exact.Distinct().ToList(), mesh.Distinct().ToList());
     }
 
     void OffsetEntities()

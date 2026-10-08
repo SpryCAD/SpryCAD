@@ -443,6 +443,12 @@ public partial class MainWindow : Window
                 e.Handled = true; return;
             }
         }
+        // Convert Entities (a page within the sketch): Enter converts, Esc goes back to the sketch
+        if (Converting && e.Key is Key.Enter or Key.Escape && !(e.Source is TextBox))
+        {
+            if (e.Key == Key.Enter) ConvertOk(); else EndConvert();
+            e.Handled = true; return;
+        }
         if (inControl) return;
         if (_sketch != null && _sketch.IsEditingDimension) return;
         if (_sketch != null && _sketch.KeyDown(Viewport, e.Key, e.KeyModifiers)) { e.Handled = true; return; }

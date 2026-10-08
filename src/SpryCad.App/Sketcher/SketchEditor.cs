@@ -350,53 +350,26 @@ public sealed partial class SketchEditor : IViewportMode
 
     // ---- convert entities (project model edges) ----
 
-    public void ConvertEdges(IEnumerable<TopoEdge> edges, IEnumerable<Body> bodies)
+    /// <summary>
+    /// Projects model edges into the sketch as fixed geometry (<see cref="SketchConvert"/>): exact where the model has
+    /// its curves; edges known only by their display polyline come as lines.
+    /// </summary>
+    public int ConvertEdges(IEnumerable<Kernel.Native.NEdge> exact, IEnumerable<TopoEdge> meshOnly)
     {
         Snapshot();
         int created = 0;
-        foreach (var e in edges)
+        foreach (var e in exact) if (SketchConvert.Edge(Sk, Frame, e)) created++;
+        foreach (var e in meshOnly)
         {
-            // circular rim of a cylinder perpendicular to the sketch plane -> circle
-            if (e.Closed)
-            {
-                SurfaceDef? cyl = null;
-                foreach (var b in bodies)
-                    foreach (var f in b.Solid.Faces)
-                        if ((f.Tag.Name == e.FaceA || f.Tag.Name == e.FaceB) && f.Tag.Surface.Kind == SurfaceKind.Cylinder) cyl = f.Tag.Surface;
-                if (cyl != null && Math.Abs(Vec3.Dot(cyl.Axis.Normalized, Frame.Normal)) > 0.999)
-                {
-                    var c = Sk.AddPoint(Frame.ToLocal(cyl.Origin), fix: true);
-                    var ci = Sk.Add(new SkCircle { Center = c.Id, R = cyl.Radius });
-                    var rc = Sk.AddConstraint(CType.Radius, ci.Id); rc.Value = cyl.Radius; rc.Expr = Expr.Format(cyl.Radius);
-                    rc.LabelPlaced = false; // made by the editor: laid out
-                    created++;
-                    continue;
-                }
-            }
             var pts = new List<Vec2> { Frame.ToLocal(e.Segs[0].A) };
             if (e.IsLinear) pts.Add(Frame.ToLocal(e.End));
             else foreach (var s in e.Segs) pts.Add(Frame.ToLocal(s.B));
-            int? first = null; int prev = -1;
-            for (int i = 0; i < pts.Count; i++)
-            {
-                int id;
-                if (e.Closed && i == pts.Count - 1 && first != null) id = first.Value;
-                else id = FindPointNear(pts[i], 1e-6) ?? Sk.AddPoint(pts[i], fix: true).Id;
-                first ??= id;
-                if (prev >= 0 && prev != id) Sk.Add(new SkLine { P1 = prev, P2 = id });
-                prev = id;
-            }
-            created++;
+            if (SketchConvert.Polyline(Sk, pts)) created++;
         }
         Resolve();
-        Message?.Invoke(created > 0 ? $"Converted {created} edge(s) into fixed sketch geometry." : "Select model edges to convert.");
+        Message?.Invoke(created > 0 ? $"Converted {created} edge(s) into fixed sketch geometry." : "Nothing new to convert: those edges are in the sketch already.");
         _vp.Redraw();
-    }
-
-    int? FindPointNear(Vec2 p, double tol)
-    {
-        foreach (var q in Sk.Points) if (Vec2.Distance(q.P, p) < tol) return q.Id;
-        return null;
+        return created;
     }
 
     // ---------------------------------------------------------------------------------------
