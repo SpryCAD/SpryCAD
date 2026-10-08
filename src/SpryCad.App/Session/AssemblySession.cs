@@ -30,16 +30,54 @@ public sealed class AssemblySession
 
     public AssemblySession(AssemblyModel model, bool dirty = false) { Model = model; Dirty = dirty; }
 
-    /// <summary>Opens an assembly file: its parts found (by identity) and built. Slow parts: call off the UI thread.</summary>
+    /// <summary>
+    /// Opens an assembly file: its parts found (by identity) and read; each shown from its cache when that is current,
+    /// the others built afterwards (<see cref="BuildPending"/>). Call off the UI thread.
+    /// </summary>
     public static AssemblySession Open(string path)
     {
         var doc = AssemblyDocument.Load(path);
-        var model = PartsIndexStore.Use(ix => AssemblyModel.Open(doc, path, ix));
+        var model = PartsIndexStore.Use(ix => AssemblyModel.Open(doc, path, ix, defer: true));
         // the mates as the parts are now (a part changed since: its components move to keep them)
         if (doc.Mates.Count > 0) model.SolveMates();
         // references updated (parts found in new places): unsaved until saved
         return new AssemblySession(model, model.Resolution.Changed);
     }
+
+    /// <summary>Displays are being built in the background (<see cref="BuildPending"/>).</summary>
+    public bool Building { get; private set; }
+
+    /// <summary>
+    /// Builds the displays waiting to be built, one part at a time off the UI thread, each shown as it is done; then the
+    /// mates solved again (a part that changed moves its components). <paramref name="progress"/> is told what is
+    /// being built ("Socket screw (M8), 3 of 7") and null when done. Call on the UI thread.
+    /// </summary>
+    public async Task BuildPending(Action<string?>? progress = null)
+    {
+        if (Building) return;
+        Building = true;
+        try
+        {
+            bool any = false;
+            for (var jobs = Model.PendingJobs(); jobs.Count > 0; jobs = Model.PendingJobs())
+            {
+                for (int i = 0; i < jobs.Count; i++)
+                {
+                    var job = jobs[i];
+                    progress?.Invoke($"Building {job.Name}, {i + 1} of {jobs.Count}…");
+                    PartDisplay? built = null; string? problem = null;
+                    try { built = await Task.Run(job.Build); }
+                    catch (Exception ex) { problem = ex.Message; }
+                    if (Model.Install(job, built, problem)) { any = true; Shown(); }
+                }
+            }
+            if (any && Model.Doc.Mates.Count > 0) { Model.SolveMates(); Shown(); }
+        }
+        finally { Building = false; progress?.Invoke(null); }
+    }
+
+    /// <summary>What it looks like changed, not the document (nothing to save): shown again.</summary>
+    void Shown() { Revision++; Changed?.Invoke(); }
 
     /// <summary>Before a change: the state to undo to.</summary>
     public void BeginChange() { _undo.Push(Model.Doc.ToJson()); _redo.Clear(); }

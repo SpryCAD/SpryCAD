@@ -16,7 +16,7 @@ public sealed class PartDisplay
     public required DisplayMesh Mesh { get; init; }
     public required double[] Color { get; init; }
     public required PartSource Source { get; init; }
-    /// <summary>Its cosmetic threads, in the part's coordinates (none when shown from the cache).</summary>
+    /// <summary>Its cosmetic threads, in the part's coordinates.</summary>
     public IReadOnlyList<CosmeticThread> Threads { get; init; } = Array.Empty<CosmeticThread>();
     /// <summary>The part's revision (of its file or embedded copy; of the cache when shown from it).</summary>
     public string? Revision { get; init; }
@@ -28,6 +28,10 @@ public sealed class PartDisplay
     public string Config { get; init; } = "";
     /// <summary>Why the part could not be shown as it is (missing, could not be read or rebuilt), if so.</summary>
     public string? Problem { get; init; }
+    /// <summary>Shown from a cache as good as a rebuild (this revision and configuration, made by this code).</summary>
+    public bool Cached { get; init; }
+    /// <summary>Waiting to be built (<see cref="AssemblyModel.Pending"/>): shown meanwhile as it last was, or not at all.</summary>
+    public bool Building { get; init; }
 }
 
 /// <summary>
@@ -50,13 +54,16 @@ public sealed class AssemblyModel
 
     AssemblyModel(AssemblyDocument doc, string? path, PartIndex? index) { Doc = doc; Path = path; Index = index; }
 
-    /// <summary>Opens an assembly: finds its parts and builds (or takes from the cache) each one's display.</summary>
-    public static AssemblyModel Open(AssemblyDocument doc, string? path, PartIndex? index = null, IEnumerable<string>? searchRoots = null)
+    /// <summary>
+    /// Opens an assembly: finds its parts and takes each one's display from the cache when that is current, else builds
+    /// it (with <paramref name="defer"/>: later, <see cref="PendingJobs"/>).
+    /// </summary>
+    public static AssemblyModel Open(AssemblyDocument doc, string? path, PartIndex? index = null, IEnumerable<string>? searchRoots = null, bool defer = false)
     {
         var m = new AssemblyModel(doc, path, index);
         m.Resolution = ComponentResolver.Resolve(doc, path, index, searchRoots);
         m.Notes.AddRange(m.Resolution.Notes);
-        foreach (var key in doc.Components.Select(c => ComponentResolver.Key(c.Part)).Distinct().ToList()) m.LoadPart(key);
+        foreach (var key in doc.Components.Select(c => ComponentResolver.Key(c.Part)).Distinct().ToList()) m.LoadPart(key, defer);
         return m;
     }
 
@@ -84,13 +91,22 @@ public sealed class AssemblyModel
     public IEnumerable<Component> ComponentsShowing(string displayKey) => Doc.Components.Where(c => DisplayKey(c) == displayKey);
 
     /// <summary>
-    /// (Re)builds a part's displays, one per configuration its components use: from its file or embedded copy, else
-    /// from the cache. Displays of configurations no component uses any more are dropped.
+    /// (Re)builds a part's displays, one per configuration its components use, and drops those no component uses
+    /// any more. Each display comes
+    /// <list type="bullet">
+    /// <item>from the assembly's cache when that is of the part's revision and configuration and was made by this
+    /// code (<see cref="GeometryVersion"/>): what a rebuild would give, so the part is only read, not rebuilt;</item>
+    /// <item>from the cache it last showed when its components are lightweight, or the part is missing or cannot
+    /// be read;</item>
+    /// <item>else built from the part: now, or with <paramref name="defer"/> later (<see cref="Pending"/>, built by
+    /// <see cref="PendingJobs"/>), meanwhile shown from an older cache if there is one, else not at all.</item>
+    /// </list>
     /// </summary>
-    public void LoadPart(string key)
+    public void LoadPart(string key, bool defer = false)
     {
         var comps = ComponentsOf(key).ToList();
         foreach (var k in Parts.Keys.Where(k => OfPart(k, key) && !comps.Any(c => DisplayKey(c) == k)).ToList()) Parts.Remove(k);
+        Pending.RemoveWhere(k => OfPart(k, key));
         if (comps.Count == 0) return;
         var r = comps[0].Part;
         var groups = comps.GroupBy(DisplayKey).ToList();
@@ -113,11 +129,33 @@ public sealed class AssemblyModel
             string? why = problem;
             if (!light && doc != null)
             {
+                var built = doc.Configured(first.Parameters);
+                // a cache of this very revision and configuration, made by this code: as good as a rebuild
+                if (doc.Id != null && CacheOf(doc.Id, doc.Revision, config) is { } current && MeshCache.VersionOf(current) == GeometryVersion.Current)
+                {
+                    try
+                    {
+                        var e = MeshCache.Read(current);
+                        Parts[g.Key] = new PartDisplay { Mesh = e.Mesh, Threads = e.Threads, Color = doc.Color, Source = src, Revision = doc.Revision, Doc = built, Part = doc, Config = config, Cached = true };
+                        continue;
+                    }
+                    catch { } // (a damaged cache: rebuilt)
+                }
+                if (defer)
+                {
+                    // shown as it last was until built (or not at all)
+                    var old = CachedOf(first) is { } oc ? MeshCache.Read(oc) : null;
+                    Parts[g.Key] = new PartDisplay
+                    {
+                        Mesh = old?.Mesh ?? new DisplayMesh(), Threads = old?.Threads ?? Array.Empty<CosmeticThread>(), Color = doc.Color, Source = src,
+                        Revision = r.Revision, Doc = built, Part = doc, Config = config, Building = true,
+                    };
+                    Pending.Add(g.Key);
+                    continue;
+                }
                 try
                 {
-                    var built = doc.Configured(first.Parameters);
-                    var (mesh, threads) = Build(built);
-                    Parts[g.Key] = new PartDisplay { Mesh = mesh, Threads = threads, Color = doc.Color, Source = src, Revision = doc.Revision, Doc = built, Part = doc, Config = config };
+                    Parts[g.Key] = BuildDisplay(doc, built, src, config);
                     continue;
                 }
                 catch (Exception ex) { why = ex.Message; }
@@ -126,11 +164,63 @@ public sealed class AssemblyModel
             if (CachedOf(first) is { } cache)
             {
                 var e = MeshCache.Read(cache);
-                Parts[g.Key] = new PartDisplay { Mesh = e.Mesh, Color = e.Color, Source = PartSource.Cache, Revision = r.Revision, Part = doc, Config = config, Problem = why };
+                Parts[g.Key] = new PartDisplay { Mesh = e.Mesh, Threads = e.Threads, Color = e.Color, Source = PartSource.Cache, Revision = r.Revision, Part = doc, Config = config, Problem = why };
                 continue;
             }
             Parts[g.Key] = new PartDisplay { Mesh = new DisplayMesh(), Color = new[] { 0.74, 0.76, 0.80 }, Source = PartSource.None, Part = doc, Config = config, Problem = why ?? "not found" };
         }
+    }
+
+    /// <summary>A display built from a part (<paramref name="built"/>: the part as configured).</summary>
+    static PartDisplay BuildDisplay(CadDocument part, CadDocument built, PartSource src, string config)
+    {
+        var (mesh, threads) = Build(built);
+        return new PartDisplay { Mesh = mesh, Threads = threads, Color = part.Color, Source = src, Revision = part.Revision, Doc = built, Part = part, Config = config };
+    }
+
+    /// <summary>Displays waiting to be built (<see cref="LoadPart"/> with defer), by <see cref="DisplayKey"/>.</summary>
+    public HashSet<string> Pending { get; } = new();
+
+    /// <summary>A display to build in the background: <see cref="Build"/> off the UI thread, then <see cref="Install"/> on it.</summary>
+    public sealed class PendingJob
+    {
+        public required string Key { get; init; }
+        /// <summary>The display shown meanwhile (the job is stale when it has been replaced).</summary>
+        public required PartDisplay Placeholder { get; init; }
+        /// <summary>Its name, for progress ("Socket screw (M8, L 30)").</summary>
+        public required string Name { get; init; }
+        public PartDisplay Build() => BuildDisplay(Placeholder.Part!, Placeholder.Doc!, Placeholder.Source, Placeholder.Config);
+    }
+
+    /// <summary>The displays waiting to be built, as jobs (in the order the components are listed).</summary>
+    public List<PendingJob> PendingJobs()
+    {
+        var jobs = new List<PendingJob>();
+        foreach (var c in Doc.Components)
+        {
+            var key = DisplayKey(c);
+            if (!Pending.Contains(key) || jobs.Any(j => j.Key == key) || Parts.GetValueOrDefault(key) is not { Doc: not null, Part: not null } pd) continue;
+            var config = ConfigLabel(c);
+            jobs.Add(new PendingJob { Key = key, Placeholder = pd, Name = c.Name.Split('<')[0] + (config.Length > 0 ? $" ({config})" : "") });
+        }
+        return jobs;
+    }
+
+    /// <summary>
+    /// Shows a built display (or why it could not be built) in place of its placeholder; false when the job is stale
+    /// (the part loaded again, configured otherwise or removed meanwhile).
+    /// </summary>
+    public bool Install(PendingJob job, PartDisplay? built, string? problem = null)
+    {
+        if (!Pending.Contains(job.Key) || !ReferenceEquals(Parts.GetValueOrDefault(job.Key), job.Placeholder)) return false;
+        Pending.Remove(job.Key);
+        var p = job.Placeholder;
+        Parts[job.Key] = built ?? new PartDisplay
+        {
+            Mesh = p.Mesh, Threads = p.Threads, Color = p.Color, Source = p.Mesh.Indices.Length > 0 ? PartSource.Cache : PartSource.None,
+            Revision = p.Revision, Part = p.Part, Config = p.Config, Problem = problem ?? "could not be built",
+        };
+        return true;
     }
 
     /// <summary>A part's document from its embedded copy or its file (null: not found).</summary>
@@ -185,6 +275,9 @@ public sealed class AssemblyModel
     byte[]? CachedOf(Component c) =>
         c.Part.PartId != null && Doc.Caches.TryGetValue(AssemblyDocument.CacheKey(c.Part.PartId, c.Part.Revision, Configurations.KeyOf(c.Parameters)), out var name)
         && Doc.Files.TryGetValue(name, out var data) ? data : null;
+
+    byte[]? CacheOf(string partId, string? revision, string config) =>
+        Doc.Caches.TryGetValue(AssemblyDocument.CacheKey(partId, revision, config), out var name) && Doc.Files.TryGetValue(name, out var data) ? data : null;
 
     /// <summary>A part's display: its rebuilt bodies as one mesh, and its cosmetic threads (drawn as helices).</summary>
     public static (DisplayMesh mesh, List<CosmeticThread> threads) Build(CadDocument doc)
@@ -459,20 +552,22 @@ public sealed class AssemblyModel
 
     /// <summary>
     /// The caches for the parts as shown now: each part shown from its file or embedded copy has its revision's
-    /// mesh cached (and its components the revision noted); caches no component uses are dropped.
+    /// mesh cached (and its components the revision noted), made again when an older version of the code made it; caches
+    /// no component uses are dropped. Displays still waiting to be built keep the cache they show.
     /// </summary>
     public void RefreshCaches()
     {
         foreach (var (key, pd) in Parts)
         {
-            if (pd.Source is not (PartSource.File or PartSource.Embedded) || pd.Doc?.Id is not { } id) continue;
+            if (pd.Building || pd.Source is not (PartSource.File or PartSource.Embedded) || pd.Doc?.Id is not { } id) continue;
             var ck = AssemblyDocument.CacheKey(id, pd.Revision, pd.Config);
-            if (!Doc.Caches.ContainsKey(ck))
+            var stale = Doc.Caches.TryGetValue(ck, out var had) && (!Doc.Files.TryGetValue(had, out var bytes) || MeshCache.VersionOf(bytes) != GeometryVersion.Current);
+            if (!Doc.Caches.ContainsKey(ck) || stale)
             {
                 // (a configuration's: named by a hash of it)
                 var config = pd.Config.Length > 0 ? "-" + DocumentContainer.Hash(System.Text.Encoding.UTF8.GetBytes(pd.Config))[..12] : "";
                 var name = $"cache/{id}-{pd.Revision ?? "none"}{config}.mesh";
-                Doc.Files[name] = MeshCache.Write(pd.Mesh, pd.Doc.Color);
+                Doc.Files[name] = MeshCache.Write(pd.Mesh, pd.Doc.Color, pd.Threads);
                 Doc.Caches[ck] = name;
             }
             foreach (var c in ComponentsShowing(key)) c.Part.Revision = pd.Revision;

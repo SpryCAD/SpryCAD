@@ -1,4 +1,5 @@
 using System.Text;
+using SpryCad.Core.Regen;
 using SpryCad.Kernel;
 
 namespace SpryCad.Core.Assembly;
@@ -8,26 +9,36 @@ namespace SpryCad.Core.Assembly;
 /// its bounds and volume, and the part's color. What a component shows when its part is not loaded (lightweight),
 /// cannot be found (missing) or is not shared (an assembly packed for viewing). Binary, little-endian:
 /// <code>
-///   "FCMESH2"  color r g b (float)  bounds min max (6 double)  volume (double)
+///   "FCMESH3"  geometry version (int)  color r g b (float)  bounds min max (6 double)  volume (double)
 ///   positions (count, floats)  normals (count, floats)  indices (count, ints)
 ///   faces (count; name, index start, index count, surface kind, surface origin and axis, plane point and
 ///          normal, radius, second parameter)  edge lines (count, floats)  edges (count; index, start, count)
+///   cosmetic threads (count; origin, axis, reference direction, radius, lead, length, external)
 /// </code>
 /// Face ranges keep their names and their surfaces (planes, axes and centres for mates; other kinds by kind only).
-/// Version 1 caches (no surfaces) are still read.
+/// The geometry version (<see cref="GeometryVersion"/>) tells a cache made by this code (as good as rebuilding the
+/// part) from an older one (shown until the part is rebuilt). Version 1 and 2 caches (no geometry version: 0; no
+/// surfaces in version 1; no threads) are still read.
 /// </summary>
 public static class MeshCache
 {
-    // version 2 keeps each face's surface (planes, cylinders, cones, spheres): mates work on lightweight parts
-    const string Magic = "FCMESH2", Magic1 = "FCMESH1";
+    // version 2 keeps each face's surface (planes, cylinders, cones, spheres): mates work on lightweight parts;
+    // version 3 the geometry version and the cosmetic threads
+    const string Magic = "FCMESH3", Magic2 = "FCMESH2", Magic1 = "FCMESH1";
 
-    public sealed record Entry(DisplayMesh Mesh, double[] Color);
+    /// <summary>A cache read: its mesh, color, cosmetic threads and the geometry version that made it (0: unknown, older).</summary>
+    public sealed record Entry(DisplayMesh Mesh, double[] Color, IReadOnlyList<CosmeticThread> Threads, int Version)
+    {
+        /// <summary>Made by this code: what rebuilding the part would give.</summary>
+        public bool Current => Version == GeometryVersion.Current;
+    }
 
-    public static byte[] Write(DisplayMesh m, double[] color)
+    public static byte[] Write(DisplayMesh m, double[] color, IReadOnlyList<CosmeticThread>? threads = null)
     {
         using var ms = new MemoryStream();
         using var w = new BinaryWriter(ms, Encoding.UTF8);
         w.Write(Encoding.ASCII.GetBytes(Magic));
+        w.Write(GeometryVersion.Current);
         for (int i = 0; i < 3; i++) w.Write((float)(i < color.Length ? color[i] : 0.75));
         foreach (var v in new[] { m.Bounds.Min, m.Bounds.Max }) { w.Write(v.X); w.Write(v.Y); w.Write(v.Z); }
         w.Write(m.Volume);
@@ -45,16 +56,28 @@ public static class MeshCache
         Floats(w, m.EdgeLines);
         w.Write(m.Edges.Count);
         foreach (var e in m.Edges) { w.Write(e.EdgeIndex); w.Write(e.VertexStart); w.Write(e.VertexCount); }
+        threads ??= Array.Empty<CosmeticThread>();
+        w.Write(threads.Count);
+        foreach (var t in threads)
+        {
+            foreach (var v in new[] { t.Origin, t.Axis, t.RefDir }) { w.Write(v.X); w.Write(v.Y); w.Write(v.Z); }
+            w.Write(t.Radius); w.Write(t.Lead); w.Write(t.Length); w.Write(t.External);
+        }
         w.Flush();
         return ms.ToArray();
     }
+
+    /// <summary>The geometry version a cache was made by (0: an older cache, or not one), without reading it all.</summary>
+    public static int VersionOf(byte[] data) =>
+        data.Length >= Magic.Length + 4 && Encoding.ASCII.GetString(data, 0, Magic.Length) == Magic ? BitConverter.ToInt32(data, Magic.Length) : 0;
 
     public static Entry Read(byte[] data)
     {
         using var r = new BinaryReader(new MemoryStream(data), Encoding.UTF8);
         var magic = Encoding.ASCII.GetString(r.ReadBytes(Magic.Length));
-        if (magic != Magic && magic != Magic1) throw new InvalidDataException("Not a SpryCAD display cache.");
-        bool surfaces = magic == Magic;
+        if (magic != Magic && magic != Magic2 && magic != Magic1) throw new InvalidDataException("Not a SpryCAD display cache.");
+        bool surfaces = magic != Magic1, v3 = magic == Magic;
+        var version = v3 ? r.ReadInt32() : 0;
         var color = new double[] { r.ReadSingle(), r.ReadSingle(), r.ReadSingle() };
         Vec3 V() => new(r.ReadDouble(), r.ReadDouble(), r.ReadDouble());
         var m = new DisplayMesh();
@@ -86,7 +109,17 @@ public static class MeshCache
         m.EdgeLines = ReadFloats(r);
         var ne = r.ReadInt32();
         for (int i = 0; i < ne; i++) m.Edges.Add(new EdgeRange(r.ReadInt32(), r.ReadInt32(), r.ReadInt32()));
-        return new Entry(m, color);
+        var threads = new List<CosmeticThread>();
+        if (v3)
+        {
+            var nt = r.ReadInt32();
+            for (int i = 0; i < nt; i++)
+            {
+                Vec3 o = V(), ax = V(), rd = V();
+                threads.Add(new CosmeticThread(o, ax, rd, r.ReadDouble(), r.ReadDouble(), r.ReadDouble(), r.ReadBoolean()));
+            }
+        }
+        return new Entry(m, color, threads, version);
     }
 
     static void Floats(BinaryWriter w, float[] a) { w.Write(a.Length); foreach (var f in a) w.Write(f); }

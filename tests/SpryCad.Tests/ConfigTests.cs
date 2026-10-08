@@ -295,15 +295,67 @@ static class ConfigTests
             var d = m.DisplayOf(m12)!;
             t.Near(d.Mesh.Bounds.Max.Z - d.Mesh.Bounds.Min.Z, 62, 0.05);
             t.Near(d.Mesh.Bounds.Max.X - d.Mesh.Bounds.Min.X, 18, 0.05);
-            // the thread modeled (no helix to draw); unthreaded: a plain shank, more material
-            t.True(d.Threads.Count == 0, "modeled thread");
+            // the cosmetic thread reaches the assembly's display (drawn as a helix where the component is); unthreaded: none
+            t.True(d.Threads.Count == 1 && d.Threads[0].External, "cosmetic thread kept for display");
             var plain = Core.Assembly.AssemblyModel.Build(m.PartDocument(m12)!.Configured(new Dictionary<string, string> { ["Size"] = "M12", ["L"] = "50", ["Threaded"] = "0" }));
-            t.True(plain.mesh.Volume > d.Mesh.Volume + 1, $"thread cut: {d.Mesh.Volume:0} < {plain.mesh.Volume:0}");
-            // a cosmetic thread reaches the assembly's display (drawn as a helix where the component is)
-            var cos = m.PartDocument(m12)!.Clone();
-            cos.Features.OfType<ThreadFeature>().Single().Cosmetic = true;
-            var built = Core.Assembly.AssemblyModel.Build(cos);
-            t.True(built.threads.Count == 1 && built.threads[0].External, "cosmetic thread kept for display");
+            t.Eq(plain.threads.Count, 0);
+            // exports model it: the thread cut, less material
+            var modeled = new Regenerator { ThreadOverride = ThreadDisplay.Modeled }.Rebuild(m.DisplayOf(m12)!.Doc!).State.Bodies.Sum(b => b.Mesh.Volume);
+            t.True(modeled < d.Mesh.Volume - 1, $"thread cut on export: {modeled:0} < {d.Mesh.Volume:0}");
+        });
+
+        t.Test("Assemblies open from their caches when current; others built afterwards (geometry version, part revision)", () =>
+        {
+            var dir = Path.Combine(Path.GetTempPath(), "fc-config-tests", Guid.NewGuid().ToString("N")[..8]);
+            Directory.CreateDirectory(dir);
+            var (part, _, _) = Plate(null);
+            part.Tables = new() { SizeTable() };
+            var pp = Path.Combine(dir, "Plate.sprt");
+            part.Save(pp);
+            var m = Core.Assembly.AssemblyModel.New();
+            var a = m.Insert(pp, Transform.Identity);
+            var b = m.Insert(pp, Transform.Translation(new Vec3(0, 100, 0)));
+            m.Configure(new[] { b }, m.PartDocument(b)!, new Dictionary<string, string> { ["Size"] = "L" });
+            var ap = Path.Combine(dir, "Plates.sasm");
+            m.Save(ap);
+            static double Width(Core.Assembly.PartDisplay d) => d.Mesh.Bounds.Max.X - d.Mesh.Bounds.Min.X;
+
+            // the cache: version 3, with the geometry version and the threads
+            var thread = new CosmeticThread(new Vec3(1, 2, 3), Vec3.UnitZ, Vec3.UnitX, 5, -1.5, 20, true);
+            var e = Core.Assembly.MeshCache.Read(Core.Assembly.MeshCache.Write(m.DisplayOf(a)!.Mesh, part.Color, new[] { thread }));
+            t.True(e.Current && e.Version == GeometryVersion.Current && e.Threads.Single() == thread, "round trip");
+
+            // opened again: every display from its cache, nothing to build
+            var doc = Core.Assembly.AssemblyDocument.Load(ap);
+            var back = Core.Assembly.AssemblyModel.Open(doc, ap, defer: true);
+            t.True(back.Pending.Count == 0 && back.Parts.Values.All(p => p.Cached && p.Source == Core.Assembly.PartSource.File && p.Part != null), "all from current caches");
+            t.Near(Width(back.DisplayOf(back.Doc.Find(b.Id)!)!), 120, 1e-3);
+
+            // caches made by older code: shown, and built afterwards
+            doc = Core.Assembly.AssemblyDocument.Load(ap);
+            foreach (var name in doc.Caches.Values) BitConverter.GetBytes(0).CopyTo(doc.Files[name], 7);
+            back = Core.Assembly.AssemblyModel.Open(doc, ap, defer: true);
+            t.Eq(back.Pending.Count, 2);
+            var bb = back.Doc.Find(b.Id)!;
+            t.True(back.DisplayOf(bb)!.Building && Width(back.DisplayOf(bb)!) > 119, "the old cache shown meanwhile");
+            foreach (var job in back.PendingJobs()) t.True(back.Install(job, job.Build()), "installed");
+            t.True(back.Pending.Count == 0 && back.Parts.Values.All(p => !p.Building && !p.Cached), "built");
+            back.RefreshCaches();
+            t.True(back.Doc.Caches.Values.All(n => Core.Assembly.MeshCache.VersionOf(back.Doc.Files[n]) == GeometryVersion.Current), "caches made again");
+
+            // the part changed since: its old display shown until built; a job made stale by loading it again is dropped
+            part.Tables![0].Rows[1].Values[0] = "90";   // M: 90 wide
+            part.Save(pp);
+            back = Core.Assembly.AssemblyModel.Open(Core.Assembly.AssemblyDocument.Load(ap), ap, defer: true);
+            var aa = back.Doc.Find(a.Id)!;
+            t.Near(Width(back.DisplayOf(aa)!), 100, 1e-3);
+            var jobs = back.PendingJobs();
+            t.Eq(jobs.Count, 2);
+            t.True(back.Install(jobs[0], jobs[0].Build()), "first built");
+            t.Near(Width(back.DisplayOf(aa)!), 90, 1e-3);
+            back.LoadPart(Core.Assembly.ComponentResolver.Key(aa.Part));
+            t.True(!back.Install(jobs[1], jobs[1].Build()) && back.Pending.Count == 0, "stale job dropped");
+            t.Near(Width(back.DisplayOf(back.Doc.Find(b.Id)!)!), 120, 1e-3);
         });
 
         t.Test("Rebuild cache: equations seen by their values (a description or same value rebuilds nothing)", () =>

@@ -86,6 +86,8 @@ public sealed class AssemblyTree : DockPanel
             if (c.Part.Embedded != null) tags.Add("embedded");
             if (pd?.Source == PartSource.Cache) tags.Add(pd.Problem != null ? "missing: the assembly's copy" : "lightweight");
             if (pd?.Source == PartSource.None) tags.Add("missing");
+            // being built after the assembly opened (shown meanwhile as it last was, if the assembly has a copy)
+            if (pd?.Building == true) tags.Add(pd.Mesh.Indices.Length > 0 ? "updating" : "loading");
             if (c.Suppressed) tags.Add("suppressed");
             var res = m.Resolution.Parts.GetValueOrDefault(ComponentResolver.Key(c.Part));
             var tip = c.Part.Embedded != null ? $"Embedded in the assembly ({c.Part.Embedded})" : res?.Path ?? $"Not found (last at {c.Part.AbsolutePath ?? c.Part.Path})";

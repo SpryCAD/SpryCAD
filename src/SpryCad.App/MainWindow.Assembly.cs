@@ -196,7 +196,19 @@ public partial class MainWindow : IAssemblyHost
         if (blank != null && blank != t) RemoveTab(blank);
         Viewport.StandardView("Trimetric", fit: true, animate: false);
         var notes = s.Model.Notes;
-        Status(notes.Count == 0 ? "Opened " + path : notes.Count == 1 ? notes[0] : $"Opened {Path.GetFileName(path)}: {notes.Count} notes about its parts (under the tree)");
+        var opened = notes.Count == 0 ? "Opened " + path : notes.Count == 1 ? notes[0] : $"Opened {Path.GetFileName(path)}: {notes.Count} notes about its parts (under the tree)";
+        Status(opened);
+        // parts without a current display cache: built now, each shown when done (the busy text says which)
+        if (s.Model.Pending.Count > 0)
+        {
+            await s.BuildPending(p =>
+            {
+                if (_tab?.Asm != s) return;
+                BusyText.IsVisible = p != null;
+                if (p != null) BusyText.Text = p;
+            });
+            if (_tab?.Asm == s) BusyText.IsVisible = false;
+        }
     }
 
     /// <summary>
