@@ -1,4 +1,5 @@
 using Avalonia.Threading;
+using FeatherCad.Core.Assembly;
 using FeatherCad.Core.Model;
 using FeatherCad.Core.Regen;
 
@@ -105,6 +106,7 @@ public sealed class DocumentSession
     {
         var d = CadDocument.Load(path);
         Doc = d; FilePath = path; Dirty = false;
+        PartsIndexStore.Record(d, path);
         _undo.Clear(); _redo.Clear();
         _regen.Invalidate();
         DocumentChanged?.Invoke();
@@ -134,7 +136,13 @@ public sealed class DocumentSession
             if (!json.Contains($"\"{name}\"")) Doc.Files.Remove(name);
         var container = UserSettings.SaveContainer || Doc.Files.Count > 0;
         if (container) Doc.Thumbnail = RenderThumbnail() ?? Doc.Thumbnail;
-        Doc.Save(path, container);
+        // saved as another file: that file is a copy, with its own identity (the original keeps its own; a failed
+        // save keeps the document as it was)
+        var (id, rev, from) = (Doc.Id, Doc.Revision, Doc.DerivedFrom);
+        if (FilePath != null && !PartIndex.SamePath(FilePath, path)) Doc.ForkIdentity();
+        try { Doc.Save(path, container); }
+        catch { (Doc.Id, Doc.Revision, Doc.DerivedFrom) = (id, rev, from); throw; }
+        PartsIndexStore.Record(Doc, path);
         FilePath = path; Dirty = false;
         DocumentChanged?.Invoke();
     }

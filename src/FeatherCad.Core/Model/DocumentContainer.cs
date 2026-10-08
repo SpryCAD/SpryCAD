@@ -52,6 +52,9 @@ public static class DocumentContainer
     public static void Save(CadDocument doc, string path, bool container)
     {
         foreach (var name in doc.Files.Keys) CheckName(name);
+        // the part's identity (kept), and this save's revision
+        doc.Id ??= CadDocument.NewGuid();
+        doc.Revision = CadDocument.NewGuid();
         // the index in model.json always matches the files written
         doc.Attachments = doc.Files.Count == 0 ? null
             : doc.Files.OrderBy(f => f.Key, StringComparer.Ordinal)
@@ -108,6 +111,32 @@ public static class DocumentContainer
                 throw new InvalidDataException($"The embedded file \"{a.Name}\" in {Path.GetFileName(path)} is damaged (checksum mismatch).");
         }
         return doc;
+    }
+
+    /// <summary>A file's identity (Id, Revision) without building the document; nulls when it has none (a part saved
+    /// before identities, or not a part).</summary>
+    public static (string? id, string? revision) ReadIdentity(string path)
+    {
+        try
+        {
+            var bytes = File.ReadAllBytes(path);
+            byte[] json;
+            if (IsZip(bytes))
+            {
+                using var zip = new ZipArchive(new MemoryStream(bytes), ZipArchiveMode.Read);
+                var model = zip.GetEntry(ModelEntry);
+                if (model == null) return (null, null);
+                json = Read(model);
+            }
+            else json = bytes;
+            using var d = System.Text.Json.JsonDocument.Parse(json);
+            string? Str(string name) => d.RootElement.TryGetProperty(name, out var v) && v.ValueKind == System.Text.Json.JsonValueKind.String ? v.GetString() : null;
+            return (Str("id"), Str("revision"));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or System.Text.Json.JsonException)
+        {
+            return (null, null);
+        }
     }
 
     static byte[] Read(ZipArchiveEntry e)

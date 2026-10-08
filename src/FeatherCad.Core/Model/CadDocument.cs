@@ -20,6 +20,15 @@ public sealed class CadDocument
 
     public string Format { get; set; } = "FeatherCAD";
     public int FormatVersion { get; set; } = CurrentFormatVersion;
+    /// <summary>
+    /// The part's identity (a GUID), given on its first save and kept for good: assemblies find the part by it
+    /// wherever the file goes. Save As to another file gives the copy a new one (<see cref="ForkIdentity"/>).
+    /// </summary>
+    public string? Id { get; set; }
+    /// <summary>A new GUID on every save: assemblies tell a changed part from the one they last saw.</summary>
+    public string? Revision { get; set; }
+    /// <summary>The part this one was saved as a copy of (its <see cref="Id"/>), if any.</summary>
+    public string? DerivedFrom { get; set; }
     public UnitSystem Units { get; set; } = UnitSystem.MMGS;
     public List<Equation> Equations { get; set; } = new();
     public List<Feature> Features { get; set; } = new();
@@ -73,6 +82,15 @@ public sealed class CadDocument
 
     /// <summary>Preview image (PNG) stored in containers.</summary>
     [JsonIgnore] public byte[]? Thumbnail { get; set; }
+
+    /// <summary>A new identity for a copy saved under another name: the original keeps its own.</summary>
+    public void ForkIdentity()
+    {
+        if (Id != null) DerivedFrom = Id;
+        Id = null; Revision = null;
+    }
+
+    public static string NewGuid() => Guid.NewGuid().ToString("D");
 
     public Feature? Find(string id) => Features.FirstOrDefault(f => f.Id == id);
     public int IndexOf(string id) => Features.FindIndex(f => f.Id == id);

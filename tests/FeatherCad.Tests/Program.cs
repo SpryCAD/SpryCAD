@@ -156,6 +156,7 @@ static class Program
             SweepFeatureTests.Run(t);
             HelicalTests.Run(t);
             ThreadFeatureTests.Run(t);
+            AssemblyTests.Run(t);
             SketchVisibilityTests.Run(t);
             Console.WriteLine("Core");
             CoreTests.Run(t);
