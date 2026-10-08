@@ -39,6 +39,12 @@ public sealed record PlaneDisplay(string Name, string? FeatureId, Frame Frame, d
 /// <summary>A sketch shown (not being edited) in the viewport.</summary>
 public sealed record SketchDisplay(string FeatureId, SketchResult Result);
 
+/// <summary>
+/// A mesh drawn where a rigid placement puts it, in a color (an assembly's component: one GPU mesh for all the
+/// components of a part). <c>Model</c> is the placement as a row-vector matrix (rotation, then translation).
+/// </summary>
+public readonly record struct MeshInstance(string Id, DisplayMesh Mesh, Matrix4x4 Model, Rgba Color);
+
 public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICustomHitTest
 {
     /// <summary>The GL surface draws via composition, so tell Avalonia the whole area is hit-testable.</summary>
@@ -54,6 +60,8 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
     public IReadOnlyList<Body> PreviewBodies { get; set; } = Array.Empty<Body>();
     public IReadOnlyList<PlaneDisplay> Planes { get; set; } = Array.Empty<PlaneDisplay>();
     public IReadOnlyList<SketchDisplay> Sketches { get; set; } = Array.Empty<SketchDisplay>();
+    /// <summary>Placed meshes (an assembly's components), drawn in the display style with their own colors.</summary>
+    public IReadOnlyList<MeshInstance> Instances { get; set; } = Array.Empty<MeshInstance>();
     public Rgba PartColor = new(0.74f, 0.76f, 0.80f);
     public DisplayStyle Style = DisplayStyle.ShadedWithEdges;
     public bool ShowPlanes = true;
@@ -144,6 +152,7 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         var live = new HashSet<DisplayMesh>(ReferenceEqualityComparer.Instance);
         foreach (var b in Bodies) live.Add(b.Mesh);
         foreach (var b in PreviewBodies) live.Add(b.Mesh);
+        foreach (var i in Instances) live.Add(i.Mesh);
         foreach (var k in _gpu.Keys.Where(k => !live.Contains(k)).ToList()) { _gpu[k].Dispose(); _gpu.Remove(k); }
         foreach (var m in live) if (!_gpu.ContainsKey(m)) _gpu[m] = GpuMesh.Create(_r.Gl, m);
 
@@ -205,12 +214,14 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
             }
         }
         if (ghost) _r.Blend(false);
+        DrawInstances(vp, view);
         if (Style == DisplayStyle.HiddenLinesVisible)
         {
             // hidden edges, faint, on top
             _r.SetupDepth(true, false);
             _r.Gl.DepthFunc(DepthFunction.Greater);
             foreach (var b in Bodies) _r.DrawEdges(_gpu[b.Mesh], new Rgba(0.55f, 0.55f, 0.6f), vp);
+            foreach (var i in Instances) _r.DrawEdges(_gpu[i.Mesh], new Rgba(0.55f, 0.55f, 0.6f), i.Model * vp);
             _r.Gl.DepthFunc(DepthFunction.Lequal);
         }
 
@@ -266,10 +277,100 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         if (_animating || Spinning) RequestNextFrameRendering();
     }
 
+    /// <summary>The placed meshes: shaded (or depth only for hidden lines) in their colors, then their edges.</summary>
+    void DrawInstances(Matrix4x4 vp, Matrix4x4 view)
+    {
+        if (_r == null || Instances.Count == 0) return;
+        if (Style != DisplayStyle.Wireframe)
+        {
+            _r.PolygonOffset(true, 1, 1);
+            if (Style == DisplayStyle.HiddenLinesVisible) _r.Gl.ColorMask(false, false, false, false);
+            foreach (var i in Instances) _r.DrawMesh(_gpu[i.Mesh], i.Color, i.Model * vp, i.Model * view, Camera.Perspective);
+            if (Style == DisplayStyle.HiddenLinesVisible) _r.Gl.ColorMask(true, true, true, true);
+            _r.PolygonOffset(false);
+        }
+        if (Style != DisplayStyle.Shaded)
+            foreach (var i in Instances) _r.DrawEdges(_gpu[i.Mesh], EdgeColor, i.Model * vp);
+    }
+
+    /// <summary>A mesh box placed by a row-vector matrix: the box of its eight corners.</summary>
+    static Box3 Placed(Box3 b, Matrix4x4 m)
+    {
+        var r = Box3.Empty;
+        if (b.IsEmpty) return r;
+        for (int c = 0; c < 8; c++)
+        {
+            var v = Vector3.Transform(new Vector3((float)((c & 1) == 0 ? b.Min.X : b.Max.X), (float)((c & 2) == 0 ? b.Min.Y : b.Max.Y), (float)((c & 4) == 0 ? b.Min.Z : b.Max.Z)), m);
+            r.Add(new Vec3(v.X, v.Y, v.Z));
+        }
+        return r;
+    }
+
+    /// <summary>
+    /// The placed mesh under a screen point: its id, the distance along the view ray and the point hit (world), or
+    /// null. Each mesh is tested in its own coordinates (the ray carried back by the inverse placement).
+    /// </summary>
+    public (string id, double t, Vec3 point)? PickInstance(double x, double y)
+    {
+        var (ro, rd) = Camera.Ray(x, y);
+        (string id, double t, Vec3 point)? best = null;
+        foreach (var inst in Instances)
+        {
+            if (!Matrix4x4.Invert(inst.Model, out var inv)) continue;
+            var o = Vector3.Transform(new Vector3((float)ro.X, (float)ro.Y, (float)ro.Z), inv);
+            var d = Vector3.TransformNormal(new Vector3((float)rd.X, (float)rd.Y, (float)rd.Z), inv);
+            var m = inst.Mesh;
+            if (!RayHitsBox(o, d, m.Bounds)) continue;
+            var lo = new Vec3(o.X, o.Y, o.Z); var ld = new Vec3(d.X, d.Y, d.Z);
+            for (int k = 0; k + 2 < m.Indices.Length; k += 3)
+            {
+                var t = RayTriangle(lo, ld, P(m, m.Indices[k]), P(m, m.Indices[k + 1]), P(m, m.Indices[k + 2]));
+                if (t > 0 && (best == null || t < best.Value.t)) best = (inst.Id, t, ro + rd * t);
+            }
+        }
+        return best;
+    }
+
+    static bool RayHitsBox(Vector3 o, Vector3 d, Box3 b)
+    {
+        if (b.IsEmpty) return false;
+        double t0 = double.MinValue, t1 = double.MaxValue;
+        for (int a = 0; a < 3; a++)
+        {
+            double oa = a == 0 ? o.X : a == 1 ? o.Y : o.Z, da = a == 0 ? d.X : a == 1 ? d.Y : d.Z;
+            double lo = a == 0 ? b.Min.X : a == 1 ? b.Min.Y : b.Min.Z, hi = a == 0 ? b.Max.X : a == 1 ? b.Max.Y : b.Max.Z;
+            var pad = 1e-6 * (1 + Math.Abs(hi - lo));
+            if (Math.Abs(da) < 1e-12) { if (oa < lo - pad || oa > hi + pad) return false; continue; }
+            double ta = (lo - pad - oa) / da, tb = (hi + pad - oa) / da;
+            if (ta > tb) (ta, tb) = (tb, ta);
+            t0 = Math.Max(t0, ta); t1 = Math.Min(t1, tb);
+            if (t0 > t1) return false;
+        }
+        return t1 >= 0;
+    }
+
+    /// <summary>Möller–Trumbore: the distance along the ray to the triangle, or -1.</summary>
+    static double RayTriangle(Vec3 o, Vec3 d, Vec3 a, Vec3 b, Vec3 c)
+    {
+        var e1 = b - a; var e2 = c - a;
+        var p = Vec3.Cross(d, e2);
+        var det = Vec3.Dot(e1, p);
+        if (Math.Abs(det) < 1e-14) return -1;
+        var inv = 1 / det;
+        var s = o - a;
+        var u = Vec3.Dot(s, p) * inv;
+        if (u < 0 || u > 1) return -1;
+        var q = Vec3.Cross(s, e1);
+        var v = Vec3.Dot(d, q) * inv;
+        if (v < 0 || u + v > 1) return -1;
+        return Vec3.Dot(e2, q) * inv;
+    }
+
     void UpdateSceneRadius()
     {
         var b = Box3.Empty;
         foreach (var body in Bodies) b.Add(body.Mesh.Bounds);
+        foreach (var i in Instances) b.Add(Placed(i.Mesh.Bounds, i.Model));
         var r = b.IsEmpty ? 100f : (float)Math.Max(100, b.Diagonal + (Camera.V(Camera.Target) - b.Center).Length);
         Camera.SceneRadius = r;
     }
@@ -729,6 +830,7 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
     {
         var b = Box3.Empty;
         foreach (var body in Bodies) b.Add(body.Mesh.Bounds);
+        foreach (var i in Instances) b.Add(Placed(i.Mesh.Bounds, i.Model));
         foreach (var s in Sketches)
             foreach (var p in s.Result.Sketch.Points) b.Add(s.Result.Frame.ToWorld(p.P));
         return b;

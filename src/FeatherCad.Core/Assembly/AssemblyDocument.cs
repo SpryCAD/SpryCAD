@@ -122,6 +122,8 @@ public sealed class PartRef
     public string? AbsolutePath { get; set; }
     /// <summary>The part embedded in the assembly (an attachment, "parts/…") instead of a file: a virtual part.</summary>
     public string? Embedded { get; set; }
+
+    public PartRef Clone() => (PartRef)MemberwiseClone();
 }
 
 /// <summary>A rigid placement: rotation (rows of a 3×3 matrix) and translation, as stored.</summary>

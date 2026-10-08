@@ -28,6 +28,67 @@ static class Demos
         ("acme-lead-screw.fcad", AcmeLeadScrew),
     };
 
+    /// <summary>The demo assemblies (written with the parts by <see cref="Write"/>).</summary>
+    public static IEnumerable<(string file, Func<FeatherCad.Core.Assembly.AssemblyModel> build)> Assemblies => new (string, Func<FeatherCad.Core.Assembly.AssemblyModel>)[]
+    {
+        ("hinge.fcasm", Hinge),
+    };
+
+    /// <summary>
+    /// A hinge in one file (its parts embedded): two of the same leaf (a 40 x 30 x 2 plate with a knuckle along half
+    /// of one edge, bored for the pin, and the plate notched along the other half for the other leaf's knuckle), the
+    /// second turned half a turn about the vertical line through the middle of the knuckle's axis (its plate on the
+    /// other side, its knuckle beside the first), and the pin through both. Printable: Clr between the knuckles,
+    /// between each knuckle and the other leaf's notch, and round the pin.
+    /// </summary>
+    static FeatherCad.Core.Assembly.AssemblyModel Hinge()
+    {
+        // the leaf: the plate on Front (x 0..40, y 0..30, z 0..T), the knuckle and its bore along X on Right
+        // (sketch x = -z, y = y) about (y 32, z T/2)
+        var leaf = Doc(("L", "40"), ("W", "30"), ("T", "2"), ("KD", "6"), ("PinD", "3"), ("Clr", "0.2"));
+        var p = new Sk(leaf);
+        p.Rect("0", "0", "L", "W");
+        var ps = leaf.AddFeature(new SketchFeature { Name = "Plate", Plane = PlaneRef.Front, Sketch = p.S });
+        leaf.AddFeature(new ExtrudeFeature { Name = "Plate", SketchId = ps.Id, Depth = "T" });
+        var k = new Sk(leaf);
+        k.Circle(k.P("-T/2", "W+KD/2-1"), "KD");
+        var ks = leaf.AddFeature(new SketchFeature { Name = "Knuckle", Plane = PlaneRef.Right, Sketch = k.S });
+        leaf.AddFeature(new ExtrudeFeature { Name = "Knuckle", SketchId = ks.Id, Depth = "L/2-Clr" });
+        // the notch for the other leaf's knuckle (the same circle, from the middle on): Clr clear of it
+        var n = new Sk(leaf);
+        n.Rect("L/2-Clr", "W-1-Clr", "L+1", "W+1");
+        var ns = leaf.AddFeature(new SketchFeature { Name = "Notch", Plane = PlaneRef.Front, Sketch = n.S });
+        leaf.AddFeature(new ExtrudeFeature { Name = "Notch", SketchId = ns.Id, IsCut = true, End = EndCondition.ThroughAllBoth });
+        var b = new Sk(leaf);
+        b.Circle(b.P("-T/2", "W+KD/2-1"), "PinD+2*Clr");
+        var bs = leaf.AddFeature(new SketchFeature { Name = "Bore", Plane = PlaneRef.Right, Sketch = b.S });
+        leaf.AddFeature(new ExtrudeFeature { Name = "Bore", SketchId = bs.Id, IsCut = true, End = EndCondition.ThroughAllBoth });
+        leaf.Color = new[] { 0.80, 0.66, 0.36 };
+        // the pin along X
+        var pin = Doc(("PinD", "3"), ("PinL", "44"));
+        var c = new Sk(pin);
+        c.Circle(Sketch.OriginId, "PinD");
+        var cs = pin.AddFeature(new SketchFeature { Name = "Pin", Plane = PlaneRef.Right, Sketch = c.S });
+        pin.AddFeature(new ExtrudeFeature { Name = "Pin", SketchId = cs.Id, Depth = "PinL" });
+        pin.Color = new[] { 0.55, 0.57, 0.62 };
+        var tmp = Path.Combine(Path.GetTempPath(), "fc-hinge-" + Guid.NewGuid().ToString("N")[..8]);
+        Directory.CreateDirectory(tmp);
+        try
+        {
+            string lp = Path.Combine(tmp, "Leaf.fcad"), pp = Path.Combine(tmp, "Pin.fcad");
+            leaf.Save(lp); pin.Save(pp);
+            var m = FeatherCad.Core.Assembly.AssemblyModel.New();
+            double ky = 32, kz = 1;
+            m.Insert(lp, Transform.Identity, embed: true);
+            m.Insert(lp, Transform.Rotation(new Vec3(20, ky, kz), Vec3.UnitZ, Math.PI), embed: true);
+            m.Insert(pp, Transform.Translation(new Vec3(-2, ky, kz)), embed: true);
+            // embedded: nothing points back at the temporary files
+            foreach (var comp in m.Doc.Components) { comp.Part.Path = null; comp.Part.AbsolutePath = null; }
+            return m;
+        }
+        finally { try { Directory.Delete(tmp, true); } catch { } }
+    }
+
     /// <summary>Equation changes each demo must survive (shows what the parameters do).</summary>
     public static readonly Dictionary<string, (string name, string expr)[][]> Variants = new()
     {
@@ -225,6 +286,13 @@ static class Demos
             foreach (var b in r.State.Bodies)
                 Console.WriteLine($"  body: native={b.Solid.Native != null} open={b.Solid.Topology.OpenHalfEdges} faces: " +
                     string.Join(" ", b.Solid.Native?.Faces.Select(f => f.Tag.Name).Distinct() ?? Array.Empty<string>()));
+        }
+        foreach (var (file, build) in Assemblies)
+        {
+            var m = build();
+            m.Save(Path.Combine(dir, file));
+            Console.WriteLine($"{file}: {m.Doc.Components.Count} components ({string.Join(", ", m.Doc.Components.Select(c => c.Name))})");
+            if (m.Parts.Values.Any(p => p.Problem != null || p.Mesh.Indices.Length == 0)) broken.Add(file);
         }
         // a failed feature fails the run, so a broken demo can't ship in the installer (build/make-installer.ps1)
         if (broken.Count == 0) return 0;

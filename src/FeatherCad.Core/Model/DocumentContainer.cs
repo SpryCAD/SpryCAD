@@ -89,9 +89,11 @@ public static class DocumentContainer
         s.Write(data);
     }
 
-    public static CadDocument Load(string path)
+    public static CadDocument Load(string path) => Load(File.ReadAllBytes(path), Path.GetFileName(path));
+
+    /// <summary>A part from its file's bytes (e.g. a part embedded in an assembly); <paramref name="name"/> for messages.</summary>
+    public static CadDocument Load(byte[] bytes, string name)
     {
-        var bytes = File.ReadAllBytes(path);
         if (!IsZip(bytes)) return CadDocument.FromJson(Encoding.UTF8.GetString(bytes)); // (BOM is skipped by the decoder)
         using var zip = new ZipArchive(new MemoryStream(bytes), ZipArchiveMode.Read);
         var model = zip.GetEntry(ModelEntry) ?? throw new InvalidDataException("Not a FeatherCAD document (no model.json in the container).");
@@ -106,9 +108,9 @@ public static class DocumentContainer
         foreach (var a in doc.Attachments ?? new())
         {
             if (!doc.Files.TryGetValue(a.Name, out var data))
-                throw new InvalidDataException($"The embedded file \"{a.Name}\" is missing from {Path.GetFileName(path)}.");
+                throw new InvalidDataException($"The embedded file \"{a.Name}\" is missing from {name}.");
             if (data.LongLength != a.Size || Hash(data) != a.Sha256)
-                throw new InvalidDataException($"The embedded file \"{a.Name}\" in {Path.GetFileName(path)} is damaged (checksum mismatch).");
+                throw new InvalidDataException($"The embedded file \"{a.Name}\" in {name} is damaged (checksum mismatch).");
         }
         return doc;
     }

@@ -111,6 +111,7 @@ public partial class MainWindow
     {
         MainMenu.Items.Add(Sub("_File",
             Item("_New", () => _ = NewFile(), "Ctrl+N", "new"),
+            Item("New _Assembly", NewAssembly, null, "new"),
             Item("_Open...", () => _ = OpenFileDialog(), "Ctrl+O", "open"),
             Item("_Save", () => _ = Save(), "Ctrl+S", "save"),
             Item("Save _As...", () => _ = SaveAs(), "Ctrl+Shift+S"),
@@ -656,7 +657,7 @@ public partial class MainWindow
 
     static readonly FilePickerFileType FcadType = new("FeatherCAD Part") { Patterns = new[] { "*.fcad" } };
     static readonly FilePickerFileType StepType = new("STEP model") { Patterns = new[] { "*.step", "*.stp" } };
-    static readonly FilePickerFileType OpenableType = new("Parts and STEP models") { Patterns = new[] { "*.fcad", "*.step", "*.stp" } };
+    static readonly FilePickerFileType OpenableType = new("Parts, assemblies and STEP models") { Patterns = new[] { "*.fcad", "*.fcasm", "*.step", "*.stp" } };
 
     static bool IsStep(string path) => Path.GetExtension(path).ToLowerInvariant() is ".step" or ".stp";
 
@@ -756,7 +757,7 @@ public partial class MainWindow
         var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
         {
             Title = "Open Part",
-            FileTypeFilter = new[] { OpenableType, FcadType, StepType },
+            FileTypeFilter = new[] { OpenableType, FcadType, AssemblyType, StepType },
             AllowMultiple = true,
         });
         await OpenFilesAsync(files.Select(f => f.TryGetLocalPath()).OfType<string>().ToList());
@@ -771,6 +772,8 @@ public partial class MainWindow
     /// </summary>
     public async Task OpenFilesAsync(IReadOnlyList<string> paths)
     {
+        foreach (var a in paths.Where(IsAssembly)) await OpenAssembly(a);
+        paths = paths.Where(p => !IsAssembly(p)).ToList();
         if (paths.Count == 0) return;
         if (paths.Count == 1) { await OpenFileAsync(paths[0]); return; }
         var blank = IsUntouched(_tab) ? _tab : null; // the empty part the window started with: not needed
@@ -799,6 +802,7 @@ public partial class MainWindow
     /// </summary>
     public async Task<bool> OpenFileAsync(string path)
     {
+        if (IsAssembly(path)) { await OpenAssembly(path); return true; }
         if (FindOpen(path) is { } open)
         {
             // opened again after it could not be: read it again (the file may have been fixed or replaced)

@@ -30,8 +30,103 @@ static class AssemblyTests
         Path = ComponentResolver.Relative(asmDir, Path.GetFullPath(partPath)),
     };
 
+    /// <summary>A cylinder part (radius r, height h) saved at path.</summary>
+    static CadDocument Cylinder(string path, double r, double h, bool identity = true)
+    {
+        var d = new CadDocument();
+        var sk = new FeatherCad.Core.Sketching.Sketch();
+        sk.Add(new FeatherCad.Core.Sketching.SkCircle { Center = FeatherCad.Core.Sketching.Sketch.OriginId, R = r });
+        var s = d.AddFeature(new SketchFeature { Plane = PlaneRef.Front, Sketch = sk });
+        d.AddFeature(new ExtrudeFeature { SketchId = s.Id, Depth = h.ToString(System.Globalization.CultureInfo.InvariantCulture) });
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        if (identity) d.Save(path);
+        else File.WriteAllText(path, d.ToJson());
+        return d;
+    }
+
     public static void Run(TestRunner t)
     {
+        t.Test("Hinge demo: one file, its parts embedded; reopened from it alone; no two components overlap", () =>
+        {
+            var dir = NewDir("hinge");
+            var path = Path.Combine(dir, "hinge.fcasm");
+            Demos.Assemblies.First(a => a.file == "hinge.fcasm").build().Save(path);
+            var m = AssemblyModel.Open(AssemblyDocument.Load(path), path, new PartIndex());
+            t.Eq(m.Doc.Components.Count, 3);
+            t.True(m.Doc.Components.All(c => m.DisplayOf(c)!.Source == PartSource.Embedded && m.DisplayOf(c)!.Problem == null), "all from the file");
+            t.Eq(m.Parts.Count, 2);
+            t.True(m.Notes.Count == 0, string.Join("; ", m.Notes));
+            // the placed solids, pairwise
+            var solids = m.Doc.Components.Select(c => (c.Name, body: new FeatherCad.Core.Regen.Regenerator().Rebuild(m.DisplayOf(c)!.Doc!).State.Bodies.Single().Solid.Native!
+                .Transformed(c.Placement.ToTransform()))).ToList();
+            for (int i = 0; i < solids.Count; i++)
+                for (int j = i + 1; j < solids.Count; j++)
+                {
+                    var common = NBoolean.Run(solids[i].body, solids[j].body, BoolOp.Intersect);
+                    var v = common.Faces.Count == 0 ? 0 : NMass.Of(common)!.Volume;
+                    t.True(v < 1e-6, $"{solids[i].Name} and {solids[j].Name} overlap by {v:0.######} mm3");
+                }
+        });
+
+        t.Test("Assembly model: components linked and embedded, displays built, caches saved; missing, lightweight and changed parts", () =>
+        {
+            var dir = NewDir("model");
+            string pa = Path.Combine(dir, "parts", "Pin.fcad"), pb = Path.Combine(dir, "parts", "Leaf.fcad");
+            Cylinder(pa, 5, 10); Cylinder(pb, 3, 20);
+            var m = AssemblyModel.New();
+            var c1 = m.Insert(pa, Transform.Identity);
+            var c2 = m.Insert(pa, Transform.Translation(new Vec3(30, 0, 0)));
+            var c3 = m.Insert(pb, Transform.Translation(new Vec3(0, 30, 0)), embed: true);
+            t.True(c1.Name == "Pin<1>" && c2.Name == "Pin<2>" && c3.Name == "Leaf<1>", "names");
+            t.Eq(m.Parts.Count, 2);
+            double V(Component c) => m.DisplayOf(c)!.Mesh.Volume;
+            t.True(Math.Abs(V(c1) - Math.PI * 25 * 10) < 0.01 * Math.PI * 250 && Math.Abs(V(c3) - Math.PI * 9 * 20) < 0.01 * Math.PI * 180, "displays");
+            t.True(c3.Part.Embedded != null && m.Doc.Files.ContainsKey(c3.Part.Embedded), "the leaf embedded");
+            var asmPath = Path.Combine(dir, "Hinge.fcasm");
+            m.Save(asmPath);
+            t.Eq(m.Doc.Caches.Count, 2);
+            t.Eq(c1.Part.Path, "parts/Pin.fcad");
+            int tris = m.DisplayOf(c1)!.Mesh.Indices.Length;
+
+            // reopened: the pin from its file, the leaf from the assembly
+            var m2 = AssemblyModel.Open(AssemblyDocument.Load(asmPath), asmPath);
+            t.True(m2.DisplayOf(m2.Doc.Components[0])!.Source == PartSource.File && m2.DisplayOf(m2.Doc.Components[2])!.Source == PartSource.Embedded, "sources");
+
+            // the pin's file moved out of reach: shown from the cache, as it was
+            var away = Path.Combine(NewDir("away"), "Pin.fcad");
+            File.Move(pa, away);
+            var m3 = AssemblyModel.Open(AssemblyDocument.Load(asmPath), asmPath, new PartIndex());
+            var pd = m3.DisplayOf(m3.Doc.Components[0])!;
+            t.True(pd.Source == PartSource.Cache && pd.Mesh.Indices.Length == tris && pd.Problem != null, "missing: from the cache");
+            t.True(m3.Notes.Any(n => n.Contains("not found")), "a note");
+            File.Move(away, pa);
+
+            // lightweight: from the cache although the file is there
+            var a4 = AssemblyDocument.Load(asmPath);
+            foreach (var c in a4.Components.Where(c => c.Name.StartsWith("Pin"))) c.Lightweight = true;
+            var m4 = AssemblyModel.Open(a4, asmPath);
+            t.True(m4.DisplayOf(a4.Components[0])!.Source == PartSource.Cache && m4.DisplayOf(a4.Components[2])!.Source == PartSource.Embedded, "lightweight");
+
+            // the pin made longer (a new revision): rebuilt, and on saving its cache replaces the old one
+            var pin = CadDocument.Load(pa);
+            ((ExtrudeFeature)pin.Features[1]).Depth = "40";
+            pin.Save(pa);
+            var m5 = AssemblyModel.Open(AssemblyDocument.Load(asmPath), asmPath);
+            t.True(m5.Resolution.Of(m5.Doc.Components[0]).NewRevision, "a new revision");
+            t.True(Math.Abs(m5.DisplayOf(m5.Doc.Components[0])!.Mesh.Volume - Math.PI * 25 * 40) < 0.01 * Math.PI * 1000, "rebuilt");
+            m5.Save(asmPath);
+            t.Eq(m5.Doc.Caches.Count, 2);
+            t.True(m5.Doc.Caches.ContainsKey(AssemblyDocument.CacheKey(pin.Id!, pin.Revision)), "the new revision cached, the old one dropped");
+            t.Eq(m5.Doc.Files.Keys.Count(k => k.StartsWith("cache/")), 2);
+
+            // a part saved before identities: given one when inserted
+            var legacy = Path.Combine(dir, "parts", "Old.fcad");
+            Cylinder(legacy, 2, 5, identity: false);
+            t.True(DocumentContainer.ReadIdentity(legacy).id == null, "no identity yet");
+            m5.Insert(legacy, Transform.Identity);
+            t.True(DocumentContainer.ReadIdentity(legacy).id != null && m5.Notes.Any(n => n.Contains("identity")), "given one");
+        });
+
         t.Test("Part identity: an id on the first save (kept), a new revision on every save, a new id for a copy", () =>
         {
             var dir = NewDir("identity");
