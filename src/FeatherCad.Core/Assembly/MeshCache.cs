@@ -8,15 +8,18 @@ namespace FeatherCad.Core.Assembly;
 /// its bounds and volume, and the part's color. What a component shows when its part is not loaded (lightweight),
 /// cannot be found (missing) or is not shared (an assembly packed for viewing). Binary, little-endian:
 /// <code>
-///   "FCMESH1"  color r g b (float)  bounds min max (6 double)  volume (double)
+///   "FCMESH2"  color r g b (float)  bounds min max (6 double)  volume (double)
 ///   positions (count, floats)  normals (count, floats)  indices (count, ints)
-///   faces (count; name, index start, index count)  edge lines (count, floats)  edges (count; index, start, count)
+///   faces (count; name, index start, index count, surface kind, surface origin and axis, plane point and
+///          normal, radius, second parameter)  edge lines (count, floats)  edges (count; index, start, count)
 /// </code>
-/// Face ranges keep their names (selection, mates); their surfaces are not kept (a plane placeholder).
+/// Face ranges keep their names and their surfaces (planes, axes and centres for mates; other kinds by kind only).
+/// Version 1 caches (no surfaces) are still read.
 /// </summary>
 public static class MeshCache
 {
-    const string Magic = "FCMESH1";
+    // version 2 keeps each face's surface (planes, cylinders, cones, spheres): mates work on lightweight parts
+    const string Magic = "FCMESH2", Magic1 = "FCMESH1";
 
     public sealed record Entry(DisplayMesh Mesh, double[] Color);
 
@@ -31,7 +34,14 @@ public static class MeshCache
         Floats(w, m.Positions); Floats(w, m.Normals);
         w.Write(m.Indices.Length); foreach (var i in m.Indices) w.Write(i);
         w.Write(m.Faces.Count);
-        foreach (var f in m.Faces) { w.Write(f.Name); w.Write(f.IndexStart); w.Write(f.IndexCount); }
+        foreach (var f in m.Faces)
+        {
+            w.Write(f.Name); w.Write(f.IndexStart); w.Write(f.IndexCount);
+            var s = f.Surface;
+            w.Write((int)s.Kind);
+            foreach (var v in new[] { s.Origin, s.Axis, f.FirstPlane.Origin, f.FirstPlane.Normal }) { w.Write(v.X); w.Write(v.Y); w.Write(v.Z); }
+            w.Write(s.Radius); w.Write(s.Param2);
+        }
         Floats(w, m.EdgeLines);
         w.Write(m.Edges.Count);
         foreach (var e in m.Edges) { w.Write(e.EdgeIndex); w.Write(e.VertexStart); w.Write(e.VertexCount); }
@@ -42,7 +52,9 @@ public static class MeshCache
     public static Entry Read(byte[] data)
     {
         using var r = new BinaryReader(new MemoryStream(data), Encoding.UTF8);
-        if (Encoding.ASCII.GetString(r.ReadBytes(Magic.Length)) != Magic) throw new InvalidDataException("Not a FeatherCAD display cache.");
+        var magic = Encoding.ASCII.GetString(r.ReadBytes(Magic.Length));
+        if (magic != Magic && magic != Magic1) throw new InvalidDataException("Not a FeatherCAD display cache.");
+        bool surfaces = magic == Magic;
         var color = new double[] { r.ReadSingle(), r.ReadSingle(), r.ReadSingle() };
         Vec3 V() => new(r.ReadDouble(), r.ReadDouble(), r.ReadDouble());
         var m = new DisplayMesh();
@@ -57,10 +69,19 @@ public static class MeshCache
         for (int i = 0; i < nf; i++)
         {
             var name = r.ReadString(); int start = r.ReadInt32(), count = r.ReadInt32();
+            var surf = SurfaceDef.PlaneDef; var plane = placeholder;
+            if (surfaces)
+            {
+                var kind = (SurfaceKind)r.ReadInt32();
+                Vec3 o = V(), ax = V(), po = V(), pn = V();
+                double rad = r.ReadDouble(), p2 = r.ReadDouble();
+                surf = kind == SurfaceKind.Plane ? SurfaceDef.PlaneDef : new SurfaceDef { Kind = kind, Origin = o, Axis = ax, Radius = rad, Param2 = p2 };
+                plane = pn.Length > 0.5 ? Plane.FromPointNormal(po, pn) : placeholder;
+            }
             // bounds of the face's triangles (picking culls by them)
             var box = Box3.Empty;
             for (int k = start; k < start + count; k++) { var v = m.Indices[k]; box.Add(new Vec3(m.Positions[3 * v], m.Positions[3 * v + 1], m.Positions[3 * v + 2])); }
-            m.Faces.Add(new FaceRange(name, start, count, SurfaceDef.PlaneDef, placeholder, box));
+            m.Faces.Add(new FaceRange(name, start, count, surf, plane, box));
         }
         m.EdgeLines = ReadFloats(r);
         var ne = r.ReadInt32();

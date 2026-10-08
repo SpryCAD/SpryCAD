@@ -44,8 +44,83 @@ static class AssemblyTests
         return d;
     }
 
+    /// <summary>A pin (cylinder r 5, 10 long along +Z) fixed, and a sleeve of the same size floating, placed askew.</summary>
+    static (AssemblyModel m, Component pin, Component sleeve, string dir) PinAndSleeve(string name)
+    {
+        var dir = NewDir(name);
+        string pp = Path.Combine(dir, "Pin.fcad"), sp = Path.Combine(dir, "Sleeve.fcad");
+        Cylinder(pp, 5, 10); Cylinder(sp, 5, 10);
+        var m = AssemblyModel.New();
+        var pin = m.Insert(pp, Transform.Identity);
+        var askew = Transform.Translation(new Vec3(40, 7, 3)) * Transform.Rotation(Vec3.Zero, new Vec3(1, 2, 0.5), 0.6);
+        var sleeve = m.Insert(sp, askew);
+        return (m, pin, sleeve, dir);
+    }
+
+    /// <summary>A component's face of a kind: its cylinder, or the planar end whose normal points along +Z (end) / -Z (start) in the part.</summary>
+    static string FaceOf(AssemblyModel m, Component c, string which)
+    {
+        var faces = m.DisplayOf(c)!.Mesh.Faces;
+        return which switch
+        {
+            "side" => faces.First(f => f.Surface.Kind == SurfaceKind.Cylinder).Name,
+            "end" => faces.First(f => f.Surface.Kind == SurfaceKind.Plane && f.FirstPlane.Normal.Z > 0.9).Name,
+            _ => faces.First(f => f.Surface.Kind == SurfaceKind.Plane && f.FirstPlane.Normal.Z < -0.9).Name,
+        };
+    }
+
     public static void Run(TestRunner t)
     {
+        t.Test("Mates: concentric and coincident stack a sleeve on a pin; a distance lifts it; contradictions are reported", () =>
+        {
+            var (m, pin, sleeve, dir) = PinAndSleeve("mates");
+            MateRef R(Component c, string which) => m.RefTo(c.Id, FaceOf(m, c, which))!;
+            var conc = m.AddMate(MateType.Concentric, R(sleeve, "side"), R(pin, "side"));
+            var coin = m.AddMate(MateType.Coincident, R(sleeve, "start"), R(pin, "end"));
+            t.True(m.LastSolve!.Satisfied, $"satisfied ({string.Join(", ", m.LastSolve.Errors.Select(e => $"{e.Key} {e.Value:E1}"))})");
+            t.True(!coin.Aligned, "face to face: anti-aligned");
+            // the sleeve's start face on the pin's end (z = 10), its axis the pin's
+            var start = m.World(coin.A); var axis = m.World(conc.A);
+            t.True(Math.Abs(start.P.Z - 10) < 1e-6 && Math.Abs(Math.Abs(start.D.Z) - 1) < 1e-9, $"stacked ({start.P}, {start.D})");
+            t.True(Math.Abs(Math.Abs(axis.D.Z) - 1) < 1e-9 && new Vec2(axis.P.X, axis.P.Y).Length < 1e-6, $"on the axis ({axis.P}, {axis.D})");
+            t.True(pin.Placement.ToTransform().T.Length < 1e-12, "the fixed pin did not move");
+
+            // a distance instead: 5 mm apart
+            m.Doc.Mates.Remove(coin);
+            var dist = m.AddMate(MateType.Distance, R(sleeve, "start"), R(pin, "end"), 5);
+            t.True(m.LastSolve!.Satisfied && Math.Abs(m.World(dist.A).P.Z - 15) < 1e-6, $"5 mm up ({m.World(dist.A).P}, normal {m.World(dist.A).D}; side {dist.Side}, aligned {dist.Aligned}; errors {string.Join(", ", m.LastSolve.Errors.Select(e => $"{e.Key} {e.Value:E1}"))}; iterations {m.LastSolve.Iterations})");
+
+            // contradicting it (coincident with the same faces): reported, nothing thrown
+            var clash = m.AddMate(MateType.Coincident, R(sleeve, "start"), R(pin, "end"));
+            t.True(!m.LastSolve!.Satisfied && m.LastSolve.Failed().Any(), "the conflict is reported");
+            m.Doc.Mates.Remove(clash);
+            m.SolveMates();
+            t.True(m.LastSolve!.Satisfied, "satisfied again without it");
+
+            // parallel and angle against the assembly's origin planes: the sleeve's end parallel to Front, its axis at 30° to Top's normal
+            var (m2, _, s2, _) = PinAndSleeve("mates2");
+            MateRef R2(string which) => m2.RefTo(s2.Id, FaceOf(m2, s2, which))!;
+            m2.AddMate(MateType.Parallel, R2("end"), m2.RefTo(null, "Front")!);
+            t.True(m2.LastSolve!.Satisfied && Math.Abs(Math.Abs(m2.World(R2("end")).D.Z) - 1) < 1e-9, "parallel to Front");
+            var (m3, _, s3, _) = PinAndSleeve("mates3");
+            var side = m3.RefTo(s3.Id, FaceOf(m3, s3, "side"))!;
+            m3.AddMate(MateType.Angle, side, m3.RefTo(null, "Top")!, 30);
+            var ang = Math.Acos(Math.Clamp(Vec3.Dot(m3.World(side).D, Vec3.UnitY), -1, 1)) * 180 / Math.PI;
+            t.True(m3.LastSolve!.Satisfied && Math.Abs(ang - 30) < 1e-5, $"30° ({ang:0.######})");
+
+            // saved; the parts' files gone: the mates still solve from the geometry they keep
+            var asmPath = Path.Combine(dir, "Stack.fcasm");
+            m.Save(asmPath);
+            var placed = sleeve.Placement.ToTransform().T;
+            File.Delete(Path.Combine(dir, "Pin.fcad")); File.Delete(Path.Combine(dir, "Sleeve.fcad"));
+            var back = AssemblyModel.Open(AssemblyDocument.Load(asmPath), asmPath, new PartIndex());
+            t.True(back.Doc.Components.All(c => back.DisplayOf(c)!.Source == PartSource.Cache), "from the caches");
+            var sb = back.Doc.Find(sleeve.Id)!;
+            sb.Placement = Placement.From(Transform.Translation(new Vec3(3, -2, 9)) * sb.Placement.ToTransform());
+            back.SolveMates();
+            t.True(back.LastSolve!.Satisfied && Vec3.Distance(sb.Placement.ToTransform().T, placed) < 1e-5, $"back in place ({sb.Placement.ToTransform().T} vs {placed})");
+        });
+
         t.Test("Hinge demo: one file, its parts embedded; reopened from it alone; no two components overlap", () =>
         {
             var dir = NewDir("hinge");

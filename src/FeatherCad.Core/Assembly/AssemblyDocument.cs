@@ -29,6 +29,11 @@ public sealed class AssemblyDocument
     public UnitSystem Units { get; set; } = UnitSystem.MMGS;
     public List<Component> Components { get; set; } = new();
     public int NextComponentId { get; set; } = 1;
+    /// <summary>The mates, in the order they were added (solved together).</summary>
+    public List<Mate> Mates { get; set; } = new();
+    public int NextMateId { get; set; } = 1;
+    /// <summary>Per mate type, the last number used in a name ("Coincident3").</summary>
+    public Dictionary<string, int> MateCounters { get; set; } = new();
     /// <summary>
     /// The display caches by part revision ("&lt;part id&gt;/&lt;revision&gt;"): the attachment holding its mesh
     /// (<see cref="MeshCache"/>). Kept for the revisions the components last saw.
@@ -63,6 +68,21 @@ public sealed class AssemblyDocument
         Components.Add(c);
         return c;
     }
+
+    /// <summary>Adds a mate: its id ("M1", …) and name ("Concentric2") given.</summary>
+    public Mate AddMate(Mate m)
+    {
+        m.Id = "M" + NextMateId++;
+        var key = m.Type.ToString();
+        var n = MateCounters.GetValueOrDefault(key) + 1;
+        MateCounters[key] = n;
+        if (string.IsNullOrEmpty(m.Name)) m.Name = key + n;
+        Mates.Add(m);
+        return m;
+    }
+
+    /// <summary>The mates a component takes part in.</summary>
+    public IEnumerable<Mate> MatesOf(string componentId) => Mates.Where(m => m.A.Component == componentId || m.B.Component == componentId);
 
     /// <summary>The cache key of a part revision.</summary>
     public static string CacheKey(string partId, string? revision) => partId + "/" + (revision ?? "none");

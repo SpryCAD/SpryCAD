@@ -52,6 +52,9 @@ public sealed class AssemblySession
         var d = AssemblyDocument.FromJson(json);
         Model.Doc.Components = d.Components;
         Model.Doc.NextComponentId = d.NextComponentId;
+        Model.Doc.Mates = d.Mates;
+        Model.Doc.NextMateId = d.NextMateId;
+        Model.Doc.MateCounters = d.MateCounters;
         // parts no component uses any more are not shown; parts used again are built again
         foreach (var key in Model.Parts.Keys.Where(k => !Model.ComponentsOf(k).Any()).ToList()) Model.Parts.Remove(key);
         foreach (var key in Model.Doc.Components.Select(c => ComponentResolver.Key(c.Part)).Distinct().Where(k => !Model.Parts.ContainsKey(k)).ToList())

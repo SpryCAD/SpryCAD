@@ -175,16 +175,89 @@ public sealed class AssemblyModel
         for (int i = 2; ; i++) if (!Doc.Files.ContainsKey($"{stem}-{i}{CadDocument.FileExtension}")) return $"{stem}-{i}{CadDocument.FileExtension}";
     }
 
-    /// <summary>Removes a component (an embedded part no other component uses goes with it).</summary>
+    /// <summary>Removes a component (its mates, and an embedded part no other component uses, go with it).</summary>
     public void Remove(Component c)
     {
         Doc.Components.Remove(c);
+        Doc.Mates.RemoveAll(m => m.A.Component == c.Id || m.B.Component == c.Id);
         var key = ComponentResolver.Key(c.Part);
         if (!ComponentsOf(key).Any())
         {
             Parts.Remove(key);
             if (c.Part.Embedded != null) Doc.Files.Remove(c.Part.Embedded);
         }
+    }
+
+    // ------------------------------------------------------------------------------------------
+    // mates
+
+    /// <summary>The assembly's origin planes (mate references with no component).</summary>
+    public static readonly string[] OriginPlanes = { "Front", "Top", "Right" };
+
+    /// <summary>A face of a component's part as a mate reference (its part's coordinates); null if it has none.</summary>
+    public MateGeom? FaceGeom(string componentId, string face)
+    {
+        if (Doc.Find(componentId) is not { } c || DisplayOf(c) is not { } pd) return null;
+        foreach (var f in pd.Mesh.Faces) if (f.Name == face) return MateGeom.Of(f);
+        return null;
+    }
+
+    /// <summary>
+    /// A reference's geometry in its part's coordinates: the face as the part has it now (the reference's copy
+    /// updated), else the copy (lightweight or missing part, or the face gone). Origin planes: the assembly's.
+    /// </summary>
+    public MateGeom Local(MateRef r)
+    {
+        if (r.Component == null)
+            return r.Face switch
+            {
+                "Top" => new MateGeom(MateGeomKind.Plane, Vec3.Zero, Vec3.UnitY),
+                "Right" => new MateGeom(MateGeomKind.Plane, Vec3.Zero, Vec3.UnitX),
+                _ => new MateGeom(MateGeomKind.Plane, Vec3.Zero, Vec3.UnitZ),
+            };
+        if (FaceGeom(r.Component, r.Face) is { } g)
+        {
+            r.Kind = g.Kind; r.P = g.P; r.D = g.D;
+            return g;
+        }
+        return r.Geom;
+    }
+
+    /// <summary>A reference's geometry where its component is placed.</summary>
+    public MateGeom World(MateRef r) =>
+        r.Component != null && Doc.Find(r.Component) is { } c ? Local(r).Placed(c.Placement.ToTransform()) : Local(r);
+
+    /// <summary>A reference to a face of a component (its geometry copied), or null if that face cannot be mated.</summary>
+    public MateRef? RefTo(string? componentId, string face)
+    {
+        var g = componentId == null ? Local(new MateRef { Face = face }) : FaceGeom(componentId, face);
+        return g == null ? null : new MateRef { Component = componentId, Face = face, Kind = g.Kind, P = g.P, D = g.D };
+    }
+
+    /// <summary>The last solve's result (mate errors).</summary>
+    public MateSolver.Result? LastSolve { get; private set; }
+
+    /// <summary>Moves floating components so the mates hold (<paramref name="onlyMove"/>: just those).</summary>
+    public MateSolver.Result SolveMates(ISet<string>? onlyMove = null)
+    {
+        LastSolve = MateSolver.Solve(Doc, Local, onlyMove);
+        return LastSolve;
+    }
+
+    /// <summary>
+    /// Adds a mate between two references (the alignment and side nearest how they lie now), moving the first
+    /// reference's component onto it if it floats (else the second's), then solving all the mates.
+    /// </summary>
+    public Mate AddMate(MateType type, MateRef a, MateRef b, double value = 0)
+    {
+        var m = new Mate { Type = type, A = a, B = b, Value = value };
+        m.ChooseAlignment(World(a), World(b));
+        Doc.AddMate(m);
+        var first = a.Component != null && Doc.Find(a.Component) is { Fixed: false } ca ? ca.Id
+            : b.Component != null && Doc.Find(b.Component) is { Fixed: false } cb ? cb.Id : null;
+        if (first != null) SolveMates(new HashSet<string> { first });
+        SolveMates();
+        return m;
     }
 
     /// <summary>
