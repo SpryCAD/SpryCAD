@@ -10,6 +10,8 @@ namespace SpryCad.Core.Model;
 ///   model.json              the document (the same JSON as a plain file)
 ///   attachments/&lt;name&gt;      embedded files, listed with size and SHA-256 in model.json
 ///   thumbnail.png           preview image (optional)
+///   display.mesh            the display as last built (optional; a display cache, made for display.revision)
+///   display.revision        the revision the display was made for
 /// </code>
 /// The kind is recognized from the first bytes ("PK" for ZIP), not the extension.
 /// </summary>
@@ -18,6 +20,7 @@ public static class DocumentContainer
     public const string ModelEntry = "model.json";
     public const string AttachmentFolder = "attachments/";
     public const string ThumbnailEntry = "thumbnail.png";
+    public const string DisplayEntry = "display.mesh", DisplayRevisionEntry = "display.revision";
 
     public static bool IsContainer(string path)
     {
@@ -72,6 +75,11 @@ public static class DocumentContainer
                 foreach (var a in doc.Attachments ?? new())
                     Write(zip, AttachmentFolder + a.Name, doc.Files[a.Name], CompressionLevel.Optimal);
                 if (doc.Thumbnail != null) Write(zip, ThumbnailEntry, doc.Thumbnail, CompressionLevel.NoCompression);
+                if (doc.Display != null)
+                {
+                    Write(zip, DisplayEntry, doc.Display, CompressionLevel.Fastest);
+                    Write(zip, DisplayRevisionEntry, Encoding.UTF8.GetBytes(doc.Revision!), CompressionLevel.NoCompression);
+                }
             }
             File.Move(tmp, path, overwrite: true);
         }
@@ -101,9 +109,13 @@ public static class DocumentContainer
         foreach (var e in zip.Entries)
         {
             if (e.FullName == ThumbnailEntry) doc.Thumbnail = Read(e);
+            else if (e.FullName == DisplayEntry) doc.Display = Read(e);
             else if (e.FullName.StartsWith(AttachmentFolder, StringComparison.Ordinal) && e.FullName.Length > AttachmentFolder.Length)
                 doc.Files[e.FullName[AttachmentFolder.Length..]] = Read(e);
         }
+        // a display made for another revision (the model edited elsewhere), or by other geometry code, is not this part's
+        var displayRev = zip.GetEntry(DisplayRevisionEntry) is { } dr ? Encoding.UTF8.GetString(Read(dr)) : null;
+        if (doc.Display != null && (displayRev != doc.Revision || Assembly.MeshCache.VersionOf(doc.Display) != Kernel.GeometryVersion.Current)) doc.Display = null;
         // every listed file must be there, intact
         foreach (var a in doc.Attachments ?? new())
         {

@@ -22,6 +22,15 @@ public enum PartsOrder
     RecentlyOpened,
 }
 
+/// <summary>When a part saved as a container keeps its display (shown at once when opened, while it rebuilds).</summary>
+public enum KeepDisplay
+{
+    Never,
+    /// <summary>When rebuilding it takes at least <see cref="UserSettings.KeepDisplaySeconds"/>.</summary>
+    SlowParts,
+    Always,
+}
+
 /// <summary>Per-user view preferences (not part of the document), stored as key=value lines in app data.</summary>
 public static class UserSettings
 {
@@ -34,6 +43,10 @@ public static class UserSettings
     /// parts with embedded files. On by default.
     /// </summary>
     public static bool SaveContainer { get; set; } = true;
+    /// <summary>When saved parts keep their display (in containers only).</summary>
+    public static KeepDisplay KeepDisplay { get; set; } = KeepDisplay.SlowParts;
+    /// <summary>How long a part takes to rebuild for it to keep its display (<see cref="KeepDisplay.SlowParts"/>).</summary>
+    public static double KeepDisplaySeconds { get; set; } = 1;
     /// <summary>What the view rotates about: by default the selection (its last vertex, edge or face), else the model's middle.</summary>
     public static RotateCenter RotateAbout { get; set; } = RotateCenter.Selection;
     /// <summary>Where the list of open parts was last (screen position and size); null: beside the tabs.</summary>
@@ -59,6 +72,8 @@ public static class UserSettings
                 if (k == nameof(ReverseWheel)) ReverseWheel = v == "1";
                 else if (k == nameof(Perspective)) Perspective = v == "1";
                 else if (k == nameof(SaveContainer)) SaveContainer = v == "1";
+                else if (k == nameof(KeepDisplay) && Enum.TryParse<KeepDisplay>(v, out var kd)) KeepDisplay = kd;
+                else if (k == nameof(KeepDisplaySeconds) && double.TryParse(v, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var ks) && ks >= 0) KeepDisplaySeconds = ks;
                 else if (k == nameof(RotateAbout) && Enum.TryParse<RotateCenter>(v, out var rc)) RotateAbout = rc;
                 else if (k == nameof(PartsWindow) && v.Split(',') is { Length: 4 } p && p.All(x => int.TryParse(x, out _)))
                     PartsWindow = (int.Parse(p[0]), int.Parse(p[1]), int.Parse(p[2]), int.Parse(p[3]));
@@ -81,6 +96,8 @@ public static class UserSettings
                 $"{nameof(ReverseWheel)}={(ReverseWheel ? 1 : 0)}",
                 $"{nameof(Perspective)}={(Perspective ? 1 : 0)}",
                 $"{nameof(SaveContainer)}={(SaveContainer ? 1 : 0)}",
+                $"{nameof(KeepDisplay)}={KeepDisplay}",
+                $"{nameof(KeepDisplaySeconds)}={KeepDisplaySeconds.ToString(System.Globalization.CultureInfo.InvariantCulture)}",
                 $"{nameof(RotateAbout)}={RotateAbout}",
             };
             if (PartsWindow is { } pw) lines.Add($"{nameof(PartsWindow)}={pw.x},{pw.y},{pw.w},{pw.h}");

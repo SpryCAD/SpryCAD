@@ -106,6 +106,9 @@ public sealed class DocumentSession
     {
         var d = CadDocument.Load(path);
         Doc = d; FilePath = path; Dirty = false;
+        // a display saved with it: shown until the rebuild is done
+        _saved = null;
+        if (d.Display != null) { try { _saved = MeshCache.Read(d.Display); } catch { } d.Display = null; }
         PartsIndexStore.Record(d, path);
         _undo.Clear(); _redo.Clear();
         _regen.Invalidate();
@@ -136,16 +139,35 @@ public sealed class DocumentSession
             if (!json.Contains($"\"{name}\"")) Doc.Files.Remove(name);
         var container = UserSettings.SaveContainer || Doc.Files.Count > 0;
         if (container) Doc.Thumbnail = RenderThumbnail() ?? Doc.Thumbnail;
+        // a slow part keeps its display (Options), to show at once when opened again
+        if (container) Doc.Display = DisplayToKeep();
         // saved as another file: that file is a copy, with its own identity (the original keeps its own; a failed
         // save keeps the document as it was)
         var (id, rev, from) = (Doc.Id, Doc.Revision, Doc.DerivedFrom);
         if (FilePath != null && !PartIndex.SamePath(FilePath, path)) Doc.ForkIdentity();
         try { Doc.Save(path, container); }
         catch { (Doc.Id, Doc.Revision, Doc.DerivedFrom) = (id, rev, from); throw; }
+        finally { Doc.Display = null; }
         PartsIndexStore.Record(Doc, path);
         FilePath = path; Dirty = false;
         DocumentChanged?.Invoke();
     }
+
+    /// <summary>
+    /// The display to save with the part (<see cref="UserSettings.KeepDisplay"/>): the last rebuild's, when it is of the
+    /// document as it is and the part is slow enough to build; else null.
+    /// </summary>
+    byte[]? DisplayToKeep()
+    {
+        if (UserSettings.KeepDisplay == KeepDisplay.Never || Result is not { } r || ResultRevision != RequestedRevision || r.State.Bodies.Count == 0) return null;
+        if (UserSettings.KeepDisplay == KeepDisplay.SlowParts && MeshCache.BuildSeconds(r) < UserSettings.KeepDisplaySeconds) return null;
+        try { return MeshCache.Of(r, Doc.Color); }
+        catch { return null; } // (never worth failing a save)
+    }
+
+    /// <summary>The display saved with the part, while it is being rebuilt after opening (null once it is, or none was saved).</summary>
+    public MeshCache.Entry? SavedDisplay => Result == null ? _saved : null;
+    MeshCache.Entry? _saved;
 
     /// <summary>Preview of the last rebuilt part (null before the first rebuild or when it fails).</summary>
     public byte[]? RenderThumbnail()
@@ -329,7 +351,7 @@ public sealed class DocumentSession
             Dispatcher.UIThread.Post(() =>
             {
                 if (preview) { if (PreviewActive) PreviewResult = r; }
-                else { Result = r; ResultRevision = rev; }
+                else { Result = r; ResultRevision = rev; _saved = null; }
                 Rebuilt?.Invoke();
             });
         }

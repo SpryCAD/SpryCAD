@@ -358,6 +358,52 @@ static class ConfigTests
             t.Near(Width(back.DisplayOf(back.Doc.Find(b.Id)!)!), 120, 1e-3);
         });
 
+        t.Test("Parts keep their display in containers: read back for its revision and geometry version only", () =>
+        {
+            var dir = Path.Combine(Path.GetTempPath(), "fc-config-tests", Guid.NewGuid().ToString("N")[..8]);
+            Directory.CreateDirectory(dir);
+            var (part, _, _) = Plate(null);
+            var r = new Regenerator().Rebuild(part);
+            t.True(Core.Assembly.MeshCache.BuildSeconds(r) > 0, "build time known");
+            part.Display = Core.Assembly.MeshCache.Of(r, part.Color);
+            var pp = Path.Combine(dir, "Plate.sprt");
+            part.Save(pp, container: true);
+            var back = CadDocument.Load(pp);
+            t.True(back.Display != null, "kept");
+            var e = Core.Assembly.MeshCache.Read(back.Display!);
+            t.Near(e.Mesh.Volume, r.State.Bodies.Sum(b => b.Mesh.Volume), 1e-6);
+            t.True(back.Clone().Display == null, "not copied with the history");
+
+            // plain JSON: none
+            back.Display = Core.Assembly.MeshCache.Of(r, part.Color);
+            back.Save(pp, container: false);
+            t.True(CadDocument.Load(pp).Display == null, "plain JSON keeps no display");
+
+            // a display for another revision (model.json changed elsewhere), or by older geometry code: not read
+            back.Display = Core.Assembly.MeshCache.Of(r, part.Color);
+            back.Save(pp, container: true);
+            byte[] Rewrite(Action<System.IO.Compression.ZipArchive> change)
+            {
+                var ms = new MemoryStream();
+                ms.Write(File.ReadAllBytes(pp));
+                using (var zip = new System.IO.Compression.ZipArchive(ms, System.IO.Compression.ZipArchiveMode.Update, leaveOpen: true)) change(zip);
+                return ms.ToArray();
+            }
+            void Replace(System.IO.Compression.ZipArchive zip, string name, byte[] data)
+            {
+                zip.GetEntry(name)!.Delete();
+                using var s = zip.CreateEntry(name).Open();
+                s.Write(data);
+            }
+            var otherRev = Rewrite(z => Replace(z, DocumentContainer.DisplayRevisionEntry, System.Text.Encoding.UTF8.GetBytes(CadDocument.NewGuid())));
+            t.True(DocumentContainer.Load(otherRev, "x").Display == null, "another revision's display dropped");
+            var mesh = back.Display!.ToArray();
+            BitConverter.GetBytes(0).CopyTo(mesh, 7);
+            var oldCode = Rewrite(z => Replace(z, DocumentContainer.DisplayEntry, mesh));
+            t.True(DocumentContainer.Load(oldCode, "x").Display == null, "older geometry code's display dropped");
+            t.True(CadDocument.Load(pp).Display != null, "the file itself still good");
+        });
+
         t.Test("Rebuild cache: equations seen by their values (a description or same value rebuilds nothing)", () =>
         {
             var (doc, _, _) = Plate(null);

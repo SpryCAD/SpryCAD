@@ -626,6 +626,14 @@ public static class Dialogs
             SelectedIndex = Array.IndexOf(pivots, owner.Viewport.RotateAbout), HorizontalAlignment = HorizontalAlignment.Stretch,
         };
         var container = new CheckBox { Content = "Always save parts as containers (with a preview image)", IsChecked = Session.UserSettings.SaveContainer };
+        var keepModes = new[] { Session.KeepDisplay.SlowParts, Session.KeepDisplay.Always, Session.KeepDisplay.Never };
+        var keep = new ComboBox
+        {
+            ItemsSource = new[] { "Keep the display of slow parts", "Keep every part's display", "Never keep the display" },
+            SelectedIndex = Array.IndexOf(keepModes, Session.UserSettings.KeepDisplay), HorizontalAlignment = HorizontalAlignment.Stretch,
+        };
+        var keepSecs = new TextBox { Text = Expr.Format(Session.UserSettings.KeepDisplaySeconds), IsEnabled = keep.SelectedIndex == 0 };
+        keep.SelectionChanged += (_, _) => keepSecs.IsEnabled = keep.SelectedIndex == 0;
         var color = new TextBox { Text = string.Join(", ", s.Doc.Color.Select(c => ((int)(c * 255)).ToString())) };
         var sheet = s.Doc.SheetMetal ?? new SheetMetalSettings();
         var bendMethod = new ComboBox { ItemsSource = new[] { "K-factor", "DIN 6935" }, SelectedIndex = sheet.Method == BendAllowanceMethod.Din6935 ? 1 : 0, HorizontalAlignment = HorizontalAlignment.Stretch };
@@ -655,6 +663,14 @@ public static class Dialogs
         sp.Children.Add(new TextBlock { Text = "Files", FontWeight = FontWeight.SemiBold });
         sp.Children.Add(container);
         sp.Children.Add(new TextBlock { Text = "Otherwise parts are saved as plain JSON, unless they embed other files (e.g. an imported model). Either kind opens normally.", FontSize = TypeScale.Small, Foreground = Palette.TextMuted, TextWrapping = TextWrapping.Wrap });
+        var keepRow = new Grid { ColumnDefinitions = new ColumnDefinitions("*,8,Auto,4,50,4,Auto") };
+        keepRow.Children.Add(keep);
+        var slower = new TextBlock { Text = "slower than", VerticalAlignment = VerticalAlignment.Center };
+        var secs = new TextBlock { Text = "s", VerticalAlignment = VerticalAlignment.Center };
+        Grid.SetColumn(slower, 2); Grid.SetColumn(keepSecs, 4); Grid.SetColumn(secs, 6);
+        keepRow.Children.Add(slower); keepRow.Children.Add(keepSecs); keepRow.Children.Add(secs);
+        sp.Children.Add(keepRow);
+        sp.Children.Add(new TextBlock { Text = "A container keeps the part as last built, so it shows at once when opened while it rebuilds (larger files). Plain JSON files never do.", FontSize = TypeScale.Small, Foreground = Palette.TextMuted, TextWrapping = TextWrapping.Wrap });
         sp.Children.Add(Buttons(ok, cancel));
         var w = MakeWindow("Options", sp, 420);
         ok.Click += (_, _) =>
@@ -666,6 +682,8 @@ public static class Dialogs
             Session.UserSettings.Perspective = owner.Viewport.Camera.Perspective;
             if (pivot.SelectedIndex >= 0) owner.Viewport.RotateAbout = Session.UserSettings.RotateAbout = pivots[pivot.SelectedIndex];
             Session.UserSettings.SaveContainer = container.IsChecked == true;
+            if (keep.SelectedIndex >= 0) Session.UserSettings.KeepDisplay = keepModes[keep.SelectedIndex];
+            if (Expr.TryEval(keepSecs.Text, null, out var ks, out _) && ks >= 0) Session.UserSettings.KeepDisplaySeconds = ks;
             Session.UserSettings.Save();
             var newUnits = units.SelectedIndex == 1 ? UnitSystem.IPS : UnitSystem.MMGS;
             var parts = (color.Text ?? "").Split(',').Select(p => double.TryParse(p.Trim(), out var v) ? Math.Clamp(v / 255, 0, 1) : -1).ToArray();

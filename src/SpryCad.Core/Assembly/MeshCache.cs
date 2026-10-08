@@ -67,6 +67,13 @@ public static class MeshCache
         return ms.ToArray();
     }
 
+    /// <summary>A rebuilt part's display as a cache: its bodies as one mesh, its cosmetic threads.</summary>
+    public static byte[] Of(RegenResult r, double[] color) =>
+        Write(AssemblyModel.Merge(r.State.Bodies.Select(b => b.Mesh)), color, r.State.Cosmetics.Values.ToList());
+
+    /// <summary>How long building the whole part took (each feature's last build, cached ones included), in seconds.</summary>
+    public static double BuildSeconds(RegenResult r) => r.Status.Values.Sum(s => s.Milliseconds) / 1000;
+
     /// <summary>The geometry version a cache was made by (0: an older cache, or not one), without reading it all.</summary>
     public static int VersionOf(byte[] data) =>
         data.Length >= Magic.Length + 4 && Encoding.ASCII.GetString(data, 0, Magic.Length) == Magic ? BitConverter.ToInt32(data, Magic.Length) : 0;

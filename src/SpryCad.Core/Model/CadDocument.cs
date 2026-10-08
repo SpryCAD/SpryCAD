@@ -85,6 +85,13 @@ public sealed class CadDocument
     /// <summary>Preview image (PNG) stored in containers.</summary>
     [JsonIgnore] public byte[]? Thumbnail { get; set; }
 
+    /// <summary>
+    /// The part's display as last built (a display cache, <see cref="Assembly.MeshCache"/>), saved in containers so a slow
+    /// part shows at once when opened, while it is rebuilt. Read only when made for this revision by the current
+    /// geometry code; null otherwise, and when none was saved.
+    /// </summary>
+    [JsonIgnore] public byte[]? Display { get; set; }
+
     /// <summary>A new identity for a copy saved under another name: the original keeps its own.</summary>
     public void ForkIdentity()
     {

@@ -225,6 +225,14 @@ public partial class MainWindow : Window
         Viewport.PreviewBodies = preview;
         Viewport.BendLines = BendLinesOf(state);
         Viewport.CosmeticThreads = state.Cosmetics.Values.ToList();
+        // a slow part just opened: the display saved with it, until the rebuild is done (nothing to pick meanwhile)
+        if (result == null && Session.SavedDisplay is { } saved)
+        {
+            var col = doc.Color;
+            Viewport.Instances = new[] { new MeshInstance("__saved", saved.Mesh, System.Numerics.Matrix4x4.Identity, new Rgba((float)col[0], (float)col[1], (float)col[2])) };
+            Viewport.CosmeticThreads = saved.Threads;
+            if (_tab.FitAfterLoad != null) { _tab.FitAfterLoad = null; Viewport.StandardView("Trimetric", fit: true, animate: false); }
+        }
 
         // planes
         var b = state.Bounds;
