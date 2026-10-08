@@ -338,7 +338,7 @@ public partial class MainWindow
             "A centerline or line of the profile's sketch, the axis of a cylindrical or conical face or a circular edge (right-click: Select Axis), a straight edge, or an axis button", 1);
         if (f.Axis != null) { if (DirItem(f.Axis, st) is { } ai) axBox.Items.Add(ai); }
         else if (f.AxisEntity != 0) axBox.Items.Add(new SelItem { Kind = SelKind.SketchSegment, FeatureId = f.SketchId, SketchItem = f.AxisEntity });
-        var axisLbl = new TextBlock { FontSize = 11, Foreground = UI.Palette.TextMuted, TextWrapping = Avalonia.Media.TextWrapping.Wrap };
+        var axisLbl = new TextBlock { FontSize = UI.TypeScale.Small, Foreground = UI.Palette.TextMuted, TextWrapping = Avalonia.Media.TextWrapping.Wrap };
         Action? axes = null;
         void UpdAxis()
         {
