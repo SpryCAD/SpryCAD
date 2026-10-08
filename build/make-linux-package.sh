@@ -98,7 +98,7 @@ Installed-Size: $(du -sk "$pkg/opt" | cut -f1)
 Depends: libc6, libgcc-s1, libstdc++6, libicu78 | libicu77 | libicu76 | libicu74 | libicu72 | libicu70, libx11-6, libice6, libsm6, libfontconfig1, libgl1
 Section: graphics
 Priority: optional
-Homepage: https://github.com/KurtJacobson/FeatherCAD
+Homepage: https://github.com/SpryCAD/SpryCAD
 Description: Fast, lightweight parametric 3D CAD
  SpryCAD is open-source parametric 3D CAD with a SolidWorks-style workflow,
  its own exact B-rep geometry kernel, and STEP and STL export.
