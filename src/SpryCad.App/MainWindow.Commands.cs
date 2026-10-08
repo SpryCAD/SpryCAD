@@ -348,7 +348,7 @@ public partial class MainWindow
         CommandBar.Children.Add(b);
     }
 
-    static readonly Dictionary<SketchTool, string> SketchToolKeys = new()
+    internal static readonly Dictionary<SketchTool, string> SketchToolKeys = new()
     {
         [SketchTool.Line] = "L", [SketchTool.Rectangle] = "R", [SketchTool.Circle] = "C", [SketchTool.CenterArc] = "A",
         [SketchTool.SmartDimension] = "D", [SketchTool.Point] = "P", [SketchTool.Trim] = "T",

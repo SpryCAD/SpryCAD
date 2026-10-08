@@ -616,49 +616,8 @@ public static class Dialogs
     /// <summary>Tools > Options: System Options and Document Properties (UI/OptionsDialog.cs).</summary>
     public static Task Options(MainWindow owner) => OptionsDialog.Show(owner);
 
-    public static async Task Shortcuts(Window owner)
-    {
-        const string text = """
-            VIEW
-              Middle mouse drag ........ Rotate
-              Middle click ............. Rotate about this spot (empty space: clear)
-              Ctrl + middle drag ....... Pan
-              Right mouse drag ......... Gestures: right Measure, up Normal To,
-                                         left Zoom to Fit, down Sketch
-                                         (sketching: Smart Dimension, Circle, Line, Rectangle)
-              Shift + middle drag ...... Zoom
-              Alt + middle drag ........ Roll
-              Mouse wheel .............. Zoom at cursor
-              F ........................ Zoom to fit
-              Spacebar ................. View Selector (click a cube face/edge/corner)
-              Ctrl+1..6 ................ Front/Back/Left/Right/Top/Bottom
-              Ctrl+7 ................... Isometric
-              Ctrl+8 ................... Normal To
-              Arrow keys ............... Rotate 15°  (Shift: 90°)
-              Ctrl + arrows ............ Pan
-
-            SKETCH
-              L Line  R Rectangle  C Circle  A Arc  P Point
-              D Smart Dimension  T Trim   Esc  Select / cancel
-              Double-click dimension ... Edit value
-              Delete ................... Delete selection
-
-            GENERAL
-              Ctrl+N/O/S ............... New / Open / Save
-              Ctrl+W ................... Close the part (its tab)
-              Ctrl+Tab ................. Next part tab (Shift: previous)
-              Ctrl+Z / Ctrl+Y .......... Undo / Redo
-              Ctrl+B / Ctrl+Q .......... Rebuild / Force rebuild
-              Enter / Esc .............. OK / Cancel in PropertyManager
-            """;
-        var ok = new Button { Content = "Close", IsDefault = true, IsCancel = true };
-        var sp = new StackPanel();
-        sp.Children.Add(new TextBlock { Text = text, FontFamily = new FontFamily("Consolas, Menlo, monospace"), FontSize = TypeScale.Body });
-        sp.Children.Add(Buttons(ok));
-        var w = MakeWindow("Keyboard & Mouse", sp, 520);
-        ok.Click += (_, _) => w.Close();
-        await w.ShowDialog(owner);
-    }
+    /// <summary>Help > Keyboard Shortcuts (UI/ShortcutsDialog.cs).</summary>
+    public static Task Shortcuts(Window owner) => ShortcutsDialog.Show(owner);
 
     const string ProjectUrl = "https://github.com/SpryCAD/SpryCAD";
 
