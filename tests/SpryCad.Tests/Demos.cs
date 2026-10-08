@@ -53,7 +53,7 @@ static partial class Demos
         var keys = m.Doc.Components.Select(SpryCad.Core.Assembly.AssemblyModel.DisplayKey).Distinct().ToList();
         var parts = keys.Select(k =>
         {
-            var bodies = new Regenerator().Rebuild(m.Parts[k].Doc!).State.Bodies.Select(b => (b.Id, b.Solid)).ToList();
+            var bodies = new Regenerator { ThreadOverride = ThreadDisplay.Modeled }.Rebuild(m.Parts[k].Doc!).State.Bodies.Select(b => (b.Id, b.Solid)).ToList();
             var first = m.ComponentsShowing(k).First();
             var config = m.ConfigLabel(first);
             return (first.Name.Split('<')[0] + (config.Length > 0 ? $" ({config})" : ""), (IReadOnlyList<(string, Solid)>)bodies);

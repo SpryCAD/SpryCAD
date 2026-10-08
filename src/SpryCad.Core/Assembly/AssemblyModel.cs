@@ -16,6 +16,8 @@ public sealed class PartDisplay
     public required DisplayMesh Mesh { get; init; }
     public required double[] Color { get; init; }
     public required PartSource Source { get; init; }
+    /// <summary>Its cosmetic threads, in the part's coordinates (none when shown from the cache).</summary>
+    public IReadOnlyList<CosmeticThread> Threads { get; init; } = Array.Empty<CosmeticThread>();
     /// <summary>The part's revision (of its file or embedded copy; of the cache when shown from it).</summary>
     public string? Revision { get; init; }
     /// <summary>The document built when loaded (not when shown from the cache): the part as configured.</summary>
@@ -114,7 +116,8 @@ public sealed class AssemblyModel
                 try
                 {
                     var built = doc.Configured(first.Parameters);
-                    Parts[g.Key] = new PartDisplay { Mesh = Build(built), Color = doc.Color, Source = src, Revision = doc.Revision, Doc = built, Part = doc, Config = config };
+                    var (mesh, threads) = Build(built);
+                    Parts[g.Key] = new PartDisplay { Mesh = mesh, Threads = threads, Color = doc.Color, Source = src, Revision = doc.Revision, Doc = built, Part = doc, Config = config };
                     continue;
                 }
                 catch (Exception ex) { why = ex.Message; }
@@ -183,11 +186,11 @@ public sealed class AssemblyModel
         c.Part.PartId != null && Doc.Caches.TryGetValue(AssemblyDocument.CacheKey(c.Part.PartId, c.Part.Revision, Configurations.KeyOf(c.Parameters)), out var name)
         && Doc.Files.TryGetValue(name, out var data) ? data : null;
 
-    /// <summary>A part's display: its rebuilt bodies as one mesh.</summary>
-    public static DisplayMesh Build(CadDocument doc)
+    /// <summary>A part's display: its rebuilt bodies as one mesh, and its cosmetic threads (drawn as helices).</summary>
+    public static (DisplayMesh mesh, List<CosmeticThread> threads) Build(CadDocument doc)
     {
         var r = new Regenerator().Rebuild(doc);
-        return Merge(r.State.Bodies.Select(b => b.Mesh));
+        return (Merge(r.State.Bodies.Select(b => b.Mesh)), r.State.Cosmetics.Values.ToList());
     }
 
     /// <summary>Display meshes as one (triangles, faces and edges renumbered).</summary>
@@ -248,8 +251,8 @@ public sealed class AssemblyModel
             Resolution.Parts[key] = new PartResolution(embed ? PartStatus.Embedded : PartStatus.Found, embed ? null : partPath, false, null);
         if (!Parts.ContainsKey(key))
         {
-            var mesh = Build(doc);
-            Parts[key] = new PartDisplay { Mesh = mesh, Color = doc.Color, Source = embed ? PartSource.Embedded : PartSource.File, Revision = doc.Revision, Doc = doc, Part = doc };
+            var (mesh, threads) = Build(doc);
+            Parts[key] = new PartDisplay { Mesh = mesh, Threads = threads, Color = doc.Color, Source = embed ? PartSource.Embedded : PartSource.File, Revision = doc.Revision, Doc = doc, Part = doc };
         }
         return c;
     }
@@ -276,7 +279,10 @@ public sealed class AssemblyModel
         var key = ComponentResolver.Key(r);
         if (!Resolution.Parts.ContainsKey(key)) Resolution.Parts[key] = new PartResolution(PartStatus.Embedded, null, false, null);
         if (!Parts.ContainsKey(key))
-            Parts[key] = new PartDisplay { Mesh = Build(doc), Color = doc.Color, Source = PartSource.Embedded, Revision = doc.Revision, Doc = doc, Part = doc };
+        {
+            var (mesh, threads) = Build(doc);
+            Parts[key] = new PartDisplay { Mesh = mesh, Threads = threads, Color = doc.Color, Source = PartSource.Embedded, Revision = doc.Revision, Doc = doc, Part = doc };
+        }
         return c;
     }
 

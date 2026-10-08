@@ -39,13 +39,13 @@ static partial class Demos
     /// <summary>
     /// An ISO 4762 socket head cap screw, M3 to M12 in one file: a design table of the sizes (thread D and pitch P,
     /// head diameter dk and height k, socket across flats s and depth t), the length L under the head and whether
-    /// the thread is shown user-facing. The head on the Front plane, the shank on the plane at its underside.
+    /// the thread is modeled user-facing. The head on the Front plane, the shank on the plane at its underside.
     /// </summary>
     internal static CadDocument SocketScrew()
     {
         var d = Doc(("L", "20"), ("Threaded", "1"));
         d.Equations[0].Exposed = true; d.Equations[0].Description = "Length under the head (mm)"; d.Equations[0].Min = 4; d.Equations[0].Max = 200;
-        d.Equations[1].Exposed = true; d.Equations[1].Description = "Thread shown"; d.Equations[1].Min = 0; d.Equations[1].Max = 1;
+        d.Equations[1].Exposed = true; d.Equations[1].Description = "Thread modeled"; d.Equations[1].Min = 0; d.Equations[1].Max = 1;
         d.Tables = new()
         {
             new DesignTable
@@ -84,7 +84,7 @@ static partial class Demos
         var shank = d.AddFeature(new ExtrudeFeature { Name = "Shank", SketchId = shs.Id, Depth = "L" });
         d.AddFeature(new ThreadFeature
         {
-            Name = "Thread", End = ThreadEnd.UpToNext, Cosmetic = true, SuppressWhen = "not Threaded",
+            Name = "Thread", End = ThreadEnd.UpToNext, SuppressWhen = "not Threaded",
             Face = new FaceRef { Name = $"{shank.Id}.S.C{shc}", Hint = new Vec3(sh.Eval("D/2"), 0, sh.Eval("k+L-1")) },
         });
         d.Color = new[] { 0.30, 0.31, 0.34 };

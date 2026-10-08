@@ -97,8 +97,8 @@ public partial class MainWindow : IAssemblyHost
             await Task.Run(() =>
             {
                 var live = keys.Except(missing).ToList();
-                // each part's solids, built from its document
-                var solids = live.ToDictionary(k => k, k => new Core.Regen.Regenerator().Rebuild(model.Parts[k].Doc!).State.Bodies.Select(b => (b.Id, b.Solid)).ToList());
+                // each part's solids, built from its document (threads modeled, as part exports do)
+                var solids = live.ToDictionary(k => k, k => new Core.Regen.Regenerator { ThreadOverride = Core.Regen.ThreadDisplay.Modeled }.Rebuild(model.Parts[k].Doc!).State.Bodies.Select(b => (b.Id, b.Solid)).ToList());
                 var comps = model.Doc.Components.Where(c => !c.Suppressed && live.Contains(AssemblyModel.DisplayKey(c))).ToList();
                 using var fs = File.Create(path);
                 if (kind == "step")
@@ -247,6 +247,7 @@ public partial class MainWindow : IAssemblyHost
     {
         if (Asm is not { } a) return;
         var inst = new List<MeshInstance>();
+        var threads = new List<Core.Regen.CosmeticThread>();
         var box = Box3.Empty;
         foreach (var c in a.Model.Doc.Components)
         {
@@ -258,13 +259,16 @@ public partial class MainWindow : IAssemblyHost
             else if (_mating == null && c.Id == _asmHover) rgba = MixColor(rgba, new Rgba(1f, 0.8f, 0.5f), 0.35f);
             var t = c.Placement.ToTransform();
             inst.Add(new MeshInstance(c.Id, pd.Mesh, ModelMatrix(t), rgba, FaceHighlights(c.Id)));
+            // its cosmetic threads, placed with it
+            foreach (var th in pd.Threads)
+                threads.Add(th with { Origin = t.Point(th.Origin), Axis = t.Vector(th.Axis), RefDir = t.Vector(th.RefDir) });
             if (!pd.Mesh.Bounds.IsEmpty) { box.Add(t.Point(pd.Mesh.Bounds.Min)); box.Add(t.Point(pd.Mesh.Bounds.Max)); }
         }
         var half = box.IsEmpty ? 50 : Math.Max(20, box.Diagonal * 0.4);
         Viewport.Bodies = Array.Empty<Core.Regen.Body>();
         Viewport.PreviewBodies = Array.Empty<Core.Regen.Body>();
         Viewport.BendLines = Array.Empty<ViewportControl.BendLine>();
-        Viewport.CosmeticThreads = Array.Empty<Core.Regen.CosmeticThread>();
+        Viewport.CosmeticThreads = threads;
         Viewport.Sketches = Array.Empty<SketchDisplay>();
         Viewport.Planes = new List<PlaneDisplay>
         {

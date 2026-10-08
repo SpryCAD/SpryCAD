@@ -295,6 +295,15 @@ static class ConfigTests
             var d = m.DisplayOf(m12)!;
             t.Near(d.Mesh.Bounds.Max.Z - d.Mesh.Bounds.Min.Z, 62, 0.05);
             t.Near(d.Mesh.Bounds.Max.X - d.Mesh.Bounds.Min.X, 18, 0.05);
+            // the thread modeled (no helix to draw); unthreaded: a plain shank, more material
+            t.True(d.Threads.Count == 0, "modeled thread");
+            var plain = Core.Assembly.AssemblyModel.Build(m.PartDocument(m12)!.Configured(new Dictionary<string, string> { ["Size"] = "M12", ["L"] = "50", ["Threaded"] = "0" }));
+            t.True(plain.mesh.Volume > d.Mesh.Volume + 1, $"thread cut: {d.Mesh.Volume:0} < {plain.mesh.Volume:0}");
+            // a cosmetic thread reaches the assembly's display (drawn as a helix where the component is)
+            var cos = m.PartDocument(m12)!.Clone();
+            cos.Features.OfType<ThreadFeature>().Single().Cosmetic = true;
+            var built = Core.Assembly.AssemblyModel.Build(cos);
+            t.True(built.threads.Count == 1 && built.threads[0].External, "cosmetic thread kept for display");
         });
 
         t.Test("Rebuild cache: equations seen by their values (a description or same value rebuilds nothing)", () =>
