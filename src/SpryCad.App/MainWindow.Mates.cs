@@ -84,8 +84,9 @@ public partial class MainWindow
     List<(string face, Rgba color)>? FaceHighlights(string componentId)
     {
         List<(string, Rgba)>? l = null;
-        if (_mating != null)
-            foreach (var p in _mating.Picks)
+        var refs = _mating?.Picks ?? (SelectedMate() is { } m ? new List<MateRef> { m.A, m.B } : null);
+        if (refs != null)
+            foreach (var p in refs)
                 if (p.Component == componentId) (l ??= new()).Add((p.Face, ViewportControl.SelectColor));
         if (_hoverFace is { } h && h.comp == componentId) (l ??= new()).Add((h.face, ViewportControl.HoverColor));
         return l;
@@ -344,16 +345,33 @@ public partial class MainWindow
     {
         if (Asm is not { } a || a.Model.Doc.Mates.FirstOrDefault(m => m.Id == id) is not { } mate) return;
         if (cmd == "edit") { MatePage(mate); return; }
+        if (cmd == "rename") { _ = RenameMate(mate); return; }
         if (_mating != null) { Status("Finish the open Mate page first (OK or Cancel)."); return; }
         a.BeginChange();
         switch (cmd)
         {
             case "flip": mate.Aligned = !mate.Aligned; break;
             case "suppress": mate.Suppressed = !mate.Suppressed; break;
-            case "delete": a.Model.Doc.Mates.Remove(mate); break;
+            case "delete":
+                a.Model.Doc.Mates.Remove(mate);
+                if (a.SelectedMate == mate.Id) a.SelectedMate = null;
+                break;
         }
         a.Model.SolveMates();
         a.EndChange();
         Status(cmd switch { "flip" => $"{mate.Name}: flipped.", "suppress" => $"{mate.Name}: {(mate.Suppressed ? "suppressed" : "unsuppressed")}.", _ => $"Deleted {mate.Name}." });
+        RefreshAssemblyScene();
+    }
+
+    async Task RenameMate(Mate mate)
+    {
+        if (Asm is not { } a) return;
+        var name = (await Dialogs.Input(this, "Rename", "Mate name:", mate.Name))?.Trim();
+        if (string.IsNullOrEmpty(name) || name == mate.Name) return;
+        if (a.Model.Doc.Mates.Any(m => m != mate && m.Name == name)) { Status($"Another mate is already named {name}."); return; }
+        a.BeginChange();
+        mate.Name = name;
+        a.EndChange();
+        Status($"Renamed to {name}.");
     }
 }

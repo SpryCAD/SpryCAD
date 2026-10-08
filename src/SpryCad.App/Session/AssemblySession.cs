@@ -17,6 +17,8 @@ public sealed class AssemblySession
     public string Title => (FilePath != null ? Path.GetFileNameWithoutExtension(FilePath) : UntitledName) + (Dirty ? " *" : "");
     /// <summary>The selected component's id (null: none).</summary>
     public string? Selected { get; set; }
+    /// <summary>The mate selected in the tree (its id): its faces shown highlighted. Never both this and a component.</summary>
+    public string? SelectedMate { get; set; }
     /// <summary>The assembly changed (components, placements, references, saved state).</summary>
     public event Action? Changed;
     /// <summary>Counts changes to what it looks like (a preview made of an older count is stale).</summary>

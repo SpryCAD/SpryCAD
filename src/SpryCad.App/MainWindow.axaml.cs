@@ -454,6 +454,9 @@ public partial class MainWindow : Window
             case Key.Delete:
                 if (_sketch == null && _page == null) { DeleteSelected(); e.Handled = true; }
                 break;
+            case Key.F2 when Asm is { SelectedMate: { } mateId } && _mating == null:
+                OnMateCommand(mateId, "rename"); e.Handled = true;
+                break;
             case Key.F2:
                 // rename the feature selected in the tree (or owning the selected face)
                 if (_sketch == null && _page == null && Session.Doc.Find(Tree.SelectedId ?? Selection.First?.FeatureId ?? "") is { } rf)

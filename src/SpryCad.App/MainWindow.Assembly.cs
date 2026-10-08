@@ -123,12 +123,13 @@ public partial class MainWindow : IAssemblyHost
         PanelHost.Children.Remove(Tree);
         _asmTree = new AssemblyTree { IsVisible = false };
         _asmTree.Selected += id => SelectComponent(id);
+        _asmTree.MateSelected += SelectMate;
         _asmTree.Opened += OpenComponent;
         _asmTree.MateCommand += OnMateCommand;
         _asmTree.Command += (id, cmd) =>
         {
             if (Asm is not { } a) return;
-            a.Selected = id;
+            a.Selected = id; a.SelectedMate = null;
             switch (cmd)
             {
                 case "open": OpenComponent(id); break;
@@ -263,6 +264,9 @@ public partial class MainWindow : IAssemblyHost
             new("Front", null, Frame.Front, half), new("Top", null, Frame.Top, half), new("Right", null, Frame.Right, half),
         };
         Viewport.ShowPlanes = _showPlanes || inst.Count == 0;
+        // the origin planes the selected mate (or the Mate page's picks) use: shown highlighted
+        var refs = _mating?.Picks ?? (SelectedMate() is { } sm ? new List<MateRef> { sm.A, sm.B } : new List<MateRef>());
+        Viewport.Emphasis = refs.Where(r => r.Component == null).Select(r => new SelItem { Kind = SelKind.Plane, Name = r.Face }).ToList();
         Viewport.Instances = inst;
         Viewport.Redraw();
     }
@@ -404,6 +408,8 @@ public partial class MainWindow : IAssemblyHost
 
     void DeleteComponent()
     {
+        // (Delete with a mate selected in the tree deletes the mate)
+        if (Asm is { SelectedMate: { } mateId } && _mating == null) { OnMateCommand(mateId, "delete"); return; }
         if (Asm is not { } a || FindComponent(a.Selected) is not { } c) return;
         a.BeginChange();
         a.Model.Remove(c);
@@ -457,9 +463,28 @@ public partial class MainWindow : IAssemblyHost
         RefreshAssemblyScene();
     }
 
+    /// <summary>A mate picked in the tree: its two faces (or origin planes) shown highlighted on the model.</summary>
+    void SelectMate(string? id)
+    {
+        if (Asm is not { } a || (id == a.SelectedMate && a.Selected == null)) return;
+        a.SelectedMate = id;
+        a.Selected = null;
+        RefreshAssemblyScene();
+        _asmTree.SelectMateRow(id);
+        if (SelectedMate() is { } m)
+        {
+            string Of(MateRef r) => r.Component == null ? r.Face + " Plane" : $"{FindComponent(r.Component)?.Name} ({r.Face})";
+            Status($"{m.Name}: {Of(m.A)} and {Of(m.B)}{(m.Suppressed ? ", suppressed" : "")} (double-click to edit)");
+        }
+    }
+
+    /// <summary>The mate selected in the tree (none while the Mate page shows its own picks).</summary>
+    Mate? SelectedMate() => Asm is { SelectedMate: { } id } a && _mating == null ? a.Model.Doc.Mates.FirstOrDefault(m => m.Id == id) : null;
+
     public void SelectComponent(string? id)
     {
-        if (Asm is not { } a || a.Selected == id) return;
+        if (Asm is not { } a || (a.Selected == id && a.SelectedMate == null)) return;
+        a.SelectedMate = null;
         a.Selected = id;
         RefreshAssemblyScene();
         _asmTree.Select(id);
