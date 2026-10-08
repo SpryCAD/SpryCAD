@@ -11,6 +11,17 @@ public enum RotateCenter
     UnderCursor,
 }
 
+/// <summary>The order of the list of open parts.</summary>
+public enum PartsOrder
+{
+    /// <summary>As the document tabs are.</summary>
+    Tabs,
+    /// <summary>By name (Part2 before Part10).</summary>
+    Name,
+    /// <summary>The most recently opened first.</summary>
+    RecentlyOpened,
+}
+
 /// <summary>Per-user view preferences (not part of the document), stored as key=value lines in app data.</summary>
 public static class UserSettings
 {
@@ -32,6 +43,8 @@ public static class UserSettings
     /// <summary>The task pane was open when the app last closed (pinned, it opens again at start).</summary>
     public static bool TaskOpen { get; set; }
     public static int TaskWidth { get; set; } = 300;
+    /// <summary>How the list of open parts is ordered.</summary>
+    public static PartsOrder PartsSort { get; set; } = PartsOrder.Tabs;
 
     public static void Load()
     {
@@ -52,6 +65,7 @@ public static class UserSettings
                 else if (k == nameof(TaskPinned)) TaskPinned = v == "1";
                 else if (k == nameof(TaskOpen)) TaskOpen = v == "1";
                 else if (k == nameof(TaskWidth) && int.TryParse(v, out var dw)) TaskWidth = dw;
+                else if (k == nameof(PartsSort) && Enum.TryParse<PartsOrder>(v, out var po)) PartsSort = po;
             }
         }
         catch { /* defaults */ }
@@ -73,6 +87,7 @@ public static class UserSettings
             lines.Add($"{nameof(TaskPinned)}={(TaskPinned ? 1 : 0)}");
             lines.Add($"{nameof(TaskOpen)}={(TaskOpen ? 1 : 0)}");
             lines.Add($"{nameof(TaskWidth)}={TaskWidth}");
+            lines.Add($"{nameof(PartsSort)}={PartsSort}");
             File.WriteAllLines(StorePath, lines);
         }
         catch { /* preferences are a convenience only */ }

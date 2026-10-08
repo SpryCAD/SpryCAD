@@ -41,7 +41,11 @@ public partial class MainWindow
         public string? ImportError;
         /// <summary>Why the part could not be opened, if it could not: shown in red on its tab and row, and over the view.</summary>
         public string? Error => LoadError ?? ImportError;
+        /// <summary>When it was opened, as a count (the list can be ordered by it).</summary>
+        public readonly long Opened = ++_openedCount;
     }
+
+    static long _openedCount;
 
     readonly List<PartTab> _parts = new();
     PartTab _tab;
@@ -103,6 +107,7 @@ public partial class MainWindow
             if (props.IsMiddleButtonPressed) _ = CloseTab(t);
             else if (props.IsLeftButtonPressed) _ = SwitchTo(t);
         };
+        t.Header.ContextMenu = PartMenu(() => _parts.Contains(t) ? t : null, fromList: false);
         t.Header.PointerEntered += (_, _) => { if (t != _tab) t.Header.Background = TabHoverBrush; };
         t.Header.PointerExited += (_, _) => UpdateTabHeader(t);
 
@@ -168,31 +173,8 @@ public partial class MainWindow
     {
         if (_partsList != null) return _partsList;
         var list = new ListBox { Background = Brushes.White, BorderThickness = new Thickness(0) };
-        // right-click: close this part, the others, or all (the part under the mouse is selected, so shown, first)
-        PartTab? Picked() => list.SelectedItem is ListBoxItem { Tag: PartTab t } ? t : null;
-        var closeOne = new MenuItem { Header = "_Close", InputGesture = new KeyGesture(Key.Delete) };
-        closeOne.Click += (_, _) => { if (Picked() is { } t) ClosePartFromList(t); };
-        var closeOthers = new MenuItem { Header = "Close _Others" };
-        closeOthers.Click += async (_, _) => { if (Picked() is { } t) { await CloseTabs(_parts.Where(p => p != t).ToList()); FocusPartsList(); } };
-        var closeAll = new MenuItem { Header = "Close _All" };
-        closeAll.Click += async (_, _) => { await CloseTabs(_parts.ToList()); FocusPartsList(); };
-        // the part's file (or the STEP model it was made from), as text on the clipboard
-        string? PathOf(PartTab t) => t.Session.SourcePath ?? t.Source;
-        var copyPath = new MenuItem { Header = "Copy File _Path" };
-        copyPath.Click += async (_, _) =>
-        {
-            if (Picked() is not { } t || PathOf(t) is not { } p || TopLevel.GetTopLevel(list)?.Clipboard is not { } clip) return;
-            await clip.SetTextAsync(p);
-            Status("Copied " + p);
-        };
-        var menu = new ContextMenu { Items = { copyPath, new Separator(), closeOne, closeOthers, new Separator(), closeAll } };
-        menu.Opening += (_, _) =>
-        {
-            closeOne.IsEnabled = Picked() != null;
-            closeOthers.IsEnabled = Picked() != null && _parts.Count > 1;
-            copyPath.IsEnabled = Picked() is { } t && PathOf(t) != null; // a new part has no file yet
-        };
-        list.ContextMenu = menu;
+        // right-click: the part under the mouse (selected, so shown, first)
+        list.ContextMenu = PartMenu(() => list.SelectedItem is ListBoxItem { Tag: PartTab t } ? t : null, fromList: true);
         list.SelectionChanged += async (_, _) =>
         {
             if (_partsSyncing || list.SelectedItem is not ListBoxItem { Tag: PartTab t } || t == _tab) return;
@@ -219,6 +201,88 @@ public partial class MainWindow
         _partsList = list;
         RefreshPartsList();
         return list;
+    }
+
+    /// <summary>
+    /// The right-click menu of a part, on its row in the list and on its tab: copy its file's path, close it, the
+    /// others or all, and the order of the list.
+    /// </summary>
+    ContextMenu PartMenu(Func<PartTab?> target, bool fromList)
+    {
+        // from the list, the list keeps the keyboard
+        void Closed() { if (fromList) { _partsWindow?.Activate(); FocusPartsList(); } }
+        var closeOne = new MenuItem { Header = "_Close", InputGesture = new KeyGesture(fromList ? Key.Delete : Key.W, fromList ? KeyModifiers.None : KeyModifiers.Control) };
+        closeOne.Click += async (_, _) => { if (target() is { } t) { await CloseTab(t); Closed(); } };
+        var closeOthers = new MenuItem { Header = "Close _Others" };
+        closeOthers.Click += async (_, _) => { if (target() is { } t) { await CloseTabs(_parts.Where(p => p != t).ToList()); Closed(); } };
+        var closeAll = new MenuItem { Header = "Close _All" };
+        closeAll.Click += async (_, _) => { await CloseTabs(_parts.ToList()); Closed(); };
+        // the part's file (or the STEP model it was made from), as text on the clipboard
+        string? PathOf(PartTab t) => t.Asm != null ? t.Asm.FilePath : t.Session.SourcePath ?? t.Source;
+        var copyPath = new MenuItem { Header = "Copy File _Path" };
+        copyPath.Click += async (_, _) =>
+        {
+            if (target() is not { } t || PathOf(t) is not { } p || Clipboard is not { } clip) return;
+            await clip.SetTextAsync(p);
+            Status("Copied " + p);
+        };
+        // the list's order (its arrow keys follow it; the tabs keep theirs)
+        var sorts = new (PartsOrder order, string label)[] { (PartsOrder.Tabs, "_Tab Order"), (PartsOrder.Name, "_Name"), (PartsOrder.RecentlyOpened, "_Recently Opened") }
+            .Select(s =>
+            {
+                var mi = new MenuItem { Header = s.label, ToggleType = MenuItemToggleType.Radio, GroupName = "partsort" };
+                mi.Click += (_, _) => { UserSettings.PartsSort = s.order; UserSettings.Save(); RefreshPartsList(); };
+                return (s.order, mi);
+            }).ToList();
+        var sort = new MenuItem { Header = "_Sort List By" };
+        foreach (var (_, mi) in sorts) sort.Items.Add(mi);
+        var menu = new ContextMenu { Items = { copyPath, new Separator(), closeOne, closeOthers, new Separator(), closeAll, new Separator(), sort } };
+        menu.Opening += (_, _) =>
+        {
+            closeOne.IsEnabled = target() != null;
+            closeOthers.IsEnabled = target() != null && _parts.Count > 1;
+            copyPath.IsEnabled = target() is { } t && PathOf(t) != null; // a new part has no file yet
+            foreach (var (order, mi) in sorts) mi.IsChecked = order == UserSettings.PartsSort;
+        };
+        return menu;
+    }
+
+    /// <summary>The open parts in the list's order.</summary>
+    List<PartTab> SortedParts() => UserSettings.PartsSort switch
+    {
+        PartsOrder.Name => _parts.OrderBy(t => TitleOf(t).TrimEnd(' ', '*'), NaturalOrder.Instance).ToList(),
+        PartsOrder.RecentlyOpened => _parts.OrderByDescending(t => t.Opened).ToList(),
+        _ => _parts.ToList(),
+    };
+
+    /// <summary>Names compared with their numbers as numbers: Part2 before Part10.</summary>
+    sealed class NaturalOrder : IComparer<string>
+    {
+        public static readonly NaturalOrder Instance = new();
+        public int Compare(string? a, string? b)
+        {
+            a ??= ""; b ??= "";
+            int i = 0, j = 0;
+            while (i < a.Length && j < b.Length)
+            {
+                if (char.IsDigit(a[i]) && char.IsDigit(b[j]))
+                {
+                    int si = i, sj = j;
+                    while (i < a.Length && char.IsDigit(a[i])) i++;
+                    while (j < b.Length && char.IsDigit(b[j])) j++;
+                    var na = a[si..i].TrimStart('0'); var nb = b[sj..j].TrimStart('0');
+                    var c = na.Length != nb.Length ? na.Length.CompareTo(nb.Length) : string.CompareOrdinal(na, nb);
+                    if (c != 0) return c;
+                }
+                else
+                {
+                    var c = char.ToUpperInvariant(a[i]).CompareTo(char.ToUpperInvariant(b[j]));
+                    if (c != 0) return c;
+                    i++; j++;
+                }
+            }
+            return (a.Length - i).CompareTo(b.Length - j);
+        }
     }
 
     /// <summary>Shows the list in the task pane or popped out in its window (taking it from where it is).</summary>
@@ -342,9 +406,10 @@ public partial class MainWindow
                 list.Items.Remove(_partRows[gone].Item);
                 _partRows.Remove(gone);
             }
-            for (int i = 0; i < _parts.Count; i++)
+            var order = SortedParts();
+            for (int i = 0; i < order.Count; i++)
             {
-                var t = _parts[i];
+                var t = order[i];
                 if (!_partRows.TryGetValue(t, out var row))
                 {
                     var img = new Image { Width = 64, Height = 64, Stretch = Stretch.Uniform, Source = t.Thumb };
