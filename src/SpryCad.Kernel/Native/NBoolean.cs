@@ -258,23 +258,40 @@ public sealed class NBoolean
                     T($"  trace {fa.Tag.Name}({fa.Surface.Kind}) x {fb.Tag.Name}({fb.Surface.Kind}): {c.Count} curves, {string.Join(" ", c.Select(x => x is NPolyline pl ? pl.Pts.Length + "pts" : x.GetType().Name))} in {swt.ElapsedMilliseconds} ms");
             });
         }
+        // each pair's section edges and imprints worked out in parallel (pure geometry: the faces' domains are built
+        // first and only read), then registered in pair order as before. A closed section touching no vertex makes
+        // vertices of its own (the shared pool): such a pair is done in that ordered pass.
+        using (Prof.Time("sec.domains")) PrepareDomains(pairs.SelectMany(p => new[] { p.fa, p.fb }), interior: false);
+        var secEdges = new List<NEdge>?[pairs.Count];
+        var imprints = new List<(NFace dst, NEdge e, bool add)>[pairs.Count];
+        using (Prof.Time("sec.pairs"))
+            Parallel.For(0, pairs.Count, i =>
+            {
+                var (fa, fb, coincident) = pairs[i];
+                var l = new List<(NFace, NEdge, bool)>();
+                if (coincident)
+                {
+                    Imprint(fb, fa, l);
+                    Imprint(fa, fb, l);
+                }
+                else
+                {
+                    secEdges[i] = SectionEdges(fa, fb, pairCurves[i], allowSnap: false);
+                    // boundary edges of one face lying on the other face's surface split that face
+                    ImprintOnSurfaceEdges(fa, fb, l);
+                    ImprintOnSurfaceEdges(fb, fa, l);
+                }
+                imprints[i] = l;
+            });
         for (int i = 0; i < pairs.Count; i++)
         {
             var (fa, fb, coincident) = pairs[i];
-            if (coincident)
+            if (!coincident)
+                foreach (var e in secEdges[i] ?? SectionEdges(fa, fb, pairCurves[i], allowSnap: true)!) { AddSec(fa, e); AddSec(fb, e); }
+            foreach (var (dst, e, add) in imprints[i])
             {
-                using var _i = Prof.Time("sec.imprint");
-                Imprint(fb, fa, AddSec);
-                Imprint(fa, fb, AddSec);
-                continue;
-            }
-            using (Prof.Time("sec.curves"))
-                foreach (var e in SectionEdges(fa, fb, pairCurves[i])) { AddSec(fa, e); AddSec(fb, e); }
-            // boundary edges of one face lying on the other face's surface split that face
-            using (Prof.Time("sec.onsurface"))
-            {
-                ImprintOnSurfaceEdges(fa, fb, AddSec);
-                ImprintOnSurfaceEdges(fb, fa, AddSec);
+                if (!coincident) _blockers.Add(e);
+                if (add) AddSec(dst, e);
             }
         }
 
@@ -807,8 +824,14 @@ public sealed class NBoolean
     // ------------------------------------------------------------------------------------------
     // section edges
 
-    IEnumerable<NEdge> SectionEdges(NFace fa, NFace fb, List<NCurve> curves)
+    /// <summary>
+    /// The section edges of a face pair (its intersection curves cut at the vertices on both surfaces, the pieces
+    /// inside both faces). Without <paramref name="allowSnap"/> nothing shared is changed: null where a closed curve
+    /// touching no vertex would need vertices of its own.
+    /// </summary>
+    List<NEdge>? SectionEdges(NFace fa, NFace fb, List<NCurve> curves, bool allowSnap)
     {
+        var res = new List<NEdge>();
         var sa = fa.Surface; var sb = fb.Surface;
         // breakpoints: vertices of either face lying on both surfaces
         var bps = fa.Coedges.Concat(fb.Coedges).SelectMany(c => new[] { c.Start, c.End })
@@ -837,6 +860,7 @@ public sealed class NBoolean
                 // no existing edge, so give it two vertices of its own; it becomes an inner loop / a new face
                 var probe = c is NPolyline pl ? pl.Eval(pl.Total * 0.37) : c.Eval(0);
                 if (!c.Periodic || domA.Classify(sa.Project(probe), _onTol) <= 0 || domB.Classify(sb.Project(probe), _onTol) <= 0) continue;
+                if (!allowSnap) return null;
                 on.Add((0, Snap(c.Eval(0))));
                 on.Add((c.Period / 2, Snap(c.Eval(c.Period / 2))));
             }
@@ -865,9 +889,10 @@ public sealed class NBoolean
                 if (ca <= 0 || cb <= 0) continue;
                 NEdge ne;
                 using (Prof.Time("sec.makeedge")) ne = MakeEdge(c, t0, t1, v0, v1, sa, sb);
-                yield return ne;
+                res.Add(ne);
             }
         }
+        return res;
     }
 
     /// <summary>How far a traced section's polyline may pass from a breakpoint that it goes through.</summary>
@@ -933,8 +958,11 @@ public sealed class NBoolean
         return BSplineCurve.Interpolate(keep.Select(i => pts[i]).ToList(), 3);
     }
 
-    /// <summary>Edges of 'src' that lie on dst's surface and inside dst become section edges of dst.</summary>
-    void ImprintOnSurfaceEdges(NFace src, NFace dst, Action<NFace, NEdge> add)
+    /// <summary>
+    /// Edges of 'src' that lie on dst's surface (each a blocker) and, those inside dst, section edges of dst: listed
+    /// as (dst, edge, inside).
+    /// </summary>
+    void ImprintOnSurfaceEdges(NFace src, NFace dst, List<(NFace, NEdge, bool)> found)
     {
         NDomain? dom = null;
         foreach (var c in src.Coedges)
@@ -944,20 +972,19 @@ public sealed class NBoolean
             var onTol = Math.Max(_tol * 10, e.Curve is NSpline ns ? ns.FitTol * 2 : 0);
             for (int i = 0; i <= 8 && on; i++) if (Math.Abs(dst.Surface.F_(e.At(i / 8.0))) > onTol) on = false;
             if (!on) continue;
-            _blockers.Add(e);
             dom ??= Dom(dst);
-            if (dom.Classify(dst.Surface.Project(e.Mid), _onTol) > 0) add(dst, e);
+            found.Add((dst, e, dom.Classify(dst.Surface.Project(e.Mid), _onTol) > 0));
         }
     }
 
-    /// <summary>Edges of 'src' lying inside the coincident face 'dst' become section edges of dst.</summary>
-    void Imprint(NFace src, NFace dst, Action<NFace, NEdge> add)
+    /// <summary>Edges of 'src' lying inside the coincident face 'dst' become section edges of dst: listed as (dst, edge, true).</summary>
+    void Imprint(NFace src, NFace dst, List<(NFace, NEdge, bool)> found)
     {
         var dom = Dom(dst);
         foreach (var c in src.Coedges)
         {
             var mid = c.Edge.Mid;
-            if (dom.Classify(dst.Surface.Project(mid), _onTol) > 0) add(dst, c.Edge);
+            if (dom.Classify(dst.Surface.Project(mid), _onTol) > 0) found.Add((dst, c.Edge, true));
         }
     }
 
