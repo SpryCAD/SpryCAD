@@ -51,6 +51,31 @@ static class ContainerTests
             t.True(back.Clone().Files.ContainsKey("imports/bracket.step"), "clone lost the attachment");
         });
 
+        t.Test("Container: the first entry is the media type, uncompressed, its text at a fixed byte (parts and assemblies)", () =>
+        {
+            // what installer/linux/sprycad-mime.xml looks for: "mimetype" at byte 30, the type right after it
+            void Check(string path, string mime)
+            {
+                var b = File.ReadAllBytes(path);
+                t.Eq(BitConverter.ToUInt32(b, 0), 0x04034b50u);                 // a ZIP's first local header
+                t.Eq(BitConverter.ToUInt16(b, 8), (ushort)0);                  // stored, not deflated
+                t.Eq(BitConverter.ToUInt16(b, 26), (ushort)DocumentContainer.MimeEntry.Length);
+                t.Eq(BitConverter.ToUInt16(b, 28), (ushort)0);                 // no extra field to shift the text
+                t.Eq(System.Text.Encoding.ASCII.GetString(b, 30, 8), DocumentContainer.MimeEntry);
+                t.Eq(System.Text.Encoding.ASCII.GetString(b, DocumentContainer.MimeOffset, mime.Length), mime);
+            }
+            var doc = Demos.All.First(d => d.file == "l-bracket.sprt").build();
+            doc.Thumbnail = new byte[] { 0x89, 0x50, 0x4E, 0x47, 1, 2, 3 };
+            var part = Temp("mime.sprt");
+            doc.Save(part, container: true);
+            Check(part, DocumentContainer.PartMime);
+            t.Eq(CadDocument.Load(part).ToJson(), doc.ToJson()); // and the part reads back as before
+            var asmPath = Temp("mime.sasm");
+            SpryCad.Core.Assembly.AssemblyContainer.Save(new SpryCad.Core.Assembly.AssemblyDocument(), asmPath);
+            Check(asmPath, DocumentContainer.AssemblyMime);
+            SpryCad.Core.Assembly.AssemblyContainer.Load(asmPath);
+        });
+
         t.Test("Container: a damaged or missing embedded file is reported, bad names are refused", () =>
         {
             var doc = new CadDocument();

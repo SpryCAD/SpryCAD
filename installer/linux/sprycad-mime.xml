@@ -1,15 +1,25 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <!-- Containers (ZIP) start with an uncompressed "mimetype" entry, as ODF and EPUB do: its text is at byte 38, so
+       a part or an assembly is known by its content too (renamed, or without its extension), not only its name.
+       A part is plain JSON unless it embeds files or is saved as a container. -->
   <mime-type type="application/x-sprycad-part">
     <comment>SpryCAD part</comment>
     <sub-class-of type="application/json"/>
+    <sub-class-of type="application/zip"/>
     <glob pattern="*.sprt"/>
+    <magic priority="80">
+      <match type="string" offset="38" value="application/x-sprycad-part"/>
+    </magic>
     <icon name="application-x-sprycad-part"/>
   </mime-type>
   <mime-type type="application/x-sprycad-assembly">
     <comment>SpryCAD assembly</comment>
     <sub-class-of type="application/zip"/>
     <glob pattern="*.sasm"/>
+    <magic priority="80">
+      <match type="string" offset="38" value="application/x-sprycad-assembly"/>
+    </magic>
     <icon name="application-x-sprycad-assembly"/>
   </mime-type>
 </mime-info>

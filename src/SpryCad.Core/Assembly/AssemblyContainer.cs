@@ -7,6 +7,7 @@ namespace SpryCad.Core.Assembly;
 /// <summary>
 /// Reads and writes .sasm files: always a ZIP container
 /// <code>
+///   mimetype                "application/x-sprycad-assembly", the first entry, uncompressed (DocumentContainer.MimeEntry)
 ///   assembly.json           the assembly (components, references, mates)
 ///   attachments/parts/…     embedded parts (.sprt bytes)
 ///   attachments/cache/…     display caches of the parts' revisions (<see cref="MeshCache"/>)
@@ -33,6 +34,7 @@ public static class AssemblyContainer
             using (var fs = File.Create(tmp))
             using (var zip = new ZipArchive(fs, ZipArchiveMode.Create))
             {
+                DocumentContainer.WriteMime(zip, DocumentContainer.AssemblyMime);
                 Write(zip, ModelEntry, Encoding.UTF8.GetBytes(json), CompressionLevel.Optimal);
                 foreach (var a in asm.Attachments ?? new())
                     Write(zip, DocumentContainer.AttachmentFolder + a.Name, asm.Files[a.Name], CompressionLevel.Optimal);

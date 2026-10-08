@@ -244,8 +244,11 @@ on open. An `.sprt` file is either this JSON as plain text, or a container (belo
 
 A part that embeds other files (e.g. an imported model) is saved as a **container**: a ZIP archive with the same
 JSON as `model.json`, the embedded files under `attachments/` (listed with size and SHA-256 in `model.json`, and
-verified on open) and a `thumbnail.png` preview. Options → "Always save parts as containers" saves every part
-that way. Both kinds use the `.sprt` extension and are told apart by their first bytes. To diff containers in git:
+verified on open) and a `thumbnail.png` preview. Its first entry is an uncompressed `mimetype`
+(`application/x-sprycad-part`; assemblies, always containers, `application/x-sprycad-assembly`), as in ODF and EPUB,
+so tools that recognize files by content can tell them apart without unzipping. Options → "Always save parts as
+containers" saves every part that way. Both kinds use the `.sprt` extension and are told apart by their first bytes.
+To diff containers in git:
 
 ```bash
 git config diff.sprt.textconv 'sh -c "unzip -p \"$0\" model.json 2>/dev/null || cat \"$0\""'

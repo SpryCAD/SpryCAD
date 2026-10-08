@@ -7,6 +7,7 @@ namespace SpryCad.Core.Model;
 /// <summary>
 /// Reads and writes .sprt files. Plain files are the document's JSON. Containers are ZIP archives:
 /// <code>
+///   mimetype                "application/x-sprycad-part", the first entry, uncompressed (<see cref="MimeEntry"/>)
 ///   model.json              the document (the same JSON as a plain file)
 ///   attachments/&lt;name&gt;      embedded files, listed with size and SHA-256 in model.json
 ///   thumbnail.png           preview image (optional)
@@ -21,6 +22,19 @@ public static class DocumentContainer
     public const string AttachmentFolder = "attachments/";
     public const string ThumbnailEntry = "thumbnail.png";
     public const string DisplayEntry = "display.mesh", DisplayRevisionEntry = "display.revision";
+
+    /// <summary>
+    /// The first entry of every container (parts and assemblies), stored uncompressed: the file's media type, as
+    /// ODF and EPUB do. Its text is then at a fixed place, <see cref="MimeOffset"/> (after the 30 byte local header
+    /// and the 8 letter name), so tools that know files by their content (the Linux desktop's shared-mime-info,
+    /// installer/linux/sprycad-mime.xml) tell a part from an assembly without unzipping. Readers ignore it.
+    /// </summary>
+    public const string MimeEntry = "mimetype";
+    public const string PartMime = "application/x-sprycad-part", AssemblyMime = "application/x-sprycad-assembly";
+    public const int MimeOffset = 38;
+
+    /// <summary>Writes the <see cref="MimeEntry"/>: it must be the archive's first entry.</summary>
+    public static void WriteMime(ZipArchive zip, string mime) => Write(zip, MimeEntry, Encoding.ASCII.GetBytes(mime), CompressionLevel.NoCompression);
 
     public static bool IsContainer(string path)
     {
@@ -71,6 +85,7 @@ public static class DocumentContainer
             {
                 using var fs = File.Create(tmp);
                 using var zip = new ZipArchive(fs, ZipArchiveMode.Create);
+                WriteMime(zip, PartMime);
                 Write(zip, ModelEntry, Encoding.UTF8.GetBytes(json), CompressionLevel.Optimal);
                 foreach (var a in doc.Attachments ?? new())
                     Write(zip, AttachmentFolder + a.Name, doc.Files[a.Name], CompressionLevel.Optimal);
