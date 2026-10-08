@@ -160,18 +160,19 @@
     <Setter Property="BorderBrush" Value="#FFB0BCCC" />
     <Setter Property="Background" Value="#FFF7F9FC" />
   </Style>
+  <!-- the active box (what is clicked goes in): the theme's blue, as selections are everywhere else -->
   <Style Selector="ListBox.selbox.activebox">
-    <Setter Property="Background" Value="#FFFFE4F0" />
-    <Setter Property="BorderBrush" Value="#FFE07AA8" />
+    <Setter Property="Background" Value="#FFEAF3FD" />
+    <Setter Property="BorderBrush" Value="#FF2F7BD6" />
+  </Style>
+  <!-- an entry selected in a box: the tree's selection blue -->
+  <Style Selector="ListBox.selbox ListBoxItem:selected /template/ ContentPresenter">
+    <Setter Property="Background" Value="#FFCDE2FA" />
+    <Setter Property="Foreground" Value="#FF1D2B3F" />
   </Style>
   <Style Selector="ListBox.selbox ListBoxItem">
     <Setter Property="Padding" Value="4,1" />
     <Setter Property="MinHeight" Value="20" />
-  </Style>
-  <!-- the Mate page's picks: the selected entry in the orange its face is drawn in on the model -->
-  <Style Selector="ListBox.matepicks ListBoxItem:selected /template/ ContentPresenter">
-    <Setter Property="Background" Value="#FFF9C9A3" />
-    <Setter Property="Foreground" Value="#FF1D2B3F" />
   </Style>
 
   <!-- Feature tree -->

@@ -8,7 +8,7 @@ using SpryCad.Core;
 
 namespace SpryCad.App.UI;
 
-/// <summary>A selection box in a PropertyManager page (pink when active, like SolidWorks).</summary>
+/// <summary>A selection box in a PropertyManager page (blue when active: what is clicked goes in).</summary>
 public sealed class PmSelectionBox
 {
     public required string Label { get; init; }

@@ -52,8 +52,8 @@ public partial class MainWindow
 
     public bool PickingFaces => _mating != null && Asm != null;
 
-    /// <summary>The color of the pick selected in the Mate Selections box.</summary>
-    static readonly Rgba FocusColor = new(0.95f, 0.45f, 0.1f);
+    /// <summary>The picks not selected in the Mate Selections box while one is: a paler selection blue.</summary>
+    static readonly Rgba PaleSelect = new(0.62f, 0.78f, 1.0f);
 
     public void HoverFace(string? component, string? face)
     {
@@ -98,8 +98,9 @@ public partial class MainWindow
         if (refs != null)
             for (int i = 0; i < refs.Count; i++)
                 if (refs[i].Component == componentId)
-                    // the pick selected in the Mate Selections box: in the focus color, so it is plain which it is
-                    (l ??= new()).Add((refs[i].Face, _mating?.Focus == i ? FocusColor : ViewportControl.SelectColor));
+                    // with an entry selected in the Mate Selections box, its face in the selection blue and the other
+                    // paler, so it is plain which it is (orange is the hover's)
+                    (l ??= new()).Add((refs[i].Face, _mating is { Focus: >= 0 } mt && mt.Focus != i ? PaleSelect : ViewportControl.SelectColor));
         if (_hoverFace is { } h && h.comp == componentId) (l ??= new()).Add((h.face, ViewportControl.HoverColor));
         return l;
     }
@@ -217,9 +218,9 @@ public partial class MainWindow
         };
         page.Content(tabs);
 
-        // the picks, in a selection box as the other editors have (pink: what is clicked goes in)
+        // the picks, in a selection box as the other editors have (blue: what is clicked goes in)
         var sel = page.Section("Mate Selections");
-        var box = new ListBox { Classes = { "selbox", "activebox", "matepicks" }, MinHeight = 44 };
+        var box = new ListBox { Classes = { "selbox", "activebox" }, MinHeight = 44 };
         void DropPick(int i)
         {
             if (i < 0 || i >= st.Picks.Count) return;
@@ -228,11 +229,11 @@ public partial class MainWindow
             st.Update?.Invoke();
         }
         void ClearPicks() { st.Picks.Clear(); st.Type = null; st.Flip = false; st.RatioA = st.RatioB = null; st.Update?.Invoke(); }
-        // an entry selected: its face drawn in the focus color, and named in the status line
+        // an entry selected: its face drawn in the full selection blue (the other paler), and named in the status line
         box.SelectionChanged += (_, _) =>
         {
             st.Focus = box.SelectedIndex;
-            if (st.Focus >= 0 && st.Focus < st.Picks.Count) Status($"{Label(st.Picks[st.Focus])}: {Describe(st.Picks[st.Focus])} (shown in orange).");
+            if (st.Focus >= 0 && st.Focus < st.Picks.Count) Status($"{Label(st.Picks[st.Focus])}: {Describe(st.Picks[st.Focus])}.");
             RefreshAssemblyScene();
         };
         box.KeyDown += (_, e) => { if (e.Key is Avalonia.Input.Key.Delete or Avalonia.Input.Key.Back) { DropPick(box.SelectedIndex); e.Handled = true; } };
