@@ -21,22 +21,26 @@ public static class Icons
         ["sketch"] = ("M3 21l3.5-1 11-11-2.5-2.5-11 11z M14 5.5l2.5 2.5", "M3 3h8v6H3z"),
         ["exitsketch"] = ("M3 21l3.5-1 11-11-2.5-2.5-11 11z", "M13 17l3 3 6-7"),
         ["extrude"] = ("M3 15l9 4 9-4-9-4z M3 15v3l9 4 9-4v-3", "M12 2v8 M9 5l3-3 3 3"),
-        ["cut"] = ("M3 9l9 4 9-4-9-4z M3 9v8l9 4 9-4V9", "M12 6v10 M9 13l3 3 3-3"),
+        // cuts: a block with a slot through it, the slot (what is taken away) in the accent; its notch shows in the
+        // outline even small: square for an extruded cut, a round trough for a revolved one, curving for a swept one
+        ["cut"] = ("M2 8L12 3l10 5v7l-10 5-10-5z M2 8l3.5 1.75 M8.5 11.25L12 13l10-5 M12 13v7", "M5.5 9.75v3.5l3 1.5v-3.5 M5.5 9.75l10-5 M8.5 11.25l10-5"),
         ["revolve"] = ("M12 2v20 M12 5c5 0 8 3 8 7s-3 7-8 7", "M16 19l-4 0 2-3"),
-        ["cutrevolve"] = ("M12 2v20 M12 5c5 0 8 3 8 7s-3 7-8 7 M4 12h5", null),
+        ["cutrevolve"] = ("M2 8L12 3l10 5v7l-10 5-10-5z M2 8l3.5 1.75 M8.5 11.25L12 13l10-5 M12 13v7", "M5.5 9.75c0 4.5 3 6 3 1.5 M5.5 9.75l10-5 M8.5 11.25l10-5"),
         ["sweep"] = ("M6 17c0-7 5-12 15-12 M9 20c0-5 4-9 12-9", "M3 18.5a4.5 2 0 1 0 9 0a4.5 2 0 1 0-9 0z"),
         ["helical"] = ("M6 5h12 M6 9h12 M6 13h12 M6 17h12 M6 5l12 4 M6 9l12 4 M6 13l12 4", "M12 2v20"),
         ["cuthelical"] = ("M6 5h12 M6 9h12 M6 13h12 M6 17h12 M6 5l12 4 M6 9l12 4 M6 13l12 4 M3 21h18", "M12 2v20"),
         ["thread"] = ("M8 3v18 M16 3v18 M8 5l8 2 M8 9l8 2 M8 13l8 2 M8 17l8 2", "M4 21h16"),
-        ["cutsweep"] = ("M6 17c0-7 5-12 15-12 M9 20c0-5 4-9 12-9 M3 18.5a4.5 2 0 1 0 9 0a4.5 2 0 1 0-9 0z", "M15 2v6 M12 5l3 3 3-3"),
+        ["cutsweep"] = ("M2 8L12 3l10 5v7l-10 5-10-5z M2 8l3.5 1.75 M8.5 11.25L12 13l10-5 M12 13v7", "M5.5 9.75v3.5l3 1.5v-3.5 M5.5 9.75c3-3 4 0 10-5 M8.5 11.25c3-3 4 0 10-5"),
         // fillet / chamfer: a block's corner, the rounded or cut edge (what the command makes) in the accent
         ["fillet"] = ("M3 21V12 M12 3h9v18H3", "M3 12a9 9 0 0 1 9-9"),
         ["chamfer"] = ("M3 21V12 M12 3h9v18H3", "M3 12l9-9"),
-        ["hole"] = ("M5 6h14v15H5z", "M9 6v15 M15 6v15 M9 10h6"),
+        // hole: a counterbored hole in section, its axis dashed; shell: a hollowed part in section, the wall left thin
+        ["hole"] = ("M3 5h4v5h3v10H3z M21 5h-4v5h-3v10h7z", "M12 2v2 M12 6.5v2 M12 11v2 M12 15.5v2 M12 20v2"),
         ["draft"] = ("M5 19L8.5 5h7L19 19z", "M2 19h20"),
-        ["shell"] = ("M3 8l9-5 9 5v10l-9 5-9-5z", "M6.5 9.5l5.5-3 5.5 3v7l-5.5 3-5.5-3z"),
-        ["lpattern"] = ("M3 3h5v5H3z M10 3h5v5h-5z M17 3h5v5h-5z M3 10h5v5H3z M10 10h5v5h-5z M17 10h5v5h-5z", "M3 20h19 M19 18l3 2-3 2"),
-        ["cpattern"] = ("M12 2a2 2 0 1 0 0.01 0z M20 10a2 2 0 1 0 0.01 0z M12 18a2 2 0 1 0 0.01 0z M4 10a2 2 0 1 0 0.01 0z", "M12 12m-1 0a1 1 0 1 0 2 0a1 1 0 1 0-2 0"),
+        ["shell"] = ("M3 5v15h18V5 M3 5h3 M18 5h3", "M6 5v12h12V5"),
+        // patterns: the seed (what is copied) in the accent, its copies dark
+        ["lpattern"] = ("M10 3h5v5h-5z M17 3h5v5h-5z M3 10h5v5H3z M10 10h5v5h-5z M17 10h5v5h-5z M3 20h19 M19 18l3 2-3 2", "M3 3h5v5H3z"),
+        ["cpattern"] = ("M20 10a2 2 0 1 0 0.01 0z M12 18a2 2 0 1 0 0.01 0z M4 10a2 2 0 1 0 0.01 0z M12 12m-1 0a1 1 0 1 0 2 0a1 1 0 1 0-2 0", "M12 2a2 2 0 1 0 0.01 0z"),
         ["mirror"] = ("M3 18L10 6v12z M21 18L14 6v12z", "M12 2v20"),
         // assemblies: two blocks stacked; a block with an arrow in; a block with arrows out (floating); a block with a light outline
         ["assembly"] = ("M3 13h9v8H3z M12 9h9v8h-9z", "M7 5h9v4"),
