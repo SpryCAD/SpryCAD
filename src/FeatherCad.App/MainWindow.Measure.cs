@@ -206,7 +206,7 @@ public partial class MainWindow
             else if (items[0] is { Kind: "Torus", Radius: { } R, TubeRadius: { } r })
             {
                 _measureLabelAt = items[0]!.Item.Point;
-                labelText = $"Ø {F(2 * Math.Abs(R - r))} in / Ø {F(2 * (R + r))} out";
+                labelText = $"Inner R {L(Math.Abs(R - r))}  (Ø {F(2 * Math.Abs(R - r))})\nOuter R {L(R + r)}  (Ø {F(2 * (R + r))})";
             }
         }
         else if (items.Count == 2)
@@ -314,6 +314,7 @@ public partial class MainWindow
     {
         var u = UnitLabel;
         string Pt(Vec3 p) => $"{F(p.X)}, {F(p.Y)}, {F(p.Z)} {u}";
+        string RD(double r) => $"R {L(r)}  (Ø {F(2 * r)})";
         switch (it.Kind)
         {
             case "Vertex": rows.Add(("X, Y, Z", Pt(it.Center!.Value))); return;
@@ -351,12 +352,10 @@ public partial class MainWindow
                 {
                     // a round tube swept around an axis (a bend): across the tube, and the inside and outside of the bend
                     double R = it.Radius!.Value, r = it.TubeRadius!.Value;
-                    rows.Add(("Tube diameter", L(2 * r)));
-                    rows.Add(("Inner diameter", L(2 * Math.Abs(R - r))));
-                    rows.Add(("Outer diameter", L(2 * (R + r))));
-                    rows.Add(("Inner radius", L(Math.Abs(R - r))));
-                    rows.Add(("Outer radius", L(R + r)));
-                    rows.Add(("Centerline radius", L(R)));
+                    rows.Add(("Inner sweep", RD(Math.Abs(R - r))));
+                    rows.Add(("Outer sweep", RD(R + r)));
+                    rows.Add(("Centerline", RD(R)));
+                    rows.Add(("Tube", RD(r)));
                     rows.Add(("Center", Pt(it.Center!.Value)));
                     rows.Add(("Area", F(it.Area) + " " + u + "²"));
                     break;
