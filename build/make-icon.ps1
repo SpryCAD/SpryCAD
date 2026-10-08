@@ -150,3 +150,81 @@ $linux = Join-Path $root 'installer\linux'
 WriteIcon (Frames { param($g, $px) Logo $g $px }) (Join-Path $assets 'SpryCAD.ico') (Join-Path $linux 'sprycad.png') 'SpryCAD'
 WriteIcon (Frames { param($g, $px) FileIcon $g $px 'part' }) (Join-Path $assets 'SpryCADPart.ico') (Join-Path $linux 'application-x-sprycad-part.png') 'SpryCADPart'
 WriteIcon (Frames { param($g, $px) FileIcon $g $px 'assembly' }) (Join-Path $assets 'SpryCADAssembly.ico') (Join-Path $linux 'application-x-sprycad-assembly.png') 'SpryCADAssembly'
+
+# The installer's wizard images (installer\wizard-*.bmp, 24-bit as Inno Setup wants), at each size it picks from for
+# the screen's DPI: the side banner of its Welcome and Finished pages (the brand teal, the S, the name, and a part
+# made in SpryCAD: the spur gear sample's own preview), and the small image at the top right of the other pages (the
+# app's tile on the header's white).
+
+# The spur gear sample's preview image (the thumbnail.png saved in the container; transparent around the part)
+$gear = $null
+try {
+  Add-Type -AssemblyName System.IO.Compression.FileSystem
+  $zip = [System.IO.Compression.ZipFile]::OpenRead((Join-Path $root 'samples\demos\spur-gear.sprt'))
+  $entry = $zip.GetEntry('thumbnail.png')
+  if ($entry) { $ms = New-Object System.IO.MemoryStream; $st = $entry.Open(); $st.CopyTo($ms); $st.Close(); $gear = [System.Drawing.Image]::FromStream($ms) }
+  $zip.Dispose()
+} catch { $gear = $null }
+
+function Banner($g, $w, $h) {
+  $u = $w / 164   # drawn on a 164 wide grid
+  $g.FillRectangle((New-Object System.Drawing.Drawing2D.LinearGradientBrush (Pt 0 0), (Pt 0 $h), (Color $tealLight), (Color $tealDark)), 0, 0, $w, $h)
+  $g.ScaleTransform($u, $u)
+  $hh = $h / $u
+  if ($gear) {
+    # the gear in the lower part, on a soft shadow
+    $size = 150; $x = (164 - $size) / 2; $y = [Math]::Max(178, $hh - $size - 6)
+    $shadow = New-Object System.Drawing.Drawing2D.GraphicsPath
+    $shadow.AddEllipse($x + 22, $y + $size * 0.80, $size - 44, $size * 0.13)
+    $sb = New-Object System.Drawing.Drawing2D.PathGradientBrush $shadow
+    $sb.CenterColor = [System.Drawing.Color]::FromArgb(70, 0, 40, 32); $sb.SurroundColors = @([System.Drawing.Color]::FromArgb(0, 0, 40, 32))
+    $g.FillPath($sb, $shadow)
+    $g.InterpolationMode = 'HighQualityBicubic'
+    $g.DrawImage($gear, [single]$x, [single]$y, [single]$size, [single]$size)
+  }
+  else {
+    # no sample to show: faint isometric blocks along the bottom, white lines only
+    $faint = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(46, 255, 255, 255)), 1.4
+    $faint.LineJoin = 'Round'
+    foreach ($b in @(@(40, ($hh - 60), 30), @(98, ($hh - 92), 22), @(128, ($hh - 38), 34), @(20, ($hh - 130), 16))) {
+      $cx, $cy, $r = $b; $k = $r * 0.866
+      $pts = [System.Drawing.PointF[]]@((Pt $cx ($cy - $r)), (Pt ($cx + $k) ($cy - $r / 2)), (Pt ($cx + $k) ($cy + $r / 2)), (Pt $cx ($cy + $r)), (Pt ($cx - $k) ($cy + $r / 2)), (Pt ($cx - $k) ($cy - $r / 2)))
+      $g.DrawPolygon($faint, $pts)
+      $g.DrawLine($faint, (Pt $cx $cy), (Pt ($cx + $k) ($cy - $r / 2))); $g.DrawLine($faint, (Pt $cx $cy), (Pt ($cx - $k) ($cy - $r / 2))); $g.DrawLine($faint, (Pt $cx $cy), (Pt $cx ($cy + $r)))
+    }
+  }
+  # the mark (its tile drawn too: a shade darker than the banner, it reads as the app's icon) and the name
+  $state = $g.Save()
+  $g.TranslateTransform(42, 34); $g.ScaleTransform(80 / 128, 80 / 128)
+  Logo $g ($u * 80 / 128)
+  $g.Restore($state)
+  $fmt = New-Object System.Drawing.StringFormat; $fmt.Alignment = 'Center'
+  $g.DrawString('SpryCAD', (New-Object System.Drawing.Font 'Segoe UI Semibold', 19, ([System.Drawing.FontStyle]::Bold), ([System.Drawing.GraphicsUnit]::Pixel)), (Brush $white), (New-Object System.Drawing.RectangleF 0, 124, 164, 30), $fmt)
+  $g.DrawString('Parametric 3D CAD', (New-Object System.Drawing.Font 'Segoe UI', 11, ([System.Drawing.FontStyle]::Regular), ([System.Drawing.GraphicsUnit]::Pixel)), (New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(220, 255, 255, 255))), (New-Object System.Drawing.RectangleF 0, 152, 164, 20), $fmt)
+}
+
+function SmallImage($g, $w, $h) {
+  $g.Clear([System.Drawing.Color]::White)
+  $side = [Math]::Min($w, $h) * 0.86
+  $g.TranslateTransform(($w - $side) / 2, ($h - $side) / 2); $g.ScaleTransform($side / 128, $side / 128)
+  Logo $g ($side / 128)
+}
+
+function WizardImages($draw, $sizes, $name) {
+  $files = @()
+  foreach ($sz in $sizes) {
+    $bmp = New-Object System.Drawing.Bitmap $sz[0], $sz[1], ([System.Drawing.Imaging.PixelFormat]::Format24bppRgb)
+    $g = [System.Drawing.Graphics]::FromImage($bmp)
+    $g.SmoothingMode = 'AntiAlias'; $g.PixelOffsetMode = 'HighQuality'; $g.TextRenderingHint = 'AntiAliasGridFit'
+    & $draw $g $sz[0] $sz[1]
+    $g.Dispose()
+    $file = Join-Path $root "installer\$name-$($sz[0])x$($sz[1]).bmp"
+    $bmp.Save($file, [System.Drawing.Imaging.ImageFormat]::Bmp); $bmp.Dispose()
+    $files += $file
+  }
+  Write-Host ($files -join "`n")
+}
+
+# the sizes Inno Setup chooses among (100% to 250% DPI)
+WizardImages { param($g, $w, $h) Banner $g $w $h } @(@(164, 314), @(192, 386), @(246, 459), @(273, 556), @(328, 604), @(383, 707), @(410, 797)) 'wizard'
+WizardImages { param($g, $w, $h) SmallImage $g $w $h } @(@(55, 55), @(64, 68), @(83, 80), @(92, 97), @(110, 106), @(119, 123), @(138, 140)) 'wizard-small'
