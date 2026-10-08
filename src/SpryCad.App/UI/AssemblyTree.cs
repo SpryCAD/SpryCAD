@@ -5,6 +5,7 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using SpryCad.App.Session;
 using SpryCad.Core.Assembly;
+using SpryCad.Core.Model;
 
 namespace SpryCad.App.UI;
 
@@ -227,7 +228,8 @@ public sealed class AssemblyTree : DockPanel
             mi.Click += (_, _) => Command?.Invoke(c.Id, cmd);
             return mi;
         }
-        return new ContextMenu
+        var configure = I("_Configure...", "configure", "configure");
+        var menu = new ContextMenu
         {
             Items =
             {
@@ -235,10 +237,14 @@ public sealed class AssemblyTree : DockPanel
                 new Separator(),
                 I("_Fix", "fix", "fix", !c.Fixed), I("F_loat", "float", "float", c.Fixed),
                 I(c.Lightweight ? "Set to _Resolved" : "Set to _Lightweight", "lightweight", c.Lightweight ? "part" : "lightweight"),
-                I("_Configure...", "configure", "configure"),
+                configure,
                 new Separator(),
                 I("_Delete", "delete", "delete"),
             },
         };
+        // Configure only for a part with something to configure (a design table, user-facing variables); asked when
+        // the menu opens, not as the tree is made, since finding the part may read its file
+        menu.Opening += (_, _) => configure.IsEnabled = _shown?.Model.PartDocument(c)?.UserParameters().Count > 0;
+        return menu;
     }
 }
