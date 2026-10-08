@@ -33,6 +33,8 @@ public static class Triangulator
     sealed class Node
     {
         public int I; public double X, Y; public Node Prev = null!, Next = null!;
+        // z-order index (long rings, see EarClip): Morton code of the point, neighbours in code order
+        public int Z; public Node? PrevZ, NextZ;
     }
 
     static double Area(Vec2[] l)
@@ -108,7 +110,12 @@ public static class Triangulator
 
     static bool Same(Node a, Node b) => Math.Abs(a.X - b.X) < 1e-12 && Math.Abs(a.Y - b.Y) < 1e-12;
 
-    static void Remove(Node n) { n.Prev.Next = n.Next; n.Next.Prev = n.Prev; }
+    static void Remove(Node n)
+    {
+        n.Prev.Next = n.Next; n.Next.Prev = n.Prev;
+        if (n.PrevZ != null) n.PrevZ.NextZ = n.NextZ;
+        if (n.NextZ != null) n.NextZ.PrevZ = n.PrevZ;
+    }
 
     static Node Rightmost(Node ring)
     {
@@ -190,21 +197,109 @@ public static class Triangulator
     // >0 if p,q,r is CCW
     static double Cross(Node p, Node q, Node r) => (q.X - p.X) * (r.Y - p.Y) - (q.Y - p.Y) * (r.X - p.X);
 
-    static bool IsEar(Node ear, bool relaxed = false)
+    static bool IsEar(Node ear, ZIndex? zi, bool relaxed = false)
     {
         var a = ear.Prev; var b = ear; var c = ear.Next;
         var area = Cross(a, b, c);
         var scale = Math.Abs(b.X - a.X) + Math.Abs(b.Y - a.Y) + Math.Abs(c.X - b.X) + Math.Abs(c.Y - b.Y);
         if (area <= 1e-14 * scale * scale) return false; // reflex or degenerate
-        var p = c.Next;
-        while (p != a)
+        if (zi != null && zi.BlockBox(a, b, c) is { } box)
         {
-            if (!Same(p, a) && !Same(p, b) && !Same(p, c) &&
-                (relaxed ? BlocksRelaxed(a, b, c, p) : PointInTriangleStrict(a, b, c, p)))
+            // only points in the box can block: those of the ring with their codes in the box's range, a run of the
+            // code order through the ear itself
+            int zMin = zi.Code(box.x0, box.y0), zMax = zi.Code(box.x1, box.y1);
+            for (var p = b.PrevZ; p != null && p.Z >= zMin; p = p.PrevZ)
+                if (p != a && p != c && Blocks(p)) return false;
+            for (var p = b.NextZ; p != null && p.Z <= zMax; p = p.NextZ)
+                if (p != a && p != c && Blocks(p)) return false;
+            return true;
+
+            bool Blocks(Node p) => p.X >= box.x0 && p.X <= box.x1 && p.Y >= box.y0 && p.Y <= box.y1 &&
+                !Same(p, a) && !Same(p, b) && !Same(p, c) && (relaxed ? BlocksRelaxed(a, b, c, p) : PointInTriangleStrict(a, b, c, p));
+        }
+        var q = c.Next;
+        while (q != a)
+        {
+            if (!Same(q, a) && !Same(q, b) && !Same(q, c) &&
+                (relaxed ? BlocksRelaxed(a, b, c, q) : PointInTriangleStrict(a, b, c, q)))
                 return false;
-            p = p.Next;
+            q = q.Next;
         }
         return true;
+    }
+
+    /// <summary>
+    /// The ring's points in z-order (Morton codes of their positions in the ring's box): the points inside a box are
+    /// those of its code range, so an ear tests only its neighbourhood instead of the whole ring (earcut's hashing).
+    /// </summary>
+    sealed class ZIndex
+    {
+        readonly double _x0, _y0, _inv, _size;
+
+        public ZIndex(Node start)
+        {
+            double x0 = double.MaxValue, y0 = double.MaxValue, x1 = double.MinValue, y1 = double.MinValue;
+            var nodes = new List<Node>();
+            var p = start;
+            do { nodes.Add(p); x0 = Math.Min(x0, p.X); y0 = Math.Min(y0, p.Y); x1 = Math.Max(x1, p.X); y1 = Math.Max(y1, p.Y); p = p.Next; } while (p != start);
+            _x0 = x0; _y0 = y0; _size = Math.Max(x1 - x0, y1 - y0);
+            _inv = _size > 0 ? 32767 / _size : 0;
+            foreach (var n in nodes) n.Z = Code(n.X, n.Y);
+            nodes.Sort((m, n) => m.Z.CompareTo(n.Z));
+            for (int i = 0; i < nodes.Count; i++)
+            {
+                nodes[i].PrevZ = i > 0 ? nodes[i - 1] : null;
+                nodes[i].NextZ = i + 1 < nodes.Count ? nodes[i + 1] : null;
+            }
+        }
+
+        /// <summary>Morton code of a point (coordinates clamped to the ring's box: non-decreasing in x and in y).</summary>
+        public int Code(double x, double y)
+        {
+            int ix = (int)Math.Clamp((x - _x0) * _inv, 0, 32767), iy = (int)Math.Clamp((y - _y0) * _inv, 0, 32767);
+            return (int)(Spread((uint)ix) | (Spread((uint)iy) << 1));
+        }
+
+        static uint Spread(uint v)
+        {
+            v = (v | (v << 8)) & 0x00FF00FF;
+            v = (v | (v << 4)) & 0x0F0F0F0F;
+            v = (v | (v << 2)) & 0x33333333;
+            return (v | (v << 1)) & 0x55555555;
+        }
+
+        /// <summary>
+        /// A box holding every point that <see cref="PointInTriangleStrict"/> (and so <see cref="BlocksRelaxed"/>) can
+        /// count as blocking ear a-b-c: the triangle its tolerances allow (each side moved out by its slack), with a
+        /// margin for rounding. Null for a sliver, whose moved corners are unreliable (then the whole ring is tested).
+        /// </summary>
+        public (double x0, double y0, double x1, double y1)? BlockBox(Node a, Node b, Node c)
+        {
+            var l2 = Math.Max(Math.Max((b.X - a.X) * (b.X - a.X) + (b.Y - a.Y) * (b.Y - a.Y), (c.X - b.X) * (c.X - b.X) + (c.Y - b.Y) * (c.Y - b.Y)),
+                              (a.X - c.X) * (a.X - c.X) + (a.Y - c.Y) * (a.Y - c.Y));
+            var eps = -1e-11 * l2;
+            // in coordinates about b: side i is A·x + B·y = K where its cross product equals eps
+            double ax = a.X - b.X, ay = a.Y - b.Y, cx = c.X - b.X, cy = c.Y - b.Y;
+            double A1 = ay, B1 = -ax, K1 = eps;                              // (b - a) × (p - a)
+            double A2 = -cy, B2 = cx, K2 = eps;                              // (c - b) × (p - b)
+            double A3 = -(ay - cy), B3 = ax - cx, K3 = eps + A3 * cx + B3 * cy; // (a - c) × (p - c)
+            if (!Corner(A1, B1, K1, A2, B2, K2, out var x12, out var y12) ||
+                !Corner(A2, B2, K2, A3, B3, K3, out var x23, out var y23) ||
+                !Corner(A3, B3, K3, A1, B1, K1, out var x31, out var y31)) return null;
+            double x0 = Math.Min(x12, Math.Min(x23, x31)), x1 = Math.Max(x12, Math.Max(x23, x31));
+            double y0 = Math.Min(y12, Math.Min(y23, y31)), y1 = Math.Max(y12, Math.Max(y23, y31));
+            var m = 1e-6 * (x1 - x0 + y1 - y0) + 1e-14 * (_size + Math.Abs(b.X - _x0) + Math.Abs(b.Y - _y0));
+            return (b.X + x0 - m, b.Y + y0 - m, b.X + x1 + m, b.Y + y1 + m);
+        }
+
+        static bool Corner(double a1, double b1, double k1, double a2, double b2, double k2, out double x, out double y)
+        {
+            var det = a1 * b2 - a2 * b1;
+            x = y = 0;
+            if (!(Math.Abs(det) >= 1e-8 * Math.Sqrt((a1 * a1 + b1 * b1) * (a2 * a2 + b2 * b2)))) return false;
+            x = (k1 * b2 - k2 * b1) / det; y = (a1 * k2 - a2 * k1) / det;
+            return double.IsFinite(x) && double.IsFinite(y);
+        }
     }
 
     /// <summary>
@@ -234,11 +329,13 @@ public static class Triangulator
     {
         var ear = start;
         int count = 0; var q = start; do { count++; q = q.Next; } while (q != start);
+        // long rings: each ear tests only the points near it (the same answers as testing every point)
+        var zi = count > 80 ? new ZIndex(start) : null;
         int stall = 0;
         int pass = 0;
         while (count > 3)
         {
-            if (IsEar(ear))
+            if (IsEar(ear, zi))
             {
                 tris.Add(ear.Prev.I); tris.Add(ear.I); tris.Add(ear.Next.I);
                 Remove(ear);
@@ -253,7 +350,7 @@ public static class Triangulator
                 // no ear found: try the relaxed test first (keeps every boundary vertex)
                 stall = 0;
                 var r = ear; Node? relaxedEar = null;
-                for (int k = 0; k < count; k++) { if (IsEar(r, relaxed: true)) { relaxedEar = r; break; } r = r.Next; }
+                for (int k = 0; k < count; k++) { if (IsEar(r, zi, relaxed: true)) { relaxedEar = r; break; } r = r.Next; }
                 if (relaxedEar != null)
                 {
                     tris.Add(relaxedEar.Prev.I); tris.Add(relaxedEar.I); tris.Add(relaxedEar.Next.I);

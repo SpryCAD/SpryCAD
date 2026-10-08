@@ -4,40 +4,61 @@ namespace SpryCad.Kernel;
 /// Small constrained Delaunay triangulation: starts from any valid triangulation of a polygon with holes,
 /// legalizes it with Lawson flips (boundary edges are constraints), and supports incremental insertion of
 /// interior points. Coordinates are supplied in a metric space so anisotropic surfaces mesh well.
+/// Triangles are kept in flat arrays (three vertices, ccw, and the three neighbours across the edges opposite them,
+/// -1 = none): a flip or an insertion rewrites entries in place.
 /// </summary>
 public sealed class CdtMesh
 {
     readonly List<Vec2> _p;
-    readonly List<int[]> _t = new();       // vertices (ccw)
-    readonly List<int[]> _n = new();       // neighbour across edge i (opposite vertex i), -1 = none
-    readonly HashSet<(int, int)> _fixed;
+    int[] _tv = new int[48];    // vertices of triangle i: 3i..3i+2
+    int[] _tn = new int[48];    // neighbour across the edge opposite vertex e of triangle i: 3i+e
+    int _count;
+    readonly HashSet<long> _fixed = new();
+    readonly Stack<(int, int)> _work = new();
     int _last;
 
     public CdtMesh(List<Vec2> metricPoints, IEnumerable<(int a, int b, int c)> tris, HashSet<(int, int)> constrained)
     {
-        _p = metricPoints; _fixed = constrained;
+        _p = metricPoints;
+        foreach (var (u, v) in constrained) _fixed.Add(Key(u, v));
         foreach (var (a, b, c) in tris)
         {
             if (Orient(a, b, c) <= 0) continue; // drop degenerate / inverted input
-            _t.Add(new[] { a, b, c });
-            _n.Add(new[] { -1, -1, -1 });
+            Add(a, b, c, -1, -1, -1);
         }
-        var map = new Dictionary<(int, int), (int tri, int edge)>();
-        for (int i = 0; i < _t.Count; i++)
+        var map = new Dictionary<long, (int tri, int edge)>();
+        for (int i = 0; i < _count; i++)
             for (int e = 0; e < 3; e++)
             {
-                var (u, v) = (_t[i][(e + 1) % 3], _t[i][(e + 2) % 3]);
-                if (map.TryGetValue((v, u), out var o)) { _n[i][e] = o.tri; _n[o.tri][o.edge] = i; }
-                else map[(u, v)] = (i, e);
+                int u = _tv[3 * i + (e + 1) % 3], v = _tv[3 * i + (e + 2) % 3];
+                if (map.TryGetValue(Directed(v, u), out var o)) { _tn[3 * i + e] = o.tri; _tn[3 * o.tri + o.edge] = i; }
+                else map[Directed(u, v)] = (i, e);
             }
     }
 
-    public IEnumerable<(int a, int b, int c)> Triangles => _t.Select(t => (t[0], t[1], t[2]));
-    public int Count => _t.Count;
+    public IEnumerable<(int a, int b, int c)> Triangles
+    {
+        get { for (int i = 0; i < _count; i++) yield return (_tv[3 * i], _tv[3 * i + 1], _tv[3 * i + 2]); }
+    }
+
+    public int Count => _count;
+
+    void Add(int a, int b, int c, int n0, int n1, int n2)
+    {
+        if (3 * _count + 3 > _tv.Length) { Array.Resize(ref _tv, _tv.Length * 2); Array.Resize(ref _tn, _tn.Length * 2); }
+        Set(_count++, a, b, c, n0, n1, n2);
+    }
+
+    void Set(int i, int a, int b, int c, int n0, int n1, int n2)
+    {
+        _tv[3 * i] = a; _tv[3 * i + 1] = b; _tv[3 * i + 2] = c;
+        _tn[3 * i] = n0; _tn[3 * i + 1] = n1; _tn[3 * i + 2] = n2;
+    }
 
     double Orient(int a, int b, int c) => Vec2.Cross(_p[b] - _p[a], _p[c] - _p[a]);
 
-    static (int, int) Key(int a, int b) => a < b ? (a, b) : (b, a);
+    static long Key(int a, int b) => a < b ? Directed(a, b) : Directed(b, a);
+    static long Directed(int a, int b) => ((long)a << 32) | (uint)b;
 
     bool InCircle(int a, int b, int c, int d)
     {
@@ -49,39 +70,36 @@ public sealed class CdtMesh
     }
 
     /// <summary>Flips edge e of triangle i if that improves the Delaunay property. Returns true if flipped.</summary>
-    bool Legalize(int i, int e, Stack<(int, int)> work)
+    bool Legalize(int i, int e)
     {
-        var j = _n[i][e];
+        var j = _tn[3 * i + e];
         if (j < 0) return false;
-        var t = _t[i];
-        int a = t[e], b = t[(e + 1) % 3], c = t[(e + 2) % 3];  // edge (b,c) opposite a
+        int a = _tv[3 * i + e], b = _tv[3 * i + (e + 1) % 3], c = _tv[3 * i + (e + 2) % 3];  // edge (b,c) opposite a
         if (_fixed.Contains(Key(b, c))) return false;
-        var tj = _t[j];
         // vertex of j opposite the shared edge
-        int d = tj[0] != b && tj[0] != c ? tj[0] : tj[1] != b && tj[1] != c ? tj[1] : tj[2];
+        int j0 = _tv[3 * j], j1 = _tv[3 * j + 1], j2 = _tv[3 * j + 2];
+        int d = j0 != b && j0 != c ? j0 : j1 != b && j1 != c ? j1 : j2;
         if (!InCircle(a, b, c, d)) return false;
         // convexity (new triangles must be ccw)
         if (Orient(a, b, d) <= 0 || Orient(a, d, c) <= 0) return false;
         // neighbours of the quad
         int nAB = NeighbourAcross(i, a, b), nCA = NeighbourAcross(i, c, a);
         int nBD = NeighbourAcross(j, b, d), nDC = NeighbourAcross(j, d, c);
-        _t[i] = new[] { a, b, d }; _t[j] = new[] { a, d, c };
         // triangle i: edges (b,d) opp a -> nBD, (d,a) opp b -> j, (a,b) opp d -> nAB
-        _n[i] = new[] { nBD, j, nAB };
+        Set(i, a, b, d, nBD, j, nAB);
         // triangle j: edges (d,c) opp a -> nDC, (c,a) opp d -> nCA, (a,d) opp c -> i
-        _n[j] = new[] { nDC, nCA, i };
+        Set(j, a, d, c, nDC, nCA, i);
         Relink(nBD, j, i); Relink(nCA, i, j);
-        work.Push((i, 0)); work.Push((j, 0));
+        _work.Push((i, 0)); _work.Push((j, 0));
         return true;
     }
 
     int NeighbourAcross(int tri, int u, int v)
     {
-        var t = _t[tri];
         for (int e = 0; e < 3; e++)
         {
-            int x = t[(e + 1) % 3], y = t[(e + 2) % 3];
-            if ((x == u && y == v) || (x == v && y == u)) return _n[tri][e];
+            int x = _tv[3 * tri + (e + 1) % 3], y = _tv[3 * tri + (e + 2) % 3];
+            if ((x == u && y == v) || (x == v && y == u)) return _tn[3 * tri + e];
         }
         return -1;
     }
@@ -89,36 +107,36 @@ public sealed class CdtMesh
     void Relink(int tri, int oldN, int newN)
     {
         if (tri < 0) return;
-        for (int e = 0; e < 3; e++) if (_n[tri][e] == oldN) { _n[tri][e] = newN; return; }
+        for (int e = 0; e < 3; e++) if (_tn[3 * tri + e] == oldN) { _tn[3 * tri + e] = newN; return; }
     }
 
     public void MakeDelaunay()
     {
-        var work = new Stack<(int, int)>();
-        for (int i = 0; i < _t.Count; i++) for (int e = 0; e < 3; e++) work.Push((i, e));
+        _work.Clear();
+        for (int i = 0; i < _count; i++) for (int e = 0; e < 3; e++) _work.Push((i, e));
         int guard = 0;
-        while (work.Count > 0 && guard++ < 2_000_000)
+        while (_work.Count > 0 && guard++ < 2_000_000)
         {
-            var (i, e) = work.Pop();
-            for (int k = 0; k < 3; k++) if (Legalize(i, (e + k) % 3, work)) break;
+            var (i, e) = _work.Pop();
+            for (int k = 0; k < 3; k++) if (Legalize(i, (e + k) % 3)) break;
         }
+        _work.Clear();
     }
 
     /// <summary>Locates the triangle containing p (walking), or -1 when outside the domain.</summary>
     int Locate(Vec2 p)
     {
-        if (_t.Count == 0) return -1;
-        int cur = Math.Clamp(_last, 0, _t.Count - 1);
-        for (int steps = 0; steps < _t.Count + 10; steps++)
+        if (_count == 0) return -1;
+        int cur = Math.Clamp(_last, 0, _count - 1);
+        for (int steps = 0; steps < _count + 10; steps++)
         {
-            var t = _t[cur];
             int next = -2;
             for (int e = 0; e < 3; e++)
             {
-                var a = _p[t[(e + 1) % 3]]; var b = _p[t[(e + 2) % 3]];
+                var a = _p[_tv[3 * cur + (e + 1) % 3]]; var b = _p[_tv[3 * cur + (e + 2) % 3]];
                 if (Vec2.Cross(b - a, p - a) < -1e-12 * ((b - a).LengthSq + 1e-30))
                 {
-                    next = _n[cur][e];
+                    next = _tn[3 * cur + e];
                     break;
                 }
             }
@@ -126,10 +144,10 @@ public sealed class CdtMesh
             if (next < 0) break; // walked out of the domain (holes/boundary): fall back to a scan
             cur = next;
         }
-        for (int i = 0; i < _t.Count; i++)
+        for (int i = 0; i < _count; i++)
         {
-            var t = _t[i];
-            if (Vec2.Cross(_p[t[1]] - _p[t[0]], p - _p[t[0]]) >= 0 && Vec2.Cross(_p[t[2]] - _p[t[1]], p - _p[t[1]]) >= 0 && Vec2.Cross(_p[t[0]] - _p[t[2]], p - _p[t[2]]) >= 0)
+            Vec2 p0 = _p[_tv[3 * i]], p1 = _p[_tv[3 * i + 1]], p2 = _p[_tv[3 * i + 2]];
+            if (Vec2.Cross(p1 - p0, p - p0) >= 0 && Vec2.Cross(p2 - p1, p - p1) >= 0 && Vec2.Cross(p0 - p2, p - p2) >= 0)
             { _last = i; return i; }
         }
         return -1;
@@ -141,26 +159,25 @@ public sealed class CdtMesh
         var p = _p[k];
         int i = Locate(p);
         if (i < 0) return false;
-        var t = _t[i];
-        int a = t[0], b = t[1], c = t[2];
+        int a = _tv[3 * i], b = _tv[3 * i + 1], c = _tv[3 * i + 2];
         // reject points too close to an existing vertex
-        foreach (var v in t) if ((_p[v] - p).LengthSq < 1e-20) return false;
-        int n0 = _n[i][0], n1 = _n[i][1], n2 = _n[i][2];   // across (b,c), (c,a), (a,b)
-        int i1 = _t.Count, i2 = _t.Count + 1;
-        _t[i] = new[] { a, b, k }; _t.Add(new[] { b, c, k }); _t.Add(new[] { c, a, k });
+        if ((_p[a] - p).LengthSq < 1e-20 || (_p[b] - p).LengthSq < 1e-20 || (_p[c] - p).LengthSq < 1e-20) return false;
+        int n0 = _tn[3 * i], n1 = _tn[3 * i + 1], n2 = _tn[3 * i + 2];   // across (b,c), (c,a), (a,b)
+        int i1 = _count, i2 = _count + 1;
         // tri i (a,b,k): edge (b,k) opp a -> i1, (k,a) opp b -> i2, (a,b) opp k -> n2
-        _n[i] = new[] { i1, i2, n2 };
-        _n.Add(new[] { i2, i, n0 });   // (b,c,k): (c,k) opp b -> i2, (k,b) opp c -> i, (b,c) opp k -> n0
-        _n.Add(new[] { i, i1, n1 });   // (c,a,k): (a,k) opp c -> i, (k,c) opp a -> i1, (c,a) opp k -> n1
+        Set(i, a, b, k, i1, i2, n2);
+        Add(b, c, k, i2, i, n0);   // (b,c,k): (c,k) opp b -> i2, (k,b) opp c -> i, (b,c) opp k -> n0
+        Add(c, a, k, i, i1, n1);   // (c,a,k): (a,k) opp c -> i, (k,c) opp a -> i1, (c,a) opp k -> n1
         Relink(n0, i, i1); Relink(n1, i, i2);
-        var work = new Stack<(int, int)>();
-        work.Push((i, 2)); work.Push((i1, 2)); work.Push((i2, 2));
+        _work.Clear();
+        _work.Push((i, 2)); _work.Push((i1, 2)); _work.Push((i2, 2));
         int guard = 0;
-        while (work.Count > 0 && guard++ < 100000)
+        while (_work.Count > 0 && guard++ < 100000)
         {
-            var (ti, e) = work.Pop();
-            Legalize(ti, e, work);
+            var (ti, e) = _work.Pop();
+            Legalize(ti, e);
         }
+        _work.Clear();
         return true;
     }
 }

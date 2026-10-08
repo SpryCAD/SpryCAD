@@ -103,13 +103,18 @@ public static class NTess
         int nu = (int)Math.Clamp(Math.Ceiling(mu / hu), 1, capU), nv = (int)Math.Clamp(Math.Ceiling(mv / hv), 1, 400);
         if ((long)nu * nv > 40000) { var k = Math.Sqrt(40000.0 / ((long)nu * nv)); nu = Math.Max(1, (int)(nu * k)); nv = Math.Max(1, (int)(nv * k)); }
         var minGap = 0.45 * Math.Min(mu / nu, mv / nv);
+        // each row's boundary crossings once (the inside test of its points), and the boundary in boxed runs (the
+        // distance test skips runs that are far)
+        var rows = new double[nv][];
+        for (int j = 1; j < nv; j++) rows[j] = Crossings(loopsUv, vMin + (vMax - vMin) * j / nv);
+        var runs = BoundaryRuns(loops3);
         for (int i = 1; i < nu; i++)
             for (int j = 1; j < nv; j++)
             {
                 var q = new Vec2(uMin + (uMax - uMin) * i / nu, vMin + (vMax - vMin) * j / nv);
-                if (!ContainsUV(loopsUv, q)) continue;
+                if (!Inside(rows[j], q.X)) continue;
                 var pq = dom.Eval(q);
-                if (BoundaryDistance(loops3, pq) < minGap) continue;
+                if (NearBoundary(loops3, runs, pq, minGap)) continue;
                 uv.Add(q); p3.Add(pq); metric.Add(new Vec2(q.X * su, q.Y * sv));
                 if (!mesh.Insert(uv.Count - 1)) { uv.RemoveAt(uv.Count - 1); p3.RemoveAt(p3.Count - 1); metric.RemoveAt(metric.Count - 1); }
             }
@@ -166,30 +171,72 @@ public static class NTess
         }
     }
 
-    static bool ContainsUV(IReadOnlyList<Vec2[]> loops, Vec2 p)
+    /// <summary>
+    /// Where the line v = y crosses the loops (the even-odd rule's crossings for points on it, sorted): a point
+    /// (x, y) is inside when an odd number of them lie beyond x.
+    /// </summary>
+    static double[] Crossings(IReadOnlyList<Vec2[]> loops, double y)
     {
-        bool inside = false;
+        var xs = new List<double>();
         foreach (var poly in loops)
             for (int i = 0, j = poly.Length - 1; i < poly.Length; j = i++)
             {
                 var a = poly[i]; var b = poly[j];
-                if ((a.Y > p.Y) != (b.Y > p.Y) && p.X < (b.X - a.X) * (p.Y - a.Y) / (b.Y - a.Y) + a.X) inside = !inside;
+                if ((a.Y > y) != (b.Y > y)) xs.Add((b.X - a.X) * (y - a.Y) / (b.Y - a.Y) + a.X);
             }
-        return inside;
+        xs.Sort();
+        return xs.ToArray();
     }
 
-    static double BoundaryDistance(IReadOnlyList<Vec3[]> loops, Vec3 p)
+    static bool Inside(double[] crossings, double x)
     {
-        double best = double.MaxValue;
+        // how many lie beyond x: from the first one greater than x
+        int lo = 0, hi = crossings.Length;
+        while (lo < hi) { int m = (lo + hi) >> 1; if (crossings[m] > x) hi = m; else lo = m + 1; }
+        return ((crossings.Length - lo) & 1) == 1;
+    }
+
+    const int RunLength = 16;
+
+    /// <summary>The boxes of the loops' segments in runs of <see cref="RunLength"/> (in loop order).</summary>
+    static List<Box3> BoundaryRuns(IReadOnlyList<Vec3[]> loops)
+    {
+        var boxes = new List<Box3>();
         foreach (var l in loops)
-            for (int i = 0; i < l.Length; i++)
+            for (int s = 0; s < l.Length; s += RunLength)
             {
-                var a = l[i]; var b = l[(i + 1) % l.Length];
-                var d = b - a; var l2 = d.LengthSq;
-                var t = l2 > 0 ? Math.Clamp(Vec3.Dot(p - a, d) / l2, 0, 1) : 0;
-                best = Math.Min(best, (a + d * t - p).Length);
+                var b = Box3.Empty;
+                for (int i = s; i < Math.Min(s + RunLength, l.Length); i++) { b.Add(l[i]); b.Add(l[(i + 1) % l.Length]); }
+                boxes.Add(b);
             }
-        return best;
+        return boxes;
+    }
+
+    /// <summary>
+    /// Whether p is closer than gap to a boundary segment (the least of their distances below gap), testing only
+    /// the runs whose box comes that close.
+    /// </summary>
+    static bool NearBoundary(IReadOnlyList<Vec3[]> loops, List<Box3> runs, Vec3 p, double gap)
+    {
+        // a box farther than this holds no segment that rounding could bring under gap
+        var far = gap * (1 + 1e-9) + 1e-12 * (Math.Abs(p.X) + Math.Abs(p.Y) + Math.Abs(p.Z) + 1);
+        int r = 0;
+        foreach (var l in loops)
+            for (int s = 0; s < l.Length; s += RunLength, r++)
+            {
+                var bx = runs[r];
+                double dx = Math.Max(0, Math.Max(bx.Min.X - p.X, p.X - bx.Max.X)), dy = Math.Max(0, Math.Max(bx.Min.Y - p.Y, p.Y - bx.Max.Y)),
+                       dz = Math.Max(0, Math.Max(bx.Min.Z - p.Z, p.Z - bx.Max.Z));
+                if (dx * dx + dy * dy + dz * dz > far * far) continue;
+                for (int i = s; i < Math.Min(s + RunLength, l.Length); i++)
+                {
+                    var a = l[i]; var b = l[(i + 1) % l.Length];
+                    var d = b - a; var l2 = d.LengthSq;
+                    var t = l2 > 0 ? Math.Clamp(Vec3.Dot(p - a, d) / l2, 0, 1) : 0;
+                    if ((a + d * t - p).Length < gap) return true;
+                }
+            }
+        return false;
     }
 
     /// <summary>

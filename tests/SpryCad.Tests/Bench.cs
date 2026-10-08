@@ -207,6 +207,9 @@ static class Bench
                 faceVols.Add(facets.GroupBy(f => tagKey[f.Tag]).ToDictionary(g => g.Key, g => (g.Sum(FacetVolume), g.Count())));
                 Console.Write($"[{faceVols[^1].Values.Sum(v => v.Item1):R}]");
             }
+            if (Environment.GetEnvironmentVariable("FC_DET_MESH") != null)
+                // the display of the final bodies, bit for bit: their facets, then the display mesh (compare processes)
+                foreach (var b in r.State.Bodies) Console.Write($"[mesh {b.Id} {MeshHash(b.Solid):X16}]");
             prints.Add(fp);
             Console.Write(".");
         }
@@ -304,6 +307,26 @@ static class Bench
         }
         Console.WriteLine(seen.Count == 1 ? "all the same" : $"{seen.Count} different volumes");
         return seen.Count == 1 ? 0 : 1;
+    }
+
+    /// <summary>A hash of a solid's facets (in order, every coordinate's bits) and of its display mesh's arrays.</summary>
+    static ulong MeshHash(Solid s)
+    {
+        ulong h = 0xcbf29ce484222325UL;
+        void Mix(ulong x) { h ^= x; h *= 0x100000001b3UL; }
+        void P(Vec3 p) { Mix((ulong)BitConverter.DoubleToInt64Bits(p.X)); Mix((ulong)BitConverter.DoubleToInt64Bits(p.Y)); Mix((ulong)BitConverter.DoubleToInt64Bits(p.Z)); }
+        foreach (var f in s.Faces)
+        {
+            Mix((ulong)f.Loops.Count);
+            foreach (var l in f.Loops) { Mix((ulong)l.Length); foreach (var p in l) P(p); }
+        }
+        var m = DisplayMesh.Build(s);
+        foreach (var x in m.Positions) Mix(BitConverter.SingleToUInt32Bits(x));
+        foreach (var x in m.Normals) Mix(BitConverter.SingleToUInt32Bits(x));
+        foreach (var x in m.Indices) Mix((ulong)x);
+        foreach (var x in m.EdgeLines) Mix(BitConverter.SingleToUInt32Bits(x));
+        foreach (var fr in m.Faces) { Mix((ulong)fr.IndexStart); Mix((ulong)fr.IndexCount); }
+        return h;
     }
 
     internal static string Fingerprint(ModelState s)
