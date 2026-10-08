@@ -76,6 +76,13 @@
   <Style Selector="ToggleButton.matetype:disabled">
     <Setter Property="Opacity" Value="0.4" />
   </Style>
+  <Style Selector="ToggleButton.matetype.framed">
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="BorderBrush" Value="#FFC4CEDB" />
+  </Style>
+  <Style Selector="ToggleButton.matetype.framed:checked /template/ ContentPresenter">
+    <Setter Property="BorderBrush" Value="#FF2F7BD6" />
+  </Style>
   <Style Selector="ToggleButton.matetype:disabled /template/ ContentPresenter">
     <Setter Property="Background" Value="Transparent" />
   </Style>
@@ -160,6 +167,11 @@
   <Style Selector="ListBox.selbox ListBoxItem">
     <Setter Property="Padding" Value="4,1" />
     <Setter Property="MinHeight" Value="20" />
+  </Style>
+  <!-- the Mate page's picks: the selected entry in the orange its face is drawn in on the model -->
+  <Style Selector="ListBox.matepicks ListBoxItem:selected /template/ ContentPresenter">
+    <Setter Property="Background" Value="#FFF9C9A3" />
+    <Setter Property="Foreground" Value="#FF1D2B3F" />
   </Style>
 
   <!-- Feature tree -->

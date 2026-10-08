@@ -40,6 +40,8 @@ public partial class MainWindow
         public Mate? Preview;
         /// <summary>Where the components were before the preview.</summary>
         public Dictionary<string, Placement> Before = new();
+        /// <summary>The pick selected in the Mate Selections box (-1: none): drawn in its own color.</summary>
+        public int Focus = -1;
         /// <summary>The mate being edited (null: adding new ones); it stands in the list while no preview does.</summary>
         public Mate? Editing;
         public Action? Update;
@@ -49,6 +51,9 @@ public partial class MainWindow
     (string comp, string face)? _hoverFace;
 
     public bool PickingFaces => _mating != null && Asm != null;
+
+    /// <summary>The color of the pick selected in the Mate Selections box.</summary>
+    static readonly Rgba FocusColor = new(0.95f, 0.45f, 0.1f);
 
     public void HoverFace(string? component, string? face)
     {
@@ -91,8 +96,10 @@ public partial class MainWindow
         List<(string, Rgba)>? l = null;
         var refs = _mating?.Picks ?? (SelectedMate() is { } m ? new List<MateRef> { m.A, m.B } : null);
         if (refs != null)
-            foreach (var p in refs)
-                if (p.Component == componentId) (l ??= new()).Add((p.Face, ViewportControl.SelectColor));
+            for (int i = 0; i < refs.Count; i++)
+                if (refs[i].Component == componentId)
+                    // the pick selected in the Mate Selections box: in the focus color, so it is plain which it is
+                    (l ??= new()).Add((refs[i].Face, _mating?.Focus == i ? FocusColor : ViewportControl.SelectColor));
         if (_hoverFace is { } h && h.comp == componentId) (l ??= new()).Add((h.face, ViewportControl.HoverColor));
         return l;
     }
@@ -184,7 +191,8 @@ public partial class MainWindow
                 Orientation = Orientation.Horizontal, Spacing = 6, HorizontalAlignment = HorizontalAlignment.Center,
                 Children = { Icons.Make(icon, 16), new TextBlock { Text = text, VerticalAlignment = VerticalAlignment.Center } },
             },
-            HorizontalContentAlignment = HorizontalAlignment.Center,
+            // the page's text size (a tab's own is much larger)
+            FontSize = 12, HorizontalContentAlignment = HorizontalAlignment.Center,
         };
         var tabs = new TabStrip
         {
@@ -197,6 +205,12 @@ public partial class MainWindow
         {
             var mechanical = tabs.SelectedIndex == 1;
             if (mechanical == st.Mechanical) return;
+            // the strip selects its first tab by itself when it is shown: only a click or a key changes the tab
+            if (!tabs.IsPointerOver && !tabs.IsKeyboardFocusWithin)
+            {
+                Avalonia.Threading.Dispatcher.UIThread.Post(() => tabs.SelectedIndex = st.Mechanical ? 1 : 0);
+                return;
+            }
             st.Mechanical = mechanical;
             // (after the strip has finished changing its selection)
             Avalonia.Threading.Dispatcher.UIThread.Post(() => { if (_mating == st) st.Update?.Invoke(); });
@@ -205,7 +219,7 @@ public partial class MainWindow
 
         // the picks, in a selection box as the other editors have (pink: what is clicked goes in)
         var sel = page.Section("Mate Selections");
-        var box = new ListBox { Classes = { "selbox", "activebox" }, MinHeight = 44 };
+        var box = new ListBox { Classes = { "selbox", "activebox", "matepicks" }, MinHeight = 44 };
         void DropPick(int i)
         {
             if (i < 0 || i >= st.Picks.Count) return;
@@ -214,6 +228,13 @@ public partial class MainWindow
             st.Update?.Invoke();
         }
         void ClearPicks() { st.Picks.Clear(); st.Type = null; st.Flip = false; st.RatioA = st.RatioB = null; st.Update?.Invoke(); }
+        // an entry selected: its face drawn in the focus color, and named in the status line
+        box.SelectionChanged += (_, _) =>
+        {
+            st.Focus = box.SelectedIndex;
+            if (st.Focus >= 0 && st.Focus < st.Picks.Count) Status($"{Label(st.Picks[st.Focus])}: {Describe(st.Picks[st.Focus])} (shown in orange).");
+            RefreshAssemblyScene();
+        };
         box.KeyDown += (_, e) => { if (e.Key is Avalonia.Input.Key.Delete or Avalonia.Input.Key.Back) { DropPick(box.SelectedIndex); e.Handled = true; } };
         var delPick = new MenuItem { Header = "Delete" };
         delPick.Click += (_, _) => DropPick(box.SelectedIndex);
@@ -291,8 +312,8 @@ public partial class MainWindow
         var lead = Field("Lead (mm/turn)", () => st.Lead, v => st.Lead = v ?? st.Lead);
         var reverse = Check("Reverse", () => st.Reverse, v => st.Reverse = v);
         // mate alignment: the second reference's normal (or axis) the same way as the first's, or against it
-        var alignSame = new ToggleButton { Content = Icons.Make("align-same", 18), Padding = new Thickness(4), MinHeight = 0 };
-        var alignOpp = new ToggleButton { Content = Icons.Make("align-opposite", 18), Padding = new Thickness(4), MinHeight = 0 };
+        var alignSame = new ToggleButton { Content = Icons.Make("align-same", 18), Padding = new Thickness(4), MinHeight = 0, Classes = { "matetype", "framed" } };
+        var alignOpp = new ToggleButton { Content = Icons.Make("align-opposite", 18), Padding = new Thickness(4), MinHeight = 0, Classes = { "matetype", "framed" } };
         ToolTip.SetTip(alignSame, "Aligned: the normals (or axes) point the same way");
         ToolTip.SetTip(alignOpp, "Anti-aligned: the normals point at each other (faces against each other)");
         void SetAligned(bool want) { if (st.Preview != null && st.Preview.Aligned != want) { st.Flip = !st.Flip; st.Update?.Invoke(); } else st.Update?.Invoke(); }
@@ -393,6 +414,8 @@ public partial class MainWindow
         void Close()
         {
             _mating = null; _hoverFace = null;
+            // solved again as the mates now stand: a preview that could not be satisfied leaves no red behind
+            if (a.Model.Doc.Mates.Count > 0) a.Model.SolveMates();
             ShowPage(null); HideConfirmCorner();
             // each mate added made its own undo point; the one begun for the next is not needed
             a.AbandonChange();

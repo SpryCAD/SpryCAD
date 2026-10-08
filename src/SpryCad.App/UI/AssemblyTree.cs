@@ -23,6 +23,7 @@ public sealed class AssemblyTree : DockPanel
     readonly Dictionary<string, Border> _rowById = new();
     string? _selected;        // a component's id, or "mate:" + a mate's
     bool _matesOpen = true;
+    string? _doubleClicked;
     AssemblySession? _shown;
 
     /// <summary>A component (its id) was selected in the tree (null: the assembly row, a mate or nothing).</summary>
@@ -163,14 +164,22 @@ public sealed class AssemblyTree : DockPanel
             }
             if (pt.IsLeftButtonPressed && e.ClickCount >= 2)
             {
-                if (key.StartsWith("mate:")) MateCommand?.Invoke(key["mate:".Length..], "edit");
-                else if (key != "__asm") Opened?.Invoke(key);
+                // acted on at the release: a page opened now would take the release (a button under the pointer)
+                _doubleClicked = key;
                 e.Handled = true;
                 return;
             }
             Pick(key);
             // (a right-click goes on to open the row's menu)
             e.Handled = pt.IsLeftButtonPressed;
+        };
+        row.PointerReleased += (_, e) =>
+        {
+            if (_doubleClicked != key) return;
+            _doubleClicked = null;
+            e.Handled = true;
+            if (key.StartsWith("mate:")) MateCommand?.Invoke(key["mate:".Length..], "edit");
+            else if (key != "__asm") Opened?.Invoke(key);
         };
         _rowById[key] = row;
         _rows.Children.Add(row);
