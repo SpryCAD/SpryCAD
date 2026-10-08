@@ -22,14 +22,18 @@ public interface IAssemblyHost
     bool PickingFaces { get; }
     void HoverFace(string? component, string? face);
     void PickFace(string component, string face);
-    /// <summary>A component was dragged to a new place: the mates pull it (and what it is mated to) back onto them.</summary>
-    void Dragged(string component);
+    /// <summary>
+    /// A component was dragged to a new place: the mates pull it (and what it is mated to) back onto them, its point
+    /// <c>local</c> (in its part) kept as near the cursor's ray (<c>origin</c>, <c>dir</c>) as they let it when given.
+    /// </summary>
+    void Dragged(string component, (Vec3 local, Vec3 origin, Vec3 dir)? pull = null);
 }
 
 /// <summary>
 /// Picking and moving components: hover and click select; double-click opens the part; dragging a floating component
 /// moves it in the view's plane through the point grabbed, Shift+drag turns it about its middle (left-right about the
-/// view's up, up-down about its right), its mates holding it (it moves only as they let it). A fixed component is not
+/// view's up, up-down about its right), its mates holding it (it moves only as they let it: where they stop it sliding,
+/// a drag turns it so the grabbed point follows the cursor as far as they allow). A fixed component is not
 /// dragged. While faces are being picked (the Mate page), hover and click pick faces instead.
 /// </summary>
 public sealed class AssemblyMode(IAssemblyHost host) : IViewportMode
@@ -47,6 +51,7 @@ public sealed class AssemblyMode(IAssemblyHost host) : IViewportMode
         if (_drag == null) { host.HoverComponent(vp.PickInstance(p.X, p.Y)?.id); return; }
         if (!_moved) { host.BeginAssemblyChange(); _moved = true; }
         var t = _drag.Placement.ToTransform();
+        (Vec3, Vec3, Vec3)? pull = null;
         if (_turn)
         {
             double dx = p.X - _last.X, dy = p.Y - _last.Y;
@@ -63,11 +68,14 @@ public sealed class AssemblyMode(IAssemblyHost host) : IViewportMode
             var hit = o + d * (Vec3.Dot(_grab - o, _normal) / den);
             _drag.Placement = Placement.From(Transform.Translation(hit - _grab) * t);
             _grab = hit;
+            // where the mates stop it sliding there, it turns (and what it is mated to moves) as far as they let the
+            // point follow the cursor: a gear on its axis turns with the cursor round it
+            pull = (_drag.Placement.ToTransform().RigidInverse().Point(hit), o, d);
         }
         _last = new Point(p.X, p.Y);
         // the mates pull it back onto them: the grabbed point goes where they leave it
         var dragged = _drag.Placement.ToTransform();
-        host.Dragged(_drag.Id);
+        host.Dragged(_drag.Id, pull);
         _grab = _drag.Placement.ToTransform().Point(dragged.RigidInverse().Point(_grab));
     }
 

@@ -95,10 +95,14 @@ public partial class MainWindow
     }
 
     /// <summary>A drag moved a component: the mates pull it, and what it is mated to, back onto them.</summary>
-    public void Dragged(string component)
+    public void Dragged(string component, (SpryCad.Kernel.Vec3 local, SpryCad.Kernel.Vec3 origin, SpryCad.Kernel.Vec3 dir)? pull = null)
     {
         if (Asm is not { } a) return;
-        if (a.Model.Doc.Mates.Count > 0) a.Model.SolveMates();
+        if (a.Model.Doc.Mates.Count > 0)
+        {
+            if (pull is { } p) a.Model.SolveDrag(new MateSolver.Pull(component, p.local, p.origin, p.dir));
+            else a.Model.SolveMates();
+        }
         RefreshAssemblyScene();
     }
 

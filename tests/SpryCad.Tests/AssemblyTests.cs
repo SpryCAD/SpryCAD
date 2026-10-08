@@ -244,6 +244,23 @@ static class AssemblyTests
             var got = TurnedAboutZ(small, new Vec3(15, 0, 0));
             t.True(Math.Abs(Math.IEEERemainder(got - expect, 2 * Math.PI)) < 1e-5 && Math.Abs(gear.AngleB + 2 * total) < 1e-5, $"the small one turned {gear.AngleB:0.####} for {total:0.####} (counted past a turn)");
 
+            // dragged: a point on the big one's rim pulled round by the cursor (seen down Z) follows it either way, the
+            // small one turning with it at the ratio
+            var rim = big.Placement.ToTransform().RigidInverse().Point(new Vec3(10 * Math.Cos(total), 10 * Math.Sin(total), 2.5));
+            double At() { var w = big.Placement.ToTransform().Point(rim); return Math.Atan2(w.Y, w.X); }
+            foreach (var step in new[] { 0.15, 0.15, 0.15, -0.1, -0.1, -0.1, -0.1, -0.1 })
+            {
+                var to = At() + step;
+                // the cursor a little off the rim (the ray need not pass through the point)
+                var cursor = new Vec3(12 * Math.Cos(to), 12 * Math.Sin(to), 50);
+                var a0 = gear.AngleA;
+                mg.SolveDrag(new MateSolver.Pull(big.Id, rim, cursor, -Vec3.UnitZ));
+                var turned = gear.AngleA - a0;
+                t.True(mg.LastSolve!.Satisfied && Math.Abs(Math.IEEERemainder(At() - to, 2 * Math.PI)) < 1e-4
+                    && Math.Abs(turned - step) < 1e-4 && Math.Abs(10 * gear.AngleA + 5 * gear.AngleB) < 1e-6,
+                    $"dragged {step:0.##}: turned {turned:0.######}, the small one at the ratio ({gear.AngleA:0.####}, {gear.AngleB:0.####})");
+            }
+
             // screw: a nut (5 mm cylinder, 10 long) on a pin, lead 6: turned by hand and let go, it settles on the
             // thread (least motion: part of the turn kept, the advance to match), along the axis the lead per turn;
             // a left-hand thread the other way

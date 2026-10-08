@@ -29,11 +29,31 @@ public static class MateSolver
     }
 
     /// <summary>
+    /// A component being dragged: its point <c>Local</c> (in its part) pulled toward the line from <c>Origin</c> along
+    /// <c>Dir</c> (the ray under the cursor).
+    /// </summary>
+    public sealed record Pull(string Component, Vec3 Local, Vec3 Origin, Vec3 Dir);
+
+    /// <summary>
+    /// A drag: the mates solved with the grabbed point pulled toward the cursor's ray (gently, so the mates win:
+    /// a component turns or slides only as they let it, and what it is mated to follows), then solved exactly. A gear
+    /// on its axis turns so the point grabbed follows the cursor round, its mate turning the other.
+    /// </summary>
+    public static Result SolveDrag(AssemblyDocument doc, Func<MateRef, MateGeom> local, Pull pull)
+    {
+        Solve(doc, local, null, 80, pull);
+        return Solve(doc, local);
+    }
+
+    /// <summary>
     /// Solves the assembly's unsuppressed mates, moving its floating components (only <paramref name="onlyMove"/>
     /// when given: a new mate moves its first component). <paramref name="local"/>: a reference's geometry in its
     /// part's coordinates.
     /// </summary>
     public static Result Solve(AssemblyDocument doc, Func<MateRef, MateGeom> local, ISet<string>? onlyMove = null, int maxIter = 80)
+        => Solve(doc, local, onlyMove, maxIter, null);
+
+    static Result Solve(AssemblyDocument doc, Func<MateRef, MateGeom> local, ISet<string>? onlyMove, int maxIter, Pull? pull)
     {
         var res = new Result();
         var byId = new Dictionary<string, Component>();
@@ -56,6 +76,8 @@ public static class MateSolver
                     freeIdx[c.Id] = free.Count;
                     free.Add(c);
                 }
+        // a pull on a component no mate moves: nothing to solve (the drag moved it)
+        if (pull != null && !freeIdx.ContainsKey(pull.Component)) pull = null;
         var placements = doc.Components.ToDictionary(c => c.Id, c => c.Placement.ToTransform());
         Transform PlacementOf(string? id, Transform[]? trial) =>
             id == null ? Transform.Identity : trial != null && freeIdx.TryGetValue(id, out var i) ? trial[i] : placements[id];
@@ -99,42 +121,55 @@ public static class MateSolver
             return t;
         }
 
-        // the mates' rows: each mate's residuals at a fixed place in the vector, and which free components it moves with
+        // the mates' rows: each mate's residuals at a fixed place in the vector, and which free components it moves with;
+        // a pull's rows after them (its component's grabbed point off the cursor's ray, weighted well below the mates)
+        int K = mates.Count + (pull != null ? 1 : 0);
+        string? CompA(int k) => k < mates.Count ? mates[k].A.Component : pull!.Component;
+        string? CompB(int k) => k < mates.Count ? mates[k].B.Component : null;
+        var pullDir = pull?.Dir.Normalized ?? Vec3.Zero;
+        const double pullWeight = 0.01;
         var buf = new List<double>();
-        void MateRes(Mate m, in Transform ta, in Transform tb)
+        void MateRes(int k, in Transform ta, in Transform tb)
         {
             buf.Clear();
-            m.Residuals(L(m.A).Placed(ta), L(m.B).Placed(tb), ta, tb, buf);
+            if (k < mates.Count)
+            {
+                var m = mates[k];
+                m.Residuals(L(m.A).Placed(ta), L(m.B).Placed(tb), ta, tb, buf);
+                return;
+            }
+            var v = ta.Point(pull!.Local) - pull.Origin;
+            v -= pullDir * Vec3.Dot(v, pullDir);
+            buf.Add(pullWeight * v.X); buf.Add(pullWeight * v.Y); buf.Add(pullWeight * v.Z);
         }
-        var rowOf = new int[mates.Count + 1];
-        var ca = new int[mates.Count]; var cb = new int[mates.Count];
-        for (int k = 0; k < mates.Count; k++)
+        var rowOf = new int[K + 1];
+        var ca = new int[K]; var cb = new int[K];
+        for (int k = 0; k < K; k++)
         {
-            var m = mates[k];
-            MateRes(m, PlacementOf(m.A.Component, null), PlacementOf(m.B.Component, null));
+            MateRes(k, PlacementOf(CompA(k), null), PlacementOf(CompB(k), null));
             rowOf[k + 1] = rowOf[k] + buf.Count;
-            ca[k] = FreeOf(m.A); cb[k] = FreeOf(m.B);
+            ca[k] = k < mates.Count ? FreeOf(mates[k].A) : freeIdx[pull!.Component];
+            cb[k] = k < mates.Count ? FreeOf(mates[k].B) : -1;
         }
-        int rows = rowOf[mates.Count];
+        int rows = rowOf[K];
         double[] Res(Transform[]? trial)
         {
             var r = new double[rows];
-            for (int k = 0; k < mates.Count; k++)
+            for (int k = 0; k < K; k++)
             {
-                var m = mates[k];
-                MateRes(m, PlacementOf(m.A.Component, trial), PlacementOf(m.B.Component, trial));
+                MateRes(k, PlacementOf(CompA(k), trial), PlacementOf(CompB(k), trial));
                 for (int q = 0; q < buf.Count && rowOf[k] + q < rowOf[k + 1]; q++) r[rowOf[k] + q] = buf[q];
             }
             return r;
         }
         var matesOf = new List<int>[nf];
         for (int i = 0; i < nf; i++) matesOf[i] = new List<int>();
-        for (int k = 0; k < mates.Count; k++)
+        for (int k = 0; k < K; k++)
         {
             if (ca[k] >= 0) matesOf[ca[k]].Add(k);
             if (cb[k] >= 0 && cb[k] != ca[k]) matesOf[cb[k]].Add(k);
         }
-        var sky = Skyline.For(nf, Enumerable.Range(0, mates.Count).Where(k => ca[k] >= 0 && cb[k] >= 0 && ca[k] != cb[k]).Select(k => (ca[k], cb[k])));
+        var sky = Skyline.For(nf, Enumerable.Range(0, K).Where(k => ca[k] >= 0 && cb[k] >= 0 && ca[k] != cb[k]).Select(k => (ca[k], cb[k])));
         static double Sq(double[] v) { double s = 0; foreach (var a in v) s += a * a; return s; }
 
         const double tol = 1e-10, h = 1e-6;
@@ -142,8 +177,8 @@ public static class MateSolver
         int it = 0;
         var r0 = Res(null);
         // the Jacobian: for each mate, its rows against each of its (at most two) free components' six numbers
-        var Ja = new double[mates.Count][]; var Jb = new double[mates.Count][];
-        for (int k = 0; k < mates.Count; k++)
+        var Ja = new double[K][]; var Jb = new double[K][];
+        for (int k = 0; k < K; k++)
         {
             int nr = rowOf[k + 1] - rowOf[k];
             Ja[k] = new double[nr * 6]; Jb[k] = new double[nr * 6];
@@ -158,19 +193,18 @@ public static class MateSolver
                     var tp = Step(h); var tm = Step(-h);
                     foreach (var k in matesOf[i])
                     {
-                        var m = mates[k];
                         int nr = rowOf[k + 1] - rowOf[k];
                         var J = ca[k] == i ? Ja[k] : Jb[k];
-                        MateRes(m, ca[k] == i ? tp : PlacementOf(m.A.Component, null), cb[k] == i ? tp : PlacementOf(m.B.Component, null));
+                        MateRes(k, ca[k] == i ? tp : PlacementOf(CompA(k), null), cb[k] == i ? tp : PlacementOf(CompB(k), null));
                         for (int q = 0; q < nr; q++) J[q * 6 + j] = q < buf.Count ? buf[q] : 0;
-                        MateRes(m, ca[k] == i ? tm : PlacementOf(m.A.Component, null), cb[k] == i ? tm : PlacementOf(m.B.Component, null));
+                        MateRes(k, ca[k] == i ? tm : PlacementOf(CompA(k), null), cb[k] == i ? tm : PlacementOf(CompB(k), null));
                         for (int q = 0; q < nr; q++) J[q * 6 + j] = (J[q * 6 + j] - (q < buf.Count ? buf[q] : 0)) / (2 * h);
                     }
                 }
             // the normal equations JtJ dx = -Jt r, a 6x6 block at a time
             sky.Clear();
             var g = new double[n];
-            for (int k = 0; k < mates.Count; k++)
+            for (int k = 0; k < K; k++)
             {
                 int nr = rowOf[k + 1] - rowOf[k], r = rowOf[k];
                 // (a mate between two references of one component: its rows count once, against that component)
@@ -207,6 +241,9 @@ public static class MateSolver
                 if (Sq(r1) < f0)
                 {
                     for (int i = 0; i < nf; i++) placements[free[i].Id] = trial[i];
+                    // pulled, the residual stays (the cursor is where the mates do not let the point go): done when
+                    // it stops getting smaller
+                    if (pull != null && f0 - Sq(r1) < 1e-12 * (1 + f0)) { r0 = r1; break; }
                     r0 = r1;
                     lambda = Math.Max(lambda / 4, 1e-12);
                     stepped = true;

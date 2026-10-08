@@ -554,6 +554,13 @@ public sealed class AssemblyModel
         return LastSolve;
     }
 
+    /// <summary>A component dragged: the mates solved with its grabbed point pulled toward the cursor's ray.</summary>
+    public MateSolver.Result SolveDrag(MateSolver.Pull pull)
+    {
+        LastSolve = MateSolver.SolveDrag(Doc, Local, pull);
+        return LastSolve;
+    }
+
     /// <summary>The placement of a reference's component (the identity for the assembly's planes).</summary>
     public Transform PlacementOf(MateRef r) => r.Component != null && Doc.Find(r.Component) is { } c ? c.Placement.ToTransform() : Transform.Identity;
 
