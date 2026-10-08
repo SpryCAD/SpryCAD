@@ -118,6 +118,9 @@ public partial class MainWindow : IAssemblyHost
     /// <summary>The active tab's assembly (null: a part is active).</summary>
     AssemblySession? Asm => _tab?.Asm;
 
+    /// <summary>The active document is an assembly (for dialogs outside the window, e.g. Options).</summary>
+    internal bool IsAssemblyActive => Asm != null;
+
     static string TitleOf(PartTab t) => t.Asm?.Title ?? t.Session.Title;
     static bool DirtyOf(PartTab t) => t.Asm?.Dirty ?? t.Session.Dirty;
 

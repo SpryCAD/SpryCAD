@@ -613,95 +613,8 @@ public static class Dialogs
         if (session.Doc.Normalize(values) != null) session.Change(() => session.Doc.Apply(values));
     }
 
-    public static async Task Options(MainWindow owner)
-    {
-        var s = owner.Session;
-        var units = new ComboBox { ItemsSource = new[] { "MMGS (millimeter, gram, second)", "IPS (inch, pound, second)" }, SelectedIndex = s.Doc.Units == UnitSystem.IPS ? 1 : 0, HorizontalAlignment = HorizontalAlignment.Stretch };
-        var wheel = new CheckBox { Content = "Reverse mouse wheel zoom direction", IsChecked = owner.Viewport.ReverseWheel };
-        var persp = new CheckBox { Content = "Perspective view", IsChecked = owner.Viewport.Camera.Perspective };
-        var pivots = new[] { Session.RotateCenter.Selection, Session.RotateCenter.ModelCenter, Session.RotateCenter.UnderCursor };
-        var pivot = new ComboBox
-        {
-            ItemsSource = new[] { "Rotate about the selection (default)", "Rotate about the model center", "Rotate about the point under the cursor" },
-            SelectedIndex = Array.IndexOf(pivots, owner.Viewport.RotateAbout), HorizontalAlignment = HorizontalAlignment.Stretch,
-        };
-        var container = new CheckBox { Content = "Always save parts as containers (with a preview image)", IsChecked = Session.UserSettings.SaveContainer };
-        var keepModes = new[] { Session.KeepDisplay.SlowParts, Session.KeepDisplay.Always, Session.KeepDisplay.Never };
-        var keep = new ComboBox
-        {
-            ItemsSource = new[] { "Keep the display of slow parts", "Keep every part's display", "Never keep the display" },
-            SelectedIndex = Array.IndexOf(keepModes, Session.UserSettings.KeepDisplay), HorizontalAlignment = HorizontalAlignment.Stretch,
-        };
-        var keepSecs = new TextBox { Text = Expr.Format(Session.UserSettings.KeepDisplaySeconds), IsEnabled = keep.SelectedIndex == 0 };
-        keep.SelectionChanged += (_, _) => keepSecs.IsEnabled = keep.SelectedIndex == 0;
-        var color = new TextBox { Text = string.Join(", ", s.Doc.Color.Select(c => ((int)(c * 255)).ToString())) };
-        var sheet = s.Doc.SheetMetal ?? new SheetMetalSettings();
-        var bendMethod = new ComboBox { ItemsSource = new[] { "K-factor", "DIN 6935" }, SelectedIndex = sheet.Method == BendAllowanceMethod.Din6935 ? 1 : 0, HorizontalAlignment = HorizontalAlignment.Stretch };
-        var kFactor = new TextBox { Text = sheet.KFactor };
-        bendMethod.SelectionChanged += (_, _) => kFactor.IsEnabled = bendMethod.SelectedIndex == 0;
-        kFactor.IsEnabled = bendMethod.SelectedIndex == 0;
-        var ok = new Button { Content = "OK", IsDefault = true };
-        var cancel = new Button { Content = "Cancel", IsCancel = true };
-        var sp = new StackPanel { Spacing = 8 };
-        sp.Children.Add(new TextBlock { Text = "Document units", FontWeight = FontWeight.SemiBold });
-        sp.Children.Add(units);
-        sp.Children.Add(new TextBlock { Text = "In IPS, values are inches; STEP/STL exports are converted to millimetres.", FontSize = TypeScale.Small, Foreground = Palette.TextMuted, TextWrapping = TextWrapping.Wrap });
-        sp.Children.Add(new TextBlock { Text = "Part color (R, G, B 0-255)", FontWeight = FontWeight.SemiBold });
-        sp.Children.Add(color);
-        sp.Children.Add(new TextBlock { Text = "Sheet metal bend allowance", FontWeight = FontWeight.SemiBold });
-        var bendRow = new Grid { ColumnDefinitions = new ColumnDefinitions("*,8,Auto,4,70") };
-        bendRow.Children.Add(bendMethod);
-        var kLabel = new TextBlock { Text = "K-factor", VerticalAlignment = VerticalAlignment.Center };
-        Grid.SetColumn(kLabel, 2); bendRow.Children.Add(kLabel);
-        Grid.SetColumn(kFactor, 4); bendRow.Children.Add(kFactor);
-        sp.Children.Add(bendRow);
-        sp.Children.Add(new TextBlock { Text = "For this part's flat patterns (a Flat Pattern can override it). K-factor 0 to 1, or an expression.", FontSize = TypeScale.Small, Foreground = Palette.TextMuted, TextWrapping = TextWrapping.Wrap });
-        sp.Children.Add(new TextBlock { Text = "View", FontWeight = FontWeight.SemiBold });
-        sp.Children.Add(wheel); sp.Children.Add(persp);
-        sp.Children.Add(pivot);
-        sp.Children.Add(new TextBlock { Text = "Middle-click a vertex, edge or face to rotate about that spot instead, until you middle-click empty space.", FontSize = TypeScale.Small, Foreground = Palette.TextMuted, TextWrapping = TextWrapping.Wrap });
-        sp.Children.Add(new TextBlock { Text = "Files", FontWeight = FontWeight.SemiBold });
-        sp.Children.Add(container);
-        sp.Children.Add(new TextBlock { Text = "Otherwise parts are saved as plain JSON, unless they embed other files (e.g. an imported model). Either kind opens normally.", FontSize = TypeScale.Small, Foreground = Palette.TextMuted, TextWrapping = TextWrapping.Wrap });
-        var keepRow = new Grid { ColumnDefinitions = new ColumnDefinitions("*,8,Auto,4,50,4,Auto") };
-        keepRow.Children.Add(keep);
-        var slower = new TextBlock { Text = "slower than", VerticalAlignment = VerticalAlignment.Center };
-        var secs = new TextBlock { Text = "s", VerticalAlignment = VerticalAlignment.Center };
-        Grid.SetColumn(slower, 2); Grid.SetColumn(keepSecs, 4); Grid.SetColumn(secs, 6);
-        keepRow.Children.Add(slower); keepRow.Children.Add(keepSecs); keepRow.Children.Add(secs);
-        sp.Children.Add(keepRow);
-        sp.Children.Add(new TextBlock { Text = "A container keeps the part as last built, so it shows at once when opened while it rebuilds (larger files). Plain JSON files never do.", FontSize = TypeScale.Small, Foreground = Palette.TextMuted, TextWrapping = TextWrapping.Wrap });
-        sp.Children.Add(Buttons(ok, cancel));
-        var w = MakeWindow("Options", sp, 420);
-        ok.Click += (_, _) =>
-        {
-            // view preferences belong to the user, not the document: remembered, no undo step, not "modified"
-            owner.Viewport.ReverseWheel = wheel.IsChecked == true;
-            owner.Viewport.Camera.Perspective = persp.IsChecked == true;
-            Session.UserSettings.ReverseWheel = owner.Viewport.ReverseWheel;
-            Session.UserSettings.Perspective = owner.Viewport.Camera.Perspective;
-            if (pivot.SelectedIndex >= 0) owner.Viewport.RotateAbout = Session.UserSettings.RotateAbout = pivots[pivot.SelectedIndex];
-            Session.UserSettings.SaveContainer = container.IsChecked == true;
-            if (keep.SelectedIndex >= 0) Session.UserSettings.KeepDisplay = keepModes[keep.SelectedIndex];
-            if (Expr.TryEval(keepSecs.Text, null, out var ks, out _) && ks >= 0) Session.UserSettings.KeepDisplaySeconds = ks;
-            Session.UserSettings.Save();
-            var newUnits = units.SelectedIndex == 1 ? UnitSystem.IPS : UnitSystem.MMGS;
-            var parts = (color.Text ?? "").Split(',').Select(p => double.TryParse(p.Trim(), out var v) ? Math.Clamp(v / 255, 0, 1) : -1).ToArray();
-            var newColor = parts.Length == 3 && parts.All(p => p >= 0) ? parts : s.Doc.Color;
-            // sheet metal: kept as typed when it is a valid K-factor (0..1, an expression of the part's variables)
-            var newSheet = new SheetMetalSettings { Method = bendMethod.SelectedIndex == 1 ? BendAllowanceMethod.Din6935 : BendAllowanceMethod.KFactor, KFactor = sheet.KFactor };
-            var kText = (kFactor.Text ?? "").Trim();
-            if (Expr.TryEval(kText, s.Lookup, out var kv, out _) && kv >= 0 && kv <= 1) newSheet.KFactor = kText;
-            var oldSheet = s.Doc.SheetMetal ?? new SheetMetalSettings();
-            bool sheetChanged = newSheet.Method != oldSheet.Method || newSheet.KFactor != oldSheet.KFactor;
-            if (newUnits != s.Doc.Units || !newColor.SequenceEqual(s.Doc.Color) || sheetChanged)
-                s.Change(() => { s.Doc.Units = newUnits; s.Doc.Color = newColor; if (sheetChanged) s.Doc.SheetMetal = newSheet; });
-            owner.Viewport.Redraw();
-            w.Close();
-        };
-        cancel.Click += (_, _) => w.Close();
-        await w.ShowDialog(owner);
-    }
+    /// <summary>Tools > Options: System Options and Document Properties (UI/OptionsDialog.cs).</summary>
+    public static Task Options(MainWindow owner) => OptionsDialog.Show(owner);
 
     public static async Task Shortcuts(Window owner)
     {
@@ -747,25 +660,77 @@ public static class Dialogs
         await w.ShowDialog(owner);
     }
 
+    const string ProjectUrl = "https://github.com/SpryCAD/SpryCAD";
+
+    /// <summary>
+    /// About SpryCAD: the app's mark and name, its version (with a button copying it and the system for a bug report),
+    /// what it reads and writes, and links to the project and its license.
+    /// </summary>
     public static async Task About(Window owner)
     {
         var ok = new Button { Content = "OK", IsDefault = true, IsCancel = true };
-        var sp = new StackPanel { Spacing = 6 };
-        sp.Children.Add(new TextBlock { Text = "SpryCAD", FontSize = 22, FontWeight = FontWeight.Bold, Foreground = Palette.Brand });
         // from git at build time (SpryCadGitVersion in the .csproj): "0.0.1-dev.3+aeb382f[.dirty]"
         var info = System.Reflection.Assembly.GetEntryAssembly()?
             .GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
             .OfType<System.Reflection.AssemblyInformationalVersionAttribute>().FirstOrDefault()?.InformationalVersion ?? "";
         var plus = info.IndexOf('+');
         var (ver, build) = plus < 0 ? (info, "") : (info[..plus], info[(plus + 1)..]);
-        var verText = new SelectableTextBlock { Text = $"Version {ver}" + (build.Length > 0 ? $"   (commit {build.Replace(".dirty", ", uncommitted changes")})" : ""), Foreground = Palette.TextMuted };
-        ToolTip.SetTip(verText, info);
-        sp.Children.Add(verText);
-        sp.Children.Add(new TextBlock { Text = "Fast, lightweight, open source parametric 3D CAD.", TextWrapping = TextWrapping.Wrap });
-        sp.Children.Add(new TextBlock { Text = "Own plane-based B-rep kernel in C#, Avalonia UI, OpenGL viewport.\nNative formats: .sprt parts (JSON), .sasm assemblies. Export: STEP AP214, STL.", TextWrapping = TextWrapping.Wrap, Foreground = Palette.TextMuted });
-        sp.Children.Add(new TextBlock { Text = "License: MIT", Foreground = Palette.TextMuted });
+
+        // the mark (the app icon's largest frame) beside the name and what it is
+        Control mark;
+        try { mark = new Image { Source = new Avalonia.Media.Imaging.Bitmap(Avalonia.Platform.AssetLoader.Open(new Uri("avares://SpryCAD/Assets/SpryCAD.ico"))), Width = 56, Height = 56 }; }
+        catch { mark = new Control { Width = 56, Height = 56 }; }
+        mark.VerticalAlignment = VerticalAlignment.Top;
+        var title = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center, Children =
+        {
+            new TextBlock { Text = "SpryCAD", FontSize = 22, FontWeight = FontWeight.Bold, Foreground = Palette.Brand },
+            new TextBlock { Text = "Fast, lightweight, open source parametric 3D CAD.", TextWrapping = TextWrapping.Wrap },
+        } };
+        var head = new DockPanel { Children = { mark, title } };
+        DockPanel.SetDock(mark, Dock.Left);
+        title.Margin = new Thickness(14, 0, 0, 0);
+
+        // the version, and a copy of it with the system for a bug report
+        var verText = new SelectableTextBlock
+        {
+            Text = $"Version {ver}" + (build.Length > 0 ? $"  (commit {build.Replace(".dirty", ", uncommitted changes")})" : ""),
+            Foreground = Palette.TextSecondary, VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.Wrap,
+        };
+        var copy = new Button { Content = "Copy", Padding = new Thickness(8, 2), MinHeight = 0, VerticalAlignment = VerticalAlignment.Center };
+        ToolTip.SetTip(copy, "Copy the version and system details (for a bug report)");
+        copy.Click += async (_, _) =>
+        {
+            var details = $"SpryCAD {info}\n{System.Runtime.InteropServices.RuntimeInformation.OSDescription} ({System.Runtime.InteropServices.RuntimeInformation.OSArchitecture})\n.NET {Environment.Version}";
+            if (TopLevel.GetTopLevel(copy)?.Clipboard is { } cb) { await cb.SetTextAsync(details); copy.Content = "Copied"; }
+        };
+        var verRow = new DockPanel { Children = { copy, verText } };
+        DockPanel.SetDock(copy, Dock.Right);
+
+        TextBlock Muted(string text) => new() { Text = text, Foreground = Palette.TextMuted, FontSize = TypeScale.Small, TextWrapping = TextWrapping.Wrap };
+        Button Link(string text, string url)
+        {
+            var b = new HyperlinkButton { Content = text, NavigateUri = new Uri(url), Padding = new Thickness(0), Foreground = Palette.Accent };
+            ToolTip.SetTip(b, url);
+            return b;
+        }
+        var links = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 16, Children =
+        {
+            Link("github.com/SpryCAD/SpryCAD", ProjectUrl),
+            Link("MIT License", ProjectUrl + "/blob/master/LICENSE"),
+        } };
+
+        var sp = new StackPanel { Spacing = 10 };
+        sp.Children.Add(head);
+        sp.Children.Add(new Border { Height = 1, Background = Palette.Border, Margin = new Thickness(0, 4) });
+        sp.Children.Add(verRow);
+        sp.Children.Add(new StackPanel { Spacing = 3, Children =
+        {
+            Muted("Parts (.sprt) and assemblies (.sasm). Imports STEP; exports STEP AP214, STL and flat patterns as DXF."),
+            Muted("Its own plane-based B-rep kernel in C#. Built with Avalonia, Silk.NET (OpenGL) and .NET."),
+        } });
+        sp.Children.Add(links);
         sp.Children.Add(Buttons(ok));
-        var w = MakeWindow("About SpryCAD", sp, 420);
+        var w = MakeWindow("About SpryCAD", sp, 460);
         ok.Click += (_, _) => w.Close();
         await w.ShowDialog(owner);
     }
