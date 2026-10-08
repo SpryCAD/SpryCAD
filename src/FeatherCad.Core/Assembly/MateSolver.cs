@@ -31,7 +31,7 @@ public static class MateSolver
     {
         var res = new Result();
         bool Live(MateRef r) => r.Component == null || doc.Find(r.Component) is { Suppressed: false };
-        var mates = doc.Mates.Where(m => !m.Suppressed && Live(m.A) && Live(m.B) && Mate.Supports(m.Type, local(m.A).Kind, local(m.B).Kind)).ToList();
+        var mates = doc.Mates.Where(m => !m.Suppressed && Live(m.A) && Live(m.B) && Mate.Supports(m.Type, local(m.A), local(m.B))).ToList();
         var free = new List<Component>();
         foreach (var m in mates)
             foreach (var r in new[] { m.A, m.B })
@@ -52,7 +52,7 @@ public static class MateSolver
 
         // a face to be turned half round onto its mate: turned first (from exactly opposite the solver cannot tell
         // which way to turn)
-        foreach (var m in mates.Where(m => m.Type is MateType.Coincident or MateType.Distance))
+        foreach (var m in mates.Where(m => m.Type is MateType.Coincident or MateType.Distance && m.Min == null))
         {
             var a = World(m.A, null); var b = World(m.B, null);
             if (a.Kind != MateGeomKind.Plane || b.Kind != MateGeomKind.Plane) continue;
@@ -83,7 +83,7 @@ public static class MateSolver
         double[] Res(Transform[]? trial)
         {
             var r = new List<double>();
-            foreach (var m in mates) m.Residuals(World(m.A, trial), World(m.B, trial), r);
+            foreach (var m in mates) m.Residuals(World(m.A, trial), World(m.B, trial), PlacementOf(m.A.Component, trial), PlacementOf(m.B.Component, trial), r);
             return r.ToArray();
         }
         static double Sq(double[] v) { double s = 0; foreach (var a in v) s += a * a; return s; }
@@ -151,7 +151,14 @@ public static class MateSolver
         {
             if (m.Suppressed) continue;
             var r = new List<double>();
-            if (Live(m.A) && Live(m.B) && Mate.Supports(m.Type, local(m.A).Kind, local(m.B).Kind)) m.Residuals(World(m.A, null), World(m.B, null), r);
+            if (Live(m.A) && Live(m.B) && Mate.Supports(m.Type, local(m.A), local(m.B)))
+            {
+                var (ga, gb) = (World(m.A, null), World(m.B, null));
+                var (ta, tb) = (PlacementOf(m.A.Component, null), PlacementOf(m.B.Component, null));
+                m.Residuals(ga, gb, ta, tb, r);
+                // the turns as they are now: the next solve counts on from here
+                m.Settle(ga, gb, ta, tb);
+            }
             else r.Add(double.PositiveInfinity);
             res.Errors[m.Id] = r.Count == 0 ? 0 : r.Max(Math.Abs);
         }

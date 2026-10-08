@@ -24,6 +24,11 @@ public partial class MainWindow
         public MateType? Type;
         public double Value = 10;
         public bool Flip;
+        public bool Limits;
+        public double Min = 0, Max = 20;
+        public double? RatioA, RatioB;
+        public double Lead = 2;
+        public bool Reverse;
         /// <summary>The mate being shown (added for the preview; removed when the setup changes or is cancelled).</summary>
         public Mate? Preview;
         /// <summary>Where the components were before the preview.</summary>
@@ -59,7 +64,7 @@ public partial class MainWindow
         if (i >= 0) st.Picks.RemoveAt(i);
         else if (st.Picks.Count == 2) st.Picks[1] = r;
         else st.Picks.Add(r);
-        st.Type = null; st.Flip = false;
+        st.Type = null; st.Flip = false; st.RatioA = st.RatioB = null;
         st.Update?.Invoke();
     }
 
@@ -82,7 +87,8 @@ public partial class MainWindow
         return l;
     }
 
-    static readonly MateType[] MateTypes = { MateType.Coincident, MateType.Parallel, MateType.Perpendicular, MateType.Concentric, MateType.Distance, MateType.Angle };
+    static readonly MateType[] StandardMates = { MateType.Coincident, MateType.Parallel, MateType.Perpendicular, MateType.Tangent, MateType.Concentric, MateType.Lock, MateType.Distance, MateType.Angle };
+    static readonly MateType[] MechanicalMates = { MateType.Gear, MateType.Screw };
 
     /// <summary>The mate type likely meant for two references (SolidWorks' choice where it has one).</summary>
     static MateType DefaultType(MateGeomKind a, MateGeomKind b) => (a, b) switch
@@ -130,38 +136,77 @@ public partial class MainWindow
         }
         sel.Children.Add(planes);
         var clear = new Button { Content = "Clear Selections", Padding = new Thickness(8, 2), MinHeight = 0, Margin = new Thickness(0, 4, 0, 0) };
-        clear.Click += (_, _) => { st.Picks.Clear(); st.Type = null; st.Flip = false; st.Update?.Invoke(); };
+        clear.Click += (_, _) => { st.Picks.Clear(); st.Type = null; st.Flip = false; st.RatioA = st.RatioB = null; st.Update?.Invoke(); };
         sel.Children.Add(clear);
 
         var std = page.Section("Standard Mates");
         var typeButtons = new Dictionary<MateType, ToggleButton>();
-        var grid = new WrapPanel { Orientation = Orientation.Horizontal };
-        foreach (var t in MateTypes)
+        WrapPanel TypeGrid(IEnumerable<MateType> types)
         {
-            var b = new ToggleButton { Content = t.ToString(), Margin = new Thickness(0, 0, 4, 4), Padding = new Thickness(8, 3), MinHeight = 0 };
-            b.Click += (_, _) => { st.Type = t; st.Flip = false; st.Update?.Invoke(); };
-            typeButtons[t] = b;
-            grid.Children.Add(b);
+            var grid = new WrapPanel { Orientation = Orientation.Horizontal };
+            foreach (var t in types)
+            {
+                var b = new ToggleButton { Content = t.ToString(), Margin = new Thickness(0, 0, 4, 4), Padding = new Thickness(8, 3), MinHeight = 0 };
+                b.Click += (_, _) => { st.Type = t; st.Flip = false; st.Update?.Invoke(); };
+                typeButtons[t] = b;
+                grid.Children.Add(b);
+            }
+            return grid;
         }
-        std.Children.Add(grid);
-        var valueBox = new TextBox { Width = 90, HorizontalAlignment = HorizontalAlignment.Left };
-        var valueLabel = new TextBlock { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) };
-        var valueRow = new StackPanel { Orientation = Orientation.Horizontal, Children = { valueLabel, valueBox }, Margin = new Thickness(0, 4) };
-        std.Children.Add(valueRow);
-        valueBox.LostFocus += (_, _) => ReadValue();
-        valueBox.KeyDown += (_, e) => { if (e.Key == Avalonia.Input.Key.Enter) { ReadValue(); e.Handled = true; } };
-        void ReadValue()
+        std.Children.Add(TypeGrid(StandardMates));
+        var mech = page.Section("Mechanical Mates");
+        mech.Children.Add(TypeGrid(MechanicalMates));
+        page.Info(mech, "Gear: two round faces turning together at a ratio (their radii unless set). Screw: one turning moves the other along the axis, the lead per turn.");
+
+        // a number field: a label and a box (Enter or leaving it applies); its Tag shows the value again
+        StackPanel Field(string label, Func<double?> get, Action<double?> set, bool optional = false)
         {
-            if (double.TryParse(valueBox.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out var v) && v >= 0 && v != st.Value) { st.Value = v; st.Update?.Invoke(); }
+            var box = new TextBox { Width = 90 };
+            var lbl = new TextBlock { Text = label, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0), MinWidth = 96 };
+            var row = new StackPanel { Orientation = Orientation.Horizontal, Children = { lbl, box }, Margin = new Thickness(0, 2) };
+            row.Tag = (Action)(() => box.Text = get() is { } v ? v.ToString("0.####", CultureInfo.InvariantCulture) : "");
+            void Read()
+            {
+                if (string.IsNullOrWhiteSpace(box.Text) && optional) { if (get() != null) { set(null); st.Update?.Invoke(); } return; }
+                if (double.TryParse(box.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out var v) && v >= 0 && v != get()) { set(v); st.Update?.Invoke(); }
+            }
+            box.LostFocus += (_, _) => Read();
+            box.KeyDown += (_, e) => { if (e.Key == Avalonia.Input.Key.Enter) { Read(); e.Handled = true; } };
+            return row;
         }
-        var flip = new Button { Content = "Flip Alignment", Padding = new Thickness(8, 2), MinHeight = 0 };
+        CheckBox Check(string label, Func<bool> get, Action<bool> set)
+        {
+            var c = new CheckBox { Content = label, Margin = new Thickness(0, 2) };
+            c.IsCheckedChanged += (_, _) => { if ((c.IsChecked == true) != get()) { set(c.IsChecked == true); st.Update?.Invoke(); } };
+            return c;
+        }
+        var opts = page.Section("Options");
+        var valueRow = Field("Distance (mm)", () => st.Value, v => st.Value = v ?? st.Value);
+        var limits = Check("Limits (it may move between)", () => st.Limits, v => st.Limits = v);
+        var minRow = Field("Minimum", () => st.Min, v => st.Min = v ?? st.Min);
+        var maxRow = Field("Maximum", () => st.Max, v => st.Max = v ?? st.Max);
+        var ratioA = Field("Ratio: first", () => st.RatioA, v => st.RatioA = v, optional: true);
+        var ratioB = Field("Ratio: second", () => st.RatioB, v => st.RatioB = v, optional: true);
+        var lead = Field("Lead (mm/turn)", () => st.Lead, v => st.Lead = v ?? st.Lead);
+        var reverse = Check("Reverse", () => st.Reverse, v => st.Reverse = v);
+        var flip = new Button { Content = "Flip Alignment", Padding = new Thickness(8, 2), MinHeight = 0, Margin = new Thickness(0, 4, 0, 0) };
         ToolTip.SetTip(flip, "Turn the second face the other way (faces against each other, or facing the same way)");
         flip.Click += (_, _) => { st.Flip = !st.Flip; st.Update?.Invoke(); };
-        std.Children.Add(flip);
+        foreach (var c in new Control[] { valueRow, limits, minRow, maxRow, ratioA, ratioB, lead, reverse, flip }) opts.Children.Add(c);
         var result = new TextBlock { TextWrapping = Avalonia.Media.TextWrapping.Wrap, Margin = new Thickness(0, 6, 0, 0), FontSize = 11 };
-        std.Children.Add(result);
+        opts.Children.Add(result);
 
-        string Describe(MateRef r) => r.Component == null ? $"{r.Face} Plane" : $"{FindComponent(r.Component)?.Name}: {r.Kind switch { MateGeomKind.Plane => "plane", MateGeomKind.Axis => "axis", _ => "point" }} ({r.Face})";
+        string Describe(MateRef r)
+        {
+            if (r.Component == null) return $"{r.Face} Plane";
+            var what = r.Kind switch
+            {
+                MateGeomKind.Plane => "plane",
+                MateGeomKind.Axis => r.R > 0 ? $"round, R {r.R:0.###}" : "axis",
+                _ => r.R > 0 ? $"sphere, R {r.R:0.###}" : "point",
+            };
+            return $"{FindComponent(r.Component)?.Name}: {what} ({r.Face})";
+        }
 
         st.Update = () =>
         {
@@ -170,20 +215,37 @@ public partial class MainWindow
             foreach (var p in st.Picks) picks.Children.Add(new TextBlock { Text = Describe(p), FontSize = 12 });
             if (st.Picks.Count == 0) picks.Children.Add(new TextBlock { Text = "(nothing picked)", FontSize = 12, Opacity = 0.6 });
             bool two = st.Picks.Count == 2;
-            MateGeomKind ka = two ? st.Picks[0].Kind : MateGeomKind.Plane, kb = two ? st.Picks[1].Kind : MateGeomKind.Plane;
-            foreach (var (t, b) in typeButtons) b.IsEnabled = two && Mate.Supports(t, ka, kb);
-            if (two && (st.Type == null || !Mate.Supports(st.Type.Value, ka, kb))) st.Type = DefaultType(ka, kb);
+            MateGeom? ga = two ? st.Picks[0].Geom : null, gb = two ? st.Picks[1].Geom : null;
+            foreach (var (t, b) in typeButtons) b.IsEnabled = two && Mate.Supports(t, ga!, gb!);
+            if (two && (st.Type == null || !Mate.Supports(st.Type.Value, ga!, gb!))) st.Type = DefaultType(ga!.Kind, gb!.Kind);
             foreach (var (t, b) in typeButtons) b.IsChecked = two && st.Type == t;
-            valueRow.IsVisible = st.Type is MateType.Distance or MateType.Angle;
-            valueLabel.Text = st.Type == MateType.Angle ? "Angle (°)" : "Distance (mm)";
-            if (st.Type == MateType.Angle && st.Value > 180) st.Value = 90;
-            valueBox.Text = st.Value.ToString("0.###", CultureInfo.InvariantCulture);
+            var type = st.Type;
+            bool dist = type is MateType.Distance or MateType.Angle;
+            valueRow.IsVisible = dist && !st.Limits;
+            ((TextBlock)valueRow.Children[0]).Text = type == MateType.Angle ? "Angle (deg)" : "Distance (mm)";
+            if (type == MateType.Angle && st.Value > 180) st.Value = 90;
+            limits.IsVisible = dist;
+            minRow.IsVisible = maxRow.IsVisible = dist && st.Limits;
+            ratioA.IsVisible = ratioB.IsVisible = type == MateType.Gear;
+            lead.IsVisible = type == MateType.Screw;
+            reverse.IsVisible = type is MateType.Gear or MateType.Screw;
+            reverse.Content = type == MateType.Screw ? "Left hand" : "Reverse (turn the same way)";
+            limits.IsChecked = st.Limits; reverse.IsChecked = st.Reverse;
+            // the gear ratio: the radii unless given
+            if (type == MateType.Gear && two) { st.RatioA ??= ga!.R > 0 ? ga.R : 1; st.RatioB ??= gb!.R > 0 ? gb.R : 1; }
+            foreach (var row in new[] { valueRow, minRow, maxRow, ratioA, ratioB, lead }) ((Action)row.Tag!)();
+            flip.IsVisible = type is not (MateType.Lock or MateType.Gear or MateType.Screw);
             flip.IsEnabled = two;
             result.Text = "";
-            if (two && st.Type is { } type && (st.Picks[0].Component != null || st.Picks[1].Component != null) && st.Picks[0].Component != st.Picks[1].Component)
+            if (two && type is { } tp && (st.Picks[0].Component != null || st.Picks[1].Component != null) && st.Picks[0].Component != st.Picks[1].Component)
             {
-                st.Preview = a.Model.AddMate(type, st.Picks[0].Clone(), st.Picks[1].Clone(), st.Value);
-                if (st.Flip) { st.Preview.Aligned = !st.Preview.Aligned; a.Model.SolveMates(); }
+                st.Preview = a.Model.AddMate(tp, st.Picks[0].Clone(), st.Picks[1].Clone(), tp == MateType.Screw ? st.Lead : st.Value, m =>
+                {
+                    if (st.Limits && tp is MateType.Distance or MateType.Angle) { m.Min = Math.Min(st.Min, st.Max); m.Max = Math.Max(st.Min, st.Max); }
+                    if (tp == MateType.Gear) { m.RatioA = st.RatioA ?? m.RatioA; m.RatioB = st.RatioB ?? m.RatioB; }
+                    if (tp is MateType.Gear or MateType.Screw) m.Reverse = st.Reverse;
+                    if (st.Flip) m.Aligned = !m.Aligned;
+                });
                 var err = a.Model.LastSolve?.Errors.GetValueOrDefault(st.Preview.Id) ?? 0;
                 result.Text = err > 1e-6 ? $"Cannot be satisfied with the other mates (off by {err:0.###}): it conflicts, or the components it would move are fixed."
                     : "Press OK (Enter) to add it.";

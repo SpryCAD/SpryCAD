@@ -90,7 +90,7 @@ public sealed class AssemblyTree : DockPanel
                     var bad = !mate.Suppressed && err > 1e-6;
                     var text = new TextBlock
                     {
-                        Text = $"{mate.Name} ({NameOf(mate.A)}, {NameOf(mate.B)})" + (mate.Type is MateType.Distance ? $" {mate.Value:0.###} mm" : mate.Type is MateType.Angle ? $" {mate.Value:0.###}°" : ""),
+                        Text = $"{mate.Name} ({NameOf(mate.A)}, {NameOf(mate.B)})" + ValueOf(mate),
                         Foreground = bad ? Red : mate.Suppressed ? Dim : null,
                     };
                     if (text.Foreground == null) text.ClearValue(TextBlock.ForegroundProperty);
@@ -106,6 +106,18 @@ public sealed class AssemblyTree : DockPanel
         foreach (var n in s.Model.Notes.TakeLast(12))
             _notes.Children.Add(new TextBlock { Text = n, TextWrapping = TextWrapping.Wrap, FontSize = 11, Foreground = Dim });
     }
+
+    /// <summary>A mate's values as the tree shows them (distance, angle or their limits; ratio; lead).</summary>
+    static string ValueOf(Mate m) => m.Type switch
+    {
+        MateType.Distance when m.Min is { } lo && m.Max is { } hi => $" {lo:0.###} to {hi:0.###} mm",
+        MateType.Distance => $" {m.Value:0.###} mm",
+        MateType.Angle when m.Min is { } lo && m.Max is { } hi => $" {lo:0.###} to {hi:0.###}\u00b0",
+        MateType.Angle => $" {m.Value:0.###}\u00b0",
+        MateType.Gear => $" {m.RatioA:0.###}:{m.RatioB:0.###}" + (m.Reverse ? " reversed" : ""),
+        MateType.Screw => $" {m.Value:0.###} mm/turn" + (m.Reverse ? " left hand" : ""),
+        _ => "",
+    };
 
     ContextMenu MenuFor(Mate mate)
     {

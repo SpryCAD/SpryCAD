@@ -32,6 +32,8 @@ static class Demos
     public static IEnumerable<(string file, Func<FeatherCad.Core.Assembly.AssemblyModel> build)> Assemblies => new (string, Func<FeatherCad.Core.Assembly.AssemblyModel>)[]
     {
         ("hinge.fcasm", Hinge),
+        ("lead-screw.fcasm", LeadScrewAssembly),
+        ("gears.fcasm", GearPair),
     };
 
     /// <summary>
@@ -41,6 +43,84 @@ static class Demos
     /// other side, its knuckle beside the first), and the pin through both. Printable: Clr between the knuckles,
     /// between each knuckle and the other leaf's notch, and round the pin.
     /// </summary>
+    /// <summary>Parts saved to a temporary folder, inserted embedded by <paramref name="build"/>; the folder deleted after.</summary>
+    static FeatherCad.Core.Assembly.AssemblyModel Embedded(IEnumerable<(string name, CadDocument doc)> parts,
+        Action<FeatherCad.Core.Assembly.AssemblyModel, Dictionary<string, string>> build)
+    {
+        var tmp = Path.Combine(Path.GetTempPath(), "fc-asm-demo-" + Guid.NewGuid().ToString("N")[..8]);
+        Directory.CreateDirectory(tmp);
+        try
+        {
+            var paths = new Dictionary<string, string>();
+            foreach (var (name, doc) in parts) { var pp = Path.Combine(tmp, name + ".fcad"); doc.Save(pp); paths[name] = pp; }
+            var m = FeatherCad.Core.Assembly.AssemblyModel.New();
+            build(m, paths);
+            // embedded: nothing points back at the temporary files
+            foreach (var comp in m.Doc.Components) { comp.Part.Path = null; comp.Part.AbsolutePath = null; }
+            return m;
+        }
+        finally { try { Directory.Delete(tmp, true); } catch { } }
+    }
+
+    /// <summary>A face of a component's part picked by its geometry.</summary>
+    static FeatherCad.Core.Assembly.MateRef FaceRef(FeatherCad.Core.Assembly.AssemblyModel m, FeatherCad.Core.Assembly.Component c, Func<FaceRange, bool> which) =>
+        m.RefTo(c.Id, m.DisplayOf(c)!.Mesh.Faces.First(which).Name)!;
+
+    /// <summary>
+    /// The three-start Acme lead screw and its nut as an assembly: the two parts of acme-lead-screw.fcad apart
+    /// (embedded), the nut on the screw where it fits, held by a Screw mate of the thread's lead (N·P): drag the nut
+    /// and it turns as it travels.
+    /// </summary>
+    static FeatherCad.Core.Assembly.AssemblyModel LeadScrewAssembly()
+    {
+        var both = AcmeLeadScrew();
+        var cut = both.Features.FindIndex(f => f.Name == "Nut");
+        var screw = CadDocument.FromJson(both.ToJson()); screw.Features.RemoveRange(cut, screw.Features.Count - cut);
+        var nut = CadDocument.FromJson(both.ToJson()); nut.Features.RemoveRange(0, cut);
+        screw.Color = new[] { 0.62, 0.64, 0.68 }; nut.Color = new[] { 0.80, 0.62, 0.30 };
+        var r = new Regenerator().Rebuild(both);
+        double gap = r.EquationValues["Gap"], lead = r.EquationValues["P"] * r.EquationValues["N"], j = r.EquationValues["J"];
+        return Embedded(new[] { ("Screw", screw), ("Nut", nut) }, (m, paths) =>
+        {
+            var s = m.Insert(paths["Screw"], Transform.Identity, embed: true);
+            // the nut part is modelled beside the screw (Gap along X): moved onto its axis it fits as it is
+            var n = m.Insert(paths["Nut"], Transform.Translation(new Vec3(-gap, 0, 0)), embed: true);
+            var journal = FaceRef(m, s, f => f.Surface.Kind == SurfaceKind.Cylinder && Math.Abs(f.Surface.Radius - j / 2) < 1e-6);
+            var bore = FaceRef(m, n, f => f.Surface.Kind == SurfaceKind.Cylinder && f.Surface.Radius < r.EquationValues["D"] / 2);
+            m.AddMate(FeatherCad.Core.Assembly.MateType.Screw, journal, bore, lead);
+        });
+    }
+
+    /// <summary>
+    /// Two of the spur gear (embedded) meshing: each on an axis along Z (the first on the assembly's, the second the
+    /// pitch diameter and 0.1 mm of backlash beside it along X, turned half a tooth to mesh), their faces on the Front plane, and a Gear mate
+    /// between their bores (1:1, the other way round): drag either and both turn.
+    /// </summary>
+    static FeatherCad.Core.Assembly.AssemblyModel GearPair()
+    {
+        var gear = Gear();
+        gear.Color = new[] { 0.55, 0.62, 0.72 };
+        var r = new Regenerator().Rebuild(gear);
+        // the pitch diameter apart plus 0.1 mm of backlash (printable: the teeth do not rub)
+        double z = r.EquationValues["z"], centre = 2 * r.EquationValues["r"] + 0.1, bore = r.EquationValues["Bore"];
+        return Embedded(new[] { ("Gear", gear) }, (m, paths) =>
+        {
+            var g1 = m.Insert(paths["Gear"], Transform.Identity, embed: true);
+            var g2 = m.Insert(paths["Gear"], Transform.Translation(new Vec3(centre, 0, 0)) * Transform.Rotation(Vec3.Zero, Vec3.UnitZ, Math.PI / z), embed: true);
+            g1.Fixed = false;
+            bool Bore(FaceRange f) => f.Surface.Kind == SurfaceKind.Cylinder && Math.Abs(f.Surface.Radius - bore / 2) < 1e-6;
+            bool Back(FaceRange f) => f.Surface.Kind == SurfaceKind.Plane && f.FirstPlane.Normal.Z < -0.9 && Math.Abs(f.FirstPlane.Origin.Z) < 1e-6;
+            var T = FeatherCad.Core.Assembly.MateType.Coincident;
+            m.AddMate(T, FaceRef(m, g1, Bore), m.RefTo(null, "Top")!);
+            m.AddMate(T, FaceRef(m, g1, Bore), m.RefTo(null, "Right")!);
+            m.AddMate(T, FaceRef(m, g1, Back), m.RefTo(null, "Front")!);
+            m.AddMate(T, FaceRef(m, g2, Bore), m.RefTo(null, "Top")!);
+            m.AddMate(FeatherCad.Core.Assembly.MateType.Distance, FaceRef(m, g2, Bore), m.RefTo(null, "Right")!, centre);
+            m.AddMate(T, FaceRef(m, g2, Back), m.RefTo(null, "Front")!);
+            m.AddMate(FeatherCad.Core.Assembly.MateType.Gear, FaceRef(m, g1, Bore), FaceRef(m, g2, Bore));
+        });
+    }
+
     static FeatherCad.Core.Assembly.AssemblyModel Hinge()
     {
         // the leaf: the plate on Front (x 0..40, y 0..30, z 0..T), the knuckle and its bore along X on Right

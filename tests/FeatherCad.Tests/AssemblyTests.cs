@@ -69,8 +69,141 @@ static class AssemblyTests
         };
     }
 
+    /// <summary>The angle a component has turned about the world Z axis through c, from a point of its part on +X.</summary>
+    static double TurnedAboutZ(Component comp, Vec3 c)
+    {
+        var p = comp.Placement.ToTransform().Point(new Vec3(10, 0, 0)) - comp.Placement.ToTransform().Point(Vec3.Zero);
+        return Math.Atan2(p.Y, p.X);
+    }
+
+    /// <summary>How much two placed components' solids overlap (mm³).</summary>
+    static double Overlap(AssemblyModel m, Component a, Component b)
+    {
+        NBody Solid(Component c) => new FeatherCad.Core.Regen.Regenerator().Rebuild(m.DisplayOf(c)!.Doc!).State.Bodies.Single().Solid.Native!.Transformed(c.Placement.ToTransform());
+        var common = NBoolean.Run(Solid(a), Solid(b), BoolOp.Intersect);
+        return common.Faces.Count == 0 ? 0 : NMass.Of(common)!.Volume;
+    }
+
     public static void Run(TestRunner t)
     {
+        t.Test("Lead screw assembly demo: the nut on the screw (a Screw mate of the thread's lead) fits; turned, it travels and still fits", () =>
+        {
+            var m = Demos.Assemblies.First(x => x.file == "lead-screw.fcasm").build();
+            var (screw, nut) = (m.Doc.Components[0], m.Doc.Components[1]);
+            t.True(m.LastSolve!.Satisfied && m.LastSolve.Moved.Count == 0, "the nut fits where it was put: the mate holds as placed");
+            t.True(Overlap(m, screw, nut) < 1e-6, $"fits ({Overlap(m, screw, nut):0.######} mm3)");
+            // turned 100 degrees (a solve places it on the thread): it has travelled along, the screw's own way round
+            var mate = m.Doc.Mates.Single();
+            var axis = m.World(mate.A);
+            var z0 = Vec3.Dot(nut.Placement.ToTransform().T, axis.D);
+            nut.Placement = Placement.From(Transform.Rotation(axis.P, axis.D, 100 * Math.PI / 180) * nut.Placement.ToTransform());
+            m.SolveMates();
+            var travel = Vec3.Dot(nut.Placement.ToTransform().T, axis.D) - z0;
+            t.True(m.LastSolve!.Satisfied && Math.Abs(travel) > 0.5, $"travelled {travel:0.###} mm");
+            var v = Overlap(m, screw, nut);
+            t.True(v < 1e-6, $"still fits after turning ({v:0.######} mm3): the mate's lead and hand are the thread's");
+        });
+
+        t.Test("Gear pair demo: meshing, turning together the other way round, the teeth clear of each other", () =>
+        {
+            var m = Demos.Assemblies.First(x => x.file == "gears.fcasm").build();
+            var (g1, g2) = (m.Doc.Components[0], m.Doc.Components[1]);
+            t.True(m.LastSolve!.Satisfied, $"the mates hold ({string.Join(", ", m.LastSolve.Failed())})");
+            t.True(Overlap(m, g1, g2) < 1e-6, $"meshing clear ({Overlap(m, g1, g2):0.######} mm3)");
+            double Angle(Component c) { var tr = c.Placement.ToTransform(); var x = tr.Vector(Vec3.UnitX); return Math.Atan2(x.Y, x.X); }
+            var (a1, a2) = (Angle(g1), Angle(g2));
+            g1.Placement = Placement.From(Transform.Rotation(Vec3.Zero, Vec3.UnitZ, 0.13) * g1.Placement.ToTransform());
+            m.SolveMates(new HashSet<string> { g2.Id });
+            var d1 = Math.IEEERemainder(Angle(g1) - a1, 2 * Math.PI); var d2 = Math.IEEERemainder(Angle(g2) - a2, 2 * Math.PI);
+            t.True(m.LastSolve!.Satisfied && Math.Abs(d1 - 0.13) < 1e-9 && Math.Abs(d2 + 0.13) < 1e-6, $"turned {d1:0.####}, the other {d2:0.####}");
+            t.True(Overlap(m, g1, g2) < 1e-6, $"still clear ({Overlap(m, g1, g2):0.######} mm3)");
+        });
+
+        t.Test("Mates: tangent, lock, distance limits, gear and screw", () =>
+        {
+            // tangent: the sleeve lying on the Top plane (its axis parallel to it, a radius above)
+            var (m, pin, sleeve, dir) = PinAndSleeve("more-mates");
+            var side = m.RefTo(sleeve.Id, FaceOf(m, sleeve, "side"))!;
+            m.AddMate(MateType.Tangent, side, m.RefTo(null, "Top")!);
+            var ax = m.World(side);
+            t.True(m.LastSolve!.Satisfied && Math.Abs(ax.D.Y) < 1e-9 && Math.Abs(Math.Abs(ax.P.Y) - 5) < 1e-6, $"on the plane ({ax.P}, {ax.D})");
+
+            // lock: knocked away, it comes back to where it was locked
+            var (m2, p2, s2, _) = PinAndSleeve("lock");
+            var locked = s2.Placement.ToTransform();
+            m2.AddMate(MateType.Lock, m2.RefTo(s2.Id, FaceOf(m2, s2, "side"))!, m2.RefTo(p2.Id, FaceOf(m2, p2, "side"))!);
+            s2.Placement = Placement.From(Transform.Translation(new Vec3(5, -3, 2)) * Transform.Rotation(Vec3.Zero, Vec3.UnitX, 0.4) * locked);
+            m2.SolveMates();
+            var q = new Vec3(3, 4, 5);
+            t.True(m2.LastSolve!.Satisfied && Vec3.Distance(s2.Placement.ToTransform().Point(q), locked.Point(q)) < 1e-6, "locked");
+
+            // distance limits: 2 to 8 mm along the pin's axis above its end
+            var (m3, p3, s3, _) = PinAndSleeve("limits");
+            MateRef R3(Component c, string w) => m3.RefTo(c.Id, FaceOf(m3, c, w))!;
+            m3.AddMate(MateType.Concentric, R3(s3, "side"), R3(p3, "side"));
+            // (above the pin, facing it: the side and alignment given, not taken from where the sleeve happens to be)
+            m3.AddMate(MateType.Distance, R3(s3, "start"), R3(p3, "end"), 5, mm => { mm.Min = 2; mm.Max = 8; mm.Side = 1; mm.Aligned = false; });
+            double Gap() => m3.World(R3(s3, "start")).P.Z - 10;
+            t.True(m3.LastSolve!.Satisfied && Gap() > 2 - 1e-6 && Gap() < 8 + 1e-6, $"within the limits ({Gap():0.###})");
+            void Lift(double dz) => s3.Placement = Placement.From(Transform.Translation(new Vec3(0, 0, dz)) * s3.Placement.ToTransform());
+            Lift(5 - Gap()); m3.SolveMates();
+            t.True(m3.LastSolve!.Satisfied && Math.Abs(Gap() - 5) < 1e-6, $"inside: stays ({Gap():0.######})");
+            Lift(12 - Gap()); m3.SolveMates();
+            t.True(m3.LastSolve!.Satisfied && Math.Abs(Gap() - 8) < 1e-5, $"past the top: held at 8 ({Gap():0.######})");
+
+            // gear: a 10 mm and a 5 mm cylinder on axes along Z (15 apart); the small one turns twice as fast, the other way
+            var gd = NewDir("gear");
+            string ga = Path.Combine(gd, "Big.fcad"), gb = Path.Combine(gd, "Small.fcad");
+            Cylinder(ga, 10, 5); Cylinder(gb, 5, 5);
+            var mg = AssemblyModel.New();
+            var big = mg.Insert(ga, Transform.Identity); var small = mg.Insert(gb, Transform.Translation(new Vec3(15, 0, 0)));
+            big.Fixed = false;
+            MateRef G(Component c, string w) => mg.RefTo(c.Id, FaceOf(mg, c, w))!;
+            mg.AddMate(MateType.Coincident, G(big, "side"), mg.RefTo(null, "Top")!);
+            mg.AddMate(MateType.Coincident, G(big, "side"), mg.RefTo(null, "Right")!);
+            mg.AddMate(MateType.Coincident, G(big, "start"), mg.RefTo(null, "Front")!);
+            mg.AddMate(MateType.Coincident, G(small, "side"), mg.RefTo(null, "Top")!);
+            mg.AddMate(MateType.Distance, G(small, "side"), mg.RefTo(null, "Right")!, 15);
+            mg.AddMate(MateType.Coincident, G(small, "start"), mg.RefTo(null, "Front")!);
+            var gear = mg.AddMate(MateType.Gear, G(big, "side"), G(small, "side"));
+            t.True(mg.LastSolve!.Satisfied && Math.Abs(gear.RatioA - 10) < 1e-9 && Math.Abs(gear.RatioB - 5) < 1e-9, "the ratio from the radii");
+            double total = 0;
+            foreach (var step in new[] { 0.5, 0.8, 1.1, 1.3, -0.4 })
+            {
+                big.Placement = Placement.From(Transform.Rotation(Vec3.Zero, Vec3.UnitZ, step) * big.Placement.ToTransform());
+                mg.SolveMates(new HashSet<string> { small.Id });
+                total += step;
+                t.True(mg.LastSolve!.Satisfied, $"geared after {total:0.##} rad");
+            }
+            var expect = Math.IEEERemainder(-2 * total, 2 * Math.PI);
+            var got = TurnedAboutZ(small, new Vec3(15, 0, 0));
+            t.True(Math.Abs(Math.IEEERemainder(got - expect, 2 * Math.PI)) < 1e-5 && Math.Abs(gear.AngleB + 2 * total) < 1e-5, $"the small one turned {gear.AngleB:0.####} for {total:0.####} (counted past a turn)");
+
+            // screw: a nut (5 mm cylinder, 10 long) on a pin, lead 6: turned by hand and let go, it settles on the
+            // thread (least motion: part of the turn kept, the advance to match), along the axis the lead per turn;
+            // a left-hand thread the other way
+            foreach (var left in new[] { false, true })
+            {
+                var (ms, ps, ns, _) = PinAndSleeve(left ? "screw-lh" : "screw");
+                var screw = ms.AddMate(MateType.Screw, ms.RefTo(ps.Id, FaceOf(ms, ps, "side"))!, ms.RefTo(ns.Id, FaceOf(ms, ns, "side"))!, 6, mm => mm.Reverse = left);
+                t.True(ms.LastSolve!.Satisfied, "on the axis");
+                var d = ms.World(screw.A).D;
+                (double turn, double along) State()
+                {
+                    var tr = ns.Placement.ToTransform();
+                    return (Math.Atan2(Vec3.Dot(Vec3.Cross(Vec3.UnitX, tr.Vector(Vec3.UnitX)), d), Vec3.Dot(Vec3.UnitX, tr.Vector(Vec3.UnitX))), Vec3.Dot(tr.Point(Vec3.Zero), d));
+                }
+                var (th0, s0) = State();
+                ns.Placement = Placement.From(Transform.Rotation(Vec3.Zero, d, Math.PI / 2) * ns.Placement.ToTransform());
+                ms.SolveMates();
+                var (th1, s1) = State();
+                double dth = Math.IEEERemainder(th1 - th0, 2 * Math.PI);
+                double advance = (left ? -1 : 1) * 6 * dth / (2 * Math.PI);
+                t.True(ms.LastSolve!.Satisfied && dth > 0.1 && Math.Abs((s1 - s0) - advance) < 1e-6,
+                    $"{(left ? "left" : "right")} hand: turned {dth:0.####} rad, advanced {s1 - s0:0.######} (expected {advance:0.######})");
+            }
+        });
+
         t.Test("Mates: concentric and coincident stack a sleeve on a pin; a distance lifts it; contradictions are reported", () =>
         {
             var (m, pin, sleeve, dir) = PinAndSleeve("mates");

@@ -217,7 +217,7 @@ public sealed class AssemblyModel
             };
         if (FaceGeom(r.Component, r.Face) is { } g)
         {
-            r.Kind = g.Kind; r.P = g.P; r.D = g.D;
+            r.Kind = g.Kind; r.P = g.P; r.D = g.D; r.R = g.R;
             return g;
         }
         return r.Geom;
@@ -231,7 +231,7 @@ public sealed class AssemblyModel
     public MateRef? RefTo(string? componentId, string face)
     {
         var g = componentId == null ? Local(new MateRef { Face = face }) : FaceGeom(componentId, face);
-        return g == null ? null : new MateRef { Component = componentId, Face = face, Kind = g.Kind, P = g.P, D = g.D };
+        return g == null ? null : new MateRef { Component = componentId, Face = face, Kind = g.Kind, P = g.P, D = g.D, R = g.R };
     }
 
     /// <summary>The last solve's result (mate errors).</summary>
@@ -244,14 +244,19 @@ public sealed class AssemblyModel
         return LastSolve;
     }
 
+    /// <summary>The placement of a reference's component (the identity for the assembly's planes).</summary>
+    public Transform PlacementOf(MateRef r) => r.Component != null && Doc.Find(r.Component) is { } c ? c.Placement.ToTransform() : Transform.Identity;
+
     /// <summary>
-    /// Adds a mate between two references (the alignment and side nearest how they lie now), moving the first
-    /// reference's component onto it if it floats (else the second's), then solving all the mates.
+    /// Adds a mate between two references (the alignment and side nearest how they lie now; Lock, Gear and Screw
+    /// recording how the components lie), moving the first reference's component onto it if it floats (else the
+    /// second's), then solving all the mates. <paramref name="setup"/>: the mate's options (limits, ratio, …) before.
     /// </summary>
-    public Mate AddMate(MateType type, MateRef a, MateRef b, double value = 0)
+    public Mate AddMate(MateType type, MateRef a, MateRef b, double value = 0, Action<Mate>? setup = null)
     {
         var m = new Mate { Type = type, A = a, B = b, Value = value };
-        m.ChooseAlignment(World(a), World(b));
+        m.Capture(World(a), World(b), PlacementOf(a), PlacementOf(b));
+        setup?.Invoke(m);
         Doc.AddMate(m);
         var first = a.Component != null && Doc.Find(a.Component) is { Fixed: false } ca ? ca.Id
             : b.Component != null && Doc.Find(b.Component) is { Fixed: false } cb ? cb.Id : null;
