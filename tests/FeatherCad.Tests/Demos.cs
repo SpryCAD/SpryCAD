@@ -25,6 +25,7 @@ static class Demos
         ("spoked-handwheel.fcad", SpokedWheel),
         ("bent-tube.fcad", BentTube),
         ("bolt-and-nut.fcad", BoltAndNut),
+        ("acme-lead-screw.fcad", AcmeLeadScrew),
     };
 
     /// <summary>Equation changes each demo must survive (shows what the parameters do).</summary>
@@ -36,6 +37,7 @@ static class Demos
         ["stepped-shaft.fcad"] = new[] { new[] { ("D2", "50"), ("KeyW", "14") }, new[] { ("L2", "100"), ("KeyL", "60") }, new[] { ("D1", "35"), ("Rs", "2"), ("C", "2") } },
         ["hand-wheel.fcad"] = new[] { new[] { ("NS", "3") }, new[] { ("Dish", "45"), ("SpokeD", "16") }, new[] { ("D", "260"), ("NS", "6"), ("KnobL", "60") } },
         ["bolt-and-nut.fcad"] = new[] { new[] { ("D", "12"), ("P", "1.75"), ("S", "19") }, new[] { ("L", "45"), ("Clr", "0.3") }, new[] { ("NutH", "10"), ("Clr", "0") } },
+        ["acme-lead-screw.fcad"] = new[] { new[] { ("N", "2") }, new[] { ("N", "2"), ("L", "60") }, new[] { ("D", "16"), ("P", "3"), ("N", "4") } },
         ["bent-tube.fcad"] = new[] { new[] { ("R", "80"), ("L1", "120") }, new[] { ("OD", "40"), ("ID", "34"), ("FlangeD", "100"), ("PCD", "75") }, new[] { ("N", "6"), ("L2", "100") } },
         ["spoked-handwheel.fcad"] = new[] { new[] { ("NS", "6") }, new[] { ("D", "300"), ("RimT", "26"), ("NG", "4") }, new[] { ("NS", "4"), ("SpokeD", "20"), ("Rf", "3") } },
         ["spur-gear.fcad"] = new[] { new[] { ("z", "48") }, new[] { ("m", "2.5"), ("z", "30") }, new[] { ("PA", "25"), ("b", "20") } },
@@ -762,6 +764,42 @@ static class Demos
             Name = "Nut thread", End = ThreadEnd.ThroughAll, Clearance = "Clr",
             Face = new FaceRef { Name = $"{nut.Id}.S.C{hole}", Hint = new Vec3(V("Gap+(D-1.0825*P)/2"), 0, V("NutH-0.5")) },
         });
+        return d;
+    }
+
+    /// <summary>
+    /// A multi-start Acme lead screw: a rod of diameter D with an N-start Acme thread of pitch P (29° included angle,
+    /// basic depth P/2, flat at the root 0.3707 P) over its length L, a journal of diameter J at one end and a 45°
+    /// lead-in chamfer at the other. One helical cut of lead N·P, patterned N times about the axis.
+    /// </summary>
+    static CadDocument AcmeLeadScrew()
+    {
+        var d = Doc(("D", "20"), ("P", "4"), ("N", "3"), ("L", "80"), ("J", "12"), ("JL", "20"));
+        // the rod on Front (along +Z), the journal on its far end
+        var r = new Sk(d);
+        var rc = r.Circle(Sketch.OriginId, "D");
+        var rs = d.AddFeature(new SketchFeature { Name = "Rod", Plane = PlaneRef.Front, Sketch = r.S });
+        var rod = d.AddFeature(new ExtrudeFeature { Name = "Rod", SketchId = rs.Id, Depth = "L" });
+        var end = d.AddFeature(new PlaneFeature { Name = "Rod end", Base = PlaneRef.Front, Offset = "L" });
+        var j = new Sk(d);
+        j.Circle(Sketch.OriginId, "J");
+        var js = d.AddFeature(new SketchFeature { Name = "Journal", Plane = new PlaneRef { Feature = end.Id }, Sketch = j.S });
+        d.AddFeature(new ExtrudeFeature { Name = "Journal", SketchId = js.Id, Depth = "JL" });
+        double V(string e) => r.Eval(e);
+        d.AddFeature(new ChamferFeature
+        {
+            Name = "Lead-in", Distance = "P/2",
+            Edges = { E($"{rod.Id}.S.C{rc}", $"{rod.Id}.Start", new Vec3(V("D/2"), 0, 0)) },
+        });
+        // the space between two teeth on Top (sketch y = -z), a pitch below the rod's free end: flat 0.3707 P at the
+        // root (radius D/2 - P/2), flanks at 14.5° out past the surface; the centerline (the rod's axis) runs up +Z
+        var g = new Sk(d);
+        string Ro = "D/2+0.5", Rr = "D/2-P/2", Hr = "0.18535*P", Ho = "0.18535*P+(P/2+0.5)*tan(14.5)";
+        g.Poly(g.P(Rr, $"P-{Hr}"), g.P(Ro, $"P-({Ho})"), g.P(Ro, $"P+{Ho}"), g.P(Rr, $"P+{Hr}"));
+        g.Centerline(Sketch.OriginId, g.P("0", "-L"));
+        var gs = d.AddFeature(new SketchFeature { Name = "Thread space", Plane = PlaneRef.Top, Sketch = g.S });
+        var groove = d.AddFeature(new HelicalSweepFeature { Name = "Thread", SketchId = gs.Id, IsCut = true, Pitch = "P*N", Revolutions = "(L+2*P)/(P*N)" });
+        d.AddFeature(new CircularPatternFeature { Name = "Starts", Seeds = { groove.Id }, Axis = new DirRef { Axis = "Z" }, Count = "N" });
         return d;
     }
 

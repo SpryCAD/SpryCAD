@@ -17,6 +17,29 @@ public sealed record ScrewMotion(Vec3 O, Vec3 X, Vec3 Y, Vec3 A, double K)
         return new ScrewMotion(origin, x, Vec3.Cross(a, x), a, lead / (2 * Math.PI));
     }
 
+    /// <summary>
+    /// Whether <paramref name="b"/> carries points along this motion's helices (the same axis, lead and hand, whatever
+    /// the frames): two such screw surfaces are curves in the same (r, z − K·θ) plane.
+    /// </summary>
+    public bool SameHelices(ScrewMotion b)
+    {
+        if (ReferenceEquals(this, b) || this == b) return true;
+        if (Math.Abs(K) < 1e-12) return false;
+        var lead = Math.Abs(2 * Math.PI * K);
+        Vec2 Rz(Vec3 p) { var l = Local(p); return new Vec2(Math.Sqrt(l.X * l.X + l.Y * l.Y), l.Z - K * Math.Atan2(l.Y, l.X)); }
+        var scale = 1 + Math.Abs(K) + (O - b.O).Length;
+        foreach (var p in new[] { O + X * scale + A * 0.3, O + Y * (2 * scale) - A * 0.7 })
+        {
+            var q0 = Rz(p);
+            foreach (var u in new[] { 0.7, -2.3 })
+            {
+                var q = Rz(b.Move(u, p));
+                if (Math.Abs(q.X - q0.X) > 1e-9 * scale || Math.Abs(Math.IEEERemainder(q.Y - q0.Y, lead)) > 1e-9 * scale) return false;
+            }
+        }
+        return true;
+    }
+
     /// <summary>Lead: the advance per full turn.</summary>
     public double Lead => K * 2 * Math.PI;
 

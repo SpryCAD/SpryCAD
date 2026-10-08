@@ -560,6 +560,16 @@ public sealed class NBoolean
     List<(double ta, double tb, Vec3 p, double reach)> CurveCrossings(NEdge a, NEdge b)
     {
         var res = new List<(double, double, Vec3, double)>();
+        // two helices of the same screw motion (a multi-start thread's grooves on one root cylinder) never cross: they
+        // are the same helix (an overlap, found below) or run beside each other all the way
+        if (a.Curve is NHelix ha && b.Curve is NHelix hb && ha.Motion.SameHelices(hb.Motion) && ha.Motion is var hm && Math.Abs(hm.K) > 1e-12)
+        {
+            var lead = Math.Abs(2 * Math.PI * hm.K);
+            Vec2 Rz(Vec3 p) { var l = hm.Local(p); return new Vec2(Math.Sqrt(l.X * l.X + l.Y * l.Y), l.Z - hm.K * Math.Atan2(l.Y, l.X)); }
+            var qa = Rz(ha.P0); var qb = Rz(hb.P0);
+            var coincidentTol = _tol * 100;
+            if (Math.Abs(qa.X - qb.X) > coincidentTol || Math.Abs(Math.IEEERemainder(qa.Y - qb.Y, lead)) > coincidentTol) return res;
+        }
         var pa = a.Samples(_sampleTol * 500); var pb = b.Samples(_sampleTol * 500);
         double lo(NEdge x) => Math.Min(x.T0, x.T1); double hi(NEdge x) => Math.Max(x.T0, x.T1);
         double Par(NEdge x, Vec3 p, double hint)

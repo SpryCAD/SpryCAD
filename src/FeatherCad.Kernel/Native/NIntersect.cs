@@ -218,6 +218,8 @@ public static class NIntersect
     {
         var m = sc.Motion;
         if (Math.Abs(m.K) < 1e-12) return null;
+        // a helix of the same motion lies on the surface or beside it all the way (on it: found by the caller's probe)
+        if (c is NHelix hx && m.SameHelices(hx.Motion)) return new List<double>();
         double pad = (sc.V1 - sc.V0) * 0.01 + 1e-9, v0 = sc.V0 - pad, v1 = sc.V1 + pad;
         const int n = 256;
         Vec3 G(double v) => m.Local(sc.Gen.Eval(v));
