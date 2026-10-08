@@ -335,11 +335,34 @@ public sealed class AssemblyModel
         m.Capture(World(a), World(b), PlacementOf(a), PlacementOf(b));
         setup?.Invoke(m);
         Doc.AddMate(m);
+        Settle(a, b);
+        return m;
+    }
+
+    /// <summary>
+    /// A mate edited: made again from its new references, type and values (taken as the components stand now) in
+    /// the old one's place, keeping its id, its place in the list and whether it is suppressed; its name too, unless
+    /// <paramref name="name"/> gives another. The components move to it as for a new mate.
+    /// </summary>
+    public Mate ReplaceMate(Mate old, MateType type, MateRef a, MateRef b, double value = 0, Action<Mate>? setup = null, string? name = null)
+    {
+        var i = Doc.Mates.IndexOf(old);
+        if (i < 0) throw new ArgumentException("The mate is not in the assembly.", nameof(old));
+        var m = new Mate { Id = old.Id, Name = name ?? old.Name, Type = type, A = a, B = b, Value = value, Suppressed = old.Suppressed };
+        m.Capture(World(a), World(b), PlacementOf(a), PlacementOf(b));
+        setup?.Invoke(m);
+        Doc.Mates[i] = m;
+        Settle(a, b);
+        return m;
+    }
+
+    // a mate just set up: the component it names first (if it floats) moved onto it, then everything solved
+    void Settle(MateRef a, MateRef b)
+    {
         var first = a.Component != null && Doc.Find(a.Component) is { Fixed: false } ca ? ca.Id
             : b.Component != null && Doc.Find(b.Component) is { Fixed: false } cb ? cb.Id : null;
         if (first != null) SolveMates(new HashSet<string> { first });
         SolveMates();
-        return m;
     }
 
     /// <summary>

@@ -14,6 +14,8 @@ namespace SpryCad.App;
 /// assembly), a mate type among those that fit them (the likely one chosen), Flip Alignment, a distance or an angle;
 /// the components move to it as it is set up (the first face's component, then the rest), OK adds it and the page
 /// stays open for the next one; Cancel puts everything back. Dragging a component moves it only as its mates let it.
+/// A mate is edited on the same page (double-click it in the tree): its faces, type and values shown, changed with
+/// the components following, OK keeping the changes (same name, same place in the list), Cancel the mate as it was.
 /// </summary>
 public partial class MainWindow
 {
@@ -33,6 +35,8 @@ public partial class MainWindow
         public Mate? Preview;
         /// <summary>Where the components were before the preview.</summary>
         public Dictionary<string, Placement> Before = new();
+        /// <summary>The mate being edited (null: adding new ones); it stands in the list while no preview does.</summary>
+        public Mate? Editing;
         public Action? Update;
     }
 
@@ -99,19 +103,43 @@ public partial class MainWindow
         _ => MateType.Coincident,
     };
 
-    void MateCommand()
+    void MateCommand() => MatePage(null);
+
+    /// <summary>The Mate page: adding mates, or (<paramref name="editing"/>) changing one.</summary>
+    void MatePage(Mate? editing)
     {
         if (Asm is not { } a) return;
         if (a.Model.Doc.Components.Count < 1) { Status("Insert components first."); return; }
+        if (_mating != null) { Status("Finish the open Mate page first (OK or Cancel)."); return; }
         a.BeginChange();
-        var st = new Mating();
+        var st = new Mating { Editing = editing };
+        if (editing is { } e)
+        {
+            st.Picks.Add(e.A.Clone()); st.Picks.Add(e.B.Clone());
+            st.Type = e.Type;
+            if (e.Type == MateType.Screw) st.Lead = e.Value; else if (e.Type is MateType.Distance or MateType.Angle) st.Value = e.Value;
+            if (e.Min is { } lo && e.Max is { } hi) { st.Limits = true; st.Min = lo; st.Max = hi; }
+            if (e.Type == MateType.Gear) { st.RatioA = e.RatioA; st.RatioB = e.RatioB; }
+            st.Reverse = e.Reverse;
+        }
         _mating = st;
         Snapshot();
         void Snapshot() { st.Before = a.Model.Doc.Components.ToDictionary(c => c.Id, c => c.Placement); }
         void Restore() { foreach (var c in a.Model.Doc.Components) if (st.Before.TryGetValue(c.Id, out var p)) c.Placement = p; }
+        // an edited mate's name: kept, or the next of its new type's when the type changed (counted on OK)
+        string? EditName(MateType t) => st.Editing is { } e && t != e.Type ? t + (a.Model.Doc.MateCounters.GetValueOrDefault(t.ToString()) + 1).ToString() : null;
         void DropPreview()
         {
             if (st.Preview == null) return;
+            if (st.Editing is { } orig)
+            {
+                // the mate as it was, back in its place
+                var i = a.Model.Doc.Mates.IndexOf(st.Preview);
+                if (i >= 0) a.Model.Doc.Mates[i] = orig;
+                st.Preview = null;
+                Restore();
+                return;
+            }
             // the preview was the last mate added: its number goes back (the next is named as if it never was)
             var d = a.Model.Doc;
             d.Mates.Remove(st.Preview);
@@ -121,7 +149,7 @@ public partial class MainWindow
             Restore();
         }
 
-        var page = new PmPage("Mate", "relations");
+        var page = new PmPage(editing != null ? "Edit Mate: " + editing.Name : "Mate", "relations");
         var sel = page.Section("Mate Selections");
         page.Info(sel, "Click two faces (planar or round) on the components, or an origin plane of the assembly. Click a face again to drop it.");
         var picks = new StackPanel { Spacing = 2, Margin = new Thickness(0, 2) };
@@ -239,16 +267,20 @@ public partial class MainWindow
             result.Text = "";
             if (two && type is { } tp && (st.Picks[0].Component != null || st.Picks[1].Component != null) && st.Picks[0].Component != st.Picks[1].Component)
             {
-                st.Preview = a.Model.AddMate(tp, st.Picks[0].Clone(), st.Picks[1].Clone(), tp == MateType.Screw ? st.Lead : st.Value, m =>
+                void Setup(Mate m)
                 {
                     if (st.Limits && tp is MateType.Distance or MateType.Angle) { m.Min = Math.Min(st.Min, st.Max); m.Max = Math.Max(st.Min, st.Max); }
                     if (tp == MateType.Gear) { m.RatioA = st.RatioA ?? m.RatioA; m.RatioB = st.RatioB ?? m.RatioB; }
                     if (tp is MateType.Gear or MateType.Screw) m.Reverse = st.Reverse;
                     if (st.Flip) m.Aligned = !m.Aligned;
-                });
+                }
+                var value = tp == MateType.Screw ? st.Lead : st.Value;
+                st.Preview = st.Editing is { } orig
+                    ? a.Model.ReplaceMate(orig, tp, st.Picks[0].Clone(), st.Picks[1].Clone(), value, Setup, EditName(tp))
+                    : a.Model.AddMate(tp, st.Picks[0].Clone(), st.Picks[1].Clone(), value, Setup);
                 var err = a.Model.LastSolve?.Errors.GetValueOrDefault(st.Preview.Id) ?? 0;
                 result.Text = err > 1e-6 ? $"Cannot be satisfied with the other mates (off by {err:0.###}): it conflicts, or the components it would move are fixed."
-                    : "Press OK (Enter) to add it.";
+                    : st.Editing != null ? "Press OK (Enter) to keep the changes." : "Press OK (Enter) to add it.";
                 result.Foreground = err > 1e-6 ? new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse("#FFC62828")) : null;
                 if (result.Foreground == null) result.ClearValue(TextBlock.ForegroundProperty);
             }
@@ -269,6 +301,20 @@ public partial class MainWindow
         }
         void Ok()
         {
+            if (st.Editing is { } orig)
+            {
+                // nothing set up (the faces dropped): the mate stays as it was
+                if (st.Preview == null) { Close(); return; }
+                if (st.Preview.Type != orig.Type) a.Model.Doc.MateCounters[st.Preview.Type.ToString()] = a.Model.Doc.MateCounters.GetValueOrDefault(st.Preview.Type.ToString()) + 1;
+                Status($"Edited {st.Preview.Name}.");
+                st.Preview = null;
+                _mating = null; _hoverFace = null;
+                ShowPage(null); HideConfirmCorner();
+                a.EndChange();
+                RefreshAssemblyScene();
+                RebuildTree();
+                return;
+            }
             if (st.Preview == null) { Close(); return; }
             // kept: the next mate starts from here (and OK with nothing set up closes the page)
             Status($"Added {st.Preview.Name}.");
@@ -287,15 +333,18 @@ public partial class MainWindow
         page.OnOk = Ok;
         page.OnCancel = Cancel;
         ShowPage(page);
-        ShowConfirmCorner(Ok, Cancel, "OK: add the mate (Enter); with nothing set up, close", "Cancel (Esc)");
+        ShowConfirmCorner(Ok, Cancel, editing != null ? "OK: keep the changes (Enter)" : "OK: add the mate (Enter); with nothing set up, close", "Cancel (Esc)");
         st.Update();
-        Status("Mate: click two faces (or a face and an origin plane).");
+        Status(editing != null ? $"Editing {editing.Name}: change its faces (click one to drop it, then pick another), type or values."
+            : "Mate: click two faces (or a face and an origin plane).");
     }
 
     /// <summary>A command from a mate's context menu in the tree.</summary>
     void OnMateCommand(string id, string cmd)
     {
         if (Asm is not { } a || a.Model.Doc.Mates.FirstOrDefault(m => m.Id == id) is not { } mate) return;
+        if (cmd == "edit") { MatePage(mate); return; }
+        if (_mating != null) { Status("Finish the open Mate page first (OK or Cancel)."); return; }
         a.BeginChange();
         switch (cmd)
         {

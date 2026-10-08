@@ -44,7 +44,13 @@ public sealed class AssemblyTree : DockPanel
             // cannot take in the middle of it (index out of range)
             Avalonia.Threading.Dispatcher.UIThread.Post(() => Selected?.Invoke(id));
         };
-        _list.DoubleTapped += (_, _) => { if ((_list.SelectedItem as ListBoxItem)?.Tag is string id && !id.StartsWith("mate:")) Opened?.Invoke(id); };
+        _list.DoubleTapped += (_, _) =>
+        {
+            if ((_list.SelectedItem as ListBoxItem)?.Tag is not string id) return;
+            // a component opens its part; a mate opens for editing
+            if (id.StartsWith("mate:")) MateCommand?.Invoke(id["mate:".Length..], "edit");
+            else Opened?.Invoke(id);
+        };
     }
 
     /// <summary>Highlights a component's row (none: no row), the rows kept.</summary>
@@ -143,7 +149,7 @@ public sealed class AssemblyTree : DockPanel
             mi.Click += (_, _) => MateCommand?.Invoke(mate.Id, cmd);
             return mi;
         }
-        return new ContextMenu { Items = { I("_Flip Alignment", "flip"), I(mate.Suppressed ? "_Unsuppress" : "_Suppress", "suppress"), new Separator(), I("_Delete", "delete") } };
+        return new ContextMenu { Items = { I("_Edit Mate...", "edit"), new Separator(), I("_Flip Alignment", "flip"), I(mate.Suppressed ? "_Unsuppress" : "_Suppress", "suppress"), new Separator(), I("_Delete", "delete") } };
     }
 
     ContextMenu MenuFor(Component c)

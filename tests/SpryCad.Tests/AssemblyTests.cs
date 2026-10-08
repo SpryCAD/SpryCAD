@@ -269,6 +269,23 @@ static class AssemblyTests
             }
         });
 
+        t.Test("Mates edited: a distance changed in place (same id, name and place in the list), then turned into a coincident", () =>
+        {
+            var (m, pin, sleeve, _) = PinAndSleeve("mateedit");
+            MateRef R(Component c, string which) => m.RefTo(c.Id, FaceOf(m, c, which))!;
+            m.AddMate(MateType.Concentric, R(sleeve, "side"), R(pin, "side"));
+            var dist = m.AddMate(MateType.Distance, R(sleeve, "start"), R(pin, "end"), 5);
+            var lock0 = m.AddMate(MateType.Parallel, R(sleeve, "start"), m.RefTo(null, "Front")!);
+            double Z() => m.World(R(sleeve, "start")).P.Z;
+            t.True(m.LastSolve!.Satisfied && Math.Abs(Math.Abs(Z() - 10) - 5) < 1e-6, $"5 mm from the end ({Z():0.######})");
+            var edited = m.ReplaceMate(dist, MateType.Distance, dist.A.Clone(), dist.B.Clone(), 12);
+            t.True(m.LastSolve!.Satisfied && Math.Abs(Math.Abs(Z() - 10) - 12) < 1e-6, $"12 mm from it after the edit ({Z():0.######})");
+            t.True(edited.Id == dist.Id && edited.Name == dist.Name && m.Doc.Mates.IndexOf(edited) == 1 && m.Doc.Mates.Count == 3 && m.Doc.Mates[2] == lock0,
+                "the same mate: id, name and place kept, nothing added");
+            var coin = m.ReplaceMate(edited, MateType.Coincident, edited.A.Clone(), edited.B.Clone(), name: "Coincident1");
+            t.True(m.LastSolve!.Satisfied && Math.Abs(Z() - 10) < 1e-6 && coin.Name == "Coincident1" && coin.Id == dist.Id, $"now coincident ({Z():0.######}, {coin.Name})");
+        });
+
         t.Test("Mates: concentric and coincident stack a sleeve on a pin; a distance lifts it; contradictions are reported", () =>
         {
             var (m, pin, sleeve, dir) = PinAndSleeve("mates");
