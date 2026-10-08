@@ -9,16 +9,16 @@ public enum UnitSystem { MMGS, IPS }
 
 /// <summary>
 /// The native part document: the full parametric history (equations, sketches with constraints, features).
-/// A *.fcprt file is either plain, human-readable JSON, or — when the part embeds other files (e.g. an imported
+/// A *.sprt file is either plain, human-readable JSON, or — when the part embeds other files (e.g. an imported
 /// STEP model) or the user prefers it — a ZIP container holding that same JSON as <c>model.json</c>, the
 /// embedded files under <c>attachments/</c> and a <c>thumbnail.png</c> preview. Both open the same way.
 /// </summary>
 public sealed class CadDocument
 {
-    public const string FileExtension = ".fcprt";
+    public const string FileExtension = ".sprt";
     public const int CurrentFormatVersion = 1;
 
-    public string Format { get; set; } = "FeatherCAD";
+    public string Format { get; set; } = "SpryCAD";
     public int FormatVersion { get; set; } = CurrentFormatVersion;
     /// <summary>
     /// The part's identity (a GUID), given on its first save and kept for good: assemblies find the part by it
@@ -161,7 +161,9 @@ public sealed class CadDocument
     public static CadDocument FromJson(string json)
     {
         var d = JsonSerializer.Deserialize<CadDocument>(json, Serialization.Options) ?? throw new InvalidDataException("Empty document");
-        if (d.Format != "FeatherCAD") throw new InvalidDataException("Not a FeatherCAD document");
+        // (parts made before the product was renamed say FeatherCAD; saved again they say SpryCAD)
+        if (d.Format == "FeatherCAD") d.Format = "SpryCAD";
+        if (d.Format != "SpryCAD") throw new InvalidDataException("Not a SpryCAD document");
         return d;
     }
 

@@ -5,7 +5,7 @@ using FeatherCad.Kernel;
 namespace FeatherCad.Core.Assembly;
 
 /// <summary>
-/// An assembly: components (placed instances of parts) and, later, the mates between them. Saved as a *.fcasm
+/// An assembly: components (placed instances of parts) and, later, the mates between them. Saved as a *.sasm
 /// container (<see cref="AssemblyContainer"/>): the assembly's JSON, the embedded parts, and the display caches of
 /// the parts it uses (so it opens, shows and shares without them).
 /// <para>
@@ -16,10 +16,10 @@ namespace FeatherCad.Core.Assembly;
 /// </summary>
 public sealed class AssemblyDocument
 {
-    public const string FileExtension = ".fcasm";
+    public const string FileExtension = ".sasm";
     public const int CurrentFormatVersion = 1;
 
-    public string Format { get; set; } = "FeatherCAD-Assembly";
+    public string Format { get; set; } = "SpryCAD-Assembly";
     public int FormatVersion { get; set; } = CurrentFormatVersion;
     /// <summary>The assembly's identity (a GUID, given on its first save), as for parts.</summary>
     public string? Id { get; set; }
@@ -92,7 +92,8 @@ public sealed class AssemblyDocument
     public static AssemblyDocument FromJson(string json)
     {
         var d = JsonSerializer.Deserialize<AssemblyDocument>(json, Serialization.Options) ?? throw new InvalidDataException("Empty assembly");
-        if (d.Format != "FeatherCAD-Assembly") throw new InvalidDataException("Not a FeatherCAD assembly");
+        if (d.Format == "FeatherCAD-Assembly") d.Format = "SpryCAD-Assembly"; // made before the rename
+        if (d.Format != "SpryCAD-Assembly") throw new InvalidDataException("Not a SpryCAD assembly");
         return d;
     }
 

@@ -21,7 +21,7 @@ namespace FeatherCad.App;
 public partial class MainWindow
 {
     /// <summary>An open part's file, dragged from the list of open parts.</summary>
-    static readonly DataFormat<string> PartDragFormat = DataFormat.CreateStringApplicationFormat("FeatherCAD.Part");
+    static readonly DataFormat<string> PartDragFormat = DataFormat.CreateStringApplicationFormat("SpryCAD.Part");
 
     /// <summary>The graphics area and the assembly's tree take parts while an assembly is the active document.</summary>
     void InitPartDrop()

@@ -4,7 +4,7 @@ namespace FeatherCad.App.Session;
 public static class RecentFiles
 {
     const int Max = 10;
-    static string StorePath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "FeatherCAD", "recent.txt");
+    static string StorePath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "SpryCAD", "recent.txt");
 
     public static List<string> Load()
     {

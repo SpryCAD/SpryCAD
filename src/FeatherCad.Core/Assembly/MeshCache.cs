@@ -53,7 +53,7 @@ public static class MeshCache
     {
         using var r = new BinaryReader(new MemoryStream(data), Encoding.UTF8);
         var magic = Encoding.ASCII.GetString(r.ReadBytes(Magic.Length));
-        if (magic != Magic && magic != Magic1) throw new InvalidDataException("Not a FeatherCAD display cache.");
+        if (magic != Magic && magic != Magic1) throw new InvalidDataException("Not a SpryCAD display cache.");
         bool surfaces = magic == Magic;
         var color = new double[] { r.ReadSingle(), r.ReadSingle(), r.ReadSingle() };
         Vec3 V() => new(r.ReadDouble(), r.ReadDouble(), r.ReadDouble());

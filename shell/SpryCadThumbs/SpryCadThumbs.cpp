@@ -1,4 +1,4 @@
-// Windows Explorer thumbnail handler for FeatherCAD parts (.fcprt).
+// Windows Explorer thumbnail handler for SpryCAD parts (.sprt).
 //
 // A part saved as a container is a ZIP holding model.json and thumbnail.png, the preview the app renders on
 // save; the PNG is stored uncompressed (it is compressed already). This handler finds that entry, decodes it with
@@ -6,7 +6,7 @@
 // file type icon. Explorer runs thumbnail handlers in an isolated surrogate process, on the file's stream.
 //
 // Built by build\make-thumbs.ps1 (cl.exe from the Visual Studio C++ build tools) and registered by the installer;
-// for a development build, "regsvr32 FeatherCadThumbs.dll" registers it for the current user.
+// for a development build, "regsvr32 SpryCadThumbs.dll" registers it for the current user.
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -31,9 +31,9 @@
 
 using Microsoft::WRL::ComPtr;
 
-// {7176CCFF-2CCE-451E-BDB2-EFD093B1801B}: also in installer\feathercad.iss
-static const CLSID CLSID_FcadThumbnail = { 0x7176ccff, 0x2cce, 0x451e, { 0xbd, 0xb2, 0xef, 0xd0, 0x93, 0xb1, 0x80, 0x1b } };
-static const wchar_t* const ClsidText = L"{7176CCFF-2CCE-451E-BDB2-EFD093B1801B}";
+// {2F5A5D18-E9B5-4929-90DF-C338D2FA19B5}: also in installer\sprycad.iss
+static const CLSID CLSID_SpryThumbnail = { 0x2f5a5d18, 0xe9b5, 0x4929, { 0x90, 0xdf, 0xc3, 0x38, 0xd2, 0xfa, 0x19, 0xb5 } };
+static const wchar_t* const ClsidText = L"{2F5A5D18-E9B5-4929-90DF-C338D2FA19B5}";
 // the shell's thumbnail handler slot (IThumbnailProvider)
 static const wchar_t* const ThumbnailShellEx = L"{e357fccd-a995-4576-b01f-234630154e96}";
 
@@ -253,7 +253,7 @@ STDAPI DllGetClassObject(REFCLSID clsid, REFIID riid, void** ppv)
 {
     if (!ppv) return E_POINTER;
     *ppv = nullptr;
-    if (clsid != CLSID_FcadThumbnail) return CLASS_E_CLASSNOTAVAILABLE;
+    if (clsid != CLSID_SpryThumbnail) return CLASS_E_CLASSNOTAVAILABLE;
     return g_factory.QueryInterface(riid, ppv);
 }
 
@@ -267,7 +267,7 @@ static HRESULT SetValue(const wchar_t* key, const wchar_t* name, const wchar_t* 
 }
 
 // the file types whose containers carry a preview: parts and assemblies
-static const wchar_t* const Extensions[] = { L".fcprt", L".fcasm" };
+static const wchar_t* const Extensions[] = { L".sprt", L".sasm" };
 
 STDAPI DllRegisterServer()
 {
@@ -277,7 +277,7 @@ STDAPI DllRegisterServer()
     swprintf_s(clsidKey, L"Software\\Classes\\CLSID\\%s", ClsidText);
     swprintf_s(serverKey, L"%s\\InprocServer32", clsidKey);
     HRESULT hr;
-    if (FAILED(hr = SetValue(clsidKey, nullptr, L"FeatherCAD Thumbnail Handler"))) return hr;
+    if (FAILED(hr = SetValue(clsidKey, nullptr, L"SpryCAD Thumbnail Handler"))) return hr;
     if (FAILED(hr = SetValue(serverKey, nullptr, path))) return hr;
     if (FAILED(hr = SetValue(serverKey, L"ThreadingModel", L"Apartment"))) return hr;
     for (auto ext : Extensions)

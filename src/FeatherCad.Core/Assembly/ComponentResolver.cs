@@ -179,7 +179,7 @@ public static class ComponentResolver
         {
             if (r.AbsolutePath == null) return;
             string? from = Path.GetDirectoryName(Path.GetFullPath(r.AbsolutePath)), to = Path.GetDirectoryName(Path.GetFullPath(newPath));
-            // the deepest folders that differ: ...\Old\Sub\a.fcprt -> ...\New\Sub\a.fcprt teaches Old -> New
+            // the deepest folders that differ: ...\Old\Sub\a.sprt -> ...\New\Sub\a.sprt teaches Old -> New
             while (from != null && to != null && string.Equals(Path.GetFileName(from), Path.GetFileName(to), StringComparison.OrdinalIgnoreCase)
                    && Path.GetDirectoryName(from) is { } pf && Path.GetDirectoryName(to) is { } pt)
             { from = pf; to = pt; }

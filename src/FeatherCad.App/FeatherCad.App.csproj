@@ -9,12 +9,12 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <ApplicationIcon>Assets\FeatherCAD.ico</ApplicationIcon>
+    <ApplicationIcon>Assets\SpryCAD.ico</ApplicationIcon>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
-    <AssemblyName>FeatherCAD</AssemblyName>
+    <AssemblyName>SpryCAD</AssemblyName>
     <!-- no Version here: it comes from git (target FeatherCadGitVersion below) -->
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
-    <Product>FeatherCAD</Product>
+    <Product>SpryCAD</Product>
     <RootNamespace>FeatherCad.App</RootNamespace>
     <TieredPGO>true</TieredPGO>
     <ServerGarbageCollector>false</ServerGarbageCollector>

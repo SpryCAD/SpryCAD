@@ -1,4 +1,4 @@
-# Builds self-contained, ReadyToRun-compiled FeatherCAD for the given platforms into ./publish/<rid>
+# Builds self-contained, ReadyToRun-compiled SpryCAD for the given platforms into ./publish/<rid>
 # Usage:  ./publish.ps1                 (current OS)
 #         ./publish.ps1 win-x64 linux-x64 osx-arm64 osx-x64
 param([string[]]$Rids)

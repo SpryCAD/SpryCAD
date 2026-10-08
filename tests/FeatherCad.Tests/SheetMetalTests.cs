@@ -175,7 +175,7 @@ static class SheetMetalTests
             // the tangent lines of the bend under the hole stop at it: two pieces each, all on material
             OnMaterial(t, f);
             t.True(f.Bends.Any(x => x.Tangents.Count == 4), "tangent lines split by the hole");
-            var dir = Path.Combine(Path.GetTempPath(), "feathercad-tests");
+            var dir = Path.Combine(Path.GetTempPath(), "sprycad-tests");
             Directory.CreateDirectory(dir);
             using (var fs = File.Create(Path.Combine(dir, "flat-bend-hole.dxf"))) DxfWriter.Write(fs, f);
             using (var fs = File.Create(Path.Combine(dir, "flat-bend-hole.step"))) StepWriter.Write(fs, new[] { ("flat", NTess.ToSolid(f.Body)), ("folded", NTess.ToSolid(b)) }, "flat");

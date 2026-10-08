@@ -202,7 +202,7 @@ public partial class MainWindow
             Item("_Options...", () => _ = Dialogs.Options(this), null, "options")));
         MainMenu.Items.Add(Sub("_Help",
             Item("_Keyboard Shortcuts", () => _ = Dialogs.Shortcuts(this), null, "help"),
-            Item("_About FeatherCAD", () => _ = Dialogs.About(this))));
+            Item("_About SpryCAD", () => _ = Dialogs.About(this))));
     }
 
     Button? _undoButton, _redoButton;
@@ -659,9 +659,9 @@ public partial class MainWindow
     // ------------------------------------------------------------------------------------------
     // file commands
 
-    static readonly FilePickerFileType FcadType = new("FeatherCAD Part") { Patterns = new[] { "*.fcprt" } };
+    static readonly FilePickerFileType FcadType = new("SpryCAD Part") { Patterns = new[] { "*.sprt" } };
     static readonly FilePickerFileType StepType = new("STEP model") { Patterns = new[] { "*.step", "*.stp" } };
-    static readonly FilePickerFileType OpenableType = new("Parts, assemblies and STEP models") { Patterns = new[] { "*.fcprt", "*.fcasm", "*.step", "*.stp" } };
+    static readonly FilePickerFileType OpenableType = new("Parts, assemblies and STEP models") { Patterns = new[] { "*.sprt", "*.sasm", "*.step", "*.stp" } };
 
     static bool IsStep(string path) => Path.GetExtension(path).ToLowerInvariant() is ".step" or ".stp";
 
@@ -724,7 +724,7 @@ public partial class MainWindow
     {
         if (!HasPendingEdit) return true;
         var what = _sketch != null ? _sketch.Feature.Name : _edit!.Feature.Name;
-        var r = await Dialogs.YesNoCancel(this, "FeatherCAD", $"{what} is still being edited. Keep the changes?", "Keep", "Discard");
+        var r = await Dialogs.YesNoCancel(this, "SpryCAD", $"{what} is still being edited. Keep the changes?", "Keep", "Discard");
         if (r == null) return false;
         if (_sketch != null) ExitSketch(r == true);
         else if (r == true) CommitEdit(); else CancelEdit();
@@ -744,7 +744,7 @@ public partial class MainWindow
         if (!await ResolvePendingEdit()) return false;
         if (Asm != null) return await ConfirmDiscardAssembly();
         if (!Session.Dirty) return true;
-        var r = await Dialogs.YesNoCancel(this, "FeatherCAD", $"Save changes to {Session.Title.TrimEnd(' ', '*')}?");
+        var r = await Dialogs.YesNoCancel(this, "SpryCAD", $"Save changes to {Session.Title.TrimEnd(' ', '*')}?");
         if (r == null) return false;
         if (r == true) return await Save();
         return true;
@@ -853,7 +853,7 @@ public partial class MainWindow
     static bool SamePath(string a, string b) =>
         string.Equals(Path.GetFullPath(a), Path.GetFullPath(b), OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
 
-    static string AutosaveDir => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "FeatherCAD");
+    static string AutosaveDir => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "SpryCAD");
 
     static bool IsAutosave(string path) =>
         SamePath(Path.GetDirectoryName(Path.GetFullPath(path)) ?? "", AutosaveDir) && Path.GetFileName(path).StartsWith("autosave", StringComparison.OrdinalIgnoreCase);
@@ -874,7 +874,7 @@ public partial class MainWindow
         var f = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
         {
             Title = "Save Part As",
-            DefaultExtension = "fcprt",
+            DefaultExtension = "sprt",
             SuggestedFileName = Session.FilePath != null ? Path.GetFileName(Session.FilePath) : Session.UntitledName + CadDocument.FileExtension,
             FileTypeChoices = new[] { FcadType },
         });

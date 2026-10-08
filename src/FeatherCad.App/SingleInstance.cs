@@ -5,15 +5,15 @@ using System.Text;
 namespace FeatherCad.App;
 
 /// <summary>
-/// Opening a file (Explorer double-click, Open with) while FeatherCAD runs: the new process hands the paths to the
+/// Opening a file (Explorer double-click, Open with) while SpryCAD runs: the new process hands the paths to the
 /// running one over a named pipe and exits, and they open there in tabs. The pipe is per user and per logon session
-/// and only accepts the same user. Started without files, FeatherCAD always opens a window of its own.
+/// and only accepts the same user. Started without files, SpryCAD always opens a window of its own.
 /// </summary>
 static class SingleInstance
 {
-    static readonly string PipeName = $"FeatherCAD-{Environment.UserName}-{System.Diagnostics.Process.GetCurrentProcess().SessionId}";
+    static readonly string PipeName = $"SpryCAD-{Environment.UserName}-{System.Diagnostics.Process.GetCurrentProcess().SessionId}";
 
-    /// <summary>Sends the files to a running FeatherCAD; false when none is running (or it does not answer).</summary>
+    /// <summary>Sends the files to a running SpryCAD; false when none is running (or it does not answer).</summary>
     public static bool TrySend(string[] files)
     {
         try

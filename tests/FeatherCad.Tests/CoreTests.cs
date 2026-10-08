@@ -291,7 +291,7 @@ static class CoreTests
         {
             var dir = AppContext.BaseDirectory;
             while (dir != null && !Directory.Exists(Path.Combine(dir, "samples"))) dir = Path.GetDirectoryName(dir);
-            var doc = CadDocument.FromJson(File.ReadAllText(Path.Combine(dir!, "tests", "FeatherCad.Tests", "models", "shelled-bracket.fcprt")));
+            var doc = CadDocument.FromJson(File.ReadAllText(Path.Combine(dir!, "tests", "FeatherCad.Tests", "models", "shelled-bracket.sprt")));
             string Id(string name) => doc.Features.First(f => f.Name == name).Id;
             var deps = doc.DependentsOf(new[] { Id("Hole1") }).Select(f => f.Name).ToList();
             t.True(deps.Contains("LPattern1"), "pattern of the hole: " + string.Join(",", deps));
@@ -306,7 +306,7 @@ static class CoreTests
             var dir = AppContext.BaseDirectory;
             while (dir != null && !Directory.Exists(Path.Combine(dir, "samples"))) dir = Path.GetDirectoryName(dir);
             var models = Path.Combine(dir!, "tests", "FeatherCad.Tests", "models");
-            var json = File.ReadAllText(Path.Combine(models, "shelled-bracket.fcprt"));
+            var json = File.ReadAllText(Path.Combine(models, "shelled-bracket.sprt"));
             // inside the shell: a 4 mm fillet around the boss foot runs past the 0.5 mm gap to the wall
             FilletFeature AddFillet(CadDocument d, bool overflow) => (FilletFeature)d.AddFeature(new FilletFeature
             { Radius = "4", Overflow = overflow, Edges = { new EdgeRef { A = "F9.I.F2.End", B = "F9.I.F8.1.F7.0.R.CB", Hint = new Vec3(70, 2.5, 18) } } });
@@ -331,7 +331,7 @@ static class CoreTests
             t.True(sw.ElapsedMilliseconds < 3000, $"fast failure ({sw.ElapsedMilliseconds} ms)");
 
             // the user's case: all inner floor edges (walls, corner, tube, both bosses) in one 2 mm fillet
-            doc = CadDocument.FromJson(File.ReadAllText(Path.Combine(models, "shelled-bracket-inner-fillet.fcprt")));
+            doc = CadDocument.FromJson(File.ReadAllText(Path.Combine(models, "shelled-bracket-inner-fillet.sprt")));
             r = new Regenerator().Rebuild(doc);
             var last = doc.Features[^1];
             t.True(r.Status[last.Id].Ok, "inner floor fillet: " + r.Status[last.Id].Error);
@@ -355,7 +355,7 @@ static class CoreTests
 
         t.Test("Demo models rebuild, also with changed parameters, and export exact STEP", () =>
         {
-            var dir = Path.Combine(Path.GetTempPath(), "feathercad-tests", "demos");
+            var dir = Path.Combine(Path.GetTempPath(), "sprycad-tests", "demos");
             t.Eq(Demos.Verify(dir, volumes: false), 0);
         });
 
@@ -440,8 +440,8 @@ static class CoreTests
             while (dir != null && !Directory.Exists(Path.Combine(dir, "samples"))) dir = Path.GetDirectoryName(dir);
             var cases = new (string file, double budgetMs)[]
             {
-                (Path.Combine(dir!, "samples", "bracket.fcprt"), 120),
-                (Path.Combine(dir!, "tests", "FeatherCad.Tests", "models", "shelled-bracket.fcprt"), 400),
+                (Path.Combine(dir!, "samples", "bracket.sprt"), 120),
+                (Path.Combine(dir!, "tests", "FeatherCad.Tests", "models", "shelled-bracket.sprt"), 400),
             };
             foreach (var (file, budget) in cases)
             {
@@ -468,7 +468,7 @@ static class CoreTests
             while (dir != null && !Directory.Exists(Path.Combine(dir, "samples"))) dir = Path.GetDirectoryName(dir);
             t.True(dir != null, "samples folder");
             // (files named Failed* are reproductions of failures, tested on their own)
-            foreach (var file in Directory.GetFiles(Path.Combine(dir!, "samples"), "*.fcprt").Where(f => !Path.GetFileName(f).StartsWith("Failed")))
+            foreach (var file in Directory.GetFiles(Path.Combine(dir!, "samples"), "*.sprt").Where(f => !Path.GetFileName(f).StartsWith("Failed")))
             {
                 var doc = CadDocument.Load(file);
                 if (Environment.GetEnvironmentVariable("FC_TRACE") != null) FeatherCad.Kernel.Native.NBoolean.Trace = m => Console.WriteLine("T " + m);
@@ -497,7 +497,7 @@ static class CoreTests
                     var brep = ExactBrep.Build(b.Solid);
                     t.True(brep.Warnings.Count == 0, $"{Path.GetFileName(file)} exact: {string.Join("; ", brep.Warnings)}");
                 }
-                var outDir = Path.Combine(Path.GetTempPath(), "feathercad-tests");
+                var outDir = Path.Combine(Path.GetTempPath(), "sprycad-tests");
                 Directory.CreateDirectory(outDir);
                 using (var fs = File.Create(Path.Combine(outDir, Path.GetFileNameWithoutExtension(file) + ".step")))
                     StepWriter.Write(fs, r.State.Bodies.Select(b => (b.Id, b.Solid)), Path.GetFileNameWithoutExtension(file), 1.0);
@@ -565,9 +565,9 @@ static class CoreTests
             t.Eq(doc2.Features.Count, doc.Features.Count);
             var r2 = new Regenerator().Rebuild(doc2);
             t.Near(r2.State.Bodies[0].Solid.Volume(), r.State.Bodies[0].Solid.Volume(), 1e-6);
-            var dir = Path.Combine(Path.GetTempPath(), "feathercad-tests");
+            var dir = Path.Combine(Path.GetTempPath(), "sprycad-tests");
             Directory.CreateDirectory(dir);
-            doc.Save(Path.Combine(dir, "demo.fcprt"));
+            doc.Save(Path.Combine(dir, "demo.sprt"));
             using (var fs = File.Create(Path.Combine(dir, "demo.step"))) StepWriter.Write(fs, r.State.Bodies.Select(b => (b.Id, b.Solid)), "demo");
             using (var fs = File.Create(Path.Combine(dir, "demo.stl"))) StlWriter.Write(fs, r.State.Bodies.Select(b => b.Solid));
         });
@@ -777,8 +777,8 @@ static class CoreTests
             t.True(r2.Status[f3.Id].Ok, r2.Status[f3.Id].Error ?? "");
             t.True(r2.State.Bodies[0].Solid.Faces.Any(f => f.Tag.Surface.Kind == SurfaceKind.Torus), "propagated through the rounded corner");
             t.True(r2.State.Bodies[0].Solid.Volume() > full, "fewer edges than the full selection");
-            var dir = Path.Combine(Path.GetTempPath(), "feathercad-tests");
-            doc.Save(Path.Combine(dir, "corner.fcprt"));
+            var dir = Path.Combine(Path.GetTempPath(), "sprycad-tests");
+            doc.Save(Path.Combine(dir, "corner.sprt"));
         });
 
         t.Test("Sketch dimensions to model edges are associative", () =>

@@ -3,8 +3,8 @@
         xmlns:vp="using:FeatherCad.App.Viewport"
         xmlns:ui="using:FeatherCad.App.UI"
         x:Class="FeatherCad.App.MainWindow"
-        Title="FeatherCAD"
-        Icon="avares://FeatherCAD/Assets/FeatherCAD.ico"
+        Title="SpryCAD"
+        Icon="avares://SpryCAD/Assets/SpryCAD.ico"
         Width="1400" Height="880"
         MinWidth="800" MinHeight="500"
         Background="#FFF3F5F8"
@@ -13,7 +13,7 @@
     <!-- Menu bar + quick access -->
     <Border DockPanel.Dock="Top" Background="#FFFFFFFF" BorderBrush="#FFD5DCE6" BorderThickness="0,0,0,1">
       <DockPanel>
-        <TextBlock DockPanel.Dock="Left" Text="FeatherCAD" FontWeight="Bold" Foreground="#FFB4232A" VerticalAlignment="Center" Margin="10,0,8,0" FontSize="13" />
+        <TextBlock DockPanel.Dock="Left" Text="SpryCAD" FontWeight="Bold" Foreground="#FF0F9A83" VerticalAlignment="Center" Margin="10,0,8,0" FontSize="13" />
         <StackPanel x:Name="QuickAccess" DockPanel.Dock="Right" Orientation="Horizontal" Margin="0,0,6,0" />
         <Menu x:Name="MainMenu" />
       </DockPanel>

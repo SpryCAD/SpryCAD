@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="application/x-sprycad-part">
+    <comment>SpryCAD part</comment>
+    <sub-class-of type="application/json"/>
+    <glob pattern="*.sprt"/>
+    <icon name="application-x-sprycad-part"/>
+  </mime-type>
+  <mime-type type="application/x-sprycad-assembly">
+    <comment>SpryCAD assembly</comment>
+    <sub-class-of type="application/zip"/>
+    <glob pattern="*.sasm"/>
+    <icon name="application-x-sprycad-assembly"/>
+  </mime-type>
+</mime-info>

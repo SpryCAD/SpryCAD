@@ -12,7 +12,7 @@ public static class PartsIndexStore
     static readonly object _lock = new();
     static PartIndex? _index;
 
-    static string StorePath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "FeatherCAD", "parts-index.json");
+    static string StorePath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "SpryCAD", "parts-index.json");
 
     /// <summary>Runs <paramref name="use"/> on the index (loaded on first use) and saves it afterwards.</summary>
     public static T Use<T>(Func<PartIndex, T> use)

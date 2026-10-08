@@ -1,4 +1,4 @@
-LIBRARY FeatherCadThumbs
+LIBRARY SpryCadThumbs
 EXPORTS
     DllGetClassObject   PRIVATE
     DllCanUnloadNow     PRIVATE

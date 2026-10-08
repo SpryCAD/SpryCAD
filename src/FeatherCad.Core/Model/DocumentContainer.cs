@@ -5,7 +5,7 @@ using System.Text;
 namespace FeatherCad.Core.Model;
 
 /// <summary>
-/// Reads and writes .fcprt files. Plain files are the document's JSON. Containers are ZIP archives:
+/// Reads and writes .sprt files. Plain files are the document's JSON. Containers are ZIP archives:
 /// <code>
 ///   model.json              the document (the same JSON as a plain file)
 ///   attachments/&lt;name&gt;      embedded files, listed with size and SHA-256 in model.json
@@ -96,7 +96,7 @@ public static class DocumentContainer
     {
         if (!IsZip(bytes)) return CadDocument.FromJson(Encoding.UTF8.GetString(bytes)); // (BOM is skipped by the decoder)
         using var zip = new ZipArchive(new MemoryStream(bytes), ZipArchiveMode.Read);
-        var model = zip.GetEntry(ModelEntry) ?? throw new InvalidDataException("Not a FeatherCAD document (no model.json in the container).");
+        var model = zip.GetEntry(ModelEntry) ?? throw new InvalidDataException("Not a SpryCAD document (no model.json in the container).");
         var doc = CadDocument.FromJson(Encoding.UTF8.GetString(Read(model)));
         foreach (var e in zip.Entries)
         {

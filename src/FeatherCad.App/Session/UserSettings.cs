@@ -25,7 +25,7 @@ public enum PartsOrder
 /// <summary>Per-user view preferences (not part of the document), stored as key=value lines in app data.</summary>
 public static class UserSettings
 {
-    static string StorePath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "FeatherCAD", "settings.txt");
+    static string StorePath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "SpryCAD", "settings.txt");
 
     public static bool ReverseWheel { get; set; }
     public static bool Perspective { get; set; }

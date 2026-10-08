@@ -156,7 +156,7 @@ public partial class MainWindow : Window
 
     void OnDocumentChanged()
     {
-        Title = "FeatherCAD - " + (_tab != null ? TitleOf(_tab) : Session.Title);
+        Title = "SpryCAD - " + (_tab != null ? TitleOf(_tab) : Session.Title);
         StatusUnits.Text = Session.Doc.Units.ToString();
         PmPage.LengthUnit = UnitLabel;
         UpdateUndoButtons();
@@ -586,7 +586,7 @@ public partial class MainWindow : Window
     public static void ShowErrorStatic(string msg) => Instance?.Status("⚠ " + msg);
 
     /// <summary>
-    /// Saves every tab with unsaved changes to the autosave folder: autosave.fcprt, autosave-2.fcprt, ... all in the
+    /// Saves every tab with unsaved changes to the autosave folder: autosave.sprt, autosave-2.sprt, ... all in the
     /// same tick, which is how Recover Autosave tells one session's files from older ones.
     /// </summary>
     void AutoSave()
@@ -611,7 +611,7 @@ public partial class MainWindow : Window
         foreach (var t in _parts.Where(DirtyOf).ToList())
         {
             if (!await SwitchTo(t)) return;
-            var r = await Dialogs.YesNoCancel(this, "FeatherCAD", $"Save changes to {TitleOf(t).TrimEnd(' ', '*')}?");
+            var r = await Dialogs.YesNoCancel(this, "SpryCAD", $"Save changes to {TitleOf(t).TrimEnd(' ', '*')}?");
             if (r == null) return;
             if (r == true && !await Save()) return;
         }

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Linux package build: publish the app for linux-x64 into ./publish/linux-x64, generate the demo parts, and pack
-#   publish/FeatherCAD-<version>-linux-x64.tar.gz
-# with install.sh / uninstall.sh (per-user menu entry, icon and .fcprt / .fcasm file types; see installer/linux), and, where
-# dpkg-deb exists, publish/feathercad_<version>_amd64.deb.
+#   publish/SpryCAD-<version>-linux-x64.tar.gz
+# with install.sh / uninstall.sh (per-user menu entry, icon and .sprt / .sasm file types; see installer/linux), and, where
+# dpkg-deb exists, publish/sprycad_<version>_amd64.deb.
 # Runs on Linux, macOS or Git Bash on Windows (GNU tar sets the Linux file modes either way).
 # Usage:  build/make-linux-package.sh
 set -euo pipefail
@@ -34,14 +34,14 @@ echo "== generating demo parts into $demos =="
 dotnet run --project "$root/tests/FeatherCad.Tests" -c Release -- demos "$demos"
 
 # 4) Stage: the app, samples, Linux desktop files and the license, in one top-level folder.
-name="FeatherCAD-$ver-$rid"
+name="SpryCAD-$ver-$rid"
 stage="$root/publish/stage"
 rm -rf "$stage"
 mkdir -p "$stage/$name/samples/demos"
 cp -R "$out/." "$stage/$name/"
-cp "$root"/samples/*.fcprt "$stage/$name/samples/"
-cp "$demos"/*.fcprt "$demos"/*.fcasm "$stage/$name/samples/demos/"
-cp "$root"/installer/linux/{install.sh,uninstall.sh,feathercad.desktop,feathercad-mime.xml,feathercad.png,application-x-feathercad-part.png,application-x-feathercad-assembly.png} "$stage/$name/"
+cp "$root"/samples/*.sprt "$stage/$name/samples/"
+cp "$demos"/*.sprt "$demos"/*.sasm "$stage/$name/samples/demos/"
+cp "$root"/installer/linux/{install.sh,uninstall.sh,sprycad.desktop,sprycad-mime.xml,sprycad.png,application-x-sprycad-part.png,application-x-sprycad-assembly.png} "$stage/$name/"
 cp "$root/LICENSE" "$stage/$name/"
 
 # 5) Pack with Linux modes: everything readable (folders searchable), then the programs again as executable.
@@ -51,7 +51,7 @@ tar="$root/publish/$name.tar"
 rm -f "$tar" "$tarball"
 opts=(--owner=0 --group=0 --numeric-owner -C "$stage")
 tar "${opts[@]}" --mode='u=rwX,go=rX' -cf "$tar" "$name"
-tar "${opts[@]}" --mode=755 -rf "$tar" "$name/FeatherCAD" "$name/install.sh" "$name/uninstall.sh" \
+tar "${opts[@]}" --mode=755 -rf "$tar" "$name/SpryCAD" "$name/install.sh" "$name/uninstall.sh" \
   $(cd "$stage" && ls "$name/createdump" 2>/dev/null)
 gzip -9 "$tar"
 rm -rf "$stage"
@@ -59,7 +59,7 @@ rm -rf "$stage"
 echo "== package ready -> $tarball =="
 
 # 6) The .deb (Debian, Ubuntu, Mint, ...), where dpkg-deb exists (Linux, WSL, CI; not Git Bash): the app in
-#    /opt/feathercad, the feathercad command in /usr/bin, and the menu entry, icon and .fcprt / .fcasm file types in
+#    /opt/sprycad, the sprycad command in /usr/bin, and the menu entry, icon and .sprt / .sasm file types in
 #    /usr/share. The desktop, MIME and icon caches refresh through those packages' dpkg triggers, so the
 #    package needs no install scripts.
 if ! command -v dpkg-deb >/dev/null; then
@@ -68,29 +68,29 @@ if ! command -v dpkg-deb >/dev/null; then
 fi
 # (debver, from step 1: a dev build is 0.0.1+dev.3, which Debian sorts after 0.0.1 as it should; "-" would read
 #  as a Debian revision separator)
-deb="$root/publish/feathercad_${debver}_amd64.deb"
+deb="$root/publish/sprycad_${debver}_amd64.deb"
 pkg="$root/publish/deb-stage"
 rm -rf "$pkg" "$deb"
-mkdir -p "$pkg/DEBIAN" "$pkg/opt/feathercad/samples/demos" "$pkg/usr/bin" "$pkg/usr/share/applications" \
-  "$pkg/usr/share/icons/hicolor/256x256/apps" "$pkg/usr/share/icons/hicolor/256x256/mimetypes" "$pkg/usr/share/mime/packages" "$pkg/usr/share/doc/feathercad"
-cp -R "$out/." "$pkg/opt/feathercad/"
-cp "$root"/samples/*.fcprt "$pkg/opt/feathercad/samples/"
-cp "$demos"/*.fcprt "$demos"/*.fcasm "$pkg/opt/feathercad/samples/demos/"
-ln -s /opt/feathercad/FeatherCAD "$pkg/usr/bin/feathercad"
-sed 's|@EXEC@|/opt/feathercad/FeatherCAD|' "$root/installer/linux/feathercad.desktop" > "$pkg/usr/share/applications/feathercad.desktop"
-cp "$root/installer/linux/feathercad.png" "$pkg/usr/share/icons/hicolor/256x256/apps/feathercad.png"
-cp "$root"/installer/linux/application-x-feathercad-{part,assembly}.png "$pkg/usr/share/icons/hicolor/256x256/mimetypes/"
-cp "$root/installer/linux/feathercad-mime.xml" "$pkg/usr/share/mime/packages/feathercad.xml"
-cp "$root/LICENSE" "$pkg/usr/share/doc/feathercad/copyright"
+mkdir -p "$pkg/DEBIAN" "$pkg/opt/sprycad/samples/demos" "$pkg/usr/bin" "$pkg/usr/share/applications" \
+  "$pkg/usr/share/icons/hicolor/256x256/apps" "$pkg/usr/share/icons/hicolor/256x256/mimetypes" "$pkg/usr/share/mime/packages" "$pkg/usr/share/doc/sprycad"
+cp -R "$out/." "$pkg/opt/sprycad/"
+cp "$root"/samples/*.sprt "$pkg/opt/sprycad/samples/"
+cp "$demos"/*.sprt "$demos"/*.sasm "$pkg/opt/sprycad/samples/demos/"
+ln -s /opt/sprycad/SpryCAD "$pkg/usr/bin/sprycad"
+sed 's|@EXEC@|/opt/sprycad/SpryCAD|' "$root/installer/linux/sprycad.desktop" > "$pkg/usr/share/applications/sprycad.desktop"
+cp "$root/installer/linux/sprycad.png" "$pkg/usr/share/icons/hicolor/256x256/apps/sprycad.png"
+cp "$root"/installer/linux/application-x-sprycad-{part,assembly}.png "$pkg/usr/share/icons/hicolor/256x256/mimetypes/"
+cp "$root/installer/linux/sprycad-mime.xml" "$pkg/usr/share/mime/packages/sprycad.xml"
+cp "$root/LICENSE" "$pkg/usr/share/doc/sprycad/copyright"
 # modes: folders 755, files 644, the programs 755
 find "$pkg" -type d -exec chmod 755 {} +
 find "$pkg" -type f -exec chmod 644 {} +
-chmod 755 "$pkg/opt/feathercad/FeatherCAD"
-[ -f "$pkg/opt/feathercad/createdump" ] && chmod 755 "$pkg/opt/feathercad/createdump"
+chmod 755 "$pkg/opt/sprycad/SpryCAD"
+[ -f "$pkg/opt/sprycad/createdump" ] && chmod 755 "$pkg/opt/sprycad/createdump"
 # The app is self-contained (.NET included); it still needs the C/C++ runtime, ICU (whose package name carries
 # its version: newest first, back to Ubuntu 22.04) and, for Avalonia, X11, fontconfig and OpenGL.
 cat > "$pkg/DEBIAN/control" <<EOF
-Package: feathercad
+Package: sprycad
 Version: $debver
 Architecture: amd64
 Maintainer: Kurt Jacobson <kcjengr@gmail.com>
@@ -100,7 +100,7 @@ Section: graphics
 Priority: optional
 Homepage: https://github.com/KurtJacobson/FeatherCAD
 Description: Fast, lightweight parametric 3D CAD
- FeatherCAD is open-source parametric 3D CAD with a SolidWorks-style workflow,
+ SpryCAD is open-source parametric 3D CAD with a SolidWorks-style workflow,
  its own exact B-rep geometry kernel, and STEP and STL export.
 EOF
 echo "== building $deb =="

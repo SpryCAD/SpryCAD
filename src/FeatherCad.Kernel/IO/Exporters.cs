@@ -6,7 +6,7 @@ namespace FeatherCad.Kernel;
 /// <summary>Binary STL export (watertight: uses the stitched topology so T-junctions are resolved).</summary>
 public static class StlWriter
 {
-    public static void Write(Stream stream, IEnumerable<Solid> solids, double scale = 1.0, string header = "FeatherCAD")
+    public static void Write(Stream stream, IEnumerable<Solid> solids, double scale = 1.0, string header = "SpryCAD")
     {
         var tris = new List<Tri>();
         foreach (var s in solids) tris.AddRange(Triangles(s));
@@ -186,8 +186,8 @@ public static class StepWriter
     {
         var sb = new StringBuilder();
         sb.Append("ISO-10303-21;\nHEADER;\n");
-        sb.Append("FILE_DESCRIPTION(('FeatherCAD model'),'2;1');\n");
-        sb.Append($"FILE_NAME('{safe}.step','{DateTime.UtcNow:yyyy-MM-ddTHH:mm:ss}',(''),(''),'FeatherCAD','FeatherCAD','');\n");
+        sb.Append("FILE_DESCRIPTION(('SpryCAD model'),'2;1');\n");
+        sb.Append($"FILE_NAME('{safe}.step','{DateTime.UtcNow:yyyy-MM-ddTHH:mm:ss}',(''),(''),'SpryCAD','SpryCAD','');\n");
         sb.Append("FILE_SCHEMA(('AUTOMOTIVE_DESIGN { 1 0 10303 214 1 1 1 1 }'));\nENDSEC;\nDATA;\n");
         sb.Append(c.Sb);
         sb.Append("ENDSEC;\nEND-ISO-10303-21;\n");

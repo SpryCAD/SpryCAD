@@ -2,10 +2,10 @@
 """Publishes one build to Cloudflare R2: the apt repository, the downloads and the update feed.
 
 Bucket layout (all under the bucket's public URL, R2_PUBLIC_URL):
-  apt/feathercad-archive-keyring.gpg                   the public key that signs the repository
+  apt/sprycad-archive-keyring.gpg                   the public key that signs the repository
   apt/dists/<channel>/{Release,Release.gpg,InRelease}  signed suite index (channel: stable or dev)
   apt/dists/<channel>/main/binary-amd64/Packages(.gz)
-  apt/pool/<channel>/main/f/feathercad/feathercad_<debver>_amd64.deb
+  apt/pool/<channel>/main/f/sprycad/sprycad_<debver>_amd64.deb
   downloads/<channel>/<version>/                       the Windows installer and the Linux tarball
   updates/<channel>.json                               the update feed: latest version, URLs, SHA-256s
 
@@ -119,7 +119,7 @@ def gpg_args():
 def publish_apt(channel, deb, keep, work):
     """Adds the .deb to the channel's pool and index, prunes old dev builds, and re-signs the suite."""
     debver = run('dpkg-deb', '-f', str(deb), 'Version', capture_output=True).stdout.strip()
-    pool = f'pool/{channel}/main/f/feathercad'
+    pool = f'pool/{channel}/main/f/sprycad'
     put(deb, f'apt/{pool}/{deb.name}', 'application/vnd.debian.binary-package')
 
     # the new package's stanza, with Filename relative to the repository root
@@ -148,8 +148,8 @@ def publish_apt(channel, deb, keep, work):
         shutil.copyfileobj(src, dst)
 
     # Release (hashes of the indexes), signed both ways: InRelease (inline) and Release.gpg (detached)
-    opts = {'Origin': 'FeatherCAD', 'Label': 'FeatherCAD', 'Suite': channel, 'Codename': channel,
-            'Architectures': ARCH, 'Components': 'main', 'Description': f'FeatherCAD {channel} builds'}
+    opts = {'Origin': 'SpryCAD', 'Label': 'SpryCAD', 'Suite': channel, 'Codename': channel,
+            'Architectures': ARCH, 'Components': 'main', 'Description': f'SpryCAD {channel} builds'}
     cmd = ['apt-ftparchive']
     for k, v in opts.items():
         cmd += ['-o', f'APT::FTPArchive::Release::{k}={v}']
@@ -158,10 +158,10 @@ def publish_apt(channel, deb, keep, work):
     gpg, key = gpg_args()
     run(*gpg, '--clearsign', '-o', str(dist / 'InRelease'), str(dist / 'Release'))
     run(*gpg, '--armor', '--detach-sign', '-o', str(dist / 'Release.gpg'), str(dist / 'Release'))
-    keyring = work / 'feathercad-archive-keyring.gpg'
+    keyring = work / 'sprycad-archive-keyring.gpg'
     keyring.write_bytes(subprocess.run(['gpg', '--batch', '--export', key], check=True, capture_output=True).stdout)
 
-    put(keyring, 'apt/feathercad-archive-keyring.gpg', 'application/pgp-keys', no_cache=True)
+    put(keyring, 'apt/sprycad-archive-keyring.gpg', 'application/pgp-keys', no_cache=True)
     for name in [f'main/binary-{ARCH}/Packages', f'main/binary-{ARCH}/Packages.gz',
                  'Release', 'Release.gpg', 'InRelease']:
         put(dist / name, f'apt/dists/{channel}/{name}', 'text/plain' if '.gz' not in name else None, no_cache=True)
@@ -192,7 +192,7 @@ def main():
     ap.add_argument('--notes-out', type=Path, help='write Markdown download links here (for a GitHub release)')
     a = ap.parse_args()
 
-    m = re.fullmatch(r'FeatherCAD-(.+)-linux-x64\.tar\.gz', a.tarball.name)
+    m = re.fullmatch(r'SpryCAD-(.+)-linux-x64\.tar\.gz', a.tarball.name)
     if not m:
         sys.exit(f'unexpected tarball name: {a.tarball.name}')
     version = m.group(1)
@@ -242,9 +242,9 @@ def main():
 
 ```bash
 sudo install -d -m 0755 /etc/apt/keyrings
-curl -fsSL {PUBLIC}/apt/feathercad-archive-keyring.gpg | sudo tee /etc/apt/keyrings/feathercad.gpg > /dev/null
-echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/feathercad.gpg] {PUBLIC}/apt {a.channel} main" | sudo tee /etc/apt/sources.list.d/feathercad.list
-sudo apt update && sudo apt install feathercad
+curl -fsSL {PUBLIC}/apt/sprycad-archive-keyring.gpg | sudo tee /etc/apt/keyrings/sprycad.gpg > /dev/null
+echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/sprycad.gpg] {PUBLIC}/apt {a.channel} main" | sudo tee /etc/apt/sources.list.d/sprycad.list
+sudo apt update && sudo apt install sprycad
 ```
 """)
     print('== done ==')

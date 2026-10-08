@@ -5,10 +5,10 @@ using FeatherCad.Core.Model;
 namespace FeatherCad.Core.Assembly;
 
 /// <summary>
-/// Reads and writes .fcasm files: always a ZIP container
+/// Reads and writes .sasm files: always a ZIP container
 /// <code>
 ///   assembly.json           the assembly (components, references, mates)
-///   attachments/parts/…     embedded parts (.fcprt bytes)
+///   attachments/parts/…     embedded parts (.sprt bytes)
 ///   attachments/cache/…     display caches of the parts' revisions (<see cref="MeshCache"/>)
 ///   thumbnail.png           preview image (optional)
 /// </code>
@@ -51,7 +51,7 @@ public static class AssemblyContainer
     {
         var bytes = File.ReadAllBytes(path);
         using var zip = new ZipArchive(new MemoryStream(bytes), ZipArchiveMode.Read);
-        var model = zip.GetEntry(ModelEntry) ?? throw new InvalidDataException("Not a FeatherCAD assembly (no assembly.json in the container).");
+        var model = zip.GetEntry(ModelEntry) ?? throw new InvalidDataException("Not a SpryCAD assembly (no assembly.json in the container).");
         var asm = AssemblyDocument.FromJson(Encoding.UTF8.GetString(Read(model)));
         var folder = DocumentContainer.AttachmentFolder;
         foreach (var e in zip.Entries)

@@ -13,7 +13,7 @@ namespace FeatherCad.App.UI;
 public enum CardKind { Error, Question, Info }
 
 /// <summary>
-/// FeatherCAD's message card: a white card with rounded corners and a soft shadow, an accented border, an icon and a
+/// SpryCAD's message card: a white card with rounded corners and a soft shadow, an accented border, an icon and a
 /// title, the text, and buttons at the bottom right. Shown over the view for a part that could not be opened, and,
 /// as an in-window dialog (<see cref="ShowAsync"/>), for the questions and messages of <see cref="Dialogs"/>.
 /// </summary>

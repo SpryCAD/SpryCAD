@@ -119,7 +119,7 @@ static class NativeBoolTests
             // the fillet contact lines cross the seam edges inside the surface (an edge/surface test only grazes)
             var dir = AppContext.BaseDirectory;
             while (dir != null && !Directory.Exists(Path.Combine(dir, "samples"))) dir = Path.GetDirectoryName(dir);
-            var file = Path.Combine(dir!, "samples", "demos", "spoked-handwheel.fcprt");
+            var file = Path.Combine(dir!, "samples", "demos", "spoked-handwheel.sprt");
             foreach (var angle in new[] { "236", "270" })
             {
                 var doc = CadDocument.Load(file);
@@ -147,7 +147,7 @@ static class NativeBoolTests
             var dir = AppContext.BaseDirectory;
             while (dir != null && !Directory.Exists(Path.Combine(dir, "samples"))) dir = Path.GetDirectoryName(dir);
             // the earlier handwheel, grips cut after the spokes (and through them)
-            var file = Path.Combine(dir!, "tests", "FeatherCad.Tests", "models", "spoked-handwheel-grips-last.fcprt");
+            var file = Path.Combine(dir!, "tests", "FeatherCad.Tests", "models", "spoked-handwheel-grips-last.sprt");
             foreach (var a in new[] { "3", "9" })
             {
                 var doc = CadDocument.Load(file);
@@ -165,7 +165,7 @@ static class NativeBoolTests
         {
             var dir = AppContext.BaseDirectory;
             while (dir != null && !Directory.Exists(Path.Combine(dir, "samples"))) dir = Path.GetDirectoryName(dir);
-            var file = Path.Combine(dir!, "samples", "demos", "spoked-handwheel.fcprt");
+            var file = Path.Combine(dir!, "samples", "demos", "spoked-handwheel.sprt");
             double Vol(CadDocument d, out RegenResult r)
             {
                 r = new Regenerator().Rebuild(d);
@@ -189,7 +189,7 @@ static class NativeBoolTests
         {
             var dir = AppContext.BaseDirectory;
             while (dir != null && !Directory.Exists(Path.Combine(dir, "samples"))) dir = Path.GetDirectoryName(dir);
-            var doc = CadDocument.Load(Path.Combine(dir!, "samples", "demos", "spoked-handwheel.fcprt"));
+            var doc = CadDocument.Load(Path.Combine(dir!, "samples", "demos", "spoked-handwheel.sprt"));
             // progress: every feature, and the instances inside a pattern
             var seen = new List<RegenProgress>();
             var regen = new Regenerator();
@@ -223,7 +223,7 @@ static class NativeBoolTests
             // the body); the outcome must not depend on scheduling
             var dir = AppContext.BaseDirectory;
             while (dir != null && !Directory.Exists(Path.Combine(dir, "samples"))) dir = Path.GetDirectoryName(dir);
-            var file = Path.Combine(dir!, "samples", "demos", "spoked-handwheel.fcprt");
+            var file = Path.Combine(dir!, "samples", "demos", "spoked-handwheel.sprt");
             string? first = null;
             for (int run = 0; run < 3; run++)
             {

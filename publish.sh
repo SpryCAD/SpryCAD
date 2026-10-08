@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds self-contained, ReadyToRun-compiled FeatherCAD into ./publish/<rid>
+# Builds self-contained, ReadyToRun-compiled SpryCAD into ./publish/<rid>
 # Usage: ./publish.sh [rid...]   e.g. ./publish.sh linux-x64 osx-arm64 win-x64
 set -euo pipefail
 cd "$(dirname "$0")"

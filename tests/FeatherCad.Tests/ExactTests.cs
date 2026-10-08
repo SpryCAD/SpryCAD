@@ -40,7 +40,7 @@ static class ExactTests
 
     public static void Run(TestRunner t)
     {
-        var dir = Path.Combine(Path.GetTempPath(), "feathercad-tests");
+        var dir = Path.Combine(Path.GetTempPath(), "sprycad-tests");
         Directory.CreateDirectory(dir);
         void Step(string name, Solid s)
         {

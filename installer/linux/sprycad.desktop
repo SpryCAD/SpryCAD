@@ -1,12 +1,12 @@
 [Desktop Entry]
 Type=Application
-Name=FeatherCAD
+Name=SpryCAD
 GenericName=Parametric 3D CAD
 Comment=Fast, lightweight parametric 3D CAD
 Exec=@EXEC@ %f
-Icon=feathercad
+Icon=sprycad
 Terminal=false
 Categories=Graphics;Engineering;3DGraphics;
-MimeType=application/x-feathercad-part;application/x-feathercad-assembly;
+MimeType=application/x-sprycad-part;application/x-sprycad-assembly;
 Keywords=CAD;3D;parametric;STEP;STL;
-StartupWMClass=FeatherCAD
+StartupWMClass=SpryCAD

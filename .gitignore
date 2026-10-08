@@ -10,8 +10,8 @@ publish/
 # STEP files written next to the demos by `verify-demos`
 samples/demos/*.step
 # personal working parts (kept out of the repo)
-samples/FailedShell.fcprt
-samples/bracket-kcj*.fcprt
-samples/demos/spur-gear-chamfer.fcprt
-samples/demos/spur-gear-nice.fcprt
-samples/demos/spoked-handwheel-FilletAfter.fcprt
+samples/FailedShell.sprt
+samples/bracket-kcj*.sprt
+samples/demos/spur-gear-chamfer.sprt
+samples/demos/spur-gear-nice.sprt
+samples/demos/spoked-handwheel-FilletAfter.sprt

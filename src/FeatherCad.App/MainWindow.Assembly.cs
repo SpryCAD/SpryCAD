@@ -23,7 +23,7 @@ public partial class MainWindow : IAssemblyHost
     AssemblyTree _asmTree = null!;
     string? _asmHover;
 
-    static readonly FilePickerFileType AssemblyType = new("FeatherCAD Assembly") { Patterns = new[] { "*" + AssemblyDocument.FileExtension } };
+    static readonly FilePickerFileType AssemblyType = new("SpryCAD Assembly") { Patterns = new[] { "*" + AssemblyDocument.FileExtension } };
 
     static bool IsAssembly(string path) => Path.GetExtension(path).Equals(AssemblyDocument.FileExtension, StringComparison.OrdinalIgnoreCase);
 
@@ -216,7 +216,7 @@ public partial class MainWindow : IAssemblyHost
     void OnAssemblyChanged()
     {
         if (Asm is not { } a) return;
-        Title = "FeatherCAD - " + a.Title;
+        Title = "SpryCAD - " + a.Title;
         UpdateUndoButtons();
         RefreshAssemblyScene();
         RebuildTree();
@@ -421,7 +421,7 @@ public partial class MainWindow : IAssemblyHost
             var f = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
             {
                 Title = "Save Assembly As",
-                DefaultExtension = "fcasm",
+                DefaultExtension = "sasm",
                 SuggestedFileName = (path != null ? Path.GetFileNameWithoutExtension(path) : a.UntitledName) + AssemblyDocument.FileExtension,
                 FileTypeChoices = new[] { AssemblyType },
             });
@@ -441,7 +441,7 @@ public partial class MainWindow : IAssemblyHost
     async Task<bool> ConfirmDiscardAssembly()
     {
         if (Asm is not { Dirty: true } a) return true;
-        var r = await Dialogs.YesNoCancel(this, "FeatherCAD", $"Save changes to {a.Title.TrimEnd(' ', '*')}?");
+        var r = await Dialogs.YesNoCancel(this, "SpryCAD", $"Save changes to {a.Title.TrimEnd(' ', '*')}?");
         if (r == null) return false;
         if (r == true) return await SaveAssembly(false);
         return true;

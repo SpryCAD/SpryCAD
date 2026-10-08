@@ -1,5 +1,5 @@
 {
-  "format": "FeatherCAD",
+  "format": "SpryCAD",
   "formatVersion": 1,
   "units": "MMGS",
   "equations": [
@@ -488,14 +488,104 @@
       "id": "F17",
       "name": "Hole2",
       "suppressed": false
+    },
+    {
+      "$type": "fillet",
+      "edges": [
+        {
+          "a": "F9.I.F2.End",
+          "b": "F9.I.F2.S.L4",
+          "body": "F2",
+          "hint": [
+            60,
+            2,
+            18
+          ]
+        },
+        {
+          "a": "F9.I.F2.End",
+          "b": "F9.I.F2.S.L7",
+          "body": "F2",
+          "hint": [
+            2,
+            30,
+            18
+          ]
+        },
+        {
+          "a": "F9.I.F2.End",
+          "b": "F9.I.F2.S.L6",
+          "body": "F2",
+          "hint": [
+            58.5,
+            58,
+            18
+          ]
+        },
+        {
+          "a": "F9.I.F2.End",
+          "b": "F9.I.F5.0.S.F",
+          "body": "F2",
+          "hint": [
+            117.120639559,
+            57.120639559,
+            18
+          ]
+        },
+        {
+          "a": "F9.I.F2.End",
+          "b": "F9.I.F2.S.L5",
+          "body": "F2",
+          "hint": [
+            118,
+            28.5,
+            18
+          ]
+        },
+        {
+          "a": "F9.I.F2.End",
+          "b": "F9.I.F4.S.C2",
+          "body": "F2",
+          "hint": [
+            40,
+            30,
+            18
+          ]
+        },
+        {
+          "a": "F9.I.F2.End",
+          "b": "F9.I.F7.0.R.CB",
+          "body": "F2",
+          "hint": [
+            62.5,
+            30,
+            18
+          ]
+        },
+        {
+          "a": "F9.I.F2.End",
+          "b": "F9.I.F8.1.F7.0.R.CB",
+          "body": "F2",
+          "hint": [
+            62.5,
+            10,
+            18
+          ]
+        }
+      ],
+      "radius": "2",
+      "tangentPropagation": true,
+      "id": "F18",
+      "name": "Fillet4",
+      "suppressed": false
     }
   ],
-  "nextFeatureId": 18,
+  "nextFeatureId": 19,
   "nameCounters": {
     "Sketch": 5,
     "Boss-Extrude": 3,
     "Cut-Extrude": 1,
-    "Fillet": 3,
+    "Fillet": 4,
     "Hole": 2,
     "LPattern": 1,
     "Shell": 1,
@@ -506,5 +596,5 @@
     0.76,
     0.8
   ],
-  "activeCount": 14
+  "activeCount": 15
 }

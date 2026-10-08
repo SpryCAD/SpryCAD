@@ -297,7 +297,7 @@ public static class Dialogs
     {
         var ok = new Button { Content = "OK", IsDefault = true, IsCancel = true };
         var sp = new StackPanel { Spacing = 6 };
-        sp.Children.Add(new TextBlock { Text = "FeatherCAD", FontSize = 22, FontWeight = FontWeight.Bold, Foreground = new SolidColorBrush(Color.FromRgb(180, 35, 42)) });
+        sp.Children.Add(new TextBlock { Text = "SpryCAD", FontSize = 22, FontWeight = FontWeight.Bold, Foreground = new SolidColorBrush(Color.FromRgb(15, 154, 131)) });
         // from git at build time (FeatherCadGitVersion in the .csproj): "0.0.1-dev.3+aeb382f[.dirty]"
         var info = System.Reflection.Assembly.GetEntryAssembly()?
             .GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
@@ -308,10 +308,10 @@ public static class Dialogs
         ToolTip.SetTip(verText, info);
         sp.Children.Add(verText);
         sp.Children.Add(new TextBlock { Text = "Fast, lightweight, open source parametric 3D CAD.", TextWrapping = TextWrapping.Wrap });
-        sp.Children.Add(new TextBlock { Text = "Own plane-based B-rep kernel in C#, Avalonia UI, OpenGL viewport.\nNative formats: .fcprt parts (JSON), .fcasm assemblies. Export: STEP AP214, STL.", TextWrapping = TextWrapping.Wrap, Foreground = Brushes.DimGray });
+        sp.Children.Add(new TextBlock { Text = "Own plane-based B-rep kernel in C#, Avalonia UI, OpenGL viewport.\nNative formats: .sprt parts (JSON), .sasm assemblies. Export: STEP AP214, STL.", TextWrapping = TextWrapping.Wrap, Foreground = Brushes.DimGray });
         sp.Children.Add(new TextBlock { Text = "License: MIT", Foreground = Brushes.DimGray });
         sp.Children.Add(Buttons(ok));
-        var w = MakeWindow("About FeatherCAD", sp, 420);
+        var w = MakeWindow("About SpryCAD", sp, 420);
         ok.Click += (_, _) => w.Close();
         await w.ShowDialog(owner);
     }

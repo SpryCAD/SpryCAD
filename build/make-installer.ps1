@@ -1,6 +1,6 @@
 # Windows installer build: publish the app into .\publish\win-x64, generate the demo parts into .\publish\demos,
-# then compile installer\feathercad.iss into
-#   publish\FeatherCAD_setup_v<version>.exe
+# then compile installer\sprycad.iss into
+#   publish\SpryCAD_setup_v<version>.exe
 # Needs Inno Setup 6 (https://jrsoftware.org/isdl.php, or: winget install JRSoftware.InnoSetup), and the Visual Studio
 # C++ build tools for the Explorer thumbnail handler (see build\make-thumbs.ps1).
 # Run from anywhere:  pwsh -File build\make-installer.ps1
@@ -48,7 +48,7 @@ Write-Host "== publishing to $out ==" -ForegroundColor Cyan
     "-p:Version=$ver" "-p:FileVersion=$verNum" -o $out
 if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed with exit code $LASTEXITCODE" }
 
-# 3b) The Explorer thumbnail handler, next to the app (the installer registers it for .fcprt files).
+# 3b) The Explorer thumbnail handler, next to the app (the installer registers it for .sprt files).
 & (Join-Path $PSScriptRoot 'make-thumbs.ps1') -Out $out
 
 # 4) Generate the parametric demo parts fresh (tests/FeatherCad.Tests/Demos.cs), so the installer ships the
@@ -60,9 +60,9 @@ Write-Host "== generating demo parts into $demos ==" -ForegroundColor Cyan
 if ($LASTEXITCODE -ne 0) { throw "demo generation failed with exit code $LASTEXITCODE" }
 
 # 5) Compile.
-$iss = Join-Path $root 'installer\feathercad.iss'
+$iss = Join-Path $root 'installer\sprycad.iss'
 Write-Host "== compiling installer ($iscc) ==" -ForegroundColor Cyan
 & $iscc "/DAppVer=$ver" "/DAppVerNum=$verNum" $iss
 if ($LASTEXITCODE -ne 0) { throw "ISCC failed with exit code $LASTEXITCODE" }
 
-Write-Host "== installer ready -> $(Join-Path $root "publish\FeatherCAD_setup_v$ver.exe") ==" -ForegroundColor Green
+Write-Host "== installer ready -> $(Join-Path $root "publish\SpryCAD_setup_v$ver.exe") ==" -ForegroundColor Green

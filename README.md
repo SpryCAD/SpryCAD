@@ -1,4 +1,4 @@
-# FeatherCAD
+# SpryCAD
 
 Fast, lightweight, open-source **parametric 3D CAD** with a SolidWorks-style workflow.
 Pure C# — its own B-rep geometry kernel, an Avalonia UI and an OpenGL viewport — so it runs
@@ -26,7 +26,7 @@ natively on **Windows, Linux and macOS** with no browser, no Electron and no nat
   plane–tilted cone, …) the fillet is the pipe swept by the ball, its centre solved exactly on the faces'
   offset surfaces (within 1e-8 mm; it reproduces the exact torus of a plane/cylinder fillet to 2e-9 mm), and
   exported to STEP as a fitted B-spline surface. Fillets and chamfers can be patterned and mirrored like cuts.
-- **Open formats**: native `.fcprt` files are readable, diffable JSON (or a ZIP holding that JSON when a part embeds
+- **Open formats**: native `.sprt` files are readable, diffable JSON (or a ZIP holding that JSON when a part embeds
   other files); export to **STEP AP214** and **binary STL**.
 
 ## Features
@@ -39,9 +39,9 @@ natively on **Windows, Linux and macOS** with no browser, no Electron and no nat
 | Solver | Numerical constraint solver with minimum-change dragging and degrees-of-freedom analysis (under / fully / over defined) |
 | Features | Extruded Boss/Base & Cut (Blind, Through All, Through All–Both, Mid Plane, two directions, merge result), Revolved Boss & Cut, Swept Boss & Cut (a profile along tangent lines and arcs, or a circle; exact planes, cylinders, cones, spheres and tori), Helical Boss & Cut (a profile swept along a helix about a centerline, a cylindrical face, an edge or an axis: springs, coils; exact screw surfaces; an optional straight run-out at the end), Thread (ISO metric on a shaft or in a hole: Blind, Up To Next, Through All, a lead-in chamfer, a relief groove or a run-out out of the side, a fit clearance for 3D printing; modeled or cosmetic, with a View override for a lightweight display, exports always modeled), Fillet, Chamfer, Hole Wizard (simple, counterbore, countersink, standard metric sizes, drill point), Shell, Linear Pattern (2 directions), Circular Pattern, Mirror, Reference Plane, Combine (add/subtract/common) |
 | Booleans | Union, subtract, intersect between bodies; multi-body parts |
-| Assemblies | `.fcasm` assemblies in document tabs (as SolidWorks): components linked to part files or embedded (a small assembly in one file), fixed or floating, lightweight from the assembly's cache; **mates** (Coincident, Concentric, Parallel, Perpendicular, Tangent, Lock, Distance and Angle with optional limits; mechanical Gear, its ratio from the round faces' diameters, and Screw, its lead per turn; faces of components and the assembly's origin planes) solved together, components dragged only as their mates let them, conflicts shown in red. Parts are found by identity (a GUID each part keeps), wherever they went: renamed, moved, a folder moved; a missing part shows from the cache (its mates still solve) and is listed, never asked about; STEP assemblies open as assemblies (each part embedded once, each use placed as the file has it, locked to the first component) and assemblies export as STEP assemblies |
+| Assemblies | `.sasm` assemblies in document tabs (as SolidWorks): components linked to part files or embedded (a small assembly in one file), fixed or floating, lightweight from the assembly's cache; **mates** (Coincident, Concentric, Parallel, Perpendicular, Tangent, Lock, Distance and Angle with optional limits; mechanical Gear, its ratio from the round faces' diameters, and Screw, its lead per turn; faces of components and the assembly's origin planes) solved together, components dragged only as their mates let them, conflicts shown in red. Parts are found by identity (a GUID each part keeps), wherever they went: renamed, moved, a folder moved; a missing part shows from the cache (its mates still solve) and is listed, never asked about; STEP assemblies open as assemblies (each part embedded once, each use placed as the file has it, locked to the first component) and assemblies export as STEP assemblies |
 | Tools | Equations / global variables, Mass Properties (volume, area, mass, center of mass, bounding box), Options (units MMGS/IPS, part color, wheel direction, perspective) |
-| Files | `.fcprt` parts and `.fcasm` assemblies, open/save, autosave + recovery, exact STEP (analytic surfaces) and STL export |
+| Files | `.sprt` parts and `.sasm` assemblies, open/save, autosave + recovery, exact STEP (analytic surfaces) and STL export |
 | View | Standard views (animated), Normal To, zoom to fit, Shaded With Edges / Shaded / Hidden Lines Visible / Wireframe, perspective, planes toggle |
 
 ## Controls (SolidWorks defaults)
@@ -71,7 +71,7 @@ Requires the [.NET 10 SDK](https://dotnet.microsoft.com/download).
 dotnet run --project src/FeatherCad.App -c Release
 ```
 
-Open a sample: `dotnet run --project src/FeatherCad.App -c Release -- samples/bracket.fcprt`
+Open a sample: `dotnet run --project src/FeatherCad.App -c Release -- samples/bracket.sprt`
 
 ### Parametric demo models (`samples/demos`)
 
@@ -81,20 +81,20 @@ as designed and with several variables changed, and exports to a valid exact STE
 
 | File | What it shows | Try changing |
 |---|---|---|
-| `pipe-flange.fcprt` | Revolved weld-neck flange, bolt hole circular-patterned on the pitch circle, hub fillet, edge chamfers | `N` (bolt count), `PCD`, `OD`, `HubH`, `BoltD` |
-| `enclosure.fcprt` | Rounded box, shell, rim fillet, screw bosses (2-D pattern) with holes, vent slots patterned and mirrored to the opposite wall | `L`, `W`, `H`, `Wall`, `VentN`, `VentP` |
-| `heat-sink.fcprt` | Base plate with N fins whose pitch is derived from N (`(L-T)/(N-1)`), counterbored mounting holes | `N`, `T`, `FinH`, `L` |
-| `stepped-shaft.fcprt` | Revolved stepped shaft, shoulder fillets, chamfers, rounded-end keyway, cross hole | `D1`, `D2`, `L2`, `KeyW`, `KeyL` |
-| `l-bracket.fcprt` | Mid-plane extruded L profile, gusset mirrored to both sides, counterbored and plain holes, outer bend fillet | `A`, `Bh`, `Wb`, `T`, `Gs`, `HoleSp` |
-| `spur-gear.fcprt` | Involute spur gear: one tooth gap (each flank three arcs through exact involute points, within ~2 µm of the true involute at module 2) patterned `z` times, keyed bore, recessed web with lightening holes; derived variables (`rb`, `ra`, `rf`, ...) in the equations | `m`, `z`, `PA`, `b`, `Bore` |
-| `hand-wheel.fcprt` | Cast-iron hand wheel: round rim, dished (raised) hub, slanted spokes extruded on a plane normal to their centreline, keyed bore, spinner knob on the rim as a separate body | `D`, `Dish`, `NS` (spokes), `SpokeD`, `KnobL` |
-| `spoked-handwheel.fcprt` | Hand wheel with filleted joints: round rim with finger scallops on its inner side, straight spokes, keyed hub. Every joint is a rolling-ball fillet between curved faces (spoke/rim cylinder–torus, spoke/hub cylinder–cylinder, convex scallop edges), made once on the seed spoke and scallop and patterned with them | `NS` (spokes), `NG` (grips per gap), `D`, `RimT`, `SpokeD`, `Rf` |
-| `bent-tube.fcprt` | Tube swept along a straight leg, a 90° bend and a second leg (exact cylinders and a torus), bolted flange at its start with a patterned hole circle | `R` (bend radius), `L1`, `L2`, `OD`, `ID`, `N`, `PCD` |
-| `bolt-and-nut.fcprt` | Printable M10 bolt and nut: hex head and shank threaded by the Thread feature (external), and a separate hex nut threaded through its hole (internal), both with a fit clearance | `D`, `P` (size and pitch), `L`, `Clr` (clearance), `NutH`, `S` |
-| `acme-lead-screw.fcprt` | Three-start Acme lead screw and its nut: a 29° trapezoidal thread space swept by a Helical Cut of lead N·P and circularly patterned N times about the axis, a journal at one end and a lead-in chamfer at the other; beside it a hex nut (separate body) threaded the same way with the screw's tooth plus a clearance, which fits the screw where it stands | `D`, `P` (pitch), `N` (starts), `L`, `J`, `JL`, `S`, `NutL`, `Clr` |
-| `hinge.fcasm` | A hinge in one file: two of the same leaf (knuckle along half an edge, notched for the other's) and the pin, all embedded, printable clearances; mated so the second leaf swings about the pin (drag it) | `L`, `W`, `T`, `KD`, `PinD`, `Clr` (in the embedded Leaf) |
-| `lead-screw.fcasm` | The three-start Acme screw and its nut as two parts (embedded), held by a Screw mate of the thread's 12 mm lead: drag the nut and it turns as it travels, fitting the thread all the way | (in the embedded parts) |
-| `gears.fcasm` | Two spur gears meshing (0.1 mm backlash), their axes mated to the origin planes and a Gear mate between them: turn one and the other turns the other way | (in the embedded Gear) |
+| `pipe-flange.sprt` | Revolved weld-neck flange, bolt hole circular-patterned on the pitch circle, hub fillet, edge chamfers | `N` (bolt count), `PCD`, `OD`, `HubH`, `BoltD` |
+| `enclosure.sprt` | Rounded box, shell, rim fillet, screw bosses (2-D pattern) with holes, vent slots patterned and mirrored to the opposite wall | `L`, `W`, `H`, `Wall`, `VentN`, `VentP` |
+| `heat-sink.sprt` | Base plate with N fins whose pitch is derived from N (`(L-T)/(N-1)`), counterbored mounting holes | `N`, `T`, `FinH`, `L` |
+| `stepped-shaft.sprt` | Revolved stepped shaft, shoulder fillets, chamfers, rounded-end keyway, cross hole | `D1`, `D2`, `L2`, `KeyW`, `KeyL` |
+| `l-bracket.sprt` | Mid-plane extruded L profile, gusset mirrored to both sides, counterbored and plain holes, outer bend fillet | `A`, `Bh`, `Wb`, `T`, `Gs`, `HoleSp` |
+| `spur-gear.sprt` | Involute spur gear: one tooth gap (each flank three arcs through exact involute points, within ~2 µm of the true involute at module 2) patterned `z` times, keyed bore, recessed web with lightening holes; derived variables (`rb`, `ra`, `rf`, ...) in the equations | `m`, `z`, `PA`, `b`, `Bore` |
+| `hand-wheel.sprt` | Cast-iron hand wheel: round rim, dished (raised) hub, slanted spokes extruded on a plane normal to their centreline, keyed bore, spinner knob on the rim as a separate body | `D`, `Dish`, `NS` (spokes), `SpokeD`, `KnobL` |
+| `spoked-handwheel.sprt` | Hand wheel with filleted joints: round rim with finger scallops on its inner side, straight spokes, keyed hub. Every joint is a rolling-ball fillet between curved faces (spoke/rim cylinder–torus, spoke/hub cylinder–cylinder, convex scallop edges), made once on the seed spoke and scallop and patterned with them | `NS` (spokes), `NG` (grips per gap), `D`, `RimT`, `SpokeD`, `Rf` |
+| `bent-tube.sprt` | Tube swept along a straight leg, a 90° bend and a second leg (exact cylinders and a torus), bolted flange at its start with a patterned hole circle | `R` (bend radius), `L1`, `L2`, `OD`, `ID`, `N`, `PCD` |
+| `bolt-and-nut.sprt` | Printable M10 bolt and nut: hex head and shank threaded by the Thread feature (external), and a separate hex nut threaded through its hole (internal), both with a fit clearance | `D`, `P` (size and pitch), `L`, `Clr` (clearance), `NutH`, `S` |
+| `acme-lead-screw.sprt` | Three-start Acme lead screw and its nut: a 29° trapezoidal thread space swept by a Helical Cut of lead N·P and circularly patterned N times about the axis, a journal at one end and a lead-in chamfer at the other; beside it a hex nut (separate body) threaded the same way with the screw's tooth plus a clearance, which fits the screw where it stands | `D`, `P` (pitch), `N` (starts), `L`, `J`, `JL`, `S`, `NutL`, `Clr` |
+| `hinge.sasm` | A hinge in one file: two of the same leaf (knuckle along half an edge, notched for the other's) and the pin, all embedded, printable clearances; mated so the second leaf swings about the pin (drag it) | `L`, `W`, `T`, `KD`, `PinD`, `Clr` (in the embedded Leaf) |
+| `lead-screw.sasm` | The three-start Acme screw and its nut as two parts (embedded), held by a Screw mate of the thread's 12 mm lead: drag the nut and it turns as it travels, fitting the thread all the way | (in the embedded parts) |
+| `gears.sasm` | Two spur gears meshing (0.1 mm backlash), their axes mated to the origin planes and a Gear mate between them: turn one and the other turns the other way | (in the embedded Gear) |
 
 The demos are generated by `tests/FeatherCad.Tests/Demos.cs` through the same document API the UI uses
 (`dotnet run --project tests/FeatherCad.Tests -c Release -- demos samples/demos`).
@@ -107,7 +107,7 @@ The demos are generated by `tests/FeatherCad.Tests/Demos.cs` through the same do
 ```powershell
 ./publish.ps1 win-x64                  # Windows (PowerShell)
 ```
-Output goes to `publish/<rid>/` — copy the folder anywhere and run `FeatherCAD(.exe)`.
+Output goes to `publish/<rid>/` — copy the folder anywhere and run `SpryCAD(.exe)`.
 
 ### Installers
 
@@ -115,14 +115,14 @@ Both publish the app, regenerate the demo parts (failing on a broken one) and in
 is `<Version>` in `src/FeatherCad.App/FeatherCad.App.csproj`, or pass one.
 
 ```powershell
-build/make-installer.ps1               # Windows: publish/FeatherCAD-Setup-<version>.exe (needs Inno Setup 6)
+build/make-installer.ps1               # Windows: publish/SpryCAD-Setup-<version>.exe (needs Inno Setup 6)
 ```
 ```bash
-build/make-linux-package.sh            # Linux: publish/FeatherCAD-<version>-linux-x64.tar.gz (also runs in Git Bash)
+build/make-linux-package.sh            # Linux: publish/SpryCAD-<version>-linux-x64.tar.gz (also runs in Git Bash)
 ```
-The Windows setup installs per user by default and opens `.fcprt` parts and `.fcasm` assemblies with FeatherCAD, each with its own icon. On Linux, unpack the
-tarball and run `./install.sh`: it installs into `~/.local/share/feathercad` with a menu entry, icon, `.fcprt`
-file type and a `feathercad` command (`./uninstall.sh` removes them).
+The Windows setup installs per user by default and opens `.sprt` parts and `.sasm` assemblies with SpryCAD, each with its own icon. On Linux, unpack the
+tarball and run `./install.sh`: it installs into `~/.local/share/sprycad` with a menu entry, icon, `.sprt`
+file type and a `sprycad` command (`./uninstall.sh` removes them).
 
 CI (`.github/workflows/packages.yml`) publishes every push to master to the **dev** channel and every version tag
 to **stable**: a signed apt repository, the downloads, and an update feed (`updates/<channel>.json`), all on
@@ -131,9 +131,9 @@ latest master build):
 
 ```bash
 sudo install -d -m 0755 /etc/apt/keyrings
-curl -fsSL https://<packages-host>/apt/feathercad-archive-keyring.gpg | sudo tee /etc/apt/keyrings/feathercad.gpg > /dev/null
-echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/feathercad.gpg] https://<packages-host>/apt stable main" | sudo tee /etc/apt/sources.list.d/feathercad.list
-sudo apt update && sudo apt install feathercad
+curl -fsSL https://<packages-host>/apt/sprycad-archive-keyring.gpg | sudo tee /etc/apt/keyrings/sprycad.gpg > /dev/null
+echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/sprycad.gpg] https://<packages-host>/apt stable main" | sudo tee /etc/apt/sources.list.d/sprycad.list
+sudo apt update && sudo apt install sprycad
 ```
 
 ### Tests
@@ -149,9 +149,9 @@ Performance tools:
 
 ```bash
 # warm/cold rebuild, per-feature times, profile by stage, and the cost of editing each feature's parameter
-dotnet run --project tests/FeatherCad.Tests -c Release -- bench path/to/model.fcprt 10
+dotnet run --project tests/FeatherCad.Tests -c Release -- bench path/to/model.sprt 10
 # rebuild with one parameter changed, writing the boolean trace to %TEMP%/fc-repro-trace.txt
-dotnet run --project tests/FeatherCad.Tests -c Release -- repro path/to/model.fcprt Fillet2 Radius 2.5
+dotnet run --project tests/FeatherCad.Tests -c Release -- repro path/to/model.sprt Fillet2 Radius 2.5
 ```
 `Kernel.Prof` is a lightweight stage profiler (`using (Prof.Time("stage")) ...`, off by default).
 
@@ -168,7 +168,7 @@ src/FeatherCad.Kernel   Geometry kernel (no dependencies)
   IO/                   STEP AP214 and STL writers
 src/FeatherCad.Core     Parametric layer
   Sketch/               Sketch model, constraint solver, profile (region) extraction
-  Model/                Document, features, references (faces/edges/planes), .fcprt serialization
+  Model/                Document, features, references (faces/edges/planes), .sprt serialization
   Regen/                Cached incremental regeneration, reference resolution
   Expr.cs               Expression evaluator for dimensions and equations
 src/FeatherCad.App      Avalonia desktop UI
@@ -180,7 +180,7 @@ tests/FeatherCad.Tests  Kernel + core test runner
 
 ### The kernel
 
-FeatherCAD has its own **exact boundary-representation kernel** (`Kernel/Native`), written for speed and
+SpryCAD has its own **exact boundary-representation kernel** (`Kernel/Native`), written for speed and
 robustness:
 
 - **Exact geometry.** A solid is faces → loops → edges → vertices; every face lies on an exact surface and every
@@ -214,17 +214,20 @@ robustness:
 - An older faceted kernel (`Kernel/Brep`, `Kernel/Csg`) remains as a fallback for the few operations the
   exact kernel cannot do yet.
 
-### The `.fcprt` format
+### The `.sprt` format
+
+SpryCAD files: `.sprt` parts, `.sasm` assemblies, and `.sdrw` (reserved for drawings). The app icon and the
+file type icons are drawn by `build/make-icon.ps1`.
 
 A part is a JSON document: units, the part colour, equations, and the ordered feature list with sketches
 (points, entities, constraints and dimension expressions). Features store what was asked for (expressions,
 face and edge references by persistent name plus a hint point), never computed geometry: the model is rebuilt
-on open. An `.fcprt` file is either this JSON as plain text, or a container (below) that holds it as
+on open. An `.sprt` file is either this JSON as plain text, or a container (below) that holds it as
 `model.json`. Example:
 
 ```json
 {
-  "format": "FeatherCAD", "formatVersion": 1, "units": "MMGS",
+  "format": "SpryCAD", "formatVersion": 1, "units": "MMGS",
   "equations": [ { "name": "W", "expr": "120" } ],
   "features": [
     { "$type": "sketch", "id": "F1", "name": "Sketch1", "plane": { "std": "Front" }, "sketch": { "...": "..." } },
@@ -237,11 +240,11 @@ on open. An `.fcprt` file is either this JSON as plain text, or a container (bel
 A part that embeds other files (e.g. an imported model) is saved as a **container**: a ZIP archive with the same
 JSON as `model.json`, the embedded files under `attachments/` (listed with size and SHA-256 in `model.json`, and
 verified on open) and a `thumbnail.png` preview. Options → "Always save parts as containers" saves every part
-that way. Both kinds use the `.fcprt` extension and are told apart by their first bytes. To diff containers in git:
+that way. Both kinds use the `.sprt` extension and are told apart by their first bytes. To diff containers in git:
 
 ```bash
-git config diff.fcprt.textconv 'sh -c "unzip -p \"$0\" model.json 2>/dev/null || cat \"$0\""'
-# and in .gitattributes:  *.fcprt diff=fcprt
+git config diff.sprt.textconv 'sh -c "unzip -p \"$0\" model.json 2>/dev/null || cat \"$0\""'
+# and in .gitattributes:  *.sprt diff=sprt
 ```
 
 ## Current limitations
@@ -312,7 +315,7 @@ Check items off as they land.
 ### Data exchange
 
 - [x] STEP import of exact solids (analytic and B-spline faces)
-- [x] Embedded files in .fcprt containers
+- [x] Embedded files in .sprt containers
 - [x] STEP assemblies (placed instances: imported as assemblies, exported from them)
 - [ ] STEP colours and layers; AP242 with PMI
 - [ ] IGES and Parasolid (x_t)

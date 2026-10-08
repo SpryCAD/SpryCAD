@@ -50,7 +50,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: windows-installer
-          path: publish/FeatherCAD_setup_v*.exe
+          path: publish/SpryCAD_setup_v*.exe
           if-no-files-found: error
           retention-days: 1
 
@@ -68,20 +68,20 @@ jobs:
       # a quick check that the .deb is well formed and holds what it should
       - name: Inspect .deb
         run: |
-          deb=$(ls publish/feathercad_*_amd64.deb)
+          deb=$(ls publish/sprycad_*_amd64.deb)
           dpkg-deb --info "$deb"
           dpkg-deb --contents "$deb" > contents.txt
-          for f in ./opt/feathercad/FeatherCAD ./usr/bin/feathercad ./usr/share/applications/feathercad.desktop \
-                   ./usr/share/mime/packages/feathercad.xml ./usr/share/icons/hicolor/256x256/apps/feathercad.png; do
+          for f in ./opt/sprycad/SpryCAD ./usr/bin/sprycad ./usr/share/applications/sprycad.desktop \
+                   ./usr/share/mime/packages/sprycad.xml ./usr/share/icons/hicolor/256x256/apps/sprycad.png; do
             grep -q " $f\( \|$\)" contents.txt || { echo "missing from the .deb: $f"; exit 1; }
           done
-          grep ' ./opt/feathercad/FeatherCAD$' contents.txt | grep -q '^-rwxr-xr-x root/root' || { echo "FeatherCAD is not root-owned 755"; exit 1; }
+          grep ' ./opt/sprycad/SpryCAD$' contents.txt | grep -q '^-rwxr-xr-x root/root' || { echo "SpryCAD is not root-owned 755"; exit 1; }
       - uses: actions/upload-artifact@v4
         with:
           name: linux-packages
           path: |
-            publish/FeatherCAD-*-linux-x64.tar.gz
-            publish/feathercad_*_amd64.deb
+            publish/SpryCAD-*-linux-x64.tar.gz
+            publish/sprycad_*_amd64.deb
           if-no-files-found: error
           retention-days: 1
 
@@ -129,9 +129,9 @@ jobs:
       - name: Publish to R2
         run: |
           python3 build/publish-r2.py --channel "$CHANNEL" \
-            --deb packages/feathercad_*_amd64.deb \
-            --tarball packages/FeatherCAD-*-linux-x64.tar.gz \
-            --installer packages/FeatherCAD_setup_v*.exe \
+            --deb packages/sprycad_*_amd64.deb \
+            --tarball packages/SpryCAD-*-linux-x64.tar.gz \
+            --installer packages/SpryCAD_setup_v*.exe \
             --notes-out links.md
           cat links.md >> "$GITHUB_STEP_SUMMARY"
       # the release carries links to R2, not the files
@@ -147,5 +147,5 @@ jobs:
             gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --notes-file links.md --draft=false --prerelease=$pre
           else
             gh release create "$tag" --repo "$GITHUB_REPOSITORY" --verify-tag --notes-file links.md --generate-notes \
-              --prerelease=$pre --title "FeatherCAD ${tag#v}"
+              --prerelease=$pre --title "SpryCAD ${tag#v}"
           fi

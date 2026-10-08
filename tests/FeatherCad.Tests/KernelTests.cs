@@ -291,7 +291,7 @@ static class KernelTests
             var b = Builders.Box(new Vec3(0, 0, 0), new Vec3(100, 50, 20));
             var c = Builders.Cylinder(new Vec3(50, 25, -5), Vec3.UnitZ, 10, 30, "H");
             var r = Csg.Subtract(b, c);
-            var dir = Path.Combine(Path.GetTempPath(), "feathercad-tests");
+            var dir = Path.Combine(Path.GetTempPath(), "sprycad-tests");
             Directory.CreateDirectory(dir);
             using (var f = File.Create(Path.Combine(dir, "plate.stl"))) StlWriter.Write(f, new[] { r });
             using (var f = File.Create(Path.Combine(dir, "plate.step"))) StepWriter.Write(f, new[] { ("Body", r) }, "plate");

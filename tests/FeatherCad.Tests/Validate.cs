@@ -4,7 +4,7 @@ using FeatherCad.Kernel;
 
 namespace FeatherCad.Tests;
 
-/// <summary><c>-- validate file.fcprt out.step</c>: rebuild, report watertightness/volumes, write the exact STEP.</summary>
+/// <summary><c>-- validate file.sprt out.step</c>: rebuild, report watertightness/volumes, write the exact STEP.</summary>
 static class Validate
 {
     public static int Run(string file, string step)
