@@ -61,7 +61,18 @@ public sealed class SkConvertGroup
     public SpryCad.Core.Model.EdgeRef? Chain { get; set; }
     /// <summary>How many edges it had when converted (fewer entities now: some were deleted, and stay so).</summary>
     public int Edges { get; set; }
-    public SkConvertGroup Clone() { var g = (SkConvertGroup)MemberwiseClone(); g.Chain = Chain?.Clone(); return g; }
+    /// <summary>
+    /// The edges converted (as last seen). An edge known here with no geometry on it had its geometry deleted, and
+    /// it stays so; an edge not known here is new (more teeth, a hole added) and is converted.
+    /// </summary>
+    public List<SpryCad.Core.Model.EdgeRef>? Known { get; set; }
+    public SkConvertGroup Clone()
+    {
+        var g = (SkConvertGroup)MemberwiseClone();
+        g.Chain = Chain?.Clone();
+        g.Known = Known?.Select(k => k.Clone()).ToList();
+        return g;
+    }
 }
 
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "$type")]
@@ -320,6 +331,15 @@ public sealed class Sketch
             if (!Entities.Any(o => o.PointIds.Contains(pid))) { Points.RemoveAll(p => p.Id == pid); removed.Add(pid); }
         }
         Constraints.RemoveAll(c => c.Refs.Any(removed.Contains));
+        // the last of a converted face or chain deleted: the conversion goes (it is not made again)
+        if (e.Link?.Group is { } g) DropGroupIfEmpty(g);
+    }
+
+    void DropGroupIfEmpty(int group)
+    {
+        if (ConvertGroups == null || Entities.Any(x => x.Link?.Group == group)) return;
+        ConvertGroups.RemoveAll(x => x.Id == group);
+        if (ConvertGroups.Count == 0) ConvertGroups = null;
     }
 
     public void DeleteConstraint(int id) => Constraints.RemoveAll(c => c.Id == id);
@@ -331,7 +351,9 @@ public sealed class Sketch
     public void Unlink(SkEntity e)
     {
         if (e.Link == null) return;
+        var group = e.Link.Group;
         e.Link = null;
+        if (group is { } g) DropGroupIfEmpty(g);
         foreach (var pid in e.PointIds)
             if (pid != OriginId && !Entities.Any(o => o.Link != null && o.PointIds.Contains(pid)) && Point(pid) is { } p) p.Fixed = false;
     }

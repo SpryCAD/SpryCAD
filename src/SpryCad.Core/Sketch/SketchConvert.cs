@@ -119,11 +119,13 @@ public static class SketchConvert
     {
         var sk = ix.Sketch;
         g.Id = (sk.ConvertGroups?.Max(x => x.Id) ?? 0) + 1;
+        g.Known = edges.Where(e => e.Uses.Count == 2).Select(e => RefOf(e, g.Body)).ToList();
         (sk.ConvertGroups ??= new()).Add(g);
         var n = edges.Count(e => Edge(ix, frame, e, g.Body, g.Id));
         if (!sk.Entities.Any(x => x.Link?.Group == g.Id)) { sk.ConvertGroups.Remove(g); if (sk.ConvertGroups.Count == 0) sk.ConvertGroups = null; }
         return n;
     }
+
 
     static List<NEdge> FaceEdges(NBody body, string faceName) =>
         body.Faces.Where(f => f.Tag.Name == faceName).SelectMany(f => f.Coedges).Select(c => c.Edge).Distinct().ToList();
@@ -138,26 +140,24 @@ public static class SketchConvert
         return any;
     }
 
+
     /// <summary>
-    /// Places converted geometry where its edges are now (a rebuild). A face or chain converted as a whole whose
-    /// edges changed (more, fewer, other curves) is converted again from what it is now. An edge picked alone and no
-    /// longer in the model leaves its geometry where it was, with a warning.
+    /// Places converted geometry where its edges are now. A face or chain converted as a whole is followed edge by
+    /// edge: geometry on an edge still there is placed on it (relations to it kept), an edge gone takes its geometry
+    /// with it, a new edge (more teeth, a hole added) is converted, and geometry deleted stays deleted. With
+    /// <paramref name="forRebuild"/> (the rebuild's own copy of the sketch) geometry whose face or edge is not in the
+    /// model now (a feature suppressed, as in another configuration) is left out, with a warning; editing the sketch
+    /// it stays as it is.
     /// </summary>
-    public static void Update(Sketch sk, Frame frame, ModelState state, List<string> warnings)
+    public static void Update(Sketch sk, Frame frame, ModelState state, List<string> warnings, bool forRebuild = false)
     {
-        // a group none of whose geometry is left was deleted
-        if (sk.ConvertGroups != null)
-        {
-            sk.ConvertGroups.RemoveAll(g => !sk.Entities.Any(e => e.Link?.Group == g.Id));
-            if (sk.ConvertGroups.Count == 0) sk.ConvertGroups = null;
-        }
         var singles = sk.Entities.Where(x => x.Link is { Group: null }).GroupBy(x => x.Link!.Key).ToList();
         if (singles.Count == 0 && sk.ConvertGroups == null) return;
 
         // the bodies' edges by the faces they join, gathered once (a sketch may hold hundreds of converted edges:
         // looked up one by one, each would scan every edge of the model)
         var names = sk.Entities.Where(x => x.Link != null).SelectMany(x => new[] { x.Link!.Edge.A, x.Link.Edge.B })
-            .Concat(sk.ConvertGroups?.Where(g => g.Chain != null).SelectMany(g => new[] { g.Chain!.A, g.Chain.B }) ?? Enumerable.Empty<string>())
+            .Concat(sk.ConvertGroups?.SelectMany(g => (g.Known ?? new()).Append(g.Chain).OfType<EdgeRef>()).SelectMany(r => new[] { r.A, r.B }) ?? Enumerable.Empty<string>())
             .ToHashSet();
         var index = new Dictionary<(string? body, string a, string b), List<NEdge>>();
         static (string, string) Pair(string a, string b) => string.CompareOrdinal(a, b) <= 0 ? (a, b) : (b, a);
@@ -184,20 +184,21 @@ public static class SketchConvert
         }
         // placed on its edge, the link following the edge (where it is now: found by it next time)
         var pointsById = sk.Points.ToDictionary(p => p.Id);
-        void PlaceAll(List<SkEntity> ents, NEdge e, List<Piece> pieces, string bodyId)
+        var wants = new Dictionary<int, List<(SkEntity e, Vec2 at)>>();
+        void Want(int id, SkEntity x, Vec2 at) => (wants.TryGetValue(id, out var l) ? l : wants[id] = new()).Add((x, at));
+        void PlaceAll(List<SkEntity> ents, EdgeRef r, List<Piece> pieces)
         {
-            var r = RefOf(e, bodyId);
             foreach (var x in ents)
             {
-                Place(pointsById, x, pieces[x.Link!.Piece]);
+                Place(Want, x, pieces[x.Link!.Piece]);
                 x.Link = new SkConvertLink { Edge = r, Piece = x.Link.Piece, Of = x.Link.Of, Group = x.Link.Group };
             }
         }
         bool Fits(List<SkEntity> ents, List<Piece> pieces) =>
             pieces.Count == ents[0].Link!.Of && ents.All(x => x.Link!.Piece < pieces.Count && KindOf(x) == pieces[x.Link.Piece].Kind);
 
-        // what goes, and the edges converted again in its place (after the others are placed: their ends are found
-        // where the neighbours now are)
+        // what goes, and the edges converted (again) in its place: after the others are placed, so their ends are
+        // found where the neighbours now are
         var remove = new List<SkEntity>();
         var add = new List<(NEdge e, string? body, int? group)>();
         foreach (var g in singles)
@@ -205,43 +206,71 @@ public static class SketchConvert
             var ents = g.ToList();
             var link = ents[0].Link!;
             var ne = Find(link.Edge);
-            if (ne == null) { warnings.Add("Converted sketch geometry: its model edge was not found (it stays where it was)."); continue; }
+            if (ne == null)
+            {
+                warnings.Add(forRebuild ? "Converted sketch geometry: its model edge is not in the model (suppressed?); it is left out."
+                                        : "Converted sketch geometry: its model edge is not in the model (suppressed?).");
+                if (forRebuild) remove.AddRange(ents);
+                continue;
+            }
             var pieces = Pieces(frame, ne);
-            if (Fits(ents, pieces)) PlaceAll(ents, ne, pieces, link.Edge.Body ?? "");
+            if (Fits(ents, pieces)) PlaceAll(ents, RefOf(ne, link.Edge.Body ?? ""), pieces);
             else { remove.AddRange(ents); add.Add((ne, link.Edge.Body, null)); }
         }
         foreach (var grp in sk.ConvertGroups?.ToList() ?? new())
         {
-            if (state.FindBody(grp.Body)?.Solid.Native is not { } nb) { warnings.Add("Converted sketch geometry: its body was not found (it stays where it was)."); continue; }
-            var now = grp.Face != null ? FaceEdges(nb, grp.Face)
+            var mine = sk.Entities.Where(x => x.Link?.Group == grp.Id).GroupBy(x => x.Link!.Key).ToDictionary(x => x.Key, x => x.ToList());
+            var nb = state.FindBody(grp.Body)?.Solid.Native;
+            var now = nb == null ? new List<NEdge>()
+                : grp.Face != null ? FaceEdges(nb, grp.Face)
                 : Find(grp.Chain!) is { } start ? TangentChain(nb, start) : new List<NEdge>();
-            if (now.Count == 0) { warnings.Add($"Converted sketch geometry: its {(grp.Face != null ? "face" : "edges")} were not found (it stays where it was)."); continue; }
-            // the same edges as when converted: each placed on its own (geometry deleted since stays deleted)
-            var mine = sk.Entities.Where(x => x.Link?.Group == grp.Id).GroupBy(x => x.Link!.Key).Select(x => x.ToList()).ToList();
-            var taken = new HashSet<NEdge>();
-            var nowSet = now.ToHashSet();
-            var placed = new List<(List<SkEntity> ents, NEdge e, List<Piece> pieces)>();
-            bool same = now.Count == grp.Edges;
-            foreach (var ents in mine)
+            if (now.Count == 0)
             {
-                if (!same) break;
-                var e = Find(ents[0].Link!.Edge, x => nowSet.Contains(x) && !taken.Contains(x));
-                List<Piece>? pieces = e == null ? null : Pieces(frame, e);
-                if (e == null || !Fits(ents, pieces!)) { same = false; break; }
-                taken.Add(e);
-                placed.Add((ents, e, pieces!));
+                var what = grp.Face != null ? "face" : "edges";
+                warnings.Add(forRebuild ? $"Converted sketch geometry: its {what} is not in the model (suppressed?); it is left out."
+                                        : $"Converted sketch geometry: its {what} is not in the model (suppressed?).");
+                if (forRebuild) remove.AddRange(mine.Values.SelectMany(x => x));
+                continue;
             }
-            if (same) { foreach (var (ents, e, pieces) in placed) PlaceAll(ents, e, pieces, grp.Body); continue; }
-            // other edges now: converted again from the face or chain as it is
-            remove.AddRange(mine.SelectMany(x => x));
-            add.AddRange(now.Select(e => (e, (string?)grp.Body, (int?)grp.Id)));
+            // each edge known, found again among the edges now (by the faces it joins, nearest where it was)
+            var known = grp.Known ?? mine.Values.Select(x => x[0].Link!.Edge).ToList(); // converted before edges were kept
+            var nowSet = now.ToHashSet();
+            var taken = new HashSet<NEdge>();
+            var stillKnown = new List<EdgeRef>();
+            foreach (var k in known)
+            {
+                var key = new SkConvertLink { Edge = k }.Key;
+                mine.Remove(key, out var ents);
+                var e = Find(k, x => nowSet.Contains(x) && !taken.Contains(x));
+                if (e == null) { if (ents != null) remove.AddRange(ents); continue; } // gone: its geometry with it
+                taken.Add(e);
+                var r = RefOf(e, grp.Body);
+                stillKnown.Add(r);
+                if (ents == null) continue; // its geometry was deleted: it stays so
+                var pieces = Pieces(frame, e);
+                if (Fits(ents, pieces)) PlaceAll(ents, r, pieces);
+                else { remove.AddRange(ents); add.Add((e, grp.Body, grp.Id)); }
+            }
+            // geometry on no edge known (should not be): converted again below with the new edges
+            remove.AddRange(mine.Values.SelectMany(x => x));
+            // edges not known: new ones
+            foreach (var e in now)
+            {
+                if (taken.Contains(e) || e.Uses.Count != 2) continue;
+                add.Add((e, grp.Body, grp.Id));
+                stillKnown.Add(RefOf(e, grp.Body));
+            }
+            grp.Known = stillKnown;
             grp.Edges = now.Count;
         }
-        if (remove.Count == 0 && add.Count == 0) return;
+        var split = PlacePoints(sk, pointsById, wants);
+        if (remove.Count == 0 && add.Count == 0 && split == 0) return;
         Remove(sk, remove);
         var ix = new Index(sk);
         foreach (var (e, body, group) in add) Edge(ix, frame, e, body, group);
+        Join(sk);
     }
+
 
     /// <summary>
     /// Removes entities at once (as <see cref="Sketch.DeleteEntity"/> one by one: their points no other entity uses,
@@ -272,19 +301,61 @@ public static class SketchConvert
         _ => null,
     };
 
-    static void Place(Dictionary<int, SkPoint> pts, SkEntity x, Piece p)
+    /// <summary>Where a piece wants each of its entity's points (and a circle's radius, set).</summary>
+    static void Place(Action<int, SkEntity, Vec2> want, SkEntity x, Piece p)
     {
         switch (x)
         {
-            case SkLine l: Set(pts, l.P1, p.A); Set(pts, l.P2, p.B); break;
-            case SkArc a: Set(pts, a.Center, p.C); Set(pts, a.Start, p.A); Set(pts, a.End, p.B); break;
-            case SkCircle c: Set(pts, c.Center, p.C); c.R = p.R; break;
+            case SkLine l: want(l.P1, x, p.A); want(l.P2, x, p.B); break;
+            case SkArc a: want(a.Center, x, p.C); want(a.Start, x, p.A); want(a.End, x, p.B); break;
+            case SkCircle c: want(c.Center, x, p.C); c.R = p.R; break;
         }
     }
 
-    static void Set(Dictionary<int, SkPoint> pts, int id, Vec2 p)
+    /// <summary>
+    /// Points placed where their pieces want them. A point the pieces sharing it want in different places (pieces
+    /// that met, on edges that no longer do: a tooth between them now) becomes one point per place. How many split.
+    /// </summary>
+    static int PlacePoints(Sketch sk, Dictionary<int, SkPoint> pts, Dictionary<int, List<(SkEntity e, Vec2 at)>> wants)
     {
-        if (id != Sketch.OriginId && pts.TryGetValue(id, out var pt)) { pt.X = p.X; pt.Y = p.Y; pt.Fixed = true; }
+        int split = 0;
+        foreach (var (id, list) in wants)
+        {
+            if (id == Sketch.OriginId || !pts.TryGetValue(id, out var pt)) continue;
+            var at = list[0].at;
+            pt.X = at.X; pt.Y = at.Y; pt.Fixed = true;
+            var others = new List<(Vec2 at, int id)>();
+            foreach (var (e, w) in list.Skip(1))
+            {
+                if (Vec2.Distance(w, at) < 1e-6) continue;
+                var np = others.FirstOrDefault(o => Vec2.Distance(o.at, w) < 1e-6).id;
+                if (np == 0) { np = sk.AddPoint(w, fix: true).Id; others.Add((w, np)); split++; }
+                e.RemapPoint(id, np);
+            }
+        }
+        return split;
+    }
+
+    /// <summary>
+    /// Converted points in the same place made one (pieces placed and converted apart that now meet), so the
+    /// outline is closed again. Only after the edges changed: placed as they were, nothing can meet anew.
+    /// </summary>
+    static void Join(Sketch sk)
+    {
+        var linked = sk.Entities.Where(e => e.Link != null).SelectMany(e => e.PointIds).ToHashSet();
+        var grid = new Dictionary<(long, long), List<SkPoint>>();
+        const double tol = 1e-6;
+        // the origin first: kept when a converted point is on it
+        foreach (var p in sk.Points.Where(p => linked.Contains(p.Id)).OrderBy(p => p.Id == Sketch.OriginId ? 0 : 1).ToList())
+        {
+            var (kx, ky) = ((long)Math.Floor(p.X / tol), (long)Math.Floor(p.Y / tol));
+            SkPoint? same = null;
+            for (long dx = -1; dx <= 1 && same == null; dx++)
+                for (long dy = -1; dy <= 1 && same == null; dy++)
+                    if (grid.TryGetValue((kx + dx, ky + dy), out var l)) same = l.FirstOrDefault(q => Vec2.Distance(q.P, p.P) < tol);
+            if (same != null) { sk.MergePoints(p.Id, same.Id); continue; }
+            (grid.TryGetValue((kx, ky), out var cell) ? cell : grid[(kx, ky)] = new()).Add(p);
+        }
     }
 
     /// <summary>

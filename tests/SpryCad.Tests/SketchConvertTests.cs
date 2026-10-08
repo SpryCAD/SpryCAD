@@ -128,6 +128,61 @@ static class SketchConvertTests
             t.True(count.Values.Distinct().Count() == 3, "the tooth counts gave other outlines");
         });
 
+        t.Test("Convert Entities: re-converted edge by edge (relations on what stays kept, deletions kept); a suppressed face left out", () =>
+        {
+            var dir = AppContext.BaseDirectory;
+            while (dir != null && !Directory.Exists(Path.Combine(dir, "samples"))) dir = Path.GetDirectoryName(dir);
+            var doc = CadDocument.Load(Path.Combine(dir!, "samples", "demos", "spur-gear.sprt"));
+            var regen = new Regenerator();
+            var gear = regen.Rebuild(doc).State.Bodies.Single(b => b.Id == "F2");
+            var frame = new Frame(new Vec3(0, 0, 30), Vec3.UnitX, Vec3.UnitY, Vec3.UnitZ);
+            var sk = new Sketch();
+            SketchConvert.Face(sk, frame, gear.Solid.Native!, gear.Id, "F2.End");
+            // the converted lines (none of them on a tooth: the bore and keyway): one gets a line of the user's
+            // dimensioned off its end, another is deleted
+            var lines = sk.Entities.OfType<SkLine>().ToList();
+            t.True(lines.Count >= 2, $"{lines.Count} lines");
+            var kept = lines[0];
+            var free = sk.AddPoint(sk.Point(kept.P1)!.P + new Vec2(-3, -4));
+            var mine = sk.Add(new SkLine { P1 = kept.P1, P2 = free.Id });
+            var dim = sk.AddConstraint(CType.Distance, mine.Id); dim.Expr = "5"; dim.Value = 5;
+            var deletedKey = lines[1].Link!.Key;
+            sk.DeleteEntity(lines[1].Id);
+            t.True(sk.ConvertGroups?.Count == 1, "the group stays while geometry of it is left");
+            var plane = doc.AddFeature(new PlaneFeature { Base = PlaneRef.Front, Offset = "30" });
+            var s = doc.AddFeature(new SketchFeature { Plane = new PlaneRef { Feature = plane.Id }, Sketch = sk });
+            doc = CadDocument.FromJson(doc.ToJson());
+            var z = doc.Equations.First(q => q.Name == "z");
+            foreach (var nz in new[] { "30", "44", z.Expr })
+            {
+                z.Expr = nz;
+                var r = regen.Rebuild(doc);
+                var res = r.State.Sketches[s.Id].Sketch;
+                t.True(res.Entity(kept.Id) is SkLine { Link: not null }, $"z = {nz}: the line on the bore kept (the same entity)");
+                t.True(res.Entity(mine.Id) is SkLine m && m.P1 == kept.P1 && res.Constraints.Any(c => c.Id == dim.Id), $"z = {nz}: the user's line and dimension kept");
+                t.True(!res.Entities.Any(e => e.Link?.Key == deletedKey), $"z = {nz}: the deleted line stays deleted");
+                var onEdges = res.Entities.Where(e => e.Link != null).Select(e => e.Link!.Key).Distinct().Count();
+                t.Eq(res.ConvertGroups!.Single().Known!.Count - onEdges, 1); // every edge converted but the one deleted
+                // (a line deleted and one of the user's added: the outline is open on purpose; nothing about the converted geometry)
+                t.True(!r.Status[s.Id].Warnings.Any(w => w.Contains("Converted")), $"z = {nz}: " + string.Join("; ", r.Status[s.Id].Warnings));
+                t.Eq(r.State.Sketches[s.Id].Solve?.Status != SketchStatus.OverDefined, true);
+            }
+
+            // the face suppressed (as a configuration might): its geometry left out of the rebuild; back with it
+            var boss = (ExtrudeFeature)doc.Find("F2")!;
+            var others = doc.Features.Where(f => f != boss && f.Id != plane.Id && f.Id != s.Id).ToList();
+            foreach (var f in others) f.Suppressed = true; // what is built on the gear's body goes with it
+            boss.Suppressed = true;
+            var off = regen.Rebuild(doc);
+            t.True(off.State.Sketches[s.Id].Sketch.Entities.All(e => e.Link == null), "left out");
+            t.True(off.Status[s.Id].Warnings.Any(w => w.Contains("left out")), "with a warning");
+            t.True(((SketchFeature)doc.Find(s.Id)!).Sketch.Entities.Any(e => e.Link != null), "the saved sketch keeps it");
+            boss.Suppressed = false;
+            foreach (var f in others) f.Suppressed = false;
+            var on = regen.Rebuild(doc).State.Sketches[s.Id].Sketch;
+            t.True(on.Entity(kept.Id) is SkLine { Link: not null } && on.Entity(mine.Id) != null, "back, the same geometry");
+        });
+
         t.Test("Convert Entities: a hole's rim as a circle; a tilted circle as fitted arcs within tolerance", () =>
         {
             var into = new Sketch();
