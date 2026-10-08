@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Linux package build: publish the app for linux-x64 into ./publish/linux-x64, generate the demo parts, and pack
 #   publish/FeatherCAD-<version>-linux-x64.tar.gz
-# with install.sh / uninstall.sh (per-user menu entry, icon and .fcad file type; see installer/linux), and, where
+# with install.sh / uninstall.sh (per-user menu entry, icon and .fcprt / .fcasm file types; see installer/linux), and, where
 # dpkg-deb exists, publish/feathercad_<version>_amd64.deb.
 # Runs on Linux, macOS or Git Bash on Windows (GNU tar sets the Linux file modes either way).
 # Usage:  build/make-linux-package.sh
@@ -39,9 +39,9 @@ stage="$root/publish/stage"
 rm -rf "$stage"
 mkdir -p "$stage/$name/samples/demos"
 cp -R "$out/." "$stage/$name/"
-cp "$root"/samples/*.fcad "$stage/$name/samples/"
-cp "$demos"/*.fcad "$stage/$name/samples/demos/"
-cp "$root"/installer/linux/{install.sh,uninstall.sh,feathercad.desktop,feathercad-mime.xml,feathercad.png} "$stage/$name/"
+cp "$root"/samples/*.fcprt "$stage/$name/samples/"
+cp "$demos"/*.fcprt "$demos"/*.fcasm "$stage/$name/samples/demos/"
+cp "$root"/installer/linux/{install.sh,uninstall.sh,feathercad.desktop,feathercad-mime.xml,feathercad.png,application-x-feathercad-part.png,application-x-feathercad-assembly.png} "$stage/$name/"
 cp "$root/LICENSE" "$stage/$name/"
 
 # 5) Pack with Linux modes: everything readable (folders searchable), then the programs again as executable.
@@ -59,7 +59,7 @@ rm -rf "$stage"
 echo "== package ready -> $tarball =="
 
 # 6) The .deb (Debian, Ubuntu, Mint, ...), where dpkg-deb exists (Linux, WSL, CI; not Git Bash): the app in
-#    /opt/feathercad, the feathercad command in /usr/bin, and the menu entry, icon and .fcad file type in
+#    /opt/feathercad, the feathercad command in /usr/bin, and the menu entry, icon and .fcprt / .fcasm file types in
 #    /usr/share. The desktop, MIME and icon caches refresh through those packages' dpkg triggers, so the
 #    package needs no install scripts.
 if ! command -v dpkg-deb >/dev/null; then
@@ -72,13 +72,14 @@ deb="$root/publish/feathercad_${debver}_amd64.deb"
 pkg="$root/publish/deb-stage"
 rm -rf "$pkg" "$deb"
 mkdir -p "$pkg/DEBIAN" "$pkg/opt/feathercad/samples/demos" "$pkg/usr/bin" "$pkg/usr/share/applications" \
-  "$pkg/usr/share/icons/hicolor/256x256/apps" "$pkg/usr/share/mime/packages" "$pkg/usr/share/doc/feathercad"
+  "$pkg/usr/share/icons/hicolor/256x256/apps" "$pkg/usr/share/icons/hicolor/256x256/mimetypes" "$pkg/usr/share/mime/packages" "$pkg/usr/share/doc/feathercad"
 cp -R "$out/." "$pkg/opt/feathercad/"
-cp "$root"/samples/*.fcad "$pkg/opt/feathercad/samples/"
-cp "$demos"/*.fcad "$pkg/opt/feathercad/samples/demos/"
+cp "$root"/samples/*.fcprt "$pkg/opt/feathercad/samples/"
+cp "$demos"/*.fcprt "$demos"/*.fcasm "$pkg/opt/feathercad/samples/demos/"
 ln -s /opt/feathercad/FeatherCAD "$pkg/usr/bin/feathercad"
 sed 's|@EXEC@|/opt/feathercad/FeatherCAD|' "$root/installer/linux/feathercad.desktop" > "$pkg/usr/share/applications/feathercad.desktop"
 cp "$root/installer/linux/feathercad.png" "$pkg/usr/share/icons/hicolor/256x256/apps/feathercad.png"
+cp "$root"/installer/linux/application-x-feathercad-{part,assembly}.png "$pkg/usr/share/icons/hicolor/256x256/mimetypes/"
 cp "$root/installer/linux/feathercad-mime.xml" "$pkg/usr/share/mime/packages/feathercad.xml"
 cp "$root/LICENSE" "$pkg/usr/share/doc/feathercad/copyright"
 # modes: folders 755, files 644, the programs 755

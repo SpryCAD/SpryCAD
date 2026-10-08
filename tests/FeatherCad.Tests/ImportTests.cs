@@ -35,7 +35,7 @@ static class ImportTests
     {
         Directory.CreateDirectory(Temp(""));
 
-        foreach (var demo in new[] { "pipe-flange.fcad", "stepped-shaft.fcad", "hand-wheel.fcad", "enclosure.fcad" })
+        foreach (var demo in new[] { "pipe-flange.fcprt", "stepped-shaft.fcprt", "hand-wheel.fcprt", "enclosure.fcprt" })
             t.Test($"STEP import: {demo} exports and imports back exactly (seams, bands, apexes, whole torus)", () =>
             {
                 var (step, volume) = Exported(demo);
@@ -106,7 +106,7 @@ static class ImportTests
 
         t.Test("STEP import: a fillet on an imported edge, kept through save and reload", () =>
         {
-            var (step, volume) = Exported("l-bracket.fcad");
+            var (step, volume) = Exported("l-bracket.fcprt");
             var d = ImportDoc(step);
             var r0 = new Regenerator().Rebuild(d);
             // a straight convex edge between two imported planar faces
@@ -120,7 +120,7 @@ static class ImportTests
             t.True(r1.Status.Values.All(s => s.Ok), string.Join("; ", r1.Status.Values.Select(s => s.Error)));
             var v1 = Vol(r1.State.Bodies[0].Solid);
             t.True(v1 < volume - 1e-3, "fillet removed nothing");
-            var path = Temp("imported.fcad");
+            var path = Temp("imported.fcprt");
             d.Save(path);
             t.True(CadDocument.IsContainer(path), "a part with an imported file must be a container");
             var r2 = new Regenerator().Rebuild(CadDocument.Load(path));
@@ -133,7 +133,7 @@ static class ImportTests
             // user's part: fillet (rolling ball, trimmed by a wall) then shell whose inner fillet no longer reaches the wall
             var dir = AppContext.BaseDirectory;
             while (dir != null && !Directory.Exists(Path.Combine(dir, "samples"))) dir = Path.GetDirectoryName(dir);
-            var path = Path.Combine(dir!, "tests", "FeatherCad.Tests", "models", "failed-shell.fcad");
+            var path = Path.Combine(dir!, "tests", "FeatherCad.Tests", "models", "failed-shell.fcprt");
             var d = CadDocument.Load(path);
             var sw = System.Diagnostics.Stopwatch.StartNew();
             var r = new Regenerator().Rebuild(d);
@@ -154,7 +154,7 @@ static class ImportTests
 
         t.Test("STEP import: the solid's own unit context wins over other units in the file; flipped face flags are corrected", () =>
         {
-            var (step, volume) = Exported("l-bracket.fcad");
+            var (step, volume) = Exported("l-bracket.fcprt");
             var text = System.Text.Encoding.ASCII.GetString(step);
             // an unused metre unit ahead of everything (presentation data in real files)
             text = text.Replace("DATA;\n", "DATA;\n#0=(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT($,.METRE.));\n");
@@ -173,7 +173,7 @@ static class ImportTests
 
         t.Test("STEP import: inch documents get the geometry in inches", () =>
         {
-            var (step, volume) = Exported("heat-sink.fcad");
+            var (step, volume) = Exported("heat-sink.fcprt");
             var d = ImportDoc(step); d.Units = UnitSystem.IPS;
             var r = new Regenerator().Rebuild(d);
             t.Near(Vol(r.State.Bodies[0].Solid), volume / Math.Pow(25.4, 3), volume / Math.Pow(25.4, 3) * 1e-4);
@@ -203,7 +203,7 @@ static class ImportTests
 
         t.Test("STEP import: B-spline blend faces (spoked wheel round trip)", () =>
         {
-            var original = new Regenerator().Rebuild(Demos.All.First(d => d.file == "spoked-handwheel.fcad").build()).State.Bodies.Single().Solid;
+            var original = new Regenerator().Rebuild(Demos.All.First(d => d.file == "spoked-handwheel.fcprt").build()).State.Bodies.Single().Solid;
             using var ms = new MemoryStream();
             StepWriter.Write(ms, new[] { ("wheel", original) }, "wheel");
             var step = ms.ToArray();

@@ -7,6 +7,6 @@ Exec=@EXEC@ %f
 Icon=feathercad
 Terminal=false
 Categories=Graphics;Engineering;3DGraphics;
-MimeType=application/x-feathercad-part;
+MimeType=application/x-feathercad-part;application/x-feathercad-assembly;
 Keywords=CAD;3D;parametric;STEP;STL;
 StartupWMClass=FeatherCAD

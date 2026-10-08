@@ -439,7 +439,7 @@ static class ThreadFeatureTests
         {
             foreach (var variant in new[] { Array.Empty<(string, string)>(), new[] { ("N", "2") }, new[] { ("D", "16"), ("P", "3"), ("N", "4") } })
             {
-                var doc = Demos.All.First(x => x.file == "acme-lead-screw.fcad").build();
+                var doc = Demos.All.First(x => x.file == "acme-lead-screw.fcprt").build();
                 foreach (var (n, e) in variant) doc.Equations.First(q => q.Name == n).Expr = e;
                 var r = new FeatherCad.Core.Regen.Regenerator().Rebuild(doc);
                 var label = string.Join(", ", variant.Select(v => v.Item1 + "=" + v.Item2));

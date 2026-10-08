@@ -48,7 +48,7 @@ static class AssemblyTests
     static (AssemblyModel m, Component pin, Component sleeve, string dir) PinAndSleeve(string name)
     {
         var dir = NewDir(name);
-        string pp = Path.Combine(dir, "Pin.fcad"), sp = Path.Combine(dir, "Sleeve.fcad");
+        string pp = Path.Combine(dir, "Pin.fcprt"), sp = Path.Combine(dir, "Sleeve.fcprt");
         Cylinder(pp, 5, 10); Cylinder(sp, 5, 10);
         var m = AssemblyModel.New();
         var pin = m.Insert(pp, Transform.Identity);
@@ -218,7 +218,7 @@ static class AssemblyTests
 
             // gear: a 10 mm and a 5 mm cylinder on axes along Z (15 apart); the small one turns twice as fast, the other way
             var gd = NewDir("gear");
-            string ga = Path.Combine(gd, "Big.fcad"), gb = Path.Combine(gd, "Small.fcad");
+            string ga = Path.Combine(gd, "Big.fcprt"), gb = Path.Combine(gd, "Small.fcprt");
             Cylinder(ga, 10, 5); Cylinder(gb, 5, 5);
             var mg = AssemblyModel.New();
             var big = mg.Insert(ga, Transform.Identity); var small = mg.Insert(gb, Transform.Translation(new Vec3(15, 0, 0)));
@@ -310,7 +310,7 @@ static class AssemblyTests
             var asmPath = Path.Combine(dir, "Stack.fcasm");
             m.Save(asmPath);
             var placed = sleeve.Placement.ToTransform().T;
-            File.Delete(Path.Combine(dir, "Pin.fcad")); File.Delete(Path.Combine(dir, "Sleeve.fcad"));
+            File.Delete(Path.Combine(dir, "Pin.fcprt")); File.Delete(Path.Combine(dir, "Sleeve.fcprt"));
             var back = AssemblyModel.Open(AssemblyDocument.Load(asmPath), asmPath, new PartIndex());
             t.True(back.Doc.Components.All(c => back.DisplayOf(c)!.Source == PartSource.Cache), "from the caches");
             var sb = back.Doc.Find(sleeve.Id)!;
@@ -365,7 +365,7 @@ static class AssemblyTests
         t.Test("Assembly model: components linked and embedded, displays built, caches saved; missing, lightweight and changed parts", () =>
         {
             var dir = NewDir("model");
-            string pa = Path.Combine(dir, "parts", "Pin.fcad"), pb = Path.Combine(dir, "parts", "Leaf.fcad");
+            string pa = Path.Combine(dir, "parts", "Pin.fcprt"), pb = Path.Combine(dir, "parts", "Leaf.fcprt");
             Cylinder(pa, 5, 10); Cylinder(pb, 3, 20);
             var m = AssemblyModel.New();
             var c1 = m.Insert(pa, Transform.Identity);
@@ -379,7 +379,7 @@ static class AssemblyTests
             var asmPath = Path.Combine(dir, "Hinge.fcasm");
             m.Save(asmPath);
             t.Eq(m.Doc.Caches.Count, 2);
-            t.Eq(c1.Part.Path, "parts/Pin.fcad");
+            t.Eq(c1.Part.Path, "parts/Pin.fcprt");
             int tris = m.DisplayOf(c1)!.Mesh.Indices.Length;
 
             // reopened: the pin from its file, the leaf from the assembly
@@ -387,7 +387,7 @@ static class AssemblyTests
             t.True(m2.DisplayOf(m2.Doc.Components[0])!.Source == PartSource.File && m2.DisplayOf(m2.Doc.Components[2])!.Source == PartSource.Embedded, "sources");
 
             // the pin's file moved out of reach: shown from the cache, as it was
-            var away = Path.Combine(NewDir("away"), "Pin.fcad");
+            var away = Path.Combine(NewDir("away"), "Pin.fcprt");
             File.Move(pa, away);
             var m3 = AssemblyModel.Open(AssemblyDocument.Load(asmPath), asmPath, new PartIndex());
             var pd = m3.DisplayOf(m3.Doc.Components[0])!;
@@ -414,7 +414,7 @@ static class AssemblyTests
             t.Eq(m5.Doc.Files.Keys.Count(k => k.StartsWith("cache/")), 2);
 
             // a part saved before identities: given one when inserted
-            var legacy = Path.Combine(dir, "parts", "Old.fcad");
+            var legacy = Path.Combine(dir, "parts", "Old.fcprt");
             Cylinder(legacy, 2, 5, identity: false);
             t.True(DocumentContainer.ReadIdentity(legacy).id == null, "no identity yet");
             m5.Insert(legacy, Transform.Identity);
@@ -426,7 +426,7 @@ static class AssemblyTests
             var dir = NewDir("identity");
             var doc = new CadDocument();
             t.True(doc.Id == null, "no id before saving");
-            var p = Path.Combine(dir, "a.fcad");
+            var p = Path.Combine(dir, "a.fcprt");
             doc.Save(p);
             var (id, rev) = (doc.Id, doc.Revision);
             t.True(id != null && rev != null, "an id and a revision");
@@ -434,29 +434,29 @@ static class AssemblyTests
             t.True(doc.Id == id && doc.Revision != rev, "same id, new revision");
             t.Eq(DocumentContainer.ReadIdentity(p), (doc.Id, doc.Revision));
             // in a container too
-            var pc = Path.Combine(dir, "c.fcad");
+            var pc = Path.Combine(dir, "c.fcprt");
             doc.Save(pc, container: true);
             t.Eq(DocumentContainer.ReadIdentity(pc), (doc.Id, doc.Revision));
             t.Eq(CadDocument.Load(pc).Id, doc.Id);
             // a copy saved under another name: its own identity, remembering where it came from
             doc.ForkIdentity();
-            doc.Save(Path.Combine(dir, "copy.fcad"));
+            doc.Save(Path.Combine(dir, "copy.fcprt"));
             t.True(doc.Id != id && doc.DerivedFrom == id, "the copy's identity");
             t.Eq(DocumentContainer.ReadIdentity(p).id, id);
             // not a part
-            File.WriteAllText(Path.Combine(dir, "x.fcad"), "not json");
-            t.Eq(DocumentContainer.ReadIdentity(Path.Combine(dir, "x.fcad")), ((string?)null, (string?)null));
+            File.WriteAllText(Path.Combine(dir, "x.fcprt"), "not json");
+            t.Eq(DocumentContainer.ReadIdentity(Path.Combine(dir, "x.fcprt")), ((string?)null, (string?)null));
         });
 
         t.Test("Assembly document: components (names, placements, fixed first), embedded files and caches saved and loaded", () =>
         {
             var dir = NewDir("doc");
             var asm = new AssemblyDocument();
-            var bolt = new PartRef { PartId = "B", Path = "parts/Bolt.fcad" };
+            var bolt = new PartRef { PartId = "B", Path = "parts/Bolt.fcprt" };
             var place = Transform.Rotation(Vec3.Zero, Vec3.UnitZ, 0.7) * Transform.Translation(new Vec3(10, 20, 30));
             var c1 = asm.AddComponent(bolt, Transform.Identity);
-            var c2 = asm.AddComponent(new PartRef { PartId = "B", Path = "parts/Bolt.fcad" }, place);
-            var c3 = asm.AddComponent(new PartRef { PartId = "N", Path = "Nut.fcad" }, Transform.Translation(new Vec3(0, 0, 50)));
+            var c2 = asm.AddComponent(new PartRef { PartId = "B", Path = "parts/Bolt.fcprt" }, place);
+            var c3 = asm.AddComponent(new PartRef { PartId = "N", Path = "Nut.fcprt" }, Transform.Translation(new Vec3(0, 0, 50)));
             t.True(c1.Name == "Bolt<1>" && c2.Name == "Bolt<2>" && c3.Name == "Nut<1>", $"names {c1.Name} {c2.Name} {c3.Name}");
             t.True(c1.Fixed && !c2.Fixed && !c3.Fixed, "the first component is fixed");
             asm.Files["cache/B.mesh"] = new byte[] { 1, 2, 3 };
@@ -503,7 +503,7 @@ static class AssemblyTests
             // a project: assembly and two parts in parts/
             var root = NewDir("resolve");
             var proj = Path.Combine(root, "Proj");
-            string bp = Path.Combine(proj, "parts", "Bolt.fcad"), np = Path.Combine(proj, "parts", "std", "Nut.fcad");
+            string bp = Path.Combine(proj, "parts", "Bolt.fcprt"), np = Path.Combine(proj, "parts", "std", "Nut.fcprt");
             var bolt = SavePart(bp); var nut = SavePart(np);
             var asmPath = Path.Combine(proj, "Top.fcasm");
             var asm = new AssemblyDocument();
@@ -523,10 +523,10 @@ static class AssemblyTests
             var moved = AssemblyDocument.Load(elsewhere);
             r = ComponentResolver.Resolve(moved, elsewhere);
             t.True(r.Parts.Values.All(p => p.Status == PartStatus.Found) && r.Changed, "found by absolute path");
-            t.Eq(moved.Components[0].Part.Path, "../Proj/parts/Bolt.fcad");
+            t.Eq(moved.Components[0].Part.Path, "../Proj/parts/Bolt.fcprt");
 
             // 3. the bolt renamed: the index knows (it was opened there)
-            var bp2 = Path.Combine(proj, "parts", "Bolt-M10.fcad");
+            var bp2 = Path.Combine(proj, "parts", "Bolt-M10.fcprt");
             File.Move(bp, bp2);
             var index = new PartIndex();
             index.RecordFile(bp2);
@@ -534,7 +534,7 @@ static class AssemblyTests
             r = ComponentResolver.Resolve(a3, asmPath, index);
             t.True(r.Of(a3.Components[0]).Status == PartStatus.Moved && PartIndex.SamePath(r.Of(a3.Components[0]).Path!, bp2), "renamed: from the index");
             t.True(r.Notes.Count == 1 && r.Notes[0].Contains("new place"), "one note");
-            t.Eq(a3.Components[0].Part.Path, "parts/Bolt-M10.fcad");
+            t.Eq(a3.Components[0].Part.Path, "parts/Bolt-M10.fcprt");
 
             // 4. renamed and nothing indexed: found by scanning the assembly's folder
             var a4 = Fresh();
@@ -548,11 +548,11 @@ static class AssemblyTests
             Directory.CreateDirectory(Path.GetDirectoryName(newParts)!);
             Directory.Move(Path.Combine(proj, "parts"), newParts);
             index = new PartIndex();
-            index.RecordFile(Path.Combine(newParts, "Bolt.fcad"));
+            index.RecordFile(Path.Combine(newParts, "Bolt.fcprt"));
             var a5 = Fresh();
             r = ComponentResolver.Resolve(a5, asmPath, index);
             t.True(r.Parts.Values.All(p => p.Status == PartStatus.Moved), "both found");
-            t.True(PartIndex.SamePath(r.Of(a5.Components[1]).Path!, Path.Combine(newParts, "std", "Nut.fcad")) && r.Notes.Any(n => n.Contains("moved with the other parts")), "the nut where the bolt's folder went");
+            t.True(PartIndex.SamePath(r.Of(a5.Components[1]).Path!, Path.Combine(newParts, "std", "Nut.fcprt")) && r.Notes.Any(n => n.Contains("moved with the other parts")), "the nut where the bolt's folder went");
 
             // 6. a different part saved under the bolt's old name: not taken; the real one is found in the library
             SavePart(bp);
@@ -568,15 +568,15 @@ static class AssemblyTests
 
             // 8. copies of a part (copied in the file manager: same id): the revision last used wins
             var dir8 = NewDir("copies");
-            var p8 = Path.Combine(dir8, "Plate.fcad");
+            var p8 = Path.Combine(dir8, "Plate.fcprt");
             var plate = SavePart(p8);
             var asm8 = new AssemblyDocument();
             asm8.AddComponent(Ref(plate, dir8, p8), Transform.Identity);
-            var older = Path.Combine(dir8, "old", "Plate.fcad");
+            var older = Path.Combine(dir8, "old", "Plate.fcprt");
             Directory.CreateDirectory(Path.GetDirectoryName(older)!);
             File.Copy(p8, older);
             plate.Save(p8); // a newer revision in place...
-            File.Move(p8, Path.Combine(dir8, "Plate-new.fcad"));
+            File.Move(p8, Path.Combine(dir8, "Plate-new.fcprt"));
             var ix8 = new PartIndex();
             ix8.Scan(dir8);
             r = ComponentResolver.Resolve(asm8, Path.Combine(dir8, "A.fcasm"), ix8);
@@ -584,10 +584,10 @@ static class AssemblyTests
 
             // 9. a part saved before identities: by path only
             var dir9 = NewDir("legacy");
-            var p9 = Path.Combine(dir9, "Old.fcad");
+            var p9 = Path.Combine(dir9, "Old.fcprt");
             File.WriteAllText(p9, new CadDocument().ToJson());
             var asm9 = new AssemblyDocument();
-            asm9.AddComponent(new PartRef { Path = "Old.fcad", AbsolutePath = p9 }, Transform.Identity);
+            asm9.AddComponent(new PartRef { Path = "Old.fcprt", AbsolutePath = p9 }, Transform.Identity);
             r = ComponentResolver.Resolve(asm9, Path.Combine(dir9, "A.fcasm"));
             t.True(r.Of(asm9.Components[0]).Status == PartStatus.Found, "by path");
         });

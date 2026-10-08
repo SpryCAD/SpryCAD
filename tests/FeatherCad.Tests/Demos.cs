@@ -9,23 +9,23 @@ namespace FeatherCad.Tests;
 /// <summary>
 /// Parametric demo parts built through the document API (what the UI produces): every dimension is an
 /// expression of the part's global variables, so changing an equation regenerates the whole part.
-/// <c>-- demos [outDir]</c> writes them as .fcad files.
+/// <c>-- demos [outDir]</c> writes them as .fcprt files.
 /// </summary>
 static class Demos
 {
     public static IEnumerable<(string file, Func<CadDocument> build)> All => new (string, Func<CadDocument>)[]
     {
-        ("pipe-flange.fcad", Flange),
-        ("enclosure.fcad", Enclosure),
-        ("heat-sink.fcad", HeatSink),
-        ("stepped-shaft.fcad", Shaft),
-        ("l-bracket.fcad", Bracket),
-        ("spur-gear.fcad", Gear),
-        ("hand-wheel.fcad", HandWheel),
-        ("spoked-handwheel.fcad", SpokedWheel),
-        ("bent-tube.fcad", BentTube),
-        ("bolt-and-nut.fcad", BoltAndNut),
-        ("acme-lead-screw.fcad", AcmeLeadScrew),
+        ("pipe-flange.fcprt", Flange),
+        ("enclosure.fcprt", Enclosure),
+        ("heat-sink.fcprt", HeatSink),
+        ("stepped-shaft.fcprt", Shaft),
+        ("l-bracket.fcprt", Bracket),
+        ("spur-gear.fcprt", Gear),
+        ("hand-wheel.fcprt", HandWheel),
+        ("spoked-handwheel.fcprt", SpokedWheel),
+        ("bent-tube.fcprt", BentTube),
+        ("bolt-and-nut.fcprt", BoltAndNut),
+        ("acme-lead-screw.fcprt", AcmeLeadScrew),
     };
 
     /// <summary>The demo assemblies (written with the parts by <see cref="Write"/>).</summary>
@@ -67,7 +67,7 @@ static class Demos
         try
         {
             var paths = new Dictionary<string, string>();
-            foreach (var (name, doc) in parts) { var pp = Path.Combine(tmp, name + ".fcad"); doc.Save(pp); paths[name] = pp; }
+            foreach (var (name, doc) in parts) { var pp = Path.Combine(tmp, name + ".fcprt"); doc.Save(pp); paths[name] = pp; }
             var m = FeatherCad.Core.Assembly.AssemblyModel.New();
             build(m, paths);
             // embedded: nothing points back at the temporary files
@@ -82,7 +82,7 @@ static class Demos
         m.RefTo(c.Id, m.DisplayOf(c)!.Mesh.Faces.First(which).Name)!;
 
     /// <summary>
-    /// The three-start Acme lead screw and its nut as an assembly: the two parts of acme-lead-screw.fcad apart
+    /// The three-start Acme lead screw and its nut as an assembly: the two parts of acme-lead-screw.fcprt apart
     /// (embedded), the nut on the screw where it fits, held by a Screw mate of the thread's lead (N·P): drag the nut
     /// and it turns as it travels.
     /// </summary>
@@ -170,7 +170,7 @@ static class Demos
         Directory.CreateDirectory(tmp);
         try
         {
-            string lp = Path.Combine(tmp, "Leaf.fcad"), pp = Path.Combine(tmp, "Pin.fcad");
+            string lp = Path.Combine(tmp, "Leaf.fcprt"), pp = Path.Combine(tmp, "Pin.fcprt");
             leaf.Save(lp); pin.Save(pp);
             var m = FeatherCad.Core.Assembly.AssemblyModel.New();
             double ky = 32, kz = 1;
@@ -200,17 +200,17 @@ static class Demos
     /// <summary>Equation changes each demo must survive (shows what the parameters do).</summary>
     public static readonly Dictionary<string, (string name, string expr)[][]> Variants = new()
     {
-        ["pipe-flange.fcad"] = new[] { new[] { ("N", "12"), ("PCD", "125") }, new[] { ("OD", "180"), ("HubH", "45"), ("N", "6") }, new[] { ("BoltD", "18"), ("Rfil", "8") } },
-        ["enclosure.fcad"] = new[] { new[] { ("L", "160"), ("W", "100") }, new[] { ("VentN", "9"), ("VentP", "5") }, new[] { ("H", "60"), ("BossH", "20"), ("Wall", "3") } },
-        ["heat-sink.fcad"] = new[] { new[] { ("N", "20"), ("T", "1.2") }, new[] { ("L", "120"), ("FinH", "40") }, new[] { ("N", "8"), ("T", "3") } },
-        ["stepped-shaft.fcad"] = new[] { new[] { ("D2", "50"), ("KeyW", "14") }, new[] { ("L2", "100"), ("KeyL", "60") }, new[] { ("D1", "35"), ("Rs", "2"), ("C", "2") } },
-        ["hand-wheel.fcad"] = new[] { new[] { ("NS", "3") }, new[] { ("Dish", "45"), ("SpokeD", "16") }, new[] { ("D", "260"), ("NS", "6"), ("KnobL", "60") } },
-        ["bolt-and-nut.fcad"] = new[] { new[] { ("D", "12"), ("P", "1.75"), ("S", "19") }, new[] { ("L", "45"), ("Clr", "0.3") }, new[] { ("NutH", "10"), ("Clr", "0") } },
-        ["acme-lead-screw.fcad"] = new[] { new[] { ("N", "2") }, new[] { ("N", "2"), ("L", "60") }, new[] { ("D", "16"), ("P", "3"), ("N", "4") } },
-        ["bent-tube.fcad"] = new[] { new[] { ("R", "80"), ("L1", "120") }, new[] { ("OD", "40"), ("ID", "34"), ("FlangeD", "100"), ("PCD", "75") }, new[] { ("N", "6"), ("L2", "100") } },
-        ["spoked-handwheel.fcad"] = new[] { new[] { ("NS", "6") }, new[] { ("D", "300"), ("RimT", "26"), ("NG", "4") }, new[] { ("NS", "4"), ("SpokeD", "20"), ("Rf", "3") } },
-        ["spur-gear.fcad"] = new[] { new[] { ("z", "48") }, new[] { ("m", "2.5"), ("z", "30") }, new[] { ("PA", "25"), ("b", "20") } },
-        ["l-bracket.fcad"] = new[] { new[] { ("Wb", "90"), ("HoleSp", "60") }, new[] { ("A", "100"), ("Bh", "80"), ("Gs", "40") }, new[] { ("T", "10"), ("Rb", "4") } },
+        ["pipe-flange.fcprt"] = new[] { new[] { ("N", "12"), ("PCD", "125") }, new[] { ("OD", "180"), ("HubH", "45"), ("N", "6") }, new[] { ("BoltD", "18"), ("Rfil", "8") } },
+        ["enclosure.fcprt"] = new[] { new[] { ("L", "160"), ("W", "100") }, new[] { ("VentN", "9"), ("VentP", "5") }, new[] { ("H", "60"), ("BossH", "20"), ("Wall", "3") } },
+        ["heat-sink.fcprt"] = new[] { new[] { ("N", "20"), ("T", "1.2") }, new[] { ("L", "120"), ("FinH", "40") }, new[] { ("N", "8"), ("T", "3") } },
+        ["stepped-shaft.fcprt"] = new[] { new[] { ("D2", "50"), ("KeyW", "14") }, new[] { ("L2", "100"), ("KeyL", "60") }, new[] { ("D1", "35"), ("Rs", "2"), ("C", "2") } },
+        ["hand-wheel.fcprt"] = new[] { new[] { ("NS", "3") }, new[] { ("Dish", "45"), ("SpokeD", "16") }, new[] { ("D", "260"), ("NS", "6"), ("KnobL", "60") } },
+        ["bolt-and-nut.fcprt"] = new[] { new[] { ("D", "12"), ("P", "1.75"), ("S", "19") }, new[] { ("L", "45"), ("Clr", "0.3") }, new[] { ("NutH", "10"), ("Clr", "0") } },
+        ["acme-lead-screw.fcprt"] = new[] { new[] { ("N", "2") }, new[] { ("N", "2"), ("L", "60") }, new[] { ("D", "16"), ("P", "3"), ("N", "4") } },
+        ["bent-tube.fcprt"] = new[] { new[] { ("R", "80"), ("L1", "120") }, new[] { ("OD", "40"), ("ID", "34"), ("FlangeD", "100"), ("PCD", "75") }, new[] { ("N", "6"), ("L2", "100") } },
+        ["spoked-handwheel.fcprt"] = new[] { new[] { ("NS", "6") }, new[] { ("D", "300"), ("RimT", "26"), ("NG", "4") }, new[] { ("NS", "4"), ("SpokeD", "20"), ("Rf", "3") } },
+        ["spur-gear.fcprt"] = new[] { new[] { ("z", "48") }, new[] { ("m", "2.5"), ("z", "30") }, new[] { ("PA", "25"), ("b", "20") } },
+        ["l-bracket.fcprt"] = new[] { new[] { ("Wb", "90"), ("HoleSp", "60") }, new[] { ("A", "100"), ("Bh", "80"), ("Gs", "40") }, new[] { ("T", "10"), ("Rb", "4") } },
     };
 
     /// <summary>Rebuilds every demo and its variants; writes the exact STEP of each to <paramref name="dir"/>.</summary>
@@ -358,12 +358,12 @@ static class Demos
 
     /// <summary>
     /// <c>-- containerize &lt;file or folder&gt;...</c>: rebuilds parts and saves each in place as a container with
-    /// its preview image (the content is unchanged). Folders: their *.fcad files, not subfolders.
+    /// its preview image (the content is unchanged). Folders: their *.fcprt files, not subfolders.
     /// </summary>
     public static int Containerize(IEnumerable<string> paths)
     {
         int bad = 0;
-        foreach (var path in paths.SelectMany(p => Directory.Exists(p) ? Directory.GetFiles(p, "*.fcad").Order() : new[] { p }.AsEnumerable()))
+        foreach (var path in paths.SelectMany(p => Directory.Exists(p) ? Directory.GetFiles(p, "*.fcprt").Order() : new[] { p }.AsEnumerable()))
         {
             var doc = CadDocument.Load(path);
             var r = new Regenerator().Rebuild(doc);

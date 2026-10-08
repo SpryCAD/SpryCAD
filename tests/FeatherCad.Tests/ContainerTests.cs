@@ -5,7 +5,7 @@ using FeatherCad.Kernel;
 
 namespace FeatherCad.Tests;
 
-/// <summary>.fcad files: plain JSON and ZIP containers with embedded files and a thumbnail.</summary>
+/// <summary>.fcprt files: plain JSON and ZIP containers with embedded files and a thumbnail.</summary>
 static class ContainerTests
 {
     static string Temp(string name) => Path.Combine(Path.GetTempPath(), "fc-container-tests", name);
@@ -16,8 +16,8 @@ static class ContainerTests
 
         t.Test("Container: a part without embedded files still saves as plain JSON (unchanged format)", () =>
         {
-            var doc = Demos.All.First(d => d.file == "l-bracket.fcad").build();
-            var path = Temp("plain.fcad");
+            var doc = Demos.All.First(d => d.file == "l-bracket.fcprt").build();
+            var path = Temp("plain.fcprt");
             doc.Save(path);
             t.True(!CadDocument.IsContainer(path), "saved as a container");
             t.Eq(File.ReadAllText(path), doc.ToJson());
@@ -27,11 +27,11 @@ static class ContainerTests
 
         t.Test("Container: embedded files and thumbnail round-trip, model.json lists them", () =>
         {
-            var doc = Demos.All.First(d => d.file == "l-bracket.fcad").build();
+            var doc = Demos.All.First(d => d.file == "l-bracket.fcprt").build();
             var step = System.Text.Encoding.ASCII.GetBytes("ISO-10303-21;\nHEADER;\nENDSEC;\nDATA;\nENDSEC;\nEND-ISO-10303-21;\n");
             doc.AddFile("imports/bracket.step", step);
             doc.Thumbnail = new byte[] { 0x89, 0x50, 0x4E, 0x47, 1, 2, 3 };
-            var path = Temp("container.fcad");
+            var path = Temp("container.fcprt");
             doc.Save(path);
             t.True(CadDocument.IsContainer(path), "not saved as a container");
             using (var zip = ZipFile.OpenRead(path))
@@ -55,7 +55,7 @@ static class ContainerTests
         {
             var doc = new CadDocument();
             doc.AddFile("imports/a.step", new byte[] { 1, 2, 3, 4 });
-            var path = Temp("damaged.fcad");
+            var path = Temp("damaged.fcprt");
             doc.Save(path);
             // flip the stored attachment's content
             using (var zip = ZipFile.Open(path, ZipArchiveMode.Update))
@@ -75,8 +75,8 @@ static class ContainerTests
 
         t.Test("Container: always-container save of a plain part, and a failed save keeps the old file", () =>
         {
-            var doc = Demos.All.First(d => d.file == "l-bracket.fcad").build();
-            var path = Temp("forced.fcad");
+            var doc = Demos.All.First(d => d.file == "l-bracket.fcprt").build();
+            var path = Temp("forced.fcprt");
             doc.Save(path, container: true);
             t.True(CadDocument.IsContainer(path), "not a container");
             t.Eq(CadDocument.Load(path).ToJson(), doc.ToJson());
@@ -90,7 +90,7 @@ static class ContainerTests
 
         t.Test("Thumbnail: PNG preview of a rebuilt part", () =>
         {
-            var doc = Demos.All.First(d => d.file == "pipe-flange.fcad").build();
+            var doc = Demos.All.First(d => d.file == "pipe-flange.fcprt").build();
             var r = new Regenerator().Rebuild(doc);
             var png = Thumbnail.Render(r.State.Bodies.Select(b => (b.Mesh, doc.Color)));
             t.True(png.Take(8).SequenceEqual(new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A }), "not a PNG");

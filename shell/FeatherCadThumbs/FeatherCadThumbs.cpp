@@ -1,4 +1,4 @@
-// Windows Explorer thumbnail handler for FeatherCAD parts (.fcad).
+// Windows Explorer thumbnail handler for FeatherCAD parts (.fcprt).
 //
 // A part saved as a container is a ZIP holding model.json and thumbnail.png, the preview the app renders on
 // save; the PNG is stored uncompressed (it is compressed already). This handler finds that entry, decodes it with
@@ -267,7 +267,7 @@ static HRESULT SetValue(const wchar_t* key, const wchar_t* name, const wchar_t* 
 }
 
 // the file types whose containers carry a preview: parts and assemblies
-static const wchar_t* const Extensions[] = { L".fcad", L".fcasm" };
+static const wchar_t* const Extensions[] = { L".fcprt", L".fcasm" };
 
 STDAPI DllRegisterServer()
 {

@@ -9,13 +9,13 @@ public enum UnitSystem { MMGS, IPS }
 
 /// <summary>
 /// The native part document: the full parametric history (equations, sketches with constraints, features).
-/// A *.fcad file is either plain, human-readable JSON, or — when the part embeds other files (e.g. an imported
+/// A *.fcprt file is either plain, human-readable JSON, or — when the part embeds other files (e.g. an imported
 /// STEP model) or the user prefers it — a ZIP container holding that same JSON as <c>model.json</c>, the
 /// embedded files under <c>attachments/</c> and a <c>thumbnail.png</c> preview. Both open the same way.
 /// </summary>
 public sealed class CadDocument
 {
-    public const string FileExtension = ".fcad";
+    public const string FileExtension = ".fcprt";
     public const int CurrentFormatVersion = 1;
 
     public string Format { get; set; } = "FeatherCAD";

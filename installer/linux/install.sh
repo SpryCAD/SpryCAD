@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Installs FeatherCAD for the current user (no root): the app into ~/.local/share/feathercad, a `feathercad`
-# command in ~/.local/bin, and a menu entry, icon and .fcad file type. Run it from the unpacked folder:
+# command in ~/.local/bin, and a menu entry, icon and .fcprt / .fcasm file types. Run it from the unpacked folder:
 #   ./install.sh
 # Settings, recent files and autosave live in ~/.config/FeatherCAD and are kept by ./uninstall.sh.
 set -euo pipefail
@@ -22,16 +22,17 @@ cp -R "$src/." "$app/"
 chmod +x "$app/FeatherCAD"
 ln -sf "$app/FeatherCAD" "$bin/feathercad"
 
-mkdir -p "$data/applications" "$data/icons/hicolor/256x256/apps" "$data/mime/packages"
+mkdir -p "$data/applications" "$data/icons/hicolor/256x256/apps" "$data/icons/hicolor/256x256/mimetypes" "$data/mime/packages"
 sed "s|@EXEC@|\"$app/FeatherCAD\"|" "$src/feathercad.desktop" > "$data/applications/feathercad.desktop"
 cp "$src/feathercad.png" "$data/icons/hicolor/256x256/apps/feathercad.png"
+cp "$src"/application-x-feathercad-{part,assembly}.png "$data/icons/hicolor/256x256/mimetypes/"
 cp "$src/feathercad-mime.xml" "$data/mime/packages/feathercad.xml"
 
 # Refresh the menu, file type and icon caches where the tools exist; desktops pick the files up anyway on next login.
 command -v update-mime-database >/dev/null && update-mime-database "$data/mime" || true
 command -v update-desktop-database >/dev/null && update-desktop-database "$data/applications" || true
 command -v gtk-update-icon-cache >/dev/null && gtk-update-icon-cache -q -t "$data/icons/hicolor" || true
-command -v xdg-mime >/dev/null && xdg-mime default feathercad.desktop application/x-feathercad-part || true
+command -v xdg-mime >/dev/null && xdg-mime default feathercad.desktop application/x-feathercad-part application/x-feathercad-assembly || true
 
 echo "Done. FeatherCAD is in your applications menu; from a terminal run: feathercad"
 case ":$PATH:" in *":$bin:"*) ;; *) echo "(Add $bin to your PATH to use the feathercad command.)" ;; esac

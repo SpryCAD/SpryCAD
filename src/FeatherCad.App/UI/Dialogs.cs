@@ -308,7 +308,7 @@ public static class Dialogs
         ToolTip.SetTip(verText, info);
         sp.Children.Add(verText);
         sp.Children.Add(new TextBlock { Text = "Fast, lightweight, open source parametric 3D CAD.", TextWrapping = TextWrapping.Wrap });
-        sp.Children.Add(new TextBlock { Text = "Own plane-based B-rep kernel in C#, Avalonia UI, OpenGL viewport.\nNative format: .fcad (JSON). Export: STEP AP214, STL.", TextWrapping = TextWrapping.Wrap, Foreground = Brushes.DimGray });
+        sp.Children.Add(new TextBlock { Text = "Own plane-based B-rep kernel in C#, Avalonia UI, OpenGL viewport.\nNative formats: .fcprt parts (JSON), .fcasm assemblies. Export: STEP AP214, STL.", TextWrapping = TextWrapping.Wrap, Foreground = Brushes.DimGray });
         sp.Children.Add(new TextBlock { Text = "License: MIT", Foreground = Brushes.DimGray });
         sp.Children.Add(Buttons(ok));
         var w = MakeWindow("About FeatherCAD", sp, 420);

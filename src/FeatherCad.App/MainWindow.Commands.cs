@@ -659,9 +659,9 @@ public partial class MainWindow
     // ------------------------------------------------------------------------------------------
     // file commands
 
-    static readonly FilePickerFileType FcadType = new("FeatherCAD Part") { Patterns = new[] { "*.fcad" } };
+    static readonly FilePickerFileType FcadType = new("FeatherCAD Part") { Patterns = new[] { "*.fcprt" } };
     static readonly FilePickerFileType StepType = new("STEP model") { Patterns = new[] { "*.step", "*.stp" } };
-    static readonly FilePickerFileType OpenableType = new("Parts, assemblies and STEP models") { Patterns = new[] { "*.fcad", "*.fcasm", "*.step", "*.stp" } };
+    static readonly FilePickerFileType OpenableType = new("Parts, assemblies and STEP models") { Patterns = new[] { "*.fcprt", "*.fcasm", "*.step", "*.stp" } };
 
     static bool IsStep(string path) => Path.GetExtension(path).ToLowerInvariant() is ".step" or ".stp";
 
@@ -874,7 +874,7 @@ public partial class MainWindow
         var f = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
         {
             Title = "Save Part As",
-            DefaultExtension = "fcad",
+            DefaultExtension = "fcprt",
             SuggestedFileName = Session.FilePath != null ? Path.GetFileName(Session.FilePath) : Session.UntitledName + CadDocument.FileExtension,
             FileTypeChoices = new[] { FcadType },
         });

@@ -6,7 +6,7 @@ using FeatherCad.Kernel;
 namespace FeatherCad.Tests;
 
 /// <summary>
-/// <c>-- fillet file.fcad FaceA FaceB hx hy hz radius [timeoutSec]</c>: appends a fillet on the edge between two
+/// <c>-- fillet file.fcprt FaceA FaceB hx hy hz radius [timeoutSec]</c>: appends a fillet on the edge between two
 /// named faces and rebuilds with a watchdog, logging boolean stages with timestamps (to find hangs).
 /// </summary>
 static class Hang

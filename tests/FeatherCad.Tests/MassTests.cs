@@ -101,7 +101,7 @@ static class ExactMassTests
         {
             var dir = AppContext.BaseDirectory;
             while (dir != null && !Directory.Exists(Path.Combine(dir, "samples"))) dir = Path.GetDirectoryName(dir);
-            var path = Path.Combine(dir!, "tests", "FeatherCad.Tests", "models", "spoked-handwheel-grips-last.fcad");
+            var path = Path.Combine(dir!, "tests", "FeatherCad.Tests", "models", "spoked-handwheel-grips-last.fcprt");
             var doc = FeatherCad.Core.Model.CadDocument.Load(path);
             var r = new FeatherCad.Core.Regen.Regenerator().Rebuild(doc);
             var nb = r.State.Bodies[0].Solid.Native!;

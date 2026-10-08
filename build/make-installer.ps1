@@ -48,7 +48,7 @@ Write-Host "== publishing to $out ==" -ForegroundColor Cyan
     "-p:Version=$ver" "-p:FileVersion=$verNum" -o $out
 if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed with exit code $LASTEXITCODE" }
 
-# 3b) The Explorer thumbnail handler, next to the app (the installer registers it for .fcad files).
+# 3b) The Explorer thumbnail handler, next to the app (the installer registers it for .fcprt files).
 & (Join-Path $PSScriptRoot 'make-thumbs.ps1') -Out $out
 
 # 4) Generate the parametric demo parts fresh (tests/FeatherCad.Tests/Demos.cs), so the installer ships the

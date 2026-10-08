@@ -5,7 +5,7 @@ using System.Text;
 namespace FeatherCad.Core.Model;
 
 /// <summary>
-/// Reads and writes .fcad files. Plain files are the document's JSON. Containers are ZIP archives:
+/// Reads and writes .fcprt files. Plain files are the document's JSON. Containers are ZIP archives:
 /// <code>
 ///   model.json              the document (the same JSON as a plain file)
 ///   attachments/&lt;name&gt;      embedded files, listed with size and SHA-256 in model.json

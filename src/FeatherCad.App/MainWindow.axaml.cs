@@ -586,7 +586,7 @@ public partial class MainWindow : Window
     public static void ShowErrorStatic(string msg) => Instance?.Status("⚠ " + msg);
 
     /// <summary>
-    /// Saves every tab with unsaved changes to the autosave folder: autosave.fcad, autosave-2.fcad, ... all in the
+    /// Saves every tab with unsaved changes to the autosave folder: autosave.fcprt, autosave-2.fcprt, ... all in the
     /// same tick, which is how Recover Autosave tells one session's files from older ones.
     /// </summary>
     void AutoSave()

@@ -22,7 +22,7 @@ static class DeterminismTests
             // the order of an edge pair once followed object hash codes (crossings differing in their last bits)
             var cases = new (string file, (string name, string expr)[] eqs)[]
             {
-                (Path.Combine(dir!, "tests", "FeatherCad.Tests", "models", "spoked-handwheel-grips-last.fcad"), new[] { ("NS", "8") }),
+                (Path.Combine(dir!, "tests", "FeatherCad.Tests", "models", "spoked-handwheel-grips-last.fcprt"), new[] { ("NS", "8") }),
             };
             foreach (var (file, eqs) in cases)
             {
@@ -82,7 +82,7 @@ static class PatternUnionTests
         {
             var dir = AppContext.BaseDirectory;
             while (dir != null && !Directory.Exists(Path.Combine(dir, "samples"))) dir = Path.GetDirectoryName(dir);
-            var json = CadDocument.Load(Path.Combine(dir!, "samples", "spoked-handwheel.fcad")).ToJson();
+            var json = CadDocument.Load(Path.Combine(dir!, "samples", "spoked-handwheel.fcprt")).ToJson();
             (List<string> names, double volume, int faces, List<string> warnings) Build(bool reuse)
             {
                 var doc = CadDocument.FromJson(json);

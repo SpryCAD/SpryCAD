@@ -7,7 +7,7 @@ using FeatherCad.Kernel.Native;
 namespace FeatherCad.Tests;
 
 /// <summary>
-/// <c>-- localbench file.(step|fcad) [holes]</c>: drills small holes into planar faces of a large part, one boolean
+/// <c>-- localbench file.(step|fcprt) [holes]</c>: drills small holes into planar faces of a large part, one boolean
 /// each, and reports the time per hole (with FC_PROF=1 the boolean profile). A local boolean costs about the
 /// same on a big part as on a small one.
 /// </summary>
@@ -63,7 +63,7 @@ static class LocalBench
             all.Link();
             return NBoolean.Run(plate, all, BoolOp.Subtract);
         }
-        if (file.EndsWith(".fcad", StringComparison.OrdinalIgnoreCase))
+        if (file.EndsWith(".fcprt", StringComparison.OrdinalIgnoreCase))
         {
             var doc = CadDocument.Load(file);
             var r = new Regenerator().Rebuild(doc);

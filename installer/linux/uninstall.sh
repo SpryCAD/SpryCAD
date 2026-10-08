@@ -7,6 +7,8 @@ rm -rf "$data/feathercad"
 [ -L "$HOME/.local/bin/feathercad" ] && rm -f "$HOME/.local/bin/feathercad"
 rm -f "$data/applications/feathercad.desktop" \
       "$data/icons/hicolor/256x256/apps/feathercad.png" \
+      "$data/icons/hicolor/256x256/mimetypes/application-x-feathercad-part.png" \
+      "$data/icons/hicolor/256x256/mimetypes/application-x-feathercad-assembly.png" \
       "$data/mime/packages/feathercad.xml"
 
 command -v update-mime-database >/dev/null && update-mime-database "$data/mime" || true

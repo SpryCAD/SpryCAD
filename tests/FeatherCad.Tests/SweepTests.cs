@@ -115,7 +115,7 @@ static class SweepFeatureTests
             double len = 50 + 20 * Math.PI / 2 + 50, vol = Math.PI * 9 * len;
             t.True(Math.Abs(KernelTests.Vex(r.State.Bodies[0].Solid) - vol) < 1e-9 * vol, "Pappus volume");
             t.Eq(r.State.Bodies[0].Solid.Topology.OpenHalfEdges, 0);
-            // the .fcad round trip keeps the feature
+            // the .fcprt round trip keeps the feature
             var again = FeatherCad.Core.Model.CadDocument.FromJson(doc.ToJson());
             t.True(again.Features.Last() is FeatherCad.Core.Model.SweepFeature s2 && s2.PathSketchId == path.Id, "sweep saved");
             var r2 = new FeatherCad.Core.Regen.Regenerator().Rebuild(again);

@@ -3,7 +3,13 @@
   <mime-type type="application/x-feathercad-part">
     <comment>FeatherCAD part</comment>
     <sub-class-of type="application/json"/>
-    <glob pattern="*.fcad"/>
-    <icon name="feathercad"/>
+    <glob pattern="*.fcprt"/>
+    <icon name="application-x-feathercad-part"/>
+  </mime-type>
+  <mime-type type="application/x-feathercad-assembly">
+    <comment>FeatherCAD assembly</comment>
+    <sub-class-of type="application/zip"/>
+    <glob pattern="*.fcasm"/>
+    <icon name="application-x-feathercad-assembly"/>
   </mime-type>
 </mime-info>

@@ -8,7 +8,7 @@ namespace FeatherCad.Core.Assembly;
 /// Reads and writes .fcasm files: always a ZIP container
 /// <code>
 ///   assembly.json           the assembly (components, references, mates)
-///   attachments/parts/…     embedded parts (.fcad bytes)
+///   attachments/parts/…     embedded parts (.fcprt bytes)
 ///   attachments/cache/…     display caches of the parts' revisions (<see cref="MeshCache"/>)
 ///   thumbnail.png           preview image (optional)
 /// </code>

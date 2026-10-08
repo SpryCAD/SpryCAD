@@ -6,7 +6,7 @@ using FeatherCad.Kernel;
 
 namespace FeatherCad.Tests;
 
-/// <summary>Rebuild benchmark: <c>dotnet run -c Release -- bench file.fcad [runs]</c>.</summary>
+/// <summary>Rebuild benchmark: <c>dotnet run -c Release -- bench file.fcprt [runs]</c>.</summary>
 static class Bench
 {
     public static void Run(string file, int runs)
@@ -108,7 +108,7 @@ static class Bench
             .FirstOrDefault(p => p.GetValue(f) is string v && double.TryParse(v, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var d) && d > 0);
 
     /// <summary>
-    /// <c>-- repro file.fcad FeatureName Prop value</c>: rebuilds with one parameter changed and the boolean trace
+    /// <c>-- repro file.fcprt FeatureName Prop value</c>: rebuilds with one parameter changed and the boolean trace
     /// of the failing (fallback) operations written to stdout.
     /// </summary>
     public static void Repro(string file, params string[] edits)
@@ -142,7 +142,7 @@ static class Bench
     }
 
     /// <summary>
-    /// <c>-- featprof file.fcad Feature [runs]</c>: the time of one feature (everything before it cached), with the
+    /// <c>-- featprof file.fcprt Feature [runs]</c>: the time of one feature (everything before it cached), with the
     /// profile of its last run.
     /// </summary>
     public static void FeatureProfile(string file, string name, int runs)
@@ -171,7 +171,7 @@ static class Bench
     }
 
     /// <summary>
-    /// <c>-- determinism file.fcad runs [Name=expr ...]</c>: rebuilds the model several times (equations set as
+    /// <c>-- determinism file.fcprt runs [Name=expr ...]</c>: rebuilds the model several times (equations set as
     /// given) and fingerprints every feature's bodies (face, edge and vertex counts, face names, a sum of the
     /// vertices, edge curves, face surfaces and anchors, edge sample caches); prints the features whose result differs
     /// between runs. FC_DET_FACES=1 also tessellates the final body as the demo check measures volume (2e-4, slow) and
@@ -255,7 +255,7 @@ static class Bench
     }
 
     /// <summary>
-    /// <c>-- massprops file.fcad [Name=expr ...]</c>: exact mass properties of each body (integrated on the B-rep)
+    /// <c>-- massprops file.fcprt [Name=expr ...]</c>: exact mass properties of each body (integrated on the B-rep)
     /// against the mesh's (display mesh, and finer tessellations), with times.
     /// </summary>
     public static int MassPropsTool(string file, string[] equations)
@@ -285,7 +285,7 @@ static class Bench
     }
 
     /// <summary>
-    /// <c>-- tessrepeat file.fcad n [Name=expr ...]</c>: rebuilds once, then tessellates the final body n times (as
+    /// <c>-- tessrepeat file.fcprt n [Name=expr ...]</c>: rebuilds once, then tessellates the final body n times (as
     /// the demo check measures volume): a race inside tessellation shows up as different volumes.
     /// </summary>
     public static int TessRepeat(string file, int n, string[] equations, bool fresh)
@@ -379,8 +379,8 @@ static class Bench
     /// </summary>
     public static void Cases(string root)
     {
-        var cur = Path.Combine(root, "samples", "demos", "spoked-handwheel.fcad");
-        var old = Path.Combine(root, "tests", "FeatherCad.Tests", "models", "spoked-handwheel-grips-last.fcad");
+        var cur = Path.Combine(root, "samples", "demos", "spoked-handwheel.fcprt");
+        var old = Path.Combine(root, "tests", "FeatherCad.Tests", "models", "spoked-handwheel-grips-last.fcprt");
         var cases = new List<(string name, string file, Action<CadDocument> edit)>();
         foreach (var a in new[] { "90", "150", "210", "230", "250", "270", "300", "340" })
             cases.Add(($"spokes {a}", cur, d => d.Features.OfType<CircularPatternFeature>().First(f => f.Name == "Spokes").Angle = a));
@@ -388,7 +388,7 @@ static class Bench
         foreach (var a in new[] { "226", "236", "250", "300" })
             cases.Add(($"old spokes {a}", old, d => d.Features.OfType<CircularPatternFeature>().First(f => f.Name == "Spokes").Angle = a));
         // a local working part, when present (not in the repository)
-        var local = Path.Combine(root, "samples", "demos", "spoked-handwheel-FilletAfter.fcad");
+        var local = Path.Combine(root, "samples", "demos", "spoked-handwheel-FilletAfter.fcprt");
         if (File.Exists(local)) cases.Add(("fillet after", local, _ => { }));
         foreach (var (name, file, edit) in cases)
         {
@@ -411,7 +411,7 @@ static class Bench
         }
     }
 
-    /// <summary><c>-- markertime file.fcad</c>: what showing a pattern's instance markers costs (the app does it on the UI thread).</summary>
+    /// <summary><c>-- markertime file.fcprt</c>: what showing a pattern's instance markers costs (the app does it on the UI thread).</summary>
     public static void MarkerTime(string file)
     {
         var doc = CadDocument.Load(file);
