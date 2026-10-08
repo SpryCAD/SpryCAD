@@ -164,7 +164,13 @@ public partial class MainWindow : IAssemblyHost
     {
         var t = AddTab(new DocumentSession());
         t.Asm = s;
-        s.Changed += () => { UpdateTabHeader(t); if (t == _tab) OnAssemblyChanged(); };
+        s.Changed += () =>
+        {
+            UpdateTabHeader(t);
+            if (t == _tab) OnAssemblyChanged();
+            // its preview in the list of open documents follows it
+            if (_partRows.TryGetValue(t, out var row)) _ = LoadThumb(t, row.Image);
+        };
         UpdateTabHeader(t);
         return t;
     }

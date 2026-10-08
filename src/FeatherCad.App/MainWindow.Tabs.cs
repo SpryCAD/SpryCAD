@@ -468,6 +468,19 @@ public partial class MainWindow
     /// <summary>The part's preview (rendered off the UI thread when the part has rebuilt since the last one).</summary>
     async Task LoadThumb(PartTab t, Image? img = null)
     {
+        // an assembly: its components as placed (made again when it has changed)
+        if (t.Asm is { } asm)
+        {
+            var arev = asm.Revision;
+            if (t.Thumb != null && t.ThumbRevision == arev) return;
+            var apng = await Task.Run(() => { try { return asm.Model.RenderThumbnail(128); } catch { return null; } });
+            if (apng == null) return;
+            t.Thumb = new Avalonia.Media.Imaging.Bitmap(new MemoryStream(apng));
+            t.ThumbRevision = arev;
+            if (_partRows.TryGetValue(t, out var arow)) arow.Image.Source = t.Thumb;
+            else if (img != null) img.Source = t.Thumb;
+            return;
+        }
         var s = t.Session;
         var result = s.Result;
         var rev = s.ResultRevision;

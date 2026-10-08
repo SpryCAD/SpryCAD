@@ -86,6 +86,27 @@ static class AssemblyTests
 
     public static void Run(TestRunner t)
     {
+        t.Test("Assembly previews: saved in the file (a PNG, stored as Explorer's handler reads it), every component as placed", () =>
+        {
+            var m = Demos.Assemblies.First(x => x.file == "hinge.fcasm").build();
+            var path = Path.Combine(NewDir("thumbs"), "Hinge.fcasm");
+            m.Save(path);
+            var png = AssemblyDocument.Load(path).Thumbnail;
+            t.True(png != null && png.Length > 1000 && png[0] == 0x89 && png[1] == (byte)'P' && png[2] == (byte)'N' && png[3] == (byte)'G', "a PNG preview");
+            using (var zip = System.IO.Compression.ZipFile.OpenRead(path))
+            {
+                var e = zip.GetEntry("thumbnail.png");
+                t.True(e != null && e.CompressedLength == e.Length, "stored uncompressed (the handler reads it straight out of the ZIP)");
+            }
+            // the placed meshes: each component where it is (the second leaf turned half round: its box mirrored about x = 20)
+            var leaf2 = m.Doc.Components[1];
+            var placed = AssemblyModel.PlacedMesh(m.DisplayOf(leaf2)!.Mesh, leaf2.Placement.ToTransform());
+            var own = m.DisplayOf(leaf2)!.Mesh.Bounds;
+            t.True(Math.Abs(placed.Bounds.Max.X - (40 - own.Min.X)) < 1e-4 && Math.Abs(placed.Bounds.Min.Y - (64 - own.Max.Y)) < 1e-4, $"placed ({placed.Bounds.Min} .. {placed.Bounds.Max})");
+            // without anything to show: no preview
+            t.True(AssemblyModel.New().RenderThumbnail() == null, "an empty assembly has none");
+        });
+
         t.Test("STEP assemblies: the hinge written and read back (parts once, placed); as an assembly: embedded parts, locked to the first", () =>
         {
             var hinge = Demos.Assemblies.First(x => x.file == "hinge.fcasm").build();

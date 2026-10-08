@@ -19,6 +19,8 @@ public sealed class AssemblySession
     public string? Selected { get; set; }
     /// <summary>The assembly changed (components, placements, references, saved state).</summary>
     public event Action? Changed;
+    /// <summary>Counts changes to what it looks like (a preview made of an older count is stale).</summary>
+    public int Revision { get; private set; }
 
     readonly Stack<string> _undo = new(), _redo = new();
     public bool CanUndo => _undo.Count > 0;
@@ -41,7 +43,7 @@ public sealed class AssemblySession
     public void BeginChange() { _undo.Push(Model.Doc.ToJson()); _redo.Clear(); }
 
     /// <summary>After a change: unsaved, and shown.</summary>
-    public void EndChange() { Dirty = true; Changed?.Invoke(); }
+    public void EndChange() { Dirty = true; Revision++; Changed?.Invoke(); }
 
     /// <summary>Drops the state saved by <see cref="BeginChange"/> (the change did not happen).</summary>
     public void AbandonChange() { if (_undo.Count > 0) _undo.Pop(); }

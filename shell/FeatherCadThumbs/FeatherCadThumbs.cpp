@@ -266,6 +266,9 @@ static HRESULT SetValue(const wchar_t* key, const wchar_t* name, const wchar_t* 
     return HRESULT_FROM_WIN32(s);
 }
 
+// the file types whose containers carry a preview: parts and assemblies
+static const wchar_t* const Extensions[] = { L".fcad", L".fcasm" };
+
 STDAPI DllRegisterServer()
 {
     wchar_t path[MAX_PATH];
@@ -273,12 +276,15 @@ STDAPI DllRegisterServer()
     wchar_t clsidKey[128], serverKey[160], shellExKey[160];
     swprintf_s(clsidKey, L"Software\\Classes\\CLSID\\%s", ClsidText);
     swprintf_s(serverKey, L"%s\\InprocServer32", clsidKey);
-    swprintf_s(shellExKey, L"Software\\Classes\\.fcad\\ShellEx\\%s", ThumbnailShellEx);
     HRESULT hr;
     if (FAILED(hr = SetValue(clsidKey, nullptr, L"FeatherCAD Thumbnail Handler"))) return hr;
     if (FAILED(hr = SetValue(serverKey, nullptr, path))) return hr;
     if (FAILED(hr = SetValue(serverKey, L"ThreadingModel", L"Apartment"))) return hr;
-    if (FAILED(hr = SetValue(shellExKey, nullptr, ClsidText))) return hr;
+    for (auto ext : Extensions)
+    {
+        swprintf_s(shellExKey, L"Software\\Classes\\%s\\ShellEx\\%s", ext, ThumbnailShellEx);
+        if (FAILED(hr = SetValue(shellExKey, nullptr, ClsidText))) return hr;
+    }
     SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, nullptr, nullptr);
     return S_OK;
 }
@@ -287,9 +293,12 @@ STDAPI DllUnregisterServer()
 {
     wchar_t clsidKey[128], shellExKey[160];
     swprintf_s(clsidKey, L"Software\\Classes\\CLSID\\%s", ClsidText);
-    swprintf_s(shellExKey, L"Software\\Classes\\.fcad\\ShellEx\\%s", ThumbnailShellEx);
     RegDeleteTreeW(HKEY_CURRENT_USER, clsidKey);
-    RegDeleteKeyW(HKEY_CURRENT_USER, shellExKey);
+    for (auto ext : Extensions)
+    {
+        swprintf_s(shellExKey, L"Software\\Classes\\%s\\ShellEx\\%s", ext, ThumbnailShellEx);
+        RegDeleteKeyW(HKEY_CURRENT_USER, shellExKey);
+    }
     SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, nullptr, nullptr);
     return S_OK;
 }

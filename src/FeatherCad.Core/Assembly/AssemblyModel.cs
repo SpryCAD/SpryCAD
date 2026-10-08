@@ -368,7 +368,41 @@ public sealed class AssemblyModel
         }
     }
 
-    /// <summary>Saves the assembly (caches refreshed; references made relative to the new place).</summary>
+    /// <summary>
+    /// A preview of the assembly (PNG): every component's part as placed, in its color (the image saved in the
+    /// file, which Explorer shows, and the list of open documents'). Null when there is nothing to show.
+    /// </summary>
+    public byte[]? RenderThumbnail(int size = 256)
+    {
+        var parts = new List<(DisplayMesh, double[])>();
+        foreach (var c in Doc.Components)
+        {
+            if (c.Suppressed || DisplayOf(c) is not { } pd || pd.Mesh.Indices.Length == 0) continue;
+            parts.Add((PlacedMesh(pd.Mesh, c.Placement.ToTransform()), c.Color ?? pd.Color));
+        }
+        return parts.Count == 0 ? null : Thumbnail.Render(parts, size);
+    }
+
+    /// <summary>A display mesh's triangles moved by a placement (positions, normals, bounds; the indices shared).</summary>
+    public static DisplayMesh PlacedMesh(DisplayMesh m, Transform t)
+    {
+        var p = new float[m.Positions.Length]; var n = new float[m.Normals.Length];
+        var box = Box3.Empty;
+        for (int i = 0; i + 2 < m.Positions.Length; i += 3)
+        {
+            var q = t.Point(new Vec3(m.Positions[i], m.Positions[i + 1], m.Positions[i + 2]));
+            p[i] = (float)q.X; p[i + 1] = (float)q.Y; p[i + 2] = (float)q.Z;
+            box.Add(q);
+        }
+        for (int i = 0; i + 2 < m.Normals.Length; i += 3)
+        {
+            var v = t.Vector(new Vec3(m.Normals[i], m.Normals[i + 1], m.Normals[i + 2]));
+            n[i] = (float)v.X; n[i + 1] = (float)v.Y; n[i + 2] = (float)v.Z;
+        }
+        return new DisplayMesh { Positions = p, Normals = n, Indices = m.Indices, Bounds = box, Volume = m.Volume };
+    }
+
+    /// <summary>Saves the assembly (caches refreshed; references made relative to the new place; its preview made).</summary>
     public void Save(string path)
     {
         path = System.IO.Path.GetFullPath(path);
@@ -378,6 +412,8 @@ public sealed class AssemblyModel
         foreach (var c in Doc.Components)
             if (c.Part.Embedded == null && c.Part.AbsolutePath != null) c.Part.Path = ComponentResolver.Relative(dir, c.Part.AbsolutePath);
         RefreshCaches();
+        // a preview is never worth failing a save: the last one is kept if this one cannot be made
+        try { Doc.Thumbnail = RenderThumbnail() ?? Doc.Thumbnail; } catch { }
         Doc.Save(path);
         Path = path;
     }
