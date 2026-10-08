@@ -642,6 +642,20 @@ public static class StepImport
                         var y = Vec3.Cross(z, x);
                         return new NEllipse(o, x, same ? y : -y, a, b);
                     }
+                case "HYPERBOLA":
+                    {
+                        var (o, z, x) = Placement(c.Args[1]);
+                        var a = D(c.Args[2]) * _s; var b = D(c.Args[3]) * _s;
+                        var y = Vec3.Cross(z, x);
+                        return new NHyperbola(o, x, same ? y : -y, a, b);
+                    }
+                case "PARABOLA":
+                    {
+                        var (o, z, x) = Placement(c.Args[1]);
+                        var f = D(c.Args[2]) * _s;
+                        var y = Vec3.Cross(z, x);
+                        return new NParabola(o, x, same ? y : -y, f);
+                    }
             }
             if (c.Is("B_SPLINE_CURVE_WITH_KNOTS") || c.Is("B_SPLINE_CURVE")) return Spline(c, same);
             throw new NotSupportedException(c.Type.ToLowerInvariant().Replace('_', ' ') + " edges");

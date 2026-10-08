@@ -36,6 +36,8 @@ public static class NHash
                         case NLine ln: h.Add(1); h.Add(ln.P); h.Add(ln.D); break;
                         case NCircle ci: h.Add(2); h.Add(ci.C); h.Add(ci.X); h.Add(ci.Y); h.Add(ci.R); break;
                         case NEllipse el: h.Add(3); h.Add(el.C); h.Add(el.X); h.Add(el.Y); h.Add(el.A); h.Add(el.B); break;
+                        case NHyperbola hy: h.Add(8); h.Add(hy.C); h.Add(hy.X); h.Add(hy.Y); h.Add(hy.A); h.Add(hy.B); break;
+                        case NParabola pa: h.Add(9); h.Add(pa.C); h.Add(pa.X); h.Add(pa.Y); h.Add(pa.F); break;
                         case NSpline sp: h.Add(4); h.Add(sp.S.Degree); foreach (var p in sp.S.Poles) h.Add(p); foreach (var k in sp.S.Knots) h.Add(k); break;
                         case NPolyline pl: h.Add(5); foreach (var p in pl.Pts) h.Add(p); break;
                         case NContact ct: h.Add(6); h.Add(ct.OnB ? 1 : 0); foreach (var p in ct.Spine.P) h.Add(p); break;

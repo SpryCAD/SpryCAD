@@ -125,6 +125,101 @@ public sealed class NEllipse : NCurve
     public override ExactCurve ToExact() => new EllipseCurve(C, Vec3.Cross(X, Y), X, A, B);
 }
 
+/// <summary>
+/// One branch of a hyperbola, C + A cosh t X + B sinh t Y (a plane across a cone, steeper than its sides: STEP's
+/// hyperbola). Open: its edges run between vertices.
+/// </summary>
+public sealed class NHyperbola : NCurve
+{
+    public Vec3 C { get; }
+    public Vec3 X { get; }
+    public Vec3 Y { get; }
+    public double A { get; }
+    public double B { get; }
+
+    public NHyperbola(Vec3 c, Vec3 x, Vec3 y, double a, double b) { C = c; X = x.Normalized; Y = y.Normalized; A = a; B = b; }
+    public override Vec3 Eval(double t) => C + X * (A * Math.Cosh(t)) + Y * (B * Math.Sinh(t));
+    public override Vec3 Deriv(double t) => X * (A * Math.Sinh(t)) + Y * (B * Math.Cosh(t));
+    Vec3 Deriv2(double t) => X * (A * Math.Cosh(t)) + Y * (B * Math.Sinh(t));
+
+    public override double Param(Vec3 p, double? hint = null)
+    {
+        // from the point's height along Y (exact on the curve), then Newton on the distance
+        var t = Math.Asinh(Vec3.Dot(p - C, Y) / B);
+        for (int i = 0; i < 30; i++)
+        {
+            var e = Eval(t) - p; var d1 = Deriv(t);
+            var f = Vec3.Dot(e, d1); var fp = Vec3.Dot(d1, d1) + Vec3.Dot(e, Deriv2(t));
+            if (!(fp > 1e-300)) break;
+            var dt = f / fp; t -= dt;
+            if (Math.Abs(dt) < 1e-15 * (1 + Math.Abs(t))) break;
+        }
+        return t;
+    }
+
+    public override NCurve Transformed(in Transform t)
+    {
+        var x = t.Vector(X); var y = t.Vector(Y);
+        return new NHyperbola(t.Point(C), x, y, A * x.Length, B * y.Length);
+    }
+
+    public override int Samples(double t0, double t1, double tol)
+    {
+        // chord error ≤ max|C''|·h²/8, the second derivative largest at the end farthest out
+        var tm = Math.Max(Math.Abs(t0), Math.Abs(t1));
+        var acc = Math.Sqrt(A * A * Math.Cosh(tm) * Math.Cosh(tm) + B * B * Math.Sinh(tm) * Math.Sinh(tm));
+        var h = Math.Sqrt(8 * tol / Math.Max(acc, 1e-12));
+        return Math.Clamp((int)Math.Ceiling(Math.Abs(t1 - t0) / h), 2, 2000);
+    }
+
+    public override ExactCurve ToExact() => new HyperbolaCurve(C, Vec3.Cross(X, Y), X, A, B);
+}
+
+/// <summary>
+/// A parabola, C + F (t² X + 2t Y) (a plane across a cone parallel to one of its sides: STEP's parabola, F the focal
+/// distance). Open: its edges run between vertices.
+/// </summary>
+public sealed class NParabola : NCurve
+{
+    public Vec3 C { get; }
+    public Vec3 X { get; }
+    public Vec3 Y { get; }
+    public double F { get; }
+
+    public NParabola(Vec3 c, Vec3 x, Vec3 y, double f) { C = c; X = x.Normalized; Y = y.Normalized; F = f; }
+    public override Vec3 Eval(double t) => C + X * (F * t * t) + Y * (2 * F * t);
+    public override Vec3 Deriv(double t) => X * (2 * F * t) + Y * (2 * F);
+
+    public override double Param(Vec3 p, double? hint = null)
+    {
+        var t = Vec3.Dot(p - C, Y) / (2 * F);
+        for (int i = 0; i < 30; i++)
+        {
+            var e = Eval(t) - p; var d1 = Deriv(t);
+            var f = Vec3.Dot(e, d1); var fp = Vec3.Dot(d1, d1) + Vec3.Dot(e, X * (2 * F));
+            if (!(fp > 1e-300)) break;
+            var dt = f / fp; t -= dt;
+            if (Math.Abs(dt) < 1e-15 * (1 + Math.Abs(t))) break;
+        }
+        return t;
+    }
+
+    public override NCurve Transformed(in Transform t)
+    {
+        var x = t.Vector(X); var y = t.Vector(Y);
+        return new NParabola(t.Point(C), x, y, F * x.Length);
+    }
+
+    public override int Samples(double t0, double t1, double tol)
+    {
+        // the second derivative is 2F X throughout
+        var h = Math.Sqrt(8 * tol / Math.Max(2 * F, 1e-12));
+        return Math.Clamp((int)Math.Ceiling(Math.Abs(t1 - t0) / h), 2, 2000);
+    }
+
+    public override ExactCurve ToExact() => new ParabolaCurve(C, Vec3.Cross(X, Y), X, F);
+}
+
 /// <summary>Cubic B-spline through exact intersection points (parameter 0..1).</summary>
 public sealed class NSpline : NCurve
 {

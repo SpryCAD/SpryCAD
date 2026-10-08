@@ -148,6 +148,17 @@ public sealed partial class ExactBrepFactory
                     var x = el.X;
                     return new EllipseCurve(el.C, axis, x, el.A, el.B);
                 }
+            case NHyperbola hy:
+                {
+                    // run against the parameter: the same branch with its Y (and so the axis) reversed
+                    var axis = Vec3.Cross(hy.X, hy.Y);
+                    return new HyperbolaCurve(hy.C, run[0].Forward ? axis : -axis, hy.X, hy.A, hy.B);
+                }
+            case NParabola pa:
+                {
+                    var axis = Vec3.Cross(pa.X, pa.Y);
+                    return new ParabolaCurve(pa.C, run[0].Forward ? axis : -axis, pa.X, pa.F);
+                }
             default:
                 {
                     var clean = new List<Vec3> { pts[0] };

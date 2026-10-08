@@ -409,6 +409,10 @@ public static class NIntersect
 
         if (a.Kind == SurfaceKind.Plane && b.Kind == SurfaceKind.Cylinder) return PlaneCylinder(a.Plane!, b, tol);
         if (b.Kind == SurfaceKind.Plane && a.Kind == SurfaceKind.Cylinder) return PlaneCylinder(b.Plane!, a, tol);
+        if (a.Kind == SurfaceKind.Plane && b.Kind == SurfaceKind.Cone) return PlaneCone(a.Plane!, b, tol);
+        if (b.Kind == SurfaceKind.Plane && a.Kind == SurfaceKind.Cone) return PlaneCone(b.Plane!, a, tol);
+        if (a.Kind == SurfaceKind.Plane && b.Kind == SurfaceKind.Torus) return PlaneTorus(a.Plane!, b, tol, chordTol);
+        if (b.Kind == SurfaceKind.Plane && a.Kind == SurfaceKind.Torus) return PlaneTorus(b.Plane!, a, tol, chordTol);
         if (a.Kind == SurfaceKind.Cylinder && b.Kind == SurfaceKind.Cylinder && Math.Abs(Math.Abs(Vec3.Dot(a.Axis, b.Axis)) - 1) < 1e-10)
             return ParallelCylinders(a, b, tol);
         if (a.Kind == SurfaceKind.Cylinder && b.Kind == SurfaceKind.Cylinder && Math.Abs(a.R - b.R) < tol)
@@ -740,6 +744,186 @@ public static class NIntersect
         var major = (a - n * cosg).Normalized;          // projection of the axis into the plane
         var minor = Vec3.Cross(n, major).Normalized;
         res.Add(new NEllipse(center, major, minor, R / Math.Abs(cosg), R));
+        return res;
+    }
+
+    /// <summary>
+    /// A plane across a cone (one nappe: r = R + z·tan(half) ≥ 0, as the surface is): a conic. In the plane's frame
+    /// about the apex's foot (x along the axis's slant in the plane, y across it, d the apex's distance, β the angle
+    /// between the plane's normal and the nappe's axis, α the half angle) the cone is (x sin β − d cos β)² =
+    /// cos²α (x² + y² + d²): with A = sin²β − cos²α, A (x − x₀)² − cos²α y² = d² cos²α sin²α / A, x₀ = d sin β cos β / A,
+    /// an ellipse (A &lt; 0), a hyperbola (A &gt; 0: the branch on this nappe) or, A = 0, a parabola. Planes square to the
+    /// axis (circles) are the coaxial case, through the apex lines (<see cref="ApexLines"/>); nearly a parabola
+    /// without being one: traced (null), as is anything that does not check out on both surfaces.
+    /// </summary>
+    static List<NCurve>? PlaneCone(Plane pl, NSurface cone, double tol)
+    {
+        var tanH = Math.Tan(cone.R2);
+        if (Math.Abs(tanH) < 1e-12) return null;
+        var apex = cone.Origin - cone.Axis * (cone.R / tanH);
+        var w = tanH > 0 ? cone.Axis : -cone.Axis; // into the nappe
+        var n = pl.Normal;
+        var d = pl.Distance(apex);
+        double alpha = Math.Abs(cone.R2), ca = Math.Cos(alpha), sa = Math.Sin(alpha), c2 = ca * ca;
+        var cosb = Vec3.Dot(n, w);
+        if (Math.Abs(d) < tol) return ApexLines(apex, w, n, cosb, ca, sa, tol);
+        var e1v = w - n * cosb; var sinb = e1v.Length;
+        if (sinb < 1e-9) return null;
+        var e1 = e1v / sinb; var e2 = Vec3.Cross(n, e1);
+        var foot = apex - n * d;
+        bool OnNappe(Vec3 q) => Vec3.Dot(q - apex, w) > 0;
+        var A = sinb * sinb - c2;
+        var res = new List<NCurve>();
+        if (Math.Abs(A) < 1e-12)
+        {
+            // x = x_v − (tan β / 2d) y²: a parabola opening away from the slant's side, focal distance |d| / (2 |tan β|)
+            var tanb = sinb / cosb;
+            var xv = d * (cosb * cosb - sinb * sinb) / (2 * sinb * cosb);
+            var k = tanb / (2 * d);
+            var vertex = foot + e1 * xv;
+            if (OnNappe(vertex)) res.Add(new NParabola(vertex, e1 * -Math.Sign(k), e2, 1 / (4 * Math.Abs(k))));
+        }
+        else if (Math.Abs(A) < 1e-6) return null;
+        else
+        {
+            var x0 = d * sinb * cosb / A;
+            var center = foot + e1 * x0;
+            if (A < 0)
+            {
+                double ax = Math.Abs(d) * ca * sa / -A, ay = Math.Abs(d) * sa / Math.Sqrt(-A);
+                if (OnNappe(center)) res.Add(ax >= ay ? new NEllipse(center, e1, e2, ax, ay) : new NEllipse(center, e2, -e1, ay, ax));
+            }
+            else
+            {
+                double a = Math.Abs(d) * ca * sa / A, b = Math.Abs(d) * sa / Math.Sqrt(A);
+                foreach (var side in new[] { 1.0, -1.0 })
+                    if (OnNappe(center + e1 * (side * a))) res.Add(new NHyperbola(center, e1 * side, e2, a, b));
+            }
+        }
+        // on both surfaces (a few points across each curve's usual range), or traced after all
+        foreach (var c in res)
+            for (int i = 0; i <= 8; i++)
+            {
+                var p = c.Eval(c.Periodic ? i * Math.PI / 4 : -2 + i * 0.5);
+                if (Math.Abs(pl.Distance(p)) > tol * 1e-2 || Math.Abs(cone.F_(p)) > tol * 1e-2) return null;
+            }
+        return res;
+    }
+
+    /// <summary>
+    /// A plane through a cone's apex (a radial plane of a chamfered gear, a keyway's wall): the nappe's generators
+    /// g = cos α w + sin α (cos θ f₁ + sin θ f₂) in it, f₁ the plane's normal square to the axis w, where
+    /// cos α cos β + sin α sin β cos θ = 0, so cos θ = −cot α cot β: two lines from the apex, or none. Square to the
+    /// axis (the apex alone) none; touching along one generator: traced (null).
+    /// </summary>
+    static List<NCurve>? ApexLines(Vec3 apex, Vec3 w, Vec3 n, double cosb, double ca, double sa, double tol)
+    {
+        var res = new List<NCurve>();
+        var f1v = n - w * cosb; var sinb = f1v.Length;
+        if (sinb < 1e-12) return res;
+        var f1 = f1v / sinb; var f2 = Vec3.Cross(w, f1);
+        var cth = -ca * cosb / (sa * sinb);
+        if (Math.Abs(Math.Abs(cth) - 1) < 1e-9) return null;
+        if (Math.Abs(cth) > 1) return res;
+        var sth = Math.Sqrt(1 - cth * cth);
+        foreach (var s in new[] { sth, -sth })
+            res.Add(new NLine(apex, w * ca + (f1 * cth + f2 * s) * sa));
+        return res;
+    }
+
+    /// <summary>
+    /// A plane across a torus (centre O, axis A, radii R &gt; r): on the meridian at u (e(u) = X cos u + Y sin u) a
+    /// point O + (R + r cos v) e + r sin v A lies on the plane n·p = k where a cos v + b sin v = −c, with s = n·e(u),
+    /// a = r s, b = r (n·A), c = n·O − k + R s: v = atan2(b, a) ± acos(−c/√(a² + b²)), exact and in closed form. Such v
+    /// exist where r²(s² + (n·A)²) ≥ c², a quadratic in s, so over arcs of u: across each arc the two roots run out and
+    /// back as one closed curve (u = u_A + (u_B − u_A)(1 − cos φ)/2, the + root for φ in (0, π), the − root back, which
+    /// is smooth where they meet), or, the plane meeting every meridian, as two curves round the axis. The curves as
+    /// exact points halved to the chord tolerance, as traced ones (no marching, no projections). A plane through the
+    /// axis: its two meridian circles. Square to the axis (circles) is the coaxial case; tangencies and the curve
+    /// pinching to a point or a crossing: traced (null), as are tori with r ≥ R.
+    /// </summary>
+    static List<NCurve>? PlaneTorus(Plane pl, NSurface tor, double tol, double chordTol)
+    {
+        double R = tor.R, r = tor.R2;
+        if (!(r > 0) || r >= R) return null;
+        var n = pl.Normal; var ax = tor.Axis; var o = tor.Origin;
+        var X = tor.F.XDir; var Y = Vec3.Cross(ax, X);
+        double al = Vec3.Dot(n, X), be = Vec3.Dot(n, Y), ga = Vec3.Dot(n, ax), de = pl.Distance(o);
+        var sig = Math.Sqrt(al * al + be * be);
+        if (sig < 1e-9) return null;
+        var u0 = Math.Atan2(be, al);
+        Vec3 E(double u) => X * Math.Cos(u) + Y * Math.Sin(u);
+        if (Math.Abs(ga) < 1e-12 && Math.Abs(de) < tol)
+            return new List<NCurve> { new NCircle(o + E(u0 + Math.PI / 2) * R, n, E(u0 + Math.PI / 2), r), new NCircle(o + E(u0 - Math.PI / 2) * R, n, E(u0 - Math.PI / 2), r) };
+        // r²(s² + γ²) − (δ + R s)² ≥ 0 between its roots s1 < s2 (the s² coefficient r² − R² is negative)
+        double qa = r * r - R * R, qb = -2 * de * R, qc = r * r * ga * ga - de * de;
+        var disc = qb * qb - 4 * qa * qc;
+        var res = new List<NCurve>();
+        var eps = 1e-9 * (1 + Math.Abs(qb) + Math.Abs(qa));
+        if (disc < -eps * eps) return res;
+        if (disc < eps * eps) return null; // touching
+        var sq = Math.Sqrt(disc);
+        var qq = -0.5 * (qb + Math.Sign(qb == 0 ? 1 : qb) * sq);
+        double r1 = qq / qa, r2 = qc / qq;
+        double s1 = Math.Min(r1, r2), s2 = Math.Max(r1, r2);
+        const double edge = 1e-9;
+        // s runs over [−σ, σ]: arcs of u where it is in [s1, s2]; near a transition (a pinch, a tangency): traced
+        if (Math.Abs(s1 - sig) < edge || Math.Abs(s1 + sig) < edge || Math.Abs(s2 - sig) < edge || Math.Abs(s2 + sig) < edge) return null;
+        if (s1 > sig || s2 < -sig) return res;
+        Vec3 At(double u, double sign)
+        {
+            var s = al * Math.Cos(u) + be * Math.Sin(u);
+            double a = r * s, b = r * ga, c = de + R * s;
+            var rho = Math.Sqrt(a * a + b * b);
+            var v = Math.Atan2(b, a) + sign * Math.Acos(Math.Clamp(rho > 0 ? -c / rho : 0, -1, 1));
+            return o + E(u) * (R + r * Math.Cos(v)) + ax * (r * Math.Sin(v));
+        }
+        var curves = new List<Func<double, Vec3>>();
+        if (s1 < -sig && s2 > sig)
+        {
+            curves.Add(t => At(t, 1));
+            curves.Add(t => At(t, -1));
+        }
+        else
+        {
+            var arcs = new List<(double ua, double ub)>();
+            if (s2 > sig) { var th = Math.Acos(s1 / sig); arcs.Add((u0 - th, u0 + th)); }
+            else if (s1 < -sig) { var th = Math.Acos(s2 / sig); arcs.Add((u0 + th, u0 + 2 * Math.PI - th)); }
+            else
+            {
+                double tl = Math.Acos(s1 / sig), th = Math.Acos(s2 / sig);
+                arcs.Add((u0 + th, u0 + tl)); arcs.Add((u0 - tl, u0 - th));
+            }
+            foreach (var (ua, ub) in arcs)
+                curves.Add(phi => At(ua + (ub - ua) * (1 - Math.Cos(phi)) * 0.5, Math.Sin(phi) >= 0 ? 1 : -1));
+        }
+        foreach (var f in curves)
+        {
+            // over φ (or u) in [0, 2π), halved where the curve leaves the chord
+            var pts = new List<Vec3>();
+            void Sub(double ta, Vec3 pa, double tb, Vec3 pb, int depth)
+            {
+                if (depth > 14) return;
+                var tm = 0.5 * (ta + tb); var pm = f(tm);
+                if (depth > 0 && Vec3.Distance(pm, (pa + pb) * 0.5) < chordTol) return;
+                Sub(ta, pa, tm, pm, depth + 1);
+                pts.Add(pm);
+                Sub(tm, pm, tb, pb, depth + 1);
+            }
+            const int n0 = 32;
+            var prev = f(0);
+            for (int i = 0; i < n0; i++)
+            {
+                double ta = 2 * Math.PI * i / n0, tb = 2 * Math.PI * (i + 1) / n0;
+                var pb = f(tb);
+                pts.Add(prev);
+                Sub(ta, prev, tb, pb, 0);
+                prev = pb;
+            }
+            foreach (var p in pts)
+                if (Math.Abs(pl.Distance(p)) > tol * 1e-2 || Math.Abs(tor.F_(p)) > tol * 1e-2) return null;
+            res.Add(new NPolyline(pts, true));
+        }
         return res;
     }
 

@@ -219,6 +219,38 @@ public sealed record BSplineCurve(int Degree, Vec3[] Poles, double[] Knots) : Ex
     }
 }
 
+/// <summary>Hyperbola branch: Center + Semi cosh t * XDir + SemiImag sinh t * (Axis × XDir) (STEP's hyperbola).</summary>
+public sealed record HyperbolaCurve(Vec3 Center, Vec3 Axis, Vec3 XDir, double Semi, double SemiImag) : ExactCurve
+{
+    public Vec3 At(double t) => Center + XDir * (Semi * Math.Cosh(t)) + Vec3.Cross(Axis, XDir) * (SemiImag * Math.Sinh(t));
+    public double ParamOf(Vec3 p) => Math.Asinh(Vec3.Dot(p - Center, Vec3.Cross(Axis, XDir)) / SemiImag);
+    public override IEnumerable<Vec3> Sample(Vec3 from, Vec3 to, bool closed, double chordTol)
+    {
+        double t0 = ParamOf(from), t1 = ParamOf(to);
+        int n = Math.Clamp((int)Math.Ceiling(Math.Abs(t1 - t0) / 0.02), 1, 2000);
+        yield return from;
+        for (int i = 1; i < n; i++) yield return At(t0 + (t1 - t0) * i / n);
+        yield return to;
+    }
+}
+
+/// <summary>Parabola: Center + Focal (t² XDir + 2t (Axis × XDir)) (STEP's parabola).</summary>
+public sealed record ParabolaCurve(Vec3 Center, Vec3 Axis, Vec3 XDir, double Focal) : ExactCurve
+{
+    public Vec3 At(double t) => Center + XDir * (Focal * t * t) + Vec3.Cross(Axis, XDir) * (2 * Focal * t);
+    public double ParamOf(Vec3 p) => Vec3.Dot(p - Center, Vec3.Cross(Axis, XDir)) / (2 * Focal);
+    public override IEnumerable<Vec3> Sample(Vec3 from, Vec3 to, bool closed, double chordTol)
+    {
+        double t0 = ParamOf(from), t1 = ParamOf(to);
+        // chord error 2F·h²/8 per step
+        var h = Math.Sqrt(4 * Math.Max(chordTol, 1e-9) / Math.Max(Focal, 1e-12));
+        int n = Math.Clamp((int)Math.Ceiling(Math.Abs(t1 - t0) / h), 1, 2000);
+        yield return from;
+        for (int i = 1; i < n; i++) yield return At(t0 + (t1 - t0) * i / n);
+        yield return to;
+    }
+}
+
 /// <summary>Ellipse: Center + Major cos t * XDir + Minor sin t * (Axis × XDir), counter-clockwise about Axis.</summary>
 public sealed record EllipseCurve(Vec3 Center, Vec3 Axis, Vec3 XDir, double Major, double Minor) : ExactCurve
 {

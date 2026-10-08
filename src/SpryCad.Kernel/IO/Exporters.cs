@@ -234,6 +234,13 @@ public static class StepWriter
                     // e.g. mitered fillet corners (equal-radius cylinders meeting at an angle)
                     geom = c.Add($"ELLIPSE('',#{Axis2(c, el.Center, el.Axis, el.XDir)},{R(el.Major)},{R(el.Minor)})");
                     break;
+                case HyperbolaCurve hy:
+                    // a plane across a cone (e.g. a gear tooth's flank across its chamfer)
+                    geom = c.Add($"HYPERBOLA('',#{Axis2(c, hy.Center, hy.Axis, hy.XDir)},{R(hy.Semi)},{R(hy.SemiImag)})");
+                    break;
+                case ParabolaCurve pa:
+                    geom = c.Add($"PARABOLA('',#{Axis2(c, pa.Center, pa.Axis, pa.XDir)},{R(pa.Focal)})");
+                    break;
                 case BSplineCurve bs:
                     {
                         var poles = string.Join(",", bs.Poles.Select(p => "#" + c.Add(Pt(p))));

@@ -164,6 +164,7 @@ static class Program
             RevolveAxisTests.Run(t);
             ConfigTests.Run(t);
             AxisCenterTests.Run(t);
+            PlaneSectionTests.Run(t);
             SlotDragTests.Run(t);
             Console.WriteLine("Core");
             CoreTests.Run(t);
