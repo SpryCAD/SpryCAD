@@ -24,7 +24,12 @@ public partial class MainWindow
     {
         public readonly List<MateRef> Picks = new();
         public MateType? Type;
-        public double Value = 10;
+        /// <summary>A Coincident's offset (mm; 0: touching; below 0: on the other side).</summary>
+        public double Offset;
+        /// <summary>An Angle's angle (degrees).</summary>
+        public double Angle = 90;
+        /// <summary>The Mechanical tab shown (else Standard).</summary>
+        public bool Mechanical;
         public bool Flip;
         public bool Limits;
         public double Min = 0, Max = 20;
@@ -92,7 +97,7 @@ public partial class MainWindow
         return l;
     }
 
-    static readonly MateType[] StandardMates = { MateType.Coincident, MateType.Parallel, MateType.Perpendicular, MateType.Tangent, MateType.Concentric, MateType.Lock, MateType.Distance, MateType.Angle };
+    static readonly MateType[] StandardMates = { MateType.Coincident, MateType.Parallel, MateType.Perpendicular, MateType.Tangent, MateType.Concentric, MateType.Lock, MateType.Angle };
     static readonly MateType[] MechanicalMates = { MateType.Gear, MateType.Screw };
 
     /// <summary>The mate type likely meant for two references (SolidWorks' choice where it has one).</summary>
@@ -106,6 +111,21 @@ public partial class MainWindow
 
     void MateCommand() => MatePage(null);
 
+    /// <summary>The icon of a mate type (in the tree and on the Mate page).</summary>
+    public static string MateIcon(MateType t) => t switch
+    {
+        MateType.Coincident or MateType.Distance => "mate-coincident",
+        MateType.Parallel => "mate-parallel",
+        MateType.Perpendicular => "mate-perpendicular",
+        MateType.Tangent => "mate-tangent",
+        MateType.Concentric => "mate-concentric",
+        MateType.Lock => "mate-lock",
+        MateType.Angle => "mate-angle",
+        MateType.Gear => "mate-gear",
+        MateType.Screw => "mate-screw",
+        _ => "relations",
+    };
+
     /// <summary>The Mate page: adding mates, or (<paramref name="editing"/>) changing one.</summary>
     void MatePage(Mate? editing)
     {
@@ -118,7 +138,10 @@ public partial class MainWindow
         {
             st.Picks.Add(e.A.Clone()); st.Picks.Add(e.B.Clone());
             st.Type = e.Type;
-            if (e.Type == MateType.Screw) st.Lead = e.Value; else if (e.Type is MateType.Distance or MateType.Angle) st.Value = e.Value;
+            if (e.Type == MateType.Screw) st.Lead = e.Value;
+            else if (e.Type == MateType.Angle) st.Angle = e.Value;
+            else if (e.Type == MateType.Coincident) st.Offset = e.Value;
+            st.Mechanical = e.Type is MateType.Gear or MateType.Screw;
             if (e.Min is { } lo && e.Max is { } hi) { st.Limits = true; st.Min = lo; st.Max = hi; }
             if (e.Type == MateType.Gear) { st.RatioA = e.RatioA; st.RatioB = e.RatioB; }
             st.Reverse = e.Reverse;
@@ -151,56 +174,103 @@ public partial class MainWindow
         }
 
         var page = new PmPage(editing != null ? "Edit Mate: " + editing.Name : "Mate", "relations");
+        var red = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse("#FFC62828"));
+
+        // Standard / Mechanical: tabs, as SolidWorks has them (styled as the panel's tabs, sharing the width)
+        static TabStripItem Tab(string icon, string text) => new()
+        {
+            Content = new StackPanel
+            {
+                Orientation = Orientation.Horizontal, Spacing = 6, HorizontalAlignment = HorizontalAlignment.Center,
+                Children = { Icons.Make(icon, 16), new TextBlock { Text = text, VerticalAlignment = VerticalAlignment.Center } },
+            },
+            HorizontalContentAlignment = HorizontalAlignment.Center,
+        };
+        var tabs = new TabStrip
+        {
+            Classes = { "paneltabs" }, Margin = new Thickness(0, 0, 0, 4),
+            ItemsPanel = new Avalonia.Controls.Templates.FuncTemplate<Panel?>(() => new Avalonia.Controls.Primitives.UniformGrid { Columns = 2 }),
+            Items = { Tab("mate-coincident", "Standard"), Tab("mate-gear", "Mechanical") },
+            SelectedIndex = st.Mechanical ? 1 : 0,
+        };
+        tabs.SelectionChanged += (_, _) =>
+        {
+            var mechanical = tabs.SelectedIndex == 1;
+            if (mechanical == st.Mechanical) return;
+            st.Mechanical = mechanical;
+            // (after the strip has finished changing its selection)
+            Avalonia.Threading.Dispatcher.UIThread.Post(() => { if (_mating == st) st.Update?.Invoke(); });
+        };
+        page.Content(tabs);
+
+        // the picks, in a selection box as the other editors have (pink: what is clicked goes in)
         var sel = page.Section("Mate Selections");
-        page.Info(sel, "Click two faces (planar or round) on the components, or an origin plane of the assembly. Click a face again to drop it.");
-        var picks = new StackPanel { Spacing = 2, Margin = new Thickness(0, 2) };
-        sel.Children.Add(picks);
+        var box = new ListBox { Classes = { "selbox", "activebox" }, MinHeight = 44 };
+        void DropPick(int i)
+        {
+            if (i < 0 || i >= st.Picks.Count) return;
+            st.Picks.RemoveAt(i);
+            st.Type = st.Picks.Count == 2 ? st.Type : null; st.Flip = false; st.RatioA = st.RatioB = null;
+            st.Update?.Invoke();
+        }
+        void ClearPicks() { st.Picks.Clear(); st.Type = null; st.Flip = false; st.RatioA = st.RatioB = null; st.Update?.Invoke(); }
+        box.KeyDown += (_, e) => { if (e.Key is Avalonia.Input.Key.Delete or Avalonia.Input.Key.Back) { DropPick(box.SelectedIndex); e.Handled = true; } };
+        var delPick = new MenuItem { Header = "Delete" };
+        delPick.Click += (_, _) => DropPick(box.SelectedIndex);
+        var clearPicks = new MenuItem { Header = "Clear Selections" };
+        clearPicks.Click += (_, _) => ClearPicks();
+        box.ContextMenu = new ContextMenu { Items = { delPick, clearPicks } };
+        sel.Children.Add(box);
         var planes = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, Margin = new Thickness(0, 4, 0, 0) };
         foreach (var pl in AssemblyModel.OriginPlanes)
         {
-            var b = new Button { Content = pl, Padding = new Thickness(8, 2), MinHeight = 0 };
+            var b = new Button { Content = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, Children = { Icons.Make("plane", 14), new TextBlock { Text = pl } } }, Padding = new Thickness(6, 2), MinHeight = 0 };
             ToolTip.SetTip(b, $"The assembly's {pl} plane");
             b.Click += (_, _) => PickRef(a.Model.RefTo(null, pl), "");
             planes.Children.Add(b);
         }
         sel.Children.Add(planes);
-        var clear = new Button { Content = "Clear Selections", Padding = new Thickness(8, 2), MinHeight = 0, Margin = new Thickness(0, 4, 0, 0) };
-        clear.Click += (_, _) => { st.Picks.Clear(); st.Type = null; st.Flip = false; st.RatioA = st.RatioB = null; st.Update?.Invoke(); };
-        sel.Children.Add(clear);
+        page.Info(sel, "Click two faces (planar or round) on the components, or an origin plane. Click a face again (or Delete in the box) to drop it.");
 
-        var std = page.Section("Standard Mates");
+        // the types: a row each, its icon and name (those that cannot relate the picks greyed)
         var typeButtons = new Dictionary<MateType, ToggleButton>();
-        WrapPanel TypeGrid(IEnumerable<MateType> types)
+        StackPanel TypeList(IEnumerable<MateType> types)
         {
-            var grid = new WrapPanel { Orientation = Orientation.Horizontal };
+            var list = new StackPanel { Spacing = 1 };
             foreach (var t in types)
             {
-                var b = new ToggleButton { Content = t.ToString(), Margin = new Thickness(0, 0, 4, 4), Padding = new Thickness(8, 3), MinHeight = 0 };
+                var b = new ToggleButton
+                {
+                    Content = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Children = { Icons.Make(MateIcon(t), 18), new TextBlock { Text = t.ToString(), VerticalAlignment = VerticalAlignment.Center } } },
+                    HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Left,
+                    Padding = new Thickness(6, 3), MinHeight = 0, Classes = { "matetype" },
+                };
                 b.Click += (_, _) => { st.Type = t; st.Flip = false; st.Update?.Invoke(); };
                 typeButtons[t] = b;
-                grid.Children.Add(b);
+                list.Children.Add(b);
             }
-            return grid;
+            return list;
         }
-        std.Children.Add(TypeGrid(StandardMates));
+        var std = page.Section("Mate Type");
+        std.Children.Add(TypeList(StandardMates));
         var mech = page.Section("Mechanical Mates");
-        mech.Children.Add(TypeGrid(MechanicalMates));
+        mech.Children.Add(TypeList(MechanicalMates));
         page.Info(mech, "Gear: two round faces turning together at a ratio (their radii unless set). Screw: one turning moves the other along the axis, the lead per turn.");
 
         // a number field: a label and a box (Enter or leaving it applies); its Tag shows the value again
-        StackPanel Field(string label, Func<double?> get, Action<double?> set, bool optional = false)
+        StackPanel Field(string label, Func<double?> get, Action<double?> set, bool optional = false, bool signed = false)
         {
-            var box = new TextBox { Width = 90 };
+            var tb = new TextBox { Width = 90 };
             var lbl = new TextBlock { Text = label, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0), MinWidth = 96 };
-            var row = new StackPanel { Orientation = Orientation.Horizontal, Children = { lbl, box }, Margin = new Thickness(0, 2) };
-            row.Tag = (Action)(() => box.Text = get() is { } v ? v.ToString("0.####", CultureInfo.InvariantCulture) : "");
+            var row = new StackPanel { Orientation = Orientation.Horizontal, Children = { lbl, tb }, Margin = new Thickness(0, 2) };
+            row.Tag = (Action)(() => tb.Text = get() is { } v ? v.ToString("0.####", CultureInfo.InvariantCulture) : "");
             void Read()
             {
-                if (string.IsNullOrWhiteSpace(box.Text) && optional) { if (get() != null) { set(null); st.Update?.Invoke(); } return; }
-                if (double.TryParse(box.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out var v) && v >= 0 && v != get()) { set(v); st.Update?.Invoke(); }
+                if (string.IsNullOrWhiteSpace(tb.Text) && optional) { if (get() != null) { set(null); st.Update?.Invoke(); } return; }
+                if (double.TryParse(tb.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out var v) && (signed || v >= 0) && v != get()) { set(v); st.Update?.Invoke(); }
             }
-            box.LostFocus += (_, _) => Read();
-            box.KeyDown += (_, e) => { if (e.Key == Avalonia.Input.Key.Enter) { Read(); e.Handled = true; } };
+            tb.LostFocus += (_, _) => Read();
+            tb.KeyDown += (_, e) => { if (e.Key == Avalonia.Input.Key.Enter) { Read(); e.Handled = true; } };
             return row;
         }
         CheckBox Check(string label, Func<bool> get, Action<bool> set)
@@ -210,7 +280,9 @@ public partial class MainWindow
             return c;
         }
         var opts = page.Section("Options");
-        var valueRow = Field("Distance (mm)", () => st.Value, v => st.Value = v ?? st.Value);
+        var offsetRow = Field("Offset (mm)", () => st.Offset, v => st.Offset = v ?? st.Offset, signed: true);
+        ToolTip.SetTip(offsetRow, "How far apart the references are held: 0 touching; a negative offset puts it on the other side");
+        var angleRow = Field("Angle (deg)", () => st.Angle, v => st.Angle = Math.Min(180, v ?? st.Angle));
         var limits = Check("Limits (it may move between)", () => st.Limits, v => st.Limits = v);
         var minRow = Field("Minimum", () => st.Min, v => st.Min = v ?? st.Min);
         var maxRow = Field("Maximum", () => st.Max, v => st.Max = v ?? st.Max);
@@ -218,43 +290,60 @@ public partial class MainWindow
         var ratioB = Field("Ratio: second", () => st.RatioB, v => st.RatioB = v, optional: true);
         var lead = Field("Lead (mm/turn)", () => st.Lead, v => st.Lead = v ?? st.Lead);
         var reverse = Check("Reverse", () => st.Reverse, v => st.Reverse = v);
-        var flip = new Button { Content = "Flip Alignment", Padding = new Thickness(8, 2), MinHeight = 0, Margin = new Thickness(0, 4, 0, 0) };
-        ToolTip.SetTip(flip, "Turn the second face the other way (faces against each other, or facing the same way)");
-        flip.Click += (_, _) => { st.Flip = !st.Flip; st.Update?.Invoke(); };
-        foreach (var c in new Control[] { valueRow, limits, minRow, maxRow, ratioA, ratioB, lead, reverse, flip }) opts.Children.Add(c);
+        // mate alignment: the second reference's normal (or axis) the same way as the first's, or against it
+        var alignSame = new ToggleButton { Content = Icons.Make("align-same", 18), Padding = new Thickness(4), MinHeight = 0 };
+        var alignOpp = new ToggleButton { Content = Icons.Make("align-opposite", 18), Padding = new Thickness(4), MinHeight = 0 };
+        ToolTip.SetTip(alignSame, "Aligned: the normals (or axes) point the same way");
+        ToolTip.SetTip(alignOpp, "Anti-aligned: the normals point at each other (faces against each other)");
+        void SetAligned(bool want) { if (st.Preview != null && st.Preview.Aligned != want) { st.Flip = !st.Flip; st.Update?.Invoke(); } else st.Update?.Invoke(); }
+        alignSame.Click += (_, _) => SetAligned(true);
+        alignOpp.Click += (_, _) => SetAligned(false);
+        var align = new StackPanel
+        {
+            Orientation = Orientation.Horizontal, Spacing = 4, Margin = new Thickness(0, 6, 0, 0),
+            Children = { new TextBlock { Text = "Mate alignment:", VerticalAlignment = VerticalAlignment.Center, MinWidth = 96, Margin = new Thickness(0, 0, 6, 0) }, alignSame, alignOpp },
+        };
+        foreach (var c in new Control[] { offsetRow, angleRow, limits, minRow, maxRow, ratioA, ratioB, lead, reverse, align }) opts.Children.Add(c);
         var result = new TextBlock { TextWrapping = Avalonia.Media.TextWrapping.Wrap, Margin = new Thickness(0, 6, 0, 0), FontSize = 11 };
         opts.Children.Add(result);
 
-        string Describe(MateRef r)
+        // a pick as SolidWorks lists it (Face<…>@Component), what it is in its tooltip
+        string Label(MateRef r) => r.Component == null ? $"{r.Face} Plane" : $"Face<{r.Face}>@{FindComponent(r.Component)?.Name}";
+        string Describe(MateRef r) => r.Component == null ? $"The assembly's {r.Face} plane" : r.Kind switch
         {
-            if (r.Component == null) return $"{r.Face} Plane";
-            var what = r.Kind switch
-            {
-                MateGeomKind.Plane => "plane",
-                MateGeomKind.Axis => r.R > 0 ? $"round, R {r.R:0.###}" : "axis",
-                _ => r.R > 0 ? $"sphere, R {r.R:0.###}" : "point",
-            };
-            return $"{FindComponent(r.Component)?.Name}: {what} ({r.Face})";
-        }
+            MateGeomKind.Plane => "A planar face",
+            MateGeomKind.Axis => r.R > 0 ? $"A round face, R {r.R:0.###} (its axis)" : "An axis",
+            _ => r.R > 0 ? $"A sphere, R {r.R:0.###} (its centre)" : "A point",
+        };
 
         st.Update = () =>
         {
             DropPreview();
-            picks.Children.Clear();
-            foreach (var p in st.Picks) picks.Children.Add(new TextBlock { Text = Describe(p), FontSize = 12 });
-            if (st.Picks.Count == 0) picks.Children.Add(new TextBlock { Text = "(nothing picked)", FontSize = 12, Opacity = 0.6 });
+            var keepIdx = box.SelectedIndex;
+            box.ItemsSource = st.Picks.Select(p =>
+            {
+                var tb = new TextBlock { Text = Label(p) };
+                ToolTip.SetTip(tb, Describe(p));
+                return tb;
+            }).ToList();
+            if (keepIdx >= 0 && keepIdx < st.Picks.Count) box.SelectedIndex = keepIdx;
             bool two = st.Picks.Count == 2;
             MateGeom? ga = two ? st.Picks[0].Geom : null, gb = two ? st.Picks[1].Geom : null;
             foreach (var (t, b) in typeButtons) b.IsEnabled = two && Mate.Supports(t, ga!, gb!);
-            if (two && (st.Type == null || !Mate.Supports(st.Type.Value, ga!, gb!))) st.Type = DefaultType(ga!.Kind, gb!.Kind);
+            if (two && (st.Type == null || !Mate.Supports(st.Type.Value, ga!, gb!)))
+                st.Type = st.Mechanical && Mate.Supports(MateType.Gear, ga!, gb!) ? MateType.Gear : DefaultType(ga!.Kind, gb!.Kind);
             foreach (var (t, b) in typeButtons) b.IsChecked = two && st.Type == t;
             var type = st.Type;
-            bool dist = type is MateType.Distance or MateType.Angle;
-            valueRow.IsVisible = dist && !st.Limits;
-            ((TextBlock)valueRow.Children[0]).Text = type == MateType.Angle ? "Angle (deg)" : "Distance (mm)";
-            if (type == MateType.Angle && st.Value > 180) st.Value = 90;
-            limits.IsVisible = dist;
-            minRow.IsVisible = maxRow.IsVisible = dist && st.Limits;
+            if (tabs.SelectedIndex != (st.Mechanical ? 1 : 0)) tabs.SelectedIndex = st.Mechanical ? 1 : 0;
+            ((Control)std.Parent!).IsVisible = !st.Mechanical;
+            ((Control)mech.Parent!).IsVisible = st.Mechanical;
+            bool coin = type == MateType.Coincident, ang = type == MateType.Angle;
+            offsetRow.IsVisible = coin && !st.Limits;
+            angleRow.IsVisible = ang && !st.Limits;
+            limits.IsVisible = coin || ang;
+            minRow.IsVisible = maxRow.IsVisible = (coin || ang) && st.Limits;
+            ((TextBlock)minRow.Children[0]).Text = ang ? "Minimum (deg)" : "Minimum (mm)";
+            ((TextBlock)maxRow.Children[0]).Text = ang ? "Maximum (deg)" : "Maximum (mm)";
             ratioA.IsVisible = ratioB.IsVisible = type == MateType.Gear;
             lead.IsVisible = type == MateType.Screw;
             reverse.IsVisible = type is MateType.Gear or MateType.Screw;
@@ -262,31 +351,41 @@ public partial class MainWindow
             limits.IsChecked = st.Limits; reverse.IsChecked = st.Reverse;
             // the gear ratio: the radii unless given
             if (type == MateType.Gear && two) { st.RatioA ??= ga!.R > 0 ? ga.R : 1; st.RatioB ??= gb!.R > 0 ? gb.R : 1; }
-            foreach (var row in new[] { valueRow, minRow, maxRow, ratioA, ratioB, lead }) ((Action)row.Tag!)();
-            flip.IsVisible = type is not (MateType.Lock or MateType.Gear or MateType.Screw);
-            flip.IsEnabled = two;
+            foreach (var row in new[] { offsetRow, angleRow, minRow, maxRow, ratioA, ratioB, lead }) ((Action)row.Tag!)();
+            align.IsVisible = type is not (MateType.Lock or MateType.Gear or MateType.Screw or MateType.Tangent);
             result.Text = "";
             if (two && type is { } tp && (st.Picks[0].Component != null || st.Picks[1].Component != null) && st.Picks[0].Component != st.Picks[1].Component)
             {
                 void Setup(Mate m)
                 {
-                    if (st.Limits && tp is MateType.Distance or MateType.Angle) { m.Min = Math.Min(st.Min, st.Max); m.Max = Math.Max(st.Min, st.Max); }
+                    if (st.Limits && tp is MateType.Coincident or MateType.Angle) { m.Min = Math.Min(st.Min, st.Max); m.Max = Math.Max(st.Min, st.Max); }
+                    // a negative offset: the other side
+                    if (tp == MateType.Coincident && !st.Limits && st.Offset < 0) m.Side = -m.Side;
                     if (tp == MateType.Gear) { m.RatioA = st.RatioA ?? m.RatioA; m.RatioB = st.RatioB ?? m.RatioB; }
                     if (tp is MateType.Gear or MateType.Screw) m.Reverse = st.Reverse;
                     if (st.Flip) m.Aligned = !m.Aligned;
                 }
-                var value = tp == MateType.Screw ? st.Lead : st.Value;
+                var value = tp switch
+                {
+                    MateType.Screw => st.Lead,
+                    MateType.Angle => st.Angle,
+                    MateType.Coincident when !st.Limits => Math.Abs(st.Offset),
+                    _ => 0,
+                };
                 st.Preview = st.Editing is { } orig
                     ? a.Model.ReplaceMate(orig, tp, st.Picks[0].Clone(), st.Picks[1].Clone(), value, Setup, EditName(tp))
                     : a.Model.AddMate(tp, st.Picks[0].Clone(), st.Picks[1].Clone(), value, Setup);
                 var err = a.Model.LastSolve?.Errors.GetValueOrDefault(st.Preview.Id) ?? 0;
                 result.Text = err > 1e-6 ? $"Cannot be satisfied with the other mates (off by {err:0.###}): it conflicts, or the components it would move are fixed."
                     : st.Editing != null ? "Press OK (Enter) to keep the changes." : "Press OK (Enter) to add it.";
-                result.Foreground = err > 1e-6 ? new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse("#FFC62828")) : null;
+                result.Foreground = err > 1e-6 ? red : null;
                 if (result.Foreground == null) result.ClearValue(TextBlock.ForegroundProperty);
             }
             else if (two && st.Picks[0].Component == st.Picks[1].Component)
                 result.Text = "Both faces are on the same component: pick faces on two components (or a component and a plane).";
+            alignSame.IsEnabled = alignOpp.IsEnabled = st.Preview != null;
+            alignSame.IsChecked = st.Preview?.Aligned == true;
+            alignOpp.IsChecked = st.Preview is { Aligned: false };
             RefreshAssemblyScene();
             RebuildTree();
         };

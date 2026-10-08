@@ -332,6 +332,7 @@ public sealed class AssemblyModel
     public Mate AddMate(MateType type, MateRef a, MateRef b, double value = 0, Action<Mate>? setup = null)
     {
         var m = new Mate { Type = type, A = a, B = b, Value = value };
+        Mate.Normalize(m);
         m.Capture(World(a), World(b), PlacementOf(a), PlacementOf(b));
         setup?.Invoke(m);
         Doc.AddMate(m);
@@ -349,6 +350,7 @@ public sealed class AssemblyModel
         var i = Doc.Mates.IndexOf(old);
         if (i < 0) throw new ArgumentException("The mate is not in the assembly.", nameof(old));
         var m = new Mate { Id = old.Id, Name = name ?? old.Name, Type = type, A = a, B = b, Value = value, Suppressed = old.Suppressed };
+        Mate.Normalize(m);
         m.Capture(World(a), World(b), PlacementOf(a), PlacementOf(b));
         setup?.Invoke(m);
         Doc.Mates[i] = m;

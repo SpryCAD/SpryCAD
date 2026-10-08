@@ -130,7 +130,7 @@ static class Demos
             m.AddMate(T, FaceRef(m, g1, Bore), m.RefTo(null, "Right")!);
             m.AddMate(T, FaceRef(m, g1, Back), m.RefTo(null, "Front")!);
             m.AddMate(T, FaceRef(m, g2, Bore), m.RefTo(null, "Top")!);
-            m.AddMate(SpryCad.Core.Assembly.MateType.Distance, FaceRef(m, g2, Bore), m.RefTo(null, "Right")!, centre);
+            m.AddMate(SpryCad.Core.Assembly.MateType.Coincident, FaceRef(m, g2, Bore), m.RefTo(null, "Right")!, centre);
             m.AddMate(T, FaceRef(m, g2, Back), m.RefTo(null, "Front")!);
             m.AddMate(SpryCad.Core.Assembly.MateType.Gear, FaceRef(m, g1, Bore), FaceRef(m, g2, Bore));
         });
@@ -187,9 +187,9 @@ static class Demos
             bool PinStart(FaceRange f) => f.Surface.Kind == SurfaceKind.Plane && f.FirstPlane.Normal.X < -0.9;
             SpryCad.Core.Assembly.MateRef R(SpryCad.Core.Assembly.Component c, Func<FaceRange, bool> which) => m.RefTo(c.Id, Face(c, which))!;
             m.AddMate(SpryCad.Core.Assembly.MateType.Concentric, R(leaf2, Bore), R(leaf1, Bore));
-            m.AddMate(SpryCad.Core.Assembly.MateType.Distance, R(leaf2, KnuckleEnd), R(leaf1, KnuckleEnd), 0.4);
+            m.AddMate(SpryCad.Core.Assembly.MateType.Coincident, R(leaf2, KnuckleEnd), R(leaf1, KnuckleEnd), 0.4);
             m.AddMate(SpryCad.Core.Assembly.MateType.Concentric, R(pinC, PinSide), R(leaf1, Bore));
-            m.AddMate(SpryCad.Core.Assembly.MateType.Distance, R(pinC, PinStart), R(leaf1, KnuckleStart), 2);
+            m.AddMate(SpryCad.Core.Assembly.MateType.Coincident, R(pinC, PinStart), R(leaf1, KnuckleStart), 2);
             // embedded: nothing points back at the temporary files
             foreach (var comp in m.Doc.Components) { comp.Part.Path = null; comp.Part.AbsolutePath = null; }
             return m;

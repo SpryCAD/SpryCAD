@@ -59,6 +59,27 @@
     <Setter Property="BoxShadow" Value="0 0 0 1 #FF2F7BD6" />
   </Style>
 
+  <!-- the Mate page's list of mate types: flat rows, the chosen one highlighted as a tree row is -->
+  <Style Selector="ToggleButton.matetype">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="CornerRadius" Value="3" />
+    <Setter Property="FontSize" Value="12.5" />
+  </Style>
+  <Style Selector="ToggleButton.matetype:pointerover /template/ ContentPresenter">
+    <Setter Property="Background" Value="#FFE8F1FC" />
+  </Style>
+  <Style Selector="ToggleButton.matetype:checked /template/ ContentPresenter">
+    <Setter Property="Background" Value="#FFCDE2FA" />
+    <Setter Property="Foreground" Value="#FF1D2B3F" />
+  </Style>
+  <Style Selector="ToggleButton.matetype:disabled">
+    <Setter Property="Opacity" Value="0.4" />
+  </Style>
+  <Style Selector="ToggleButton.matetype:disabled /template/ ContentPresenter">
+    <Setter Property="Background" Value="Transparent" />
+  </Style>
+
   <!-- CommandManager tabs -->
   <Style Selector="ToggleButton.tab">
     <Setter Property="Background" Value="Transparent" />

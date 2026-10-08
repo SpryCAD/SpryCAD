@@ -6,6 +6,10 @@ namespace SpryCad.Core.Assembly;
 /// The mates: SolidWorks' standard ones (Coincident, Parallel, Perpendicular, Tangent, Concentric, Lock, Distance,
 /// Angle — Distance and Angle with optional limits) and the mechanical Gear and Screw.
 /// </summary>
+/// <remarks>
+/// Distance is not a type of its own any more: a Coincident with an offset (its <see cref="Mate.Value"/>) or limits
+/// holds the references that far apart. Distance stays for files saved before; they load as such Coincidents.
+/// </remarks>
 public enum MateType { Coincident, Concentric, Parallel, Perpendicular, Distance, Angle, Tangent, Lock, Gear, Screw }
 
 /// <summary>What a mate reference is, geometrically.</summary>
@@ -64,8 +68,14 @@ public sealed class Mate
     public MateType Type { get; set; }
     public MateRef A { get; set; } = new();
     public MateRef B { get; set; } = new();
-    /// <summary>Distance (mm) or angle (degrees), for Distance and Angle mates; the lead (mm per turn) for Screw.</summary>
+    /// <summary>The offset (mm) of a Coincident (0: touching), the angle (degrees) of an Angle, the lead (mm per turn) of a Screw.</summary>
     public double Value { get; set; }
+
+    /// <summary>A Distance (from files saved before it was folded in) made the Coincident with an offset it is.</summary>
+    public static void Normalize(Mate m)
+    {
+        if (m.Type == MateType.Distance) m.Type = MateType.Coincident;
+    }
     /// <summary>
     /// The directions the same way (aligned) or opposite (anti-aligned: faces against each other). Chosen when the
     /// mate is made from how the components lie (the nearer), flipped by the user.
@@ -229,7 +239,9 @@ public sealed class Mate
         if ((int)a.Kind > (int)b.Kind) (a, b) = (b, a);
         double sgn = Aligned ? 1 : -1;
         var k = (a.Kind, b.Kind);
-        switch (Type)
+        // a coincident held apart (an offset, or limits) is measured as a distance
+        var type = Type == MateType.Coincident && (Value != 0 || Min != null) ? MateType.Distance : Type;
+        switch (type)
         {
             case MateType.Coincident when k == (MateGeomKind.Axis, MateGeomKind.Axis):
             case MateType.Concentric when k == (MateGeomKind.Axis, MateGeomKind.Axis):

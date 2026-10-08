@@ -207,7 +207,7 @@ static class AssemblyTests
             MateRef R3(Component c, string w) => m3.RefTo(c.Id, FaceOf(m3, c, w))!;
             m3.AddMate(MateType.Concentric, R3(s3, "side"), R3(p3, "side"));
             // (above the pin, facing it: the side and alignment given, not taken from where the sleeve happens to be)
-            m3.AddMate(MateType.Distance, R3(s3, "start"), R3(p3, "end"), 5, mm => { mm.Min = 2; mm.Max = 8; mm.Side = 1; mm.Aligned = false; });
+            m3.AddMate(MateType.Coincident, R3(s3, "start"), R3(p3, "end"), 5, mm => { mm.Min = 2; mm.Max = 8; mm.Side = 1; mm.Aligned = false; });
             double Gap() => m3.World(R3(s3, "start")).P.Z - 10;
             t.True(m3.LastSolve!.Satisfied && Gap() > 2 - 1e-6 && Gap() < 8 + 1e-6, $"within the limits ({Gap():0.###})");
             void Lift(double dz) => s3.Placement = Placement.From(Transform.Translation(new Vec3(0, 0, dz)) * s3.Placement.ToTransform());
@@ -228,7 +228,7 @@ static class AssemblyTests
             mg.AddMate(MateType.Coincident, G(big, "side"), mg.RefTo(null, "Right")!);
             mg.AddMate(MateType.Coincident, G(big, "start"), mg.RefTo(null, "Front")!);
             mg.AddMate(MateType.Coincident, G(small, "side"), mg.RefTo(null, "Top")!);
-            mg.AddMate(MateType.Distance, G(small, "side"), mg.RefTo(null, "Right")!, 15);
+            mg.AddMate(MateType.Coincident, G(small, "side"), mg.RefTo(null, "Right")!, 15);
             mg.AddMate(MateType.Coincident, G(small, "start"), mg.RefTo(null, "Front")!);
             var gear = mg.AddMate(MateType.Gear, G(big, "side"), G(small, "side"));
             t.True(mg.LastSolve!.Satisfied && Math.Abs(gear.RatioA - 10) < 1e-9 && Math.Abs(gear.RatioB - 5) < 1e-9, "the ratio from the radii");
@@ -269,21 +269,26 @@ static class AssemblyTests
             }
         });
 
-        t.Test("Mates edited: a distance changed in place (same id, name and place in the list), then turned into a coincident", () =>
+        t.Test("Mates edited: a coincident's offset changed in place (same id, name and place in the list), then removed; old Distance mates load as offsets", () =>
         {
             var (m, pin, sleeve, _) = PinAndSleeve("mateedit");
             MateRef R(Component c, string which) => m.RefTo(c.Id, FaceOf(m, c, which))!;
             m.AddMate(MateType.Concentric, R(sleeve, "side"), R(pin, "side"));
-            var dist = m.AddMate(MateType.Distance, R(sleeve, "start"), R(pin, "end"), 5);
+            var dist = m.AddMate(MateType.Coincident, R(sleeve, "start"), R(pin, "end"), 5);
             var lock0 = m.AddMate(MateType.Parallel, R(sleeve, "start"), m.RefTo(null, "Front")!);
             double Z() => m.World(R(sleeve, "start")).P.Z;
             t.True(m.LastSolve!.Satisfied && Math.Abs(Math.Abs(Z() - 10) - 5) < 1e-6, $"5 mm from the end ({Z():0.######})");
-            var edited = m.ReplaceMate(dist, MateType.Distance, dist.A.Clone(), dist.B.Clone(), 12);
+            var edited = m.ReplaceMate(dist, MateType.Coincident, dist.A.Clone(), dist.B.Clone(), 12);
             t.True(m.LastSolve!.Satisfied && Math.Abs(Math.Abs(Z() - 10) - 12) < 1e-6, $"12 mm from it after the edit ({Z():0.######})");
             t.True(edited.Id == dist.Id && edited.Name == dist.Name && m.Doc.Mates.IndexOf(edited) == 1 && m.Doc.Mates.Count == 3 && m.Doc.Mates[2] == lock0,
                 "the same mate: id, name and place kept, nothing added");
-            var coin = m.ReplaceMate(edited, MateType.Coincident, edited.A.Clone(), edited.B.Clone(), name: "Coincident1");
-            t.True(m.LastSolve!.Satisfied && Math.Abs(Z() - 10) < 1e-6 && coin.Name == "Coincident1" && coin.Id == dist.Id, $"now coincident ({Z():0.######}, {coin.Name})");
+            // an assembly saved when Distance was a type of its own: read as the Coincident with an offset it is
+            var json = m.Doc.ToJson();
+            var i = m.Doc.Mates.IndexOf(edited);
+            var legacy = AssemblyDocument.FromJson(json.Replace("\"Coincident\"", "\"Distance\""));
+            t.True(legacy.Mates.All(x => x.Type != MateType.Distance) && legacy.Mates[i].Value == 12, "Distance mates load as Coincidents with their offset");
+            var coin = m.ReplaceMate(edited, MateType.Coincident, edited.A.Clone(), edited.B.Clone(), 0);
+            t.True(m.LastSolve!.Satisfied && Math.Abs(Z() - 10) < 1e-6 && coin.Name == dist.Name && coin.Id == dist.Id, $"no offset: touching ({Z():0.######}, {coin.Name})");
         });
 
         t.Test("Mates: concentric and coincident stack a sleeve on a pin; a distance lifts it; contradictions are reported", () =>
@@ -302,7 +307,7 @@ static class AssemblyTests
 
             // a distance instead: 5 mm apart
             m.Doc.Mates.Remove(coin);
-            var dist = m.AddMate(MateType.Distance, R(sleeve, "start"), R(pin, "end"), 5);
+            var dist = m.AddMate(MateType.Coincident, R(sleeve, "start"), R(pin, "end"), 5);
             t.True(m.LastSolve!.Satisfied && Math.Abs(m.World(dist.A).P.Z - 15) < 1e-6, $"5 mm up ({m.World(dist.A).P}, normal {m.World(dist.A).D}; side {dist.Side}, aligned {dist.Aligned}; errors {string.Join(", ", m.LastSolve.Errors.Select(e => $"{e.Key} {e.Value:E1}"))}; iterations {m.LastSolve.Iterations})");
 
             // contradicting it (coincident with the same faces): reported, nothing thrown

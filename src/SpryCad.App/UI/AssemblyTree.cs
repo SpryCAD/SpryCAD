@@ -176,26 +176,13 @@ public sealed class AssemblyTree : DockPanel
         _rows.Children.Add(row);
     }
 
-    static string IconFor(MateType t) => t switch
-    {
-        MateType.Coincident => "mate-coincident",
-        MateType.Parallel => "mate-parallel",
-        MateType.Perpendicular => "mate-perpendicular",
-        MateType.Tangent => "mate-tangent",
-        MateType.Concentric => "mate-concentric",
-        MateType.Lock => "mate-lock",
-        MateType.Distance => "mate-distance",
-        MateType.Angle => "mate-angle",
-        MateType.Gear => "mate-gear",
-        MateType.Screw => "mate-screw",
-        _ => "relations",
-    };
+    static string IconFor(MateType t) => MainWindow.MateIcon(t);
 
     /// <summary>A mate's values as the tree shows them (distance, angle or their limits; ratio; lead).</summary>
     static string ValueOf(Mate m) => m.Type switch
     {
-        MateType.Distance when m.Min is { } lo && m.Max is { } hi => $" ({lo:0.###} to {hi:0.###} mm)",
-        MateType.Distance => $" ({m.Value:0.###} mm)",
+        MateType.Coincident when m.Min is { } lo && m.Max is { } hi => $" ({lo:0.###} to {hi:0.###} mm)",
+        MateType.Coincident when m.Value != 0 => $" ({m.Value:0.###} mm)",
         MateType.Angle when m.Min is { } lo && m.Max is { } hi => $" ({lo:0.###} to {hi:0.###}°)",
         MateType.Angle => $" ({m.Value:0.###}°)",
         MateType.Gear => $" ({m.RatioA:0.###}:{m.RatioB:0.###}" + (m.Reverse ? " reversed)" : ")"),

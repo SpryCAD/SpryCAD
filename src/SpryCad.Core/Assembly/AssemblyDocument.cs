@@ -72,6 +72,7 @@ public sealed class AssemblyDocument
     /// <summary>Adds a mate: its id ("M1", …) and name ("Concentric2") given.</summary>
     public Mate AddMate(Mate m)
     {
+        Mate.Normalize(m);
         m.Id = "M" + NextMateId++;
         var key = m.Type.ToString();
         var n = MateCounters.GetValueOrDefault(key) + 1;
@@ -94,6 +95,7 @@ public sealed class AssemblyDocument
         var d = JsonSerializer.Deserialize<AssemblyDocument>(json, Serialization.Options) ?? throw new InvalidDataException("Empty assembly");
         if (d.Format == "FeatherCAD-Assembly") d.Format = "SpryCAD-Assembly"; // made before the rename
         if (d.Format != "SpryCAD-Assembly") throw new InvalidDataException("Not a SpryCAD assembly");
+        foreach (var m in d.Mates) Mate.Normalize(m);
         return d;
     }
 
