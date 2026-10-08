@@ -229,6 +229,7 @@ public sealed class Regenerator
                 case ChamferFeature ch: { var cs = ChamferSizeOf(ch); DoBlend(ch.Edges, cs.D1, false, ch.TangentPropagation, ch.Overflow, cs); break; }
                 case HoleFeature h: DoHole(h); break;
                 case ShellFeature sh: DoShell(sh); break;
+                case DraftFeature dr: DoDraft(dr); break;
                 case LinearPatternFeature lp: DoLinearPattern(lp); break;
                 case CircularPatternFeature cp: DoCircularPattern(cp); break;
                 case MirrorFeature m: DoMirror(m); break;
@@ -320,6 +321,18 @@ public sealed class Regenerator
                 if (d2 > 0) z0 = -d2 * dir;
             }
             var tool = Builders.Extrude(sk.Regions, sk.Frame, Math.Min(z0, z1), Math.Max(z0, z1), f.Id);
+            // a draft: the side walls tapered from the sketch plane, narrowing along the extrusion (outward: widening)
+            if (!string.IsNullOrWhiteSpace(e.Draft) && Num(e.Draft, "Draft angle") is var draft && draft != 0)
+            {
+                if (Math.Abs(draft) >= 89) throw new FeatureException("The draft angle must be below 89 degrees.");
+                if (z0 < 0 && z1 > 0) throw new FeatureException("Draft works on an extrude in one direction yet (not Mid Plane or two directions).");
+                var pull = sk.Frame.Normal * (z1 > 0 ? 1 : -1);
+                var neutral = Plane.FromPointNormal(sk.Frame.ToWorld(0, 0, 0), sk.Frame.Normal);
+                var sides = (tool.Native?.Faces.Select(x => x.Tag.Name) ?? Enumerable.Empty<string>())
+                    .Where(n => n != f.Id + ".Start" && n != f.Id + ".End").ToHashSet();
+                try { tool = DraftOp.Apply(tool, sides, neutral, pull, (e.DraftOutward ? -1 : 1) * draft * Math.PI / 180); }
+                catch (DraftFailedException ex) { throw new FeatureException(ex.Message); }
+            }
             ApplyTool(tool, e.IsCut, e.Merge);
             State.Tools[f.Id] = new ToolInfo(tool, e.IsCut, e.Merge);
         }
@@ -881,6 +894,32 @@ public sealed class Regenerator
                     ? new Body { Id = b.Id, Solid = ShellOp.Apply(b.Solid, names, t, f.Id) } : b).ToList();
             }
             catch (ShellFailedException ex) { throw new FeatureException(ex.Message); }
+            State = State.With(bodies);
+        }
+
+        void DoDraft(DraftFeature d)
+        {
+            var angle = Positive(d.Angle, "Angle");
+            if (angle >= 89) throw new FeatureException("The draft angle must be below 89 degrees.");
+            if (d.Faces.Count == 0) throw new FeatureException("Select the faces to draft.");
+            var frame = Resolver.ResolvePlane(d.Neutral, State);
+            var neutral = Plane.FromPointNormal(frame.ToWorld(0, 0, 0), frame.Normal);
+            // a face as the neutral plane: pulled into the part (its outward normal the other way); a plane: along its normal
+            var pull = (d.Neutral.Face != null ? -frame.Normal : frame.Normal) * (d.Reverse ? -1 : 1);
+            var byBody = new Dictionary<string, HashSet<string>>();
+            foreach (var fr in d.Faces)
+            {
+                var (b, name) = Resolver.ResolveFaceName(fr, State);
+                if (!byBody.TryGetValue(b.Id, out var set)) byBody[b.Id] = set = new HashSet<string>();
+                set.Add(name);
+            }
+            List<Body> bodies;
+            try
+            {
+                bodies = State.Bodies.Select(b => byBody.TryGetValue(b.Id, out var names)
+                    ? new Body { Id = b.Id, Solid = DraftOp.Apply(b.Solid, names, neutral, pull, angle * Math.PI / 180) } : b).ToList();
+            }
+            catch (DraftFailedException ex) { throw new FeatureException(ex.Message); }
             State = State.With(bodies);
         }
 

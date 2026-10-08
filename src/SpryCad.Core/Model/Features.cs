@@ -61,6 +61,7 @@ public sealed class DirRef
 [JsonDerivedType(typeof(ChamferFeature), "chamfer")]
 [JsonDerivedType(typeof(HoleFeature), "hole")]
 [JsonDerivedType(typeof(ShellFeature), "shell")]
+[JsonDerivedType(typeof(DraftFeature), "draft")]
 [JsonDerivedType(typeof(LinearPatternFeature), "linearPattern")]
 [JsonDerivedType(typeof(CircularPatternFeature), "circularPattern")]
 [JsonDerivedType(typeof(MirrorFeature), "mirror")]
@@ -99,6 +100,10 @@ public sealed class ExtrudeFeature : Feature
     /// <summary>Optional second direction depth (blank = none).</summary>
     public string? Depth2 { get; set; }
     public bool Merge { get; set; } = true;
+    /// <summary>The side walls' draft angle (degrees; blank or 0: none): narrowing away from the sketch plane.</summary>
+    public string? Draft { get; set; }
+    /// <summary>The draft the other way: the walls widen away from the sketch plane.</summary>
+    public bool DraftOutward { get; set; }
     public override IEnumerable<string> Consumes => new[] { SketchId };
 }
 
@@ -249,6 +254,22 @@ public sealed class ShellFeature : Feature
     public override string Kind => "Shell";
     public List<FaceRef> Faces { get; set; } = new();
     public string Thickness { get; set; } = "2";
+}
+
+/// <summary>
+/// Draft (neutral plane): faces tapered by an angle to the pull direction, each about where it meets the neutral
+/// plane, so the part narrows going along the pull direction (planar faces, and round faces along it).
+/// </summary>
+public sealed class DraftFeature : Feature
+{
+    public override string Kind => "Draft";
+    /// <summary>The neutral plane: a planar face (the pull direction then goes into the part) or a plane.</summary>
+    public PlaneRef Neutral { get; set; } = PlaneRef.Top;
+    public List<FaceRef> Faces { get; set; } = new();
+    /// <summary>The draft angle (degrees).</summary>
+    public string Angle { get; set; } = "3";
+    /// <summary>The pull direction the other way.</summary>
+    public bool Reverse { get; set; }
 }
 
 public sealed class LinearPatternFeature : Feature

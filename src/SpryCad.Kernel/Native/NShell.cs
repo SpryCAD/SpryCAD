@@ -20,7 +20,20 @@ public static class NShell
     }
 
     /// <summary>Offsets each face along its outward normal by dist(face) and rebuilds the topology.</summary>
-    public static NBody Offset(NBody body, Func<NFace, double> dist, string tagPrefix)
+    public static NBody Offset(NBody body, Func<NFace, double> dist, string tagPrefix) =>
+        Rebuild(body,
+            f => OffsetSurface(f.Surface, dist(f) * (f.Sense ? 1 : -1)), // along the natural normal
+            (f, s) => new FaceTag(tagPrefix + f.Tag.Name, s.Kind == SurfaceKind.Plane ? f.Tag.Surface : s.Def),
+            "shell");
+
+    /// <summary>
+    /// The body with new surfaces for its faces (<paramref name="surfaceOf"/>), its topology kept: each vertex moved
+    /// onto its faces' new surfaces, each edge made again as the intersection of its two faces' new surfaces.
+    /// <paramref name="tagOf"/>: a face's tag given its new surface (asked once per tag). Fails (with
+    /// <paramref name="what"/> in the message) where a corner or an edge has no solution, i.e. where the new
+    /// surfaces would change the topology.
+    /// </summary>
+    public static NBody Rebuild(NBody body, Func<NFace, NSurface> surfaceOf, Func<NFace, NSurface, FaceTag> tagOf, string what)
     {
         body.Link();
         var scale = Math.Max(body.Bounds.Diagonal, 1e-9);
@@ -28,11 +41,7 @@ public static class NShell
 
         var surf = new Dictionary<NFace, NSurface>(ReferenceEqualityComparer.Instance);
         var tags = new Dictionary<FaceTag, FaceTag>(ReferenceEqualityComparer.Instance);
-        foreach (var f in body.Faces)
-        {
-            var d = dist(f) * (f.Sense ? 1 : -1); // along the natural normal
-            surf[f] = OffsetSurface(f.Surface, d);
-        }
+        foreach (var f in body.Faces) surf[f] = surfaceOf(f);
 
         // vertices: on all offset surfaces of their faces (minimum-norm move, so tangent faces offset along the normal)
         var vFaces = new Dictionary<NVertex, List<NSurface>>(ReferenceEqualityComparer.Instance);
@@ -48,7 +57,7 @@ public static class NShell
         {
             var p = Solve(ss, v.P, tol, out var res);
             Debug?.Invoke($"vertex {v.P} -> {p} res {res:g2} on {string.Join(",", ss.Select(x => x.Kind))}");
-            if (res > 1e-6 * scale) throw new InvalidOperationException("shell: offset corner has no solution");
+            if (res > 1e-6 * scale) throw new InvalidOperationException(what + ": a corner has no solution");
             vmap[v] = new NVertex(p);
         }
 
@@ -56,19 +65,19 @@ public static class NShell
         var emap = new Dictionary<NEdge, NEdge>(ReferenceEqualityComparer.Instance);
         foreach (var e in body.Edges)
         {
-            if (e.Uses.Count != 2) throw new InvalidOperationException("shell: open body");
+            if (e.Uses.Count != 2) throw new InvalidOperationException(what + ": open body");
             var sa = surf[e.Uses[0].Face]; var sb = surf[e.Uses[1].Face];
-            emap[e] = OffsetEdge(e, sa, sb, vmap[e.V0], vmap[e.V1], tol, scale);
+            // an edge between two faces that keep their surfaces, whose ends stay: kept as it is
+            emap[e] = ReferenceEquals(sa, e.Uses[0].Face.Surface) && ReferenceEquals(sb, e.Uses[1].Face.Surface)
+                && vmap[e.V0].P == e.V0.P && vmap[e.V1].P == e.V1.P
+                ? new NEdge(e.Curve, e.T0, e.T1, vmap[e.V0], vmap[e.V1])
+                : OffsetEdge(e, sa, sb, vmap[e.V0], vmap[e.V1], tol, scale, what);
         }
 
         var res2 = new NBody();
         foreach (var f in body.Faces)
         {
-            if (!tags.TryGetValue(f.Tag, out var tag))
-            {
-                var s = surf[f];
-                tags[f.Tag] = tag = new FaceTag(tagPrefix + f.Tag.Name, s.Kind == SurfaceKind.Plane ? f.Tag.Surface : s.Def);
-            }
+            if (!tags.TryGetValue(f.Tag, out var tag)) tags[f.Tag] = tag = tagOf(f, surf[f]);
             Vec3? anchor = f.Anchor is { } a ? Solve(new[] { surf[f] }, a, tol, out _) : null;
             var nf = new NFace(surf[f], f.Sense, tag, anchor);
             foreach (var l in f.Loops)
@@ -109,7 +118,7 @@ public static class NShell
         throw new NotSupportedException();
     }
 
-    static NEdge OffsetEdge(NEdge e, NSurface sa, NSurface sb, NVertex v0, NVertex v1, double tol, double scale)
+    static NEdge OffsetEdge(NEdge e, NSurface sa, NSurface sb, NVertex v0, NVertex v1, double tol, double scale, string what)
     {
         // points of the offset edge (projected from samples of the original)
         const int n = 12;
@@ -120,7 +129,7 @@ public static class NShell
             double s = (double)i / n;
             var guess = e.At(s) + (v0.P - e.V0.P) * (1 - s) + (v1.P - e.V1.P) * s;
             var p = Solve(ss, guess, tol, out var r);
-            if (r > 1e-6 * scale) throw new InvalidOperationException("shell: offset edge has no solution");
+            if (r > 1e-6 * scale) throw new InvalidOperationException(what + ": an edge has no solution");
             pts.Add(p);
         }
         pts.Add(v1.P);

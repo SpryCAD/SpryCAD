@@ -150,6 +150,7 @@ static class Program
             NativeBoolTests.Run(t);
             NativeRevolveTests.Run(t);
             SheetMetalTests.Run(t);
+            DraftTests.Run(t);
             ExactMassTests.Run(t);
             DeterminismTests.Run(t);
             PatternUnionTests.Run(t);
