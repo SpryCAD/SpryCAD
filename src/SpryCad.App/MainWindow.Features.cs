@@ -924,22 +924,68 @@ public partial class MainWindow
     InstanceMarkers? _instanceMarkers;
 
     /// <summary>
-    /// Numbered markers at the pattern's instances (centre of the seeds' tools, moved by each instance's transform);
+    /// Numbered markers at the pattern's instances (centre of the seeds' tools within the model, on the face toward
+    /// the eye, moved by each instance's transform);
     /// clicking one adds it to or removes it from the skip list (written into the page's field, which updates the
     /// preview). Removed when the page closes.
     /// </summary>
     void ShowInstanceMarkers(Feature f, ModelState st, List<string> seeds, Func<List<int>> getSkip, TextBox skipBox, PmPage page)
     {
         _instanceMarkers?.Dispose();
-        List<(int, Vec3)> Positions()
+        // the direction the seeds go into the part: a circular pattern's axis; for a linear pattern the sketch normal
+        // of an extruded or hole seed, else the normal of its two directions (none with one direction only)
+        Vec3? DepthAxis()
         {
-            var box = Box3.Empty;
-            foreach (var id in seeds) if (st.Tools.TryGetValue(id, out var t)) box.Add(t.Tool.Bounds);
-            if (box.IsEmpty) return new();
+            if (f is CircularPatternFeature cp) return Resolver.ResolveDir(cp.Axis, st).dir.Normalized;
+            if (f is not LinearPatternFeature lp) return null;
+            foreach (var id in seeds)
+            {
+                var sk = Session.Doc.Features.FirstOrDefault(x => x.Id == id) switch
+                {
+                    ExtrudeFeature e => e.SketchId, HoleFeature h => h.SketchId, _ => null,
+                };
+                if (sk != null && st.Sketches.TryGetValue(sk, out var sr)) return sr.Frame.Normal.Normalized;
+            }
+            if (lp.Direction2 == null) return null;
+            var n = Vec3.Cross(Resolver.ResolveDir(lp.Direction, st).dir, Resolver.ResolveDir(lp.Direction2, st).dir);
+            return n.Length > 1e-9 ? n.Normalized : null;
+        }
+        List<(int, Vec3, Vec3)> Positions()
+        {
+            var tool = Box3.Empty;
+            foreach (var id in seeds) if (st.Tools.TryGetValue(id, out var t)) tool.Add(t.Tool.Bounds);
+            if (tool.IsEmpty) return new();
+            // a through-all cut's tool reaches far past the part: centre on the part of it within the model
+            var box = tool;
+            var mb = st.Bounds;
+            if (!mb.IsEmpty && box.Overlaps(mb)) box = new Box3 { Min = Vec3.Max(box.Min, mb.Min), Max = Vec3.Min(box.Max, mb.Max) };
             var c = box.Center;
+            Vec3 front = c, back = c;
+            if (DepthAxis() is { } ax)
+            {
+                // on the part's faces at either end along the depth (the model's points within the seed's tool), so
+                // the markers sit on the face toward the eye rather than inside the part
+                double lo = double.MaxValue, hi = double.MinValue, tol = 1e-6 * Math.Max(1, tool.Diagonal);
+                foreach (var body in st.Bodies)
+                {
+                    var ps = body.Mesh.Positions;
+                    for (int i = 0; i + 2 < ps.Length; i += 3)
+                    {
+                        var p = new Vec3(ps[i], ps[i + 1], ps[i + 2]);
+                        if (!tool.Contains(p, tol)) continue;
+                        var d = Vec3.Dot(p, ax);
+                        lo = Math.Min(lo, d); hi = Math.Max(hi, d);
+                    }
+                }
+                if (lo <= hi)
+                {
+                    var dc = Vec3.Dot(c, ax);
+                    front = c + ax * (lo - dc); back = c + ax * (hi - dc);
+                }
+            }
             var ts = Regenerator.PatternTransforms(f, st, Session.Lookup) ?? new();
-            var res = new List<(int, Vec3)> { (1, c) };
-            for (int i = 0; i < ts.Count; i++) res.Add((i + 2, ts[i].Point(c)));
+            var res = new List<(int, Vec3, Vec3)> { (1, front, back) };
+            for (int i = 0; i < ts.Count; i++) res.Add((i + 2, ts[i].Point(front), ts[i].Point(back)));
             return res;
         }
         var markers = new InstanceMarkers(Viewport, Positions, getSkip, list => skipBox.Text = string.Join(", ", list));
