@@ -302,6 +302,20 @@ public sealed class Regenerator
             return (b.Diagonal + (b.Center - frame.Origin).Length) * 2 + 10;
         }
 
+        /// <summary>How far the bodies reach from the sketch's plane along its normal (dir: +1 or -1); 0 when nothing is that side.</summary>
+        double Reach(Frame frame, double dir)
+        {
+            var b = State.Bounds;
+            if (b.IsEmpty) return 0;
+            double far = 0;
+            for (int c = 0; c < 8; c++)
+            {
+                var p = new Vec3((c & 1) == 0 ? b.Min.X : b.Max.X, (c & 2) == 0 ? b.Min.Y : b.Max.Y, (c & 4) == 0 ? b.Min.Z : b.Max.Z);
+                far = Math.Max(far, dir * Vec3.Dot(p - frame.Origin, frame.Normal));
+            }
+            return far;
+        }
+
         void DoExtrude(ExtrudeFeature e)
         {
             var sk = GetSketch(e.SketchId);
@@ -326,12 +340,26 @@ public sealed class Regenerator
             {
                 if (Math.Abs(draft) >= 89) throw new FeatureException("The draft angle must be below 89 degrees.");
                 if (z0 < 0 && z1 > 0) throw new FeatureException("Draft works on an extrude in one direction yet (not Mid Plane or two directions).");
+                // Through All: just past the far side of the part (drafted walls taken far enough would meet and cross)
+                if (e.End == EndCondition.ThroughAll)
+                {
+                    var reach = Reach(sk.Frame, dir);
+                    if (reach <= 1e-9) throw new FeatureException("There is nothing beyond the sketch in that direction to go through.");
+                    z1 = (reach + Math.Max(0.1, 1e-3 * State.Bounds.Diagonal)) * dir;
+                    tool = Builders.Extrude(sk.Regions, sk.Frame, Math.Min(z0, z1), Math.Max(z0, z1), f.Id);
+                }
                 var pull = sk.Frame.Normal * (z1 > 0 ? 1 : -1);
                 var neutral = Plane.FromPointNormal(sk.Frame.ToWorld(0, 0, 0), sk.Frame.Normal);
                 var sides = (tool.Native?.Faces.Select(x => x.Tag.Name) ?? Enumerable.Empty<string>())
                     .Where(n => n != f.Id + ".Start" && n != f.Id + ".End").ToHashSet();
                 try { tool = DraftOp.Apply(tool, sides, neutral, pull, (e.DraftOutward ? -1 : 1) * draft * Math.PI / 180); }
-                catch (DraftFailedException ex) { throw new FeatureException(ex.Message); }
+                catch (DraftFailedException ex)
+                {
+                    // (faces that cannot be drafted say so; otherwise the walls met: the profile closed up on the way)
+                    if (ex.Message.Contains("can be drafted")) throw new FeatureException(ex.Message);
+                    throw new FeatureException($"The drafted side walls meet before the end of the extrude ({Math.Abs(z1):0.###} mm): the profile closes up at this angle. " +
+                        "Use a smaller angle or depth, or Draft outward.");
+                }
             }
             ApplyTool(tool, e.IsCut, e.Merge);
             State.Tools[f.Id] = new ToolInfo(tool, e.IsCut, e.Merge);

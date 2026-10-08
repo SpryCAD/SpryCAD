@@ -126,6 +126,27 @@ static class DraftTests
             t.Eq(body.Faces.Count(f => f.Surface.Kind == SurfaceKind.Cone), 2);
         });
 
+        t.Test("Drafted Through All cut: through the plate and no further (the walls taken far would cross); a hole that closes up first says so", () =>
+        {
+            CadDocument Plate(double r, string angle)
+            {
+                var plate = new CadDocument();
+                var p = plate.AddFeature(new SketchFeature { Plane = PlaneRef.Front, Sketch = CoreTests.Rect(60, 60) });
+                plate.AddFeature(new ExtrudeFeature { SketchId = p.Id, Depth = "10", Reverse = true });
+                var h = plate.AddFeature(new SketchFeature { Plane = PlaneRef.Front, Sketch = Circle(30, 30, r) });
+                plate.AddFeature(new ExtrudeFeature { SketchId = h.Id, IsCut = true, End = EndCondition.ThroughAll, Reverse = true, Draft = angle });
+                return plate;
+            }
+            var cut = Body(Plate(8, "5"));
+            t.Eq(cut.Validate(), null);
+            t.Near(Volume(cut), 60 * 60 * 10 - Cone(8, 8 - 10 * T5, 10), 1e-6);
+            // a 2 mm hole at 20 degrees closes up 5.5 mm in, before the far side 10 mm down
+            var doc = Plate(2, "20");
+            var r = new Regenerator().Rebuild(doc);
+            var st = r.Status[doc.Features[^1].Id];
+            t.True(st is { Ok: false } && st.Error!.Contains("meet before the end"), $"closes up: {st.Error}");
+        });
+
         t.Test("Draft: what cannot be drafted says why (a face parallel to the neutral plane; a draft through a mid-plane extrude)", () =>
         {
             var doc = new CadDocument();
