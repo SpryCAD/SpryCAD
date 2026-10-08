@@ -451,10 +451,13 @@ public static class SketchSolver
     {
         if (drag != null && drag.Count > 0)
         {
+            // the shape before the drag: a step that turns it inside out is not taken (see SameShape)
+            var s0 = Build(sk, null, false);
+            var x0 = s0.X.ToArray();
             // 1) dragged points fixed at the cursor
             var s1 = Build(sk, drag, includeDragAsFixed: true);
             var x1 = s1.X.ToArray();
-            if (Iterate(s1, x1, 40) < 1e-7)
+            if (Iterate(s1, x1, 40) < 1e-7 && SameShape(s0, x0, s1, x1))
             {
                 Apply(s1, x1, drag);
                 return analyze ? Analyze(sk) : new SolveResult { Converged = true };
@@ -471,18 +474,50 @@ public static class SketchSolver
             }
             Iterate(s2, x2, 30);
             var s3 = Build(sk, null, false);
-            if (Iterate(s3, x2, 40) < 1e-7) { Apply(s3, x2, null); }
+            // (neither way keeps the shape: the sketch stays where it was, as a drag past a limit does)
+            if (Iterate(s3, x2, 40) < 1e-7 && SameShape(s0, x0, s3, x2)) { Apply(s3, x2, null); }
             return analyze ? Analyze(sk) : new SolveResult { Converged = true };
         }
 
         var s = Build(sk, null, false);
         var x = s.X.ToArray();
+        var xBefore = x.ToArray();
         var res = Iterate(s, x, 100);
-        bool ok = res < 1e-7;
+        // a solution that flips a tangency (or collapses its line) is not this sketch: not solved, nothing moved
+        bool ok = res < 1e-7 && SameShape(s, xBefore, s, x);
         if (ok) Apply(s, x, null);
         if (!analyze) return new SolveResult { Converged = ok, Residual = res, Status = ok ? SketchStatus.UnderDefined : SketchStatus.OverDefined };
         var an = Analyze(sk);
         return ok ? an : new SolveResult { Converged = false, Residual = res, Status = SketchStatus.OverDefined, FreePoints = an.FreePoints, FreeRadii = an.FreeRadii, Dof = an.Dof };
+    }
+
+    /// <summary>
+    /// Whether a solve keeps the sketch's shape: each line tangent to an arc or circle still has it on the same side,
+    /// and is not shrunk to nothing. A tangency stays as it was applied: the arc running on past the line, or turned
+    /// back beside it (for an arc meeting the line at an end, which side its center is on decides which). The equation
+    /// of a tangency at a shared end holds on either side, and on a line shrunk to nothing, so the solver can land
+    /// there (a slot whose side collapses, its arcs meeting at a point); such a solution is refused instead, and the
+    /// sketch stays as it was. Compared with the sketch before the solve, which was kept so in turn.
+    /// </summary>
+    static bool SameShape(System before, double[] xb, System after, double[] xa)
+    {
+        foreach (var c in before.Sketch.Constraints)
+        {
+            if (c.Type != CType.Tangent || c.Refs.Length < 2) continue;
+            int li = IsLine(before, c.Refs[0]) ? 0 : IsLine(before, c.Refs[1]) ? 1 : -1;
+            if (li < 0 || !IsRound(before, c.Refs[1 - li])) continue;
+            (double side, double len) Of(System s, double[] x)
+            {
+                var (a, b) = Line(s, c.Refs[li]);
+                var d = b.Get(x) - a.Get(x);
+                return (Vec2.Cross(d, CenterOf(s, c.Refs[1 - li]).Get(x) - a.Get(x)), d.Length);
+            }
+            var (s0, l0) = Of(before, xb);
+            var (s1, l1) = Of(after, xa);
+            if (l0 > 1e-9 && l1 < Math.Max(1e-6, l0 * 1e-3)) return false;
+            if (Math.Abs(s0) > 1e-12 * Math.Max(1, l0 * l0) && Math.Sign(s0) != Math.Sign(s1)) return false;
+        }
+        return true;
     }
 
     static void Apply(System s, double[] x, IReadOnlyDictionary<int, Vec2>? drag)
