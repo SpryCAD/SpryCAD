@@ -1,6 +1,6 @@
 # Draws the SpryCAD icons at every size Windows uses, each an ICO of PNG frames:
 #   src\SpryCad.App\Assets\SpryCAD.ico           the app: a white S drawn as a sketch spline, grips at its ends,
-#                                                   on the brand-teal tile
+#                                                   on the brand-teal tile, a blue block in its corner from 64 px
 #   src\SpryCad.App\Assets\SpryCADPart.ico       .sprt parts: a page with a block, the app's tile as a badge
 #   src\SpryCad.App\Assets\SpryCADAssembly.ico   .sasm assemblies: a page with two blocks put together (orange, blue)
 #   (at 16 and 20 px no page, the blocks alone, so a part and an assembly still differ in Explorer's small views)
@@ -33,8 +33,9 @@ $tealLight = '#16B095'
 $tealDark = '#0A7563'
 $white = '#FFFFFF'
 
-# The app's mark on a 128 grid, $px pixels to the unit (the frame's size / 128).
-function Logo($g, $px) {
+# The app's mark on a 128 grid, $px pixels to the unit (the frame's size / 128). $block: the blue isometric block in
+# its corner where there is room (64 px and up; not on the small badge of the file icons).
+function Logo($g, $px, $block = $true) {
   # Small sizes get a heavier S so it survives being shrunk to 16 px; the grips only where they can be made out.
   $k = if ($px * 128 -le 24) { 1.45 } elseif ($px * 128 -le 48) { 1.2 } else { 1 }
   $tile = RoundRect 4 4 120 120 26
@@ -53,6 +54,12 @@ function Logo($g, $px) {
       $g.FillRectangle((Brush $white), $e[0] - 10, $e[1] - 10, 20, 20)
       $g.FillRectangle((Brush $tealDark), $e[0] - 5, $e[1] - 5, 10, 10)
     }
+  }
+
+  # A blue block, the part icon's and the app's accent blue, in the bottom-right corner: it is a CAD program. Only
+  # where it can be made out without crowding the S (64 px and up).
+  if ($block -and $px * 128 -ge 64) {
+    Block $g 106 105 18 '#5FA3E0' '#2F75B8' '#1F5590' ([Math]::Max(1.0, $px * 128 / 28) / $px)
   }
 }
 
@@ -103,7 +110,7 @@ function FileIcon($g, $px, $kind) {
   if ($px * 128 -ge 32) {
     $state = $g.Save()
     $g.TranslateTransform(4, 4); $g.ScaleTransform(0.40, 0.40)
-    Logo $g ($px * 0.40)
+    Logo $g ($px * 0.40) $false
     $g.Restore($state)
   }
 }
