@@ -172,7 +172,7 @@ public partial class MainWindow
         StatusSketch.Foreground = _sketch.Status.Status switch
         {
             SketchStatus.FullyDefined => Brushes.Black,
-            SketchStatus.OverDefined => Brushes.Red,
+            SketchStatus.OverDefined => Palette.Danger,
             _ => Brushes.Blue,
         };
         _sketch.UpdateOverlay(Viewport);
@@ -326,7 +326,7 @@ public partial class MainWindow
                         VerticalAlignment = VerticalAlignment.Center,
                     };
                     // dangling: its model edge no longer in the model
-                    if (dangling > 0) label.Foreground = new SolidColorBrush(Color.FromRgb(158, 102, 26));
+                    if (dangling > 0) label.Foreground = Palette.Warning;
                     row.Children.Add(label);
                     ex.Children.Add(row);
                 }
@@ -450,7 +450,7 @@ public partial class MainWindow
             "Click model edges (lines, arcs, curves) and faces (all their edges). Click one again to remove it.");
         page.Check(s, "Select chain", () => _convertChain, v => { _convertChain = v; UpdateConvertCount(); });
         page.Info(s, "Select chain: each edge picked brings the edges tangent to it, end to end (a filleted outline in one click).");
-        _convertCount = new TextBlock { FontSize = 11, Foreground = Brushes.DimGray, Margin = new Thickness(0, 4, 0, 0) };
+        _convertCount = new TextBlock { FontSize = 11, Foreground = Palette.TextMuted, Margin = new Thickness(0, 4, 0, 0) };
         s.Children.Add(_convertCount);
         // model edges and faces selected already are what is converted
         foreach (var it in Selection.Items.Where(i => i.Kind is SelKind.Edge or SelKind.Face).ToList()) box.Add(it);

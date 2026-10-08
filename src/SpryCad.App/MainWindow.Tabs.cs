@@ -5,6 +5,8 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using SpryCad.App.Session;
 
+using SpryCad.App.UI;
+
 namespace SpryCad.App;
 
 /// <summary>
@@ -61,10 +63,10 @@ public partial class MainWindow
             if (!taken.Contains("Part" + n)) return "Part" + n;
     }
 
-    static readonly IBrush TabActiveBrush = Brushes.White;
-    static readonly IBrush TabInactiveBrush = new SolidColorBrush(Color.Parse("#FFDCE3EC"));
-    static readonly IBrush TabHoverBrush = new SolidColorBrush(Color.Parse("#FFEEF2F7"));
-    static readonly IBrush TabBorderBrush = new SolidColorBrush(Color.Parse("#FFC5CFDC"));
+    static IBrush TabActiveBrush => Palette.Surface;
+    static IBrush TabInactiveBrush => Palette.StripItem;
+    static IBrush TabHoverBrush => Palette.StripItemHover;
+    static IBrush TabBorderBrush => Palette.BorderStrong;
 
     /// <summary>Adds a tab for a session (not activated). Its events reach the window only while it is active.</summary>
     PartTab AddTab(DocumentSession s)
@@ -153,7 +155,7 @@ public partial class MainWindow
 
     sealed record PartRow(ListBoxItem Item, TextBlock Title, TextBlock Path, Image Image, Control Warning, Button Close);
 
-    static readonly IBrush ErrorBrush = new SolidColorBrush(Color.Parse("#FFC62828"));
+    static IBrush ErrorBrush => Palette.Danger;
 
     /// <summary>Red text for a part that could not be opened, else the normal color (cleared, not set to null: a null brush draws nothing).</summary>
     static void SetErrorColor(TextBlock tb, bool error)
@@ -186,7 +188,7 @@ public partial class MainWindow
     ListBox PartsListControl()
     {
         if (_partsList != null) return _partsList;
-        var list = new ListBox { Background = Brushes.White, BorderThickness = new Thickness(0) };
+        var list = new ListBox { Background = Palette.Surface, BorderThickness = new Thickness(0) };
         // not virtualized: the rows are their own containers, and a virtualizing panel loses rows moved within the
         // list (re-sorted), showing nothing for them
         list.ItemsPanel = new Avalonia.Controls.Templates.FuncTemplate<Panel?>(() => new StackPanel());
@@ -431,7 +433,7 @@ public partial class MainWindow
                 {
                     var img = new Image { Width = 64, Height = 64, Stretch = Stretch.Uniform, Source = t.Thumb };
                     var title = new TextBlock { FontSize = 13, TextTrimming = TextTrimming.CharacterEllipsis };
-                    var path = new TextBlock { FontSize = 11, Foreground = Brushes.Gray, TextTrimming = TextTrimming.PathSegmentEllipsis };
+                    var path = new TextBlock { FontSize = 11, Foreground = Palette.TextMuted, TextTrimming = TextTrimming.PathSegmentEllipsis };
                     var text = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Spacing = 2, Margin = new Thickness(10, 0, 0, 0), Children = { title, path } };
                     var close = new Button
                     {
@@ -467,7 +469,7 @@ public partial class MainWindow
                 var error = t.Error;
                 SetErrorColor(row.Title, error != null);
                 row.Path.Text = error ?? t.Asm?.FilePath ?? t.Session.FilePath ?? t.Source ?? "Not saved yet";
-                row.Path.Foreground = error != null ? ErrorBrush : Brushes.Gray;
+                row.Path.Foreground = error != null ? ErrorBrush : Palette.TextMuted;
                 row.Path.TextTrimming = error != null ? TextTrimming.CharacterEllipsis : TextTrimming.PathSegmentEllipsis;
                 row.Warning.IsVisible = error != null && t.Thumb == null;
                 ToolTip.SetTip(row.Item, error != null ? $"Could not be opened: {error}\n{t.Source ?? t.Session.FilePath}" : null);

@@ -262,11 +262,11 @@ public partial class MainWindow
         {
             if (label.Length == 0)
             {
-                _measureResults.Children.Add(new TextBlock { Text = value, FontSize = 11, Foreground = Brushes.DimGray, TextWrapping = TextWrapping.Wrap });
+                _measureResults.Children.Add(new TextBlock { Text = value, FontSize = 11, Foreground = Palette.TextMuted, TextWrapping = TextWrapping.Wrap });
                 continue;
             }
             var row = new DockPanel();
-            var lb = new TextBlock { Text = label, Width = 110, Foreground = Brushes.DimGray, TextWrapping = TextWrapping.Wrap };
+            var lb = new TextBlock { Text = label, Width = 110, Foreground = Palette.TextMuted, TextWrapping = TextWrapping.Wrap };
             DockPanel.SetDock(lb, Dock.Left);
             row.Children.Add(lb);
             row.Children.Add(new SelectableTextBlock { Text = value, FontWeight = FontWeight.SemiBold, TextWrapping = TextWrapping.Wrap });

@@ -10,6 +10,8 @@ using SpryCad.Core.Model;
 using SpryCad.Core.Regen;
 using SpryCad.Kernel;
 
+using SpryCad.App.UI;
+
 namespace SpryCad.App;
 
 /// <summary>
@@ -36,7 +38,7 @@ public partial class MainWindow
     const string CustomMaterial = "Custom";
     const double KgM3ToLbIn3 = 3.6127292e-5;
 
-    static readonly IBrush LabelBrush = new SolidColorBrush(Color.FromRgb(90, 100, 115));
+    static IBrush LabelBrush => Palette.TextMuted;
 
     void MassPropertiesCommand()
     {
@@ -100,10 +102,10 @@ public partial class MainWindow
         materialRow.Children.Add(mat);
 
         // the report: plain text on white, as a printout (SolidWorks' report box)
-        _massReport = new SelectableTextBlock { FontFamily = new FontFamily("Consolas, Menlo, monospace"), FontSize = 12, Foreground = Brushes.Black };
+        _massReport = new SelectableTextBlock { FontFamily = new FontFamily("Consolas, Menlo, monospace"), FontSize = 12, Foreground = Palette.Text };
         var reportBox = new Border
         {
-            Background = Brushes.White, BorderBrush = new SolidColorBrush(Color.FromRgb(171, 179, 191)), BorderThickness = new Thickness(1),
+            Background = Palette.Surface, BorderBrush = Palette.FieldBorder, BorderThickness = new Thickness(1),
             Child = new ScrollViewer
             {
                 Content = new Border { Padding = new Thickness(10, 8), Child = _massReport },

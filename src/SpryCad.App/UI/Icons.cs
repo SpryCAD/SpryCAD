@@ -120,8 +120,8 @@ public static class Icons
         ["warning"] = ("M12 3L2 21h20z M12 10v5 M12 18v.5", null),
     };
 
-    static readonly IBrush Stroke = new SolidColorBrush(Color.FromRgb(45, 55, 72));
-    static readonly IBrush Accent = new SolidColorBrush(Color.FromRgb(30, 110, 220));
+    static IBrush Stroke => Palette.Text;
+    static IBrush Accent => Palette.Accent;
 
     public static Control Make(string name, double size = 20, IBrush? stroke = null, IBrush? accent = null)
     {

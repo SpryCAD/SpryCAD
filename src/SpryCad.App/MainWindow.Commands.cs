@@ -44,7 +44,7 @@ public partial class MainWindow
         // the theme's own check box colors (they follow the system accent), so these match the app's check boxes
         static Avalonia.Media.IBrush Theme(string key, Avalonia.Media.IBrush fallback)
             => Application.Current is { } app && app.TryGetResource(key, app.ActualThemeVariant, out var r) && r is Avalonia.Media.IBrush b ? b : fallback;
-        var accent = Theme("CheckBoxCheckBackgroundFillChecked", new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.FromRgb(60, 60, 60)));
+        var accent = Theme("CheckBoxCheckBackgroundFillChecked", Palette.Accent);
         var glyph = Theme("CheckBoxCheckGlyphForegroundChecked", Avalonia.Media.Brushes.White);
         var offBorder = Theme("CheckBoxCheckBackgroundStrokeUnchecked", Avalonia.Media.Brushes.Gray);
         var offFill = Theme("CheckBoxCheckBackgroundFillUnchecked", Avalonia.Media.Brushes.White);
@@ -395,7 +395,7 @@ public partial class MainWindow
         ["Configure"] = "Sets the part's user-facing parameters: its design tables' rows and the variables marked User.",
     };
 
-    void Sep() => CommandBar.Children.Add(new Border { Width = 1, Background = new SolidColorBrush(Color.FromRgb(210, 216, 225)), Margin = new Thickness(4, 6) });
+    void Sep() => CommandBar.Children.Add(new Border { Width = 1, Background = Palette.Border, Margin = new Thickness(4, 6) });
 
     void UpdateToolButtons()
     {

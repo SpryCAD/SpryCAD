@@ -19,7 +19,7 @@ public sealed class FeatureTree : UserControl
 
     // feature reorder drag: the pressed row, then the drop line drawn over the rows while moving
     readonly Canvas _overlay = new() { IsHitTestVisible = false };
-    readonly Border _dropLine = new() { Height = 2, IsVisible = false, Background = new SolidColorBrush(Color.FromRgb(40, 110, 210)) };
+    readonly Border _dropLine = new() { Height = 2, IsVisible = false, Background = Palette.Accent };
     string? _pressId;
     Point _pressAt;
     bool _moving;
@@ -174,7 +174,7 @@ public sealed class FeatureTree : UserControl
         var bar = new Border
         {
             Height = 6, Margin = new Thickness(14, 3, 8, 3), CornerRadius = new CornerRadius(2),
-            Background = new SolidColorBrush(Color.FromRgb(40, 110, 210)),
+            Background = Palette.Accent,
             Cursor = new Cursor(StandardCursorType.SizeNorthSouth), Tag = "__rollback",
         };
         ToolTip.SetTip(bar, "Rollback bar: drag up or down to roll the model back.");
@@ -269,7 +269,7 @@ public sealed class FeatureTree : UserControl
     {
         var glyph = new Avalonia.Controls.Shapes.Path
         {
-            Data = shown ? EyeOpen : EyeShut, Stroke = shown ? new SolidColorBrush(Color.FromRgb(45, 55, 72)) : Brushes.Gray,
+            Data = shown ? EyeOpen : EyeShut, Stroke = shown ? Palette.Text : Palette.TextDisabled,
             StrokeThickness = 1.6, Stretch = Stretch.Uniform, Width = 14, Height = 14,
         };
         var b = new Border
@@ -279,7 +279,7 @@ public sealed class FeatureTree : UserControl
             Opacity = shown ? 1 : 0.7,
         };
         ToolTip.SetTip(b, shown ? "Hide the sketch" : "Show the sketch (e.g. to use it again in another feature)");
-        b.PointerEntered += (_, _) => b.Background = new SolidColorBrush(Color.FromArgb(40, 0, 90, 200));
+        b.PointerEntered += (_, _) => b.Background = Palette.SelectedBg;
         b.PointerExited += (_, _) => b.Background = Brushes.Transparent;
         b.PointerPressed += (_, e) =>
         {
@@ -303,12 +303,12 @@ public sealed class FeatureTree : UserControl
                 Cursor = new Cursor(StandardCursorType.Hand), VerticalAlignment = VerticalAlignment.Center,
                 Child = new TextBlock
                 {
-                    Text = _expanded.Contains(id) ? "▾" : "▸", FontSize = 14, Foreground = Brushes.DimGray,
+                    Text = _expanded.Contains(id) ? "▾" : "▸", FontSize = 14, Foreground = Palette.TextMuted,
                     HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
                 },
             };
             ToolTip.SetTip(exp, _expanded.Contains(id) ? "Collapse" : "Expand");
-            exp.PointerEntered += (_, _) => exp.Background = new SolidColorBrush(Color.FromArgb(40, 0, 90, 200));
+            exp.PointerEntered += (_, _) => exp.Background = Palette.SelectedBg;
             exp.PointerExited += (_, _) => exp.Background = Brushes.Transparent;
             exp.PointerPressed += (_, e) =>
             {
@@ -322,20 +322,20 @@ public sealed class FeatureTree : UserControl
         sp.Children.Add(Icons.Make(icon, 16));
         var tb = new TextBlock { Text = text, VerticalAlignment = VerticalAlignment.Center, FontSize = 12.5 };
         if (isHeader) tb.FontWeight = FontWeight.SemiBold;
-        if (suppressed) tb.Foreground = Brushes.Gray;
-        if (status is { Ok: false }) { tb.Foreground = Brushes.Red; ToolTip.SetTip(tb, status.Error); }
+        if (suppressed) tb.Foreground = Palette.TextDisabled;
+        if (status is { Ok: false }) { tb.Foreground = Palette.Danger; ToolTip.SetTip(tb, status.Error); }
         else if (status is { Warnings.Count: > 0 }) { ToolTip.SetTip(tb, string.Join("\n", status.Warnings)); }
         sp.Children.Add(tb);
         // a feature with a Suppress When condition, or suppressed with another: the reason as a tip on a small marker
         if (condition != null)
         {
-            var mark = new TextBlock { Text = "ƒ", FontStyle = FontStyle.Italic, FontSize = 12, Foreground = Brushes.SteelBlue, VerticalAlignment = VerticalAlignment.Center };
+            var mark = new TextBlock { Text = "ƒ", FontStyle = FontStyle.Italic, FontSize = 12, Foreground = Palette.Accent, VerticalAlignment = VerticalAlignment.Center };
             ToolTip.SetTip(mark, condition);
             sp.Children.Add(mark);
         }
-        if (status is { Ok: false }) sp.Children.Add(new TextBlock { Text = "✖", Foreground = Brushes.Red, VerticalAlignment = VerticalAlignment.Center });
-        else if (status is { Warnings.Count: > 0 }) sp.Children.Add(new TextBlock { Text = "⚠", Foreground = Brushes.DarkOrange, VerticalAlignment = VerticalAlignment.Center });
-        if (status != null && status.Milliseconds > 200) sp.Children.Add(new TextBlock { Text = $"{status.Milliseconds:0} ms", Foreground = Brushes.Gray, FontSize = 10, VerticalAlignment = VerticalAlignment.Center });
+        if (status is { Ok: false }) sp.Children.Add(new TextBlock { Text = "✖", Foreground = Palette.Danger, VerticalAlignment = VerticalAlignment.Center });
+        else if (status is { Warnings.Count: > 0 }) sp.Children.Add(new TextBlock { Text = "⚠", Foreground = Palette.Warning, VerticalAlignment = VerticalAlignment.Center });
+        if (status != null && status.Milliseconds > 200) sp.Children.Add(new TextBlock { Text = $"{status.Milliseconds:0} ms", Foreground = Palette.TextMuted, FontSize = 10, VerticalAlignment = VerticalAlignment.Center });
         if (sketchShown is { } shownNow) sp.Children.Add(EyeButton(id, shownNow));
 
         var row = new Border { Classes = { "treerow" }, Child = sp, Tag = id };

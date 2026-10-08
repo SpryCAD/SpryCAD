@@ -114,7 +114,7 @@ public static class Dialogs
         var list = new StackPanel { Spacing = 3 };
         var info = new TextBlock
         {
-            FontSize = 11, Foreground = Brushes.DimGray, TextWrapping = TextWrapping.Wrap,
+            FontSize = 11, Foreground = Palette.TextMuted, TextWrapping = TextWrapping.Wrap,
             Text = "Global variables usable in any dimension or feature value, e.g. W = 100, H = W/2. Trig functions use degrees; units like 1in are converted to mm. "
                 + "Conditions (Teeth < 30 and not Slots) give 1 or 0, for Suppress When. "
                 + "User-facing variables are what Configure shows (an assembly sets them per instance); the others are internal.",
@@ -123,7 +123,7 @@ public static class Dialogs
         var fromTables = (tables ?? new()).SelectMany(t => new[] { t.Name }.Concat(t.Columns)).Where(n => !string.IsNullOrWhiteSpace(n)).Select(n => n.Trim()).ToList();
         var tableInfo = new TextBlock
         {
-            FontSize = 11, Foreground = Brushes.DimGray, TextWrapping = TextWrapping.Wrap, IsVisible = fromTables.Count > 0,
+            FontSize = 11, Foreground = Palette.TextMuted, TextWrapping = TextWrapping.Wrap, IsVisible = fromTables.Count > 0,
             Text = "Set by design tables (Tools > Design Table): " + string.Join(", ", fromTables) + ".",
         };
         const string cols = "120,*,90,44,150,56,56,30";
@@ -136,7 +136,7 @@ public static class Dialogs
             var err = rows.Count(x => x.Name.Trim().Equals(name, StringComparison.OrdinalIgnoreCase)) > 1 || fromTables.Contains(name, StringComparer.OrdinalIgnoreCase)
                 ? $"{name} is set twice" : errs.GetValueOrDefault(r.Name);
             cell.Text = err ?? (vals.TryGetValue(name, out var val) ? Expr.Format(val) : "");
-            if (err != null) cell.Foreground = Brushes.Red; else cell.ClearValue(TextBlock.ForegroundProperty);
+            if (err != null) cell.Foreground = Palette.Danger; else cell.ClearValue(TextBlock.ForegroundProperty);
             ToolTip.SetTip(cell, err);
         }
         // re-evaluate in place (rebuilding the rows would steal focus while tabbing between fields)
@@ -230,10 +230,10 @@ public static class Dialogs
         void Update()
         {
             var text = tb.Text?.Trim() ?? "";
-            if (text.Length == 0) { now.Text = "No condition: the feature is built unless suppressed by hand."; now.Foreground = Brushes.DimGray; return; }
-            if (!Expr.TryEval(text, lookup, out var v, out var err)) { now.Text = err; now.Foreground = Brushes.Red; return; }
+            if (text.Length == 0) { now.Text = "No condition: the feature is built unless suppressed by hand."; now.Foreground = Palette.TextMuted; return; }
+            if (!Expr.TryEval(text, lookup, out var v, out var err)) { now.Text = err; now.Foreground = Palette.Danger; return; }
             now.Text = Expr.Truthy(v) ? "Holds now: the feature is suppressed (and the features using it)." : "Does not hold now: the feature is built.";
-            now.Foreground = Brushes.DimGray;
+            now.Foreground = Palette.TextMuted;
         }
         tb.TextChanged += (_, _) => Update();
         Update();
@@ -246,7 +246,7 @@ public static class Dialogs
         sp.Children.Add(now);
         sp.Children.Add(new TextBlock
         {
-            FontSize = 11, Foreground = Brushes.DimGray, TextWrapping = TextWrapping.Wrap,
+            FontSize = 11, Foreground = Palette.TextMuted, TextWrapping = TextWrapping.Wrap,
             Text = "Compare with < <= > >= == != and combine with and, or, not. "
                 + (names.Count > 0 ? "Variables: " + string.Join(", ", names) + "." : "Define variables in Equations first."),
         });
@@ -279,7 +279,7 @@ public static class Dialogs
         var addTable = new Button { Content = "+ Table" };
         var delTable = new Button { Content = "Delete Table" };
         var body = new StackPanel { Spacing = 6 };
-        var error = new TextBlock { Foreground = Brushes.Red, FontSize = 11, TextWrapping = TextWrapping.Wrap };
+        var error = new TextBlock { Foreground = Palette.Danger, FontSize = 11, TextWrapping = TextWrapping.Wrap };
         bool picking = false;
 
         static DesignTable NewTable(int n) => new()
@@ -308,7 +308,7 @@ public static class Dialogs
             {
                 body.Children.Add(new TextBlock
                 {
-                    TextWrapping = TextWrapping.Wrap, Foreground = Brushes.DimGray,
+                    TextWrapping = TextWrapping.Wrap, Foreground = Palette.TextMuted,
                     Text = "No design tables. A table gives rows of values for a set of variables, e.g. a screw's sizes M3, M4, M5 with D, Pitch and HeadD for each: "
                         + "choosing a row sets them all. Add one with + Table, or paste a spreadsheet.",
                 });
@@ -450,7 +450,7 @@ public static class Dialogs
         var sp = new StackPanel { Spacing = 8 };
         sp.Children.Add(new TextBlock
         {
-            FontSize = 11, Foreground = Brushes.DimGray, TextWrapping = TextWrapping.Wrap,
+            FontSize = 11, Foreground = Palette.TextMuted, TextWrapping = TextWrapping.Wrap,
             Text = "Rows of values for a set of variables; the row in use sets them all. Values may be expressions of the part's other variables. "
                 + "The table's name holds the number of the row in use (1 = the first), for conditions such as Size >= 3.",
         });
@@ -488,7 +488,7 @@ public static class Dialogs
         if (current != null) foreach (var (k, v) in current) if (values.ContainsKey(k)) values[k] = v;
         var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,12,*"), RowDefinitions = new RowDefinitions(string.Join(",", ps.Select(_ => "Auto,Auto"))) };
         var errors = new Dictionary<string, TextBlock>();
-        var summary = new TextBlock { FontSize = 11, Foreground = Brushes.DimGray, TextWrapping = TextWrapping.Wrap };
+        var summary = new TextBlock { FontSize = 11, Foreground = Palette.TextMuted, TextWrapping = TextWrapping.Wrap };
         void Summary()
         {
             // what the choices give: the internal values too, so a size can be checked before OK
@@ -520,7 +520,7 @@ public static class Dialogs
             {
                 var tb = new TextBox { Text = values[p.Name] };
                 if (p.Min != null || p.Max != null) tb.Watermark = $"{(p.Min is { } lo ? Expr.Format(lo) : "")} to {(p.Max is { } hi ? Expr.Format(hi) : "")}";
-                var err = new TextBlock { FontSize = 11, Foreground = Brushes.Red, TextWrapping = TextWrapping.Wrap };
+                var err = new TextBlock { FontSize = 11, Foreground = Palette.Danger, TextWrapping = TextWrapping.Wrap };
                 errors[p.Name] = err;
                 tb.TextChanged += (_, _) =>
                 {
@@ -543,7 +543,7 @@ public static class Dialogs
         var ok = new Button { Content = "OK", IsDefault = true };
         var cancel = new Button { Content = "Cancel", IsCancel = true };
         var sp = new StackPanel { Spacing = 8 };
-        if (note != null) sp.Children.Add(new TextBlock { Text = note, FontSize = 11, Foreground = Brushes.DimGray, TextWrapping = TextWrapping.Wrap });
+        if (note != null) sp.Children.Add(new TextBlock { Text = note, FontSize = 11, Foreground = Palette.TextMuted, TextWrapping = TextWrapping.Wrap });
         sp.Children.Add(grid);
         sp.Children.Add(summary);
         sp.Children.Add(all);
@@ -601,7 +601,7 @@ public static class Dialogs
         var sp = new StackPanel { Spacing = 8 };
         sp.Children.Add(new TextBlock { Text = "Document units", FontWeight = FontWeight.SemiBold });
         sp.Children.Add(units);
-        sp.Children.Add(new TextBlock { Text = "In IPS, values are inches; STEP/STL exports are converted to millimetres.", FontSize = 11, Foreground = Brushes.DimGray, TextWrapping = TextWrapping.Wrap });
+        sp.Children.Add(new TextBlock { Text = "In IPS, values are inches; STEP/STL exports are converted to millimetres.", FontSize = 11, Foreground = Palette.TextMuted, TextWrapping = TextWrapping.Wrap });
         sp.Children.Add(new TextBlock { Text = "Part color (R, G, B 0-255)", FontWeight = FontWeight.SemiBold });
         sp.Children.Add(color);
         sp.Children.Add(new TextBlock { Text = "Sheet metal bend allowance", FontWeight = FontWeight.SemiBold });
@@ -611,14 +611,14 @@ public static class Dialogs
         Grid.SetColumn(kLabel, 2); bendRow.Children.Add(kLabel);
         Grid.SetColumn(kFactor, 4); bendRow.Children.Add(kFactor);
         sp.Children.Add(bendRow);
-        sp.Children.Add(new TextBlock { Text = "For this part's flat patterns (a Flat Pattern can override it). K-factor 0 to 1, or an expression.", FontSize = 11, Foreground = Brushes.DimGray, TextWrapping = TextWrapping.Wrap });
+        sp.Children.Add(new TextBlock { Text = "For this part's flat patterns (a Flat Pattern can override it). K-factor 0 to 1, or an expression.", FontSize = 11, Foreground = Palette.TextMuted, TextWrapping = TextWrapping.Wrap });
         sp.Children.Add(new TextBlock { Text = "View", FontWeight = FontWeight.SemiBold });
         sp.Children.Add(wheel); sp.Children.Add(persp);
         sp.Children.Add(pivot);
-        sp.Children.Add(new TextBlock { Text = "Middle-click a vertex, edge or face to rotate about that spot instead, until you middle-click empty space.", FontSize = 11, Foreground = Brushes.DimGray, TextWrapping = TextWrapping.Wrap });
+        sp.Children.Add(new TextBlock { Text = "Middle-click a vertex, edge or face to rotate about that spot instead, until you middle-click empty space.", FontSize = 11, Foreground = Palette.TextMuted, TextWrapping = TextWrapping.Wrap });
         sp.Children.Add(new TextBlock { Text = "Files", FontWeight = FontWeight.SemiBold });
         sp.Children.Add(container);
-        sp.Children.Add(new TextBlock { Text = "Otherwise parts are saved as plain JSON, unless they embed other files (e.g. an imported model). Either kind opens normally.", FontSize = 11, Foreground = Brushes.DimGray, TextWrapping = TextWrapping.Wrap });
+        sp.Children.Add(new TextBlock { Text = "Otherwise parts are saved as plain JSON, unless they embed other files (e.g. an imported model). Either kind opens normally.", FontSize = 11, Foreground = Palette.TextMuted, TextWrapping = TextWrapping.Wrap });
         sp.Children.Add(Buttons(ok, cancel));
         var w = MakeWindow("Options", sp, 420);
         ok.Click += (_, _) =>
@@ -697,19 +697,19 @@ public static class Dialogs
     {
         var ok = new Button { Content = "OK", IsDefault = true, IsCancel = true };
         var sp = new StackPanel { Spacing = 6 };
-        sp.Children.Add(new TextBlock { Text = "SpryCAD", FontSize = 22, FontWeight = FontWeight.Bold, Foreground = new SolidColorBrush(Color.FromRgb(15, 154, 131)) });
+        sp.Children.Add(new TextBlock { Text = "SpryCAD", FontSize = 22, FontWeight = FontWeight.Bold, Foreground = Palette.Brand });
         // from git at build time (SpryCadGitVersion in the .csproj): "0.0.1-dev.3+aeb382f[.dirty]"
         var info = System.Reflection.Assembly.GetEntryAssembly()?
             .GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
             .OfType<System.Reflection.AssemblyInformationalVersionAttribute>().FirstOrDefault()?.InformationalVersion ?? "";
         var plus = info.IndexOf('+');
         var (ver, build) = plus < 0 ? (info, "") : (info[..plus], info[(plus + 1)..]);
-        var verText = new SelectableTextBlock { Text = $"Version {ver}" + (build.Length > 0 ? $"   (commit {build.Replace(".dirty", ", uncommitted changes")})" : ""), Foreground = Brushes.DimGray };
+        var verText = new SelectableTextBlock { Text = $"Version {ver}" + (build.Length > 0 ? $"   (commit {build.Replace(".dirty", ", uncommitted changes")})" : ""), Foreground = Palette.TextMuted };
         ToolTip.SetTip(verText, info);
         sp.Children.Add(verText);
         sp.Children.Add(new TextBlock { Text = "Fast, lightweight, open source parametric 3D CAD.", TextWrapping = TextWrapping.Wrap });
-        sp.Children.Add(new TextBlock { Text = "Own plane-based B-rep kernel in C#, Avalonia UI, OpenGL viewport.\nNative formats: .sprt parts (JSON), .sasm assemblies. Export: STEP AP214, STL.", TextWrapping = TextWrapping.Wrap, Foreground = Brushes.DimGray });
-        sp.Children.Add(new TextBlock { Text = "License: MIT", Foreground = Brushes.DimGray });
+        sp.Children.Add(new TextBlock { Text = "Own plane-based B-rep kernel in C#, Avalonia UI, OpenGL viewport.\nNative formats: .sprt parts (JSON), .sasm assemblies. Export: STEP AP214, STL.", TextWrapping = TextWrapping.Wrap, Foreground = Palette.TextMuted });
+        sp.Children.Add(new TextBlock { Text = "License: MIT", Foreground = Palette.TextMuted });
         sp.Children.Add(Buttons(ok));
         var w = MakeWindow("About SpryCAD", sp, 420);
         ok.Click += (_, _) => w.Close();

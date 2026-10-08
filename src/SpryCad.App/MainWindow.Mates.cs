@@ -195,7 +195,7 @@ public partial class MainWindow
         }
 
         var page = new PmPage(editing != null ? "Edit Mate: " + editing.Name : "Mate", "relations");
-        var red = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse("#FFC62828"));
+        var red = Palette.Danger;
 
         // Standard / Mechanical: tabs, as SolidWorks has them (styled as the panel's tabs, sharing the width)
         static TabStripItem Tab(string icon, string text) => new()

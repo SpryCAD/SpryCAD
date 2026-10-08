@@ -36,8 +36,8 @@ public sealed class AssemblyTree : DockPanel
     /// <summary>A command for a mate: "edit", "rename", "flip", "suppress", "delete".</summary>
     public event Action<string, string>? MateCommand;
 
-    static readonly IBrush Red = new SolidColorBrush(Color.Parse("#FFC62828"));
-    static readonly IBrush Dim = new SolidColorBrush(Color.Parse("#FF5A6B85"));
+    static IBrush Red => Palette.Danger;
+    static IBrush Dim => Palette.TextMuted;
 
     public AssemblyTree()
     {
@@ -150,7 +150,7 @@ public sealed class AssemblyTree : DockPanel
         var tb = new TextBlock { Text = text, VerticalAlignment = VerticalAlignment.Center, FontSize = 12.5 };
         if (header) tb.FontWeight = FontWeight.SemiBold;
         if (bad) tb.Foreground = Red;
-        else if (dim) tb.Foreground = Brushes.Gray;
+        else if (dim) tb.Foreground = Palette.TextDisabled;
         sp.Children.Add(tb);
         if (note != null) sp.Children.Add(new TextBlock { Text = note, Foreground = Dim, FontSize = 11, VerticalAlignment = VerticalAlignment.Center });
         var row = new Border { Classes = { "treerow" }, Child = sp, Tag = key, ContextMenu = menu };

@@ -57,8 +57,8 @@ public sealed class PmSelectionBox
 public sealed class PmPage
 {
     /// <summary>The OK / Cancel icon colors, shared with the confirmation corner so the pair looks the same in both.</summary>
-    public static readonly IBrush OkBrush = new SolidColorBrush(Color.FromRgb(20, 150, 40));
-    public static readonly IBrush CancelBrush = new SolidColorBrush(Color.FromRgb(200, 40, 40));
+    public static IBrush OkBrush => Palette.Success;
+    public static IBrush CancelBrush => Palette.Danger;
 
     public string Title { get; }
     public string Icon { get; }
@@ -78,7 +78,7 @@ public sealed class PmPage
 
     readonly DockPanel _root = new();
     readonly StackPanel _body = new() { Spacing = 0 };
-    readonly TextBlock _msg = new() { TextWrapping = TextWrapping.Wrap, FontSize = 11, Foreground = new SolidColorBrush(Color.FromRgb(120, 70, 0)) };
+    readonly TextBlock _msg = new() { TextWrapping = TextWrapping.Wrap, FontSize = 11, Foreground = Palette.NoteText };
     readonly Border _msgBorder;
 
     public PmPage(string title, string icon, bool showOkCancel = true)
@@ -87,7 +87,7 @@ public sealed class PmPage
         var header = new DockPanel { Margin = new Thickness(6, 6, 6, 2) };
         var titleRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
         titleRow.Children.Add(Icons.Make(icon, 22));
-        titleRow.Children.Add(new TextBlock { Text = title, FontSize = 15, FontWeight = FontWeight.SemiBold, VerticalAlignment = VerticalAlignment.Center, Foreground = new SolidColorBrush(Color.FromRgb(29, 53, 87)) });
+        titleRow.Children.Add(new TextBlock { Text = title, FontSize = 15, FontWeight = FontWeight.SemiBold, VerticalAlignment = VerticalAlignment.Center, Foreground = Palette.Heading });
         DockPanel.SetDock(titleRow, Dock.Top);
         header.Children.Add(titleRow);
         if (showOkCancel)
@@ -107,7 +107,7 @@ public sealed class PmPage
         _root.Children.Add(header);
         _msgBorder = new Border
         {
-            Background = new SolidColorBrush(Color.FromRgb(255, 248, 220)), BorderBrush = new SolidColorBrush(Color.FromRgb(230, 200, 120)),
+            Background = Palette.NoteBg, BorderBrush = Palette.NoteBorder,
             BorderThickness = new Thickness(1), Margin = new Thickness(4, 2), Padding = new Thickness(6, 4), CornerRadius = new CornerRadius(3),
             Child = _msg, IsVisible = false,
         };
@@ -127,7 +127,7 @@ public sealed class PmPage
     }
 
     public void Info(StackPanel s, string text) =>
-        s.Children.Add(new TextBlock { Text = text, TextWrapping = TextWrapping.Wrap, FontSize = 11, Foreground = Brushes.DimGray });
+        s.Children.Add(new TextBlock { Text = text, TextWrapping = TextWrapping.Wrap, FontSize = 11, Foreground = Palette.TextMuted });
 
     static Grid Row(string label, Control field, string? icon = null)
     {
@@ -150,7 +150,7 @@ public sealed class PmPage
         unit ??= LengthUnit;
         var tb = new TextBox { Text = get(), MinWidth = 90, HorizontalAlignment = HorizontalAlignment.Stretch };
         void MarkInvalid(bool bad) { if (bad) _invalid[tb] = label; else _invalid.Remove(tb); }
-        var unitLbl = new TextBlock { Text = unit, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(4, 0, 0, 0), Foreground = Brushes.Gray, FontSize = 11 };
+        var unitLbl = new TextBlock { Text = unit, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(4, 0, 0, 0), Foreground = Palette.TextMuted, FontSize = 11 };
         var dp = new DockPanel();
         DockPanel.SetDock(unitLbl, Dock.Right);
         dp.Children.Add(unitLbl); dp.Children.Add(tb);
@@ -176,7 +176,7 @@ public sealed class PmPage
             else
             {
                 MarkInvalid(true);
-                tb.BorderBrush = Brushes.Red;
+                tb.BorderBrush = Palette.Danger;
                 ToolTip.SetTip(tb, err);
             }
         }
@@ -212,7 +212,7 @@ public sealed class PmPage
                     for (int k = a; k <= b; k++) res.Add(k);
                 else { err = $"\"{part}\" is not an instance number ({min} or more) or a range such as {min}-{min + 2}"; break; }
             }
-            if (err != null) { _invalid[tb] = label; tb.BorderBrush = Brushes.Red; ToolTip.SetTip(tb, err); return; }
+            if (err != null) { _invalid[tb] = label; tb.BorderBrush = Palette.Danger; ToolTip.SetTip(tb, err); return; }
             _invalid.Remove(tb); tb.BorderBrush = null; ToolTip.SetTip(tb, tip);
             set(res.ToList());
             Changed?.Invoke();
@@ -254,7 +254,7 @@ public sealed class PmPage
     public PmSelectionBox Selection(StackPanel s, string label, SelFilter filter, string hint, int max = int.MaxValue, Func<SelItem, bool>? accept = null)
     {
         var box = new PmSelectionBox { Label = label, Filter = filter, Max = max, Accept = accept };
-        s.Children.Add(new TextBlock { Text = hint, FontSize = 11, Foreground = Brushes.DimGray, TextWrapping = TextWrapping.Wrap });
+        s.Children.Add(new TextBlock { Text = hint, FontSize = 11, Foreground = Palette.TextMuted, TextWrapping = TextWrapping.Wrap });
         box.List.GotFocus += (_, _) => Activate(box);
         box.List.PointerPressed += (_, _) => Activate(box);
         box.List.KeyDown += (_, e) =>

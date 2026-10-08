@@ -7,6 +7,8 @@ using Avalonia.Media;
 using Avalonia.VisualTree;
 using SpryCad.App.Session;
 
+using SpryCad.App.UI;
+
 namespace SpryCad.App;
 
 /// <summary>
@@ -37,7 +39,7 @@ public partial class MainWindow
     Button _taskPin = null!, _taskPopOut = null!;
     TaskPane _partsPane = null!;
 
-    static readonly IBrush TaskTabActive = new SolidColorBrush(Color.Parse("#FFCFE2F8"));
+    static IBrush TaskTabActive => Palette.SelectedBg;
     static readonly BoxShadows TaskShadow = BoxShadows.Parse("-4 0 14 0 #40000000");
 
     void BuildTaskPane()
@@ -72,13 +74,13 @@ public partial class MainWindow
         header.Children.Add(_taskPin);
         header.Children.Add(_taskPopOut);
         header.Children.Add(_taskTitle);
-        var headerBar = new Border { Child = header, Background = new SolidColorBrush(Color.Parse("#FFE8EDF3")), BorderBrush = new SolidColorBrush(Color.Parse("#FFD5DCE6")), BorderThickness = new Thickness(0, 0, 0, 1) };
+        var headerBar = new Border { Child = header, Background = Palette.Strip, BorderBrush = Palette.Border, BorderThickness = new Thickness(0, 0, 0, 1) };
         DockPanel.SetDock(headerBar, Avalonia.Controls.Dock.Top);
         _taskBody = new ContentControl();
         _taskPanel = new Border
         {
-            Background = new SolidColorBrush(Color.Parse("#FFF5F7FA")),
-            BorderBrush = new SolidColorBrush(Color.Parse("#FFD5DCE6")), BorderThickness = new Thickness(1, 0, 0, 0),
+            Background = Palette.Panel,
+            BorderBrush = Palette.Border, BorderThickness = new Thickness(1, 0, 0, 0),
             Child = new DockPanel { Children = { headerBar, _taskBody } },
         };
 
@@ -176,7 +178,7 @@ public partial class MainWindow
         {
             var on = mode != TaskMode.Hidden && p == _taskCurrent;
             p.Tab.Background = on ? TaskTabActive : Brushes.Transparent;
-            p.Tab.BorderBrush = on ? new SolidColorBrush(Color.Parse("#FF9EC3EE")) : Brushes.Transparent;
+            p.Tab.BorderBrush = on ? Palette.HoverBorder : Brushes.Transparent;
         }
         UserSettings.TaskOpen = mode != TaskMode.Hidden;
         UserSettings.Save();

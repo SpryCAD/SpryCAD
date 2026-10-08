@@ -1,0 +1,51 @@
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <!-- The app's named colors: the window's chrome, panels, selections and status. The .axaml files take them as
+       {DynamicResource Spry.X}, code as UI.Palette.X. Per theme variant, so a dark set is one more dictionary.
+       Not here: the colors drawn in the graphics area (model, sketch, triad, view cube, markers). -->
+  <ResourceDictionary.ThemeDictionaries>
+    <ResourceDictionary x:Key="Light">
+      <!-- surfaces, lightest to darkest -->
+      <SolidColorBrush x:Key="Spry.Surface" Color="#FFFFFFFF" />        <!-- menu bar, cards, lists, PM sections -->
+      <SolidColorBrush x:Key="Spry.SurfaceAlt" Color="#FFF8FAFC" />     <!-- command bar, selection boxes -->
+      <SolidColorBrush x:Key="Spry.Panel" Color="#FFF5F7FA" />          <!-- left panel, task pane -->
+      <SolidColorBrush x:Key="Spry.Window" Color="#FFF3F5F8" />
+      <SolidColorBrush x:Key="Spry.Strip" Color="#FFE8EDF3" />          <!-- tab strips, status bar, task pane header -->
+      <SolidColorBrush x:Key="Spry.StripItemHover" Color="#FFEEF2F7" />
+      <SolidColorBrush x:Key="Spry.StripItem" Color="#FFDCE3EC" />      <!-- an unselected document tab; splitters -->
+      <SolidColorBrush x:Key="Spry.Hud" Color="#E6FFFFFF" />            <!-- toolbars floating on the graphics area -->
+      <SolidColorBrush x:Key="Spry.Scrim" Color="#26000000" />          <!-- behind a card -->
+
+      <!-- lines -->
+      <SolidColorBrush x:Key="Spry.Border" Color="#FFD5DCE6" />         <!-- between the window's areas, separators -->
+      <SolidColorBrush x:Key="Spry.BorderStrong" Color="#FFC5CFDC" />   <!-- around a control or section -->
+      <SolidColorBrush x:Key="Spry.FieldBorder" Color="#FFB0BCCC" />    <!-- around a box holding values -->
+
+      <!-- the accent and the selection blues -->
+      <SolidColorBrush x:Key="Spry.Accent" Color="#FF2F7BD6" />         <!-- = the theme's Accent (App.axaml) -->
+      <SolidColorBrush x:Key="Spry.AccentLight" Color="#FF8EC0FF" />
+      <SolidColorBrush x:Key="Spry.AccentText" Color="#FF1D4E8F" />
+      <SolidColorBrush x:Key="Spry.HoverBg" Color="#FFE8F1FC" />        <!-- under the pointer; the feature owning a picked face -->
+      <SolidColorBrush x:Key="Spry.HoverBorder" Color="#FF9EC3EE" />
+      <SolidColorBrush x:Key="Spry.SelectedBg" Color="#FFCDE2FA" />     <!-- selected, pressed, on -->
+      <SolidColorBrush x:Key="Spry.SelectedBorder" Color="#FF5C9AE0" />
+      <SolidColorBrush x:Key="Spry.SelectedText" Color="#FF1D2B3F" />
+
+      <!-- text -->
+      <SolidColorBrush x:Key="Spry.Text" Color="#FF2B3645" />
+      <SolidColorBrush x:Key="Spry.Heading" Color="#FF1D3557" />
+      <SolidColorBrush x:Key="Spry.TextSecondary" Color="#FF425066" />
+      <SolidColorBrush x:Key="Spry.TextMuted" Color="#FF5A6B85" />      <!-- hints, units, timings, paths: 5:1 on Panel -->
+      <SolidColorBrush x:Key="Spry.TextDisabled" Color="#FF8A94A2" />   <!-- unavailable, suppressed, driven -->
+      <SolidColorBrush x:Key="Spry.Brand" Color="#FF0F9A83" />          <!-- the SpryCAD name only -->
+
+      <!-- status -->
+      <SolidColorBrush x:Key="Spry.Danger" Color="#FFC62828" />         <!-- errors, Cancel, a skipped instance -->
+      <SolidColorBrush x:Key="Spry.Success" Color="#FF149628" />        <!-- OK -->
+      <SolidColorBrush x:Key="Spry.Warning" Color="#FFA8661A" />        <!-- warnings, dangling geometry -->
+      <SolidColorBrush x:Key="Spry.NoteBg" Color="#FFFFF8DC" />         <!-- the PropertyManager's message box -->
+      <SolidColorBrush x:Key="Spry.NoteBorder" Color="#FFE6C878" />
+      <SolidColorBrush x:Key="Spry.NoteText" Color="#FF784600" />
+    </ResourceDictionary>
+  </ResourceDictionary.ThemeDictionaries>
+</ResourceDictionary>

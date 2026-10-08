@@ -13,20 +13,20 @@
     <Setter Property="CornerRadius" Value="3" />
   </Style>
   <Style Selector="Button.cmd:pointerover /template/ ContentPresenter">
-    <Setter Property="Background" Value="#FFE3EEFB" />
-    <Setter Property="BorderBrush" Value="#FF9EC3EE" />
+    <Setter Property="Background" Value="{DynamicResource Spry.HoverBg}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Spry.HoverBorder}" />
   </Style>
   <Style Selector="Button.cmd.active /template/ ContentPresenter">
-    <Setter Property="Background" Value="#FFCFE2F8" />
-    <Setter Property="BorderBrush" Value="#FF5C9AE0" />
+    <Setter Property="Background" Value="{DynamicResource Spry.SelectedBg}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Spry.SelectedBorder}" />
   </Style>
   <Style Selector="Button.cmd TextBlock">
     <Setter Property="FontSize" Value="11" />
     <Setter Property="TextAlignment" Value="Center" />
-    <Setter Property="Foreground" Value="#FF283548" />
+    <Setter Property="Foreground" Value="{DynamicResource Spry.Text}" />
   </Style>
   <Style Selector="Button.cmd:disabled TextBlock">
-    <Setter Property="Foreground" Value="#FFA0A8B4" />
+    <Setter Property="Foreground" Value="{DynamicResource Spry.TextDisabled}" />
   </Style>
   <Style Selector="Button.cmd:disabled /template/ ContentPresenter">
     <Setter Property="Background" Value="Transparent" />
@@ -43,12 +43,12 @@
     <Setter Property="CornerRadius" Value="3" />
   </Style>
   <Style Selector="Button.tb:pointerover /template/ ContentPresenter">
-    <Setter Property="Background" Value="#FFE3EEFB" />
-    <Setter Property="BorderBrush" Value="#FF9EC3EE" />
+    <Setter Property="Background" Value="{DynamicResource Spry.HoverBg}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Spry.HoverBorder}" />
   </Style>
   <Style Selector="Button.tb.active /template/ ContentPresenter">
-    <Setter Property="Background" Value="#FFCFE2F8" />
-    <Setter Property="BorderBrush" Value="#FF5C9AE0" />
+    <Setter Property="Background" Value="{DynamicResource Spry.SelectedBg}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Spry.SelectedBorder}" />
   </Style>
   <!-- disabled: no fill (the theme's grey made an unavailable Undo look pressed), the icon faded instead -->
   <Style Selector="Button.tb:disabled /template/ ContentPresenter">
@@ -63,11 +63,11 @@
        the border's color plus a thin halo outside it (a shadow, which takes no room): the border keeps its
        thickness, so the button keeps its size and nothing moves when the ring goes from button to button -->
   <Style Selector="Button.card:focus /template/ ContentPresenter">
-    <Setter Property="BorderBrush" Value="#FF2F7BD6" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Spry.Accent}" />
     <Setter Property="BoxShadow" Value="0 0 0 1 #CC2F7BD6" />
   </Style>
   <Style Selector="Button.card.accent:focus /template/ ContentPresenter">
-    <Setter Property="BorderBrush" Value="#FF8EC0FF" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Spry.AccentLight}" />
     <Setter Property="BoxShadow" Value="0 0 0 1 #FF2F7BD6" />
   </Style>
 
@@ -79,21 +79,21 @@
     <Setter Property="FontSize" Value="12.5" />
   </Style>
   <Style Selector="ToggleButton.matetype:pointerover /template/ ContentPresenter">
-    <Setter Property="Background" Value="#FFE8F1FC" />
+    <Setter Property="Background" Value="{DynamicResource Spry.HoverBg}" />
   </Style>
   <Style Selector="ToggleButton.matetype:checked /template/ ContentPresenter">
-    <Setter Property="Background" Value="#FFCDE2FA" />
-    <Setter Property="Foreground" Value="#FF1D2B3F" />
+    <Setter Property="Background" Value="{DynamicResource Spry.SelectedBg}" />
+    <Setter Property="Foreground" Value="{DynamicResource Spry.SelectedText}" />
   </Style>
   <Style Selector="ToggleButton.matetype:disabled">
     <Setter Property="Opacity" Value="0.4" />
   </Style>
   <Style Selector="ToggleButton.matetype.framed">
     <Setter Property="BorderThickness" Value="1" />
-    <Setter Property="BorderBrush" Value="#FFC4CEDB" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Spry.BorderStrong}" />
   </Style>
   <Style Selector="ToggleButton.matetype.framed:checked /template/ ContentPresenter">
-    <Setter Property="BorderBrush" Value="#FF2F7BD6" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Spry.Accent}" />
   </Style>
   <Style Selector="ToggleButton.matetype:disabled /template/ ContentPresenter">
     <Setter Property="Background" Value="Transparent" />
@@ -109,15 +109,15 @@
     <Setter Property="FontSize" Value="12" />
   </Style>
   <Style Selector="ToggleButton.tab:checked /template/ ContentPresenter">
-    <Setter Property="Background" Value="#FFFFFFFF" />
-    <Setter Property="BorderBrush" Value="#FF2F7BD6" />
-    <Setter Property="Foreground" Value="#FF1D4E8F" />
+    <Setter Property="Background" Value="{DynamicResource Spry.Surface}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Spry.Accent}" />
+    <Setter Property="Foreground" Value="{DynamicResource Spry.AccentText}" />
   </Style>
 
   <!-- left panel tabs (FeatureManager / PropertyManager / ...): compact icon tabs; the selected one is white,
        with the theme's selection line under it -->
   <Style Selector="TabStrip.paneltabs">
-    <Setter Property="Background" Value="#FFE8EDF3" />
+    <Setter Property="Background" Value="{DynamicResource Spry.Strip}" />
   </Style>
   <Style Selector="TabStrip.paneltabs TabStripItem">
     <Setter Property="Padding" Value="8,4,8,2" />
@@ -140,21 +140,19 @@
     </Setter>
   </Style>
   <Style Selector="TabStrip.paneltabs TabStripItem:pointerover">
-    <Setter Property="Background" Value="#FFE3EEFB" />
+    <Setter Property="Background" Value="{DynamicResource Spry.HoverBg}" />
   </Style>
   <Style Selector="TabStrip.paneltabs TabStripItem:selected">
-    <Setter Property="Background" Value="#FFF5F7FA" />
+    <Setter Property="Background" Value="{DynamicResource Spry.Panel}" />
   </Style>
   <Style Selector="TabStrip.paneltabs TabStripItem:selected /template/ Border#PART_Root">
-    <Setter Property="BorderBrush">
-      <SolidColorBrush Color="{DynamicResource SystemAccentColor}" />
-    </Setter>
+    <Setter Property="BorderBrush" Value="{DynamicResource Spry.Accent}" />
   </Style>
 
   <!-- PropertyManager -->
   <Style Selector="Border.pmsection">
-    <Setter Property="Background" Value="#FFFFFFFF" />
-    <Setter Property="BorderBrush" Value="#FFC9D3E0" />
+    <Setter Property="Background" Value="{DynamicResource Spry.Surface}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Spry.BorderStrong}" />
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="3" />
     <Setter Property="Margin" Value="4,3" />
@@ -162,25 +160,25 @@
   </Style>
   <Style Selector="TextBlock.pmheader">
     <Setter Property="FontWeight" Value="SemiBold" />
-    <Setter Property="Foreground" Value="#FF1D3557" />
+    <Setter Property="Foreground" Value="{DynamicResource Spry.Heading}" />
     <Setter Property="Margin" Value="0,0,0,4" />
   </Style>
   <Style Selector="ListBox.selbox">
     <Setter Property="MinHeight" Value="44" />
     <Setter Property="MaxHeight" Value="140" />
     <Setter Property="BorderThickness" Value="1" />
-    <Setter Property="BorderBrush" Value="#FFB0BCCC" />
-    <Setter Property="Background" Value="#FFF7F9FC" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Spry.FieldBorder}" />
+    <Setter Property="Background" Value="{DynamicResource Spry.SurfaceAlt}" />
   </Style>
   <!-- the active box (what is clicked goes in): the theme's blue, as selections are everywhere else -->
   <Style Selector="ListBox.selbox.activebox">
-    <Setter Property="Background" Value="#FFEAF3FD" />
-    <Setter Property="BorderBrush" Value="#FF2F7BD6" />
+    <Setter Property="Background" Value="{DynamicResource Spry.HoverBg}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Spry.Accent}" />
   </Style>
   <!-- an entry selected in a box: the tree's selection blue -->
   <Style Selector="ListBox.selbox ListBoxItem:selected /template/ ContentPresenter">
-    <Setter Property="Background" Value="#FFCDE2FA" />
-    <Setter Property="Foreground" Value="#FF1D2B3F" />
+    <Setter Property="Background" Value="{DynamicResource Spry.SelectedBg}" />
+    <Setter Property="Foreground" Value="{DynamicResource Spry.SelectedText}" />
   </Style>
   <Style Selector="ListBox.selbox ListBoxItem">
     <Setter Property="Padding" Value="4,1" />
@@ -194,20 +192,20 @@
     <Setter Property="CornerRadius" Value="2" />
   </Style>
   <Style Selector="Border.treerow:pointerover">
-    <Setter Property="Background" Value="#FFE8F1FC" />
+    <Setter Property="Background" Value="{DynamicResource Spry.HoverBg}" />
   </Style>
   <!-- the feature that owns the face/edge selected in the graphics area (not a tree selection) -->
   <Style Selector="Border.treerow.related">
-    <Setter Property="Background" Value="#FFEAF2FD" />
+    <Setter Property="Background" Value="{DynamicResource Spry.HoverBg}" />
   </Style>
   <Style Selector="Border.treerow.selected">
-    <Setter Property="Background" Value="#FFCDE2FA" />
+    <Setter Property="Background" Value="{DynamicResource Spry.SelectedBg}" />
   </Style>
 
   <!-- heads-up toolbar -->
   <Style Selector="Border.hud">
-    <Setter Property="Background" Value="#E6FFFFFF" />
-    <Setter Property="BorderBrush" Value="#FFC4CEDB" />
+    <Setter Property="Background" Value="{DynamicResource Spry.Hud}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Spry.BorderStrong}" />
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="4" />
     <Setter Property="Padding" Value="2" />

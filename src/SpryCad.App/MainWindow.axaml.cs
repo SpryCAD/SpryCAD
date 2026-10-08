@@ -115,12 +115,12 @@ public partial class MainWindow : Window
             if (!Session.PreviewActive && bad.Count > 0)
             {
                 text = $"✖ {bad[0].Name}: {r.Status[bad[0].Id].Error}" + (bad.Count > 1 ? $"  (+{bad.Count - 1} more error{(bad.Count > 2 ? "s" : "")})" : "");
-                StatusRebuild.Foreground = Brushes.Firebrick;
+                StatusRebuild.Foreground = Palette.Danger;
             }
             else if (!Session.PreviewActive && warned > 0)
             {
                 text += $"  ⚠ {warned} warning{(warned == 1 ? "" : "s")}";
-                StatusRebuild.Foreground = Brushes.DarkGoldenrod;
+                StatusRebuild.Foreground = Palette.Warning;
             }
             else StatusRebuild.Foreground = StatusNormalBrush;
             StatusRebuild.Text = text;
@@ -152,7 +152,7 @@ public partial class MainWindow : Window
         Viewport.Redraw();
     }
 
-    static readonly IBrush StatusNormalBrush = new SolidColorBrush(Color.Parse("#FF6A778A"));
+    static IBrush StatusNormalBrush => Palette.TextMuted;
 
     void OnDocumentChanged()
     {

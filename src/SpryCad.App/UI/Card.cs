@@ -19,9 +19,9 @@ public enum CardKind { Error, Question, Info }
 /// </summary>
 public static class Card
 {
-    public static readonly IBrush ErrorBrush = new SolidColorBrush(Color.Parse("#FFC62828"));
-    public static readonly IBrush QuestionBrush = new SolidColorBrush(Color.Parse("#FF2F7BD6"));
-    public static readonly IBrush InfoBrush = new SolidColorBrush(Color.Parse("#FF5A6B85"));
+    public static IBrush ErrorBrush => Palette.Danger;
+    public static IBrush QuestionBrush => Palette.Accent;
+    public static IBrush InfoBrush => Palette.TextMuted;
 
     public static IBrush AccentOf(CardKind kind) => kind switch { CardKind.Error => ErrorBrush, CardKind.Question => QuestionBrush, _ => InfoBrush };
 
@@ -53,7 +53,7 @@ public static class Card
         }
         return new Border
         {
-            Background = Brushes.White, BorderBrush = accent, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(6),
+            Background = Palette.Surface, BorderBrush = accent, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(6),
             Padding = new Thickness(16, 12), MaxWidth = 520, MinWidth = 320, Margin = new Thickness(24),
             HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
             BoxShadow = BoxShadows.Parse("0 4 16 0 #30000000"),
@@ -65,7 +65,7 @@ public static class Card
     public static TextBlock Text(string text, bool dim = false)
     {
         var t = new TextBlock { Text = text, FontSize = dim ? 11 : 12, TextWrapping = TextWrapping.Wrap };
-        if (dim) t.Foreground = Brushes.Gray;
+        if (dim) t.Foreground = Palette.TextDisabled;
         return t;
     }
 
@@ -88,7 +88,7 @@ public static class Card
         var card = Make(kind, title, body, btns, out _);
         var backdrop = new Grid
         {
-            Background = new SolidColorBrush(Color.Parse("#26000000")),
+            Background = Palette.Scrim,
             Width = layer.Bounds.Width, Height = layer.Bounds.Height,
             Children = { card },
         };
