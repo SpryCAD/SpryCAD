@@ -334,8 +334,8 @@ public partial class MainWindow
         // one box, as the other features: a line of the profile's sketch, or an axis from the model (a cylindrical or
         // conical face, a straight or circular edge); the X / Y / Z buttons; empty: the sketch's first centerline
         var st = StateForEdit(f, isNew);
-        var axBox = page.Selection(axisSec, "Axis", SelFilter.SketchSegment | SelFilter.Edge | SelFilter.Face,
-            "A centerline or line of the profile's sketch, a cylindrical or conical face, a straight or circular edge, or an axis button", 1);
+        var axBox = page.Selection(axisSec, "Axis", SelFilter.SketchSegment | SelFilter.Edge | SelFilter.Face | SelFilter.Axis,
+            "A centerline or line of the profile's sketch, the axis of a cylindrical or conical face or a circular edge (right-click: Select Axis), a straight edge, or an axis button", 1);
         if (f.Axis != null) { if (DirItem(f.Axis, st) is { } ai) axBox.Items.Add(ai); }
         else if (f.AxisEntity != 0) axBox.Items.Add(new SelItem { Kind = SelKind.SketchSegment, FeatureId = f.SketchId, SketchItem = f.AxisEntity });
         var axisLbl = new TextBlock { FontSize = 11, Foreground = UI.Palette.TextMuted, TextWrapping = Avalonia.Media.TextWrapping.Wrap };
