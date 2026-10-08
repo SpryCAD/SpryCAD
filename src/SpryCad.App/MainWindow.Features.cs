@@ -400,7 +400,7 @@ public partial class MainWindow
             "A centerline in the profile's sketch, a cylindrical face, a straight or circular edge, or an axis button", 1);
         if (f.Axis != null) { if (DirItem(f.Axis, st) is { } ai) axBox.Items.Add(ai); }
         else if (f.AxisEntity != 0) axBox.Items.Add(new SelItem { Kind = SelKind.SketchSegment, FeatureId = f.SketchId, SketchItem = f.AxisEntity });
-        var axisLbl = new TextBlock { FontSize = 11, Foreground = UI.Palette.TextMuted, TextWrapping = Avalonia.Media.TextWrapping.Wrap };
+        var axisLbl = new TextBlock { FontSize = UI.TypeScale.Small, Foreground = UI.Palette.TextMuted, TextWrapping = Avalonia.Media.TextWrapping.Wrap };
         Action? axes = null;
         void UpdAxis()
         {
@@ -841,7 +841,7 @@ public partial class MainWindow
         var d1 = page.Section("Direction 1");
         var dirBox = page.Selection(d1, "Direction", SelFilter.Edge | SelFilter.Face | SelFilter.Plane, "Pattern direction: a linear edge, face, plane, or axis button", 1);
         if (DirItem(f.Direction, st) is { } di) dirBox.Items.Add(di);
-        var axisLbl = new TextBlock { FontSize = 11, Foreground = UI.Palette.TextMuted };
+        var axisLbl = new TextBlock { FontSize = UI.TypeScale.Small, Foreground = UI.Palette.TextMuted };
         Action? axes1 = null;
         void UpdAxis() { axisLbl.Text = f.Direction.Axis != null ? $"Using the {f.Direction.Axis} axis" : ""; axes1?.Invoke(); }
         dirBox.Changed += () => { if (dirBox.Items.FirstOrDefault()?.ToDirRef() is { } dr) { f.Direction = dr; UpdAxis(); } };
@@ -851,7 +851,7 @@ public partial class MainWindow
         page.Number(d1, "Spacing", () => f.Spacing, v => f.Spacing = v, "dimension");
         page.Number(d1, "Instances", () => f.Count, v => f.Count = v, "lpattern", "");
         var d2 = page.Section("Direction 2");
-        var axisLbl2 = new TextBlock { FontSize = 11, Foreground = UI.Palette.TextMuted };
+        var axisLbl2 = new TextBlock { FontSize = UI.TypeScale.Small, Foreground = UI.Palette.TextMuted };
         Action? axes2 = null;
         void UpdAxis2() { axisLbl2.Text = f.Direction2?.Axis != null ? $"Using the {f.Direction2.Axis} axis" : ""; axes2?.Invoke(); }
         var use2 = page.Check(d2, "Use direction 2", () => f.Direction2 != null, v => { f.Direction2 = v ? (f.Direction2 ?? new DirRef { Axis = "Y" }) : null; UpdAxis2(); });
@@ -878,7 +878,7 @@ public partial class MainWindow
         var p = page.Section("Parameters");
         var axBox = page.Selection(p, "Axis", SelFilter.Edge | SelFilter.Face | SelFilter.Plane, "Axis: a cylindrical face, circular or linear edge, or axis button", 1);
         if (DirItem(f.Axis, st) is { } ai) axBox.Items.Add(ai);
-        var axisLbl = new TextBlock { FontSize = 11, Foreground = UI.Palette.TextMuted };
+        var axisLbl = new TextBlock { FontSize = UI.TypeScale.Small, Foreground = UI.Palette.TextMuted };
         Action? axes = null;
         void UpdAxis() { axisLbl.Text = f.Axis.Axis != null ? $"Using the {f.Axis.Axis} axis" : ""; axes?.Invoke(); }
         axBox.Changed += () => { if (axBox.Items.FirstOrDefault()?.ToDirRef() is { } dr) { f.Axis = dr; UpdAxis(); } };

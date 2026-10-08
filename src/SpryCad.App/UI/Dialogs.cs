@@ -11,18 +11,55 @@ namespace SpryCad.App.UI;
 
 public static class Dialogs
 {
-    static Window MakeWindow(string title, Control content, double width = 420)
+    internal static Window MakeWindow(string title, Control content, double width = 420)
     {
-        return new Window
+        var w = new Window
         {
             Title = title,
             Width = width,
             SizeToContent = SizeToContent.Height,
             CanResize = false,
+            CanMinimize = false,
+            CanMaximize = false,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
             Content = new Border { Padding = new Thickness(14), Child = content },
             ShowInTaskbar = false,
         };
+        Compact(w);
+        return w;
+    }
+
+    /// <summary>
+    /// A dialog window as dense as the panels: its text and the theme's controls (buttons, boxes, lists) in the body
+    /// size; its OK / Cancel buttons as a card's (the keyboard's ring), the default one (Enter) accent-styled.
+    /// </summary>
+    internal static void Compact(Window w)
+    {
+        w.FontSize = TypeScale.Body;
+        w.Resources["ControlContentThemeFontSize"] = TypeScale.Body;
+        // found once the window is up, so buttons added any way (Buttons below or the dialog's own) get it
+        w.Opened += (_, _) =>
+        {
+            foreach (var b in Avalonia.VisualTree.VisualExtensions.GetVisualDescendants(w).OfType<Button>())
+            {
+                if (!b.IsDefault && !b.IsCancel) continue;
+                if (!b.Classes.Contains("card")) b.Classes.Add("card");
+                if (b.IsDefault && !b.Classes.Contains("accent")) b.Classes.Add("accent");
+            }
+        };
+    }
+
+    /// <summary>A small delete (✕) button for a list row or column: the Cancel icon, in a target big enough to hit.</summary>
+    internal static Button DeleteButton(string tip)
+    {
+        var b = new Button
+        {
+            Content = Icons.Make("cancel", 12), Padding = new Thickness(3), MinWidth = 22, MinHeight = 22,
+            HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center, Classes = { "tb" },
+        };
+        ToolTip.SetTip(b, tip);
+        return b;
     }
 
     static StackPanel Buttons(params Button[] b)
@@ -114,7 +151,7 @@ public static class Dialogs
         var list = new StackPanel { Spacing = 3 };
         var info = new TextBlock
         {
-            FontSize = 11, Foreground = Palette.TextMuted, TextWrapping = TextWrapping.Wrap,
+            FontSize = TypeScale.Small, Foreground = Palette.TextMuted, TextWrapping = TextWrapping.Wrap,
             Text = "Global variables usable in any dimension or feature value, e.g. W = 100, H = W/2. Trig functions use degrees; units like 1in are converted to mm. "
                 + "Conditions (Teeth < 30 and not Slots) give 1 or 0, for Suppress When. "
                 + "User-facing variables are what Configure shows (an assembly sets them per instance); the others are internal.",
@@ -123,7 +160,7 @@ public static class Dialogs
         var fromTables = (tables ?? new()).SelectMany(t => new[] { t.Name }.Concat(t.Columns)).Where(n => !string.IsNullOrWhiteSpace(n)).Select(n => n.Trim()).ToList();
         var tableInfo = new TextBlock
         {
-            FontSize = 11, Foreground = Palette.TextMuted, TextWrapping = TextWrapping.Wrap, IsVisible = fromTables.Count > 0,
+            FontSize = TypeScale.Small, Foreground = Palette.TextMuted, TextWrapping = TextWrapping.Wrap, IsVisible = fromTables.Count > 0,
             Text = "Set by design tables (Tools > Design Table): " + string.Join(", ", fromTables) + ".",
         };
         const string cols = "120,*,90,44,150,56,56,30";
@@ -178,7 +215,7 @@ public static class Dialogs
                 var desc = new TextBox { Text = r.Description ?? "", Margin = m, IsEnabled = r.Exposed };
                 var lo = new TextBox { Text = r.Min is { } a ? Expr.Format(a) : "", Margin = m, IsEnabled = r.Exposed };
                 var hi = new TextBox { Text = r.Max is { } b ? Expr.Format(b) : "", Margin = m, IsEnabled = r.Exposed };
-                var del = new Button { Content = "✖", Padding = new Thickness(4, 0) };
+                var del = DeleteButton("Delete this variable");
                 ToolTip.SetTip(user, "User-facing: shown in Configure");
                 var rr = r;
                 valueCells.Add((rr, v));
@@ -226,7 +263,7 @@ public static class Dialogs
         var session = owner.Session;
         var lookup = session.Lookup;
         var tb = new TextBox { Text = f.SuppressWhen ?? "", Watermark = "e.g. Teeth < 30 or Size == 2" };
-        var now = new TextBlock { FontSize = 11, TextWrapping = TextWrapping.Wrap };
+        var now = new TextBlock { FontSize = TypeScale.Small, TextWrapping = TextWrapping.Wrap };
         void Update()
         {
             var text = tb.Text?.Trim() ?? "";
@@ -246,7 +283,7 @@ public static class Dialogs
         sp.Children.Add(now);
         sp.Children.Add(new TextBlock
         {
-            FontSize = 11, Foreground = Palette.TextMuted, TextWrapping = TextWrapping.Wrap,
+            FontSize = TypeScale.Small, Foreground = Palette.TextMuted, TextWrapping = TextWrapping.Wrap,
             Text = "Compare with < <= > >= == != and combine with and, or, not. "
                 + (names.Count > 0 ? "Variables: " + string.Join(", ", names) + "." : "Define variables in Equations first."),
         });
@@ -279,7 +316,7 @@ public static class Dialogs
         var addTable = new Button { Content = "+ Table" };
         var delTable = new Button { Content = "Delete Table" };
         var body = new StackPanel { Spacing = 6 };
-        var error = new TextBlock { Foreground = Palette.Danger, FontSize = 11, TextWrapping = TextWrapping.Wrap };
+        var error = new TextBlock { Foreground = Palette.Danger, FontSize = TypeScale.Small, TextWrapping = TextWrapping.Wrap };
         bool picking = false;
 
         static DesignTable NewTable(int n) => new()
@@ -343,8 +380,7 @@ public static class Dialogs
                 var cn = new TextBox { Text = t.Columns[c], FontWeight = FontWeight.SemiBold };
                 ToolTip.SetTip(cn, "The variable this column sets");
                 cn.TextChanged += (_, _) => t.Columns[cc] = cn.Text?.Trim() ?? "";
-                var dc = new Button { Content = "✖", Padding = new Thickness(3, 0), FontSize = 9, VerticalAlignment = VerticalAlignment.Center };
-                ToolTip.SetTip(dc, "Delete this column");
+                var dc = DeleteButton("Delete this column");
                 dc.Click += (_, _) => { t.Columns.RemoveAt(cc); foreach (var r in t.Rows) if (cc < r.Values.Count) r.Values.RemoveAt(cc); Refresh(); };
                 Grid.SetColumn(dc, 1);
                 cell.Children.Add(cn); cell.Children.Add(dc);
@@ -373,7 +409,7 @@ public static class Dialogs
                 }
                 var use = new RadioButton { GroupName = group, IsChecked = ReferenceEquals(rr, selected), HorizontalAlignment = HorizontalAlignment.Center };
                 use.IsCheckedChanged += (_, _) => { if (use.IsChecked == true) t.Selected = rr.Key; };
-                var del = new Button { Content = "✖", Padding = new Thickness(4, 0) };
+                var del = DeleteButton("Delete this row");
                 del.Click += (_, _) => { t.Rows.Remove(rr); Refresh(); };
                 Grid.SetColumn(use, t.Columns.Count + 1); Grid.SetColumn(del, t.Columns.Count + 2);
                 g.Children.Add(use); g.Children.Add(del);
@@ -450,7 +486,7 @@ public static class Dialogs
         var sp = new StackPanel { Spacing = 8 };
         sp.Children.Add(new TextBlock
         {
-            FontSize = 11, Foreground = Palette.TextMuted, TextWrapping = TextWrapping.Wrap,
+            FontSize = TypeScale.Small, Foreground = Palette.TextMuted, TextWrapping = TextWrapping.Wrap,
             Text = "Rows of values for a set of variables; the row in use sets them all. Values may be expressions of the part's other variables. "
                 + "The table's name holds the number of the row in use (1 = the first), for conditions such as Size >= 3.",
         });
@@ -488,7 +524,7 @@ public static class Dialogs
         if (current != null) foreach (var (k, v) in current) if (values.ContainsKey(k)) values[k] = v;
         var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,12,*"), RowDefinitions = new RowDefinitions(string.Join(",", ps.Select(_ => "Auto,Auto"))) };
         var errors = new Dictionary<string, TextBlock>();
-        var summary = new TextBlock { FontSize = 11, Foreground = Palette.TextMuted, TextWrapping = TextWrapping.Wrap };
+        var summary = new TextBlock { FontSize = TypeScale.Small, Foreground = Palette.TextMuted, TextWrapping = TextWrapping.Wrap };
         void Summary()
         {
             // what the choices give: the internal values too, so a size can be checked before OK
@@ -520,7 +556,7 @@ public static class Dialogs
             {
                 var tb = new TextBox { Text = values[p.Name] };
                 if (p.Min != null || p.Max != null) tb.Watermark = $"{(p.Min is { } lo ? Expr.Format(lo) : "")} to {(p.Max is { } hi ? Expr.Format(hi) : "")}";
-                var err = new TextBlock { FontSize = 11, Foreground = Palette.Danger, TextWrapping = TextWrapping.Wrap };
+                var err = new TextBlock { FontSize = TypeScale.Small, Foreground = Palette.Danger, TextWrapping = TextWrapping.Wrap };
                 errors[p.Name] = err;
                 tb.TextChanged += (_, _) =>
                 {
@@ -543,7 +579,7 @@ public static class Dialogs
         var ok = new Button { Content = "OK", IsDefault = true };
         var cancel = new Button { Content = "Cancel", IsCancel = true };
         var sp = new StackPanel { Spacing = 8 };
-        if (note != null) sp.Children.Add(new TextBlock { Text = note, FontSize = 11, Foreground = Palette.TextMuted, TextWrapping = TextWrapping.Wrap });
+        if (note != null) sp.Children.Add(new TextBlock { Text = note, FontSize = TypeScale.Small, Foreground = Palette.TextMuted, TextWrapping = TextWrapping.Wrap });
         sp.Children.Add(grid);
         sp.Children.Add(summary);
         sp.Children.Add(all);
@@ -601,7 +637,7 @@ public static class Dialogs
         var sp = new StackPanel { Spacing = 8 };
         sp.Children.Add(new TextBlock { Text = "Document units", FontWeight = FontWeight.SemiBold });
         sp.Children.Add(units);
-        sp.Children.Add(new TextBlock { Text = "In IPS, values are inches; STEP/STL exports are converted to millimetres.", FontSize = 11, Foreground = Palette.TextMuted, TextWrapping = TextWrapping.Wrap });
+        sp.Children.Add(new TextBlock { Text = "In IPS, values are inches; STEP/STL exports are converted to millimetres.", FontSize = TypeScale.Small, Foreground = Palette.TextMuted, TextWrapping = TextWrapping.Wrap });
         sp.Children.Add(new TextBlock { Text = "Part color (R, G, B 0-255)", FontWeight = FontWeight.SemiBold });
         sp.Children.Add(color);
         sp.Children.Add(new TextBlock { Text = "Sheet metal bend allowance", FontWeight = FontWeight.SemiBold });
@@ -611,14 +647,14 @@ public static class Dialogs
         Grid.SetColumn(kLabel, 2); bendRow.Children.Add(kLabel);
         Grid.SetColumn(kFactor, 4); bendRow.Children.Add(kFactor);
         sp.Children.Add(bendRow);
-        sp.Children.Add(new TextBlock { Text = "For this part's flat patterns (a Flat Pattern can override it). K-factor 0 to 1, or an expression.", FontSize = 11, Foreground = Palette.TextMuted, TextWrapping = TextWrapping.Wrap });
+        sp.Children.Add(new TextBlock { Text = "For this part's flat patterns (a Flat Pattern can override it). K-factor 0 to 1, or an expression.", FontSize = TypeScale.Small, Foreground = Palette.TextMuted, TextWrapping = TextWrapping.Wrap });
         sp.Children.Add(new TextBlock { Text = "View", FontWeight = FontWeight.SemiBold });
         sp.Children.Add(wheel); sp.Children.Add(persp);
         sp.Children.Add(pivot);
-        sp.Children.Add(new TextBlock { Text = "Middle-click a vertex, edge or face to rotate about that spot instead, until you middle-click empty space.", FontSize = 11, Foreground = Palette.TextMuted, TextWrapping = TextWrapping.Wrap });
+        sp.Children.Add(new TextBlock { Text = "Middle-click a vertex, edge or face to rotate about that spot instead, until you middle-click empty space.", FontSize = TypeScale.Small, Foreground = Palette.TextMuted, TextWrapping = TextWrapping.Wrap });
         sp.Children.Add(new TextBlock { Text = "Files", FontWeight = FontWeight.SemiBold });
         sp.Children.Add(container);
-        sp.Children.Add(new TextBlock { Text = "Otherwise parts are saved as plain JSON, unless they embed other files (e.g. an imported model). Either kind opens normally.", FontSize = 11, Foreground = Palette.TextMuted, TextWrapping = TextWrapping.Wrap });
+        sp.Children.Add(new TextBlock { Text = "Otherwise parts are saved as plain JSON, unless they embed other files (e.g. an imported model). Either kind opens normally.", FontSize = TypeScale.Small, Foreground = Palette.TextMuted, TextWrapping = TextWrapping.Wrap });
         sp.Children.Add(Buttons(ok, cancel));
         var w = MakeWindow("Options", sp, 420);
         ok.Click += (_, _) =>
@@ -686,7 +722,7 @@ public static class Dialogs
             """;
         var ok = new Button { Content = "Close", IsDefault = true, IsCancel = true };
         var sp = new StackPanel();
-        sp.Children.Add(new TextBlock { Text = text, FontFamily = new FontFamily("Consolas, Menlo, monospace"), FontSize = 12 });
+        sp.Children.Add(new TextBlock { Text = text, FontFamily = new FontFamily("Consolas, Menlo, monospace"), FontSize = TypeScale.Body });
         sp.Children.Add(Buttons(ok));
         var w = MakeWindow("Keyboard & Mouse", sp, 520);
         ok.Click += (_, _) => w.Close();

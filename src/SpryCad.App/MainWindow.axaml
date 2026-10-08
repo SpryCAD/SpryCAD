@@ -13,7 +13,7 @@
     <!-- Menu bar + quick access -->
     <Border DockPanel.Dock="Top" Background="{DynamicResource Spry.Surface}" BorderBrush="{DynamicResource Spry.Border}" BorderThickness="0,0,0,1">
       <DockPanel>
-        <TextBlock DockPanel.Dock="Left" Text="SpryCAD" FontWeight="Bold" Foreground="{DynamicResource Spry.Brand}" VerticalAlignment="Center" Margin="10,0,8,0" FontSize="13" />
+        <TextBlock DockPanel.Dock="Left" Text="SpryCAD" FontWeight="Bold" Foreground="{DynamicResource Spry.Brand}" VerticalAlignment="Center" Margin="10,0,8,0" FontSize="{x:Static ui:TypeScale.Header}" />
         <StackPanel x:Name="QuickAccess" DockPanel.Dock="Right" Orientation="Horizontal" Margin="0,0,6,0" />
         <Menu x:Name="MainMenu" />
       </DockPanel>
@@ -43,7 +43,7 @@
     <!-- Document tabs: one per open part, as many as fit; the button at the right lists them all (MainWindow.Tabs.cs) -->
     <Border DockPanel.Dock="Top" Background="{DynamicResource Spry.Strip}" BorderBrush="{DynamicResource Spry.Border}" BorderThickness="0,0,0,1">
       <DockPanel>
-        <Button x:Name="PartsButton" DockPanel.Dock="Right" Margin="2,3,4,3" Padding="8,1" MinHeight="0" FontSize="12"
+        <Button x:Name="PartsButton" DockPanel.Dock="Right" Margin="2,3,4,3" Padding="8,1" MinHeight="0" FontSize="{x:Static ui:TypeScale.Body}"
                 Background="Transparent" BorderThickness="1" BorderBrush="{DynamicResource Spry.BorderStrong}" VerticalAlignment="Center" />
         <ui:TabStripPanel x:Name="DocTabs" Margin="4,3,4,0" Spacing="2" ClipToBounds="True" />
       </DockPanel>

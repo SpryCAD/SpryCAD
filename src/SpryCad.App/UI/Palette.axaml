@@ -46,6 +46,10 @@
       <SolidColorBrush x:Key="Spry.NoteBg" Color="#FFFFF8DC" />         <!-- the PropertyManager's message box -->
       <SolidColorBrush x:Key="Spry.NoteBorder" Color="#FFE6C878" />
       <SolidColorBrush x:Key="Spry.NoteText" Color="#FF784600" />
+
+      <!-- the theme's keyboard focus outline: the accent, as the app's own focus rings, not black -->
+      <SolidColorBrush x:Key="SystemControlFocusVisualPrimaryBrush" Color="#FF2F7BD6" />
+      <SolidColorBrush x:Key="SystemControlFocusVisualSecondaryBrush" Color="#FFFFFFFF" />
     </ResourceDictionary>
   </ResourceDictionary.ThemeDictionaries>
 </ResourceDictionary>

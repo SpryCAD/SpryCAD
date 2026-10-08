@@ -31,7 +31,7 @@ public static class Card
         var accent = AccentOf(kind);
         titleBlock = new TextBlock
         {
-            Text = title, FontSize = 14, FontWeight = FontWeight.SemiBold,
+            Text = title, FontSize = TypeScale.Title, FontWeight = FontWeight.SemiBold,
             VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(8, 0, 0, 0),
         };
         if (kind == CardKind.Error) titleBlock.Foreground = accent; // a problem's title in red

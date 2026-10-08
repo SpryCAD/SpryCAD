@@ -513,14 +513,14 @@ public partial class MainWindow
         var f = new Flyout { Content = grid, Placement = PlacementMode.Bottom };
         foreach (var v in new[] { "Front", "Back", "Left", "Right", "Top", "Bottom", "Isometric", "Trimetric", "Dimetric" })
         {
-            var b = new Button { Content = v, Width = 78, Margin = new Thickness(2), FontSize = 11 };
+            var b = new Button { Content = v, Width = 78, Margin = new Thickness(2), FontSize = UI.TypeScale.Small };
             b.Click += (_, _) => { Viewport.StandardView(v); f.Hide(); };
             grid.Children.Add(b);
         }
-        var nb = new Button { Content = "Normal To", Width = 78, Margin = new Thickness(2), FontSize = 11 };
+        var nb = new Button { Content = "Normal To", Width = 78, Margin = new Thickness(2), FontSize = UI.TypeScale.Small };
         nb.Click += (_, _) => { NormalTo(); f.Hide(); };
         grid.Children.Add(nb);
-        var sel = new Button { Content = "View Selector (Spacebar)", Margin = new Thickness(2), FontSize = 11, HorizontalAlignment = HorizontalAlignment.Stretch };
+        var sel = new Button { Content = "View Selector (Spacebar)", Margin = new Thickness(2), FontSize = UI.TypeScale.Small, HorizontalAlignment = HorizontalAlignment.Stretch };
         sel.Click += (_, _) => { f.Hide(); _viewSelector.Open(); };
         grid.Children.Add(sel);
         return f;

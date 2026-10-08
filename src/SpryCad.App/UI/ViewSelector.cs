@@ -31,7 +31,7 @@ public sealed class ViewSelector : Grid
         var strip = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, Margin = new Thickness(4) };
         void B(string text, Action a)
         {
-            var b = new Button { Content = text, FontSize = 11, Padding = new Thickness(8, 3) };
+            var b = new Button { Content = text, FontSize = TypeScale.Small, Padding = new Thickness(8, 3) };
             b.Click += (_, _) => { a(); Close(); };
             strip.Children.Add(b);
         }

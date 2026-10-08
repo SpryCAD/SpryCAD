@@ -279,7 +279,7 @@ public partial class MainWindow
         else
         {
             var sel = page.Section("Selected Entities");
-            foreach (var r in ed.Selected.Take(12)) sel.Children.Add(new TextBlock { Text = Describe(ed, r), FontSize = 12 });
+            foreach (var r in ed.Selected.Take(12)) sel.Children.Add(new TextBlock { Text = Describe(ed, r), FontSize = UI.TypeScale.Body });
             if (ed.Selected.Count > 12) sel.Children.Add(new TextBlock { Text = $"… {ed.Selected.Count - 12} more" });
 
             var rels = ed.ApplicableRelations();
@@ -314,8 +314,7 @@ public partial class MainWindow
                 if (linked.Count > 0)
                 {
                     var row = new DockPanel();
-                    var del = new Button { Content = "✖", Padding = new Thickness(4, 0), Classes = { "tb" } };
-                    ToolTip.SetTip(del, "Delete On Edge: the geometry stays where it is, no longer following the model");
+                    var del = Dialogs.DeleteButton("Delete On Edge: the geometry stays where it is, no longer following the model");
                     del.Click += (_, _) => { ed.UnlinkSelection(); BuildSketchPage(); };
                     DockPanel.SetDock(del, Dock.Right);
                     row.Children.Add(del);
@@ -333,8 +332,7 @@ public partial class MainWindow
                 foreach (var c in existing)
                 {
                     var row = new DockPanel();
-                    var del = new Button { Content = "✖", Padding = new Thickness(4, 0), Classes = { "tb" } };
-                    ToolTip.SetTip(del, "Delete relation");
+                    var del = Dialogs.DeleteButton("Delete relation");
                     var cid = c.Id;
                     del.Click += (_, _) => { ed.Selected.Clear(); ed.Selected.Add(new SkRef(SkRefKind.Constraint, cid)); ed.DeleteSelection(); BuildSketchPage(); };
                     DockPanel.SetDock(del, Dock.Right);
@@ -345,7 +343,7 @@ public partial class MainWindow
                 foreach (var p in fixedPts)
                 {
                     var row = new DockPanel();
-                    var del = new Button { Content = "✖", Padding = new Thickness(4, 0), Classes = { "tb" } };
+                    var del = Dialogs.DeleteButton("Unfix this point");
                     var pid = p;
                     del.Click += (_, _) => { if (ed.Sk.Point(pid) is { } pp) { pp.Fixed = false; ed.Resolve(); Viewport.Redraw(); BuildSketchPage(); } };
                     DockPanel.SetDock(del, Dock.Right);
@@ -450,7 +448,7 @@ public partial class MainWindow
             "Click model edges (lines, arcs, curves) and faces (all their edges). Click one again to remove it.");
         page.Check(s, "Select chain", () => _convertChain, v => { _convertChain = v; UpdateConvertCount(); });
         page.Info(s, "Select chain: each edge picked brings the edges tangent to it, end to end (a filleted outline in one click).");
-        _convertCount = new TextBlock { FontSize = 11, Foreground = Palette.TextMuted, Margin = new Thickness(0, 4, 0, 0) };
+        _convertCount = new TextBlock { FontSize = UI.TypeScale.Small, Foreground = Palette.TextMuted, Margin = new Thickness(0, 4, 0, 0) };
         s.Children.Add(_convertCount);
         // model edges and faces selected already are what is converted
         foreach (var it in Selection.Items.Where(i => i.Kind is SelKind.Edge or SelKind.Face).ToList()) box.Add(it);

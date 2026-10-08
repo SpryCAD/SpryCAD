@@ -89,10 +89,11 @@ public partial class MainWindow
         s.BusyChanged += busy => { if (s == Session) { BusyText.IsVisible = busy; BusyText.Text = "Rebuilding…"; } };
         s.Progress += p => { if (s == Session && s.Busy) BusyText.Text = p.Text; };
 
-        t.Label = new TextBlock { VerticalAlignment = VerticalAlignment.Center, FontSize = 12, Margin = new Thickness(0, 0, 6, 0) };
+        t.Label = new TextBlock { VerticalAlignment = VerticalAlignment.Center, FontSize = UI.TypeScale.Body, Margin = new Thickness(0, 0, 6, 0) };
         var close = new Button
         {
-            Content = "✕", FontSize = 10, Padding = new Thickness(4, 0), MinHeight = 0, MinWidth = 0,
+            Content = UI.Icons.Make("cancel", 10), Padding = new Thickness(3), MinHeight = 18, MinWidth = 18,
+            HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center,
             Background = Brushes.Transparent, BorderThickness = new Thickness(0), VerticalAlignment = VerticalAlignment.Center,
         };
         ToolTip.SetTip(close, "Close (Ctrl+W)");
@@ -432,12 +433,13 @@ public partial class MainWindow
                 if (!_partRows.TryGetValue(t, out var row))
                 {
                     var img = new Image { Width = 64, Height = 64, Stretch = Stretch.Uniform, Source = t.Thumb };
-                    var title = new TextBlock { FontSize = 13, TextTrimming = TextTrimming.CharacterEllipsis };
-                    var path = new TextBlock { FontSize = 11, Foreground = Palette.TextMuted, TextTrimming = TextTrimming.PathSegmentEllipsis };
+                    var title = new TextBlock { FontSize = UI.TypeScale.Header, TextTrimming = TextTrimming.CharacterEllipsis };
+                    var path = new TextBlock { FontSize = UI.TypeScale.Small, Foreground = Palette.TextMuted, TextTrimming = TextTrimming.PathSegmentEllipsis };
                     var text = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Spacing = 2, Margin = new Thickness(10, 0, 0, 0), Children = { title, path } };
                     var close = new Button
                     {
-                        Content = "✕", FontSize = 12, Padding = new Thickness(6, 2), MinHeight = 0, MinWidth = 0, Margin = new Thickness(6, 0, 0, 0),
+                        Content = UI.Icons.Make("cancel", 12), Padding = new Thickness(5), MinHeight = 24, MinWidth = 24, Margin = new Thickness(6, 0, 0, 0),
+                        HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center,
                         Background = Brushes.Transparent, BorderThickness = new Thickness(0), VerticalAlignment = VerticalAlignment.Center,
                         Opacity = 0, Focusable = false,
                     };

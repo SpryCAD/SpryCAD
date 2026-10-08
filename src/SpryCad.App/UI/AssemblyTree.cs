@@ -121,7 +121,7 @@ public sealed class AssemblyTree : DockPanel
         Highlight(s.SelectedMate is { } sm && _rowById.ContainsKey("mate:" + sm) ? "mate:" + sm : s.Selected);
         _notes.Children.Clear();
         foreach (var n in s.Model.Notes.TakeLast(12))
-            _notes.Children.Add(new TextBlock { Text = n, TextWrapping = TextWrapping.Wrap, FontSize = 11, Foreground = Dim });
+            _notes.Children.Add(new TextBlock { Text = n, TextWrapping = TextWrapping.Wrap, FontSize = TypeScale.Small, Foreground = Dim });
     }
 
     void ToggleMates()
@@ -149,12 +149,12 @@ public sealed class AssemblyTree : DockPanel
         }
         else sp.Children.Add(new Control { Width = 18 });
         sp.Children.Add(Icons.Make(icon, 16));
-        var tb = new TextBlock { Text = text, VerticalAlignment = VerticalAlignment.Center, FontSize = 12.5 };
+        var tb = new TextBlock { Text = text, VerticalAlignment = VerticalAlignment.Center, FontSize = TypeScale.Body };
         if (header) tb.FontWeight = FontWeight.SemiBold;
         if (bad) tb.Foreground = Red;
         else if (dim) tb.Foreground = Palette.TextDisabled;
         sp.Children.Add(tb);
-        if (note != null) sp.Children.Add(new TextBlock { Text = note, Foreground = Dim, FontSize = 11, VerticalAlignment = VerticalAlignment.Center });
+        if (note != null) sp.Children.Add(new TextBlock { Text = note, Foreground = Dim, FontSize = TypeScale.Small, VerticalAlignment = VerticalAlignment.Center });
         var row = new Border { Classes = { "treerow" }, Child = sp, Tag = key, ContextMenu = menu };
         if (tip != null) ToolTip.SetTip(row, tip);
         row.PointerPressed += (_, e) =>

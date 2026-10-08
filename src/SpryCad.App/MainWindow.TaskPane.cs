@@ -65,7 +65,7 @@ public partial class MainWindow
             UserSettings.Save();
             PlaceTaskPane(UserSettings.TaskPinned ? TaskMode.Pinned : TaskMode.Overlay);
         };
-        _taskTitle = new TextBlock { FontWeight = FontWeight.SemiBold, FontSize = 12, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(6, 0), TextTrimming = TextTrimming.CharacterEllipsis };
+        _taskTitle = new TextBlock { FontWeight = FontWeight.SemiBold, FontSize = UI.TypeScale.Body, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(6, 0), TextTrimming = TextTrimming.CharacterEllipsis };
         var header = new DockPanel { Margin = new Thickness(2) };
         DockPanel.SetDock(collapse, Avalonia.Controls.Dock.Left);
         DockPanel.SetDock(_taskPin, Avalonia.Controls.Dock.Right);

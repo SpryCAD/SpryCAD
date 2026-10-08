@@ -125,10 +125,11 @@ public partial class MainWindow
         var w = new Window
         {
             Title = "Mass Properties - " + Session.Title.TrimEnd(' ', '*'),
-            Width = 640, SizeToContent = SizeToContent.Height, CanResize = false,
+            Width = 640, SizeToContent = SizeToContent.Height, CanResize = false, CanMinimize = false, CanMaximize = false,
             WindowStartupLocation = WindowStartupLocation.CenterOwner, ShowInTaskbar = false,
             Content = new Border { Padding = new Thickness(12), Child = content },
         };
+        Dialogs.Compact(w);
         close.Click += (_, _) => w.Close();
         w.Closed += (_, _) => EndMassProperties();
         // back to the window after working on the part (or another part's tab): up to date
@@ -175,10 +176,11 @@ public partial class MainWindow
         sp.Children.Add(row); sp.Children.Add(sci); sp.Children.Add(buttons);
         var w = new Window
         {
-            Title = "Mass Properties Options", Width = 300, SizeToContent = SizeToContent.Height, CanResize = false,
+            Title = "Mass Properties Options", Width = 300, SizeToContent = SizeToContent.Height, CanResize = false, CanMinimize = false, CanMaximize = false,
             WindowStartupLocation = WindowStartupLocation.CenterOwner, ShowInTaskbar = false,
             Content = new Border { Padding = new Thickness(14), Child = sp },
         };
+        Dialogs.Compact(w);
         var changed = false;
         ok.Click += (_, _) =>
         {

@@ -206,7 +206,7 @@ public partial class MainWindow
                 Children = { Icons.Make(icon, 16), new TextBlock { Text = text, VerticalAlignment = VerticalAlignment.Center } },
             },
             // the page's text size (a tab's own is much larger)
-            FontSize = 12, HorizontalContentAlignment = HorizontalAlignment.Center,
+            FontSize = UI.TypeScale.Body, HorizontalContentAlignment = HorizontalAlignment.Center,
         };
         var tabs = new TabStrip
         {
@@ -342,7 +342,7 @@ public partial class MainWindow
             Children = { new TextBlock { Text = "Mate alignment:", VerticalAlignment = VerticalAlignment.Center, MinWidth = 96, Margin = new Thickness(0, 0, 6, 0) }, alignSame, alignOpp },
         };
         foreach (var c in new Control[] { offsetRow, angleRow, limits, minRow, maxRow, ratioA, ratioB, lead, reverse, align }) opts.Children.Add(c);
-        var result = new TextBlock { TextWrapping = Avalonia.Media.TextWrapping.Wrap, Margin = new Thickness(0, 6, 0, 0), FontSize = 11 };
+        var result = new TextBlock { TextWrapping = Avalonia.Media.TextWrapping.Wrap, Margin = new Thickness(0, 6, 0, 0), FontSize = UI.TypeScale.Small };
         opts.Children.Add(result);
 
         // a pick as SolidWorks lists it (Face<…>@Component), what it is in its tooltip

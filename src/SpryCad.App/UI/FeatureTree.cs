@@ -171,10 +171,11 @@ public sealed class FeatureTree : UserControl
 
     void AddRollbackBar()
     {
+        // a thin line, in a taller clear strip that takes the mouse: as easy to grab as a thick bar, lighter to look at
         var bar = new Border
         {
-            Height = 6, Margin = new Thickness(14, 3, 8, 3), CornerRadius = new CornerRadius(2),
-            Background = Palette.Accent,
+            Height = 10, Margin = new Thickness(14, 1, 8, 1), Background = Brushes.Transparent,
+            Child = new Border { Height = 3, CornerRadius = new CornerRadius(1.5), Background = Palette.Accent, VerticalAlignment = VerticalAlignment.Center },
             Cursor = new Cursor(StandardCursorType.SizeNorthSouth), Tag = "__rollback",
         };
         ToolTip.SetTip(bar, "Rollback bar: drag up or down to roll the model back.");
@@ -320,7 +321,7 @@ public sealed class FeatureTree : UserControl
         }
         else sp.Children.Add(new Control { Width = 18 });
         sp.Children.Add(Icons.Make(icon, 16));
-        var tb = new TextBlock { Text = text, VerticalAlignment = VerticalAlignment.Center, FontSize = 12.5 };
+        var tb = new TextBlock { Text = text, VerticalAlignment = VerticalAlignment.Center, FontSize = TypeScale.Body };
         if (isHeader) tb.FontWeight = FontWeight.SemiBold;
         if (suppressed) tb.Foreground = Palette.TextDisabled;
         if (status is { Ok: false }) { tb.Foreground = Palette.Danger; ToolTip.SetTip(tb, status.Error); }
@@ -329,13 +330,13 @@ public sealed class FeatureTree : UserControl
         // a feature with a Suppress When condition, or suppressed with another: the reason as a tip on a small marker
         if (condition != null)
         {
-            var mark = new TextBlock { Text = "ƒ", FontStyle = FontStyle.Italic, FontSize = 12, Foreground = Palette.Accent, VerticalAlignment = VerticalAlignment.Center };
+            var mark = new TextBlock { Text = "ƒ", FontStyle = FontStyle.Italic, FontSize = TypeScale.Body, Foreground = Palette.Accent, VerticalAlignment = VerticalAlignment.Center };
             ToolTip.SetTip(mark, condition);
             sp.Children.Add(mark);
         }
         if (status is { Ok: false }) sp.Children.Add(new TextBlock { Text = "✖", Foreground = Palette.Danger, VerticalAlignment = VerticalAlignment.Center });
         else if (status is { Warnings.Count: > 0 }) sp.Children.Add(new TextBlock { Text = "⚠", Foreground = Palette.Warning, VerticalAlignment = VerticalAlignment.Center });
-        if (status != null && status.Milliseconds > 200) sp.Children.Add(new TextBlock { Text = $"{status.Milliseconds:0} ms", Foreground = Palette.TextMuted, FontSize = 10, VerticalAlignment = VerticalAlignment.Center });
+        if (status != null && status.Milliseconds > 200) sp.Children.Add(new TextBlock { Text = $"{status.Milliseconds:0} ms", Foreground = Palette.TextMuted, FontSize = TypeScale.Small, VerticalAlignment = VerticalAlignment.Center });
         if (sketchShown is { } shownNow) sp.Children.Add(EyeButton(id, shownNow));
 
         var row = new Border { Classes = { "treerow" }, Child = sp, Tag = id };

@@ -25,7 +25,7 @@ public sealed class GestureWheel : Canvas
     Point _origin;
     int _active = -1;
     bool _done;
-    readonly TextBlock _name = new() { FontSize = 11, Foreground = new SolidColorBrush(Color.FromRgb(60, 66, 76)), TextAlignment = TextAlignment.Center, Width = 2 * Inner - 8, TextWrapping = TextWrapping.Wrap };
+    readonly TextBlock _name = new() { FontSize = TypeScale.Small, Foreground = new SolidColorBrush(Color.FromRgb(60, 66, 76)), TextAlignment = TextAlignment.Center, Width = 2 * Inner - 8, TextWrapping = TextWrapping.Wrap };
 
     public GestureWheel()
     {

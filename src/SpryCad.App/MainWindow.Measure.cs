@@ -262,7 +262,7 @@ public partial class MainWindow
         {
             if (label.Length == 0)
             {
-                _measureResults.Children.Add(new TextBlock { Text = value, FontSize = 11, Foreground = Palette.TextMuted, TextWrapping = TextWrapping.Wrap });
+                _measureResults.Children.Add(new TextBlock { Text = value, FontSize = UI.TypeScale.Small, Foreground = Palette.TextMuted, TextWrapping = TextWrapping.Wrap });
                 continue;
             }
             var row = new DockPanel();
@@ -286,7 +286,7 @@ public partial class MainWindow
                     Background = new SolidColorBrush(Color.FromArgb(235, 255, 255, 255)),
                     BorderBrush = new SolidColorBrush(Color.FromRgb(204, 26, 140)), BorderThickness = new Avalonia.Thickness(1),
                     CornerRadius = new Avalonia.CornerRadius(3), Padding = new Avalonia.Thickness(4, 1),
-                    Child = new TextBlock { FontSize = 12, FontWeight = FontWeight.SemiBold },
+                    Child = new TextBlock { FontSize = UI.TypeScale.Body, FontWeight = FontWeight.SemiBold },
                     IsHitTestVisible = false,
                 };
                 Overlay.Children.Add(_measureLabel);

@@ -78,7 +78,7 @@ public sealed class PmPage
 
     readonly DockPanel _root = new();
     readonly StackPanel _body = new() { Spacing = 0 };
-    readonly TextBlock _msg = new() { TextWrapping = TextWrapping.Wrap, FontSize = 11, Foreground = Palette.NoteText };
+    readonly TextBlock _msg = new() { TextWrapping = TextWrapping.Wrap, FontSize = TypeScale.Small, Foreground = Palette.NoteText };
     readonly Border _msgBorder;
 
     public PmPage(string title, string icon, bool showOkCancel = true)
@@ -87,7 +87,7 @@ public sealed class PmPage
         var header = new DockPanel { Margin = new Thickness(6, 6, 6, 2) };
         var titleRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
         titleRow.Children.Add(Icons.Make(icon, 22));
-        titleRow.Children.Add(new TextBlock { Text = title, FontSize = 15, FontWeight = FontWeight.SemiBold, VerticalAlignment = VerticalAlignment.Center, Foreground = Palette.Heading });
+        titleRow.Children.Add(new TextBlock { Text = title, FontSize = TypeScale.Title, FontWeight = FontWeight.SemiBold, VerticalAlignment = VerticalAlignment.Center, Foreground = Palette.Heading });
         DockPanel.SetDock(titleRow, Dock.Top);
         header.Children.Add(titleRow);
         if (showOkCancel)
@@ -127,14 +127,14 @@ public sealed class PmPage
     }
 
     public void Info(StackPanel s, string text) =>
-        s.Children.Add(new TextBlock { Text = text, TextWrapping = TextWrapping.Wrap, FontSize = 11, Foreground = Palette.TextMuted });
+        s.Children.Add(new TextBlock { Text = text, TextWrapping = TextWrapping.Wrap, FontSize = TypeScale.Small, Foreground = Palette.TextMuted });
 
     static Grid Row(string label, Control field, string? icon = null)
     {
         var g = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*"), Margin = new Thickness(0, 1) };
         var l = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, MinWidth = 82, VerticalAlignment = VerticalAlignment.Center };
         if (icon != null) l.Children.Add(Icons.Make(icon, 16));
-        l.Children.Add(new TextBlock { Text = label, VerticalAlignment = VerticalAlignment.Center, FontSize = 12 });
+        l.Children.Add(new TextBlock { Text = label, VerticalAlignment = VerticalAlignment.Center, FontSize = TypeScale.Body });
         g.Children.Add(l);
         Grid.SetColumn(field, 1);
         g.Children.Add(field);
@@ -150,7 +150,7 @@ public sealed class PmPage
         unit ??= LengthUnit;
         var tb = new TextBox { Text = get(), MinWidth = 90, HorizontalAlignment = HorizontalAlignment.Stretch };
         void MarkInvalid(bool bad) { if (bad) _invalid[tb] = label; else _invalid.Remove(tb); }
-        var unitLbl = new TextBlock { Text = unit, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(4, 0, 0, 0), Foreground = Palette.TextMuted, FontSize = 11 };
+        var unitLbl = new TextBlock { Text = unit, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(4, 0, 0, 0), Foreground = Palette.TextMuted, FontSize = TypeScale.Small };
         var dp = new DockPanel();
         DockPanel.SetDock(unitLbl, Dock.Right);
         dp.Children.Add(unitLbl); dp.Children.Add(tb);
@@ -223,7 +223,7 @@ public sealed class PmPage
 
     public CheckBox Check(StackPanel s, string label, Func<bool> get, Action<bool> set)
     {
-        var cb = new CheckBox { Content = label, IsChecked = get(), FontSize = 12 };
+        var cb = new CheckBox { Content = label, IsChecked = get(), FontSize = TypeScale.Body };
         cb.IsCheckedChanged += (_, _) => { set(cb.IsChecked == true); Changed?.Invoke(); };
         s.Children.Add(cb);
         return cb;
@@ -231,7 +231,7 @@ public sealed class PmPage
 
     public ComboBox Combo<T>(StackPanel s, string label, IList<(T value, string text)> options, Func<T> get, Action<T> set, string? icon = null)
     {
-        var cb = new ComboBox { HorizontalAlignment = HorizontalAlignment.Stretch, FontSize = 12 };
+        var cb = new ComboBox { HorizontalAlignment = HorizontalAlignment.Stretch, FontSize = TypeScale.Body };
         cb.ItemsSource = options.Select(o => o.text).ToList();
         var cur = get();
         cb.SelectedIndex = Math.Max(0, options.ToList().FindIndex(o => EqualityComparer<T>.Default.Equals(o.value, cur)));
@@ -254,7 +254,7 @@ public sealed class PmPage
     public PmSelectionBox Selection(StackPanel s, string label, SelFilter filter, string hint, int max = int.MaxValue, Func<SelItem, bool>? accept = null)
     {
         var box = new PmSelectionBox { Label = label, Filter = filter, Max = max, Accept = accept };
-        s.Children.Add(new TextBlock { Text = hint, FontSize = 11, Foreground = Palette.TextMuted, TextWrapping = TextWrapping.Wrap });
+        s.Children.Add(new TextBlock { Text = hint, FontSize = TypeScale.Small, Foreground = Palette.TextMuted, TextWrapping = TextWrapping.Wrap });
         box.List.GotFocus += (_, _) => Activate(box);
         box.List.PointerPressed += (_, _) => Activate(box);
         box.List.KeyDown += (_, e) =>
