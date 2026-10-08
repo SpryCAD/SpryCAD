@@ -79,7 +79,8 @@ public partial class MainWindow
         public Vec3? Axis;                  // cylinder / cone axis (through Center), circle axis
         public Vec3? Dir;                   // line direction
         public Plane? Plane;                // planar face
-        public double? Radius;
+        public double? Radius;              // torus: its centerline radius
+        public double? TubeRadius;          // torus minor radius
         public double Length, Area;
         public double? ConeAngle;           // half angle, degrees
         public Func<Vec3, Vec3>? Project;   // closest point on the exact curve / surface (curved items)
@@ -121,7 +122,7 @@ public partial class MainWindow
                 case SurfaceKind.Cylinder: it.Kind = "Cylinder"; it.Center = def.Origin; it.Axis = def.Axis; it.Radius = def.Radius; break;
                 case SurfaceKind.Cone: it.Kind = "Cone"; it.Center = def.Origin; it.Axis = def.Axis; it.ConeAngle = def.Param2 * 180 / Math.PI; break;
                 case SurfaceKind.Sphere: it.Kind = "Sphere"; it.Center = def.Origin; it.Radius = def.Radius; break;
-                case SurfaceKind.Torus: it.Kind = "Torus"; it.Center = def.Origin; it.Axis = def.Axis; break;
+                case SurfaceKind.Torus: it.Kind = "Torus"; it.Center = def.Origin; it.Axis = def.Axis; it.Radius = def.Radius; it.TubeRadius = def.Param2; break;
                 default: it.Kind = "Surface"; break;
             }
             if (def.IsCurved) { var es = new ExactSurface(def); it.Project = es.Project; }
@@ -201,6 +202,11 @@ public partial class MainWindow
                 _measureLabelAt = (rl.center + rl.onIt) * 0.5;
                 var it = items[0]!;
                 labelText = "R " + L(it.Radius!.Value) + (it.Kind is "Circle" or "Cylinder" ? $"  (Ø {F(2 * it.Radius.Value)})" : "");
+            }
+            else if (items[0] is { Kind: "Torus", Radius: { } R, TubeRadius: { } r })
+            {
+                _measureLabelAt = items[0]!.Item.Point;
+                labelText = $"Ø {F(2 * Math.Abs(R - r))} in / Ø {F(2 * (R + r))} out";
             }
         }
         else if (items.Count == 2)
@@ -341,6 +347,20 @@ public partial class MainWindow
                 rows.Add(("Center", Pt(it.Center!.Value)));
                 rows.Add(("Area", F(it.Area) + " " + u + "²"));
                 break;
+            case "Torus":
+                {
+                    // a round tube swept around an axis (a bend): across the tube, and the inside and outside of the bend
+                    double R = it.Radius!.Value, r = it.TubeRadius!.Value;
+                    rows.Add(("Tube diameter", L(2 * r)));
+                    rows.Add(("Inner diameter", L(2 * Math.Abs(R - r))));
+                    rows.Add(("Outer diameter", L(2 * (R + r))));
+                    rows.Add(("Inner radius", L(Math.Abs(R - r))));
+                    rows.Add(("Outer radius", L(R + r)));
+                    rows.Add(("Centerline radius", L(R)));
+                    rows.Add(("Center", Pt(it.Center!.Value)));
+                    rows.Add(("Area", F(it.Area) + " " + u + "²"));
+                    break;
+                }
             case "Cone":
                 rows.Add(("Half angle", F(it.ConeAngle!.Value) + "°"));
                 rows.Add(("Area", F(it.Area) + " " + u + "²"));
