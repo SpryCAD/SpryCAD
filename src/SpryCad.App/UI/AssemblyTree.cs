@@ -38,9 +38,25 @@ public sealed class AssemblyTree : DockPanel
         Children.Add(_list);
         _list.SelectionChanged += (_, _) =>
         {
-            if (!_syncing) Selected?.Invoke((_list.SelectedItem as ListBoxItem)?.Tag is string id && !id.StartsWith("mate:") ? id : null);
+            if (_syncing) return;
+            var id = (_list.SelectedItem as ListBoxItem)?.Tag is string t && !t.StartsWith("mate:") ? t : null;
+            // after the list has finished changing its selection: a listener may make the rows again, which the list
+            // cannot take in the middle of it (index out of range)
+            Avalonia.Threading.Dispatcher.UIThread.Post(() => Selected?.Invoke(id));
         };
         _list.DoubleTapped += (_, _) => { if ((_list.SelectedItem as ListBoxItem)?.Tag is string id && !id.StartsWith("mate:")) Opened?.Invoke(id); };
+    }
+
+    /// <summary>Highlights a component's row (none: no row), the rows kept.</summary>
+    public void Select(string? id)
+    {
+        var item = id == null ? null : _list.Items.OfType<ListBoxItem>().FirstOrDefault(i => i.Tag as string == id);
+        // a mate's row stays selected when no component is
+        if (item == null && (_list.SelectedItem as ListBoxItem)?.Tag is string t && t.StartsWith("mate:")) return;
+        if (_list.SelectedItem == item) return;
+        _syncing = true;
+        try { _list.SelectedItem = item; }
+        finally { _syncing = false; }
     }
 
     /// <summary>Shows an assembly (its rows made again: assemblies have tens of components, not thousands).</summary>

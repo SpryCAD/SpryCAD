@@ -462,7 +462,7 @@ public partial class MainWindow : IAssemblyHost
         if (Asm is not { } a || a.Selected == id) return;
         a.Selected = id;
         RefreshAssemblyScene();
-        RebuildTree();
+        _asmTree.Select(id);
         if (FindComponent(id) is { } c)
             Status($"{c.Name}: {(c.Fixed ? "fixed" : "floating (drag to move, Shift+drag to turn)")}" +
                    (c.Part.Embedded != null ? ", embedded" : a.Model.Resolution.Parts.GetValueOrDefault(ComponentResolver.Key(c.Part))?.Path is { } p ? ", " + p : ""));
