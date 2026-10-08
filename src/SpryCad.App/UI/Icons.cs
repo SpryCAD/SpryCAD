@@ -16,7 +16,8 @@ public static class Icons
         ["undo"] = ("M9 5L4 10l5 5 M4 10h11a5 5 0 0 1 0 10h-4", null),
         ["redo"] = ("M15 5l5 5-5 5 M20 10H9a5 5 0 0 0 0 10h4", null),
         ["rebuild"] = ("M19 12a7 7 0 1 1-2-4.95 M19 3v5h-5", null),
-        ["options"] = ("M12 8a4 4 0 1 0 0 8a4 4 0 1 0 0-8z M12 2v3 M12 19v3 M2 12h3 M19 12h3 M5 5l2 2 M17 17l2 2 M19 5l-2 2 M5 19l2-2", null),
+        // options: a cog (teeth round a ring, the hole in the middle)
+        ["options"] = ("M18.89 9.89L21.88 10.44 21.88 13.56 18.89 14.11 18.36 15.38 20.09 17.88 17.88 20.09 15.38 18.36 14.11 18.89 13.56 21.88 10.44 21.88 9.89 18.89 8.62 18.36 6.12 20.09 3.91 17.88 5.64 15.38 5.11 14.11 2.12 13.56 2.12 10.44 5.11 9.89 5.64 8.62 3.91 6.12 6.12 3.91 8.62 5.64 9.89 5.11 10.44 2.12 13.56 2.12 14.11 5.11 15.38 5.64 17.88 3.91 20.09 6.12 18.36 8.62z M12 9a3 3 0 1 0 0 6a3 3 0 1 0 0-6z", null),
         ["sketch"] = ("M3 21l3.5-1 11-11-2.5-2.5-11 11z M14 5.5l2.5 2.5", "M3 3h8v6H3z"),
         ["exitsketch"] = ("M3 21l3.5-1 11-11-2.5-2.5-11 11z", "M13 17l3 3 6-7"),
         ["extrude"] = ("M3 15l9 4 9-4-9-4z M3 15v3l9 4 9-4v-3", "M12 2v8 M9 5l3-3 3 3"),
@@ -28,8 +29,9 @@ public static class Icons
         ["cuthelical"] = ("M6 5h12 M6 9h12 M6 13h12 M6 17h12 M6 5l12 4 M6 9l12 4 M6 13l12 4 M3 21h18", "M12 2v20"),
         ["thread"] = ("M8 3v18 M16 3v18 M8 5l8 2 M8 9l8 2 M8 13l8 2 M8 17l8 2", "M4 21h16"),
         ["cutsweep"] = ("M6 17c0-7 5-12 15-12 M9 20c0-5 4-9 12-9 M3 18.5a4.5 2 0 1 0 9 0a4.5 2 0 1 0-9 0z", "M15 2v6 M12 5l3 3 3-3"),
-        ["fillet"] = ("M4 21V11a7 7 0 0 1 7-7h10", "M4 21h17V4"),
-        ["chamfer"] = ("M4 21V10l6-6h11", "M4 21h17V4"),
+        // fillet / chamfer: a block's corner, the rounded or cut edge (what the command makes) in the accent
+        ["fillet"] = ("M3 21V12 M12 3h9v18H3", "M3 12a9 9 0 0 1 9-9"),
+        ["chamfer"] = ("M3 21V12 M12 3h9v18H3", "M3 12l9-9"),
         ["hole"] = ("M5 6h14v15H5z", "M9 6v15 M15 6v15 M9 10h6"),
         ["draft"] = ("M5 19L8.5 5h7L19 19z", "M2 19h20"),
         ["shell"] = ("M3 8l9-5 9 5v10l-9 5-9-5z", "M6.5 9.5l5.5-3 5.5 3v7l-5.5 3-5.5-3z"),
@@ -53,8 +55,13 @@ public static class Icons
         ["mass"] = ("M5 8h14l2 13H3z M9 8a3 3 0 0 1 6 0", null),
         // Measure: a ruler with ticks
         ["measure"] = ("M3 15l12-12 6 6-12 12z", "M7 11l2 2 M10 8l2 2 M13 5l2 2"),
-        ["export"] = ("M4 14v6h16v-6 M12 3v12 M8 11l4 4 4-4", null),
-        ["import"] = ("M4 14v6h16v-6 M12 15V3 M8 7l4-4 4 4", null),
+        // export: an arrow leaving the tray; import: one coming into it. Per format: what goes, the arrow leaving
+        // (STEP a solid, STL a triangle mesh, DXF a flat pattern with its bend lines)
+        ["export"] = ("M4 14v6h16v-6 M12 15V3 M8 7l4-4 4 4", null),
+        ["export-step"] = ("M2 12l6-3 6 3v7l-6 3-6-3z M2 12l6 3 6-3 M8 15v7", "M15 9l6-6 M16 3h5v5"),
+        ["export-stl"] = ("M2 22l6.5-12 6.5 12z M5.25 16h6.5L8.5 22z", "M15 9l6-6 M16 3h5v5"),
+        ["export-dxf"] = ("M2 12h12v10H2z", "M6 12v10 M10 12v10 M15 9l6-6 M16 3h5v5"),
+        ["import"] = ("M4 14v6h16v-6 M12 3v12 M8 11l4 4 4-4", null),
         // sketch tools
         ["line"] = ("M4 20L20 4", "M2.5 18.5h3v3h-3z M18.5 2.5h3v3h-3z"),
         ["centerline"] = ("M3 21l2-2 M7 17l2-2 M11 13l2-2 M15 9l2-2 M19 5l2-2", null),
@@ -76,8 +83,8 @@ public static class Icons
         ["convert"] = ("M3 3h12v12H3z", "M10 10l11 11 M21 15v6h-6"),
         ["construction"] = ("M3 21l2-2 M7 17l2-2 M11 13l2-2 M15 9l2-2 M19 5l2-2", "M12 12m-3 0a3 3 0 1 0 6 0a3 3 0 1 0-6 0"),
         ["relations"] = ("M4 20V4 M4 20h16", "M8 16l8-8"),
-        // assembly mates: the Mates folder, then one per mate type
-        ["mates"] = ("M9 12m-5 0a5 5 0 1 0 10 0a5 5 0 1 0-10 0", "M15 12m-5 0a5 5 0 1 0 10 0a5 5 0 1 0-10 0"),
+        // assembly mates: the Mates folder and the Mate command (a paper clip, as SolidWorks'), then one per mate type
+        ["mates"] = ("M16 8v9a4 4 0 0 1-8 0V6a2.5 2.5 0 0 1 5 0v10a1 1 0 0 1-2 0V8", null),
         ["mate-coincident"] = ("M4 4h16v8H4z", "M4 12h16v8H4z"),
         ["mate-parallel"] = ("M4 18L14 6", "M10 18L20 6"),
         ["mate-perpendicular"] = ("M4 20h16", "M12 20V4 M12 16h4v4"),
@@ -116,8 +123,17 @@ public static class Icons
         // dock right: a window with a panel at its right, an arrow going into it (the floating list back to the dock)
         ["dockright"] = ("M3 4h18v16H3z M15 4v16", "M5 12h7 M9 9l3 3-3 3"),
         ["folder"] =("M3 6h6l2 2h10v11H3z", null),
-        ["rollback"] = ("M3 12h18", "M8 8l-4 4 4 4"),
+        ["rollback"] = ("M5 12h16", "M8 8l-4 4 4 4"),
         ["warning"] = ("M12 3L2 21h20z M12 10v5 M12 18v.5", null),
+        // menu commands: show / hide (the tree's eye), suppress (a block struck through), rename (a name field and its cursor),
+        // delete (a bin), roll forward (the rollback bar's arrow the other way), select (the pointer)
+        ["show"] = ("M2 12C5 7 8.5 5 12 5s7 2 10 7c-3 5-6.5 7-10 7s-7-2-10-7z M12 9a3 3 0 1 0 0.01 0z", null),
+        ["hide"] = ("M2 12C5 7 8.5 5 12 5s7 2 10 7c-3 5-6.5 7-10 7s-7-2-10-7z", "M4 4l16 16"),
+        ["suppress"] = ("M3 8l9-5 9 5v8l-9 5-9-5z", "M3 21L21 3"),
+        ["rename"] = ("M3 7h18v10H3z M6 12h5", "M14.5 9v6"),
+        ["delete"] = ("M4 6h16 M9 6V3h6v3 M6 6l1 15h10l1-15", "M10 10v7 M14 10v7"),
+        ["rollforward"] = ("M3 12h16", "M16 8l4 4-4 4"),
+        ["select"] = ("M6 3l13 8-6 1.5-3.5 6.5z", null),
     };
 
     static IBrush Stroke => Palette.Text;

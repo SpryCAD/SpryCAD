@@ -118,10 +118,10 @@ public partial class MainWindow
             Item("_Close", () => _ = CloseTab(_tab), "Ctrl+W"),
             RecentMenu(),
             "-",
-            Item("_Import STEP...", () => _ = ImportDialog(), "Ctrl+I", "open"),
-            Item("Export _STEP...", () => _ = Export("step"), null, "export"),
-            Item("Export S_TL...", () => _ = Export("stl"), null, "export"),
-            Item("Export Flat Pattern _DXF...", () => _ = ExportDxf(), null, "export"),
+            Item("_Import STEP...", () => _ = ImportDialog(), "Ctrl+I", "import"),
+            Item("Export _STEP...", () => _ = Export("step"), null, "export-step"),
+            Item("Export S_TL...", () => _ = Export("stl"), null, "export-stl"),
+            Item("Export Flat Pattern _DXF...", () => _ = ExportDxf(), null, "export-dxf"),
             "-",
             Item("Recover Autosave", () => RecoverAutosave()),
             "-",
@@ -130,13 +130,13 @@ public partial class MainWindow
             Item("_Undo", Undo, "Ctrl+Z", "undo"),
             Item("_Redo", Redo, "Ctrl+Y", "redo"),
             "-",
-            Item("_Delete", DeleteSelected, "Delete"),
+            Item("_Delete", DeleteSelected, "Delete", "delete"),
             Item("Re_build", () => Session.RequestRebuild(), "Ctrl+B", "rebuild"),
-            Item("Force Rebuild", () => Session.ForceRebuild(), "Ctrl+Q"),
+            Item("Force Rebuild", () => Session.ForceRebuild(), "Ctrl+Q", "rebuild"),
             "-",
-            Item("Suppress", () => SetSuppressed(true)),
-            Item("Unsuppress", () => SetSuppressed(false)),
-            Item("Roll Forward to End", RollForward)));
+            Item("Suppress", () => SetSuppressed(true), null, "suppress"),
+            Item("Unsuppress", () => SetSuppressed(false), null, "part"),
+            Item("Roll Forward to End", RollForward, null, "rollforward")));
         MainMenu.Items.Add(Sub("_View",
             Sub("_Orientation",
                 Item("Front", () => Viewport.StandardView("Front"), "Ctrl+D1"),
@@ -318,7 +318,7 @@ public partial class MainWindow
                 Cmd("flatpattern", "Flat\nPattern", FlatPatternCommand);
                 Cmd("flatten", "Flatten", ToggleFlatten);
                 Sep();
-                Cmd("export", "Export\nDXF", () => _ = ExportDxf());
+                Cmd("export-dxf", "Export\nDXF", () => _ = ExportDxf());
                 break;
             case "Evaluate":
                 Cmd("measure", "Measure", MeasureCommand);
@@ -327,8 +327,8 @@ public partial class MainWindow
                 Cmd("table", "Design\nTable", () => _ = Dialogs.DesignTables(this));
                 Cmd("configure", "Configure", () => _ = Dialogs.ConfigurePart(this));
                 Sep();
-                Cmd("export", "Export\nSTEP", () => _ = Export("step"));
-                Cmd("export", "Export\nSTL", () => _ = Export("stl"));
+                Cmd("export-step", "Export\nSTEP", () => _ = Export("step"));
+                Cmd("export-stl", "Export\nSTL", () => _ = Export("stl"));
                 break;
         }
         UpdateToolButtons();
@@ -582,8 +582,8 @@ public partial class MainWindow
         var menu = new ContextMenu();
         if (_sketch != null)
         {
-            menu.Items.Add(Item("Select", () => SetSketchTool(SketchTool.Select)));
-            menu.Items.Add(Item("End Chain / Cancel", () => _sketch.CancelOperation()));
+            menu.Items.Add(Item("Select", () => SetSketchTool(SketchTool.Select), null, "select"));
+            menu.Items.Add(Item("End Chain / Cancel", () => _sketch.CancelOperation(), null, "cancel"));
             menu.Items.Add(new Separator());
             menu.Items.Add(Item("Line", () => SetSketchTool(SketchTool.Line), "L", "line"));
             menu.Items.Add(Item("Rectangle", () => SetSketchTool(SketchTool.Rectangle), "R", "rect"));
@@ -621,7 +621,7 @@ public partial class MainWindow
                 if (menu.Items.Count > 0) menu.Items.Add(new Separator());
                 menu.Items.Add(Item($"Edit Feature ({owner.Name})", () => EditFeature(owner.Id)));
                 var sk = owner.Consumes.FirstOrDefault(c => Session.Doc.Find(c) is SketchFeature);
-                if (sk != null) menu.Items.Add(Item("Edit Sketch", () => EditFeature(sk)));
+                if (sk != null) menu.Items.Add(Item("Edit Sketch", () => EditFeature(sk), null, "sketch"));
             }
             if (menu.Items.Count > 0) menu.Items.Add(new Separator());
             // measures what was right-clicked (and the rest of the selection), as SolidWorks
@@ -647,7 +647,7 @@ public partial class MainWindow
         }
         if (f != null)
         {
-            menu.Items.Add(Item(f is SketchFeature ? "Edit Sketch" : "Edit Feature", () => EditFeature(id), null, f is SketchFeature ? "sketch" : null));
+            menu.Items.Add(Item(f is SketchFeature ? "Edit Sketch" : "Edit Feature", () => EditFeature(id), null, FeatureTree.IconFor(f)));
             var sk = f.Consumes.FirstOrDefault(c => Session.Doc.Find(c) is SketchFeature);
             if (sk != null && f is not HoleFeature) menu.Items.Add(Item("Edit Sketch", () => EditFeature(sk), null, "sketch"));
             if (f is HoleFeature hf) menu.Items.Add(Item("Edit Hole Positions", () => EditFeature(hf.SketchId), null, "sketch"));
@@ -655,16 +655,16 @@ public partial class MainWindow
             if (f is SketchFeature)
             {
                 var shown = Session.Doc.SketchShown(id, Session.Doc.ConsumedByActive().Contains(id));
-                menu.Items.Add(Item(shown ? "Hide" : "Show", () => SetSketchShown(id, !shown)));
+                menu.Items.Add(Item(shown ? "Hide" : "Show", () => SetSketchShown(id, !shown), null, shown ? "hide" : "show"));
             }
             menu.Items.Add(new Separator());
-            menu.Items.Add(Item(f.Suppressed ? "Unsuppress" : "Suppress", () => SetSuppressed(!f.Suppressed)));
-            menu.Items.Add(Item(string.IsNullOrWhiteSpace(f.SuppressWhen) ? "Suppress When..." : "Edit Suppress Condition...", () => _ = Dialogs.SuppressWhen(this, f)));
-            menu.Items.Add(Item("Rename", () => _ = RenameFeature(f), "F2"));
+            menu.Items.Add(Item(f.Suppressed ? "Unsuppress" : "Suppress", () => SetSuppressed(!f.Suppressed), null, f.Suppressed ? "part" : "suppress"));
+            menu.Items.Add(Item(string.IsNullOrWhiteSpace(f.SuppressWhen) ? "Suppress When..." : "Edit Suppress Condition...", () => _ = Dialogs.SuppressWhen(this, f), null, "equations"));
+            menu.Items.Add(Item("Rename", () => _ = RenameFeature(f), "F2", "rename"));
             menu.Items.Add(Item("Roll Back", () => RollbackTo(id, false), null, "rollback"));
-            menu.Items.Add(Item("Delete", DeleteSelected));
+            menu.Items.Add(Item("Delete", DeleteSelected, null, "delete"));
         }
-        if (Session.Doc.RollbackIndex != null) menu.Items.Add(Item("Roll to End", RollForward));
+        if (Session.Doc.RollbackIndex != null) menu.Items.Add(Item("Roll to End", RollForward, null, "rollforward"));
         if (menu.Items.Count > 0) menu.Open(row);
     }
 

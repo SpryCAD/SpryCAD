@@ -297,7 +297,7 @@ public partial class MainWindow : IAssemblyHost
         void Tip(string tip) => ToolTip.SetTip(CommandBar.Children[^1], tip);
         Cmd("insertcomp", "Insert\nComponents", InsertComponentCommand);
         Tip("Insert Components\nBrings parts into the assembly: open parts or files, linked (an edit to the part shows in every assembly using it) or embedded (kept inside the assembly: one self-contained file).");
-        Cmd("relations", "Mate", MateCommand);
+        Cmd("mates", "Mate", MateCommand);
         Tip("Mate\nPositions components relative to each other: pick two faces (or a face and an origin plane), then coincident, parallel, perpendicular, concentric, distance or angle.");
         Sep();
         Cmd("fix", "Fix", () => SetFixed(true));

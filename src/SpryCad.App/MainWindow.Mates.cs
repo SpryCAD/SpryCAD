@@ -144,7 +144,7 @@ public partial class MainWindow
         MateType.Angle => "mate-angle",
         MateType.Gear => "mate-gear",
         MateType.Screw => "mate-screw",
-        _ => "relations",
+        _ => "mates",
     };
 
     /// <summary>The Mate page: adding mates, or (<paramref name="editing"/>) changing one.</summary>
@@ -194,7 +194,7 @@ public partial class MainWindow
             Restore();
         }
 
-        var page = new PmPage(editing != null ? "Edit Mate: " + editing.Name : "Mate", "relations");
+        var page = new PmPage(editing != null ? "Edit Mate: " + editing.Name : "Mate", "mates");
         var red = Palette.Danger;
 
         // Standard / Mechanical: tabs, as SolidWorks has them (styled as the panel's tabs, sharing the width)

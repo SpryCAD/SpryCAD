@@ -204,9 +204,9 @@ public sealed class AssemblyTree : DockPanel
 
     ContextMenu MenuFor(Mate mate)
     {
-        MenuItem I(string header, string cmd, string? gesture = null)
+        MenuItem I(string header, string cmd, string icon, string? gesture = null)
         {
-            var mi = new MenuItem { Header = header, InputGesture = gesture != null ? KeyGesture.Parse(gesture) : null };
+            var mi = new MenuItem { Header = header, Icon = Icons.Make(icon, 16), InputGesture = gesture != null ? KeyGesture.Parse(gesture) : null };
             mi.Click += (_, _) => MateCommand?.Invoke(mate.Id, cmd);
             return mi;
         }
@@ -214,18 +214,18 @@ public sealed class AssemblyTree : DockPanel
         {
             Items =
             {
-                I("_Edit Mate...", "edit"), I("_Rename...", "rename", "F2"), new Separator(),
-                I("_Flip Alignment", "flip"), I(mate.Suppressed ? "_Unsuppress" : "_Suppress", "suppress"), new Separator(),
-                I("_Delete", "delete"),
+                I("_Edit Mate...", "edit", IconFor(mate.Type)), I("_Rename...", "rename", "rename", "F2"), new Separator(),
+                I("_Flip Alignment", "flip", "align-opposite"), I(mate.Suppressed ? "_Unsuppress" : "_Suppress", "suppress", mate.Suppressed ? "mates" : "suppress"), new Separator(),
+                I("_Delete", "delete", "delete"),
             },
         };
     }
 
     ContextMenu MenuFor(Component c)
     {
-        MenuItem I(string header, string cmd, bool enabled = true)
+        MenuItem I(string header, string cmd, string icon, bool enabled = true)
         {
-            var mi = new MenuItem { Header = header, IsEnabled = enabled };
+            var mi = new MenuItem { Header = header, Icon = Icons.Make(icon, 16), IsEnabled = enabled };
             mi.Click += (_, _) => Command?.Invoke(c.Id, cmd);
             return mi;
         }
@@ -233,13 +233,13 @@ public sealed class AssemblyTree : DockPanel
         {
             Items =
             {
-                I("_Open Part", "open", c.Part.Embedded == null),
+                I("_Open Part", "open", "open", c.Part.Embedded == null),
                 new Separator(),
-                I("_Fix", "fix", !c.Fixed), I("F_loat", "float", c.Fixed),
-                I(c.Lightweight ? "Set to _Resolved" : "Set to _Lightweight", "lightweight"),
-                I("_Configure...", "configure"),
+                I("_Fix", "fix", "fix", !c.Fixed), I("F_loat", "float", "float", c.Fixed),
+                I(c.Lightweight ? "Set to _Resolved" : "Set to _Lightweight", "lightweight", c.Lightweight ? "part" : "lightweight"),
+                I("_Configure...", "configure", "configure"),
                 new Separator(),
-                I("_Delete", "delete"),
+                I("_Delete", "delete", "delete"),
             },
         };
     }

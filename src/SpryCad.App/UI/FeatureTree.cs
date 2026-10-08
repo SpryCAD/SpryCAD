@@ -147,7 +147,7 @@ public sealed class FeatureTree : UserControl
         return f.Name;
     }
 
-    static string IconFor(Feature f) => f switch
+    internal static string IconFor(Feature f) => f switch
     {
         SketchFeature => "sketch",
         ExtrudeFeature e => e.IsCut ? "cut" : "extrude",
