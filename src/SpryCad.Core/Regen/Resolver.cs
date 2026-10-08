@@ -222,6 +222,12 @@ public static class Resolver
             var (_, te) = ResolveEdge(v, st);
             return NearestEnd(te.Start, te.End, v.Hint);
         }
+        if (r.Center is { } ce)
+        {
+            // the circle's center, wherever the edge went
+            if (ResolveNativeEdge(ce, st) is { edge.Curve: Kernel.Native.NCircle c }) return c.C;
+            throw new FeatureException("The edge of the reference center is gone, or no longer round.");
+        }
         throw new FeatureException("No reference point selected.");
 
         static Vec3 NearestEnd(Vec3 a, Vec3 b, Vec3 hint) => Vec3.Distance(a, hint) <= Vec3.Distance(b, hint) ? a : b;

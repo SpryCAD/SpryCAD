@@ -54,6 +54,11 @@ public sealed class MateRef
     public Vec3 D { get; set; }
     /// <summary>The radius of a cylinder or sphere (0: none).</summary>
     public double R { get; set; }
+    /// <summary>
+    /// The center of the round face's circle at one end of it along its axis (+1: the far end, -1: the near one), as a
+    /// point: a hole's or a boss's center. Null: the face itself.
+    /// </summary>
+    public int? End { get; set; }
 
     public MateGeom Geom => new(Kind, P, D, R);
     public MateRef Clone() => (MateRef)MemberwiseClone();

@@ -578,6 +578,21 @@ public partial class MainWindow
             new("sketch", "Sketch", () => StartSketchCommand()),
         };
 
+    /// <summary>
+    /// An axis or center chosen from the right-click menu: into the open page's selection box, as a click would put
+    /// it (the box must take one); else selected.
+    /// </summary>
+    void PickSpecial(SelItem item, string what)
+    {
+        if (_page?.ActiveBox != null)
+        {
+            if (_page.HandlePick(item)) UpdateEmphasis();
+            else Status($"This page has no box for {what}.");
+        }
+        else Selection.Set(item);
+        Viewport.Redraw();
+    }
+
     void OnViewportContext(PointerInfo p)
     {
         var menu = new ContextMenu();
@@ -596,6 +611,15 @@ public partial class MainWindow
         }
         else
         {
+            // picking mate references: a round face's axis (as a click on it), or the center of its circle at the end
+            // nearer the pointer (a hole's, a boss's)
+            if (Asm is { } asm && PickingFaces && Viewport.PickInstance(p.X, p.Y) is { face: { } mf } mh
+                && asm.Model.FaceGeom(mh.id, mf) is { Kind: Core.Assembly.MateGeomKind.Axis })
+            {
+                menu.Items.Add(Item("Select Axis", () => PickFace(mh.id, mf)));
+                menu.Items.Add(Item("Select Center", () => PickRef(asm.Model.RefTo(mh.id, mf, asm.Model.NearerEnd(mh.id, mf, mh.point)), "That face has no circle to take the center of.")));
+                menu.Items.Add(new Separator());
+            }
             var hit = Viewport.Pick(p.X, p.Y, SelFilter.Any);
             if (hit != null && !Selection.Contains(hit)) Selection.Set(hit);
             if (hit?.Kind == SelKind.Face && hit.Planar || hit?.Kind == SelKind.Plane)
@@ -608,6 +632,15 @@ public partial class MainWindow
             {
                 menu.Items.Add(Item("Fillet", () => BlendCommand(true), null, "fillet"));
                 menu.Items.Add(Item("Chamfer", () => BlendCommand(false), null, "chamfer"));
+            }
+            // a round face or circular edge: its axis or the center of its circle, picked as anything else is
+            var axis = hit != null ? Viewport.AxisOf(hit) : null;
+            var center = hit != null ? Viewport.CenterOf(hit) : null;
+            if (axis != null || center != null)
+            {
+                if (menu.Items.Count > 0) menu.Items.Add(new Separator());
+                if (axis != null) menu.Items.Add(Item("Select Axis", () => PickSpecial(axis, "an axis")));
+                if (center != null) menu.Items.Add(Item("Select Center", () => PickSpecial(center, "a center")));
             }
             if (hit?.Kind == SelKind.Sketch)
             {

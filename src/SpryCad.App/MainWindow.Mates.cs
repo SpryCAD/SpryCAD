@@ -86,7 +86,7 @@ public partial class MainWindow
         if (_mating is not { } st) return;
         if (r == null) { Status(notMateable); return; }
         // picked again: dropped; a third: replaces the second
-        var i = st.Picks.FindIndex(p => p.Component == r.Component && p.Face == r.Face);
+        var i = st.Picks.FindIndex(p => p.Component == r.Component && p.Face == r.Face && p.End == r.End);
         if (i >= 0) st.Picks.RemoveAt(i);
         else if (st.Picks.Count == 2) st.Picks[1] = r;
         else st.Picks.Add(r);
@@ -346,7 +346,7 @@ public partial class MainWindow
         opts.Children.Add(result);
 
         // a pick as SolidWorks lists it (Face<…>@Component), what it is in its tooltip
-        string Label(MateRef r) => r.Component == null ? $"{r.Face} Plane" : $"Face<{r.Face}>@{FindComponent(r.Component)?.Name}";
+        string Label(MateRef r) => r.Component == null ? $"{r.Face} Plane" : $"{(r.End != null ? "Center" : r.Kind == MateGeomKind.Axis ? "Axis" : "Face")}<{r.Face}>@{FindComponent(r.Component)?.Name}";
         string Describe(MateRef r) => r.Component == null ? $"The assembly's {r.Face} plane" : r.Kind switch
         {
             MateGeomKind.Plane => "A planar face",

@@ -126,6 +126,7 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
     protected override void OnOpenGlInit(GlInterface gl)
     {
         var silk = GL.GetApi(gl.GetProcAddress);
+        try { App.SetGlInfo($"{silk.GetStringS(StringName.Vendor)} / {silk.GetStringS(StringName.Renderer)} / {silk.GetStringS(StringName.Version)}"); } catch { }
         _r = new GlRenderer(silk, GlVersion.Type == GlProfileType.OpenGLES);
     }
 
@@ -488,11 +489,36 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
                 g.Line(it.Point - Vec3.UnitY * r, it.Point + Vec3.UnitY * r, c, top: true);
                 g.Line(it.Point - Vec3.UnitZ * r, it.Point + Vec3.UnitZ * r, c, top: true);
             }
+            else if (it.Kind == SelKind.Axis)
+                DrawAxis(g, it.Point - it.Normal * it.AxisHalfLength, it.Point + it.Normal * it.AxisHalfLength, c);
             else if (it.Kind == SelKind.SketchSegment && Sketches.FirstOrDefault(s => s.FeatureId == it.FeatureId) is { } sd
                      && sd.Result.Sketch.Entity(it.SketchItem) is { } ent)
                 foreach (var (a2, b2) in SketchDrawing.Segments2D(sd.Result.Sketch, ent))
                     g.Line(sd.Result.Frame.ToWorld(a2), sd.Result.Frame.ToWorld(b2), c, top: true);
         }
+    }
+
+    /// <summary>A temporary axis: dash-dot like a centerline, over the model, with a short stroke across each end.</summary>
+    public void DrawAxis(DynamicGeometry g, Vec3 a, Vec3 b, Rgba c)
+    {
+        var px = Camera.PixelSize;
+        var len = Vec3.Distance(a, b);
+        if (len < 1e-12) return;
+        var d = (b - a) / len;
+        double dash = px * 12, gap = px * 3, dot = px * 2;
+        if (len / (dash + dot + 2 * gap) > 2000) g.Line(a, b, c, top: true);
+        else
+            for (double t = 0; t < len; t += dash + dot + 2 * gap)
+            {
+                g.Line(a + d * t, a + d * Math.Min(t + dash, len), c, top: true);
+                var t2 = t + dash + gap;
+                if (t2 < len) g.Line(a + d * t2, a + d * Math.Min(t2 + dot, len), c, top: true);
+            }
+        // the ends: a stroke across, in the screen plane
+        var n = Vec3.Cross(Camera.V(Camera.Back), d);
+        if (n.Length < 1e-9) return;
+        n = n.Normalized * (px * 5);
+        g.Line(a - n, a + n, c, top: true); g.Line(b - n, b + n, c, top: true);
     }
 
     /// <summary>An axis through the origin to show (e.g. while an X/Y/Z axis button is hovered), or null.</summary>
@@ -1119,7 +1145,102 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
 
     // ---- picking ----
 
+    /// <summary>
+    /// What is under the cursor that <paramref name="filter"/> accepts. A box asking for axes
+    /// (<see cref="SelFilter.Axis"/>) gets a round face's or a circular edge's axis (as SolidWorks' temporary axes)
+    /// where it would get the face or edge.
+    /// </summary>
     public SelItem? Pick(double x, double y, SelFilter filter)
+    {
+        if ((filter & SelFilter.Axis) == 0) return PickItem(x, y, filter);
+        var h = PickItem(x, y, filter | SelFilter.Face | SelFilter.Edge);
+        if (h != null && AxisOf(h) is { } ax) return ax;
+        // (faces and edges looked at only for their axes)
+        if (h is { Kind: SelKind.Face } && (filter & (SelFilter.Face | SelFilter.PlanarFace)) == 0) return null;
+        if (h is { Kind: SelKind.Face, Planar: false } && (filter & SelFilter.Face) == 0) return null;
+        if (h is { Kind: SelKind.Edge } && (filter & SelFilter.Edge) == 0) return null;
+        return h;
+    }
+
+    /// <summary>The axis of a picked round face (cylinder, cone) or circular edge, as an Axis item; null for anything else.</summary>
+    public SelItem? AxisOf(SelItem h)
+    {
+        if (Bodies.FirstOrDefault(b => b.Id == h.BodyId) is not { } body) return null;
+        if (h.Kind == SelKind.Face && h.Name != null) return FaceAxis(body, h.Name);
+        if (h.Kind == SelKind.Edge && h.EdgeCircular && h.Edge != null) return EdgeAxis(body, h.Edge);
+        return null;
+    }
+
+    /// <summary>
+    /// The center of a circle a pick is on: a circular edge's, or of a round face's circular edge nearest where it was
+    /// picked (a hole's rim). Null when there is none.
+    /// </summary>
+    public SelItem? CenterOf(SelItem h)
+    {
+        if (Bodies.FirstOrDefault(b => b.Id == h.BodyId) is not { Solid.Native: { } nb } body) return null;
+        nb.Link();
+        Kernel.Native.NEdge? best = null; double bestD = double.MaxValue;
+        foreach (var e in nb.Edges)
+        {
+            if (e.Curve is not Kernel.Native.NCircle || e.Uses.Count != 2) continue;
+            string fa = e.Uses[0].Face.Tag.Name, fb = e.Uses[1].Face.Tag.Name;
+            bool on = h.Kind switch
+            {
+                SelKind.Edge => h.Edge != null && ((fa == h.Edge.A && fb == h.Edge.B) || (fa == h.Edge.B && fb == h.Edge.A)),
+                SelKind.Face => fa == h.Name || fb == h.Name,
+                _ => false,
+            };
+            if (!on) continue;
+            var d = e.Samples(1e-3).Min(p => Vec3.Distance(p, h.Point));
+            if (d < bestD) { bestD = d; best = e; }
+        }
+        if (best?.Curve is not Kernel.Native.NCircle c) return null;
+        var er = new Core.Model.EdgeRef { A = best.Uses[0].Face.Tag.Name, B = best.Uses[1].Face.Tag.Name, Body = body.Id, Hint = best.Mid };
+        return new SelItem { Kind = SelKind.Vertex, BodyId = body.Id, Point = c.C, IsCenter = true, CenterRadius = c.R, Edge = er };
+    }
+
+    /// <summary>A round face's axis (cylinders and cones), drawn along the face and a little past it.</summary>
+    public static SelItem? FaceAxis(Body body, string face)
+    {
+        var m = body.Mesh;
+        foreach (var fr in m.Faces)
+        {
+            if (fr.Name != face || fr.Surface.Kind is not (SurfaceKind.Cylinder or SurfaceKind.Cone)) continue;
+            var o = fr.Surface.Origin; var d = fr.Surface.Axis.Normalized;
+            double lo = double.MaxValue, hi = double.MinValue;
+            for (int k = fr.IndexStart; k < fr.IndexStart + fr.IndexCount; k++)
+            {
+                var i = m.Indices[k];
+                var t = Vec3.Dot(new Vec3(m.Positions[3 * i], m.Positions[3 * i + 1], m.Positions[3 * i + 2]) - o, d);
+                lo = Math.Min(lo, t); hi = Math.Max(hi, t);
+            }
+            if (lo > hi) return null;
+            var half = (hi - lo) / 2;
+            return new SelItem
+            {
+                Kind = SelKind.Axis, BodyId = body.Id, Name = face, Point = o + d * ((lo + hi) / 2), Normal = d,
+                AxisHalfLength = half + Math.Max(2, half * 0.15),
+            };
+        }
+        return null;
+    }
+
+    /// <summary>A circular edge's axis (through its center, square to it), drawn about as long as the circle is wide.</summary>
+    public static SelItem? EdgeAxis(Body body, Core.Model.EdgeRef edge)
+    {
+        if (body.Solid.Native is not { } nb) return null;
+        nb.Link();
+        foreach (var e in nb.Edges)
+        {
+            if (e.Curve is not Kernel.Native.NCircle c || e.Uses.Count != 2) continue;
+            var fa = e.Uses[0].Face.Tag.Name; var fb = e.Uses[1].Face.Tag.Name;
+            if (!((fa == edge.A && fb == edge.B) || (fa == edge.B && fb == edge.A))) continue;
+            return new SelItem { Kind = SelKind.Axis, BodyId = body.Id, Edge = edge.Clone(), Point = c.C, Normal = c.Axis.Normalized, AxisHalfLength = c.R * 1.3 };
+        }
+        return null;
+    }
+
+    SelItem? PickItem(double x, double y, SelFilter filter)
     {
         var (ro, rd) = Camera.Ray(x, y);
         double bestT = double.MaxValue; SelItem? best = null;
@@ -1181,12 +1302,12 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
             // circle and arc centers (the Measure tool): a model vertex as near wins
             if ((filter & SelFilter.Center) != 0)
                 foreach (var b in Bodies)
-                    foreach (var (c, r) in CircleCenters(b))
+                    foreach (var (c, r, ce) in CircleCenters(b))
                     {
                         var sc = Camera.Project(c);
                         if (Camera.Perspective && Camera.DepthOf(c) <= 0) continue;
                         var d = Math.Sqrt((sc.X - x) * (sc.X - x) + (sc.Y - y) * (sc.Y - y));
-                        if (d < bestVPx - 0.5) { bestVPx = d; bestV = new SelItem { Kind = SelKind.Vertex, BodyId = b.Id, Point = c, IsCenter = true, CenterRadius = r }; }
+                        if (d < bestVPx - 0.5) { bestVPx = d; bestV = new SelItem { Kind = SelKind.Vertex, BodyId = b.Id, Point = c, IsCenter = true, CenterRadius = r, Edge = ce }; }
                     }
             if ((filter & SelFilter.Vertex) == 0) { if (bestV != null) return bestV; }
             else if (PickVertex(x, y) is { } mv && ScreenPx(mv.point, x, y) <= bestVPx + 0.5)
@@ -1288,16 +1409,18 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
     double ScreenPx(Vec3 p, double x, double y) { var s = Camera.Project(p); return Math.Sqrt((s.X - x) * (s.X - x) + (s.Y - y) * (s.Y - y)); }
 
     // circle and arc centers of each body (from its exact edges), worked out once per body
-    static readonly System.Runtime.CompilerServices.ConditionalWeakTable<Body, List<(Vec3 center, double radius)>> _centers = new();
+    static readonly System.Runtime.CompilerServices.ConditionalWeakTable<Body, List<(Vec3 center, double radius, Core.Model.EdgeRef? edge)>> _centers = new();
 
     /// <summary>The distinct centers of a body's circular edges (circles and arcs), with their radii.</summary>
-    static List<(Vec3 center, double radius)> CircleCenters(Body b) => _centers.GetValue(b, body =>
+    // (each with the edge it is the center of, by its faces: a point reference to it follows the model)
+    static List<(Vec3 center, double radius, Core.Model.EdgeRef? edge)> CircleCenters(Body b) => _centers.GetValue(b, body =>
     {
-        var list = new List<(Vec3, double)>();
+        var list = new List<(Vec3, double, Core.Model.EdgeRef?)>();
         if (body.Solid.Native is not { } nb) return list;
+        nb.Link();
         foreach (var e in nb.Edges)
             if (e.Curve is Kernel.Native.NCircle c && !list.Any(x => Vec3.Distance(x.Item1, c.C) < 1e-6 && Math.Abs(x.Item2 - c.R) < 1e-6))
-                list.Add((c.C, c.R));
+                list.Add((c.C, c.R, e.Uses.Count == 2 ? new Core.Model.EdgeRef { A = e.Uses[0].Face.Tag.Name, B = e.Uses[1].Face.Tag.Name, Body = body.Id, Hint = e.Mid } : null));
         return list;
     });
 

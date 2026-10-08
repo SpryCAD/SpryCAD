@@ -454,12 +454,59 @@ public sealed class AssemblyModel
     /// <summary>The assembly's origin planes (mate references with no component).</summary>
     public static readonly string[] OriginPlanes = { "Front", "Top", "Right" };
 
-    /// <summary>A face of a component's part as a mate reference (its part's coordinates); null if it has none.</summary>
-    public MateGeom? FaceGeom(string componentId, string face)
+    /// <summary>
+    /// A face of a component's part as a mate reference (its part's coordinates); null if it has none. With
+    /// <paramref name="end"/>: the center of a round face's circle at that end (<see cref="MateRef.End"/>), a point.
+    /// </summary>
+    public MateGeom? FaceGeom(string componentId, string face, int? end = null)
     {
         if (Doc.Find(componentId) is not { } c || DisplayOf(c) is not { } pd) return null;
-        foreach (var f in pd.Mesh.Faces) if (f.Name == face) return MateGeom.Of(f);
+        foreach (var f in pd.Mesh.Faces)
+        {
+            if (f.Name != face) continue;
+            var g = MateGeom.Of(f);
+            if (end == null || g is not { Kind: MateGeomKind.Axis }) return end == null ? g : null;
+            if (AxisSpan(pd.Mesh, f) is not { } span) return null;
+            var t = end > 0 ? span.hi : span.lo;
+            // (no radius: a point with one is a sphere's center, which Tangent would mate as the sphere)
+            return new MateGeom(MateGeomKind.Point, g.P + g.D * t, g.D);
+        }
         return null;
+    }
+
+    /// <summary>How far a round face reaches along its axis (from the axis's origin point), from its triangles.</summary>
+    public static (double lo, double hi)? AxisSpan(DisplayMesh m, FaceRange f)
+    {
+        var o = f.Surface.Origin; var d = f.Surface.Axis.Normalized;
+        double lo = double.MaxValue, hi = double.MinValue;
+        for (int k = f.IndexStart; k < f.IndexStart + f.IndexCount; k++)
+        {
+            var i = m.Indices[k];
+            var t = Vec3.Dot(new Vec3(m.Positions[3 * i], m.Positions[3 * i + 1], m.Positions[3 * i + 2]) - o, d);
+            lo = Math.Min(lo, t); hi = Math.Max(hi, t);
+        }
+        return lo <= hi ? (lo, hi) : null;
+    }
+
+    /// <summary>
+    /// A round face's axis where its component is placed, as long as the face (to draw it); null for other faces.
+    /// </summary>
+    public (Vec3 a, Vec3 b)? AxisSegment(string componentId, string face)
+    {
+        if (Doc.Find(componentId) is not { } c || DisplayOf(c) is not { } pd) return null;
+        var f = pd.Mesh.Faces.FirstOrDefault(x => x.Name == face);
+        if (f == null || MateGeom.Of(f) is not { Kind: MateGeomKind.Axis } g || AxisSpan(pd.Mesh, f) is not { } span) return null;
+        var pad = Math.Max(2, (span.hi - span.lo) * 0.15);
+        var t = c.Placement.ToTransform();
+        return (t.Point(g.P + g.D * (span.lo - pad)), t.Point(g.P + g.D * (span.hi + pad)));
+    }
+
+    /// <summary>The end of a round face (<see cref="MateRef.End"/>) nearer a point in the part's coordinates (a pick).</summary>
+    public int? NearerEnd(string componentId, string face, Vec3 worldPoint)
+    {
+        if (Doc.Find(componentId) is not { } c || FaceGeom(componentId, face, 1) is not { } far || FaceGeom(componentId, face, -1) is not { } near) return null;
+        var p = c.Placement.ToTransform().RigidInverse().Point(worldPoint);
+        return Vec3.Distance(p, far.P) <= Vec3.Distance(p, near.P) ? 1 : -1;
     }
 
     /// <summary>
@@ -475,7 +522,7 @@ public sealed class AssemblyModel
                 "Right" => new MateGeom(MateGeomKind.Plane, Vec3.Zero, Vec3.UnitX),
                 _ => new MateGeom(MateGeomKind.Plane, Vec3.Zero, Vec3.UnitZ),
             };
-        if (FaceGeom(r.Component, r.Face) is { } g)
+        if (FaceGeom(r.Component, r.Face, r.End) is { } g)
         {
             r.Kind = g.Kind; r.P = g.P; r.D = g.D; r.R = g.R;
             return g;
@@ -487,11 +534,14 @@ public sealed class AssemblyModel
     public MateGeom World(MateRef r) =>
         r.Component != null && Doc.Find(r.Component) is { } c ? Local(r).Placed(c.Placement.ToTransform()) : Local(r);
 
-    /// <summary>A reference to a face of a component (its geometry copied), or null if that face cannot be mated.</summary>
-    public MateRef? RefTo(string? componentId, string face)
+    /// <summary>
+    /// A reference to a face of a component, or with <paramref name="end"/> to the center of a round face's circle there
+    /// (its geometry copied); null if it cannot be mated.
+    /// </summary>
+    public MateRef? RefTo(string? componentId, string face, int? end = null)
     {
-        var g = componentId == null ? Local(new MateRef { Face = face }) : FaceGeom(componentId, face);
-        return g == null ? null : new MateRef { Component = componentId, Face = face, Kind = g.Kind, P = g.P, D = g.D, R = g.R };
+        var g = componentId == null ? Local(new MateRef { Face = face }) : FaceGeom(componentId, face, end);
+        return g == null ? null : new MateRef { Component = componentId, Face = face, End = componentId == null ? null : end, Kind = g.Kind, P = g.P, D = g.D, R = g.R };
     }
 
     /// <summary>The last solve's result (mate errors).</summary>

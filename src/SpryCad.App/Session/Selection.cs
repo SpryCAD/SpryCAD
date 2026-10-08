@@ -3,7 +3,8 @@ using SpryCad.Kernel;
 
 namespace SpryCad.App.Session;
 
-public enum SelKind { Face, Edge, Plane, Sketch, Feature, Body, Origin, Vertex, SketchSegment }
+/// <summary>What is selected. Axis: the axis of a round face or circular edge (a temporary axis, as SolidWorks has).</summary>
+public enum SelKind { Face, Edge, Plane, Sketch, Feature, Body, Origin, Vertex, SketchSegment, Axis }
 
 [Flags]
 public enum SelFilter
@@ -17,6 +18,8 @@ public enum SelFilter
     SketchSegment = 256,
     /// <summary>Centers of circles and arcs (picked as a point: the Measure tool).</summary>
     Center = 512,
+    /// <summary>Axes of round faces and circular edges (a box asking for a direction or an axis).</summary>
+    Axis = 1024,
     Any = Face | Edge | Plane | Sketch | Feature,
 }
 
@@ -43,6 +46,8 @@ public sealed class SelItem
     /// <summary>A Vertex that is the center of a circle or arc (no vertex of the model), with that circle's radius.</summary>
     public bool IsCenter { get; init; }
     public double CenterRadius { get; init; }
+    /// <summary>An Axis: half its length to draw (along <see cref="Normal"/>, either side of <see cref="Point"/>).</summary>
+    public double AxisHalfLength { get; init; }
 
     public string Key => Kind switch
     {
@@ -54,6 +59,7 @@ public sealed class SelItem
         SelKind.Body => $"B:{BodyId}",
         SelKind.Vertex => FeatureId != null ? $"V:{FeatureId}:{SketchItem}" : $"V:{BodyId}:{Point.X:0.######},{Point.Y:0.######},{Point.Z:0.######}",
         SelKind.SketchSegment => $"G:{FeatureId}:{SketchItem}",
+        SelKind.Axis => $"A:{BodyId}:{Name}:{Edge?.A}:{Edge?.B}",
         _ => "O",
     };
 
@@ -67,6 +73,7 @@ public sealed class SelItem
         SelKind.Body => $"Body<{BodyId}>",
         SelKind.Vertex => FeatureId != null ? $"Point{SketchItem}@{doc.Find(FeatureId)?.Name}" : IsCenter ? $"Center<Ø{2 * CenterRadius:0.###}>" : "Vertex<" + $"{Point.X:0.##}, {Point.Y:0.##}, {Point.Z:0.##}>",
         SelKind.SketchSegment => $"Line{SketchItem}@{doc.Find(FeatureId!)?.Name}",
+        SelKind.Axis => $"Axis<{ShortName(Name ?? Edge?.A)}>",
         _ => "Origin",
     };
 
@@ -82,11 +89,12 @@ public sealed class SelItem
         return null;
     }
 
-    /// <summary>Vertex picks as a point reference (sketch point, or the end of an edge between named faces).</summary>
+    /// <summary>Vertex picks as a point reference (sketch point, the end of an edge between named faces, or a circle's center).</summary>
     public PointRef? ToPointRef()
     {
         if (Kind != SelKind.Vertex) return null;
         if (FeatureId != null) return new PointRef { Sketch = FeatureId, SketchPoint = SketchItem };
+        if (IsCenter && Edge != null) { var c = Edge.Clone(); return new PointRef { Center = c }; }
         if (Edge != null) { var e = Edge.Clone(); e.Hint = Point; return new PointRef { Vertex = e }; }
         return null;
     }
@@ -101,6 +109,8 @@ public sealed class SelItem
 
     public DirRef? ToDirRef()
     {
+        // an axis: of its round face, else of its circular edge
+        if (Kind == SelKind.Axis) return Name != null ? new DirRef { Face = ToFaceRef() } : Edge != null ? new DirRef { Edge = Edge.Clone() } : null;
         if (Kind == SelKind.Edge && Edge != null) return new DirRef { Edge = Edge.Clone() };
         if (Kind == SelKind.Face) return new DirRef { Face = ToFaceRef() };
         if (Kind == SelKind.Plane) return new DirRef { Plane = ToPlaneRef() };

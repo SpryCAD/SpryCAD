@@ -365,9 +365,11 @@ public sealed class CurveRef
 public sealed class PointRef
 {
     public EdgeRef? Vertex { get; set; }
+    /// <summary>The center of a circular edge (a circle or an arc of one): a hole's, a boss's.</summary>
+    public EdgeRef? Center { get; set; }
     public string? Sketch { get; set; }
     public int SketchPoint { get; set; }
-    public PointRef Clone() => new() { Vertex = Vertex?.Clone(), Sketch = Sketch, SketchPoint = SketchPoint };
+    public PointRef Clone() => new() { Vertex = Vertex?.Clone(), Center = Center?.Clone(), Sketch = Sketch, SketchPoint = SketchPoint };
 }
 
 public enum CombineOp { Add, Subtract, Common }

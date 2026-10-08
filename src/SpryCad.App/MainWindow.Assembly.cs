@@ -300,6 +300,16 @@ public partial class MainWindow : IAssemblyHost
         if (_hoverPick is { Component: null } hp) marked.Add((PlaneItem(hp.Face), ViewportControl.HoverColor));
         for (int i = 0; i < refs.Count; i++)
             if (refs[i].Component == null) marked.Add((PlaneItem(refs[i].Face), PickColor(i)));
+        // a round face picked: its axis drawn; a center: a cross there. While picking, a round face under the
+        // pointer shows its axis too (what a click on it mates)
+        static SelItem AxisItem((Vec3 a, Vec3 b) s) => new() { Kind = SelKind.Axis, Point = (s.a + s.b) * 0.5, Normal = (s.b - s.a).Normalized, AxisHalfLength = Vec3.Distance(s.a, s.b) / 2 };
+        for (int i = 0; i < refs.Count; i++)
+        {
+            if (refs[i].Component is not { } rc) continue;
+            if (refs[i].End != null) marked.Add((new SelItem { Kind = SelKind.Vertex, IsCenter = true, Point = a.Model.World(refs[i]).P }, PickColor(i)));
+            else if (refs[i].Kind == MateGeomKind.Axis && a.Model.AxisSegment(rc, refs[i].Face) is { } seg) marked.Add((AxisItem(seg), PickColor(i)));
+        }
+        if (_mating != null && _hoverFace is { } hov && a.Model.AxisSegment(hov.comp, hov.face) is { } hseg) marked.Add((AxisItem(hseg), ViewportControl.HoverColor));
         Viewport.Emphasis = Array.Empty<SelItem>();
         Viewport.Marked = marked;
         Viewport.Instances = inst;
@@ -560,7 +570,7 @@ public partial class MainWindow : IAssemblyHost
         _asmTree.SelectMateRow(id);
         if (SelectedMate() is { } m)
         {
-            string Of(MateRef r) => r.Component == null ? r.Face + " Plane" : $"{FindComponent(r.Component)?.Name} ({r.Face})";
+            string Of(MateRef r) => r.Component == null ? r.Face + " Plane" : $"{FindComponent(r.Component)?.Name} ({(r.End != null ? "center of " : "")}{r.Face})";
             Status($"{m.Name}: {Of(m.A)} and {Of(m.B)}{(m.Suppressed ? ", suppressed" : "")} (double-click to edit)");
         }
     }

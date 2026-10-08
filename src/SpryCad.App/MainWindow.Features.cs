@@ -230,6 +230,9 @@ public partial class MainWindow
     static SelItem? DirItem(DirRef? d, ModelState st)
     {
         if (d == null || d.Axis != null) return null;
+        // a round face or circular edge: shown as its axis, as it was picked
+        if (d.Face is { } rf && st.Bodies.OrderBy(b => b.Id == rf.Body ? 0 : 1).Select(b => ViewportControl.FaceAxis(b, rf.Name)).FirstOrDefault(a => a != null) is { } fa) return fa;
+        if (d.Edge is { } re && EdgeItem(re, st) is { EdgeCircular: true, BodyId: { } eb } && st.FindBody(eb) is { } body && ViewportControl.EdgeAxis(body, re) is { } ea) return ea;
         if (d.Edge != null) return EdgeItem(d.Edge, st);
         if (d.Face != null) return FaceItem(d.Face);
         if (d.Plane != null) return PlaneItem(d.Plane, st);
@@ -420,8 +423,8 @@ public partial class MainWindow
         // one box: a line of the profile's sketch, or an axis from the model (a cylindrical face, a straight or
         // circular edge); the X / Y / Z buttons; empty: the sketch's first centerline
         var st = StateForEdit(f, isNew);
-        var axBox = page.Selection(axisSec, "Axis", SelFilter.SketchSegment | SelFilter.Edge | SelFilter.Face,
-            "A centerline in the profile's sketch, a cylindrical face, a straight or circular edge, or an axis button", 1);
+        var axBox = page.Selection(axisSec, "Axis", SelFilter.SketchSegment | SelFilter.Edge | SelFilter.Face | SelFilter.Axis,
+            "A centerline in the profile's sketch, the axis of a cylindrical face or a circular edge (right-click: Select Axis), a straight edge, or an axis button", 1);
         if (f.Axis != null) { if (DirItem(f.Axis, st) is { } ai) axBox.Items.Add(ai); }
         else if (f.AxisEntity != 0) axBox.Items.Add(new SelItem { Kind = SelKind.SketchSegment, FeatureId = f.SketchId, SketchItem = f.AxisEntity });
         var axisLbl = new TextBlock { FontSize = UI.TypeScale.Small, Foreground = UI.Palette.TextMuted, TextWrapping = Avalonia.Media.TextWrapping.Wrap };
@@ -863,7 +866,7 @@ public partial class MainWindow
         var page = new PmPage("Linear Pattern", "lpattern");
         var st = StateForEdit(f, isNew);
         var d1 = page.Section("Direction 1");
-        var dirBox = page.Selection(d1, "Direction", SelFilter.Edge | SelFilter.Face | SelFilter.Plane, "Pattern direction: a linear edge, face, plane, or axis button", 1);
+        var dirBox = page.Selection(d1, "Direction", SelFilter.Edge | SelFilter.Face | SelFilter.Plane | SelFilter.Axis, "Pattern direction: a linear edge, face, plane, the axis of a round face, or axis button", 1);
         if (DirItem(f.Direction, st) is { } di) dirBox.Items.Add(di);
         var axisLbl = new TextBlock { FontSize = UI.TypeScale.Small, Foreground = UI.Palette.TextMuted };
         Action? axes1 = null;
@@ -900,7 +903,7 @@ public partial class MainWindow
         var page = new PmPage("Circular Pattern", "cpattern");
         var st = StateForEdit(f, isNew);
         var p = page.Section("Parameters");
-        var axBox = page.Selection(p, "Axis", SelFilter.Edge | SelFilter.Face | SelFilter.Plane, "Axis: a cylindrical face, circular or linear edge, or axis button", 1);
+        var axBox = page.Selection(p, "Axis", SelFilter.Edge | SelFilter.Face | SelFilter.Plane | SelFilter.Axis, "Axis: of a cylindrical face or circular edge (right-click: Select Axis), a linear edge, or axis button", 1);
         if (DirItem(f.Axis, st) is { } ai) axBox.Items.Add(ai);
         var axisLbl = new TextBlock { FontSize = UI.TypeScale.Small, Foreground = UI.Palette.TextMuted };
         Action? axes = null;
@@ -1046,8 +1049,8 @@ public partial class MainWindow
         var offsetRow = page.Number(r, "Offset", () => f.Offset, v => f.Offset = v, "dimension");
 
         var ax = page.Section("Axis");
-        var axisBox = page.Selection(ax, "Axis", SelFilter.Edge, "Linear edge (or choose X / Y / Z)", 1);
-        if (f.Axis?.Edge is { } ae) axisBox.Items.Add(new SelItem { Kind = SelKind.Edge, Edge = ae, BodyId = ae.Body, Point = ae.Hint });
+        var axisBox = page.Selection(ax, "Axis", SelFilter.Edge | SelFilter.Axis, "Linear edge, or the axis of a round face or circular edge (or choose X / Y / Z)", 1);
+        if (DirItem(f.Axis, st) is { } aItem) axisBox.Items.Add(aItem);
         page.Combo(ax, "Or axis", new List<(string, string)> { ("", "(selected edge)"), ("X", "X axis"), ("Y", "Y axis"), ("Z", "Z axis") },
             () => f.Axis?.Axis ?? "", v => { if (v != "") f.Axis = new DirRef { Axis = v }; });
         axisBox.Changed += () => { if (axisBox.Items.FirstOrDefault()?.ToDirRef() is { } dr) f.Axis = dr; };
@@ -1060,13 +1063,14 @@ public partial class MainWindow
         curveBox.Changed += () => { if (curveBox.Items.FirstOrDefault()?.ToCurveRef() is { } cr) f.Curve = cr; };
 
         var pt = page.Section("Point");
-        var pointBox = page.Selection(pt, "Point", SelFilter.Vertex, "Vertex or sketch point", 1);
+        var pointBox = page.Selection(pt, "Point", SelFilter.Vertex | SelFilter.Center, "Vertex, sketch point, or the center of a circle or arc", 1);
         if (f.Point is { } pr0)
         {
             Vec3 at = default;
             try { at = Resolver.ResolvePoint(pr0, st); } catch (FeatureException) { }
             pointBox.Items.Add(pr0.Sketch != null
                 ? new SelItem { Kind = SelKind.Vertex, FeatureId = pr0.Sketch, SketchItem = pr0.SketchPoint, Point = at }
+                : pr0.Center is { } pc ? new SelItem { Kind = SelKind.Vertex, Edge = pc, BodyId = pc.Body, Point = at, IsCenter = true }
                 : new SelItem { Kind = SelKind.Vertex, Edge = pr0.Vertex, BodyId = pr0.Vertex?.Body, Point = at });
         }
         pointBox.Changed += () => f.Point = pointBox.Items.FirstOrDefault()?.ToPointRef();
