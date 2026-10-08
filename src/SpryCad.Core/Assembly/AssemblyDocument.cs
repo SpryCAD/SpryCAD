@@ -88,7 +88,8 @@ public sealed class AssemblyDocument
     /// <summary>The cache key of a part revision, as configured (<see cref="Configurations.KeyOf"/>; "": as it is).</summary>
     public static string CacheKey(string partId, string? revision, string config = "") => partId + "/" + (revision ?? "none") + (config.Length > 0 ? "|" + config : "");
 
-    public string ToJson() => JsonSerializer.Serialize(this, Serialization.Options);
+    /// <summary>The document as JSON: indented as files are written, or compact (copies, undo snapshots).</summary>
+    public string ToJson(bool indented = true) => JsonSerializer.Serialize(this, indented ? Serialization.Options : Serialization.Compact);
 
     public static AssemblyDocument FromJson(string json)
     {
@@ -101,7 +102,7 @@ public sealed class AssemblyDocument
 
     public AssemblyDocument Clone()
     {
-        var d = FromJson(ToJson());
+        var d = FromJson(ToJson(indented: false));
         d.Files = new Dictionary<string, byte[]>(Files, StringComparer.Ordinal);
         d.Thumbnail = Thumbnail;
         return d;

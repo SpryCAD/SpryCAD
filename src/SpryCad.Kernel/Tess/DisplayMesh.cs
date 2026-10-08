@@ -195,16 +195,45 @@ public sealed class DisplayMesh
         foreach (var t in tris) runStart[t.face + 1]++;
         for (int fi = 0; fi < nf; fi++) runStart[fi + 1] += runStart[fi];
         var order = Enumerable.Range(0, nf).OrderBy(i => solid.Faces[i].Tag.Name, StringComparer.Ordinal).ToList();
-        // smooth normals of curved faces at each triangle corner, faces in parallel (on free-form surfaces each
-        // normal is a closest-point search)
+        // smooth normals of curved faces at each triangle corner, faces in parallel. On free-form surfaces each
+        // normal is a closest-point search and a point is a corner of about six triangles: each (point, surface)
+        // searched once, in parallel, then turned to each facet's side
         var cornerN = new Vec3[3 * nt];
+        var surfIdx = new Dictionary<SurfaceDef, int>(ReferenceEqualityComparer.Instance);
+        var slotOf = new Dictionary<(int p, int s), int>();
+        var slots = new List<(int p, SurfaceDef s)>();
+        var cornerSlot = new int[3 * nt];
+        for (int fi = 0; fi < nf; fi++)
+        {
+            var s = solid.Faces[fi].Tag.Surface;
+            if (!s.IsFreeForm) continue;
+            if (!surfIdx.TryGetValue(s, out var si)) surfIdx[s] = si = surfIdx.Count;
+            for (int k = runStart[fi]; k < runStart[fi + 1]; k++)
+            {
+                var (a, b, c, _) = tris[k];
+                for (int q = 0; q < 3; q++)
+                {
+                    var key = (q == 0 ? a : q == 1 ? b : c, si);
+                    if (!slotOf.TryGetValue(key, out var slot)) { slotOf[key] = slot = slots.Count; slots.Add((key.Item1, s)); }
+                    cornerSlot[3 * k + q] = slot;
+                }
+            }
+        }
+        var rawN = new Vec3?[slots.Count];
+        Parallel.For(0, slots.Count, i => rawN[i] = slots[i].s.RawNormal(pts[slots[i].p]));
         Parallel.For(0, nf, fi =>
         {
             var f = solid.Faces[fi];
             if (!f.Tag.Surface.IsCurved) return;
             var fn = f.Plane.Normal;
+            var freeForm = f.Tag.Surface.IsFreeForm;
             for (int k = runStart[fi]; k < runStart[fi + 1]; k++)
             {
+                if (freeForm)
+                {
+                    for (int q = 3 * k; q < 3 * k + 3; q++) cornerN[q] = SurfaceDef.Orient(rawN[cornerSlot[q]], fn);
+                    continue;
+                }
                 var (a, b, c, _) = tris[k];
                 cornerN[3 * k] = f.Tag.Surface.NormalAt(pts[a], fn);
                 cornerN[3 * k + 1] = f.Tag.Surface.NormalAt(pts[b], fn);

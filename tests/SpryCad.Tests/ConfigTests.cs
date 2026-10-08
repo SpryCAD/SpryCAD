@@ -415,6 +415,13 @@ static class ConfigTests
             t.Eq(regen.Rebuild(doc).Rebuilt, 0);
             doc.Equations[0].Expr = "90";
             t.True(regen.Rebuild(doc).Rebuilt > 0, "a new value rebuilds");
+            // back to the value before (undo): what was built for it is still there
+            doc.Equations[0].Expr = "100";
+            t.Eq(regen.Rebuild(doc).Rebuilt, 0);
+            doc.Equations[0].Expr = "90";
+            t.Eq(regen.Rebuild(doc).Rebuilt, 0);
+            regen.Invalidate();
+            t.Eq(regen.Rebuild(doc).Rebuilt, doc.Features.Count);
         });
     }
 }

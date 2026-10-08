@@ -135,14 +135,16 @@ public sealed class CadDocument
     {
         var gone = new HashSet<string>(ids);
         var result = new List<Feature>();
+        var jsons = Features.Select(JsonOf).ToList();
         bool grew = true;
         while (grew)
         {
             grew = false;
-            foreach (var f in Features)
+            for (int i = 0; i < Features.Count; i++)
             {
+                var f = Features[i];
                 if (gone.Contains(f.Id)) continue;
-                var json = JsonOf(f);
+                var json = jsons[i];
                 if (gone.Any(id => Refers(json, id)))
                 {
                     gone.Add(f.Id); result.Add(f); grew = true;
@@ -152,7 +154,7 @@ public sealed class CadDocument
         return result;
     }
 
-    public static string JsonOf(Feature f) => JsonSerializer.Serialize(f, typeof(Feature), Serialization.Options);
+    public static string JsonOf(Feature f) => JsonSerializer.Serialize(f, typeof(Feature), Serialization.Compact);
 
     /// <summary>
     /// Whether a feature's serialized definition refers to feature <paramref name="id"/>: "F7" as a whole value
@@ -166,7 +168,8 @@ public sealed class CadDocument
         (f is CircularPatternFeature cp && cp.Seeds.Contains(id)) ||
         (f is MirrorFeature mf && mf.Seeds.Contains(id)));
 
-    public string ToJson() => JsonSerializer.Serialize(this, Serialization.Options);
+    /// <summary>The document as JSON: indented as files are written, or compact (copies, undo snapshots).</summary>
+    public string ToJson(bool indented = true) => JsonSerializer.Serialize(this, indented ? Serialization.Options : Serialization.Compact);
     public static CadDocument FromJson(string json)
     {
         var d = JsonSerializer.Deserialize<CadDocument>(json, Serialization.Options) ?? throw new InvalidDataException("Empty document");
@@ -179,7 +182,7 @@ public sealed class CadDocument
     /// <summary>Deep copy of the history; embedded files and thumbnail are shared (they are never modified in place).</summary>
     public CadDocument Clone()
     {
-        var d = FromJson(ToJson());
+        var d = FromJson(ToJson(indented: false));
         d.Files = new Dictionary<string, byte[]>(Files, StringComparer.Ordinal);
         d.Thumbnail = Thumbnail;
         return d;
@@ -238,8 +241,11 @@ public static class Serialization
         },
     };
 
+    /// <summary>The same without indentation: JSON that stays in memory (copies, undo, cache keys), about half the size.</summary>
+    public static readonly JsonSerializerOptions Compact = new(Options) { WriteIndented = false };
+
     public static object CloneObject(object o, Type t)
-        => JsonSerializer.Deserialize(JsonSerializer.Serialize(o, t, Options), t, Options)!;
+        => JsonSerializer.Deserialize(JsonSerializer.Serialize(o, t, Compact), t, Compact)!;
 
     public static T Clone<T>(T o) where T : class => (T)CloneObject(o, typeof(T));
 }

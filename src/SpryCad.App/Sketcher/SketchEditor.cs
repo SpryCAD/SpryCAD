@@ -132,20 +132,24 @@ public sealed partial class SketchEditor : IViewportMode
         _vp.Redraw();
     }
 
-    /// <summary>Solves the sketch with dimension values evaluated from their expressions.</summary>
-    public void Resolve(IReadOnlyDictionary<int, Vec2>? drag = null)
+    /// <summary>
+    /// Solves the sketch with dimension values evaluated from their expressions. Without <paramref name="analyze"/>
+    /// (each move of a drag) the definition (the colors) is kept as it was: the drag's end analyses it again.
+    /// </summary>
+    public void Resolve(IReadOnlyDictionary<int, Vec2>? drag = null, bool analyze = true)
     {
         foreach (var c in Sk.Constraints)
             if (c.IsDimension && !c.Driven && !string.IsNullOrWhiteSpace(c.Expr) && Expr.TryEval(c.Expr, Lookup, out var v, out _))
                 c.Value = v;
-        Status = SketchSolver.Solve(Sk, drag);
+        var status = SketchSolver.Solve(Sk, drag, analyze);
+        if (analyze) Status = status;
         foreach (var c in Sk.Constraints) if (c.Driven) c.Value = SketchSolver.Measure(Sk, c);
         Changed?.Invoke();
     }
 
     void Snapshot()
     {
-        _undo.Add(System.Text.Json.JsonSerializer.Serialize(Sk, Serialization.Options));
+        _undo.Add(System.Text.Json.JsonSerializer.Serialize(Sk, Serialization.Compact));
         if (_undo.Count > 100) _undo.RemoveAt(0);
         _redo.Clear();
         Modified = true;
@@ -154,7 +158,7 @@ public sealed partial class SketchEditor : IViewportMode
     public bool Undo()
     {
         if (_undo.Count == 0) return false;
-        _redo.Add(System.Text.Json.JsonSerializer.Serialize(Sk, Serialization.Options));
+        _redo.Add(System.Text.Json.JsonSerializer.Serialize(Sk, Serialization.Compact));
         Restore(_undo[^1]); _undo.RemoveAt(_undo.Count - 1);
         return true;
     }
@@ -162,7 +166,7 @@ public sealed partial class SketchEditor : IViewportMode
     public bool Redo()
     {
         if (_redo.Count == 0) return false;
-        _undo.Add(System.Text.Json.JsonSerializer.Serialize(Sk, Serialization.Options));
+        _undo.Add(System.Text.Json.JsonSerializer.Serialize(Sk, Serialization.Compact));
         Restore(_redo[^1]); _redo.RemoveAt(_redo.Count - 1);
         return true;
     }
@@ -1171,7 +1175,7 @@ public sealed partial class SketchEditor : IViewportMode
         if (_dragCircle >= 0 && Sk.Entity(_dragCircle) is SkCircle circ)
         {
             circ.R = Math.Max(1e-6, Vec2.Distance(Sk.P(circ.Center), m));
-            Resolve();
+            Resolve(analyze: false);
             _vp.Redraw();
             return;
         }
@@ -1179,7 +1183,7 @@ public sealed partial class SketchEditor : IViewportMode
         {
             var delta = m - _downSketch;
             var targets = _dragOrigins.ToDictionary(kv => kv.Key, kv => kv.Value + delta);
-            Resolve(targets);
+            Resolve(targets, analyze: false);
             _vp.Redraw();
         }
     }

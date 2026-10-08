@@ -135,8 +135,14 @@ public sealed class ScrewSurface
 
     public (Vec3 S, Vec3 Su, Vec3 Sv) Partials(double u, double v)
     {
-        var g = Gen.Eval(v);
-        return (Motion.Move(u, g), Motion.Velocity(u, g), Motion.Turn(u, Gen.Deriv(v)));
+        // Move, Velocity and Turn of the motion with the frame coordinates and the turn's sine and cosine taken once
+        var m = Motion;
+        var l = m.Local(Gen.Eval(v)); var gd = Gen.Deriv(v);
+        double x = Vec3.Dot(gd, m.X), y = Vec3.Dot(gd, m.Y), z = Vec3.Dot(gd, m.A);
+        double c = Math.Cos(u), s = Math.Sin(u);
+        return (m.O + m.X * (c * l.X - s * l.Y) + m.Y * (s * l.X + c * l.Y) + m.A * (l.Z + m.K * u),
+                m.X * (-s * l.X - c * l.Y) + m.Y * (c * l.X - s * l.Y) + m.A * m.K,
+                m.X * (c * x - s * y) + m.Y * (s * x + c * y) + m.A * z);
     }
 
     /// <summary>Natural normal (Su × Sv) at (u, v).</summary>
@@ -146,7 +152,24 @@ public sealed class ScrewSurface
     /// Closest point of the surface to p: (u, v), the point and the distance. Seeds: for generator samples, the u
     /// whose turn brings the sample to p's angle on the right turn; then Gauss-Newton. A hint is tried first.
     /// </summary>
+    // the last unhinted query per thread (the signed distance and the normal of a point are usually asked together)
+    [ThreadStatic] static ScrewSurface? _lastSurf;
+    [ThreadStatic] static Vec3 _lastP;
+    [ThreadStatic] static (double u, double v, Vec3 c, double dist) _lastRes;
+
     public (double u, double v, Vec3 c, double dist) Closest(Vec3 p, double uHint = double.NaN, double vHint = double.NaN)
+    {
+        if (double.IsNaN(uHint) && double.IsNaN(vHint))
+        {
+            if (ReferenceEquals(_lastSurf, this) && _lastP == p) return _lastRes;
+            var r = ClosestCore(p, uHint, vHint);
+            _lastSurf = this; _lastP = p; _lastRes = r;
+            return r;
+        }
+        return ClosestCore(p, uHint, vHint);
+    }
+
+    (double u, double v, Vec3 c, double dist) ClosestCore(Vec3 p, double uHint, double vHint)
     {
         // a hint next to a point on the surface (walking along an edge): Newton from it lands on the point itself
         if (!double.IsNaN(uHint) && !double.IsNaN(vHint))
@@ -229,13 +252,22 @@ public sealed class ScrewSurface
     /// <summary>The box of the made part (the sweep's turns), padded.</summary>
     public Box3 Box(double pad)
     {
+        var b = (_sweptBox ??= new(SweptBox())).Value;
+        // a turn's chord sags inside the circle: grow by the sag of π/8 steps (and the pad)
+        var sag = MaxRadius * (1 - Math.Cos(Math.PI / 16)) + pad;
+        b.Add(b.Min - new Vec3(sag, sag, sag)); b.Add(b.Max + new Vec3(sag, sag, sag));
+        return b;
+    }
+
+    // the box of the generator samples at the sweep's steps (a ray cast asks for it every time; one reference, as
+    // parallel ray casts read it)
+    System.Runtime.CompilerServices.StrongBox<Box3>? _sweptBox;
+    Box3 SweptBox()
+    {
         var b = Box3.Empty;
         int nu = Math.Max(8, (int)Math.Ceiling((U1 - U0) / (Math.PI / 8)));
         for (int i = 0; i <= nu; i++)
             foreach (var g in _gs) b.Add(Motion.Move(U0 + (U1 - U0) * i / nu, g));
-        // a turn's chord sags inside the circle: grow by the sag of π/8 steps (and the pad)
-        var sag = MaxRadius * (1 - Math.Cos(Math.PI / 16)) + pad;
-        b.Add(b.Min - new Vec3(sag, sag, sag)); b.Add(b.Max + new Vec3(sag, sag, sag));
         return b;
     }
 

@@ -42,7 +42,19 @@ public sealed class Camera
         }
     }
 
-    public Matrix4x4 ViewProj => View * Projection;
+    public Matrix4x4 ViewProj => Cached().ViewProj;
+
+    // the view-projection and eye of the camera as it last was: picking projects every edge's points, and each
+    // would rebuild both matrices (the fields are set directly: the state they were made for is compared)
+    sealed record Derived((Quaternion, Vector3, float, bool, float, float, float, float) Key, Matrix4x4 ViewProj, Vector3 Eye, Vector3 Back);
+    Derived? _derived;
+    Derived Cached()
+    {
+        var key = (Rotation, Target, HalfHeight, Perspective, Fov, Width, Height, SceneRadius);
+        var d = _derived;
+        if (d != null && d.Key.Equals(key)) return d;
+        return _derived = new Derived(key, View * Projection, Eye, Back);
+    }
 
     /// <summary>World units per screen pixel at the target depth.</summary>
     public float PixelSize => HalfHeight * 2 / Math.Max(1, Height);
@@ -73,7 +85,7 @@ public sealed class Camera
     }
 
     /// <summary>Depth of a world point along the view direction.</summary>
-    public double DepthOf(Vec3 p) => -Vec3.Dot(p - V(Eye), V(Back));
+    public double DepthOf(Vec3 p) { var d = Cached(); return -Vec3.Dot(p - V(d.Eye), V(d.Back)); }
 
     public static Vec3 V(Vector3 v) => new(v.X, v.Y, v.Z);
     public static Vector3 F(Vec3 v) => new((float)v.X, (float)v.Y, (float)v.Z);

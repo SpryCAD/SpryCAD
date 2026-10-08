@@ -12,8 +12,20 @@ namespace SpryCad.Core.Regen;
 /// </summary>
 public sealed class Regenerator
 {
-    sealed record CacheEntry(ulong Key, ModelState State, FeatureStatus Status);
-    readonly List<CacheEntry> _cache = new();
+    // results by the hash of a feature and everything before it, not only the latest history: undo, redo and a
+    // preview's way back find what they built before. Kept: the least recently used dropped beyond two entries
+    // per feature (the history being built is always the most recent). Invalidate may come from another thread
+    // than the rebuild's: the cache is used under its lock, and a rebuild under way then adds nothing (Epoch)
+    sealed class CacheEntry(ulong key, ModelState state, FeatureStatus status)
+    {
+        public readonly ulong Key = key;
+        public readonly ModelState State = state;
+        public readonly FeatureStatus Status = status;
+        public long Used;
+    }
+    readonly Dictionary<ulong, CacheEntry> _cache = new();
+    long _uses;
+    int _epoch;
 
     /// <summary>Threads as each is set, or all modeled (exports) / all cosmetic (a lightweight view).</summary>
     public ThreadDisplay ThreadOverride { get; set; }
@@ -27,6 +39,8 @@ public sealed class Regenerator
     public RegenResult Rebuild(CadDocument doc, int? upTo = null, CancellationToken cancel = default, Action<RegenProgress>? progress = null)
     {
         var sw = Stopwatch.StartNew();
+        int epoch;
+        lock (_cache) epoch = _epoch;
         var (eqValues, eqErrors) = EvaluateEquations(doc);
         Func<string, double?> lookup = name => eqValues.TryGetValue(name, out var v) ? v : null;
 
@@ -45,23 +59,24 @@ public sealed class Regenerator
         for (int i = 0; i < count; i++)
         {
             var f = doc.Features[i];
-            var json = JsonSerializer.Serialize(f, typeof(Feature), Serialization.Options);
+            var json = CadDocument.JsonOf(f);
             key = Hash(key, json);
             // (the condition and what it uses are covered by the key: the equations and every feature before)
             var (suppressed, by, condError) = SuppressionOf(f, json, off, lookup);
             if (suppressed) off[f.Id] = f.Name;
             // a flat pattern also depends on the part's sheet metal settings
-            if (f is FlatPatternFeature) key = Hash(key, JsonSerializer.Serialize(doc.SheetMetal, Serialization.Options));
+            if (f is FlatPatternFeature) key = Hash(key, JsonSerializer.Serialize(doc.SheetMetal, Serialization.Compact));
             // a thread also on how threads are shown
             if (f is ThreadFeature) key = Hash(key, ThreadOverride.ToString());
-            if (i < _cache.Count && _cache[i].Key == key)
+            CacheEntry? hit;
+            lock (_cache) if (_cache.TryGetValue(key, out hit) && epoch == _epoch) hit.Used = ++_uses; else hit = null;
+            if (hit != null)
             {
-                state = _cache[i].State;
-                status[f.Id] = _cache[i].Status;
+                state = hit.State;
+                status[f.Id] = hit.Status;
                 states.Add(state);
                 continue;
             }
-            if (_cache.Count > i) _cache.RemoveRange(i, _cache.Count - i);
             cancel.ThrowIfCancellationRequested();
             var st = new FeatureStatus { Suppressed = suppressed, SuppressedBy = by, Error = condError };
             var fsw = Stopwatch.StartNew();
@@ -86,7 +101,12 @@ public sealed class Regenerator
             }
             st.Milliseconds = fsw.Elapsed.TotalMilliseconds;
             rebuilt++;
-            _cache.Add(new CacheEntry(key, state, st));
+            lock (_cache)
+                if (epoch == _epoch)
+                {
+                    _cache[key] = new CacheEntry(key, state, st) { Used = ++_uses };
+                    Trim(2 * doc.Features.Count + 8);
+                }
             status[f.Id] = st;
             states.Add(state);
         }
@@ -102,7 +122,17 @@ public sealed class Regenerator
         };
     }
 
-    public void Invalidate() => _cache.Clear();
+    public void Invalidate()
+    {
+        lock (_cache) { _cache.Clear(); _epoch++; }
+    }
+
+    // drops the least recently used entries beyond max (called under the lock)
+    void Trim(int max)
+    {
+        if (_cache.Count <= max) return;
+        foreach (var e in _cache.Values.OrderBy(e => e.Used).Take(_cache.Count - max).ToList()) _cache.Remove(e.Key);
+    }
 
     /// <summary>
     /// Whether a feature is built: not when suppressed by the user, while its Suppress When condition holds, or
@@ -121,7 +151,7 @@ public sealed class Regenerator
         }
         if (off.Count == 0) return (false, null, null);
         // a sketch goes with the plane or face it is on; geometry it took from the model stays, dangling
-        if (f is SketchFeature sk) json = JsonSerializer.Serialize(sk.Plane, Serialization.Options);
+        if (f is SketchFeature sk) json = JsonSerializer.Serialize(sk.Plane, Serialization.Compact);
         foreach (var (id, name) in off)
             if (CadDocument.Refers(json, id)) return (true, name, null);
         return (false, null, null);
@@ -138,7 +168,7 @@ public sealed class Regenerator
         var result = new Dictionary<string, string?>();
         foreach (var f in doc.Features)
         {
-            var (s, by, _) = SuppressionOf(f, JsonSerializer.Serialize(f, typeof(Feature), Serialization.Options), off, lookup);
+            var (s, by, _) = SuppressionOf(f, CadDocument.JsonOf(f), off, lookup);
             if (!s) continue;
             off[f.Id] = f.Name; result[f.Id] = by;
         }

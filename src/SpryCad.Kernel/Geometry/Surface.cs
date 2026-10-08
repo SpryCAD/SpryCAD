@@ -49,7 +49,13 @@ public sealed record SurfaceDef
     }
 
     /// <summary>Analytic outward normal at p, given the facet normal (used to pick the side).</summary>
-    public Vec3 NormalAt(Vec3 p, Vec3 facetNormal)
+    public Vec3 NormalAt(Vec3 p, Vec3 facetNormal) => Orient(RawNormal(p), facetNormal);
+
+    /// <summary>Whether a normal is a closest-point search (worth computing once per point).</summary>
+    public bool IsFreeForm => Kind is SurfaceKind.Pipe or SurfaceKind.BSpline or SurfaceKind.Offset or SurfaceKind.Screw;
+
+    /// <summary>The surface's normal direction at p, either side, not normalized (null for a plane).</summary>
+    public Vec3? RawNormal(Vec3 p)
     {
         Vec3 n;
         switch (Kind)
@@ -98,8 +104,15 @@ public sealed record SurfaceDef
                 n = Screw!.Normal(p);
                 break;
             default:
-                return facetNormal;
+                return null;
         }
+        return n;
+    }
+
+    /// <summary>A <see cref="RawNormal"/> turned to the facet's side (the facet normal where it is unusable).</summary>
+    public static Vec3 Orient(Vec3? raw, Vec3 facetNormal)
+    {
+        if (raw is not { } n) return facetNormal;
         n = n.Normalized;
         if (n.LengthSq < 0.5) return facetNormal;
         if (Vec3.Dot(n, facetNormal) < 0) n = -n;

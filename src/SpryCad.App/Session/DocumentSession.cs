@@ -187,7 +187,7 @@ public sealed class DocumentSession
     /// <summary>Call before mutating the document; records an undo snapshot.</summary>
     public void BeginChange()
     {
-        _undo.Add(Doc.ToJson());
+        _undo.Add(Doc.ToJson(indented: false));
         if (_undo.Count > 200) _undo.RemoveAt(0);
         _redo.Clear();
     }
@@ -216,7 +216,7 @@ public sealed class DocumentSession
     public void Undo()
     {
         if (_undo.Count == 0) return;
-        _redo.Add(Doc.ToJson());
+        _redo.Add(Doc.ToJson(indented: false));
         Restore(_undo[^1]);
         _undo.RemoveAt(_undo.Count - 1);
         Dirty = true;
@@ -227,7 +227,7 @@ public sealed class DocumentSession
     public void Redo()
     {
         if (_redo.Count == 0) return;
-        _undo.Add(Doc.ToJson());
+        _undo.Add(Doc.ToJson(indented: false));
         Restore(_redo[^1]);
         _redo.RemoveAt(_redo.Count - 1);
         Dirty = true;
