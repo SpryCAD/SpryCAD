@@ -371,6 +371,7 @@ public partial class MainWindow
                     // the ✕ on the row under the mouse (and the selected one, see below)
                     item.PointerEntered += (_, _) => close.Opacity = 1;
                     item.PointerExited += (_, _) => close.Opacity = t == _tab ? 1 : 0;
+                    AllowPartDrag(list, item, t);
                     row = new PartRow(item, title, path, img, warning, close);
                     _partRows[t] = row;
                     list.Items.Insert(Math.Min(i, list.Items.Count), row.Item);

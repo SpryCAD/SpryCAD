@@ -54,6 +54,7 @@ public partial class MainWindow : IAssemblyHost
                 case "delete": DeleteComponent(); break;
             }
         };
+        InitPartDrop();
         return new Panel { Children = { Tree, _asmTree } };
     }
 
