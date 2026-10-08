@@ -41,10 +41,11 @@ OutputBaseFilename=SpryCAD_setup_v{#AppVer}
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
-; the brand on the Finished page and at the top right of the others (made by build\make-icon.ps1): each a list of
-; sizes, from which Inno Setup picks the one for the screen's DPI
-WizardImageFile=wizard-164x314.bmp,wizard-192x386.bmp,wizard-246x459.bmp,wizard-273x556.bmp,wizard-328x604.bmp,wizard-383x707.bmp,wizard-410x797.bmp
-WizardSmallImageFile=wizard-small-55x55.bmp,wizard-small-64x68.bmp,wizard-small-83x80.bmp,wizard-small-92x97.bmp,wizard-small-110x106.bmp,wizard-small-119x123.bmp,wizard-small-138x140.bmp
+; the brand on the Finished page and at the top right of the others, drawn at build time (build\make-icon.ps1
+; -Wizard, run by make-installer.ps1 before compiling): each a list of sizes, from which Inno Setup picks the one
+; for the screen's DPI
+WizardImageFile=..\publish\wizard\wizard-164x314.bmp,..\publish\wizard\wizard-192x386.bmp,..\publish\wizard\wizard-246x459.bmp,..\publish\wizard\wizard-273x556.bmp,..\publish\wizard\wizard-328x604.bmp,..\publish\wizard\wizard-383x707.bmp,..\publish\wizard\wizard-410x797.bmp
+WizardSmallImageFile=..\publish\wizard\wizard-small-55x55.bmp,..\publish\wizard\wizard-small-64x68.bmp,..\publish\wizard\wizard-small-83x80.bmp,..\publish\wizard\wizard-small-92x97.bmp,..\publish\wizard\wizard-small-110x106.bmp,..\publish\wizard\wizard-small-119x123.bmp,..\publish\wizard\wizard-small-138x140.bmp
 ; few pages: no license to accept (MIT asks for none, and About links to it), no Ready page (the options are the
 ; last choice), the folder asked on a first install only
 DisableReadyPage=yes

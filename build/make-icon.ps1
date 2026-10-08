@@ -7,7 +7,9 @@
 # and their 256 px frames for Linux (installer\linux\sprycad.png, application-x-sprycad-part.png, -assembly.png).
 # Windows only (System.Drawing). Run from the repo root:
 #   build\make-icon.ps1 [-PreviewDir <folder for PNGs of every frame>]
-param([string]$PreviewDir)
+# With -Wizard it draws the installer's wizard images instead, into publish\wizard: build\make-installer.ps1 does that
+# before compiling, so they are not kept in the repository.
+param([string]$PreviewDir, [switch]$Wizard)
 Add-Type -AssemblyName System.Drawing
 $root = Split-Path -Parent $PSScriptRoot
 
@@ -147,11 +149,13 @@ function WriteIcon($frames, $ico, $png, $name) {
 
 $assets = Join-Path $root 'src\SpryCad.App\Assets'
 $linux = Join-Path $root 'installer\linux'
+if (-not $Wizard) {
 WriteIcon (Frames { param($g, $px) Logo $g $px }) (Join-Path $assets 'SpryCAD.ico') (Join-Path $linux 'sprycad.png') 'SpryCAD'
 WriteIcon (Frames { param($g, $px) FileIcon $g $px 'part' }) (Join-Path $assets 'SpryCADPart.ico') (Join-Path $linux 'application-x-sprycad-part.png') 'SpryCADPart'
 WriteIcon (Frames { param($g, $px) FileIcon $g $px 'assembly' }) (Join-Path $assets 'SpryCADAssembly.ico') (Join-Path $linux 'application-x-sprycad-assembly.png') 'SpryCADAssembly'
+}
 
-# The installer's wizard images (installer\wizard-*.bmp, 24-bit as Inno Setup wants), at each size it picks from for
+# The installer's wizard images (publish\wizard\*.bmp with -Wizard; 24-bit, as Inno Setup wants), at each size it picks from for
 # the screen's DPI: the side banner of its Welcome and Finished pages (the brand teal, the S, the name, and a part
 # made in SpryCAD: the spur gear sample's own preview), and the small image at the top right of the other pages (the
 # app's tile on the header's white).
@@ -218,13 +222,17 @@ function WizardImages($draw, $sizes, $name) {
     $g.SmoothingMode = 'AntiAlias'; $g.PixelOffsetMode = 'HighQuality'; $g.TextRenderingHint = 'AntiAliasGridFit'
     & $draw $g $sz[0] $sz[1]
     $g.Dispose()
-    $file = Join-Path $root "installer\$name-$($sz[0])x$($sz[1]).bmp"
+    $file = Join-Path $wizardDir "$name-$($sz[0])x$($sz[1]).bmp"
     $bmp.Save($file, [System.Drawing.Imaging.ImageFormat]::Bmp); $bmp.Dispose()
     $files += $file
   }
   Write-Host ($files -join "`n")
 }
 
-# the sizes Inno Setup chooses among (100% to 250% DPI)
-WizardImages { param($g, $w, $h) Banner $g $w $h } @(@(164, 314), @(192, 386), @(246, 459), @(273, 556), @(328, 604), @(383, 707), @(410, 797)) 'wizard'
-WizardImages { param($g, $w, $h) SmallImage $g $w $h } @(@(55, 55), @(64, 68), @(83, 80), @(92, 97), @(110, 106), @(119, 123), @(138, 140)) 'wizard-small'
+if ($Wizard) {
+  $wizardDir = Join-Path $root 'publish\wizard'
+  [System.IO.Directory]::CreateDirectory($wizardDir) | Out-Null
+  # the sizes Inno Setup chooses among (100% to 250% DPI)
+  WizardImages { param($g, $w, $h) Banner $g $w $h } @(@(164, 314), @(192, 386), @(246, 459), @(273, 556), @(328, 604), @(383, 707), @(410, 797)) 'wizard'
+  WizardImages { param($g, $w, $h) SmallImage $g $w $h } @(@(55, 55), @(64, 68), @(83, 80), @(92, 97), @(110, 106), @(119, 123), @(138, 140)) 'wizard-small'
+}

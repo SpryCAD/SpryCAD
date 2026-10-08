@@ -59,7 +59,12 @@ Write-Host "== generating demo parts into $demos ==" -ForegroundColor Cyan
 & dotnet run --project (Join-Path $root 'tests\SpryCad.Tests') -c Release -- demos $demos
 if ($LASTEXITCODE -ne 0) { throw "demo generation failed with exit code $LASTEXITCODE" }
 
-# 5) Compile.
+# 5) The wizard's images (the branded banner and corner tile, at each DPI size), drawn into publish\wizard.
+Write-Host "== drawing the wizard images ==" -ForegroundColor Cyan
+& (Join-Path $PSScriptRoot 'make-icon.ps1') -Wizard
+if (-not $?) { throw "drawing the wizard images failed" }
+
+# 6) Compile.
 $iss = Join-Path $root 'installer\sprycad.iss'
 Write-Host "== compiling installer ($iscc) ==" -ForegroundColor Cyan
 & $iscc "/DAppVer=$ver" "/DAppVerNum=$verNum" $iss
