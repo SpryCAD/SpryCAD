@@ -365,11 +365,11 @@ public sealed partial class SketchEditor : IViewportMode
     /// Projects model edges into the sketch (<see cref="SketchConvert"/>), kept on them as the model changes: exact where the model has
     /// its curves; edges known only by their display polyline come as fixed lines.
     /// </summary>
-    public int ConvertEdges(IEnumerable<(Kernel.Native.NEdge edge, string bodyId)> exact, IEnumerable<TopoEdge> meshOnly)
+    public int ConvertEdges(IEnumerable<SketchConvert.Request> exact, IEnumerable<TopoEdge> meshOnly)
     {
         Snapshot();
         int created = 0;
-        foreach (var (e, body) in exact) if (SketchConvert.Edge(Sk, Frame, e, body)) created++;
+        created += SketchConvert.Apply(Sk, Frame, exact);
         foreach (var e in meshOnly)
         {
             var pts = new List<Vec2> { Frame.ToLocal(e.Segs[0].A) };

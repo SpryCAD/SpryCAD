@@ -41,8 +41,27 @@ public sealed class SkConvertLink
     /// <summary>Which piece of the edge (a curve with no exact sketch equivalent is fitted with several), of how many.</summary>
     public int Piece { get; set; }
     public int Of { get; set; } = 1;
+    /// <summary>The <see cref="SkConvertGroup"/> (a face or chain converted as a whole) it came from; null for an edge picked alone.</summary>
+    public int? Group { get; set; }
 
     [JsonIgnore] public string Key => $"{Edge.Body}|{Edge.A}|{Edge.B}|{Edge.Hint.X:R},{Edge.Hint.Y:R},{Edge.Hint.Z:R}";
+}
+
+/// <summary>
+/// A face (all its edges) or a tangent chain converted as a whole: when the model changes how many edges it has
+/// (a gear given more teeth), its geometry is converted again from what it is now, not followed edge by edge.
+/// </summary>
+public sealed class SkConvertGroup
+{
+    public int Id { get; set; }
+    public string Body { get; set; } = "";
+    /// <summary>The face whose edges were converted (every face of the body by that name).</summary>
+    public string? Face { get; set; }
+    /// <summary>The edge a tangent chain was picked by.</summary>
+    public SpryCad.Core.Model.EdgeRef? Chain { get; set; }
+    /// <summary>How many edges it had when converted (fewer entities now: some were deleted, and stay so).</summary>
+    public int Edges { get; set; }
+    public SkConvertGroup Clone() { var g = (SkConvertGroup)MemberwiseClone(); g.Chain = Chain?.Clone(); return g; }
 }
 
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "$type")]
@@ -184,6 +203,8 @@ public sealed class Sketch
     public List<SkConstraint> Constraints { get; set; } = new();
     /// <summary>Sketch fillets (null when none, so sketches without them are saved as before).</summary>
     public List<SkFillet>? Fillets { get; set; }
+    /// <summary>What Convert Entities was given (a face, a chain), converted again as it changes (null when none).</summary>
+    public List<SkConvertGroup>? ConvertGroups { get; set; }
     public int NextId { get; set; } = 1;
 
     public int NewId() => NextId++;
@@ -218,6 +239,7 @@ public sealed class Sketch
         Entities = Entities.Select(e => e.Clone()).ToList(),
         Constraints = Constraints.Select(c => c.Clone()).ToList(),
         Fillets = Fillets?.Select(f => f.Clone()).ToList(),
+        ConvertGroups = ConvertGroups?.Select(g => g.Clone()).ToList(),
         NextId = NextId,
     };
 

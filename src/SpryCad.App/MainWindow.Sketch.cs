@@ -460,8 +460,8 @@ public partial class MainWindow
     void ConvertOk()
     {
         if (!Converting || _convertBox is not { } box) return;
-        var (exact, mesh) = ConvertTargets(box.Items, _convertChain);
-        if (exact.Count + mesh.Count == 0) { Status("Pick model edges or faces to convert."); return; }
+        var (exact, mesh, count) = ConvertTargets(box.Items, _convertChain);
+        if (count == 0) { Status("Pick model edges or faces to convert."); return; }
         _sketch!.ConvertEdges(exact, mesh);
         EndConvert();
     }
@@ -490,18 +490,18 @@ public partial class MainWindow
     void UpdateConvertCount()
     {
         if (_convertCount == null || _convertBox == null) return;
-        var (exact, mesh) = ConvertTargets(_convertBox.Items, _convertChain);
-        var n = exact.Count + mesh.Count;
+        var (_, _, n) = ConvertTargets(_convertBox.Items, _convertChain);
         _convertCount.Text = n == 0 ? "Nothing picked yet." : $"{n} edge{(n == 1 ? "" : "s")} to convert.";
     }
 
     /// <summary>
-    /// The model edges the picks stand for: exact ones (the bodies' curves) where the model has them, else the
-    /// display edges. A face gives all its edges; with <paramref name="chain"/> an edge brings its tangent chain.
+    /// What the picks stand for: faces, chains and edges of the bodies' exact model (converted as picked, so a face
+    /// or chain is converted again as the model changes it), else display edges. With <paramref name="chain"/> an
+    /// edge brings its tangent chain. Also how many edges that is.
     /// </summary>
-    (List<(Kernel.Native.NEdge edge, string bodyId)> exact, List<TopoEdge> mesh) ConvertTargets(IEnumerable<SelItem> picks, bool chain)
+    (List<SketchConvert.Request> exact, List<TopoEdge> mesh, int count) ConvertTargets(IEnumerable<SelItem> picks, bool chain)
     {
-        var exact = new List<(Kernel.Native.NEdge edge, string bodyId)>();
+        var exact = new List<SketchConvert.Request>();
         var mesh = new List<TopoEdge>();
         var st = Session.DisplayResult?.State;
         foreach (var s in picks)
@@ -511,11 +511,7 @@ public partial class MainWindow
             var nb = body.Solid.Native;
             if (s.Kind == SelKind.Face)
             {
-                if (nb != null)
-                {
-                    nb.Link();
-                    exact.AddRange(nb.Faces.Where(f => f.Tag.Name == s.Name).SelectMany(f => f.Coedges).Select(c => (c.Edge, body.Id)));
-                }
+                if (nb != null && s.Name != null) exact.Add(new SketchConvert.Request(nb, body.Id, Face: s.Name));
                 else mesh.AddRange(body.Solid.Topology.Edges.Where(e => e.FaceA == s.Name || e.FaceB == s.Name));
                 continue;
             }
@@ -523,10 +519,11 @@ public partial class MainWindow
             Kernel.Native.NEdge? ne = null;
             if (nb != null && s.Edge != null && st != null)
                 try { ne = Resolver.ResolveNativeEdge(s.Edge, st)?.edge; } catch { /* not found: the display edge */ }
-            if (ne != null) exact.AddRange((chain ? SketchConvert.TangentChain(nb!, ne) : new() { ne }).Select(x => (x, body.Id)));
+            if (ne != null) exact.Add(new SketchConvert.Request(nb!, body.Id, Edge: ne, Chain: chain));
             else if (s.EdgeIndex >= 0 && s.EdgeIndex < body.Solid.Topology.Edges.Count) mesh.Add(body.Solid.Topology.Edges[s.EdgeIndex]);
         }
-        return (exact.DistinctBy(x => x.edge).ToList(), mesh.Distinct().ToList());
+        mesh = mesh.Distinct().ToList();
+        return (exact, mesh, exact.SelectMany(r => r.Edges()).Distinct().Count() + mesh.Count);
     }
 
     void OffsetEntities()

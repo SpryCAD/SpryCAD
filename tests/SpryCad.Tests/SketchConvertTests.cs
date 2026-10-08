@@ -94,6 +94,40 @@ static class SketchConvertTests
             GC.KeepAlive(plate);
         });
 
+        t.Test("Convert Entities: a converted face follows a change in its edges (a gear given other tooth counts)", () =>
+        {
+            var dir = AppContext.BaseDirectory;
+            while (dir != null && !Directory.Exists(Path.Combine(dir, "samples"))) dir = Path.GetDirectoryName(dir);
+            var doc = CadDocument.Load(Path.Combine(dir!, "samples", "demos", "spur-gear.sprt"));
+            var regen = new Regenerator();
+            var r0 = regen.Rebuild(doc);
+            var gear = r0.State.Bodies.Single(b => b.Id == "F2");
+            var frame = new Frame(new Vec3(0, 0, 30), Vec3.UnitX, Vec3.UnitY, Vec3.UnitZ);
+            var sk = new Sketch();
+            var edges = SketchConvert.Face(sk, frame, gear.Solid.Native!, gear.Id, "F2.End");
+            t.True(edges > 100 && sk.ConvertGroups?.Count == 1, $"{edges} edges in one group");
+            var plane = doc.AddFeature(new PlaneFeature { Base = PlaneRef.Front, Offset = "30" });
+            var s = doc.AddFeature(new SketchFeature { Plane = new PlaneRef { Feature = plane.Id }, Sketch = sk });
+            doc.AddFeature(new ExtrudeFeature { SketchId = s.Id, Depth = "2" });
+            doc = CadDocument.FromJson(doc.ToJson()); // saved and opened again
+            var z = doc.Equations.First(q => q.Name == "z");
+            var count = new Dictionary<string, int>();
+            foreach (var nz in new[] { z.Expr, "30", "44" })
+            {
+                z.Expr = nz;
+                var r = regen.Rebuild(doc);
+                t.True(r.Status.Values.All(x => x.Error == null), $"z = {nz}: rebuilt: " + string.Join("; ", r.Status.Values.Select(x => x.Error).OfType<string>()));
+                var res = r.State.Sketches[s.Id];
+                t.True(!r.Status[s.Id].Warnings.Any(), $"z = {nz}: " + string.Join("; ", r.Status[s.Id].Warnings));
+                t.Eq(res.Solve?.Status, SketchStatus.FullyDefined);
+                // the face's outline as it is now: its edges converted again, one each
+                var faceEdges = r.State.Bodies.Single(b => b.Id == "F2").Solid.Native!.Faces.Where(f => f.Tag.Name == "F2.End").SelectMany(f => f.Coedges).Select(c => c.Edge).Distinct().Count();
+                t.Eq(res.Sketch.Entities.Select(e => e.Link!.Key).Distinct().Count(), faceEdges);
+                count[nz] = faceEdges;
+            }
+            t.True(count.Values.Distinct().Count() == 3, "the tooth counts gave other outlines");
+        });
+
         t.Test("Convert Entities: a hole's rim as a circle; a tilted circle as fitted arcs within tolerance", () =>
         {
             var into = new Sketch();
