@@ -28,6 +28,10 @@
   <Style Selector="Button.cmd:disabled TextBlock">
     <Setter Property="Foreground" Value="#FFA0A8B4" />
   </Style>
+  <Style Selector="Button.cmd:disabled /template/ ContentPresenter">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderBrush" Value="Transparent" />
+  </Style>
 
   <!-- small toolbar buttons -->
   <Style Selector="Button.tb">
@@ -45,6 +49,14 @@
   <Style Selector="Button.tb.active /template/ ContentPresenter">
     <Setter Property="Background" Value="#FFCFE2F8" />
     <Setter Property="BorderBrush" Value="#FF5C9AE0" />
+  </Style>
+  <!-- disabled: no fill (the theme's grey made an unavailable Undo look pressed), the icon faded instead -->
+  <Style Selector="Button.tb:disabled /template/ ContentPresenter">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderBrush" Value="Transparent" />
+  </Style>
+  <Style Selector="Button.tb:disabled">
+    <Setter Property="Opacity" Value="0.4" />
   </Style>
 
   <!-- the buttons of a card (UI/Card.cs): the one with the keyboard has a blue ring (Enter presses it). The ring is

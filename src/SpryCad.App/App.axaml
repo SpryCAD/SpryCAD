@@ -4,10 +4,11 @@
              RequestedThemeVariant="Light">
   <Application.Styles>
     <!-- a fixed accent (check boxes, radio buttons, focus lines, list selections) rather than the system's, so the
-         app looks the same on every PC; the menu check boxes (MainWindow.Commands.cs) take it from here too -->
+         app looks the same on every PC; the menu check boxes (MainWindow.Commands.cs) take it from here too. It is
+         the blue of the app's own selections and focus rings (UI/Styles.axaml), so the theme's controls match them -->
     <FluentTheme DensityStyle="Compact">
       <FluentTheme.Palettes>
-        <ColorPaletteResources x:Key="Light" Accent="#FF3D3D3D" />
+        <ColorPaletteResources x:Key="Light" Accent="#FF2F7BD6" />
       </FluentTheme.Palettes>
     </FluentTheme>
     <StyleInclude Source="avares://SpryCAD/UI/Styles.axaml" />

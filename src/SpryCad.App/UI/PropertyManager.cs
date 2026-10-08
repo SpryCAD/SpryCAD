@@ -56,6 +56,10 @@ public sealed class PmSelectionBox
 /// </summary>
 public sealed class PmPage
 {
+    /// <summary>The OK / Cancel icon colors, shared with the confirmation corner so the pair looks the same in both.</summary>
+    public static readonly IBrush OkBrush = new SolidColorBrush(Color.FromRgb(20, 150, 40));
+    public static readonly IBrush CancelBrush = new SolidColorBrush(Color.FromRgb(200, 40, 40));
+
     public string Title { get; }
     public string Icon { get; }
     public Control View => _root;
@@ -89,10 +93,10 @@ public sealed class PmPage
         if (showOkCancel)
         {
             var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, Margin = new Thickness(0, 6, 0, 0) };
-            var ok = new Button { Content = Icons.Make("ok", 18, new SolidColorBrush(Color.FromRgb(20, 150, 40))), Classes = { "tb" } };
+            var ok = new Button { Content = Icons.Make("ok", 18, OkBrush), Classes = { "tb" } };
             ToolTip.SetTip(ok, "OK (Enter)");
             ok.Click += (_, _) => OnOk?.Invoke();
-            var cancel = new Button { Content = Icons.Make("cancel", 18, new SolidColorBrush(Color.FromRgb(200, 40, 40))), Classes = { "tb" } };
+            var cancel = new Button { Content = Icons.Make("cancel", 18, CancelBrush), Classes = { "tb" } };
             ToolTip.SetTip(cancel, "Cancel (Esc)");
             cancel.Click += (_, _) => OnCancel?.Invoke();
             buttons.Children.Add(ok); buttons.Children.Add(cancel);

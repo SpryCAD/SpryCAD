@@ -103,7 +103,7 @@ public partial class MainWindow
         Viewport.Mode = _sketch;
         Viewport.Hover = null;
         ShowTab("Sketch");
-        ShowConfirmCorner(() => ExitSketch(true), DiscardSketch, "Exit Sketch", "Discard changes");
+        ShowConfirmCorner(() => ExitSketch(true), DiscardSketch, "Exit Sketch", "Discard changes", okIcon: "exitsketch");
         BuildSketchPage();
         // a new sketch turns to its plane; an existing one also zooms to fit its geometry and its dimensions
         Viewport.NormalTo(frame, isNew ? null : SketchFit(sf.Sketch, frame));
@@ -480,7 +480,7 @@ public partial class MainWindow
         if (!Converting) return;
         _convertPage = null; _convertBox = null; _convertCount = null;
         Viewport.Emphasis = Array.Empty<SelItem>();
-        ShowConfirmCorner(() => ExitSketch(true), DiscardSketch, "Exit Sketch", "Discard changes");
+        ShowConfirmCorner(() => ExitSketch(true), DiscardSketch, "Exit Sketch", "Discard changes", okIcon: "exitsketch");
         BuildSketchPage();
         Viewport.Redraw();
     }
@@ -562,13 +562,17 @@ public partial class MainWindow
     // ------------------------------------------------------------------------------------------
     // confirmation corner
 
-    void ShowConfirmCorner(Action ok, Action cancel, string okTip, string cancelTip)
+    /// <summary>
+    /// The OK / Cancel pair at the graphics area's top right. OK is the PropertyManager's green check, except in a
+    /// sketch, where it is the Exit Sketch icon (<paramref name="okIcon"/>), as the command bar's button is.
+    /// </summary>
+    void ShowConfirmCorner(Action ok, Action cancel, string okTip, string cancelTip, string okIcon = "ok")
     {
         ConfirmBar.Children.Clear();
-        var okB = new Button { Classes = { "tb" }, Content = Icons.Make("exitsketch", 26) };
+        var okB = new Button { Classes = { "tb" }, Content = okIcon == "ok" ? Icons.Make("ok", 24, PmPage.OkBrush) : Icons.Make(okIcon, 24) };
         ToolTip.SetTip(okB, okTip);
         okB.Click += (_, _) => ok();
-        var cb = new Button { Classes = { "tb" }, Content = Icons.Make("cancel", 22, new SolidColorBrush(Color.FromRgb(200, 40, 40))) };
+        var cb = new Button { Classes = { "tb" }, Content = Icons.Make("cancel", 24, PmPage.CancelBrush) };
         ToolTip.SetTip(cb, cancelTip);
         cb.Click += (_, _) => cancel();
         ConfirmBar.Children.Add(okB);
