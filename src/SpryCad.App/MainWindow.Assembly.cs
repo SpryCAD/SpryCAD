@@ -259,6 +259,7 @@ public partial class MainWindow : IAssemblyHost
     public void RefreshAssemblyScene()
     {
         if (Asm is not { } a) return;
+        UpdateConfigureButton();
         var inst = new List<MeshInstance>();
         var threads = new List<Core.Regen.CosmeticThread>();
         var box = Box3.Empty;
@@ -321,9 +322,29 @@ public partial class MainWindow : IAssemblyHost
         Tip("Lightweight / Resolve\nShows the selected part's components from the assembly's copy (no rebuild: fast for big assemblies), or from the part again.");
         Cmd("configure", "Configure", () => _ = ConfigureComponent());
         Tip("Configure\nSets the selected component's part parameters for this instance: a design table's row (a screw's size), user-facing variables (its length). One part file, many configurations.");
+        _configureButton = (Button)CommandBar.Children[^1];
+        ToolTip.SetShowOnDisabled(_configureButton, true); // greyed out: still says what it is for
+        UpdateConfigureButton(force: true);
         Sep();
         Cmd("open", "Open\nPart", () => { if (Asm?.Selected is { } id) OpenComponent(id); });
         Tip("Open Part\nOpens the selected component's part in a tab of its own (double-click does too).");
+    }
+
+    Button? _configureButton;
+    string? _configureFor;
+
+    /// <summary>
+    /// The Assembly tab's Configure, as the component menu's: only for a selected component whose part has something
+    /// to configure (a design table, user-facing variables). Looked up once per selection, since finding the part may
+    /// read its file.
+    /// </summary>
+    void UpdateConfigureButton(bool force = false)
+    {
+        if (_configureButton == null) return;
+        var id = Asm?.Selected;
+        if (!force && id == _configureFor) return;
+        _configureFor = id;
+        _configureButton.IsEnabled = FindComponent(id) is { } c && Asm!.Model.PartDocument(c)?.UserParameters().Count > 0;
     }
 
     // ------------------------------------------------------------------------------------------
