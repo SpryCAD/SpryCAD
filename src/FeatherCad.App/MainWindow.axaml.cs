@@ -216,6 +216,7 @@ public partial class MainWindow : Window
         Viewport.Bodies = state.Bodies;
         Viewport.PreviewBodies = preview;
         Viewport.BendLines = BendLinesOf(state);
+        Viewport.CosmeticThreads = state.Cosmetics.Values.ToList();
 
         // planes
         var b = state.Bounds;

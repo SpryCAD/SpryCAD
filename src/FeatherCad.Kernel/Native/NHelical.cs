@@ -11,7 +11,7 @@ public static class NHelical
     /// <summary>
     /// Sweeps the regions (in <paramref name="frame"/>'s plane) about the axis through <paramref name="axisOrigin"/>
     /// along <paramref name="axisDir"/>, turning <paramref name="angle"/> radians (positive) while advancing
-    /// <paramref name="lead"/> per turn along the axis (negative: a left-hand helix). Faces: prefix.H.&lt;segment&gt;,
+    /// <paramref name="lead"/> per turn along the axis (negative: a left-hand helix, advancing along the axis all the same). Faces: prefix.H.&lt;segment&gt;,
     /// caps prefix.Start and prefix.End.
     /// <para>
     /// A run-out: the end runs on in a straight line, <paramref name="exitLength"/> long, or until the whole profile
@@ -48,7 +48,10 @@ public static class NHelical
         // a profile in a plane through the axis taller than the lead would run into its next turn
         if (Math.Abs(Vec3.Dot(n, a)) < 1e-9 && hMax - hMin >= Math.Abs(lead) - 1e-9 * scale && angle > 2 * Math.PI - 1e-9)
             throw new ArgumentException("the profile is taller than the pitch: neighbouring turns would overlap");
-        var motion = ScrewMotion.About(axisOrigin, a, lead, refDir);
+        // left hand: turning the other way (the mirrored frame) while advancing the same way (a plain negative lead
+        // would turn the same way and advance backwards: a left-hand helix too, but behind the profile)
+        var motion = ScrewMotion.About(axisOrigin, a, Math.Abs(lead), refDir);
+        if (lead < 0) motion = motion with { Y = -motion.Y };
         var end = motion.At(angle);
         // the start cap faces against the motion, the end cap with it
         var centre = frame.ToWorld(loops[0].segs[0].A);

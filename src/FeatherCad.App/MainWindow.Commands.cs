@@ -156,6 +156,10 @@ public partial class MainWindow
                 StyleItem("Hidden Lines Visible", DisplayStyle.HiddenLinesVisible),
                 StyleItem("Wireframe", DisplayStyle.Wireframe)),
             Toggle("Perspective", () => Viewport.Camera.Perspective, () => { Viewport.Camera.Perspective = !Viewport.Camera.Perspective; Viewport.Redraw(); }),
+            Sub("_Threads",
+                Toggle("As Set in Each Thread", () => Session.Threads == ThreadDisplay.AsSet, () => Session.Threads = ThreadDisplay.AsSet, radio: true),
+                Toggle("All Modeled", () => Session.Threads == ThreadDisplay.Modeled, () => Session.Threads = ThreadDisplay.Modeled, radio: true),
+                Toggle("All Cosmetic (lightweight)", () => Session.Threads == ThreadDisplay.Cosmetic, () => Session.Threads = ThreadDisplay.Cosmetic, radio: true)),
             "-",
             Toggle("Planes", () => _showPlanes, TogglePlanes),
             Toggle("Origins", () => Viewport.ShowOrigin, () => { Viewport.ShowOrigin = !Viewport.ShowOrigin; Viewport.Redraw(); }),
@@ -893,9 +897,13 @@ public partial class MainWindow
             var bodies = r.State.Bodies.ToList();
             Status($"Exporting {Path.GetFileName(path)}...");
             var sw = System.Diagnostics.Stopwatch.StartNew();
+            // cosmetic threads are modeled for export: the part rebuilt so (a copy, off the UI thread)
+            var hasCosmetic = r.State.Cosmetics.Count > 0;
+            var snapshot = hasCosmetic ? Session.Doc.Clone() : null;
             // written off the UI thread: the exact B-rep / tessellation of big parts takes a moment
             await Task.Run(() =>
             {
+                if (snapshot != null) bodies = new Regenerator { ThreadOverride = ThreadDisplay.Modeled }.Rebuild(snapshot).State.Bodies.ToList();
                 using var fs = File.Create(path);
                 if (kind == "step") StepWriter.Write(fs, bodies.Select(b => (b.Id, b.Solid)), baseName, scale);
                 else StlWriter.Write(fs, bodies.Select(b => b.Solid), scale);

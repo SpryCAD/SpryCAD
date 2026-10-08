@@ -15,6 +15,9 @@ public sealed class Regenerator
     sealed record CacheEntry(ulong Key, ModelState State, FeatureStatus Status);
     readonly List<CacheEntry> _cache = new();
 
+    /// <summary>Threads as each is set, or all modeled (exports) / all cosmetic (a lightweight view).</summary>
+    public ThreadDisplay ThreadOverride { get; set; }
+
     /// <summary>
     /// Rebuilds the document (features already built with the same inputs come from the cache).
     /// <paramref name="progress"/> is told which feature is being built (and, within patterns, which instance);
@@ -39,6 +42,8 @@ public sealed class Regenerator
             key = Hash(key, JsonSerializer.Serialize(f, typeof(Feature), Serialization.Options));
             // a flat pattern also depends on the part's sheet metal settings
             if (f is FlatPatternFeature) key = Hash(key, JsonSerializer.Serialize(doc.SheetMetal, Serialization.Options));
+            // a thread also on how threads are shown
+            if (f is ThreadFeature) key = Hash(key, ThreadOverride.ToString());
             if (i < _cache.Count && _cache[i].Key == key)
             {
                 state = _cache[i].State;
@@ -58,6 +63,7 @@ public sealed class Regenerator
                     var ctx = new Ctx(doc, state.Copy(), lookup, st, f)
                     {
                         Cancel = cancel,
+                        ThreadMode = ThreadOverride,
                         Detail = progress == null ? null : d => progress(new RegenProgress(i, count, f.Id, f.Name, d)),
                     };
                     using (Prof.Time("feature." + f.GetType().Name)) ctx.Execute();
@@ -192,6 +198,7 @@ public sealed class Regenerator
     {
         public ModelState State = state;
         public CancellationToken Cancel;
+        public ThreadDisplay ThreadMode;
         /// <summary>Progress within the feature (e.g. "instance 7 of 24").</summary>
         public Action<string>? Detail;
 
@@ -476,13 +483,14 @@ public sealed class Regenerator
             if (threadLen <= 0) throw new FeatureException("The face is too short for this thread.");
             var run = threadLen + pitch;
             double yStart = pitch, yFar = pitch + faceLen;
-            Solid tool;
+            bool cosmetic = ThreadMode switch { ThreadDisplay.Modeled => false, ThreadDisplay.Cosmetic => true, _ => t.Cosmetic };
+            Solid? tool = null;
             try
             {
                 // a clearance too large for the standard crest: the shaft turned down (the hole bored out) over the
                 // whole groove first (the groove would otherwise run on below the surface where the turning ends,
                 // a closed tunnel), not past the far end unless the thread runs out through it
-                if (turn is { } rt)
+                if (turn is { } rt && !cosmetic)
                 {
                     double r0 = external ? rt : surfaceR - 0.1 * pitch, r1 = external ? surfaceR + 0.1 * pitch : rt;
                     var y1 = run + halfWidth + 0.05 * pitch;
@@ -534,12 +542,23 @@ public sealed class Regenerator
                     var relief = Kernel.Native.NBuild.Revolve(new[] { rr }, frame, Vec2.Zero, new Vec2(0, 1), 2 * Math.PI, f.Id + ".Relief");
                     ApplyTool(Kernel.Native.NTess.ToSolid(relief), true, true, warn: false);
                 }
-                var nb = Kernel.Native.NHelical.Sweep(new[] { region }, frame, origin, dir, t.LeftHand ? -pitch : pitch, run / pitch * 2 * Math.PI, f.Id,
-                    exitRadius: runout == ThreadRunout.Tangent ? exitR : 0);
-                if (nb.Validate() is { } bad) throw new FeatureException("The thread is not a valid solid: " + bad);
-                tool = Kernel.Native.NTess.ToSolid(nb);
+                if (!cosmetic)
+                {
+                    var nb = Kernel.Native.NHelical.Sweep(new[] { region }, frame, origin, dir, t.LeftHand ? -pitch : pitch, run / pitch * 2 * Math.PI, f.Id,
+                        exitRadius: runout == ThreadRunout.Tangent ? exitR : 0);
+                    if (nb.Validate() is { } bad) throw new FeatureException("The thread is not a valid solid: " + bad);
+                    tool = Kernel.Native.NTess.ToSolid(nb);
+                }
             }
             catch (ArgumentException ex) { throw new FeatureException(char.ToUpper(ex.Message[0]) + ex.Message[1..] + "."); }
+            if (tool == null)
+            {
+                // cosmetic: the face as it is (the shaft at the major diameter, the hole at the minor), the thread drawn
+                // as a helix on it over the thread's length
+                State.Cosmetics[f.Id] = new CosmeticThread(axisO + axisDir * hStart, dir, radial, surfaceR, t.LeftHand ? -pitch : pitch,
+                    Math.Min(threadLen, faceLen), external);
+                return;
+            }
             ApplyTool(tool, true, true);
             State.Tools[f.Id] = new ToolInfo(tool, true, true);
         }

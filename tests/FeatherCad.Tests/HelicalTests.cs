@@ -169,10 +169,10 @@ static class HelicalTests
             var cyl = NBuild.Extrude(new[] { new ProfileRegion(ProfileLoop.Circle(Vec2.Zero, 10, "C")) }, frame, 0, 30, "Shaft");
             double apexR = 8.4, outR = 10.9, h = (outR - apexR) * Math.Tan(Math.PI / 6);
             var tri = new[] { new Vec2(apexR, 6), new Vec2(outR, 6 - h), new Vec2(outR, 6 + h) };
-            // (a left-hand one higher up, to run down inside the shaft)
+            // (both hands advance up the shaft from y = 6)
             foreach (var lead in new[] { 3.0, -3.0 })
             {
-                var tri2 = tri.Select(q => q + new Vec2(0, lead < 0 ? 18 : 0)).ToArray();
+                var tri2 = tri;
                 var tool = NHelical.Sweep(new[] { new ProfileRegion(ProfileLoop.Polygon(tri2, "T")) }, Frame.Front, Vec3.Zero, Vec3.UnitY, lead, 4 * 2 * Math.PI, "Th", exitRadius: 11);
                 var tv = Volume(t, tool);
                 t.True(tv > 4 * 2 * Math.PI * FirstMoment(tri), "the run-out adds to the sweep");
@@ -193,7 +193,8 @@ static class HelicalTests
             foreach (var (lead, y0) in new[] { (3.0, 24.0), (-3.0, 6.0), (3.0, -6.0) })
             {
                 var tri = new[] { new Vec2(apexR, y0), new Vec2(outR, y0 - h), new Vec2(outR, y0 + h) };
-                var tool = NHelical.Sweep(new[] { new ProfileRegion(ProfileLoop.Polygon(tri, "T")) }, Frame.Front, Vec3.Zero, Vec3.UnitY, lead, turns * 2 * Math.PI, "Th");
+                // the left-hand one about the axis pointing down: it advances down (out the bottom), turns·lead in y
+                var tool = NHelical.Sweep(new[] { new ProfileRegion(ProfileLoop.Polygon(tri, "T")) }, Frame.Front, Vec3.Zero, lead < 0 ? -Vec3.UnitY : Vec3.UnitY, lead, turns * 2 * Math.PI, "Th");
                 var cut = NBoolean.Run(cyl, tool, BoolOp.Subtract);
                 // a profile point at height v sweeps through v .. v + turns·lead: it lies in the shaft over (2π/|lead|)·|that ∩ [0, 30]| of angle
                 var removed = SweptInside(ClipInside(tri, 10), lead, turns, 0, 30);
@@ -480,6 +481,59 @@ static class ThreadFeatureTests
                 var looser = Removed("0.2");
                 t.True(looser > removed + 1, $"clearance removes more: {looser:0.###} vs {removed:0.###}");
             }
+        });
+
+        t.Test("Thread feature: cosmetic (no groove, a helix to draw), the view override both ways; left hand cuts as much as right hand", () =>
+        {
+            // a 10 mm shaft 20 long on a 30 mm collar 5 thick
+            var doc = new FeatherCad.Core.Model.CadDocument();
+            var c = doc.AddFeature(new FeatherCad.Core.Model.SketchFeature { Plane = FeatherCad.Core.Model.PlaneRef.Front, Sketch = CircleAt(Vec2.Zero, 15) });
+            doc.AddFeature(new FeatherCad.Core.Model.ExtrudeFeature { SketchId = c.Id, Depth = "5" });
+            var top = doc.AddFeature(new FeatherCad.Core.Model.PlaneFeature { Base = FeatherCad.Core.Model.PlaneRef.Front, Offset = "5" });
+            var s = doc.AddFeature(new FeatherCad.Core.Model.SketchFeature { Plane = new FeatherCad.Core.Model.PlaneRef { Feature = top.Id }, Sketch = CircleAt(Vec2.Zero, 5) });
+            doc.AddFeature(new FeatherCad.Core.Model.ExtrudeFeature { SketchId = s.Id, Depth = "20" });
+            var before = new FeatherCad.Core.Regen.Regenerator().Rebuild(doc);
+            var v0 = KernelTests.Vex(before.State.Bodies[0].Solid);
+            var cylFace = before.State.Bodies[0].Solid.Native!.Faces.First(f => f.Surface.Kind == SurfaceKind.Cylinder && Math.Abs(f.Surface.R - 5) < 1e-9);
+            FeatherCad.Core.Model.ThreadFeature Thread(FeatherCad.Core.Model.CadDocument d, bool cosmetic, bool left = false) => d.AddFeature(new FeatherCad.Core.Model.ThreadFeature
+            {
+                Face = new FeatherCad.Core.Model.FaceRef { Name = cylFace.Tag.Name, Hint = new Vec3(5, 0, 24) }, End = FeatherCad.Core.Model.ThreadEnd.UpToNext,
+                Chamfer = true, Clearance = "0.2", Cosmetic = cosmetic, LeftHand = left,
+            });
+            bool Modeled(FeatherCad.Core.Regen.RegenResult r) => r.State.Bodies[0].Solid.Native!.Faces.Any(f => f.Surface.Kind == SurfaceKind.Screw);
+            // cosmetic: the chamfer only (no turning down, no groove); a helix along the shaft from its free end
+            var dc = FeatherCad.Core.Model.CadDocument.FromJson(doc.ToJson());
+            var th = Thread(dc, true);
+            var regen = new FeatherCad.Core.Regen.Regenerator();
+            var rc = regen.Rebuild(dc);
+            t.True(rc.Status[th.Id].Ok, rc.Status[th.Id].Error ?? "");
+            t.True(!Modeled(rc), "no groove");
+            t.True(rc.State.Bodies[0].Solid.Native!.Faces.Any(f => f.Surface.Kind == SurfaceKind.Cone), "the chamfer is kept");
+            var removed = v0 - KernelTests.Vex(rc.State.Bodies[0].Solid);
+            t.True(removed > 0 && removed < 30, $"only the chamfer removed ({removed:0.###}: a 45° ring about 1 mm deep)");
+            var cos = rc.State.Cosmetics[th.Id];
+            t.True(Math.Abs(cos.Radius - 5) < 1e-9 && Math.Abs(cos.Lead - 1.5) < 1e-9 && cos.External, "the helix: on the shaft, the M10 pitch");
+            t.True(Math.Abs(cos.Origin.Z - 25) < 1e-6 && cos.Axis.Z < -0.999 && cos.Length > 15 && cos.Length <= 20, $"from the free end down the shaft ({cos.Origin}, {cos.Axis}, {cos.Length:0.###})");
+            // the view override, on the same regenerator (the cache rebuilds the thread)
+            regen.ThreadOverride = FeatherCad.Core.Regen.ThreadDisplay.Modeled;
+            var rm = regen.Rebuild(dc);
+            t.True(Modeled(rm) && rm.State.Cosmetics.Count == 0, "all modeled");
+            var modeledRemoved = v0 - KernelTests.Vex(rm.State.Bodies[0].Solid);
+            var dm = FeatherCad.Core.Model.CadDocument.FromJson(doc.ToJson());
+            Thread(dm, false);
+            regen = new FeatherCad.Core.Regen.Regenerator { ThreadOverride = FeatherCad.Core.Regen.ThreadDisplay.Cosmetic };
+            var rmc = regen.Rebuild(dm);
+            t.True(!Modeled(rmc) && rmc.State.Cosmetics.Count == 1, "all cosmetic");
+            regen.ThreadOverride = FeatherCad.Core.Regen.ThreadDisplay.AsSet;
+            t.True(Modeled(regen.Rebuild(dm)), "as set: modeled");
+            // saved and loaded
+            t.True(((FeatherCad.Core.Model.ThreadFeature)FeatherCad.Core.Model.CadDocument.FromJson(dc.ToJson()).Find(th.Id)!).Cosmetic, "saved");
+            // a left-hand thread runs into the shaft as the right-hand one does (the same groove, mirrored)
+            var dl = FeatherCad.Core.Model.CadDocument.FromJson(doc.ToJson());
+            Thread(dl, false, left: true);
+            var rl = new FeatherCad.Core.Regen.Regenerator().Rebuild(dl);
+            var leftRemoved = v0 - KernelTests.Vex(rl.State.Bodies[0].Solid);
+            t.True(Math.Abs(leftRemoved - modeledRemoved) < 1e-3 * modeledRemoved, $"left hand removes {leftRemoved:0.###}, right hand {modeledRemoved:0.###}");
         });
 
         t.Test("Thread feature: blind, up to next and through all; lead-in chamfers; no buried groove where a turned-down thread ends", () =>

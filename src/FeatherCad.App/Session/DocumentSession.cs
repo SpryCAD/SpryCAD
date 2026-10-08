@@ -243,6 +243,13 @@ public sealed class DocumentSession
         Rebuilt?.Invoke();
     }
 
+    /// <summary>Threads as each is set, or all modeled / all cosmetic: a view setting (not saved with the part).</summary>
+    public ThreadDisplay Threads
+    {
+        get => _regen.ThreadOverride;
+        set { if (_regen.ThreadOverride == value) return; _regen.ThreadOverride = value; RequestRebuild(); }
+    }
+
     public void ForceRebuild()
     {
         _regen.Invalidate();

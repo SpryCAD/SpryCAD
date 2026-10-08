@@ -179,6 +179,11 @@ public sealed class ThreadFeature : Feature
     public string Length { get; set; } = "";
     /// <summary>A 45° lead-in chamfer (countersink in a hole) at the start end, and at the far end of a through thread.</summary>
     public bool Chamfer { get; set; } = true;
+    /// <summary>
+    /// Shown without modeling the helical groove (helix lines on the face; chamfers and relief kept): fast to rebuild
+    /// and draw. Exports always model it. The View menu can show every thread modeled or cosmetic instead.
+    /// </summary>
+    public bool Cosmetic { get; set; }
     /// <summary>How the far end of a thread that stops in the material ends (not used by Through All).</summary>
     public ThreadRunout Runout { get; set; } = ThreadRunout.None;
     /// <summary>Extra room on the flanks and root (mm), for 3D printed threads.</summary>

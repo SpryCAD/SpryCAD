@@ -467,6 +467,8 @@ public partial class MainWindow
         page.Number(opt, "Clearance", () => f.Clearance, v => f.Clearance = v, "dimension");
         page.Info(opt, "Extra room on the flanks for 3D printed threads (0.1–0.3 mm is typical); the crest is lowered where it would get too narrow.");
         page.Check(opt, "Lead-in chamfer", () => f.Chamfer, v => f.Chamfer = v);
+        page.Check(opt, "Cosmetic (not modeled: faster)", () => f.Cosmetic, v => f.Cosmetic = v);
+        page.Info(opt, "A cosmetic thread is drawn as a helix on the face; exports always model it. View > Threads shows every thread modeled or cosmetic.");
         page.Combo(opt, "Thread end", new List<(ThreadRunout, string)>
         {
             (ThreadRunout.None, "Plain"), (ThreadRunout.Relief, "Relief groove (undercut)"), (ThreadRunout.Tangent, "Run out of the side (shafts)"),

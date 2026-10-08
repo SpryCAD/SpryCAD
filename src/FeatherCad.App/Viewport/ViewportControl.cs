@@ -240,6 +240,7 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         DrawMeasureLines(_dyn);
         if (CenterOfMass is { } com) DrawCenterOfMass(_dyn, com.center, com.axes, com.length);
         DrawBendLines(_dyn);
+        DrawCosmeticThreads(_dyn);
         if (Hover is { Kind: SelKind.Vertex, FeatureId: null } hv) DrawPointHover(_dyn, hv);
         if (_nav == Nav.Rotate) DrawPivot(_dyn, _pivot);
         else if (Spinning) DrawPivot(_dyn, _spinPivot);
@@ -432,6 +433,38 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         set { _bendLines = value; Redraw(); }
     }
     IReadOnlyList<BendLine> _bendLines = Array.Empty<BendLine>();
+
+    /// <summary>Cosmetic threads: drawn as a helix on their face.</summary>
+    public IReadOnlyList<Core.Regen.CosmeticThread> CosmeticThreads
+    {
+        get => _cosmetic;
+        set { _cosmetic = value; Redraw(); }
+    }
+    IReadOnlyList<Core.Regen.CosmeticThread> _cosmetic = Array.Empty<Core.Regen.CosmeticThread>();
+
+    void DrawCosmeticThreads(DynamicGeometry g)
+    {
+        var px = Camera.PixelSize;
+        var c = new Rgba(0.30f, 0.36f, 0.48f);
+        foreach (var th in _cosmetic)
+        {
+            // lifted 2 pixels off the face toward where it is seen from (out of a shaft, in from a hole's wall)
+            var r = th.Radius + (th.External ? px * 2 : -px * 2);
+            if (r <= 0 || th.Lead == 0) continue;
+            // along the axis into the face, turning counterclockwise about it (right hand) or clockwise (left hand)
+            var ax = th.Axis.Normalized; var x = th.RefDir.Normalized; var y = Vec3.Cross(ax, x);
+            var turns = th.Length / Math.Abs(th.Lead);
+            int n = (int)Math.Clamp(Math.Ceiling(turns * 48), 2, 40000);
+            Vec3 At(double s) { var a = Math.Sign(th.Lead) * 2 * Math.PI * turns * s; return th.Origin + ax * (th.Length * s) + (x * Math.Cos(a) + y * Math.Sin(a)) * r; }
+            var prev = At(0);
+            for (int i = 1; i <= n; i++)
+            {
+                var p = At((double)i / n);
+                g.Line(prev, p, c);
+                prev = p;
+            }
+        }
+    }
 
     void DrawBendLines(DynamicGeometry g)
     {

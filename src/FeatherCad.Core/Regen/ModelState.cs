@@ -43,6 +43,16 @@ public sealed class ToolInfo
 public sealed record BlendSpec(List<FeatherCad.Core.Model.EdgeRef> Refs, double Size, bool Fillet, bool Propagate, bool Overflow,
     FeatherCad.Kernel.ChamferSize? Chamfer, List<FeatherCad.Kernel.Vec3[]> Edges, double Length);
 
+/// <summary>
+/// A thread shown cosmetically (not modeled): a helix of the given lead on the cylinder of <c>Radius</c> about the
+/// axis, from <c>Origin</c> (on the axis, at the thread's start) along <c>Axis</c> for <c>Length</c>, starting at
+/// <c>RefDir</c>. External threads (shafts) are seen from outside the cylinder, internal ones (holes) from inside.
+/// </summary>
+public sealed record CosmeticThread(Vec3 Origin, Vec3 Axis, Vec3 RefDir, double Radius, double Lead, double Length, bool External);
+
+/// <summary>How threads are built: each as it is set, or all modeled / all cosmetic (a view setting, not saved).</summary>
+public enum ThreadDisplay { AsSet, Modeled, Cosmetic }
+
 /// <summary>Immutable model state after a feature.</summary>
 public sealed class ModelState
 {
@@ -52,6 +62,8 @@ public sealed class ModelState
     public Dictionary<string, SketchResult> Sketches { get; init; } = new();
     /// <summary>Flat patterns by body id (made by a Flat Pattern feature, whether the part shows flat or folded).</summary>
     public Dictionary<string, FlatPattern> Flats { get; init; } = new();
+    /// <summary>Cosmetic threads by feature id.</summary>
+    public Dictionary<string, CosmeticThread> Cosmetics { get; init; } = new();
 
     public static ModelState Initial() => new();
 
@@ -62,6 +74,7 @@ public sealed class ModelState
         Tools = Tools,
         Sketches = Sketches,
         Flats = Flats,
+        Cosmetics = Cosmetics,
     };
 
     public ModelState Copy() => new()
@@ -71,6 +84,7 @@ public sealed class ModelState
         Tools = new Dictionary<string, ToolInfo>(Tools),
         Sketches = new Dictionary<string, SketchResult>(Sketches),
         Flats = new Dictionary<string, FlatPattern>(Flats),
+        Cosmetics = new Dictionary<string, CosmeticThread>(Cosmetics),
     };
 
     public Box3 Bounds
