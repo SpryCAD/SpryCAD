@@ -1106,6 +1106,7 @@ public sealed class Regenerator
                 if (!State.Tools.TryGetValue(seedId, out var tool))
                     throw new FeatureException("Only extrude, revolve, sweep, helical sweep, thread, hole, fillet, chamfer, pattern and mirror features can be patterned.");
                 var copies = new List<(int i, Solid tool)>();
+                var plain = new List<int>();
                 // instances whose blend is solved again (their edges are not the seed's edges moved)
                 var toSolve = new List<(int i, Body body, List<Kernel.Native.NEdge> edges, double tol)>();
                 for (int i = 0; i < transforms.Count; i++)
@@ -1118,8 +1119,12 @@ public sealed class Regenerator
                         toSolve.Add((i, inst.body, inst.edges, inst.tol));
                         continue;
                     }
-                    copies.Add((i, tool.Tool.Transformed(transforms[i], $"{f.Id}.{i + 1}.")));
+                    plain.Add(i);
                 }
+                // the seed's tool moved to each plain instance: independent copies, made in parallel (in order)
+                var moved0 = new Solid[plain.Count];
+                Parallel.For(0, plain.Count, k => moved0[k] = tool.Tool.Transformed(transforms[plain[k]], $"{f.Id}.{plain[k] + 1}."));
+                for (int k = 0; k < plain.Count; k++) copies.Add((plain[k], moved0[k]));
                 // instances solved again: one solve per distinct configuration (instances whose edges are another's
                 // moved reuse its tools), solved in parallel, each on its own copy of the body (nothing shared is
                 // written), then applied below with the copies' one-at-a-time fallback
