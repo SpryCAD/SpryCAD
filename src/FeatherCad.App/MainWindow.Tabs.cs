@@ -173,6 +173,9 @@ public partial class MainWindow
     {
         if (_partsList != null) return _partsList;
         var list = new ListBox { Background = Brushes.White, BorderThickness = new Thickness(0) };
+        // not virtualized: the rows are their own containers, and a virtualizing panel loses rows moved within the
+        // list (re-sorted), showing nothing for them
+        list.ItemsPanel = new Avalonia.Controls.Templates.FuncTemplate<Panel?>(() => new StackPanel());
         // right-click: the part under the mouse (selected, so shown, first)
         list.ContextMenu = PartMenu(() => list.SelectedItem is ListBoxItem { Tag: PartTab t } ? t : null, fromList: true);
         list.SelectionChanged += async (_, _) =>
