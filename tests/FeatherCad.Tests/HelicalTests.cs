@@ -411,6 +411,61 @@ static class ThreadFeatureTests
             t.True(worst < 0.05, $"the wire's mesh lies within 0.05 of it (worst {worst:0.####})");
         });
 
+        t.Test("Circular Pattern of a helical cut about its axis: a two-start thread (the grooves' helical faces met in closed form, not traced)", () =>
+        {
+            var doc = new FeatherCad.Core.Model.CadDocument();
+            var c = doc.AddFeature(new FeatherCad.Core.Model.SketchFeature { Plane = FeatherCad.Core.Model.PlaneRef.Front, Sketch = CircleAt(Vec2.Zero, 10) });
+            doc.AddFeature(new FeatherCad.Core.Model.ExtrudeFeature { SketchId = c.Id, Depth = "30" });
+            var sk = new FeatherCad.Core.Sketching.Sketch();
+            var p1 = sk.AddPoint(new Vec2(8.6, -5)); var p2 = sk.AddPoint(new Vec2(11, -5 - 1.4)); var p3 = sk.AddPoint(new Vec2(11, -5 + 1.4));
+            sk.Add(new FeatherCad.Core.Sketching.SkLine { P1 = p1.Id, P2 = p2.Id }); sk.Add(new FeatherCad.Core.Sketching.SkLine { P1 = p2.Id, P2 = p3.Id }); sk.Add(new FeatherCad.Core.Sketching.SkLine { P1 = p3.Id, P2 = p1.Id });
+            var a = sk.AddPoint(new Vec2(0, 0)); var b = sk.AddPoint(new Vec2(0, -30));
+            sk.Add(new FeatherCad.Core.Sketching.SkLine { P1 = a.Id, P2 = b.Id, Construction = true });
+            var s = doc.AddFeature(new FeatherCad.Core.Model.SketchFeature { Plane = FeatherCad.Core.Model.PlaneRef.Top, Sketch = sk });
+            // lead 8, two starts: the second groove half a turn round (4 mm along), clear of the first
+            var h = doc.AddFeature(new FeatherCad.Core.Model.HelicalSweepFeature { SketchId = s.Id, Pitch = "8", Revolutions = "2", IsCut = true });
+            var pat = doc.AddFeature(new FeatherCad.Core.Model.CircularPatternFeature { Seeds = { h.Id }, Axis = new FeatherCad.Core.Model.DirRef { Axis = "Z" }, Count = "2" });
+            var r = new FeatherCad.Core.Regen.Regenerator().Rebuild(doc);
+            t.True(r.Status[pat.Id].Ok && r.Status[pat.Id].Warnings.Count == 0, r.Status[pat.Id].Error ?? string.Join("; ", r.Status[pat.Id].Warnings));
+            double V(int i) => KernelTests.Vex(r.States[i].Bodies[0].Solid);
+            var one = V(1) - V(3); var two = V(1) - V(4);
+            t.True(Math.Abs(two - 2 * one) < 1e-6 * two, $"the second start removes as much as the first ({one:0.######}, both {two:0.######})");
+            t.Eq(r.State.Bodies[0].Solid.Topology.OpenHalfEdges, 0);
+            // it was 30 s of tracing the grooves' faces against each other
+            t.True(r.Status[pat.Id].Milliseconds < 3000, $"the pattern in {r.Status[pat.Id].Milliseconds:0} ms");
+        });
+
+        t.Test("Screw surfaces of the same helices meet along helices (or not at all); a plane through the axis cuts the generator's copies", () =>
+        {
+            var m = ScrewMotion.About(Vec3.Zero, Vec3.UnitY, 4, Vec3.UnitX);
+            var gen = new NLine(new Vec3(8.4, 6, 0), new Vec3(2.5, -1.44, 0));
+            var sa = new ScrewSurface(m, gen, 0, 2.9, 0, 6 * Math.PI);
+            NSurface Turned(double ang) => NSurface.ScrewOf(new ScrewSurface(m, gen.Transformed(Transform.Rotation(Vec3.Zero, Vec3.UnitY, ang)), 0, 2.9, 0, 6 * Math.PI));
+            // half a turn round: 2 mm along, past the flank's 1.44 mm rise: apart
+            var apart = NIntersect.Analytic(NSurface.ScrewOf(sa), Turned(Math.PI), 1e-6);
+            t.True(apart != null && apart.Count == 0, "half a turn round: apart, no tracing");
+            // the other flank of a V (its mirror across the profile's middle) crosses this one: one helix, on both
+            var other = new NLine(new Vec3(8.4, 6, 0), new Vec3(2.5, 1.44, 0));
+            var sb = NSurface.ScrewOf(new ScrewSurface(m, other.Transformed(Transform.Rotation(Vec3.Zero, Vec3.UnitY, 0.3)), 0, 2.9, 0, 6 * Math.PI));
+            var hx = NIntersect.Analytic(NSurface.ScrewOf(sa), sb, 1e-6);
+            t.True(hx != null && hx.Count == 1 && hx[0] is NHelix, $"one helix ({hx?.Count})");
+            foreach (var u in new[] { 0.3, 2.0, 5.5 })
+            {
+                var p = hx![0].Eval(u);
+                t.True(sa.Closest(p).dist < 1e-9 && sb.Screw!.Closest(p).dist < 1e-9, $"helix point {u} on both");
+            }
+            // a plane through the axis: the generator carried to it each half turn (6π: 6 or 7 copies)
+            var plane = NSurface.FromPlane(Plane.FromPointNormal(Vec3.Zero, new Vec3(Math.Sin(1.0), 0, Math.Cos(1.0))));
+            var copies = NIntersect.Analytic(NSurface.ScrewOf(sa), plane, 1e-6);
+            t.True(copies != null && copies.Count >= 6 && copies.All(cv => cv is NLine), $"copies of the generator ({copies?.Count})");
+            foreach (var cv in copies!)
+                foreach (var tt in new[] { 0.0, 1.5 })
+                {
+                    var p = cv.Eval(tt);
+                    t.True(Math.Abs(plane.F_(p)) < 1e-9 && sa.Closest(p).dist < 1e-9, "on the plane and the surface");
+                }
+        });
+
         t.Test("Helical Sweep feature: a coil spring from a sketch (circle and centerline), saved and loaded", () =>
         {
             var doc = new FeatherCad.Core.Model.CadDocument();

@@ -444,6 +444,40 @@ public static class NIntersect
         if (o.Kind == SurfaceKind.Plane && Math.Abs(Vec3.Dot(o.Plane!.Normal, screw.Screw!.Motion.A)) < 1e-12
             && Math.Abs(o.Plane.Distance(screw.Screw.Motion.O)) > screw.Screw.MaxRadius * 1.01 + tol)
             return new List<NCurve>();
+        if (o.Kind == SurfaceKind.Screw) return ScrewScrew(screw.Screw!, o.Screw!, tol);
+        // a plane through the axis, the generator in a plane through it too (thread and coil profiles): the generator
+        // carried round to the plane, each half turn of the sweep (a sweep's end caps against another sweep)
+        if (o.Kind == SurfaceKind.Plane && Math.Abs(screw.Screw!.Motion.K) > 1e-12)
+        {
+            var ss = screw.Screw; var mo = ss.Motion; var pl = o.Plane!;
+            if (Math.Abs(Vec3.Dot(pl.Normal, mo.A)) < 1e-12 && Math.Abs(pl.Distance(mo.O)) < tol)
+            {
+                double? thetaG = null; bool planar = true;
+                for (int i = 0; i <= 16 && planar; i++)
+                {
+                    var l = mo.Local(ss.Gen.Eval(ss.V0 + (ss.V1 - ss.V0) * i / 16));
+                    if (Math.Sqrt(l.X * l.X + l.Y * l.Y) < 1e3 * tol) continue;
+                    var th = Math.Atan2(l.Y, l.X);
+                    thetaG ??= th;
+                    // the same half plane, or the opposite one (the generator crossing the axis's line)
+                    if (Math.Abs(Math.IEEERemainder(th - thetaG.Value, Math.PI)) > 1e-9) planar = false;
+                }
+                if (planar && thetaG is { } tg)
+                {
+                    var d = Vec3.Cross(pl.Normal, mo.A);
+                    var phi = Math.Atan2(Vec3.Dot(d, mo.Y), Vec3.Dot(d, mo.X));
+                    double upad = (ss.U1 - ss.U0) * 0.01 + 1e-9;
+                    var base0 = phi - tg;
+                    long k0 = (long)Math.Ceiling((ss.U0 - upad - base0) / Math.PI), k1 = (long)Math.Floor((ss.U1 + upad - base0) / Math.PI);
+                    if (k1 - k0 <= 10000)
+                    {
+                        var copies = new List<NCurve>();
+                        for (long k = k0; k <= k1; k++) copies.Add(ss.Gen.Transformed(mo.At(base0 + k * Math.PI)));
+                        return copies;
+                    }
+                }
+            }
+        }
         if (o.Kind is SurfaceKind.Plane or SurfaceKind.Cone)
             return Math.Abs(screw.Screw!.Motion.K) > 1e-12 && o.ProfileAbout(screw.Screw.Motion.O, screw.Screw.Motion.A, tol) is { } prof
                 ? ScrewAcross(screw.Screw, prof, chordTol) : null;
@@ -468,6 +502,102 @@ public static class NIntersect
             }
             pv = v; pf = f;
         }
+        return res;
+    }
+
+    /// <summary>
+    /// Two screw surfaces of the same helices (the same axis, lead and hand: a multi-start thread's grooves, a
+    /// thread patterned about its axis). A point is fixed on its helix by its distance r from the axis and its height
+    /// carried back along it, ζ = z − K·θ (modulo the lead); each surface is its generator's curve in (r, ζ), and the
+    /// surfaces meet along the helices through the points where the two curves cross. Null when the motions differ
+    /// or the curves run along each other (traced, or coincident).
+    /// </summary>
+    static List<NCurve>? ScrewScrew(ScrewSurface a, ScrewSurface b, double tol)
+    {
+        var m = a.Motion;
+        if (Math.Abs(m.K) < 1e-12) return null;
+        var lead = Math.Abs(2 * Math.PI * m.K);
+        double R(Vec3 p) { var l = m.Local(p); return Math.Sqrt(l.X * l.X + l.Y * l.Y); }
+        double Zeta(Vec3 p) { var l = m.Local(p); return l.Z - m.K * Math.Atan2(l.Y, l.X); }
+        double Wrap(double z) => Math.IEEERemainder(z, lead);
+        // b's motion must carry its points along a's helices
+        foreach (var v in new[] { b.V0, 0.5 * (b.V0 + b.V1), b.V1 })
+        {
+            var p = b.Gen.Eval(v);
+            if (R(p) < 1e3 * tol) continue;
+            foreach (var u in new[] { 0.7, -2.1 })
+            {
+                var q = b.Motion.Move(u, p);
+                if (Math.Abs(R(q) - R(p)) > tol || Math.Abs(Wrap(Zeta(q) - Zeta(p))) > tol) return null;
+            }
+        }
+        // each generator as a curve in (r, ζ), ζ unwrapped along it; a little past the swept part, as elsewhere
+        const int n = 96;
+        (double[] v, Vec2[] q) Curve(ScrewSurface s)
+        {
+            double pad = (s.V1 - s.V0) * 0.01 + 1e-9, v0 = s.V0 - pad, v1 = s.V1 + pad;
+            var vs = new double[n + 1]; var qs = new Vec2[n + 1];
+            for (int i = 0; i <= n; i++)
+            {
+                vs[i] = v0 + (v1 - v0) * i / n;
+                var p = s.Gen.Eval(vs[i]);
+                var z = Zeta(p);
+                if (i > 0) z = qs[i - 1].Y + Wrap(z - qs[i - 1].Y);
+                qs[i] = new Vec2(R(p), z);
+            }
+            return (vs, qs);
+        }
+        var (va, qa) = Curve(a); var (vb, qb) = Curve(b);
+        // a crossing of a's and b's curves (b shifted by whole leads), refined on both generators
+        (double va, double vb)? Refine(double x, double y)
+        {
+            double Dz(double p, double q) => Wrap(Zeta(a.Gen.Eval(p)) - Zeta(b.Gen.Eval(q)));
+            for (int it = 0; it < 40; it++)
+            {
+                double f1 = R(a.Gen.Eval(x)) - R(b.Gen.Eval(y)), f2 = Dz(x, y);
+                if (Math.Abs(f1) < 1e-13 && Math.Abs(f2) < 1e-13) break;
+                double h = 1e-7 * (1 + Math.Abs(a.V1 - a.V0)), g = 1e-7 * (1 + Math.Abs(b.V1 - b.V0));
+                double a11 = (R(a.Gen.Eval(x + h)) - R(a.Gen.Eval(x - h))) / (2 * h), a12 = -(R(b.Gen.Eval(y + g)) - R(b.Gen.Eval(y - g))) / (2 * g);
+                double a21 = (Dz(x + h, y) - Dz(x - h, y)) / (2 * h), a22 = (Dz(x, y + g) - Dz(x, y - g)) / (2 * g);
+                var det = a11 * a22 - a12 * a21;
+                if (Math.Abs(det) < 1e-300) return null;
+                x -= (a22 * f1 - a12 * f2) / det; y -= (a11 * f2 - a21 * f1) / det;
+            }
+            var pa = a.Gen.Eval(x); var pb = b.Gen.Eval(y);
+            return Math.Abs(R(pa) - R(pb)) < tol && Math.Abs(Wrap(Zeta(pa) - Zeta(pb))) < tol ? (x, y) : null;
+        }
+        var res = new List<NCurve>();
+        var found = new List<Vec2>();
+        double zaMin = qa.Min(q => q.Y), zaMax = qa.Max(q => q.Y), zbMin = qb.Min(q => q.Y), zbMax = qb.Max(q => q.Y);
+        int k0 = (int)Math.Floor((zaMin - zbMax) / lead) - 1, k1 = (int)Math.Ceiling((zaMax - zbMin) / lead) + 1;
+        for (int k = k0; k <= k1; k++)
+            for (int i = 0; i < n; i++)
+            {
+                Vec2 p0 = qa[i], p1 = qa[i + 1], d1 = p1 - p0;
+                for (int j = 0; j < n; j++)
+                {
+                    Vec2 s0 = qb[j] + new Vec2(0, k * lead), s1 = qb[j + 1] + new Vec2(0, k * lead), d2 = s1 - s0;
+                    var den = Vec2.Cross(d1, d2);
+                    var w = s0 - p0;
+                    if (Math.Abs(den) < 1e-14 * (d1.Length * d2.Length + 1e-300))
+                    {
+                        // parallel: running along each other (coincident in part) is not a crossing of curves
+                        if (Math.Abs(Vec2.Cross(d1, w)) < tol * d1.Length && d1.Length > 0
+                            && Math.Max(Vec2.Dot(w, d1), Vec2.Dot(s1 - p0, d1)) >= 0 && Math.Min(Vec2.Dot(w, d1), Vec2.Dot(s1 - p0, d1)) <= d1.LengthSq)
+                            return null;
+                        continue;
+                    }
+                    double sa = Vec2.Cross(w, d2) / den, sb = Vec2.Cross(w, d1) / den;
+                    if (sa < -1e-9 || sa > 1 + 1e-9 || sb < -1e-9 || sb > 1 + 1e-9) continue;
+                    var hit = Refine(va[i] + (va[i + 1] - va[i]) * sa, vb[j] + (vb[j + 1] - vb[j]) * sb);
+                    if (hit is not { } h) continue;
+                    var pa = a.Gen.Eval(h.va);
+                    var key = new Vec2(R(pa), Wrap(Zeta(pa)));
+                    if (found.Any(f => Math.Abs(f.X - key.X) < tol && Math.Abs(Wrap(f.Y - key.Y)) < tol)) continue;
+                    found.Add(key);
+                    res.Add(new NHelix(m, pa));
+                }
+            }
         return res;
     }
 
