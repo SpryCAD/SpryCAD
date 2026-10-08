@@ -80,6 +80,8 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
     public SelectionSet? Selection { get; set; }
     /// <summary>Extra highlighted items (e.g. preview of what a PM selection box holds).</summary>
     public IReadOnlyList<SelItem> Emphasis { get; set; } = Array.Empty<SelItem>();
+    /// <summary>Extra highlighted items in colors of their own (an item given twice: the first wins).</summary>
+    public IReadOnlyList<(SelItem item, Rgba color)> Marked { get; set; } = Array.Empty<(SelItem, Rgba)>();
     /// <summary>Model edges (polylines) to show in red: where the feature being edited/selected failed.</summary>
     public IReadOnlyList<Vec3[]> ProblemEdges { get; set; } = Array.Empty<Vec3[]>();
 
@@ -429,6 +431,7 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
     Highlights CollectHighlights()
     {
         var h = new Highlights();
+        foreach (var m in Marked) h.Items.Add(m);
         foreach (var e in Emphasis) h.Items.Add((e, SelectColor.WithAlpha(1)));
         if (Selection != null) foreach (var s in Selection.Items) h.Items.Add((s, SelectColor));
         if (Hover != null) h.Items.Add((Hover, HoverColor));

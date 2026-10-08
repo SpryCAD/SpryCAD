@@ -49,6 +49,18 @@ public partial class MainWindow
 
     Mating? _mating;
     (string comp, string face)? _hoverFace;
+    /// <summary>A pick (its entry in Mate Selections) or an origin plane (its button) under the pointer: shown in orange.</summary>
+    MateRef? _hoverPick;
+
+    void HoverPick(MateRef? r)
+    {
+        if (r == _hoverPick) return;
+        _hoverPick = r;
+        RefreshAssemblyScene();
+    }
+
+    /// <summary>The color a mate's i-th reference is drawn in: full selection blue, paler while another is selected in the box.</summary>
+    Rgba PickColor(int i) => _mating is { Focus: >= 0 } mt && mt.Focus != i ? PaleSelect : ViewportControl.SelectColor;
 
     public bool PickingFaces => _mating != null && Asm != null;
 
@@ -100,7 +112,8 @@ public partial class MainWindow
                 if (refs[i].Component == componentId)
                     // with an entry selected in the Mate Selections box, its face in the selection blue and the other
                     // paler, so it is plain which it is (orange is the hover's)
-                    (l ??= new()).Add((refs[i].Face, _mating is { Focus: >= 0 } mt && mt.Focus != i ? PaleSelect : ViewportControl.SelectColor));
+                    (l ??= new()).Add((refs[i].Face, PickColor(i)));
+        if (_hoverPick is { Component: { } hc, Face: var hf } && hc == componentId) (l ??= new()).Add((hf, ViewportControl.HoverColor));
         if (_hoverFace is { } h && h.comp == componentId) (l ??= new()).Add((h.face, ViewportControl.HoverColor));
         return l;
     }
@@ -249,6 +262,9 @@ public partial class MainWindow
             var b = new Button { Content = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, Children = { Icons.Make("plane", 14), new TextBlock { Text = pl } } }, Padding = new Thickness(6, 2), MinHeight = 0 };
             ToolTip.SetTip(b, $"The assembly's {pl} plane");
             b.Click += (_, _) => PickRef(a.Model.RefTo(null, pl), "");
+            // hovered: the plane shown where it is (even with the planes hidden)
+            b.PointerEntered += (_, _) => HoverPick(a.Model.RefTo(null, pl));
+            b.PointerExited += (_, _) => HoverPick(null);
             planes.Children.Add(b);
         }
         sel.Children.Add(planes);
@@ -344,10 +360,14 @@ public partial class MainWindow
             var keepIdx = box.SelectedIndex;
             box.ItemsSource = st.Picks.Select(p =>
             {
-                var tb = new TextBlock { Text = Label(p) };
+                var tb = new TextBlock { Text = Label(p), Background = Avalonia.Media.Brushes.Transparent };
                 ToolTip.SetTip(tb, Describe(p));
+                // hovered: its face or plane shown in orange
+                tb.PointerEntered += (_, _) => HoverPick(p);
+                tb.PointerExited += (_, _) => HoverPick(null);
                 return tb;
             }).ToList();
+            _hoverPick = null;
             if (keepIdx >= 0 && keepIdx < st.Picks.Count) box.SelectedIndex = keepIdx;
             bool two = st.Picks.Count == 2;
             MateGeom? ga = two ? st.Picks[0].Geom : null, gb = two ? st.Picks[1].Geom : null;
@@ -414,7 +434,7 @@ public partial class MainWindow
 
         void Close()
         {
-            _mating = null; _hoverFace = null;
+            _mating = null; _hoverFace = null; _hoverPick = null;
             // solved again as the mates now stand: a preview that could not be satisfied leaves no red behind
             if (a.Model.Doc.Mates.Count > 0) a.Model.SolveMates();
             ShowPage(null); HideConfirmCorner();
@@ -432,7 +452,7 @@ public partial class MainWindow
                 if (st.Preview.Type != orig.Type) a.Model.Doc.MateCounters[st.Preview.Type.ToString()] = a.Model.Doc.MateCounters.GetValueOrDefault(st.Preview.Type.ToString()) + 1;
                 Status($"Edited {st.Preview.Name}.");
                 st.Preview = null;
-                _mating = null; _hoverFace = null;
+                _mating = null; _hoverFace = null; _hoverPick = null;
                 ShowPage(null); HideConfirmCorner();
                 a.EndChange();
                 RefreshAssemblyScene();

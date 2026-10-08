@@ -211,6 +211,8 @@ public partial class MainWindow : IAssemblyHost
         if (asm && _activeTab != "Assembly") ShowTab("Assembly");
         else if (!asm && _activeTab == "Assembly") ShowTab("Features");
         _asmHover = null;
+        // (a part's planes are named as the assembly's: the assembly's marks go with it)
+        if (!asm) Viewport.Marked = Array.Empty<(SelItem, Rgba)>();
         if (asm) OnAssemblyChanged();
     }
 
@@ -264,9 +266,16 @@ public partial class MainWindow : IAssemblyHost
             new("Front", null, Frame.Front, half), new("Top", null, Frame.Top, half), new("Right", null, Frame.Right, half),
         };
         Viewport.ShowPlanes = _showPlanes || inst.Count == 0;
-        // the origin planes the selected mate (or the Mate page's picks) use: shown highlighted
+        // the origin planes the selected mate (or the Mate page's picks) use: shown highlighted as its faces are (the
+        // pick selected in the Mate Selections box in full blue, the other paler); one hovered on the page in orange
         var refs = _mating?.Picks ?? (SelectedMate() is { } sm ? new List<MateRef> { sm.A, sm.B } : new List<MateRef>());
-        Viewport.Emphasis = refs.Where(r => r.Component == null).Select(r => new SelItem { Kind = SelKind.Plane, Name = r.Face }).ToList();
+        var marked = new List<(SelItem, Rgba)>();
+        static SelItem PlaneItem(string name) => new() { Kind = SelKind.Plane, Name = name };
+        if (_hoverPick is { Component: null } hp) marked.Add((PlaneItem(hp.Face), ViewportControl.HoverColor));
+        for (int i = 0; i < refs.Count; i++)
+            if (refs[i].Component == null) marked.Add((PlaneItem(refs[i].Face), PickColor(i)));
+        Viewport.Emphasis = Array.Empty<SelItem>();
+        Viewport.Marked = marked;
         Viewport.Instances = inst;
         Viewport.Redraw();
     }
