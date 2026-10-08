@@ -126,6 +126,26 @@ static class SlotDragTests
             t.True(Vec2.Cross(d, sk.P(p1)) > 0 && Vec2.Cross(d, sk.P(p2)) > 0 && Vec2.Cross(d, sk.P(p3)) < 0 && Vec2.Cross(d, sk.P(p4)) < 0, "not turned inside out");
         });
 
+        t.Test("Sketch drag: what the drag does not need stays put (a slot keeps its length while its side is dragged up)", () =>
+        {
+            var sk = new Sketch();
+            int cb = sk.AddPoint(new Vec2(90, 0)).Id;
+            var axis = sk.Add(new SkLine { P1 = Sketch.OriginId, P2 = cb, Construction = true });
+            sk.AddConstraint(CType.Horizontal, axis.Id);
+            int p1 = sk.AddPoint(new Vec2(0, 15)).Id, p2 = sk.AddPoint(new Vec2(90, 15)).Id, p3 = sk.AddPoint(new Vec2(90, -15)).Id, p4 = sk.AddPoint(new Vec2(0, -15)).Id;
+            var top = sk.Add(new SkLine { P1 = p1, P2 = p2 }); var bot = sk.Add(new SkLine { P1 = p3, P2 = p4 });
+            var arcB = sk.Add(new SkArc { Center = cb, Start = p3, End = p2 }); var arcA = sk.Add(new SkArc { Center = Sketch.OriginId, Start = p1, End = p4 });
+            foreach (var (l, a) in new[] { (top, arcB), (bot, arcA), (top, arcA), (bot, arcB) }) SketchSolver.CaptureSign(sk, sk.AddConstraint(CType.Tangent, l.Id, a.Id));
+            sk.AddConstraint(CType.Parallel, top.Id, axis.Id);
+            t.True(SketchSolver.Solve(sk).Converged, "as drawn");
+            // the pointer up and a little to the side (the point can only go up: it stays over the origin)
+            for (int k = 1; k <= 20; k++)
+                SketchSolver.Solve(sk, new Dictionary<int, Vec2> { [p1] = new Vec2(0.3 * k, 15 + 1.0 * k) }, analyze: false);
+            t.True(SketchSolver.Solve(sk).Converged, "solved");
+            t.Near(sk.P(p1).Y, 35, 1);            // followed the pointer up (a little behind: it cannot go sideways)
+            t.Near(sk.P(cb).X, 90, 0.5);          // the length kept (it used to shrink to nothing)
+        });
+
         t.Test("Sketch solve: dimensions change a slot without flipping its tangencies (each arc runs on past its sides)", () =>
         {
             var (sk, ca, cb, ends, top, bot) = Slot(new Vec2(0, 0), new Vec2(60, 10), 15);

@@ -455,31 +455,17 @@ public static class SketchSolver
             drag = drag.Where(kv => sk.Point(kv.Key) is not { Fixed: true }).ToDictionary(kv => kv.Key, kv => kv.Value);
         if (drag != null && drag.Count > 0)
         {
-            // the shape before the drag: a step that turns it inside out is not taken (see SameShape)
+            // the shape before the drag: a step that turns it inside out is not taken (see SameShape). A step refused
+            // so is tried shorter (half, a quarter, an eighth, a thirty-second of the way): the drag goes as far as the shape allows
+            // instead of stopping short of the limit
             var s0 = Build(sk, null, false);
             var x0 = s0.X.ToArray();
-            // 1) dragged points fixed at the cursor
-            var s1 = Build(sk, drag, includeDragAsFixed: true);
-            var x1 = s1.X.ToArray();
-            if (Iterate(s1, x1, 40) < 1e-7 && SameShape(s0, x0, s1, x1))
+            var from = drag.ToDictionary(kv => kv.Key, kv => sk.P(kv.Key));
+            foreach (var f in new[] { 1.0, 0.5, 0.25, 0.125, 1.0 / 32 })
             {
-                Apply(s1, x1, drag);
-                return analyze ? Analyze(sk) : new SolveResult { Converged = true };
+                var to = f == 1 ? drag : drag.ToDictionary(kv => kv.Key, kv => from[kv.Key] + (kv.Value - from[kv.Key]) * f);
+                if (TryDrag(sk, s0, x0, to)) break;
             }
-            // 2) soft pull toward the cursor, then project back onto the constraints
-            var s2 = Build(sk, null, false);
-            var x2 = s2.X.ToArray();
-            foreach (var (pid, target) in drag)
-            {
-                if (!s2.PointVars.TryGetValue(pid, out var v)) continue;
-                var (ix, iy) = v;
-                s2.Eqs.Add(new Eq { Vars = new[] { ix }, F = x => (x[ix] - target.X) * 0.01 });
-                s2.Eqs.Add(new Eq { Vars = new[] { iy }, F = x => (x[iy] - target.Y) * 0.01 });
-            }
-            Iterate(s2, x2, 30);
-            var s3 = Build(sk, null, false);
-            // (neither way keeps the shape: the sketch stays where it was, as a drag past a limit does)
-            if (Iterate(s3, x2, 40) < 1e-7 && SameShape(s0, x0, s3, x2)) { Apply(s3, x2, null); }
             return analyze ? Analyze(sk) : new SolveResult { Converged = true };
         }
 
@@ -493,6 +479,51 @@ public static class SketchSolver
         if (!analyze) return new SolveResult { Converged = ok, Residual = res, Status = ok ? SketchStatus.UnderDefined : SketchStatus.OverDefined };
         var an = Analyze(sk);
         return ok ? an : new SolveResult { Converged = false, Residual = res, Status = SketchStatus.OverDefined, FreePoints = an.FreePoints, FreeRadii = an.FreeRadii, Dof = an.Dof };
+    }
+
+    /// <summary>
+    /// One drag step: the dragged points held at the pointer, else pulled toward it as far as the relations let them
+    /// (everything else held lightly where it is), then the relations met exactly. Applied when the shape is kept.
+    /// </summary>
+    static bool TryDrag(Sketch sk, System s0, double[] x0, IReadOnlyDictionary<int, Vec2> drag)
+    {
+        // 1) dragged points fixed at the cursor
+        var s1 = Build(sk, drag, includeDragAsFixed: true);
+        var x1 = s1.X.ToArray();
+        if (Iterate(s1, x1, 40) < 1e-7 && SameShape(s0, x0, s1, x1))
+        {
+            Apply(s1, x1, drag);
+            return true;
+        }
+        // 2) soft pull toward the cursor, then project back onto the constraints
+        var s2 = Build(sk, null, false);
+        var x2 = s2.X.ToArray();
+        var pulled = new HashSet<int>();
+        foreach (var (pid, target) in drag)
+        {
+            if (!s2.PointVars.TryGetValue(pid, out var v)) continue;
+            var (ix, iy) = v;
+            pulled.Add(ix); pulled.Add(iy);
+            s2.Eqs.Add(new Eq { Vars = new[] { ix }, F = x => (x[ix] - target.X) * 0.01 });
+            s2.Eqs.Add(new Eq { Vars = new[] { iy }, F = x => (x[iy] - target.Y) * 0.01 });
+        }
+        // everything else held lightly where it is (far weaker than the pull): the pointer moves what it can, and
+        // geometry the drag does not need to move stays put instead of drifting along its own freedom (a slot
+        // shrinking while its side is dragged)
+        for (int i = 0; i < x2.Length; i++)
+        {
+            if (pulled.Contains(i)) continue;
+            int vi = i; var at = x2[i];
+            s2.Eqs.Add(new Eq { Vars = new[] { vi }, F = x => (x[vi] - at) * 1e-4 });
+        }
+        Iterate(s2, x2, 30);
+        var s3 = Build(sk, null, false);
+        if (Iterate(s3, x2, 40) < 1e-7 && SameShape(s0, x0, s3, x2))
+        {
+            Apply(s3, x2, null);
+            return true;
+        }
+        return false;
     }
 
     /// <summary>
@@ -521,7 +552,43 @@ public static class SketchSolver
             if (l0 > 1e-9 && l1 < Math.Max(1e-6, l0 * 1e-3)) return false;
             if (Math.Abs(s0) > 1e-12 * Math.Max(1, l0 * l0) && Math.Sign(s0) != Math.Sign(s1)) return false;
         }
+        // nothing shrinks to nothing (equal sides of a polygon all at once, a circle's radius through zero), and no
+        // arc turns into its complement (an end swung past the other: a fillet of 90° becoming 270°)
+        // (shrinking by 1000 in one step, or below a millionth of the sketch's size: halving steps toward nothing are
+        // stopped too, before a tangency's side can no longer be told)
+        double size = 1;
+        foreach (var p in before.PRefs.Values) size = Math.Max(size, p.Get(xb).Length);
+        bool Collapsed(double was, double now) => was > 1e-9 && now < Math.Max(Math.Min(was, size * 1e-6), was * 1e-3);
+        foreach (var e in before.Sketch.Entities)
+            switch (e)
+            {
+                case SkLine l:
+                    {
+                        var (a, b) = Line(before, l.Id); var (a2, b2) = Line(after, l.Id);
+                        if (Collapsed((b.Get(xb) - a.Get(xb)).Length, (b2.Get(xa) - a2.Get(xa)).Length)) return false;
+                        break;
+                    }
+                case SkCircle:
+                    if (before.RRefs.TryGetValue(e.Id, out var r0) && after.RRefs.TryGetValue(e.Id, out var r1) && Collapsed(r0.Get(xb), r1.Get(xa))) return false;
+                    break;
+                case SkArc arc:
+                    {
+                        if (Collapsed(before.RRefs[arc.Id].Get(xb), after.RRefs[arc.Id].Get(xa))) return false;
+                        if (Math.Abs(Sweep(before, xb, arc) - Sweep(after, xa, arc)) > Math.PI) return false;
+                        break;
+                    }
+            }
         return true;
+    }
+
+    /// <summary>An arc's sweep, counterclockwise from its start to its end: 0 to 2π.</summary>
+    static double Sweep(System s, double[] x, SkArc a)
+    {
+        var c = s.PRefs[a.Center].Get(x); var st = s.PRefs[a.Start].Get(x) - c; var en = s.PRefs[a.End].Get(x) - c;
+        var w = Math.Atan2(en.Y, en.X) - Math.Atan2(st.Y, st.X);
+        while (w < 0) w += 2 * Math.PI;
+        while (w >= 2 * Math.PI) w -= 2 * Math.PI;
+        return w;
     }
 
     static void Apply(System s, double[] x, IReadOnlyDictionary<int, Vec2>? drag)

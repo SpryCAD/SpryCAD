@@ -116,6 +116,7 @@ static class Program
         if (args.Length > 1 && args[0] == "verify-demos") return Demos.Verify(args[1], filter: args.Length > 2 ? args[2] : null);
         if (args.Length > 1 && args[0] == "demo-sketches") return Demos.SketchReport(args[1]);
         if (args.Length > 0 && args[0] == "matebench") return MateBench.Run(args[1..]);
+        if (args.Length > 0 && args[0] == "sketchfuzz") return SketchFuzz.Cli(args[1..]);
         if (args.Length > 0 && args[0] == "demos") return Demos.Write(args.Length > 1 ? args[1] : Path.Combine(Path.GetTempPath(), "fc-demos"));
         if (args.Length > 1 && args[0] == "containerize") return Demos.Containerize(args.Skip(1));
         if (args.Length > 2 && args[0] == "validate") return Validate.Run(args[1], args[2]);
@@ -166,6 +167,7 @@ static class Program
             AxisCenterTests.Run(t);
             PlaneSectionTests.Run(t);
             SlotDragTests.Run(t);
+            SketchFuzz.Check(t);
             Console.WriteLine("Core");
             CoreTests.Run(t);
             Console.WriteLine($"\n{t.Passed} passed, {t.Failed} failed");
