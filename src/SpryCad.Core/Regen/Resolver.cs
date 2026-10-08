@@ -315,6 +315,8 @@ public static class Resolver
         }
         if (r.Face != null)
         {
+            // a round face's axis from the exact face (finding it among the facets would tessellate the whole body)
+            if (NativeFace(r.Face, st) is { } hit && hit.face.Tag.Surface is { IsCurved: true } ns) return (ns.Origin, ns.Axis.Normalized);
             var (_, face) = ResolveFace(r.Face, st);
             var s = face.Tag.Surface;
             if (s.IsCurved) return (s.Origin, s.Axis.Normalized);
