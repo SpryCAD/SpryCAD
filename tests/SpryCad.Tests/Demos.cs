@@ -37,6 +37,7 @@ static partial class Demos
         ("lead-screw.sasm", LeadScrewAssembly),
         ("gears.sasm", GearPair),
         ("screw-sizes.sasm", ScrewSizes),
+        ("linkage.sasm", Linkage),
     };
 
     /// <summary>

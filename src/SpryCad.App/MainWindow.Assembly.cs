@@ -271,9 +271,9 @@ public partial class MainWindow : IAssemblyHost
             if (c.Suppressed || a.Model.DisplayOf(c) is not { } pd || pd.Mesh.Indices.Length == 0) continue;
             var col = c.Color ?? pd.Color;
             var rgba = new Rgba((float)col[0], (float)col[1], (float)col[2]);
-            // while faces are picked (Mate) the components keep their colors: the faces are highlighted
-            if (_mating == null && c.Id == a.Selected) rgba = MixColor(rgba, ViewportControl.SelectColor, 0.55f);
-            else if (_mating == null && c.Id == _asmHover) rgba = MixColor(rgba, new Rgba(1f, 0.8f, 0.5f), 0.35f);
+            // while faces are picked (Mate, Motor) the components keep their colors: the faces are highlighted
+            if (!PickingFaces && c.Id == a.Selected) rgba = MixColor(rgba, ViewportControl.SelectColor, 0.55f);
+            else if (!PickingFaces && c.Id == _asmHover) rgba = MixColor(rgba, new Rgba(1f, 0.8f, 0.5f), 0.35f);
             var t = c.Placement.ToTransform();
             inst.Add(new MeshInstance(c.Id, pd.Mesh, ModelMatrix(t), rgba, FaceHighlights(c.Id)));
             // its cosmetic threads, placed with it
@@ -294,7 +294,7 @@ public partial class MainWindow : IAssemblyHost
         Viewport.ShowPlanes = _showPlanes || inst.Count == 0;
         // the origin planes the selected mate (or the Mate page's picks) use: shown highlighted as its faces are (the
         // pick selected in the Mate Selections box in full blue, the other paler); one hovered on the page in orange
-        var refs = _mating?.Picks ?? (SelectedMate() is { } sm ? new List<MateRef> { sm.A, sm.B } : new List<MateRef>());
+        var refs = PagePicks ?? (SelectedMate() is { } sm ? new List<MateRef> { sm.A, sm.B } : new List<MateRef>());
         var marked = new List<(SelItem, Rgba)>();
         static SelItem PlaneItem(string name) => new() { Kind = SelKind.Plane, Name = name };
         if (_hoverPick is { Component: null } hp) marked.Add((PlaneItem(hp.Face), ViewportControl.HoverColor));
@@ -309,7 +309,7 @@ public partial class MainWindow : IAssemblyHost
             if (refs[i].End != null) marked.Add((new SelItem { Kind = SelKind.Vertex, IsCenter = true, Point = a.Model.World(refs[i]).P }, PickColor(i)));
             else if (refs[i].Kind == MateGeomKind.Axis && a.Model.AxisSegment(rc, refs[i].Face) is { } seg) marked.Add((AxisItem(seg), PickColor(i)));
         }
-        if (_mating != null && _hoverFace is { } hov && a.Model.AxisSegment(hov.comp, hov.face) is { } hseg) marked.Add((AxisItem(hseg), ViewportControl.HoverColor));
+        if (PickingFaces && _hoverFace is { } hov && a.Model.AxisSegment(hov.comp, hov.face) is { } hseg) marked.Add((AxisItem(hseg), ViewportControl.HoverColor));
         Viewport.Emphasis = Array.Empty<SelItem>();
         Viewport.Marked = marked;
         Viewport.Instances = inst;
@@ -326,6 +326,8 @@ public partial class MainWindow : IAssemblyHost
         Tip("Insert Components\nBrings parts into the assembly: open parts or files, linked (an edit to the part shows in every assembly using it) or embedded (kept inside the assembly: one self-contained file).");
         Cmd("mates", "Mate", MateCommand);
         Tip("Mate\nPositions components relative to each other: pick two faces (or a face and an origin plane), then coincident, parallel, perpendicular, concentric, distance or angle.");
+        Cmd("motor", "Motor", MotorCommand);
+        Tip("Motor\nTurns a component about the axis of a round face at a set speed; its mates carry the rest (a gear drives its mate, a crank its linkage). Play, Pause, Reset.");
         Sep();
         Cmd("fix", "Fix", () => SetFixed(true));
         Tip("Fix\nFixes the selected component where it is.");

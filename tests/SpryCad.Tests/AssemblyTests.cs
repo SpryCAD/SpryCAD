@@ -184,6 +184,66 @@ static class AssemblyTests
             t.True(Overlap(m, g1, g2) < 1e-6, $"still clear ({Overlap(m, g1, g2):0.######} mm3)");
         });
 
+        t.Test("Linkage demo: the mates hold as placed; the drive gear turned (dragged), the crank, rocker and slider follow the kinematics", () =>
+        {
+            var m = Demos.Assemblies.First(x => x.file == "linkage.sasm").build();
+            var bad = m.Parts.Values.Where(p => p.Problem != null || p.Mesh.Indices.Length == 0).Select(p => p.Problem ?? "empty").ToList();
+            t.True(bad.Count == 0, $"the parts build ({string.Join("; ", bad)})");
+            var warned = m.Parts.Values.SelectMany(p =>
+            {
+                var r = new SpryCad.Core.Regen.Regenerator().Rebuild(p.Doc!);
+                return p.Doc!.Features.Where(f => !r.Status[f.Id].Ok || r.Status[f.Id].Warnings.Count > 0)
+                    .Select(f => $"{f.Name}: {r.Status[f.Id].Error} {string.Join("; ", r.Status[f.Id].Warnings)}");
+            }).ToList();
+            t.True(warned.Count == 0, $"no feature fails or warns ({string.Join(" | ", warned)})");
+            t.True(m.LastSolve!.Satisfied && m.LastSolve.Moved.Count == 0,
+                $"the mates hold where the parts were put ({m.Doc.Mates.Count} mates; failed: {string.Join(", ", m.LastSolve.Failed().Select(id => m.Doc.Mates.First(x => x.Id == id).Type))}; moved {m.LastSolve.Moved.Count})");
+            Component C(string name) => m.Doc.Components.First(c => c.Name.StartsWith(name));
+            var (crank, slider, g2) = (C("Crank"), C("Slider"), m.Doc.Components.Last(c => c.Name.StartsWith("Gear")));
+            double CrankAngle() { var x = crank.Placement.ToTransform().Vector(Vec3.UnitX); return Math.Atan2(x.Y, x.X); }
+            // the second gear's rim dragged round (seen down Z) by steps: the crank turns the other way, 1:1
+            var g2c = g2.Placement.ToTransform().Point(Vec3.Zero);
+            var rim = new Vec3(30, 0, 5);
+            double before = CrankAngle(), turned = 0;
+            for (int i = 0; i < 12; i++)
+            {
+                var w = g2.Placement.ToTransform().Point(rim) - g2c;
+                var to = Math.Atan2(w.Y, w.X) + 0.12;
+                m.SolveDrag(new MateSolver.Pull(g2.Id, rim, g2c + new Vec3(30 * Math.Cos(to), 30 * Math.Sin(to), 50), -Vec3.UnitZ));
+                turned += 0.12;
+                t.True(m.LastSolve!.Satisfied, $"step {i}: the mates hold ({string.Join(", ", m.LastSolve.Failed().Select(id => m.Doc.Mates.First(x => x.Id == id).Type))})");
+            }
+            var crankTurn = Math.IEEERemainder(CrankAngle() - before, 2 * Math.PI);
+            t.True(Math.Abs(crankTurn + turned) < 1e-3, $"the crank turned {crankTurn:0.####} for the gear's {turned:0.####}");
+            var (_, b, c) = Demos.LinkageJoints(CrankAngle());
+            var sx = slider.Placement.ToTransform().Point(Vec3.Zero).X;
+            t.True(Math.Abs(sx - c.X) < 1e-4, $"the slider at {sx:0.####} (kinematics: {c.X:0.####})");
+            var rocker = C("Rocker").Placement.ToTransform();
+            var bAt = rocker.Point(new Vec3(70, 0, 0));
+            t.True(Math.Abs(bAt.X - b.X) < 1e-4 && Math.Abs(bAt.Y - b.Y) < 1e-4, $"the rocker's end at ({bAt.X:0.###}, {bAt.Y:0.###}) (kinematics: ({b.X:0.###}, {b.Y:0.###}))");
+
+            // a motor on the second gear (as the Motor page steps it: turned about its bore's axis and held while the
+            // rest is solved), two whole turns: the mechanism goes right round and comes back where it was
+            var bore = m.Doc.Mates.First(x => x.Type == MateType.Gear).B;
+            var others = m.Doc.Components.Where(x => !x.Fixed && x != g2).Select(x => x.Id).ToHashSet();
+            var start = (CrankAngle(), slider.Placement.ToTransform().Point(Vec3.Zero).X);
+            double worst = 0;
+            int steps = 0;
+            for (double turned2 = 0; turned2 < 4 * Math.PI - 1e-9; turned2 += Math.PI / 30, steps++)
+            {
+                var ax = m.World(bore);
+                g2.Placement = Placement.From(Transform.Rotation(ax.P, ax.D, Math.PI / 30) * g2.Placement.ToTransform());
+                var res = m.SolveMates(others);
+                if (!res.Satisfied) { t.True(false, $"motor step {steps}: the mates hold ({string.Join(", ", res.Failed())})"); break; }
+                var (_, _, cc) = Demos.LinkageJoints(CrankAngle());
+                worst = Math.Max(worst, Math.Abs(slider.Placement.ToTransform().Point(Vec3.Zero).X - cc.X));
+            }
+            t.True(worst < 1e-4, $"{steps} motor steps: the slider where the kinematics put it throughout (off by {worst:0.######})");
+            var end = (CrankAngle(), slider.Placement.ToTransform().Point(Vec3.Zero).X);
+            t.True(Math.Abs(Math.IEEERemainder(end.Item1 - start.Item1, 2 * Math.PI)) < 1e-4 && Math.Abs(end.Item2 - start.Item2) < 1e-4,
+                $"two turns: back where it started (crank {start.Item1:0.####} -> {end.Item1:0.####}, slider {start.Item2:0.###} -> {end.Item2:0.###})");
+        });
+
         t.Test("Mates: tangent, lock, distance limits, gear and screw", () =>
         {
             // tangent: the sleeve lying on the Top plane (its axis parallel to it, a radius above)

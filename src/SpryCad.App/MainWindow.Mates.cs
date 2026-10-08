@@ -62,7 +62,7 @@ public partial class MainWindow
     /// <summary>The color a mate's i-th reference is drawn in: full selection blue, paler while another is selected in the box.</summary>
     Rgba PickColor(int i) => _mating is { Focus: >= 0 } mt && mt.Focus != i ? PaleSelect : ViewportControl.SelectColor;
 
-    public bool PickingFaces => _mating != null && Asm != null;
+    public bool PickingFaces => (_mating != null || _motor != null) && Asm != null;
 
     /// <summary>The picks not selected in the Mate Selections box while one is: a paler selection blue.</summary>
     static readonly Rgba PaleSelect = new(0.62f, 0.78f, 1.0f);
@@ -77,6 +77,7 @@ public partial class MainWindow
 
     public void PickFace(string component, string face)
     {
+        if (_motor != null) { MotorPick(component, face); return; }
         if (_mating is not { } st || Asm is not { } a) return;
         PickRef(a.Model.RefTo(component, face), $"{FindComponent(component)?.Name}: that face is not planar or round (it cannot be mated yet)");
     }
@@ -110,7 +111,7 @@ public partial class MainWindow
     List<(string face, Rgba color)>? FaceHighlights(string componentId)
     {
         List<(string, Rgba)>? l = null;
-        var refs = _mating?.Picks ?? (SelectedMate() is { } m ? new List<MateRef> { m.A, m.B } : null);
+        var refs = PagePicks ?? (SelectedMate() is { } m ? new List<MateRef> { m.A, m.B } : null);
         if (refs != null)
             for (int i = 0; i < refs.Count; i++)
                 if (refs[i].Component == componentId)
@@ -157,6 +158,7 @@ public partial class MainWindow
         if (Asm is not { } a) return;
         if (a.Model.Doc.Components.Count < 1) { Status("Insert components first."); return; }
         if (_mating != null) { Status("Finish the open Mate page first (OK or Cancel)."); return; }
+        if (_motor != null) { Status("Close the Motor page first (OK or Cancel)."); return; }
         a.BeginChange();
         var st = new Mating { Editing = editing };
         if (editing is { } e)

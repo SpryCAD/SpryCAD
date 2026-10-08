@@ -103,6 +103,11 @@ public static class Icons
         ["align-opposite"] = ("M7 20V5 M4 8l3-3 3 3", "M17 4v15 M14 16l3 3 3-3"),
         ["mate-screw"] = ("M8 2v20 M14 2v20 M8 5l6 2 M8 10l6 2 M8 15l6 2", "M19 8v10 M17 16l2 2 2-2"),
         ["fix"] = ("M12 3v12 M7 9h10 M5 15c2 4 12 4 14 0", null),
+        // motor: a shaft with a turning arrow round it; play, pause, reset
+        ["motor"] = ("M12 12m-2.5 0a2.5 2.5 0 1 0 5 0a2.5 2.5 0 1 0-5 0", "M19 9A7.5 7.5 0 1 0 19.5 14 M19 4v5h-5"),
+        ["play"] = ("M7 4l13 8-13 8z", null),
+        ["pause"] = ("M7 4h3v16H7z M14 4h3v16h-3z", null),
+        ["reset"] = ("M5 12a7 7 0 1 0 2-5 M4 3v5h5", null),
         // view
         ["fit"] = ("M3 8V3h5 M16 3h5v5 M21 16v5h-5 M8 21H3v-5", "M8 8h8v8H8z"),
         ["views"] = ("M12 2l9 5v10l-9 5-9-5V7z M12 12l9-5 M12 12v10 M12 12L3 7", null),
