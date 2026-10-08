@@ -1,0 +1,129 @@
+# Performance notes
+
+Open performance work, for whoever picks it up next. From a review of the whole code base (October 2026) and the
+changes made after it. Line numbers drift: search for the names.
+
+The aim is a faster app that stays robust and light: no new dependencies, and results that are either bit-identical
+or checked against the old ones (see *Checking a change* below).
+
+## Done already
+
+| Commit | What |
+|---|---|
+| `ebcb470` | Display normals of free-form faces searched once per point; screw surfaces keep their last closest point and sweep box; the rebuild cache keyed by prefix hash (undo/redo/preview hits); compact JSON in memory; no DOF analysis per sketch-drag move; camera matrices cached |
+| `4d0e6b2` | Ear clipping with a z-order index; `CdtMesh` in flat arrays; NTess interior grid by row crossings and boxed boundary runs (display tessellation ~1.7× faster) |
+| `ab36f00` | Plane × cone (exact conics, apex lines) and plane × torus (closed-form points) instead of traced |
+
+## Where the time goes now
+
+Measure with `dotnet run -c Release -- bench <file.sprt> 5` in `tests/SpryCad.Tests` (per-feature times plus a
+profile; the profile's times are summed over threads). On the heavy samples (`samples/demos/spur-gear-nice.sprt`,
+`samples/spoked-handwheel.sprt`) the leaders are:
+
+- **`NIntersect.Trace`** (`trace.march`, `trace.project`, `trace.grid`). These are surface pairs with no closed form:
+  Cone × Cylinder on the gear (~600 ms summed), Torus × Cylinder on the handwheel (~400 ms).
+- **`sec.makeedge`**: `NBoolean.FitSpline` over traced polylines (~300 ms on the gear).
+- **Display mesh build**: `mesh.topology`, `topo.weld`, `topo.edges`, `mesh.emit`.
+
+## Kernel: open items, roughly by expected gain
+
+1. **`NIntersect.Trace` internals** (results must stay identical):
+   - `edgePts`, `adj` and `used` are tuple-keyed dictionaries plus a `HashSet`. Every node has degree ≤ 2, so flat
+     stamped arrays work, as the grid already does. Keep the chaining order: keys in first-insertion order, degree-1
+     nodes first.
+   - `Densify` always splits at depth 0 and then projects twice at depth 1. That is about 3 projections per
+     segment; the extra points change results.
+   - `ProjectToIntersection` calls `F_` and then `Grad` with no hint.
+2. **`NBoolean.FitSpline` and `NSpline.Param`**:
+   - `Param` costs about 250 B-spline evaluations: a 129-sample scan plus 60 golden-section steps at 2 evaluations
+     each. It also ignores `hint`.
+   - `FitSpline` builds a new `NSpline` per iteration and re-parameterises every point, adding one point per pass.
+   - Fix: Newton from the bracket, clamped, with the scan as fallback. Add every bad span's worst point per pass.
+   - Results change slightly, so check them as below.
+3. **`NDomain.Classify`, `BoundaryDistance` and `ContainsUV`**: linear in all boundary samples, with a square root per
+   segment. Per-loop boxes, squared distances and skipping far loops give identical results.
+4. **Vertex matching in `NBoolean`**: `MergeVertices` and `Snap` match linearly (O(V²)). Use a grid hash as
+   `WeldVertices` has, and return the lowest-index match to stay deterministic. `ImprintSplitVertices` and `Sew` are
+   O(E·V) with no box prefilter.
+5. **Edge sample cache** (`NEdge.Samples`): it keeps the finest sampling any caller asked for, and `EdgeSurface` asks
+   for `tol*50`. Later domains and display boundaries then carry many more points than they need. A cache per
+   tolerance band would fix it, but `SplitFace` relies on the fine samples, so validate.
+6. **B-spline interpolation** (`Exact/Curves.cs` `Interpolate`/`SolveBanded`): builds a dense (n+1)² matrix and
+   clones it. STEP rational curves push n into the thousands (hundreds of MB). Store the band only.
+7. **NURBS core** (`NNurbs.DerivsIn`):
+   - Six passes over `Vec3[,]`/`double[,]`; flat homogeneous poles in one pass should be 3–5× faster.
+   - `PoleAt` uses LINQ inside Newton.
+   - Newton stops only on a step below 1e-15; add a residual test.
+8. **Screw-surface ray casts** (`ScrewSurface.RayHits`): up to 20,000 unhinted `Closest` calls per ray. Warm-start
+   from the previous sample with the global search as fallback. Ray parity must not change.
+9. **Mass properties**:
+   - `NMass.Partials` uses finite differences for B-spline and offset surfaces; `Nurbs.Derivs` is exact.
+   - `Breaks` samples more panels than 8-point Gauss needs.
+10. **Display pipeline**:
+    - `NTess` emits one `Face` object per triangle, then `Topology.Build` re-welds every corner through a dictionary.
+      Indexed per-face output would skip the weld.
+    - `DisplayMesh` emits unshared vertices (3× the GPU memory within a face).
+11. **Small items**:
+    - `NFace.ComputeBounds` builds a throwaway domain. Sharing the cached one changed results; see *Tried and rejected*.
+    - `ClassifyAll` runs `CoincidentWith` before the cheap box test.
+    - `NFace.Coedges` is a LINQ `SelectMany` used in hot loops.
+    - `AddSec` uses `List.Contains`.
+    - `SplitFace` pruning and dedup are O(s²) to O(s³).
+    - STEP import uses culture-sensitive `EndsWith` (should be ordinal) and runs `Unit()` twice, each with sorts.
+    - `Solid.Combine` has an unreachable duplicate clone block.
+
+## Core and app: open items
+
+- **Sketch solver** (`Sketch/Solver.cs`):
+  - Dense m×m systems, allocated per damping attempt.
+  - Split equations into independent clusters (union-find over `Eq.Vars`) and skip converged clusters.
+  - Drop equations with no variables.
+  - Analytic derivatives for the common constraints.
+  - `WouldOverDefine` ranks the whole sketch twice.
+- **Mate solver** (`Assembly/MateSolver.cs`): already sparse. Solve the connected pieces separately and skip those
+  already within tolerance. `Settle` runs two full solves.
+- **Regenerator**:
+  - Cancellation is only checked between features, so pass the token into the boolean and blend loops.
+  - `DocumentSession` builds display meshes before its stale check.
+  - Equations are ordered by trial and catch (about n²/2 exceptions); sort them topologically.
+  - `ResolveDir` from an edge tessellates the whole intermediate body; try `ResolveNativeEdge` first, as the other
+    resolvers do.
+- **Viewport** (`ViewportControl`, `SketchEditor`):
+  - `Redraw()` rebuilds the sketch overlay synchronously on every input event, recreating every relation glyph
+    (brushes, a native `Cursor` each). Coalesce to once per frame, pool glyphs by constraint id, and cache the label
+    layout (a pan does not change it).
+  - `PickVertex` allocates per edge per move with no cull.
+  - Assembly hover ray-tests every triangle; cull by face boxes as `PickItem` does.
+- **Sketch lookups**: `Sketch.Point`, `Entity` and `P` are linear scans used per entity per frame. Selection is a
+  `List`.
+- **Feature tree**: rebuilt fully 2–3 times per edit and on every preview tick. Icon SVG paths are re-parsed each
+  time.
+- **Dynamic geometry**: cosmetic thread helices and sketches are rebuilt and re-uploaded every frame.
+- **Saving and startup**:
+  - Autosave re-hashes and recompresses attachments every time; cache them per array instance.
+  - Startup: measure with `TieredCompilationQuickJit` on, and start `Warmup` after the window opens.
+
+## Tried and rejected
+
+- **`Roots.Bisect` → Illinois/Brent**: about 2% on threads, but results changed on 136 of 358 feature hashes.
+- **`ComputeBounds` sharing the face's cached domain**: changes results. `Solid.Bounds` caches a finer domain that
+  booleans then reuse, which makes them order-dependent and slower to classify.
+- **Anisotropic Morton scaling in the ear-clipping index**: slower on thread outlines; square scaling is kept.
+- **Plane tangent to a cone along a generator, or tangent to a torus**: left traced on purpose (tangential contact).
+
+## Checking a change
+
+All of these run from `tests/SpryCad.Tests`, built with `dotnet build -c Release`.
+
+- **Results bit for bit**: `dotnet run -c Release --no-build -- determinism <file.sprt> 1` prints a hash per feature.
+  Run it before and after (another process, or a `git worktree` of the old commit) over `samples/*.sprt` and
+  `samples/demos/*.sprt`, and diff the output.
+- **Display bit for bit**: run the same with `FC_DET_MESH=1`, which adds a hash of the final facets and display mesh.
+- **Within tolerance**, when results are allowed to change:
+  - `-- massprops <file>` gives exact volume, area and inertia per body.
+  - `-- verify-demos <dir>` rebuilds every demo and its variants, checks they are closed, writes STEP, and prints
+    volumes.
+  - Compare both against the old build.
+- **Tests**: `dotnet run -c Release --no-build` runs them all. Pass a name fragment to filter.
+- **Timing**: machines here are often busy (other agents build and test). Alternate old and new builds run for run
+  (`bench <file> 5`, two rounds each) instead of trusting one pair of numbers.
