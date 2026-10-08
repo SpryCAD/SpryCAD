@@ -150,6 +150,28 @@ public sealed class NDomain
         return new Vec2(q.X, q.Y * VSign);
     }
 
+    /// <summary>
+    /// UV' coordinates of points along a curve (an edge's samples): on a screw surface each point is found from the
+    /// one before it (from the domain's middle, a long helical face's points are turns away: a full search each).
+    /// </summary>
+    public Vec2[] MapAlong(IReadOnlyList<Vec3> pts)
+    {
+        var res = new Vec2[pts.Count];
+        if (Face.Surface.Kind != SurfaceKind.Screw)
+        {
+            for (int i = 0; i < res.Length; i++) res[i] = Map(pts[i]);
+            return res;
+        }
+        double hu = (UMin + UMax) / 2, hv = (VMin + VMax) / 2 * VSign;
+        for (int i = 0; i < res.Length; i++)
+        {
+            var q = Face.Surface.UV(pts[i], hu, hv);
+            res[i] = new Vec2(q.X, q.Y * VSign);
+            hu = q.X; hv = q.Y;
+        }
+        return res;
+    }
+
     public Vec3 Eval(Vec2 uv) => Face.Surface.Eval(uv.X, uv.Y * VSign);
 
     public bool ContainsUV(Vec2 p)

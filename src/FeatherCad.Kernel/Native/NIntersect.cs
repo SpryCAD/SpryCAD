@@ -91,7 +91,7 @@ public static class NIntersect
 
         if (Math.Abs(F(e.T0)) < tol) res.Add(e.T0);
         if (Math.Abs(F(e.T1)) < tol) res.Add(e.T1);
-        var exact = AnalyticRoots(c, s, tol);
+        var exact = AnalyticRoots(c, s, tol) ?? (s.Kind == SurfaceKind.Screw ? ScrewRoots(c, s.Screw!, lo, hi, tol) : null);
         if (exact != null)
         {
             foreach (var t0 in exact)
@@ -201,6 +201,100 @@ public static class NIntersect
     }
 
     /// <summary>All parameters where the (unbounded) curve meets the surface, or null without a closed form.</summary>
+    /// <summary>
+    /// Where a line along the screw's axis, a circle about it, or a line square to it through it crosses the screw
+    /// surface, from the generator alone (no closest-point searches). The motion keeps a point's distance r from the
+    /// axis, turns it by u and raises it K·u; a generator point at v (radius r(v), angle a(v), height z(v)):
+    /// <list type="bullet">
+    /// <item>a line along the axis at radius d, angle φ: the points with r(v) = d, at the turns u = φ − a(v) + 2πk;</item>
+    /// <item>a circle about the axis at height H, radius R: the points with r(v) = R, at u = (H − z(v)) / K;</item>
+    /// <item>a line through the axis square to it at height H: the v where the point raised to H, at angle
+    /// a(v) + (H − z(v)) / K, lies on the line's direction (or the opposite one), at t = foot ± r(v).</item>
+    /// </list>
+    /// Generator parameters a little past the swept part, as for the surface's other closed forms. Null for anything
+    /// else (the caller scans).
+    /// </summary>
+    static List<double>? ScrewRoots(NCurve c, ScrewSurface sc, double lo, double hi, double tol)
+    {
+        var m = sc.Motion;
+        if (Math.Abs(m.K) < 1e-12) return null;
+        double pad = (sc.V1 - sc.V0) * 0.01 + 1e-9, v0 = sc.V0 - pad, v1 = sc.V1 + pad;
+        const int n = 256;
+        Vec3 G(double v) => m.Local(sc.Gen.Eval(v));
+        // the v where f changes sign (not across a jump of f: angles wrap by 2π)
+        List<double> SignChanges(Func<double, double> f, double jump)
+        {
+            var r = new List<double>();
+            double pv = v0, pf = f(v0);
+            for (int i = 1; i <= n; i++)
+            {
+                var v = v0 + (v1 - v0) * i / n; var fv = f(v);
+                if (pf == 0) r.Add(pv);
+                else if (pf * fv < 0 && Math.Abs(fv - pf) < jump) r.Add(Roots.Bisect(f, pv, v));
+                pv = v; pf = fv;
+            }
+            if (pf == 0) r.Add(pv);
+            return r;
+        }
+        double Radius(Vec3 l) => Math.Sqrt(l.X * l.X + l.Y * l.Y);
+        double Wrap(double a) => Math.IEEERemainder(a, 2 * Math.PI);
+        if (c is NLine ln)
+        {
+            var la = m.Local(ln.P); var dz = Vec3.Dot(ln.D, m.A);
+            // farther from the axis than the surface reaches (a nut's hex edges about its thread): nothing
+            var cr = Vec3.Cross(ln.D, m.A);
+            if (cr.Length > 1e-12 && Math.Abs(Vec3.Dot(ln.P - m.O, cr.Normalized)) > sc.MaxRadius * 1.01 + tol) return new List<double>();
+            if (Math.Abs(Math.Abs(dz) - 1) < 1e-12)
+            {
+                // along the axis
+                var d = Radius(la); var phi = Math.Atan2(la.Y, la.X);
+                var res = new List<double>();
+                foreach (var v in SignChanges(v => Radius(G(v)) - d, double.MaxValue))
+                {
+                    var g = G(v);
+                    var u0 = phi - Math.Atan2(g.Y, g.X);
+                    // t = dz·(z(v) + K·(u0 + 2πk) − z_line), for the k landing in [lo, hi]
+                    double t0 = dz * (g.Z + m.K * u0 - la.Z), step = dz * m.K * 2 * Math.PI;
+                    double ka = (lo - t0) / step, kb = (hi - t0) / step;
+                    long k0 = (long)Math.Ceiling(Math.Min(ka, kb) - 1e-9), k1 = (long)Math.Floor(Math.Max(ka, kb) + 1e-9);
+                    if (k1 - k0 > 100000) return null;
+                    for (long k = k0; k <= k1; k++) res.Add(t0 + step * k);
+                }
+                return res;
+            }
+            if (Math.Abs(dz) < 1e-12)
+            {
+                // square to the axis: through it?
+                var dl = new Vec3(Vec3.Dot(ln.D, m.X), Vec3.Dot(ln.D, m.Y), 0);
+                var tf = -(la.X * dl.X + la.Y * dl.Y); // the foot of the axis on the line
+                var foot = new Vec3(la.X + dl.X * tf, la.Y + dl.Y * tf, la.Z);
+                if (Radius(foot) > tol) return null;
+                var phi = Math.Atan2(dl.Y, dl.X); var H = la.Z;
+                double Ang(double v) { var g = G(v); return Math.Atan2(g.Y, g.X) + (H - g.Z) / m.K; }
+                var res = new List<double>();
+                foreach (var (off, sign) in new[] { (0.0, 1.0), (Math.PI, -1.0) })
+                    foreach (var v in SignChanges(v => Wrap(Ang(v) - phi - off), Math.PI))
+                        res.Add(tf + sign * Radius(G(v)));
+                return res;
+            }
+            return null;
+        }
+        if (c is NCircle ci && Math.Abs(Math.Abs(Vec3.Dot(ci.Axis, m.A)) - 1) < 1e-12)
+        {
+            var lc = m.Local(ci.C);
+            if (Radius(lc) > tol) return null;
+            var res = new List<double>();
+            foreach (var v in SignChanges(v => Radius(G(v)) - ci.R, double.MaxValue))
+            {
+                var g = sc.Gen.Eval(v);
+                var p = m.Move((lc.Z - m.Local(g).Z) / m.K, g);
+                res.Add(ci.Param(p));
+            }
+            return res;
+        }
+        return null;
+    }
+
     static List<double>? AnalyticRoots(NCurve c, NSurface s, double tol)
     {
         if (c is NLine ln)

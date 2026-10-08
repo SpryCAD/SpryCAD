@@ -1019,7 +1019,7 @@ public sealed class NBoolean
         HalfEdge Make(NEdge e, bool fwd)
         {
             var pts = e.Samples(_sampleTol * 500);
-            var uv = pts.Select(dom.Map).ToArray();
+            var uv = dom.MapAlong(pts);
             if (!fwd) Array.Reverse(uv);
             var h = new HalfEdge { Edge = e, Forward = fwd, From = fwd ? e.V0 : e.V1, To = fwd ? e.V1 : e.V0, Uv = uv };
             h.OutAngle = Dir(uv, true).Angle;

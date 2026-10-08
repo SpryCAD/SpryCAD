@@ -112,6 +112,49 @@ static class HelicalTests
             t.Eq(NIntersect.Analytic(screw, far, 1e-6)!.Count, 0);
         });
 
+        t.Test("Screw surface crossed by a line along its axis, a circle about it and a line through it: closed form, as a brute-force scan finds", () =>
+        {
+            var sc = new ScrewSurface(ScrewMotion.About(Vec3.Zero, Vec3.UnitY, 3, Vec3.UnitX), new NLine(new Vec3(8.4, 6, 0), new Vec3(2.5, -1.44, 0)), 0, 2.9, 0, 8 * Math.PI);
+            var screw = NSurface.ScrewOf(sc);
+            NEdge LineEdge(Vec3 a, Vec3 b) => new(new NLine(a, b - a), 0, (b - a).Length, new NVertex(a), new NVertex(b));
+            var at30 = new Vec3(Math.Cos(Math.PI / 6), 0, Math.Sin(Math.PI / 6)) * 9.5;
+            var across = new Vec3(Math.Cos(0.05), 0, -Math.Sin(0.05)) * 12; // square to the axis, turned a little about it
+            var edges = new (string name, NEdge e)[]
+            {
+                ("along the axis", LineEdge(at30 + new Vec3(0, -5, 0), at30 + new Vec3(0, 30, 0))),
+                ("through the axis", LineEdge(new Vec3(0, 10.3, 0) - across, new Vec3(0, 10.3, 0) + across)),
+                ("about the axis", new NEdge(new NCircle(new Vec3(0, 10, 0), Vec3.UnitY, Vec3.UnitX, 9.5), 0, 2 * Math.PI, new NVertex(new Vec3(9.5, 10, 0)), new NVertex(new Vec3(9.5, 10, 0)))),
+            };
+            foreach (var (name, e) in edges)
+            {
+                var hits = NIntersect.EdgeSurface(e, screw, 1e-7).Params;
+                // brute force: sign changes of the signed distance on a fine scan, kept where the root is on the surface
+                // (the generator's own stretch: the signed distance also counts its line extended past the profile)
+                var brute = new List<double>();
+                double lo = e.T0, hi = e.T1; int n = 20000;
+                double F(double t) => screw.F_(e.Curve.Eval(t));
+                double pt = lo, pf = F(lo);
+                for (int i = 1; i <= n; i++)
+                {
+                    var tt = lo + (hi - lo) * i / n; var f = F(tt);
+                    if (pf * f < 0)
+                    {
+                        var r = Roots.Bisect(F, pt, tt);
+                        var cv = sc.Closest(e.Curve.Eval(r)).v;
+                        if (Math.Abs(F(r)) < 1e-6 && cv > sc.V0 - 0.03 && cv < sc.V1 + 0.03) brute.Add(r);
+                    }
+                    pt = tt; pf = f;
+                }
+                t.True(hits.Count > 0, $"{name}: crossings found");
+                t.True(hits.Count == brute.Count, $"{name}: {hits.Count} crossings [{string.Join(", ", hits.Select(h => h.ToString("0.####")))}] vs brute force {brute.Count} [{string.Join(", ", brute.Select(h => h.ToString("0.####")))}]");
+                for (int i = 0; i < Math.Min(hits.Count, brute.Count); i++)
+                {
+                    t.True(Math.Abs(hits[i] - brute[i]) < 1e-6, $"{name}: crossing {i} at {hits[i]:0.######} vs {brute[i]:0.######}");
+                    t.True(sc.Closest(e.Curve.Eval(hits[i])).dist < 1e-9, $"{name}: crossing {i} on the surface");
+                }
+            }
+        });
+
         t.Test("Helical sweep run-out: a round wire runs on along the end's normal; a V leaves a radius along the helix's tangent", () =>
         {
             // a circle profile: a right cylinder 5 long on the end (exact: Pappus + π r² · 5)
