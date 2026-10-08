@@ -17,6 +17,8 @@ public partial class MainWindow
     sealed class PartTab(DocumentSession session)
     {
         public readonly DocumentSession Session = session;
+        /// <summary>The tab's assembly when it holds one (its part session then stays empty).</summary>
+        public AssemblySession? Asm;
         public Border Header = null!;
         public TextBlock Label = null!;
         /// <summary>The camera when last left; null until then (the view is fitted to the part instead).</summary>
@@ -49,7 +51,7 @@ public partial class MainWindow
     /// </summary>
     string NextUntitledName()
     {
-        var taken = new HashSet<string>(_parts.Select(t => t.Session.FilePath is { } p ? Path.GetFileNameWithoutExtension(p) : t.Session.UntitledName),
+        var taken = new HashSet<string>(_parts.Where(t => t.Asm == null).Select(t => t.Session.FilePath is { } p ? Path.GetFileNameWithoutExtension(p) : t.Session.UntitledName),
             StringComparer.OrdinalIgnoreCase);
         for (int n = 1; ; n++)
             if (!taken.Contains("Part" + n)) return "Part" + n;
@@ -375,18 +377,18 @@ public partial class MainWindow
                     _ = LoadThumb(t, img);
                 }
                 else if (list.Items.IndexOf(row.Item) != i) { list.Items.Remove(row.Item); list.Items.Insert(i, row.Item); }
-                row.Title.Text = t.Session.Title;
+                row.Title.Text = TitleOf(t);
                 row.Title.FontWeight = t == _tab ? FontWeight.SemiBold : FontWeight.Normal;
                 if (!row.Item.IsPointerOver) row.Close.Opacity = t == _tab ? 1 : 0;
                 // could not be opened: the name in red, the problem instead of the path (in full on the tooltip)
                 var error = t.Error;
                 SetErrorColor(row.Title, error != null);
-                row.Path.Text = error ?? t.Session.FilePath ?? t.Source ?? "Not saved yet";
+                row.Path.Text = error ?? t.Asm?.FilePath ?? t.Session.FilePath ?? t.Source ?? "Not saved yet";
                 row.Path.Foreground = error != null ? ErrorBrush : Brushes.Gray;
                 row.Path.TextTrimming = error != null ? TextTrimming.CharacterEllipsis : TextTrimming.PathSegmentEllipsis;
                 row.Warning.IsVisible = error != null && t.Thumb == null;
                 ToolTip.SetTip(row.Item, error != null ? $"Could not be opened: {error}\n{t.Source ?? t.Session.FilePath}" : null);
-                Avalonia.Controls.Primitives.TextSearch.SetText(row.Item, t.Session.Title);
+                Avalonia.Controls.Primitives.TextSearch.SetText(row.Item, TitleOf(t));
             }
             if (_partRows.TryGetValue(_tab, out var active) && !ReferenceEquals(list.SelectedItem, active.Item))
             {
@@ -556,17 +558,17 @@ public partial class MainWindow
 
     void UpdateTabHeader(PartTab t)
     {
-        t.Label.Text = t.Session.Title;
+        t.Label.Text = TitleOf(t);
         t.Label.FontWeight = t == _tab ? FontWeight.SemiBold : FontWeight.Normal;
         SetErrorColor(t.Label, t.Error != null);
         t.Header.Background = t == _tab ? TabActiveBrush : TabInactiveBrush;
-        ToolTip.SetTip(t.Header, t.Error is { } e ? $"Could not be opened: {e}" : t.Session.FilePath ?? t.Source ?? "Not saved yet");
+        ToolTip.SetTip(t.Header, t.Error is { } e ? $"Could not be opened: {e}" : t.Asm?.FilePath ?? t.Session.FilePath ?? t.Source ?? "Not saved yet");
         RefreshPartsList();
     }
 
     /// <summary>An unsaved new part nobody has worked on: opening a file reuses its tab instead of adding one.</summary>
     bool IsUntouched(PartTab t) =>
-        t.Session.FilePath == null && !t.Session.Dirty && !t.Session.CanUndo && t.Session.Doc.Features.Count == 0
+        t.Asm == null && t.Session.FilePath == null && !t.Session.Dirty && !t.Session.CanUndo && t.Session.Doc.Features.Count == 0
         && !t.Session.IsPending && t.Error == null && !(t == _tab && HasPendingEdit);
 
     /// <summary>Opens an empty tab and makes it active (null if leaving the current one was cancelled).</summary>
@@ -608,6 +610,7 @@ public partial class MainWindow
         UpdateTabHeader(old);
         UpdateTabHeader(t);
         DocTabs.Active = t.Header; // shown even when the tabs before it fill the strip
+        ApplyDocumentKind(); // an assembly's tree, commands and picking, or a part's
 
         StatusRebuild.Text = "";
         BusyText.IsVisible = Session.Busy;

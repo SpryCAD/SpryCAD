@@ -35,6 +35,11 @@ public static class Icons
         ["lpattern"] = ("M3 3h5v5H3z M10 3h5v5h-5z M17 3h5v5h-5z M3 10h5v5H3z M10 10h5v5h-5z M17 10h5v5h-5z", "M3 20h19 M19 18l3 2-3 2"),
         ["cpattern"] = ("M12 2a2 2 0 1 0 0.01 0z M20 10a2 2 0 1 0 0.01 0z M12 18a2 2 0 1 0 0.01 0z M4 10a2 2 0 1 0 0.01 0z", "M12 12m-1 0a1 1 0 1 0 2 0a1 1 0 1 0-2 0"),
         ["mirror"] = ("M3 18L10 6v12z M21 18L14 6v12z", "M12 2v20"),
+        // assemblies: two blocks stacked; a block with an arrow in; a block with arrows out (floating); a block with a light outline
+        ["assembly"] = ("M3 13h9v8H3z M12 9h9v8h-9z", "M7 5h9v4"),
+        ["insertcomp"] = ("M10 10h11v11H10z", "M2 3l6 6 M8 4v5H3"),
+        ["float"] = ("M8 8h8v8H8z", "M12 2v4 M12 18v4 M2 12h4 M18 12h4"),
+        ["lightweight"] = ("M4 8h12v12H4z", "M14 4h6v6"),
         ["plane"] = ("M2 17l5-10h15l-5 10z", null),
         ["combine"] = ("M9 12m-6 0a6 6 0 1 0 12 0a6 6 0 1 0-12 0 M15 12m-6 0a6 6 0 1 0 12 0a6 6 0 1 0-12 0", null),
         // sheet metal: a bent sheet unrolled flat, its bend line dashed; flatten: folded and flat with an arrow

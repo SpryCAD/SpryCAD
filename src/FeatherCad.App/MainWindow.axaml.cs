@@ -156,7 +156,7 @@ public partial class MainWindow : Window
 
     void OnDocumentChanged()
     {
-        Title = "FeatherCAD - " + Session.Title;
+        Title = "FeatherCAD - " + (_tab != null ? TitleOf(_tab) : Session.Title);
         StatusUnits.Text = Session.Doc.Units.ToString();
         PmPage.LengthUnit = UnitLabel;
         UpdateUndoButtons();
@@ -164,7 +164,11 @@ public partial class MainWindow : Window
         RebuildTree();
     }
 
-    void RebuildTree() => Tree.Rebuild(Session.Doc, Session.Title.TrimEnd(' ', '*'), Session.Result);
+    void RebuildTree()
+    {
+        if (Asm is { } a) { _asmTree.Show(a); return; }
+        Tree.Rebuild(Session.Doc, Session.Title.TrimEnd(' ', '*'), Session.Result);
+    }
 
     /// <summary>Pushes the current rebuild result (or rolled back / preview state) into the viewport.</summary>
     /// <summary>
@@ -191,6 +195,8 @@ public partial class MainWindow : Window
 
     public void RefreshScene()
     {
+        if (Asm != null) { RefreshAssemblyScene(); return; }
+        Viewport.Instances = Array.Empty<MeshInstance>();
         var doc = Session.Doc;
         var result = Session.DisplayResult;
         var baseResult = Session.Result;
@@ -598,14 +604,14 @@ public partial class MainWindow : Window
 
     async void OnClosing(object? sender, WindowClosingEventArgs e)
     {
-        if ((!HasPendingEdit && !_parts.Any(t => t.Session.Dirty)) || _closeConfirmed) return;
+        if ((!HasPendingEdit && !_parts.Any(DirtyOf)) || _closeConfirmed) return;
         e.Cancel = true;
         // the pending edit (active tab) first, then each part with unsaved changes, shown as it is asked about
         if (!await ResolvePendingEdit()) return;
-        foreach (var t in _parts.Where(t => t.Session.Dirty).ToList())
+        foreach (var t in _parts.Where(DirtyOf).ToList())
         {
             if (!await SwitchTo(t)) return;
-            var r = await Dialogs.YesNoCancel(this, "FeatherCAD", $"Save changes to {Session.Title.TrimEnd(' ', '*')}?");
+            var r = await Dialogs.YesNoCancel(this, "FeatherCAD", $"Save changes to {TitleOf(t).TrimEnd(' ', '*')}?");
             if (r == null) return;
             if (r == true && !await Save()) return;
         }

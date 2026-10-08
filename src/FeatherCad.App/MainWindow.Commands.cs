@@ -211,8 +211,8 @@ public partial class MainWindow
     void UpdateUndoButtons()
     {
         if (_undoButton == null || _redoButton == null) return;
-        _undoButton.IsEnabled = _sketch != null || Session.CanUndo;
-        _redoButton.IsEnabled = _sketch != null || Session.CanRedo;
+        _undoButton.IsEnabled = _sketch != null || (Asm?.CanUndo ?? Session.CanUndo);
+        _redoButton.IsEnabled = _sketch != null || (Asm?.CanRedo ?? Session.CanRedo);
     }
 
     void BuildQuickAccess()
@@ -239,9 +239,10 @@ public partial class MainWindow
 
     void BuildCommandManager()
     {
-        foreach (var name in new[] { "Features", "Sketch", "Sheet Metal", "Evaluate" })
+        foreach (var name in new[] { "Assembly", "Features", "Sketch", "Sheet Metal", "Evaluate" })
         {
-            var t = new ToggleButton { Content = name, Classes = { "tab" } };
+            // the Assembly tab only while an assembly is active (ApplyDocumentKind)
+            var t = new ToggleButton { Content = name, Classes = { "tab" }, IsVisible = name != "Assembly" };
             t.Click += (_, _) => ShowTab(name);
             _tabs[name] = t;
             CommandTabs.Children.Add(t);
@@ -257,6 +258,9 @@ public partial class MainWindow
         _toolButtons.Clear();
         switch (name)
         {
+            case "Assembly":
+                AssemblyCommands();
+                break;
             case "Features":
                 Cmd("extrude", "Extruded\nBoss/Base", () => ExtrudeCommand(false));
                 Cmd("revolve", "Revolved\nBoss/Base", () => RevolveCommand(false));
@@ -404,7 +408,7 @@ public partial class MainWindow
 
     void BuildPanelTabs()
     {
-        AddPanelTab(TreeTab, "part", "FeatureManager Design Tree", Tree);
+        AddPanelTab(TreeTab, "part", "FeatureManager Design Tree", TreePanel());
         AddPanelTab(PropertyTab, "propsheet", "PropertyManager (the settings of the feature or sketch being edited)", PmHost,
             available: () => _page != null);
         PanelTabs.SelectionChanged += (_, _) =>
@@ -738,6 +742,7 @@ public partial class MainWindow
     async Task<bool> ConfirmDiscard()
     {
         if (!await ResolvePendingEdit()) return false;
+        if (Asm != null) return await ConfirmDiscardAssembly();
         if (!Session.Dirty) return true;
         var r = await Dialogs.YesNoCancel(this, "FeatherCAD", $"Save changes to {Session.Title.TrimEnd(' ', '*')}?");
         if (r == null) return false;
@@ -856,6 +861,7 @@ public partial class MainWindow
     async Task<bool> Save()
     {
         if (!await ResolvePendingEdit()) return false;
+        if (Asm != null) return await SaveAssembly(false);
         if (Session.FilePath == null) return await SaveAs();
         try { Session.Save(Session.FilePath); RecentFiles.Add(Session.FilePath); Status("Saved " + Session.FilePath); return true; }
         catch (Exception ex) { await Dialogs.Message(this, "Save failed", ex.Message); return false; }
@@ -864,6 +870,7 @@ public partial class MainWindow
     async Task<bool> SaveAs()
     {
         if (!await ResolvePendingEdit()) return false;
+        if (Asm != null) return await SaveAssembly(true);
         var f = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
         {
             Title = "Save Part As",
@@ -983,6 +990,7 @@ public partial class MainWindow
     {
         if (_sketch != null) { if (_sketch.Undo()) Status("Undo"); return; }
         if (_page != null) return;
+        if (Asm is { } a) { a.Undo(); return; }
         Session.Undo();
     }
 
@@ -990,10 +998,15 @@ public partial class MainWindow
     {
         if (_sketch != null) { _sketch.Redo(); return; }
         if (_page != null) return;
+        if (Asm is { } a) { a.Redo(); return; }
         Session.Redo();
     }
 
-    void DeleteSelected() => _ = DeleteSelectedAsync();
+    void DeleteSelected()
+    {
+        if (Asm != null) { DeleteComponent(); return; }
+        _ = DeleteSelectedAsync();
+    }
 
     async Task DeleteSelectedAsync()
     {
