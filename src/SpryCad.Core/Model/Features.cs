@@ -120,6 +120,11 @@ public sealed class RevolveFeature : Feature
     public bool IsCut { get; set; }
     /// <summary>Sketch line used as axis (0 = first centerline).</summary>
     public int AxisEntity { get; set; }
+    /// <summary>
+    /// An axis from the model instead (a cylindrical or conical face, a straight or circular edge, X / Y / Z): it must
+    /// lie in the sketch's plane. Null: the sketch line <see cref="AxisEntity"/>.
+    /// </summary>
+    public DirRef? Axis { get; set; }
     public string Angle { get; set; } = "360";
     public bool Reverse { get; set; }
     public bool Merge { get; set; } = true;

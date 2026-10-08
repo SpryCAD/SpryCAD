@@ -460,14 +460,31 @@ public sealed class Regenerator
         void DoRevolve(RevolveFeature r)
         {
             var sk = GetSketch(r.SketchId);
-            SkLine? axis = r.AxisEntity != 0 ? sk.Sketch.Entity(r.AxisEntity) as SkLine : null;
-            axis ??= sk.Sketch.Entities.OfType<SkLine>().FirstOrDefault(l => l.Construction);
-            if (axis == null) throw new FeatureException("Select an axis of revolution (a centerline).");
-            var regions = axis.Construction ? sk.Regions : ProfileExtractor.Extract(sk.Sketch, out _);
+            List<ProfileRegion> regions;
+            Vec2 a, dir;
+            if (r.Axis != null)
+            {
+                // an axis from the model (a cylindrical or conical face, an edge, X / Y / Z): in the sketch's plane
+                var (o, d) = Resolver.ResolveDir(r.Axis, State);
+                var n = sk.Frame.Normal;
+                if (Math.Abs(Vec3.Dot(d, n)) > 1e-6 || Math.Abs(Vec3.Dot(o - sk.Frame.Origin, n)) > 1e-6)
+                    throw new FeatureException("The axis of revolution must lie in the sketch's plane.");
+                a = sk.Frame.ToLocal(o);
+                dir = (sk.Frame.ToLocal(o + d) - a).Normalized;
+                regions = sk.Regions;
+            }
+            else
+            {
+                SkLine? axis = r.AxisEntity != 0 ? sk.Sketch.Entity(r.AxisEntity) as SkLine : null;
+                axis ??= sk.Sketch.Entities.OfType<SkLine>().FirstOrDefault(l => l.Construction);
+                if (axis == null) throw new FeatureException("Select an axis of revolution: a centerline or line in the sketch, an edge, a cylindrical or conical face, or X / Y / Z.");
+                // a solid line too: often the side of a half profile that lies on the axis (part of the profile)
+                regions = axis.Construction ? sk.Regions : ProfileExtractor.Extract(sk.Sketch, out _);
+                a = sk.Sketch.P(axis.P1);
+                dir = (sk.Sketch.P(axis.P2) - a).Normalized;
+            }
             if (regions.Count == 0) throw new FeatureException("The sketch has no closed profile.");
-            var a = sk.Sketch.P(axis.P1); var b = sk.Sketch.P(axis.P2);
             var ang = Positive(r.Angle, "Angle") * Math.PI / 180;
-            var dir = (b - a).Normalized;
             if (r.Reverse) dir = -dir;
             // profile must stay on one side of the axis
             double minS = double.MaxValue, maxS = double.MinValue;
