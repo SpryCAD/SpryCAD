@@ -131,6 +131,10 @@ static class AssemblyTests
             t.True(m.Doc.Components.All(c => m.DisplayOf(c)!.Source == PartSource.Embedded && m.DisplayOf(c)!.Problem == null), "all from the file");
             t.Eq(m.Parts.Count, 2);
             t.True(m.Notes.Count == 0, string.Join("; ", m.Notes));
+            // its mates hold as placed
+            t.Eq(m.Doc.Mates.Count, 4);
+            m.SolveMates();
+            t.True(m.LastSolve!.Satisfied && m.LastSolve.Moved.Count == 0, $"the mates hold as placed (moved: {string.Join(", ", m.LastSolve.Moved)})");
             // the placed solids, pairwise
             var solids = m.Doc.Components.Select(c => (c.Name, body: new FeatherCad.Core.Regen.Regenerator().Rebuild(m.DisplayOf(c)!.Doc!).State.Bodies.Single().Solid.Native!
                 .Transformed(c.Placement.ToTransform()))).ToList();
@@ -141,6 +145,23 @@ static class AssemblyTests
                     var v = common.Faces.Count == 0 ? 0 : NMass.Of(common)!.Volume;
                     t.True(v < 1e-6, $"{solids[i].Name} and {solids[j].Name} overlap by {v:0.######} mm3");
                 }
+            // the second leaf swings about the hinge's axis (its one freedom): turned there it stays; moved along the
+            // axis or off it, the mates bring it back onto the axis, its knuckle where it was along it (how far round it
+            // ends up is free: the least motion may turn it a little)
+            var leaf2 = m.Doc.Components[1];
+            var home = leaf2.Placement.ToTransform();
+            var axisP = new Vec3(0, 32, 1);
+            var swung = Transform.Rotation(axisP, Vec3.UnitX, 0.6) * home;
+            leaf2.Placement = Placement.From(swung);
+            m.SolveMates();
+            t.True(m.LastSolve!.Satisfied && !m.LastSolve.Moved.Contains(leaf2.Id), "turned about the axis: it stays");
+            leaf2.Placement = Placement.From(Transform.Translation(new Vec3(3, 0.5, -0.4)) * swung);
+            m.SolveMates();
+            var q = new Vec3(30, 50, 1);
+            var back = leaf2.Placement.ToTransform().Point(q); var was = swung.Point(q);
+            double R(Vec3 p) => new Vec2(p.Y - 32, p.Z - 1).Length;
+            t.True(m.LastSolve!.Satisfied && Math.Abs(back.X - was.X) < 1e-6 && Math.Abs(R(back) - R(was)) < 1e-6,
+                $"moved off: back on the axis, as far along it ({back} vs {was})");
         });
 
         t.Test("Assembly model: components linked and embedded, displays built, caches saved; missing, lightweight and changed parts", () =>

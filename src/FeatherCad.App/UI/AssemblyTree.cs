@@ -1,6 +1,5 @@
 using Avalonia;
 using Avalonia.Controls;
-using Avalonia.Input;
 using Avalonia.Media;
 using FeatherCad.App.Session;
 using FeatherCad.Core.Assembly;
@@ -10,8 +9,9 @@ namespace FeatherCad.App.UI;
 /// <summary>
 /// The FeatureManager tree of an assembly: the assembly at the top, then its components as SolidWorks shows them —
 /// (f) fixed or (-) floating, the name, and what is special about its part (embedded, lightweight, missing: in red,
-/// shown from the assembly's copy). Notes about the parts (found in new places, missing) underneath. Clicking selects;
-/// double-clicking opens the part; right-click offers the component's commands.
+/// shown from the assembly's copy), then the Mates folder (a mate the components could not be placed to satisfy in
+/// red). Notes about the parts (found in new places, missing) underneath. Clicking selects; double-clicking opens the
+/// part; right-click offers the component's or the mate's commands.
 /// </summary>
 public sealed class AssemblyTree : DockPanel
 {
@@ -24,6 +24,8 @@ public sealed class AssemblyTree : DockPanel
     public event Action<string>? Opened;
     /// <summary>A command from a component's context menu: "fix", "float", "lightweight", "open", "delete".</summary>
     public event Action<string, string>? Command;
+    /// <summary>A command from a mate's context menu: "flip", "suppress", "delete".</summary>
+    public event Action<string, string>? MateCommand;
 
     static readonly IBrush Red = new SolidColorBrush(Color.Parse("#FFC62828"));
     static readonly IBrush Dim = new SolidColorBrush(Color.Parse("#FF5A6B85"));
@@ -36,9 +38,9 @@ public sealed class AssemblyTree : DockPanel
         Children.Add(_list);
         _list.SelectionChanged += (_, _) =>
         {
-            if (!_syncing) Selected?.Invoke((_list.SelectedItem as ListBoxItem)?.Tag as string);
+            if (!_syncing) Selected?.Invoke((_list.SelectedItem as ListBoxItem)?.Tag is string id && !id.StartsWith("mate:") ? id : null);
         };
-        _list.DoubleTapped += (_, _) => { if ((_list.SelectedItem as ListBoxItem)?.Tag is string id) Opened?.Invoke(id); };
+        _list.DoubleTapped += (_, _) => { if ((_list.SelectedItem as ListBoxItem)?.Tag is string id && !id.StartsWith("mate:")) Opened?.Invoke(id); };
     }
 
     /// <summary>Shows an assembly (its rows made again: assemblies have tens of components, not thousands).</summary>
@@ -73,11 +75,47 @@ public sealed class AssemblyTree : DockPanel
                 _list.Items.Add(item);
                 if (c.Id == s.Selected) _list.SelectedItem = item;
             }
+            // the mates
+            if (m.Doc.Mates.Count > 0)
+            {
+                _list.Items.Add(new ListBoxItem
+                {
+                    Content = new StackPanel { Orientation = Avalonia.Layout.Orientation.Horizontal, Spacing = 6, Children = { Icons.Make("relations", 16), new TextBlock { Text = "Mates" } } },
+                    Padding = new Thickness(6, 4, 6, 2), Focusable = false, IsHitTestVisible = true,
+                });
+                string NameOf(MateRef r) => r.Component == null ? r.Face + " Plane" : m.Doc.Find(r.Component)?.Name ?? "?";
+                foreach (var mate in m.Doc.Mates)
+                {
+                    var err = m.LastSolve?.Errors.GetValueOrDefault(mate.Id) ?? 0;
+                    var bad = !mate.Suppressed && err > 1e-6;
+                    var text = new TextBlock
+                    {
+                        Text = $"{mate.Name} ({NameOf(mate.A)}, {NameOf(mate.B)})" + (mate.Type is MateType.Distance ? $" {mate.Value:0.###} mm" : mate.Type is MateType.Angle ? $" {mate.Value:0.###}°" : ""),
+                        Foreground = bad ? Red : mate.Suppressed ? Dim : null,
+                    };
+                    if (text.Foreground == null) text.ClearValue(TextBlock.ForegroundProperty);
+                    var item = new ListBoxItem { Content = new Border { Child = text, Margin = new Thickness(14, 0, 0, 0) }, Tag = "mate:" + mate.Id, Padding = new Thickness(6, 2), ContextMenu = MenuFor(mate) };
+                    ToolTip.SetTip(item, bad ? $"Not satisfied: off by {err:0.######} (it conflicts with other mates, or cannot be reached)"
+                        : mate.Suppressed ? "Suppressed" : mate.Aligned ? "Aligned" : "Anti-aligned");
+                    _list.Items.Add(item);
+                }
+            }
         }
         finally { _syncing = false; }
         _notes.Children.Clear();
         foreach (var n in s.Model.Notes.TakeLast(12))
             _notes.Children.Add(new TextBlock { Text = n, TextWrapping = TextWrapping.Wrap, FontSize = 11, Foreground = Dim });
+    }
+
+    ContextMenu MenuFor(Mate mate)
+    {
+        MenuItem I(string header, string cmd)
+        {
+            var mi = new MenuItem { Header = header };
+            mi.Click += (_, _) => MateCommand?.Invoke(mate.Id, cmd);
+            return mi;
+        }
+        return new ContextMenu { Items = { I("_Flip Alignment", "flip"), I(mate.Suppressed ? "_Unsuppress" : "_Suppress", "suppress"), new Separator(), I("_Delete", "delete") } };
     }
 
     ContextMenu MenuFor(Component c)

@@ -18,12 +18,19 @@ public interface IAssemblyHost
     void EndAssemblyChange();
     /// <summary>Shows the components where they are now (while dragging: no tree update).</summary>
     void RefreshAssemblyScene();
+    /// <summary>Faces are being picked (the Mate page is open): hover and click pick faces, nothing is dragged.</summary>
+    bool PickingFaces { get; }
+    void HoverFace(string? component, string? face);
+    void PickFace(string component, string face);
+    /// <summary>A component was dragged to a new place: the mates pull it (and what it is mated to) back onto them.</summary>
+    void Dragged(string component);
 }
 
 /// <summary>
 /// Picking and moving components: hover and click select; double-click opens the part; dragging a floating component
 /// moves it in the view's plane through the point grabbed, Shift+drag turns it about its middle (left-right about the
-/// view's up, up-down about its right). A fixed component is not dragged.
+/// view's up, up-down about its right), its mates holding it (it moves only as they let it). A fixed component is not
+/// dragged. While faces are being picked (the Mate page), hover and click pick faces instead.
 /// </summary>
 public sealed class AssemblyMode(IAssemblyHost host) : IViewportMode
 {
@@ -36,6 +43,7 @@ public sealed class AssemblyMode(IAssemblyHost host) : IViewportMode
 
     public void PointerMove(ViewportControl vp, PointerInfo p)
     {
+        if (host.PickingFaces) { var f = vp.PickInstance(p.X, p.Y); host.HoverFace(f?.id, f?.face); return; }
         if (_drag == null) { host.HoverComponent(vp.PickInstance(p.X, p.Y)?.id); return; }
         if (!_moved) { host.BeginAssemblyChange(); _moved = true; }
         var t = _drag.Placement.ToTransform();
@@ -57,12 +65,16 @@ public sealed class AssemblyMode(IAssemblyHost host) : IViewportMode
             _grab = hit;
         }
         _last = new Point(p.X, p.Y);
-        host.RefreshAssemblyScene();
+        // the mates pull it back onto them: the grabbed point goes where they leave it
+        var dragged = _drag.Placement.ToTransform();
+        host.Dragged(_drag.Id);
+        _grab = _drag.Placement.ToTransform().Point(dragged.RigidInverse().Point(_grab));
     }
 
     public void PointerDown(ViewportControl vp, PointerInfo p)
     {
         var hit = vp.PickInstance(p.X, p.Y);
+        if (host.PickingFaces) { if (hit is { face: { } face } fh) host.PickFace(fh.id, face); return; }
         if (p.ClickCount >= 2) { if (hit is { } dh) host.OpenComponent(dh.id); return; }
         host.SelectComponent(hit?.id);
         if (hit is not { } h || host.FindComponent(h.id) is not { Fixed: false } c) return;

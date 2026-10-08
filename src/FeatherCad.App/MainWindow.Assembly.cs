@@ -40,6 +40,7 @@ public partial class MainWindow : IAssemblyHost
         _asmTree = new AssemblyTree { IsVisible = false };
         _asmTree.Selected += id => SelectComponent(id);
         _asmTree.Opened += OpenComponent;
+        _asmTree.MateCommand += OnMateCommand;
         _asmTree.Command += (id, cmd) =>
         {
             if (Asm is not { } a) return;
@@ -153,10 +154,11 @@ public partial class MainWindow : IAssemblyHost
             if (c.Suppressed || a.Model.DisplayOf(c) is not { } pd || pd.Mesh.Indices.Length == 0) continue;
             var col = c.Color ?? pd.Color;
             var rgba = new Rgba((float)col[0], (float)col[1], (float)col[2]);
-            if (c.Id == a.Selected) rgba = MixColor(rgba, ViewportControl.SelectColor, 0.55f);
-            else if (c.Id == _asmHover) rgba = MixColor(rgba, new Rgba(1f, 0.8f, 0.5f), 0.35f);
+            // while faces are picked (Mate) the components keep their colors: the faces are highlighted
+            if (_mating == null && c.Id == a.Selected) rgba = MixColor(rgba, ViewportControl.SelectColor, 0.55f);
+            else if (_mating == null && c.Id == _asmHover) rgba = MixColor(rgba, new Rgba(1f, 0.8f, 0.5f), 0.35f);
             var t = c.Placement.ToTransform();
-            inst.Add(new MeshInstance(c.Id, pd.Mesh, ModelMatrix(t), rgba));
+            inst.Add(new MeshInstance(c.Id, pd.Mesh, ModelMatrix(t), rgba, FaceHighlights(c.Id)));
             if (!pd.Mesh.Bounds.IsEmpty) { box.Add(t.Point(pd.Mesh.Bounds.Min)); box.Add(t.Point(pd.Mesh.Bounds.Max)); }
         }
         var half = box.IsEmpty ? 50 : Math.Max(20, box.Diagonal * 0.4);
@@ -182,6 +184,8 @@ public partial class MainWindow : IAssemblyHost
         void Tip(string tip) => ToolTip.SetTip(CommandBar.Children[^1], tip);
         Cmd("insertcomp", "Insert\nComponents", InsertComponentCommand);
         Tip("Insert Components\nBrings parts into the assembly: open parts or files, linked (an edit to the part shows in every assembly using it) or embedded (kept inside the assembly: one self-contained file).");
+        Cmd("relations", "Mate", MateCommand);
+        Tip("Mate\nPositions components relative to each other: pick two faces (or a face and an origin plane), then coincident, parallel, perpendicular, concentric, distance or angle.");
         Sep();
         Cmd("fix", "Fix", () => SetFixed(true));
         Tip("Fix\nFixes the selected component where it is.");
@@ -288,6 +292,8 @@ public partial class MainWindow : IAssemblyHost
         if (c.Fixed == fix) return;
         a.BeginChange();
         c.Fixed = fix;
+        // floating now: the mates may move it (and fixed: others may have to move instead)
+        if (a.Model.Doc.Mates.Count > 0) a.Model.SolveMates();
         a.EndChange();
     }
 

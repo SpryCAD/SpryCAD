@@ -42,8 +42,9 @@ public sealed record SketchDisplay(string FeatureId, SketchResult Result);
 /// <summary>
 /// A mesh drawn where a rigid placement puts it, in a color (an assembly's component: one GPU mesh for all the
 /// components of a part). <c>Model</c> is the placement as a row-vector matrix (rotation, then translation).
+/// <c>Faces</c>: faces drawn over it in other colors (hover, selection), by name.
 /// </summary>
-public readonly record struct MeshInstance(string Id, DisplayMesh Mesh, Matrix4x4 Model, Rgba Color);
+public readonly record struct MeshInstance(string Id, DisplayMesh Mesh, Matrix4x4 Model, Rgba Color, IReadOnlyList<(string face, Rgba color)>? Faces = null);
 
 public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICustomHitTest
 {
@@ -285,7 +286,14 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         {
             _r.PolygonOffset(true, 1, 1);
             if (Style == DisplayStyle.HiddenLinesVisible) _r.Gl.ColorMask(false, false, false, false);
-            foreach (var i in Instances) _r.DrawMesh(_gpu[i.Mesh], i.Color, i.Model * vp, i.Model * view, Camera.Perspective);
+            foreach (var i in Instances)
+            {
+                _r.DrawMesh(_gpu[i.Mesh], i.Color, i.Model * vp, i.Model * view, Camera.Perspective);
+                if (i.Faces != null && Style != DisplayStyle.HiddenLinesVisible)
+                    foreach (var (name, color) in i.Faces)
+                        foreach (var fr in i.Mesh.Faces)
+                            if (fr.Name == name) _r.DrawMesh(_gpu[i.Mesh], color, i.Model * vp, i.Model * view, Camera.Perspective, fr.IndexStart, fr.IndexCount);
+            }
             if (Style == DisplayStyle.HiddenLinesVisible) _r.Gl.ColorMask(true, true, true, true);
             _r.PolygonOffset(false);
         }
@@ -307,13 +315,15 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
     }
 
     /// <summary>
-    /// The placed mesh under a screen point: its id, the distance along the view ray and the point hit (world), or
-    /// null. Each mesh is tested in its own coordinates (the ray carried back by the inverse placement).
+    /// The placed mesh under a screen point: its id, the distance along the view ray, the point hit (world) and the
+    /// face hit (its name), or null. Each mesh is tested in its own coordinates (the ray carried back by the inverse
+    /// placement).
     /// </summary>
-    public (string id, double t, Vec3 point)? PickInstance(double x, double y)
+    public (string id, double t, Vec3 point, string? face)? PickInstance(double x, double y)
     {
         var (ro, rd) = Camera.Ray(x, y);
-        (string id, double t, Vec3 point)? best = null;
+        (string id, double t, Vec3 point, string? face)? best = null;
+        DisplayMesh? bestMesh = null; int bestTri = -1;
         foreach (var inst in Instances)
         {
             if (!Matrix4x4.Invert(inst.Model, out var inv)) continue;
@@ -325,9 +335,12 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
             for (int k = 0; k + 2 < m.Indices.Length; k += 3)
             {
                 var t = RayTriangle(lo, ld, P(m, m.Indices[k]), P(m, m.Indices[k + 1]), P(m, m.Indices[k + 2]));
-                if (t > 0 && (best == null || t < best.Value.t)) best = (inst.Id, t, ro + rd * t);
+                if (t > 0 && (best == null || t < best.Value.t)) { best = (inst.Id, t, ro + rd * t, null); bestMesh = m; bestTri = k; }
             }
         }
+        if (best is { } b && bestMesh != null)
+            foreach (var fr in bestMesh.Faces)
+                if (bestTri >= fr.IndexStart && bestTri < fr.IndexStart + fr.IndexCount) return b with { face = fr.Name };
         return best;
     }
 

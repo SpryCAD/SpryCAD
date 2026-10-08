@@ -79,9 +79,22 @@ static class Demos
             leaf.Save(lp); pin.Save(pp);
             var m = FeatherCad.Core.Assembly.AssemblyModel.New();
             double ky = 32, kz = 1;
-            m.Insert(lp, Transform.Identity, embed: true);
-            m.Insert(lp, Transform.Rotation(new Vec3(20, ky, kz), Vec3.UnitZ, Math.PI), embed: true);
-            m.Insert(pp, Transform.Translation(new Vec3(-2, ky, kz)), embed: true);
+            var leaf1 = m.Insert(lp, Transform.Identity, embed: true);
+            var leaf2 = m.Insert(lp, Transform.Rotation(new Vec3(20, ky, kz), Vec3.UnitZ, Math.PI), embed: true);
+            var pinC = m.Insert(pp, Transform.Translation(new Vec3(-2, ky, kz)), embed: true);
+            // the mates: the second leaf on the first's knuckle axis, its knuckle Clr*2 from the first's (it swings
+            // about the axis: drag it); the pin in the bore, sticking out 2 mm past the first knuckle's start
+            string Face(FeatherCad.Core.Assembly.Component c, Func<FaceRange, bool> which) => m.DisplayOf(c)!.Mesh.Faces.First(which).Name;
+            bool Bore(FaceRange f) => f.Surface.Kind == SurfaceKind.Cylinder && f.Surface.Radius < 2;
+            bool KnuckleEnd(FaceRange f) => f.Surface.Kind == SurfaceKind.Plane && f.FirstPlane.Normal.X > 0.9 && Math.Abs(f.FirstPlane.Origin.X - 19.8) < 1e-6;
+            bool KnuckleStart(FaceRange f) => f.Surface.Kind == SurfaceKind.Plane && f.FirstPlane.Normal.X < -0.9 && Math.Abs(f.FirstPlane.Origin.X) < 1e-6;
+            bool PinSide(FaceRange f) => f.Surface.Kind == SurfaceKind.Cylinder;
+            bool PinStart(FaceRange f) => f.Surface.Kind == SurfaceKind.Plane && f.FirstPlane.Normal.X < -0.9;
+            FeatherCad.Core.Assembly.MateRef R(FeatherCad.Core.Assembly.Component c, Func<FaceRange, bool> which) => m.RefTo(c.Id, Face(c, which))!;
+            m.AddMate(FeatherCad.Core.Assembly.MateType.Concentric, R(leaf2, Bore), R(leaf1, Bore));
+            m.AddMate(FeatherCad.Core.Assembly.MateType.Distance, R(leaf2, KnuckleEnd), R(leaf1, KnuckleEnd), 0.4);
+            m.AddMate(FeatherCad.Core.Assembly.MateType.Concentric, R(pinC, PinSide), R(leaf1, Bore));
+            m.AddMate(FeatherCad.Core.Assembly.MateType.Distance, R(pinC, PinStart), R(leaf1, KnuckleStart), 2);
             // embedded: nothing points back at the temporary files
             foreach (var comp in m.Doc.Components) { comp.Part.Path = null; comp.Part.AbsolutePath = null; }
             return m;

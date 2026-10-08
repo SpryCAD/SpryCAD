@@ -31,6 +31,8 @@ public sealed class AssemblySession
     {
         var doc = AssemblyDocument.Load(path);
         var model = PartsIndexStore.Use(ix => AssemblyModel.Open(doc, path, ix));
+        // the mates as the parts are now (a part changed since: its components move to keep them)
+        if (doc.Mates.Count > 0) model.SolveMates();
         // references updated (parts found in new places): unsaved until saved
         return new AssemblySession(model, model.Resolution.Changed);
     }
