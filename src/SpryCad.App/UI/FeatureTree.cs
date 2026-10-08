@@ -147,6 +147,7 @@ public sealed class FeatureTree : UserControl
         ChamferFeature => "chamfer",
         HoleFeature => "hole",
         ShellFeature => "shell",
+        DraftFeature => "draft",
         LinearPatternFeature => "lpattern",
         CircularPatternFeature => "cpattern",
         MirrorFeature => "mirror",

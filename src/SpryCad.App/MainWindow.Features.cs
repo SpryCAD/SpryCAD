@@ -182,6 +182,7 @@ public partial class MainWindow
             case ChamferFeature ch: OpenBlendPage(ch.Clone(), false); break;
             case HoleFeature h: OpenHolePage((HoleFeature)h.Clone(), false); break;
             case ShellFeature s: OpenShellPage((ShellFeature)s.Clone(), false); break;
+            case DraftFeature dr: OpenDraftPage((DraftFeature)dr.Clone(), false); break;
             case LinearPatternFeature lp: OpenLinearPatternPage((LinearPatternFeature)lp.Clone(), false); break;
             case CircularPatternFeature cp: OpenCircularPatternPage((CircularPatternFeature)cp.Clone(), false); break;
             case MirrorFeature m: OpenMirrorPage((MirrorFeature)m.Clone(), false); break;
@@ -284,6 +285,9 @@ public partial class MainWindow
         }, () => f.End, v => f.End = v);
         page.Check(d1, "Reverse direction", () => f.Reverse, v => f.Reverse = v);
         page.Number(d1, "Depth", () => f.Depth, v => f.Depth = v, "dimension");
+        // the side walls tapered from the sketch plane (narrowing along the extrusion; outward: widening)
+        page.Number(d1, "Draft angle", () => f.Draft ?? "", v => f.Draft = string.IsNullOrWhiteSpace(v) ? null : v, "draft", "°", optional: true);
+        page.Check(d1, "Draft outward", () => f.DraftOutward, v => f.DraftOutward = v);
         var d2 = page.Section("Direction 2 (optional)");
         page.Number(d2, "Depth", () => f.Depth2 ?? "", v => f.Depth2 = string.IsNullOrWhiteSpace(v) ? null : v, "dimension", optional: true);
         page.Info(d2, "Blind extrusion in the opposite direction. Leave empty for none.");
@@ -681,6 +685,38 @@ public partial class MainWindow
         foreach (var fr in f.Faces) box.Items.Add(FaceItem(fr));
         box.Changed += () => { f.Faces = box.Items.Select(i => i.ToFaceRef()).ToList(); };
         BeginEdit(f, isNew, page, overlay: true, hint: f.Faces.Count == 0 ? "Select the faces to remove." : null);
+    }
+
+    // ------------------------------------------------------------------------------------------
+    // Draft
+
+    void DraftCommand()
+    {
+        var faces = Selection.Items.Where(s => s.Kind == SelKind.Face).Select(s => s.ToFaceRef()).ToList();
+        OpenDraftPage(new DraftFeature { Faces = faces }, true);
+    }
+
+    void OpenDraftPage(DraftFeature f, bool isNew)
+    {
+        var page = new PmPage("Draft", "draft");
+        var st = StateForEdit(f, isNew);
+        var a = page.Section("Draft Angle");
+        page.Number(a, "Angle", () => f.Angle, v => f.Angle = v, "draft", "°");
+        var n = page.Section("Neutral Plane");
+        var neutral = page.Selection(n, "Neutral plane", SelFilter.Plane | SelFilter.PlanarFace,
+            "The plane or planar face the drafted faces turn about (they keep their place where they meet it)", 1);
+        if (PlaneItem(f.Neutral, st) is { } pi) neutral.Items.Add(pi);
+        neutral.Changed += () => { if (neutral.Items.FirstOrDefault()?.ToPlaneRef() is { } pr) f.Neutral = pr; };
+        page.Check(n, "Reverse pull direction", () => f.Reverse, v => f.Reverse = v);
+        page.Info(n, "The part narrows along the pull direction: into the part from a neutral face, along a plane's normal.");
+        var fs = page.Section("Faces to Draft");
+        var faces = page.Selection(fs, "Faces", SelFilter.Face, "Faces to draft: planar, or round along the pull direction");
+        foreach (var fr in f.Faces) faces.Items.Add(FaceItem(fr));
+        faces.Changed += () => { f.Faces = faces.Items.Select(i => i.ToFaceRef()).ToList(); };
+        // a new draft: the first click picks the neutral plane, the next ones the faces (as SolidWorks)
+        neutral.Changed += () => { if (page.ActiveBox == neutral && neutral.Items.Count == 1) page.Activate(faces); };
+        page.Activate(isNew && f.Faces.Count == 0 ? neutral : faces);
+        BeginEdit(f, isNew, page, overlay: true, hint: f.Faces.Count == 0 ? "Select the neutral plane (e.g. the base face), then the faces to draft." : null);
     }
 
     // ------------------------------------------------------------------------------------------

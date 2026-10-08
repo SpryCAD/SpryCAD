@@ -184,6 +184,7 @@ public partial class MainWindow
                 Item("_Hole Wizard...", HoleCommand, null, "hole"),
                 Item("_Thread...", ThreadCommand, null, "thread"),
                 Item("_Shell...", ShellCommand, null, "shell"),
+                Item("_Draft...", DraftCommand, null, "draft"),
                 Item("C_ombine...", CombineCommand, null, "combine")),
             Sub("_Pattern/Mirror",
                 Item("_Linear Pattern...", LinearPatternCommand, null, "lpattern"),
@@ -277,6 +278,7 @@ public partial class MainWindow
                 Cmd("fillet", "Fillet", () => BlendCommand(true));
                 Cmd("chamfer", "Chamfer", () => BlendCommand(false));
                 Cmd("shell", "Shell", ShellCommand);
+                Cmd("draft", "Draft", DraftCommand);
                 Sep();
                 Cmd("lpattern", "Linear\nPattern", LinearPatternCommand);
                 Cmd("cpattern", "Circular\nPattern", CircularPatternCommand);
@@ -364,6 +366,7 @@ public partial class MainWindow
         ["Fillet"] = "Rounds the selected edges (tangent edges are included).",
         ["Chamfer"] = "Bevels the selected edges.",
         ["Shell"] = "Hollows the part, leaving the selected faces open.",
+        ["Draft"] = "Tapers faces by an angle about a neutral plane, so the part comes out of a mould (planar faces, and round faces along the pull direction).",
         ["Linear Pattern"] = "Copies features along one or two directions.",
         ["Circular Pattern"] = "Copies features around an axis.",
         ["Mirror"] = "Mirrors features about a plane or planar face.",

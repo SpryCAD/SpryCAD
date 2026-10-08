@@ -31,6 +31,7 @@ public static class Icons
         ["fillet"] = ("M4 21V11a7 7 0 0 1 7-7h10", "M4 21h17V4"),
         ["chamfer"] = ("M4 21V10l6-6h11", "M4 21h17V4"),
         ["hole"] = ("M5 6h14v15H5z", "M9 6v15 M15 6v15 M9 10h6"),
+        ["draft"] = ("M5 19L8.5 5h7L19 19z", "M2 19h20"),
         ["shell"] = ("M3 8l9-5 9 5v10l-9 5-9-5z", "M6.5 9.5l5.5-3 5.5 3v7l-5.5 3-5.5-3z"),
         ["lpattern"] = ("M3 3h5v5H3z M10 3h5v5h-5z M17 3h5v5h-5z M3 10h5v5H3z M10 10h5v5h-5z M17 10h5v5h-5z", "M3 20h19 M19 18l3 2-3 2"),
         ["cpattern"] = ("M12 2a2 2 0 1 0 0.01 0z M20 10a2 2 0 1 0 0.01 0z M12 18a2 2 0 1 0 0.01 0z M4 10a2 2 0 1 0 0.01 0z", "M12 12m-1 0a1 1 0 1 0 2 0a1 1 0 1 0-2 0"),
