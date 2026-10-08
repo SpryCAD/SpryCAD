@@ -30,6 +30,21 @@ public sealed class SkExternal
         ((Edge.A == o.Edge.A && Edge.B == o.Edge.B) || (Edge.A == o.Edge.B && Edge.B == o.Edge.A));
 }
 
+/// <summary>
+/// Convert Entities' link ("On Edge", as SolidWorks'): the sketch entity is a piece of a model edge seen in the
+/// sketch, placed again from the edge on every rebuild, so it follows the model as it changes. Unlike
+/// <see cref="SkExternal"/> it is ordinary geometry (it makes profiles).
+/// </summary>
+public sealed class SkConvertLink
+{
+    public SpryCad.Core.Model.EdgeRef Edge { get; set; } = new();
+    /// <summary>Which piece of the edge (a curve with no exact sketch equivalent is fitted with several), of how many.</summary>
+    public int Piece { get; set; }
+    public int Of { get; set; } = 1;
+
+    [JsonIgnore] public string Key => $"{Edge.Body}|{Edge.A}|{Edge.B}|{Edge.Hint.X:R},{Edge.Hint.Y:R},{Edge.Hint.Z:R}";
+}
+
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "$type")]
 [JsonDerivedType(typeof(SkLine), "line")]
 [JsonDerivedType(typeof(SkCircle), "circle")]
@@ -42,6 +57,8 @@ public abstract class SkEntity
     /// <summary>Reference to model geometry (fixed, not part of profiles).</summary>
     public SkExternal? External { get; set; }
     [JsonIgnore] public bool IsReference => External != null;
+    /// <summary>Converted from a model edge and kept on it (Convert Entities); null for drawn geometry.</summary>
+    public SkConvertLink? Link { get; set; }
     public abstract IEnumerable<int> PointIds { get; }
     public abstract SkEntity Clone();
     public abstract void RemapPoint(int from, int to);
@@ -284,6 +301,18 @@ public sealed class Sketch
     }
 
     public void DeleteConstraint(int id) => Constraints.RemoveAll(c => c.Id == id);
+
+    /// <summary>
+    /// Takes converted geometry off its model edge (SolidWorks: deleting On Edge): it stays where it is as ordinary,
+    /// free geometry; points it shares with geometry still on an edge stay held there.
+    /// </summary>
+    public void Unlink(SkEntity e)
+    {
+        if (e.Link == null) return;
+        e.Link = null;
+        foreach (var pid in e.PointIds)
+            if (pid != OriginId && !Entities.Any(o => o.Link != null && o.PointIds.Contains(pid)) && Point(pid) is { } p) p.Fixed = false;
+    }
 
     /// <summary>Removes model-reference entities no constraint uses any more.</summary>
     public void RemoveUnusedReferences()

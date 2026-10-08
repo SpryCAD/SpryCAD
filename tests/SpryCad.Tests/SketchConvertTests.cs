@@ -53,6 +53,47 @@ static class SketchConvertTests
             t.True(chain.All(e => top.Coedges.Any(c => c.Edge == e)), "the top outline only");
         });
 
+        t.Test("Convert Entities: converted geometry follows the model (On Edge), and makes a profile", () =>
+        {
+            // a plate W x 20, corners R5, 10 thick; its top outline converted into a second sketch and extruded from it
+            var sk = CoreTests.Rect(40, 20, "W");
+            foreach (var corner in sk.Points.Select(p => p.Id).ToList()) SketchOps.Fillet(sk, corner, 5);
+            var doc = new CadDocument();
+            doc.Equations.Add(new Equation { Name = "W", Expr = "40" });
+            var s1 = doc.AddFeature(new SketchFeature { Plane = PlaneRef.Front, Sketch = sk });
+            var plate = doc.AddFeature(new ExtrudeFeature { SketchId = s1.Id, Depth = "10" });
+            var regen = new Regenerator();
+            var body = regen.Rebuild(doc).State.Bodies.Single();
+            var nb = body.Solid.Native!; nb.Link();
+            var top = nb.Faces.Single(f => f.Surface.Kind == SurfaceKind.Plane && f.Coedges.All(c => Math.Abs(c.Edge.V0.P.Z - 10) < 1e-9));
+            var conv = new Sketch();
+            foreach (var c in top.Coedges) SketchConvert.Edge(conv, Frame.Front, c.Edge, body.Id);
+            t.True(conv.Entities.All(e => e.Link != null), "linked");
+            var s2 = doc.AddFeature(new SketchFeature { Plane = PlaneRef.Front, Sketch = conv });
+
+            double MaxX(RegenResult r) => r.State.Sketches[s2.Id].Sketch.Points.Max(p => p.X);
+            var r1 = regen.Rebuild(doc);
+            t.Near(MaxX(r1), 40, 1e-9);
+            t.Eq(r1.State.Sketches[s2.Id].Regions.Count, 1);
+
+            // wider: the converted outline goes with it, still a closed profile with its arcs R5
+            doc.Equations[0].Expr = "60";
+            var r2 = regen.Rebuild(doc);
+            t.True(r2.Status.Values.All(s => s.Error == null), "rebuilt");
+            var moved = r2.State.Sketches[s2.Id];
+            t.Near(MaxX(r2), 60, 1e-9);
+            t.Eq(moved.Regions.Count, 1);
+            foreach (var a in moved.Sketch.Entities.OfType<SkArc>())
+                t.Near(Vec2.Distance(moved.Sketch.Point(a.Center)!.P, moved.Sketch.Point(a.Start)!.P), 5, 1e-9);
+            t.True(!r2.Status[s2.Id].Warnings.Any(), "no warnings: " + string.Join("; ", r2.Status[s2.Id].Warnings));
+
+            // taken off the edges: stays where it was saved
+            var free = (Sketch)conv.Clone();
+            foreach (var e in free.Entities.ToList()) free.Unlink(e);
+            t.True(free.Entities.All(e => e.Link == null) && free.Points.Where(p => p.Id != Sketch.OriginId).All(p => !p.Fixed), "free");
+            GC.KeepAlive(plate);
+        });
+
         t.Test("Convert Entities: a hole's rim as a circle; a tilted circle as fitted arcs within tolerance", () =>
         {
             var into = new Sketch();

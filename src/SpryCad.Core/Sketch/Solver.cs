@@ -80,9 +80,9 @@ public static class SketchSolver
         }
         foreach (var e in sk.Entities)
         {
-            if (e is SkCircle rc && rc.IsReference)
+            if (e is SkCircle rc && (rc.IsReference || rc.Link != null))
             {
-                s.RRefs[rc.Id] = new RRef(-1, rc.R); // model circle: radius is fixed
+                s.RRefs[rc.Id] = new RRef(-1, rc.R); // model circle (referenced or converted): radius is fixed
             }
             else if (e is SkCircle c)
             {

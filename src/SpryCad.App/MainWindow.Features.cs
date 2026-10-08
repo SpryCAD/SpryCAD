@@ -165,6 +165,12 @@ public partial class MainWindow
                     }
                     var consumer = Session.Doc.ConsumersOf(sf.Id).FirstOrDefault();
                     EnterSketch((SketchFeature)sf.Clone(), frame, isNew: false, pointsOnly: consumer is HoleFeature);
+                    // converted geometry where its model edges are now (the model may have changed since it was saved)
+                    if (r != null && _sketch != null && _sketch.Sk.Entities.Any(x => x.Link != null))
+                    {
+                        SketchConvert.Update(_sketch.Sk, frame, StateBefore(r, Session.Doc.IndexOf(sf.Id)), new List<string>());
+                        _sketch.Resolve();
+                    }
                     break;
                 }
             case ExtrudeFeature e: OpenExtrudePage((ExtrudeFeature)e.Clone(), false); break;

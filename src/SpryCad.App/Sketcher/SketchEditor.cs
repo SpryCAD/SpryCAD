@@ -328,7 +328,18 @@ public sealed partial class SketchEditor : IViewportMode
         Snapshot();
         var pts = SelectedPoints.ToList();
         foreach (var e in SelectedEntities) pts.AddRange(e.PointIds);
+        // floating converted geometry takes it off its model edge (else the next rebuild would hold it there again)
+        if (!fix) foreach (var e in SelectedEntities.Concat(Sk.Entities.Where(x => x.Link != null && x.PointIds.Any(pts.Contains))).Distinct().ToList()) Sk.Unlink(e);
         foreach (var id in pts) if (Sk.Point(id) is { } p && p.Id != Sketch.OriginId) p.Fixed = fix;
+        Resolve();
+        _vp.Redraw();
+    }
+
+    /// <summary>Takes the selected converted geometry off its model edges (it stays, as free geometry).</summary>
+    public void UnlinkSelection()
+    {
+        Snapshot();
+        foreach (var e in SelectedEntities.Where(e => e.Link != null).ToList()) Sk.Unlink(e);
         Resolve();
         _vp.Redraw();
     }
@@ -351,14 +362,14 @@ public sealed partial class SketchEditor : IViewportMode
     // ---- convert entities (project model edges) ----
 
     /// <summary>
-    /// Projects model edges into the sketch as fixed geometry (<see cref="SketchConvert"/>): exact where the model has
-    /// its curves; edges known only by their display polyline come as lines.
+    /// Projects model edges into the sketch (<see cref="SketchConvert"/>), kept on them as the model changes: exact where the model has
+    /// its curves; edges known only by their display polyline come as fixed lines.
     /// </summary>
-    public int ConvertEdges(IEnumerable<Kernel.Native.NEdge> exact, IEnumerable<TopoEdge> meshOnly)
+    public int ConvertEdges(IEnumerable<(Kernel.Native.NEdge edge, string bodyId)> exact, IEnumerable<TopoEdge> meshOnly)
     {
         Snapshot();
         int created = 0;
-        foreach (var e in exact) if (SketchConvert.Edge(Sk, Frame, e)) created++;
+        foreach (var (e, body) in exact) if (SketchConvert.Edge(Sk, Frame, e, body)) created++;
         foreach (var e in meshOnly)
         {
             var pts = new List<Vec2> { Frame.ToLocal(e.Segs[0].A) };
@@ -367,7 +378,7 @@ public sealed partial class SketchEditor : IViewportMode
             if (SketchConvert.Polyline(Sk, pts)) created++;
         }
         Resolve();
-        Message?.Invoke(created > 0 ? $"Converted {created} edge(s) into fixed sketch geometry." : "Nothing new to convert: those edges are in the sketch already.");
+        Message?.Invoke(created > 0 ? $"Converted {created} edge(s): they follow the model as it changes." : "Nothing new to convert: those edges are in the sketch already.");
         _vp.Redraw();
         return created;
     }
@@ -1863,7 +1874,25 @@ public sealed partial class SketchEditor : IViewportMode
             _glyphs.Add(gb);
         }
         // fixed points
-        var refPoints = Sk.Entities.Where(e => e.IsReference).SelectMany(e => e.PointIds).ToHashSet();
+        // converted geometry: one On Edge mark on each entity, not an anchor on each of its points
+        foreach (var e in Sk.Entities.Where(e => e.Link != null))
+        {
+            if (MidOf(e) is not { } at) continue;
+            var s = Screen(at);
+            var gb = new Border
+            {
+                Background = new SolidColorBrush(Color.FromArgb(230, 210, 228, 250)),
+                BorderBrush = new SolidColorBrush(Color.FromRgb(70, 110, 170)), BorderThickness = new Thickness(1),
+                Padding = new Thickness(2, 0), CornerRadius = new CornerRadius(2),
+                Child = new TextBlock { Text = "⛓", FontSize = 9, Foreground = new SolidColorBrush(Color.FromRgb(40, 70, 130)) },
+                IsHitTestVisible = false,
+            };
+            ToolTip.SetTip(gb, "On Edge: converted from the model, follows it");
+            Canvas.SetLeft(gb, s.X + 4); Canvas.SetTop(gb, s.Y + 2);
+            Overlay.Children.Add(gb);
+            _glyphs.Add(gb);
+        }
+        var refPoints = Sk.Entities.Where(e => e.IsReference || e.Link != null).SelectMany(e => e.PointIds).ToHashSet();
         foreach (var p in Sk.Points.Where(p => p.Fixed && p.Id != Sketch.OriginId && !refPoints.Contains(p.Id)))
         {
             var s = Screen(p.P);
@@ -1879,6 +1908,23 @@ public sealed partial class SketchEditor : IViewportMode
             Overlay.Children.Add(gb);
             _glyphs.Add(gb);
         }
+    }
+
+    /// <summary>The middle of a line or arc, the top of a circle (where an entity's mark goes).</summary>
+    Vec2? MidOf(SkEntity e)
+    {
+        switch (e)
+        {
+            case SkLine l when Sk.Point(l.P1) is { } a && Sk.Point(l.P2) is { } b: return (a.P + b.P) * 0.5;
+            case SkCircle c when Sk.Point(c.Center) is { } cc: return cc.P + new Vec2(0, c.R);
+            case SkArc a when Sk.Point(a.Center) is { } c && Sk.Point(a.Start) is { } s && Sk.Point(a.End) is { } en:
+                {
+                    var a0 = (s.P - c.P).Angle; var a1 = (en.P - c.P).Angle;
+                    var sweep = a1 - a0; while (sweep <= 0) sweep += 2 * Math.PI;
+                    return c.P + Vec2.FromAngle(a0 + sweep / 2, (s.P - c.P).Length);
+                }
+        }
+        return null;
     }
 
     Vec2? GlyphPos(SkConstraint c, Dictionary<int, int> perEntity)

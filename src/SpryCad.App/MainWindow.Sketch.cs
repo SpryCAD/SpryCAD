@@ -304,10 +304,24 @@ public partial class MainWindow
 
             var existing = ed.RelationsOfSelection().ToList();
             var pts = ed.SelectedPoints.Concat(ed.SelectedEntities.SelectMany(e => e.PointIds)).Distinct().ToList();
-            var fixedPts = pts.Where(p => ed.Sk.Point(p)?.Fixed == true && p != Sketch.OriginId).ToList();
-            if (existing.Count > 0 || fixedPts.Count > 0)
+            // converted geometry is held by its model edge (On Edge), not by anchors on its points
+            var linked = ed.SelectedEntities.Where(e => e.Link != null).ToList();
+            var onEdge = ed.Sk.Entities.Where(e => e.Link != null).SelectMany(e => e.PointIds).ToHashSet();
+            var fixedPts = pts.Where(p => ed.Sk.Point(p)?.Fixed == true && p != Sketch.OriginId && !onEdge.Contains(p)).ToList();
+            if (existing.Count > 0 || fixedPts.Count > 0 || linked.Count > 0)
             {
                 var ex = page.Section("Existing Relations");
+                if (linked.Count > 0)
+                {
+                    var row = new DockPanel();
+                    var del = new Button { Content = "✖", Padding = new Thickness(4, 0), Classes = { "tb" } };
+                    ToolTip.SetTip(del, "Delete On Edge: the geometry stays where it is, no longer following the model");
+                    del.Click += (_, _) => { ed.UnlinkSelection(); BuildSketchPage(); };
+                    DockPanel.SetDock(del, Dock.Right);
+                    row.Children.Add(del);
+                    row.Children.Add(new TextBlock { Text = "⛓  On Edge" + (linked.Count > 1 ? $" ({linked.Count})" : ""), VerticalAlignment = VerticalAlignment.Center });
+                    ex.Children.Add(row);
+                }
                 foreach (var c in existing)
                 {
                     var row = new DockPanel();
@@ -485,9 +499,9 @@ public partial class MainWindow
     /// The model edges the picks stand for: exact ones (the bodies' curves) where the model has them, else the
     /// display edges. A face gives all its edges; with <paramref name="chain"/> an edge brings its tangent chain.
     /// </summary>
-    (List<Kernel.Native.NEdge> exact, List<TopoEdge> mesh) ConvertTargets(IEnumerable<SelItem> picks, bool chain)
+    (List<(Kernel.Native.NEdge edge, string bodyId)> exact, List<TopoEdge> mesh) ConvertTargets(IEnumerable<SelItem> picks, bool chain)
     {
-        var exact = new List<Kernel.Native.NEdge>();
+        var exact = new List<(Kernel.Native.NEdge edge, string bodyId)>();
         var mesh = new List<TopoEdge>();
         var st = Session.DisplayResult?.State;
         foreach (var s in picks)
@@ -500,7 +514,7 @@ public partial class MainWindow
                 if (nb != null)
                 {
                     nb.Link();
-                    exact.AddRange(nb.Faces.Where(f => f.Tag.Name == s.Name).SelectMany(f => f.Coedges).Select(c => c.Edge));
+                    exact.AddRange(nb.Faces.Where(f => f.Tag.Name == s.Name).SelectMany(f => f.Coedges).Select(c => (c.Edge, body.Id)));
                 }
                 else mesh.AddRange(body.Solid.Topology.Edges.Where(e => e.FaceA == s.Name || e.FaceB == s.Name));
                 continue;
@@ -509,10 +523,10 @@ public partial class MainWindow
             Kernel.Native.NEdge? ne = null;
             if (nb != null && s.Edge != null && st != null)
                 try { ne = Resolver.ResolveNativeEdge(s.Edge, st)?.edge; } catch { /* not found: the display edge */ }
-            if (ne != null) exact.AddRange(chain ? SketchConvert.TangentChain(nb!, ne) : new[] { ne });
+            if (ne != null) exact.AddRange((chain ? SketchConvert.TangentChain(nb!, ne) : new() { ne }).Select(x => (x, body.Id)));
             else if (s.EdgeIndex >= 0 && s.EdgeIndex < body.Solid.Topology.Edges.Count) mesh.Add(body.Solid.Topology.Edges[s.EdgeIndex]);
         }
-        return (exact.Distinct().ToList(), mesh.Distinct().ToList());
+        return (exact.DistinctBy(x => x.edge).ToList(), mesh.Distinct().ToList());
     }
 
     void OffsetEntities()
