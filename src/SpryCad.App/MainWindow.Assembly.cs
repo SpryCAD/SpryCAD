@@ -54,7 +54,7 @@ public partial class MainWindow : IAssemblyHost
         Status("Importing " + Path.GetFileName(path) + "…");
         AssemblyModel? m;
         try { m = await Task.Run(() => AssemblyModel.FromStep(File.ReadAllBytes(path), Path.GetFileNameWithoutExtension(path))); }
-        catch (Exception ex) { await Dialogs.Message(this, "Import STEP Assembly", $"{Path.GetFileName(path)} could not be imported: {ex.Message}"); return; }
+        catch (Exception ex) { App.Log(ex, "Import STEP Assembly"); await Dialogs.Message(this, "Import STEP Assembly", $"{Path.GetFileName(path)} could not be imported: {ex.Message}"); return; }
         // one part after all: a part tab, as any STEP part
         if (m == null) { _stepParts.Add(Path.GetFullPath(path)); await OpenFileAsync(path); return; }
         var blank = IsUntouched(_tab) ? _tab : null;
@@ -112,7 +112,7 @@ public partial class MainWindow : IAssemblyHost
             });
             Status($"Exported {path}" + (missing.Count > 0 ? $" ({missing.Count} part(s) left out: shown only from the assembly's copy; resolve them first)" : ""));
         }
-        catch (Exception ex) { await Dialogs.Message(this, "Export failed", ex.Message); }
+        catch (Exception ex) { App.Log(ex, "Export failed"); await Dialogs.Message(this, "Export failed", ex.Message); }
     }
 
     /// <summary>The active tab's assembly (null: a part is active).</summary>
@@ -191,7 +191,7 @@ public partial class MainWindow : IAssemblyHost
         Status("Opening " + Path.GetFileName(path) + "…");
         AssemblySession s;
         try { s = await Task.Run(() => AssemblySession.Open(path)); }
-        catch (Exception ex) { await Dialogs.Message(this, "Open Assembly", $"{Path.GetFileName(path)} could not be opened: {ex.Message}"); return; }
+        catch (Exception ex) { App.Log(ex, "Open Assembly"); await Dialogs.Message(this, "Open Assembly", $"{Path.GetFileName(path)} could not be opened: {ex.Message}"); return; }
         var blank = IsUntouched(_tab) ? _tab : null;
         var t = AddAssemblyTab(s);
         RecentFiles.Add(path);
@@ -425,7 +425,7 @@ public partial class MainWindow : IAssemblyHost
                 var c = await Task.Run(() => PartsIndexStore.Use(_ => a.Model.Insert(p, at, embed)));
                 last = c.Id;
             }
-            catch (Exception ex) { await Dialogs.Message(this, "Insert Component", $"{Path.GetFileName(p)} could not be inserted: {ex.Message}"); }
+            catch (Exception ex) { App.Log(ex, "Insert Component"); await Dialogs.Message(this, "Insert Component", $"{Path.GetFileName(p)} could not be inserted: {ex.Message}"); }
         }
         if (last == null) { a.AbandonChange(); Status("Nothing inserted."); return; }
         a.Selected = last;
@@ -496,7 +496,7 @@ public partial class MainWindow : IAssemblyHost
         if (comps.All(x => Configurations.KeyOf(x.Parameters) == config)) return;
         a.BeginChange();
         try { a.Model.Configure(comps, part, ch.values); }
-        catch (Exception ex) { a.AbandonChange(); await Dialogs.Message(this, "Configure failed", ex.Message); return; }
+        catch (Exception ex) { App.Log(ex, "Configure failed"); a.AbandonChange(); await Dialogs.Message(this, "Configure failed", ex.Message); return; }
         if (a.Model.Doc.Mates.Count > 0) a.Model.SolveMates();
         a.EndChange();
         var problem = a.Model.DisplayOf(c)?.Problem;
@@ -538,7 +538,7 @@ public partial class MainWindow : IAssemblyHost
             Status("Saved " + path);
             return true;
         }
-        catch (Exception ex) { await Dialogs.Message(this, "Save failed", ex.Message); return false; }
+        catch (Exception ex) { App.Log(ex, "Save failed"); await Dialogs.Message(this, "Save failed", ex.Message); return false; }
     }
 
     async Task<bool> ConfirmDiscardAssembly()

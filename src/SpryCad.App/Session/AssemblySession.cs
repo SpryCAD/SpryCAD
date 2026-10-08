@@ -67,7 +67,7 @@ public sealed class AssemblySession
                     progress?.Invoke($"Building {job.Name}, {i + 1} of {jobs.Count}…");
                     PartDisplay? built = null; string? problem = null;
                     try { built = await Task.Run(job.Build); }
-                    catch (Exception ex) { problem = ex.Message; }
+                    catch (Exception ex) { App.Log(ex, "Build component part " + job.Name); problem = ex.Message; }
                     if (Model.Install(job, built, problem)) { any = true; Shown(); }
                 }
             }

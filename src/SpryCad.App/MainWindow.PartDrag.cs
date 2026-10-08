@@ -69,7 +69,7 @@ public partial class MainWindow
                     c.Placement = Placement.From(Transform.Translation(DropPoint(pt, anchor) - pd.Mesh.Bounds.Center));
                 last = c.Id;
             }
-            catch (Exception ex) { await Dialogs.Message(this, "Insert Component", $"{Path.GetFileName(p)} could not be inserted: {ex.Message}"); }
+            catch (Exception ex) { App.Log(ex, "Insert " + p); await Dialogs.Message(this, "Insert Component", $"{Path.GetFileName(p)} could not be inserted: {ex.Message}"); }
         }
         if (last == null) { a.AbandonChange(); return; }
         a.Selected = last;

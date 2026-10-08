@@ -341,6 +341,7 @@ public sealed class DocumentSession
             catch (OperationCanceledException) { continue; } // superseded by a newer request
             catch (Exception ex)
             {
+                App.Log(ex, "Rebuild of " + (SourcePath ?? UntitledName));
                 Dispatcher.UIThread.Post(() => App.ShowError("Rebuild failed: " + ex.Message));
                 continue;
             }

@@ -547,7 +547,7 @@ public partial class MainWindow
             t.FitAfterLoad = s.RequestedRevision;
             return null;
         }
-        catch (Exception ex) { return ex.Message; }
+        catch (Exception ex) { App.Log(ex, "Open " + path); return ex.Message; }
     }
 
     /// <summary>

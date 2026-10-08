@@ -741,7 +741,7 @@ public partial class MainWindow
         var s = t.Session;
         byte[] data;
         try { data = File.ReadAllBytes(path); }
-        catch (Exception ex) { return ex.Message; }
+        catch (Exception ex) { App.Log(ex, "Import " + path); return ex.Message; }
         if (!System.Text.Encoding.ASCII.GetString(data, 0, Math.Min(64, data.Length)).TrimStart().StartsWith("ISO-10303-21"))
             return Path.GetFileName(path) + " is not a STEP file.";
         var hash = DocumentContainer.Hash(data);
@@ -887,6 +887,7 @@ public partial class MainWindow
         catch (Exception ex)
         {
             // the part stays open, marked, saying why (Retry reads it again)
+            App.Log(ex, "Open " + path);
             _tab.Source = path;
             Session.UntitledName = Path.GetFileNameWithoutExtension(path);
             _tab.LoadError = ex.Message;
@@ -910,7 +911,7 @@ public partial class MainWindow
         if (Asm != null) return await SaveAssembly(false);
         if (Session.FilePath == null) return await SaveAs();
         try { Session.Save(Session.FilePath); RecentFiles.Add(Session.FilePath); Status("Saved " + Session.FilePath); return true; }
-        catch (Exception ex) { await Dialogs.Message(this, "Save failed", ex.Message); return false; }
+        catch (Exception ex) { App.Log(ex, "Save failed"); await Dialogs.Message(this, "Save failed", ex.Message); return false; }
     }
 
     async Task<bool> SaveAs()
@@ -927,7 +928,7 @@ public partial class MainWindow
         var path = f?.TryGetLocalPath();
         if (path == null) return false;
         try { Session.Save(path); RecentFiles.Add(path); Status("Saved " + path); return true; }
-        catch (Exception ex) { await Dialogs.Message(this, "Save failed", ex.Message); return false; }
+        catch (Exception ex) { App.Log(ex, "Save failed"); await Dialogs.Message(this, "Save failed", ex.Message); return false; }
     }
 
     async Task Export(string kind)
@@ -968,7 +969,7 @@ public partial class MainWindow
             });
             Status($"Exported {path} ({sw.ElapsedMilliseconds} ms)");
         }
-        catch (Exception ex) { await Dialogs.Message(this, "Export failed", ex.Message); }
+        catch (Exception ex) { App.Log(ex, "Export failed"); await Dialogs.Message(this, "Export failed", ex.Message); }
     }
 
     /// <summary>Writes the flat pattern (of each body a Flat Pattern feature unfolded) as DXF, in millimetres.</summary>
@@ -1004,7 +1005,7 @@ public partial class MainWindow
             }
             Status($"Exported {string.Join(", ", written)}");
         }
-        catch (Exception ex) { await Dialogs.Message(this, "Export failed", ex.Message); }
+        catch (Exception ex) { App.Log(ex, "Export failed"); await Dialogs.Message(this, "Export failed", ex.Message); }
     }
 
     /// <summary>

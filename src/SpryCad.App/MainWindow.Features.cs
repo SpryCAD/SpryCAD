@@ -161,7 +161,7 @@ public partial class MainWindow
                     else
                     {
                         try { frame = Resolver.ResolvePlane(sf.Plane, r == null ? ModelState.Initial() : StateBefore(r, Session.Doc.IndexOf(sf.Id))); }
-                        catch (Exception ex) { Status("Cannot edit sketch: " + ex.Message); return; }
+                        catch (Exception ex) { App.Log(ex, "Edit sketch"); Status("Cannot edit sketch: " + ex.Message); return; }
                     }
                     var consumer = Session.Doc.ConsumersOf(sf.Id).FirstOrDefault();
                     EnterSketch((SketchFeature)sf.Clone(), frame, isNew: false, pointsOnly: consumer is HoleFeature);
