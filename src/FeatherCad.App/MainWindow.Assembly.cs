@@ -27,6 +27,90 @@ public partial class MainWindow : IAssemblyHost
 
     static bool IsAssembly(string path) => Path.GetExtension(path).Equals(AssemblyDocument.FileExtension, StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>STEP files that looked like assemblies but hold a single part: opened as parts.</summary>
+    readonly HashSet<string> _stepParts = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>A STEP file holding an assembly (placed uses of parts), not a single part.</summary>
+    bool IsStepAssembly(string path)
+    {
+        if (!IsStep(path) || _stepParts.Contains(Path.GetFullPath(path))) return false;
+        try { return StepImport.IsAssembly(File.ReadAllBytes(path)); }
+        catch (IOException) { return false; }
+    }
+
+    /// <summary>An assembly file, or a STEP file holding an assembly: opened in an assembly tab.</summary>
+    bool OpensAsAssembly(string path) => IsAssembly(path) || IsStepAssembly(path);
+
+    Task OpenAnyAssembly(string path) => IsAssembly(path) ? OpenAssembly(path) : OpenStepAssembly(path);
+
+    /// <summary>
+    /// A STEP assembly opened as a new assembly (not saved yet, named after the file): its parts embedded, each use
+    /// placed as the file has it, the first fixed and the others locked to it (delete a lock to move a part).
+    /// </summary>
+    async Task OpenStepAssembly(string path)
+    {
+        if (_parts.FirstOrDefault(t => t.Asm != null && t.Source is { } src && PartIndex.SamePath(src, path)) is { } open) { await SwitchTo(open); return; }
+        Status("Importing " + Path.GetFileName(path) + "…");
+        AssemblyModel? m;
+        try { m = await Task.Run(() => AssemblyModel.FromStep(File.ReadAllBytes(path), Path.GetFileNameWithoutExtension(path))); }
+        catch (Exception ex) { await Dialogs.Message(this, "Import STEP Assembly", $"{Path.GetFileName(path)} could not be imported: {ex.Message}"); return; }
+        // one part after all: a part tab, as any STEP part
+        if (m == null) { _stepParts.Add(Path.GetFullPath(path)); await OpenFileAsync(path); return; }
+        var blank = IsUntouched(_tab) ? _tab : null;
+        var t = AddAssemblyTab(new AssemblySession(m) { UntitledName = Path.GetFileNameWithoutExtension(path) });
+        t.Source = path;
+        RecentFiles.Add(path);
+        if (!await SwitchTo(t)) return;
+        if (blank != null && blank != t) RemoveTab(blank);
+        Viewport.StandardView("Trimetric", fit: true, animate: false);
+        Status($"Imported {m.Doc.Components.Count} components ({m.Parts.Count} parts, embedded), each locked to the first: delete a lock (under Mates) to move a part." +
+               (m.Notes.Count > 0 ? $" {m.Notes.Count} notes under the tree." : ""));
+    }
+
+    /// <summary>
+    /// Exports the assembly: STEP as an assembly (each part once, each component placed), STL as all the components'
+    /// solids where they are. Parts shown only from the assembly's copy (missing, lightweight) cannot be written.
+    /// </summary>
+    async Task ExportAssembly(string kind)
+    {
+        if (Asm is not { } a) return;
+        var keys = a.Model.Doc.Components.Where(c => !c.Suppressed).Select(c => ComponentResolver.Key(c.Part)).Distinct().ToList();
+        var missing = keys.Where(k => a.Model.Parts.GetValueOrDefault(k)?.Doc == null).ToList();
+        if (keys.Count == 0) { await Dialogs.Message(this, "Export", "The assembly has no components to export."); return; }
+        var type = kind == "step"
+            ? new FilePickerFileType("STEP AP214") { Patterns = new[] { "*.step", "*.stp" } }
+            : new FilePickerFileType("STL (binary)") { Patterns = new[] { "*.stl" } };
+        var baseName = a.FilePath != null ? Path.GetFileNameWithoutExtension(a.FilePath) : a.UntitledName;
+        var f = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+        {
+            Title = kind == "step" ? "Export STEP Assembly" : "Export STL", DefaultExtension = kind == "step" ? "step" : "stl",
+            SuggestedFileName = baseName + (kind == "step" ? ".step" : ".stl"), FileTypeChoices = new[] { type },
+        });
+        var path = f?.TryGetLocalPath();
+        if (path == null) return;
+        Status($"Exporting {Path.GetFileName(path)}…");
+        try
+        {
+            var model = a.Model;
+            await Task.Run(() =>
+            {
+                var live = keys.Except(missing).ToList();
+                // each part's solids, built from its document
+                var solids = live.ToDictionary(k => k, k => new Core.Regen.Regenerator().Rebuild(model.Parts[k].Doc!).State.Bodies.Select(b => (b.Id, b.Solid)).ToList());
+                var comps = model.Doc.Components.Where(c => !c.Suppressed && live.Contains(ComponentResolver.Key(c.Part))).ToList();
+                using var fs = File.Create(path);
+                if (kind == "step")
+                {
+                    var parts = live.Select(k => (model.ComponentsOf(k).First().Name.Split('<')[0], (IReadOnlyList<(string, Solid)>)solids[k])).ToList();
+                    StepWriter.WriteAssembly(fs, baseName, parts, comps.Select(c => (live.IndexOf(ComponentResolver.Key(c.Part)), c.Name, c.Placement.ToTransform())).ToList());
+                }
+                else StlWriter.Write(fs, comps.SelectMany(c => solids[ComponentResolver.Key(c.Part)].Select(s => s.Solid.Transformed(c.Placement.ToTransform()))));
+            });
+            Status($"Exported {path}" + (missing.Count > 0 ? $" ({missing.Count} part(s) left out: shown only from the assembly's copy; resolve them first)" : ""));
+        }
+        catch (Exception ex) { await Dialogs.Message(this, "Export failed", ex.Message); }
+    }
+
     /// <summary>The active tab's assembly (null: a part is active).</summary>
     AssemblySession? Asm => _tab?.Asm;
 

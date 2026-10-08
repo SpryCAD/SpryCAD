@@ -43,6 +43,21 @@ static class Demos
     /// other side, its knuckle beside the first), and the pin through both. Printable: Clr between the knuckles,
     /// between each knuckle and the other leaf's notch, and round the pin.
     /// </summary>
+    /// <summary>An assembly written as a STEP assembly (each part's solids once, each component placed).</summary>
+    public static byte[] AssemblyStep(FeatherCad.Core.Assembly.AssemblyModel m, string name)
+    {
+        var keys = m.Doc.Components.Select(c => FeatherCad.Core.Assembly.ComponentResolver.Key(c.Part)).Distinct().ToList();
+        var parts = keys.Select(k =>
+        {
+            var bodies = new Regenerator().Rebuild(m.Parts[k].Doc!).State.Bodies.Select(b => (b.Id, b.Solid)).ToList();
+            return (m.ComponentsOf(k).First().Name.Split('<')[0], (IReadOnlyList<(string, Solid)>)bodies);
+        }).ToList();
+        var comps = m.Doc.Components.Select(c => (keys.IndexOf(FeatherCad.Core.Assembly.ComponentResolver.Key(c.Part)), c.Name, c.Placement.ToTransform())).ToList();
+        using var ms = new MemoryStream();
+        StepWriter.WriteAssembly(ms, name, parts, comps);
+        return ms.ToArray();
+    }
+
     /// <summary>Parts saved to a temporary folder, inserted embedded by <paramref name="build"/>; the folder deleted after.</summary>
     static FeatherCad.Core.Assembly.AssemblyModel Embedded(IEnumerable<(string name, CadDocument doc)> parts,
         Action<FeatherCad.Core.Assembly.AssemblyModel, Dictionary<string, string>> build)
@@ -384,6 +399,8 @@ static class Demos
         {
             var m = build();
             m.Save(Path.Combine(dir, file));
+            // and as a STEP assembly (for other CAD systems, and to try opening one)
+            File.WriteAllBytes(Path.Combine(dir, Path.ChangeExtension(file, ".step")), AssemblyStep(m, Path.GetFileNameWithoutExtension(file)));
             Console.WriteLine($"{file}: {m.Doc.Components.Count} components ({string.Join(", ", m.Doc.Components.Select(c => c.Name))})");
             if (m.Parts.Values.Any(p => p.Problem != null || p.Mesh.Indices.Length == 0)) broken.Add(file);
         }

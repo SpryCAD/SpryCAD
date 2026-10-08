@@ -777,8 +777,8 @@ public partial class MainWindow
     /// </summary>
     public async Task OpenFilesAsync(IReadOnlyList<string> paths)
     {
-        foreach (var a in paths.Where(IsAssembly)) await OpenAssembly(a);
-        paths = paths.Where(p => !IsAssembly(p)).ToList();
+        foreach (var a in paths.Where(OpensAsAssembly).ToList()) await OpenAnyAssembly(a);
+        paths = paths.Where(p => !OpensAsAssembly(p)).ToList();
         if (paths.Count == 0) return;
         if (paths.Count == 1) { await OpenFileAsync(paths[0]); return; }
         var blank = IsUntouched(_tab) ? _tab : null; // the empty part the window started with: not needed
@@ -807,7 +807,7 @@ public partial class MainWindow
     /// </summary>
     public async Task<bool> OpenFileAsync(string path)
     {
-        if (IsAssembly(path)) { await OpenAssembly(path); return true; }
+        if (OpensAsAssembly(path)) { await OpenAnyAssembly(path); return true; }
         if (FindOpen(path) is { } open)
         {
             // opened again after it could not be: read it again (the file may have been fixed or replaced)
@@ -886,6 +886,7 @@ public partial class MainWindow
 
     async Task Export(string kind)
     {
+        if (Asm != null) { await ExportAssembly(kind); return; }
         var r = Session.Result;
         if (r == null || r.State.Bodies.Count == 0) { await Dialogs.Message(this, "Export", "There is no solid body to export."); return; }
         var type = kind == "step"

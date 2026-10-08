@@ -5,6 +5,22 @@ namespace FeatherCad.Kernel;
 /// <summary>A solid read from a STEP file.</summary>
 public sealed record StepSolid(string Name, NBody Body);
 
+/// <summary>A part of a STEP assembly: its name and its solids, in its own coordinates.</summary>
+public sealed record StepPart(string Name, List<StepSolid> Solids);
+
+/// <summary>A placed use of a part in a STEP assembly (sub-assemblies' placements composed).</summary>
+public sealed record StepOccurrence(int Part, string Name, Transform Placement);
+
+/// <summary>A STEP assembly: its parts and where each is used.</summary>
+public sealed class StepAssemblyResult
+{
+    public string Name { get; set; } = "Assembly";
+    public List<StepPart> Parts { get; } = new();
+    public List<StepOccurrence> Occurrences { get; } = new();
+    public List<string> Warnings { get; } = new();
+    public double UnitMm { get; set; } = 1;
+}
+
 /// <summary>What was read from a STEP file.</summary>
 public sealed class StepImportResult
 {
@@ -61,6 +77,162 @@ public static class StepImport
         }
         if (r.Solids.Count == 0) throw new InvalidDataException("No solid of the STEP file could be imported: " + string.Join("; ", r.Warnings.Take(3)));
         return r;
+    }
+
+    // ------------------------------------------------------------------------------------------
+    // assemblies
+
+    /// <summary>Whether a STEP file is an assembly (placed uses of parts), from its text alone.</summary>
+    public static bool IsAssembly(byte[] data)
+    {
+        var text = System.Text.Encoding.Latin1.GetString(data);
+        return text.Contains("NEXT_ASSEMBLY_USAGE_OCCURRENCE", StringComparison.Ordinal) || text.Contains("MAPPED_ITEM", StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Reads a STEP assembly: each product with solids becomes a part (its solids in its own coordinates), each use
+    /// of it an occurrence placed where the assembly puts it (through sub-assemblies). Placements come from
+    /// CONTEXT_DEPENDENT_SHAPE_REPRESENTATIONs (a REPRESENTATION_RELATIONSHIP_WITH_TRANSFORMATION between the part's
+    /// shape and its parent's, either way round, by an ITEM_DEFINED_TRANSFORMATION) or MAPPED_ITEMs. A product's
+    /// shape may be split over representations related without a transformation (as SolidWorks and CATIA write).
+    /// Null when the file has no assembly structure.
+    /// </summary>
+    public static StepAssemblyResult? ReadAssembly(byte[] data, string prefix, double mmToUnits = 1)
+    {
+        if (!IsAssembly(data)) return null;
+        var f = StepFile.Parse(data);
+        var res = new StepAssemblyResult();
+        res.UnitMm = LengthUnitMm(f);
+        var ctx = new Ctx(f, res.UnitMm * mmToUnits, AngleUnitRadians(f), prefix, res.Warnings);
+        bool IsBrep(StepInstance i) => i.Is("MANIFOLD_SOLID_BREP") || i.Is("BREP_WITH_VOIDS");
+        StepInstance? Inst(object? a) => a is StepRef r && f.Instances.TryGetValue(r.Id, out var i) ? i : null;
+        List<object?>? RepArgs(StepInstance i) => i.Parts.FirstOrDefault(p => p.Type.EndsWith("REPRESENTATION") && p.Args.Count >= 2 && p.Args[1] is List<object?>).Args;
+
+        // representations related without a transformation: one shape split over them
+        var plain = new Dictionary<int, List<int>>();
+        void Link(int x, int y)
+        {
+            if (!plain.TryGetValue(x, out var l)) plain[x] = l = new(); l.Add(y);
+            if (!plain.TryGetValue(y, out var m)) plain[y] = m = new(); m.Add(x);
+        }
+        foreach (var i in f.Instances.Values)
+            if (i.Part("REPRESENTATION_RELATIONSHIP") is { } rr && !i.Is("REPRESENTATION_RELATIONSHIP_WITH_TRANSFORMATION") && rr.Count >= 4 && rr[2] is StepRef r1 && rr[3] is StepRef r2)
+                Link(r1.Id, r2.Id);
+            else if (i.Is("SHAPE_REPRESENTATION_RELATIONSHIP") && !i.Is("REPRESENTATION_RELATIONSHIP_WITH_TRANSFORMATION") && i.Args.Count >= 4 && i.Args[2] is StepRef s1 && i.Args[3] is StepRef s2)
+                Link(s1.Id, s2.Id);
+        HashSet<int> Closure(int rep)
+        {
+            var seen = new HashSet<int> { rep }; var stack = new Stack<int>(); stack.Push(rep);
+            while (stack.Count > 0) foreach (var n in plain.GetValueOrDefault(stack.Pop()) ?? new()) if (seen.Add(n)) stack.Push(n);
+            return seen;
+        }
+
+        // product definitions: their shapes and names
+        var repsOf = new Dictionary<int, HashSet<int>>();
+        foreach (var sdr in f.OfType("SHAPE_DEFINITION_REPRESENTATION"))
+        {
+            if (Inst(sdr.Args[0]) is not { } pds || pds.Args.Count < 3 || Inst(pds.Args[2]) is not { } pd || !pd.Is("PRODUCT_DEFINITION")) continue;
+            if (Inst(sdr.Args[1]) is not { } rep) continue;
+            if (!repsOf.TryGetValue(pd.Id, out var set)) repsOf[pd.Id] = set = new();
+            set.UnionWith(Closure(rep.Id));
+        }
+        string NameOf(int pdId)
+        {
+            var pd = f.Instances[pdId];
+            if (Inst(pd.Args.Count > 2 ? pd.Args[2] : null) is { } pdf && Inst(pdf.Args.Count > 2 ? pdf.Args[2] : null) is { } prod)
+                foreach (var a in new[] { 1, 0 })
+                    if (prod.Args.Count > a && prod.Args[a] is string n && n.Trim().Length > 0) return n.Trim();
+            return "Part";
+        }
+        Transform Frame(object? a)
+        {
+            var (o, z, x) = ctx.Placement(a);
+            var y = Vec3.Cross(z, x);
+            return new Transform(x.X, y.X, z.X, x.Y, y.Y, z.Y, x.Z, y.Z, z.Z, o);
+        }
+
+        // the assembly's links: parent product definition -> (child product definition, child-to-parent placement, name)
+        var children = new Dictionary<int, List<(int child, Transform t, string name)>>();
+        var placed = new HashSet<int>();
+        foreach (var cdsr in f.OfType("CONTEXT_DEPENDENT_SHAPE_REPRESENTATION"))
+        {
+            if (Inst(cdsr.Args[0]) is not { } rel || Inst(cdsr.Args[1]) is not { } ipds || ipds.Args.Count < 3 || Inst(ipds.Args[2]) is not { } nauo) continue;
+            if (!nauo.Is("NEXT_ASSEMBLY_USAGE_OCCURRENCE") || nauo.Args.Count < 5 || Inst(nauo.Args[3]) is not { } parent || Inst(nauo.Args[4]) is not { } child) continue;
+            var rr = rel.Part("REPRESENTATION_RELATIONSHIP");
+            var rwt = rel.Part("REPRESENTATION_RELATIONSHIP_WITH_TRANSFORMATION");
+            if (rr == null || rwt == null || rr.Count < 4 || Inst(rwt[0]) is not { } idt || !idt.Is("ITEM_DEFINED_TRANSFORMATION")) continue;
+            var f1 = Frame(idt.Args[2]); var f2 = Frame(idt.Args[3]);
+            // item 1 belongs to rep 1: the part's shape is rep 1 (child to parent: frame 2 after frame 1 undone), or
+            // the writer put it the other way round
+            var childReps = repsOf.GetValueOrDefault(child.Id) ?? new();
+            bool childIsRep1 = rr[2] is StepRef c1 && childReps.Contains(c1.Id) || !(rr[3] is StepRef c2 && childReps.Contains(c2.Id));
+            var t = childIsRep1 ? f2 * f1.RigidInverse() : f1 * f2.RigidInverse();
+            var name = nauo.Args[1] is string nn && nn.Length > 0 ? nn : NameOf(child.Id);
+            if (!children.TryGetValue(parent.Id, out var l)) children[parent.Id] = l = new();
+            l.Add((child.Id, t, name));
+            placed.Add(nauo.Id);
+        }
+        // uses without a placement: where the part is
+        foreach (var nauo in f.OfType("NEXT_ASSEMBLY_USAGE_OCCURRENCE"))
+        {
+            if (placed.Contains(nauo.Id) || Inst(nauo.Args[3]) is not { } parent || Inst(nauo.Args[4]) is not { } child) continue;
+            if (!children.TryGetValue(parent.Id, out var l)) children[parent.Id] = l = new();
+            l.Add((child.Id, Transform.Identity, nauo.Args[1] is string nn && nn.Length > 0 ? nn : NameOf(child.Id)));
+        }
+
+        // a product's own solids, and mapped items in its shapes (a representation used again, placed)
+        var partIndex = new Dictionary<string, int>();
+        int PartOf(string key, string name, IEnumerable<StepInstance> breps)
+        {
+            if (partIndex.TryGetValue(key, out var i)) return i;
+            var r = new StepImportResult();
+            foreach (var b in breps.OrderBy(x => x.Id))
+            {
+                var parts = new List<(StepInstance shell, bool reversed)> { (f.Get(b.Args[1]), false) };
+                if (b.Is("BREP_WITH_VOIDS") && b.Args.Count > 2 && b.Args[2] is List<object?> voids)
+                    foreach (var v in voids) { var oc = f.Get(v); parts.Add((f.Get(oc.Args[2]), !(oc.Args[3] is StepEnum { Value: "T" }))); }
+                ctx.AddSolid(r, b.Args.Count > 0 && b.Args[0] is string bn && bn.Length > 0 ? bn : name, parts);
+            }
+            res.Warnings.AddRange(r.Warnings);
+            if (r.Solids.Count == 0) return partIndex[key] = -1;
+            res.Parts.Add(new StepPart(name, r.Solids));
+            return partIndex[key] = res.Parts.Count - 1;
+        }
+        IEnumerable<StepInstance> Items(IEnumerable<int> reps) =>
+            reps.Select(id => f.Instances.GetValueOrDefault(id)).OfType<StepInstance>().SelectMany(rep => RepArgs(rep) is { } ra ? ((List<object?>)ra[1]).Select(Inst).OfType<StepInstance>() : Enumerable.Empty<StepInstance>());
+
+        void Walk(IEnumerable<int> reps, string key, string name, Transform t, int depth)
+        {
+            if (depth > 64) { res.Warnings.Add("The assembly is nested too deeply (a loop?); its deeper levels were left out."); return; }
+            var repSet = reps.ToList();
+            var items = Items(repSet).ToList();
+            var breps = items.Where(IsBrep).ToList();
+            if (breps.Count > 0 && PartOf(key, name, breps) is var pi and >= 0) res.Occurrences.Add(new StepOccurrence(pi, name, t));
+            // mapped items: another representation placed in this one
+            foreach (var mi in items.Where(i => i.Is("MAPPED_ITEM")))
+            {
+                if (Inst(mi.Args[1]) is not { } map || map.Args.Count < 2 || Inst(map.Args[1]) is not { } mrep) continue;
+                var mt = Frame(mi.Args[2]) * Frame(map.Args[0]).RigidInverse();
+                // the product owning that representation names it, if any
+                var owner = repsOf.FirstOrDefault(kv => kv.Value.Contains(mrep.Id)).Key;
+                Walk(Closure(mrep.Id), "rep:" + mrep.Id, owner != 0 ? NameOf(owner) : (mi.Args[0] is string mn && mn.Length > 0 ? mn : name), t * mt, depth + 1);
+            }
+        }
+        void WalkProduct(int pd, string name, Transform t, int depth)
+        {
+            Walk(repsOf.GetValueOrDefault(pd) ?? new HashSet<int>(), "pd:" + pd, name, t, depth);
+            foreach (var (child, ct, cname) in children.GetValueOrDefault(pd) ?? new())
+                WalkProduct(child, cname, t * ct, depth + 1);
+        }
+
+        // the roots: product definitions used by no other
+        var childIds = new HashSet<int>(children.Values.SelectMany(l => l.Select(x => x.child)));
+        var roots = children.Keys.Where(k => !childIds.Contains(k)).ToList();
+        if (roots.Count == 0) roots = repsOf.Keys.Where(k => !childIds.Contains(k)).ToList();
+        foreach (var root in roots.OrderBy(x => x)) WalkProduct(root, NameOf(root), Transform.Identity, 0);
+        if (roots.Count == 1) res.Name = NameOf(roots[0]);
+        if (res.Occurrences.Count == 0) throw new InvalidDataException("No part of the STEP assembly could be imported: " + string.Join("; ", res.Warnings.Take(3)));
+        return res;
     }
 
     // ------------------------------------------------------------------------------------------
@@ -205,7 +377,7 @@ public static class StepImport
         }
 
         /// <summary>AXIS2_PLACEMENT_3D(name, location, axis, ref_direction): origin, Z and X.</summary>
-        (Vec3 o, Vec3 z, Vec3 x) Placement(object? a)
+        public (Vec3 o, Vec3 z, Vec3 x) Placement(object? a)
         {
             var p = _f.Get(a);
             var o = Point(p.Args[1]);

@@ -86,6 +86,50 @@ static class AssemblyTests
 
     public static void Run(TestRunner t)
     {
+        t.Test("STEP assemblies: the hinge written and read back (parts once, placed); as an assembly: embedded parts, locked to the first", () =>
+        {
+            var hinge = Demos.Assemblies.First(x => x.file == "hinge.fcasm").build();
+            var step = Demos.AssemblyStep(hinge, "Hinge");
+            t.True(StepImport.IsAssembly(step), "an assembly");
+            var res = StepImport.ReadAssembly(step, "S.")!;
+            t.True(res.Parts.Count == 2 && res.Occurrences.Count == 3 && res.Name == "Hinge", $"{res.Parts.Count} parts, {res.Occurrences.Count} uses, '{res.Name}'");
+            var q = new Vec3(3, 4, 5);
+            for (int i = 0; i < 3; i++)
+                t.True(Vec3.Distance(res.Occurrences[i].Placement.Point(q), hinge.Doc.Components[i].Placement.ToTransform().Point(q)) < 1e-6, $"use {i + 1} placed as it was");
+
+            var m = AssemblyModel.FromStep(step, "Hinge")!;
+            t.Eq(m.Doc.Components.Count, 3);
+            t.True(m.Doc.Components.All(c => c.Part.Embedded != null) && m.Parts.Count == 2, "embedded, a part each");
+            t.True(m.Doc.Components[0].Fixed && m.Doc.Mates.Count == 2 && m.Doc.Mates.All(x => x.Type == MateType.Lock), "fixed first, the others locked to it");
+            m.SolveMates();
+            t.True(m.LastSolve!.Satisfied && m.LastSolve.Moved.Count == 0, "the locks hold as read");
+            for (int i = 0; i < 3; i++)
+            {
+                t.True(Vec3.Distance(m.Doc.Components[i].Placement.ToTransform().Point(q), hinge.Doc.Components[i].Placement.ToTransform().Point(q)) < 1e-6, $"component {i + 1} where it was");
+                var v0 = hinge.DisplayOf(hinge.Doc.Components[i])!.Mesh.Volume; var v1 = m.DisplayOf(m.Doc.Components[i])!.Mesh.Volume;
+                t.True(Math.Abs(v1 - v0) < 1e-3 * v0, $"component {i + 1}'s volume {v1:0.###} vs {v0:0.###}");
+            }
+            // saved and opened again, from itself alone
+            var path = Path.Combine(NewDir("step-asm"), "Hinge.fcasm");
+            m.Save(path);
+            var back = AssemblyModel.Open(AssemblyDocument.Load(path), path, new PartIndex());
+            t.True(back.Doc.Components.All(c => back.DisplayOf(c)!.Source == PartSource.Embedded && back.DisplayOf(c)!.Problem == null), "reopened");
+
+            // written the other way round (the parent's shape as the relationship's first representation, the
+            // transformation's items swapped to match): the same placements
+            var text = System.Text.Encoding.ASCII.GetString(step);
+            text = System.Text.RegularExpressions.Regex.Replace(text, @"REPRESENTATION_RELATIONSHIP\('',\s*'',\s*(#\d+),\s*(#\d+)\)", "REPRESENTATION_RELATIONSHIP('','',$2,$1)");
+            text = System.Text.RegularExpressions.Regex.Replace(text, @"ITEM_DEFINED_TRANSFORMATION\('',\s*'',\s*(#\d+),\s*(#\d+)\)", "ITEM_DEFINED_TRANSFORMATION('','',$2,$1)");
+            var swapped = StepImport.ReadAssembly(System.Text.Encoding.ASCII.GetBytes(text), "S.")!;
+            for (int i = 0; i < 3; i++)
+                t.True(Vec3.Distance(swapped.Occurrences[i].Placement.Point(q), hinge.Doc.Components[i].Placement.ToTransform().Point(q)) < 1e-6, $"swapped: use {i + 1} placed as it was");
+
+            // a part's STEP is not an assembly
+            using var ms = new MemoryStream();
+            StepWriter.Write(ms, new[] { ("Pin", new FeatherCad.Core.Regen.Regenerator().Rebuild(hinge.Parts.Values.First().Doc!).State.Bodies[0].Solid) }, "Pin");
+            t.True(!StepImport.IsAssembly(ms.ToArray()) && AssemblyModel.FromStep(ms.ToArray(), "Pin") == null, "a part's STEP is not an assembly");
+        });
+
         t.Test("Lead screw assembly demo: the nut on the screw (a Screw mate of the thread's lead) fits; turned, it travels and still fits", () =>
         {
             var m = Demos.Assemblies.First(x => x.file == "lead-screw.fcasm").build();

@@ -68,25 +68,99 @@ public static class StepWriter
     public static void Write(Stream stream, IEnumerable<(string name, Solid solid)> bodies, string productName, double scale = 1.0, bool exact = true)
     {
         var c = new Ctx();
+        var (appCtx, prodCtx, pdc, geomCtx) = Contexts(c);
+        var safe = Esc(productName);
+        var (_, pds, _) = Product(c, productName, prodCtx, pdc);
+        var items = new List<int> { Origin(c) };
+        items.AddRange(Bodies(c, bodies, scale, exact));
+        var rep = c.Add($"ADVANCED_BREP_SHAPE_REPRESENTATION('{safe}',({string.Join(",", items.Select(i => "#" + i))}),#{geomCtx})");
+        c.Add($"SHAPE_DEFINITION_REPRESENTATION(#{pds},#{rep})");
+        Finish(stream, c, safe);
+    }
+
+    /// <summary>
+    /// An assembly as AP214 writes them: a product per part (its solids in its own coordinates), the assembly's
+    /// product, and per component a NEXT_ASSEMBLY_USAGE_OCCURRENCE whose placement is a
+    /// REPRESENTATION_RELATIONSHIP_WITH_TRANSFORMATION from the part's shape to the assembly's (an
+    /// ITEM_DEFINED_TRANSFORMATION from the part's origin to the component's frame). Rigid placements only.
+    /// </summary>
+    public static void WriteAssembly(Stream stream, string assemblyName, IReadOnlyList<(string name, IReadOnlyList<(string name, Solid solid)> bodies)> parts,
+        IReadOnlyList<(int part, string name, Transform placement)> components, double scale = 1.0, bool exact = true)
+    {
+        var c = new Ctx();
+        var (appCtx, prodCtx, pdc, geomCtx) = Contexts(c);
+        var (_, asmPds, asmPd) = Product(c, assemblyName, prodCtx, pdc);
+        var asmItems = new List<int> { Origin(c) };
+        var partRep = new int[parts.Count]; var partPd = new int[parts.Count]; var partOrigin = new int[parts.Count];
+        for (int i = 0; i < parts.Count; i++)
+        {
+            var (pname, bodies) = parts[i];
+            var (_, pds, pd) = Product(c, pname, prodCtx, pdc);
+            partPd[i] = pd;
+            partOrigin[i] = Origin(c);
+            var items = new List<int> { partOrigin[i] };
+            items.AddRange(Bodies(c, bodies, scale, exact));
+            partRep[i] = c.Add($"ADVANCED_BREP_SHAPE_REPRESENTATION('{Esc(pname)}',({string.Join(",", items.Select(x => "#" + x))}),#{geomCtx})");
+            c.Add($"SHAPE_DEFINITION_REPRESENTATION(#{pds},#{partRep[i]})");
+        }
+        // the assembly's shape: its origin and each component's frame
+        var frames = new List<int>();
+        foreach (var (_, _, t) in components)
+        {
+            var o = c.Add(Pt(t.T * scale)); var z = c.Add(Dir(t.Vector(Vec3.UnitZ))); var x = c.Add(Dir(t.Vector(Vec3.UnitX)));
+            frames.Add(c.Add($"AXIS2_PLACEMENT_3D('',#{o},#{z},#{x})"));
+        }
+        asmItems.AddRange(frames);
+        var asmRep = c.Add($"SHAPE_REPRESENTATION('{Esc(assemblyName)}',({string.Join(",", asmItems.Select(x => "#" + x))}),#{geomCtx})");
+        c.Add($"SHAPE_DEFINITION_REPRESENTATION(#{asmPds},#{asmRep})");
+        for (int k = 0; k < components.Count; k++)
+        {
+            var (pi, cname, _) = components[k];
+            var nauo = c.Add($"NEXT_ASSEMBLY_USAGE_OCCURRENCE('{k + 1}','{Esc(cname)}','',#{asmPd},#{partPd[pi]},$)");
+            var ipds = c.Add($"PRODUCT_DEFINITION_SHAPE('{Esc(cname)}','',#{nauo})");
+            var idt = c.Add($"ITEM_DEFINED_TRANSFORMATION('','',#{partOrigin[pi]},#{frames[k]})");
+            var rel = c.Add($"(REPRESENTATION_RELATIONSHIP('','',#{partRep[pi]},#{asmRep})REPRESENTATION_RELATIONSHIP_WITH_TRANSFORMATION(#{idt})SHAPE_REPRESENTATION_RELATIONSHIP())");
+            c.Add($"CONTEXT_DEPENDENT_SHAPE_REPRESENTATION(#{rel},#{ipds})");
+        }
+        Finish(stream, c, Esc(assemblyName));
+    }
+
+    static (int appCtx, int prodCtx, int pdc, int geomCtx) Contexts(Ctx c)
+    {
         var appCtx = c.Add("APPLICATION_CONTEXT('core data for automotive mechanical design processes')");
         c.Add($"APPLICATION_PROTOCOL_DEFINITION('international standard','automotive_design',2000,#{appCtx})");
         var prodCtx = c.Add($"PRODUCT_CONTEXT('',#{appCtx},'mechanical')");
-        var safe = Esc(productName);
-        var product = c.Add($"PRODUCT('{safe}','{safe}','',(#{prodCtx}))");
-        var pdf = c.Add($"PRODUCT_DEFINITION_FORMATION('','',#{product})");
         var pdc = c.Add($"PRODUCT_DEFINITION_CONTEXT('part definition',#{appCtx},'design')");
-        var pd = c.Add($"PRODUCT_DEFINITION('design','',#{pdf},#{pdc})");
-        var pds = c.Add($"PRODUCT_DEFINITION_SHAPE('','',#{pd})");
-        c.Add($"PRODUCT_RELATED_PRODUCT_CATEGORY('part',$,(#{product}))");
         var lenUnit = c.Add("(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))");
         var angUnit = c.Add("(NAMED_UNIT(*)PLANE_ANGLE_UNIT()SI_UNIT($,.RADIAN.))");
         var solUnit = c.Add("(NAMED_UNIT(*)SI_UNIT($,.STERADIAN.)SOLID_ANGLE_UNIT())");
         var unc = c.Add($"UNCERTAINTY_MEASURE_WITH_UNIT(LENGTH_MEASURE(1.E-06),#{lenUnit},'distance_accuracy_value','confusion accuracy')");
         var geomCtx = c.Add($"(GEOMETRIC_REPRESENTATION_CONTEXT(3)GLOBAL_UNCERTAINTY_ASSIGNED_CONTEXT((#{unc}))GLOBAL_UNIT_ASSIGNED_CONTEXT((#{lenUnit},#{angUnit},#{solUnit}))REPRESENTATION_CONTEXT('Context3D','3D Context with UNIT and UNCERTAINTY'))");
-        var o = c.Add(Pt(Vec3.Zero)); var dz = c.Add(Dir(Vec3.UnitZ)); var dx = c.Add(Dir(Vec3.UnitX));
-        var origin = c.Add($"AXIS2_PLACEMENT_3D('',#{o},#{dz},#{dx})");
+        return (appCtx, prodCtx, pdc, geomCtx);
+    }
 
-        var items = new List<int> { origin };
+    /// <summary>A product and its definition: (product, product definition shape, product definition).</summary>
+    static (int product, int pds, int pd) Product(Ctx c, string name, int prodCtx, int pdc)
+    {
+        var safe = Esc(name);
+        var product = c.Add($"PRODUCT('{safe}','{safe}','',(#{prodCtx}))");
+        var pdf = c.Add($"PRODUCT_DEFINITION_FORMATION('','',#{product})");
+        var pd = c.Add($"PRODUCT_DEFINITION('design','',#{pdf},#{pdc})");
+        var pds = c.Add($"PRODUCT_DEFINITION_SHAPE('','',#{pd})");
+        c.Add($"PRODUCT_RELATED_PRODUCT_CATEGORY('part',$,(#{product}))");
+        return (product, pds, pd);
+    }
+
+    static int Origin(Ctx c)
+    {
+        var o = c.Add(Pt(Vec3.Zero)); var dz = c.Add(Dir(Vec3.UnitZ)); var dx = c.Add(Dir(Vec3.UnitX));
+        return c.Add($"AXIS2_PLACEMENT_3D('',#{o},#{dz},#{dx})");
+    }
+
+    /// <summary>Solids as MANIFOLD_SOLID_BREPs (exact; faceted if that fails): their ids.</summary>
+    static List<int> Bodies(Ctx c, IEnumerable<(string name, Solid solid)> bodies, double scale, bool exact)
+    {
+        var items = new List<int>();
         foreach (var (name, solid) in bodies)
         {
             var s = Math.Abs(scale - 1) > 1e-15 ? solid.Transformed(Transform.Scale(scale)) : solid;
@@ -105,9 +179,11 @@ public static class StepWriter
             foreach (var shell in shells)
                 items.Add(c.Add($"MANIFOLD_SOLID_BREP('{Esc(name)}',#{shell})"));
         }
-        var rep = c.Add($"ADVANCED_BREP_SHAPE_REPRESENTATION('{safe}',({string.Join(",", items.Select(i => "#" + i))}),#{geomCtx})");
-        c.Add($"SHAPE_DEFINITION_REPRESENTATION(#{pds},#{rep})");
+        return items;
+    }
 
+    static void Finish(Stream stream, Ctx c, string safe)
+    {
         var sb = new StringBuilder();
         sb.Append("ISO-10303-21;\nHEADER;\n");
         sb.Append("FILE_DESCRIPTION(('FeatherCAD model'),'2;1');\n");

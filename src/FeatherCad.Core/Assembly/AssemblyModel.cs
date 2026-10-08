@@ -168,6 +168,83 @@ public sealed class AssemblyModel
         return c;
     }
 
+    /// <summary>
+    /// Adds a component of a part document embedded in the assembly (the document saved into it once per part:
+    /// further components of it share the copy). The document gets an identity if it has none.
+    /// </summary>
+    public Component InsertEmbedded(CadDocument doc, string name, Transform placement)
+    {
+        var existing = doc.Id != null ? Doc.Components.Select(c => c.Part).FirstOrDefault(p => p.Embedded != null && p.PartId == doc.Id) : null;
+        PartRef r;
+        if (existing != null) r = existing.Clone();
+        else
+        {
+            // saved as a part file would be (its identity and revision given), kept inside the assembly
+            var tmp = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "fc-embed-" + Guid.NewGuid().ToString("N") + CadDocument.FileExtension);
+            try { doc.Save(tmp, container: true); Doc.Files[UniqueName("parts/" + SafeFileName(name) + CadDocument.FileExtension)] = File.ReadAllBytes(tmp); }
+            finally { try { File.Delete(tmp); } catch { } }
+            var file = Doc.Files.Keys.Last(k => k.StartsWith("parts/" + SafeFileName(name), StringComparison.Ordinal));
+            r = new PartRef { PartId = doc.Id, Revision = doc.Revision, Embedded = file };
+        }
+        var c = Doc.AddComponent(r, placement, name);
+        var key = ComponentResolver.Key(r);
+        if (!Resolution.Parts.ContainsKey(key)) Resolution.Parts[key] = new PartResolution(PartStatus.Embedded, null, false, null);
+        if (!Parts.ContainsKey(key))
+            Parts[key] = new PartDisplay { Mesh = Build(doc), Color = doc.Color, Source = PartSource.Embedded, Revision = doc.Revision, Doc = doc };
+        return c;
+    }
+
+    static string SafeFileName(string name)
+    {
+        var bad = System.IO.Path.GetInvalidFileNameChars().Concat(new[] { '/', '\\', ':' }).ToHashSet();
+        var s = new string(name.Select(ch => bad.Contains(ch) ? '_' : ch).ToArray()).Trim();
+        return s.Length == 0 ? "Part" : s;
+    }
+
+    /// <summary>
+    /// An assembly from a STEP assembly file: each of its parts a part document embedded in the assembly (an Import
+    /// of that part's solids, in its own coordinates), each use of a part a component where the file places it. The
+    /// first component is fixed and every other one locked to it, so the assembly stays as it was designed until a
+    /// lock is deleted (then mate it as wanted). Null when the file is not an assembly (or holds one part, once).
+    /// </summary>
+    public static AssemblyModel? FromStep(byte[] data, string name)
+    {
+        var res = StepImport.ReadAssembly(data, "S.");
+        // no assembly structure, or a single use of a single part (a part, as STEP parts are opened)
+        if (res == null || res.Occurrences.Count < 2) return null;
+        var m = New();
+        m.Notes.AddRange(res.Warnings);
+        // a part document per STEP part: its solids written to a STEP of their own and imported
+        var docs = new CadDocument?[res.Parts.Count];
+        var names = new string[res.Parts.Count];
+        var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < res.Parts.Count; i++)
+        {
+            var part = res.Parts[i];
+            var n = part.Name;
+            for (int k = 2; !used.Add(n); k++) n = $"{part.Name} ({k})";
+            names[i] = n;
+            using var ms = new MemoryStream();
+            StepWriter.Write(ms, part.Solids.Select(sd => (sd.Name, Kernel.Native.NTess.ToSolid(sd.Body))), n);
+            var bytes = ms.ToArray();
+            var doc = new CadDocument();
+            var file = "imports/" + SafeFileName(n) + ".step";
+            doc.AddFile(file, bytes);
+            doc.AddFeature(new ImportFeature { File = file, Sha256 = DocumentContainer.Hash(bytes) });
+            docs[i] = doc;
+        }
+        Component? first = null;
+        foreach (var o in res.Occurrences)
+        {
+            var c = m.InsertEmbedded(docs[o.Part]!, names[o.Part], o.Placement);
+            if (first == null) { first = c; continue; }
+            // held where the file put it: locked to the first component
+            // (a lock holds the components themselves: no face is needed)
+            m.AddMate(MateType.Lock, new MateRef { Component = c.Id, D = Vec3.UnitZ }, new MateRef { Component = first.Id, D = Vec3.UnitZ });
+        }
+        return m;
+    }
+
     string UniqueName(string name)
     {
         if (!Doc.Files.ContainsKey(name)) return name;
