@@ -127,6 +127,20 @@ public partial class MainWindow
         ToolTip.SetTip(PartsButton, "All open parts (Ctrl+E), in the task pane at the right: arrow keys switch between them");
         DocTabs.HiddenCountChanged += () => Avalonia.Threading.Dispatcher.UIThread.Post(UpdatePartsButton);
         UpdatePartsButton();
+        // + after the last tab: a new part or assembly (as a browser's new tab)
+        var add = new Button
+        {
+            Content = "+", FontSize = 15, Padding = new Thickness(7, 0, 7, 1), MinHeight = 0, MinWidth = 0, Margin = new Thickness(2, 0, 0, 1),
+            Background = Brushes.Transparent, BorderThickness = new Thickness(0), CornerRadius = new CornerRadius(4),
+            VerticalAlignment = VerticalAlignment.Center, Focusable = false,
+        };
+        ToolTip.SetTip(add, "New part or assembly");
+        var newPart = new MenuItem { Header = "New _Part", InputGesture = new KeyGesture(Key.N, KeyModifiers.Control) };
+        newPart.Click += (_, _) => _ = NewFile();
+        var newAsm = new MenuItem { Header = "New _Assembly" };
+        newAsm.Click += (_, _) => NewAssembly();
+        add.Flyout = new MenuFlyout { Placement = PlacementMode.BottomEdgeAlignedLeft, Items = { newPart, newAsm } };
+        DocTabs.Trailing = add;
     }
 
     void UpdatePartsButton()
