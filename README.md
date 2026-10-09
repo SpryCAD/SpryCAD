@@ -136,8 +136,8 @@ latest master build):
 
 ```bash
 sudo install -d -m 0755 /etc/apt/keyrings
-curl -fsSL https://<packages-host>/apt/sprycad-archive-keyring.gpg | sudo tee /etc/apt/keyrings/sprycad.gpg > /dev/null
-echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/sprycad.gpg] https://<packages-host>/apt stable main" | sudo tee /etc/apt/sources.list.d/sprycad.list
+curl -fsSL https://download.sprycad.com/apt/sprycad-archive-keyring.gpg | sudo tee /etc/apt/keyrings/sprycad.gpg > /dev/null
+echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/sprycad.gpg] https://download.sprycad.com/apt stable main" | sudo tee /etc/apt/sources.list.d/sprycad.list
 sudo apt update && sudo apt install sprycad
 ```
 

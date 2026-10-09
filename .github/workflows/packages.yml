@@ -18,7 +18,7 @@
 #             UPDATE_SIGNING_KEY    PEM private key (ECDSA P-256) that signs the update feed; its public half is in
 #                                   src/SpryCad.App/Updater.cs
 #   Variables R2_BUCKET             the bucket name
-#             R2_PUBLIC_URL         the bucket's public URL: its custom domain (https://packages.example.com) or r2.dev URL
+#             R2_PUBLIC_URL         the bucket's public URL: https://download.sprycad.com (its custom domain)
 name: Packages
 
 on:
