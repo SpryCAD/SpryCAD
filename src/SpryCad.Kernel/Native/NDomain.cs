@@ -174,37 +174,124 @@ public sealed class NDomain
 
     public Vec3 Eval(Vec2 uv) => Face.Surface.Eval(uv.X, uv.Y * VSign);
 
+    // boxes of runs of boundary segments (segment k of a loop runs from point k to point k + 1, wrapping), built on
+    // first use: UV boxes of Loops, 3D boxes of Loops3. One reference each: safe to publish across threads.
+    const int Run = 16;
+    readonly record struct Box2(int Start, int End, double MinX, double MaxX, double MinY, double MaxY);
+    readonly record struct Box3(int Start, int End, Vec3 Min, Vec3 Max);
+    Box2[][]? _boxes2;
+    Box3[][]? _boxes3;
+
+    Box2[][] Boxes2()
+    {
+        if (_boxes2 is { } bx) return bx;
+        var res = new Box2[Loops.Count][];
+        for (int li = 0; li < Loops.Count; li++)
+        {
+            var l = Loops[li]; int n = l.Length;
+            var r = new Box2[(n + Run - 1) / Run];
+            for (int k = 0; k < r.Length; k++)
+            {
+                int s = k * Run, e = Math.Min(n, s + Run);
+                double x0 = double.MaxValue, x1 = double.MinValue, y0 = double.MaxValue, y1 = double.MinValue;
+                for (int i = s; i <= e; i++)
+                {
+                    var q = l[i % n];
+                    // NaN coordinates: a box that is never skipped
+                    if (double.IsNaN(q.X) || double.IsNaN(q.Y)) { x0 = y0 = double.NegativeInfinity; x1 = y1 = double.PositiveInfinity; break; }
+                    x0 = Math.Min(x0, q.X); x1 = Math.Max(x1, q.X); y0 = Math.Min(y0, q.Y); y1 = Math.Max(y1, q.Y);
+                }
+                r[k] = new Box2(s, e, x0, x1, y0, y1);
+            }
+            res[li] = r;
+        }
+        return _boxes2 = res;
+    }
+
+    Box3[][] Boxes3()
+    {
+        if (_boxes3 is { } bx) return bx;
+        var res = new Box3[Loops3.Count][];
+        for (int li = 0; li < Loops3.Count; li++)
+        {
+            var l = Loops3[li]; int n = l.Length;
+            var r = new Box3[(n + Run - 1) / Run];
+            for (int k = 0; k < r.Length; k++)
+            {
+                int s = k * Run, e = Math.Min(n, s + Run);
+                Vec3 lo = l[s], hi = l[s];
+                for (int i = s; i <= e; i++) { var q = l[i % n]; lo = Vec3.Min(lo, q); hi = Vec3.Max(hi, q); }
+                r[k] = new Box3(s, e, lo, hi);
+            }
+            res[li] = r;
+        }
+        return _boxes3 = res;
+    }
+
     public bool ContainsUV(Vec2 p)
     {
+        // crossings of the ray from p towards +u; a run of segments all above or all below p (or all to its left,
+        // with a margin for the rounding of the crossing) has none. The order of the segments does not matter.
         bool inside = false;
-        foreach (var poly in Loops)
-            for (int i = 0, j = poly.Length - 1; i < poly.Length; j = i++)
+        var boxes = Boxes2();
+        for (int li = 0; li < Loops.Count; li++)
+        {
+            var poly = Loops[li]; int n = poly.Length;
+            foreach (var bx in boxes[li])
             {
-                var a = poly[i]; var b = poly[j];
-                if ((a.Y > p.Y) != (b.Y > p.Y) && p.X < (b.X - a.X) * (p.Y - a.Y) / (b.Y - a.Y) + a.X) inside = !inside;
+                if (bx.MinY > p.Y || bx.MaxY <= p.Y) continue;
+                if (p.X > bx.MaxX + 1e-9 * (Math.Abs(bx.MaxX) + Math.Abs(bx.MinX) + 1)) continue;
+                for (int k = bx.Start; k < bx.End; k++)
+                {
+                    // as (i, j) = (k + 1, k): the crossing computed from the same end
+                    var a = poly[(k + 1) % n]; var b = poly[k];
+                    if ((a.Y > p.Y) != (b.Y > p.Y) && p.X < (b.X - a.X) * (p.Y - a.Y) / (b.Y - a.Y) + a.X) inside = !inside;
+                }
             }
+        }
         return inside;
     }
 
     /// <summary>Distance (3D) from p to the face boundary polyline.</summary>
-    public double BoundaryDistance(Vec3 p)
+    public double BoundaryDistance(Vec3 p) => BoundaryDistanceBelow(p, double.MaxValue);
+
+    /// <summary>
+    /// <see cref="BoundaryDistance"/> where it is below <paramref name="limit"/>; otherwise some value not below it.
+    /// Runs of segments whose box is no nearer than the best so far are skipped.
+    /// </summary>
+    double BoundaryDistanceBelow(Vec3 p, double limit)
     {
-        double best = double.MaxValue;
-        foreach (var l in Loops3)
-            for (int i = 0; i < l.Length; i++)
+        // squared distances (the root is monotonic: the same minimum); NaN propagates as before. A limit: segments a
+        // little beyond it are still measured, so a distance not measured has a root above the limit
+        double init = limit == double.MaxValue ? double.MaxValue : limit * limit * (1 + 1e-9), best = init;
+        var boxes = Boxes3();
+        for (int li = 0; li < Loops3.Count; li++)
+        {
+            var l = Loops3[li]; int n = l.Length;
+            foreach (var bx in boxes[li])
             {
-                var a = l[i]; var b = l[(i + 1) % l.Length];
-                var d = b - a; var l2 = d.LengthSq;
-                var t = l2 > 0 ? Math.Clamp(Vec3.Dot(p - a, d) / l2, 0, 1) : 0;
-                best = Math.Min(best, (a + d * t - p).Length);
+                // distance to the box, less a margin for the rounding of the segment points
+                var e = Vec3.Max(Vec3.Max(bx.Min - p, p - bx.Max), Vec3.Zero);
+                var pad = 1e-9 * ((bx.Max - bx.Min).Length + bx.Min.Length + bx.Max.Length + p.Length);
+                var lb = Math.Max(0, e.Length - pad);
+                if (lb * lb > best) continue;
+                for (int i = bx.Start; i < bx.End; i++)
+                {
+                    var a = l[i]; var b = l[(i + 1) % n];
+                    var d = b - a; var l2 = d.LengthSq;
+                    var t = l2 > 0 ? Math.Clamp(Vec3.Dot(p - a, d) / l2, 0, 1) : 0;
+                    best = Math.Min(best, (a + d * t - p).LengthSq);
+                }
             }
-        return best;
+        }
+        return best == init ? limit : Math.Sqrt(best);
     }
 
     /// <summary>+1 inside, 0 on the boundary (within onTol), -1 outside. p is assumed to lie on the surface.</summary>
     public int Classify(Vec3 p, double onTol)
     {
-        var bd = BoundaryDistance(p);
+        // only compared with these limits: runs farther than the larger one need not be measured
+        var bd = BoundaryDistanceBelow(p, Math.Max(onTol, _tol * 2 + onTol));
         if (bd < onTol) return 0;
         // within the chord error of the sampled boundary: decide on the exact edge curves (a point on a
         // true arc can lie outside its polyline)

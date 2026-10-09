@@ -72,6 +72,73 @@ static class NativeBoolTests
 
     public static void Run(TestRunner t)
     {
+        t.Test("Native domain: point tests match the plain loops bit for bit", () =>
+        {
+            // a plate with a hole pattern (long loops in many runs) and its hole walls; points everywhere and right
+            // next to the boundary, against the tests over every segment
+            var plate = NativeTests.Box(new Vec3(0, 0, 0), new Vec3(70, 70, 8), "P");
+            var holes = new NBody();
+            for (int i = 0; i < 6; i++)
+                for (int j = 0; j < 6; j++)
+                    holes.Faces.AddRange(NativeTests.Cyl(new Vec3(10 + 10 * i, 10 + 10 * j, -1), Vec3.UnitZ, 2.5 + 0.3 * ((i + j) % 3), 10, $"G{i}{j}").Faces);
+            holes.Link();
+            var body = NBoolean.Run(plate, holes, BoolOp.Subtract);
+            static bool InsideRef(NDomain d, Vec2 p)
+            {
+                bool inside = false;
+                foreach (var poly in d.Loops)
+                    for (int i = 0, j = poly.Length - 1; i < poly.Length; j = i++)
+                    {
+                        var a = poly[i]; var b = poly[j];
+                        if ((a.Y > p.Y) != (b.Y > p.Y) && p.X < (b.X - a.X) * (p.Y - a.Y) / (b.Y - a.Y) + a.X) inside = !inside;
+                    }
+                return inside;
+            }
+            static double DistRef(NDomain d, Vec3 p)
+            {
+                double best = double.MaxValue;
+                foreach (var l in d.Loops3)
+                    for (int i = 0; i < l.Length; i++)
+                    {
+                        var a = l[i]; var b = l[(i + 1) % l.Length];
+                        var dd = b - a; var l2 = dd.LengthSq;
+                        var tt = l2 > 0 ? Math.Clamp(Vec3.Dot(p - a, dd) / l2, 0, 1) : 0;
+                        best = Math.Min(best, (a + dd * tt - p).Length);
+                    }
+                return best;
+            }
+            var rnd = new Random(7);
+            int n = 0;
+            foreach (var f in body.Faces)
+            {
+                const double tol = 1e-3;
+                var d = NDomain.Of(f, tol);
+                var pts = new List<Vec2>();
+                for (int k = 0; k < 400; k++)
+                    pts.Add(new Vec2(d.UMin + (d.UMax - d.UMin) * (rnd.NextDouble() * 1.2 - 0.1), d.VMin + (d.VMax - d.VMin) * (rnd.NextDouble() * 1.2 - 0.1)));
+                foreach (var l in d.Loops)
+                    for (int k = 0; k < l.Length; k += 3)
+                    {
+                        pts.Add(l[k]);
+                        pts.Add(l[k] + new Vec2(rnd.NextDouble() - 0.5, rnd.NextDouble() - 0.5) * 1e-3);
+                    }
+                foreach (var uv in pts)
+                {
+                    var p = d.Eval(uv);
+                    t.True(d.ContainsUV(uv) == InsideRef(d, uv), $"{f.Tag.Name}: inside at {uv}");
+                    var bd = DistRef(d, p);
+                    t.True(BitConverter.DoubleToInt64Bits(d.BoundaryDistance(p)) == BitConverter.DoubleToInt64Bits(bd), $"{f.Tag.Name}: distance at {uv}");
+                    foreach (var onTol in new[] { 1e-6, 1e-4, 1e-2 })
+                    {
+                        int want = bd < onTol ? 0 : bd < tol * 2 + onTol && d.ExactBoundaryDistance(p) < onTol ? 0 : InsideRef(d, d.Map(p)) ? 1 : -1;
+                        t.Eq(d.Classify(p, onTol), want);
+                    }
+                    n++;
+                }
+            }
+            t.True(n > 2000, "points tested");
+        });
+
         t.Test("Native bool: local booleans give the whole-body result", () =>
         {
             // a plate with a hole pattern, then cuts and bosses touching few faces: faces far from each tool are

@@ -14,7 +14,8 @@ or checked against the old ones (see *Checking a change* below).
 | `4d0e6b2` | Ear clipping with a z-order index; `CdtMesh` in flat arrays; NTess interior grid by row crossings and boxed boundary runs (display tessellation ~1.7× faster) |
 | `ab36f00` | Plane × cone (exact conics, apex lines) and plane × torus (closed-form points) instead of traced |
 | `d7e143e` | `NIntersect.Trace` crossings, adjacency and chaining in flat stamped arrays; `NSurface.FGrad` gives `F_` and `Grad` from one evaluation for `ProjectToIntersection` (results bit for bit; traced time on the handwheel about halved, Torus × Cylinder ~310 to ~155 ms summed) |
-| (next) | `BSplineCurve.Derivs` (exact first and second derivatives) and `ClosestParam` (bracketed Newton); `NSpline.Param` uses it after the sample scan instead of 60 golden-section steps; `FitSpline` measures each point on its own span and adds every bad span's worst point per pass, with no `NSpline` per pass (`sec.makeedge` 4–5× faster; results bit for bit on every sample and demo variant) |
+| `d9974b7` | `BSplineCurve.Derivs` (exact first and second derivatives) and `ClosestParam` (bracketed Newton); `NSpline.Param` uses it after the sample scan instead of 60 golden-section steps; `FitSpline` measures each point on its own span and adds every bad span's worst point per pass, with no `NSpline` per pass (`sec.makeedge` 4–5× faster; results bit for bit on every sample and demo variant) |
+| (next) | `NDomain`: boxes over runs of 16 boundary segments (UV and 3D, built on first use); `ContainsUV` skips runs the ray cannot cross, `BoundaryDistance` compares squared distances and skips runs farther than the best, and `Classify` measures only up to its limit (results bit for bit; `sec.midclass` about 1.5–3× faster: gear 23 to 13 ms, acme screw 21 to 6 ms) |
 
 ## Where the time goes now
 
@@ -36,8 +37,8 @@ profile; the profile's times are summed over threads). On the heavy samples (`sa
      now about as large as the march and the projection.
 2. **`NBoolean.FitSpline` and `NSpline.Param`**: done (see above). The `NSpline` constructor still evaluates 129
    samples for the scan; `Param` still ignores `hint`.
-3. **`NDomain.Classify`, `BoundaryDistance` and `ContainsUV`**: linear in all boundary samples, with a square root per
-   segment. Per-loop boxes, squared distances and skipping far loops give identical results.
+3. **`NDomain.Classify`, `BoundaryDistance` and `ContainsUV`**: done (see above). What is left of `sec.midclass` is probably
+   mostly `Map` (the surface's `UV`) and `Project`; `ExactBoundaryDistance` is still linear in the coedges.
 4. **Vertex matching in `NBoolean`**: `MergeVertices` and `Snap` match linearly (O(V²)). Use a grid hash as
    `WeldVertices` has, and return the lowest-index match to stay deterministic. `ImprintSplitVertices` and `Sew` are
    O(E·V) with no box prefilter.
