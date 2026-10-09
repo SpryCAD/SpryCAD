@@ -5,7 +5,7 @@ Bucket layout (all under the bucket's public URL, R2_PUBLIC_URL):
   apt/sprycad-archive-keyring.gpg                   the public key that signs the repository
   apt/dists/<channel>/{Release,Release.gpg,InRelease}  signed suite index (channel: stable or dev)
   apt/dists/<channel>/main/binary-amd64/Packages(.gz)
-  apt/pool/<channel>/main/f/sprycad/sprycad_<debver>_amd64.deb
+  apt/pool/<channel>/main/s/sprycad/sprycad_<debver>_amd64.deb
   downloads/<channel>/<version>/                       the Windows installer and the Linux tarball
   updates/<channel>.json                               the update feed: latest version, URLs, SHA-256s
 
@@ -119,7 +119,7 @@ def gpg_args():
 def publish_apt(channel, deb, keep, work):
     """Adds the .deb to the channel's pool and index, prunes old dev builds, and re-signs the suite."""
     debver = run('dpkg-deb', '-f', str(deb), 'Version', capture_output=True).stdout.strip()
-    pool = f'pool/{channel}/main/f/sprycad'
+    pool = f'pool/{channel}/main/s/sprycad'
     put(deb, f'apt/{pool}/{deb.name}', 'application/vnd.debian.binary-package')
 
     # the new package's stanza, with Filename relative to the repository root
