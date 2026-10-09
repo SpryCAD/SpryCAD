@@ -22,7 +22,7 @@ uploaded before its signature; an app reading between the two sees a mismatch an
 Usage: build/publish-r2.py --channel dev --deb X.deb --tarball X.tar.gz --installer X.exe [--notes-out links.md]
 Needs: aws (CLI v2), dpkg-scanpackages (dpkg-dev), apt-ftparchive (apt-utils), gpg with the signing key imported,
   openssl.
-Environment: R2_ACCOUNT_ID, R2_BUCKET, R2_PUBLIC_URL, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY (the R2 API token),
+Environment: R2_ENDPOINT, R2_BUCKET, R2_PUBLIC_URL, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY (the R2 API token),
   UPDATE_SIGNING_KEY (PEM private key, P-256), and optionally APT_GPG_KEY_ID (default: the first secret key) and
   APT_GPG_PASSPHRASE.
 """
@@ -53,7 +53,9 @@ def env(name, default=None):
 
 BUCKET = env('R2_BUCKET')
 SIGNING_KEY = env('UPDATE_SIGNING_KEY')  # read first: a missing key stops the run before anything is uploaded
-ENDPOINT = f"https://{env('R2_ACCOUNT_ID')}.r2.cloudflarestorage.com"
+# the bucket's S3 API URL as Cloudflare shows it (https://<account id>.r2.cloudflarestorage.com, perhaps with the
+# bucket's name after it, which the CLI takes separately)
+ENDPOINT = env('R2_ENDPOINT').rstrip('/').removesuffix('/' + BUCKET)
 PUBLIC = env('R2_PUBLIC_URL').rstrip('/')
 
 

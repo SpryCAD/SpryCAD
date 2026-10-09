@@ -10,7 +10,7 @@
 # The version always comes from git (the build scripts); the checkouts fetch the full history for the tags.
 #
 # One-time setup (repository Settings > Secrets and variables > Actions):
-#   Secrets   R2_ACCOUNT_ID         Cloudflare account ID
+#   Secrets   R2_ENDPOINT           the bucket's S3 API URL (bucket Settings): https://<account id>.r2.cloudflarestorage.com
 #             R2_ACCESS_KEY_ID      R2 API token (Object Read & Write, this bucket only): access key ID
 #             R2_SECRET_ACCESS_KEY  ... and its secret access key
 #             APT_GPG_PRIVATE_KEY   armored private key that signs the apt repository (gpg --armor --export-secret-keys)
@@ -104,8 +104,9 @@ jobs:
       cancel-in-progress: false
     env:
       CHANNEL: ${{ github.ref_type == 'tag' && 'stable' || 'dev' }}
-      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
-      R2_BUCKET: ${{ vars.R2_BUCKET }}
+      # a secret or a variable, either works
+      R2_ENDPOINT: ${{ secrets.R2_ENDPOINT || vars.R2_ENDPOINT }}
+      R2_BUCKET: ${{ vars.R2_BUCKET || secrets.R2_BUCKET }}
       R2_PUBLIC_URL: ${{ vars.R2_PUBLIC_URL }}
       AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
