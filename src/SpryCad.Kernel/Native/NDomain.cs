@@ -19,7 +19,7 @@ public sealed class NDomain
     public double VMax { get; private set; } = double.MinValue;
     readonly double _tol;
 
-    NDomain(NFace f, double tol)
+    NDomain(NFace f, double tol, bool finest = false)
     {
         Face = f; _tol = tol;
         VSign = f.Sense ? 1 : -1;
@@ -39,7 +39,7 @@ public sealed class NDomain
             double vhint = first ? anchorV : VRef;
             foreach (var c in loop.Coedges)
             {
-                var p = c.Points(tol);
+                var p = c.Points(tol, finest);
                 var cuv = new Vec2[p.Count];
                 for (int i = 0; i < p.Count; i++)
                 {
@@ -128,17 +128,17 @@ public sealed class NDomain
         }
     }
 
-    public static NDomain Of(NFace f, double tol = 1e-3) => new(f, tol);
+    public static NDomain Of(NFace f, double tol = 1e-3, bool finest = false) => new(f, tol, finest);
 
     /// <summary>
     /// The face's domain at <paramref name="tol"/> or finer, kept on the face (it survives cloning, and is rebuilt
     /// when the loops' geometry changed): repeated point tests on the same faces build it once.
     /// </summary>
-    public static NDomain Cached(NFace f, double tol)
+    public static NDomain Cached(NFace f, double tol, bool finest = false)
     {
         var sig = f.LoopSignature();
         if (f.DomainCache is { } dc && dc.Tol <= tol * 1.0001 && dc.Sig == sig) return dc.Dom;
-        var d = new NDomain(f, tol);
+        var d = new NDomain(f, tol, finest);
         f.DomainCache = new(d, tol, sig);
         return d;
     }

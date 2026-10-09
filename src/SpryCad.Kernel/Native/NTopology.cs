@@ -21,7 +21,10 @@ public sealed class NEdge
     // tessellation follows them)
     sealed record BoxCache(Box3 Box, double Tol);
     BoxCache? _box;
-    SampleCache? _samples;
+    // the finest sampling asked for (what FinestSamples gives), and one near a coarser tolerance asked for later
+    SampleCache? _samples, _banded;
+    /// <summary>A sampling at most this much finer than asked for is used as it is; a finer one is not.</summary>
+    const double Band = 4;
     /// <summary>Diagnostics: the tolerance the cached samples were taken at (NaN: none).</summary>
     public double SampledTol => _samples?.Tol ?? double.NaN;
 
@@ -38,11 +41,39 @@ public sealed class NEdge
         get { var s = Samples(1e-3); double l = 0; for (int i = 1; i < s.Count; i++) l += Vec3.Distance(s[i - 1], s[i]); return l; }
     }
 
-    /// <summary>Points from V0 to V1 within the chord tolerance (end points are exactly the vertices).</summary>
-    public List<Vec3> Samples(double tol)
+    /// <summary>
+    /// Points from V0 to V1 within the chord tolerance (end points are exactly the vertices): a cached sampling within
+    /// the tolerance and not much finer than it.
+    /// </summary>
+    public List<Vec3> Samples(double tol) => SamplesAt(tol).Points;
+
+    SampleCache SamplesAt(double tol)
+    {
+        bool Fits(SampleCache? c) => c != null && c.Tol <= tol * 1.0001 && c.Tol * Band >= tol;
+        var fine = _samples;
+        if (Fits(fine)) return fine!;
+        var near = _banded;
+        if (Fits(near)) return near!;
+        // nothing cached is fine enough: the new finest; something much finer is: a sampling near tol beside it
+        if (fine == null || fine.Tol > tol * 1.0001) return FinestAt(tol);
+        return _banded = Sample(tol);
+    }
+
+    /// <summary>
+    /// Points within the chord tolerance, the finest sampling taken so far if that is finer (the face split follows
+    /// the boundary points that edge/surface intersection sampled finely).
+    /// </summary>
+    public List<Vec3> FinestSamples(double tol) => FinestAt(tol).Points;
+
+    SampleCache FinestAt(double tol)
     {
         var cached = _samples;
-        if (cached != null && cached.Tol <= tol * 1.0001) return cached.Points;
+        if (cached != null && cached.Tol <= tol * 1.0001) return cached;
+        return _samples = Sample(tol);
+    }
+
+    SampleCache Sample(double tol)
+    {
         if (Curve is NSpline or NPolyline or NContact or NSection or NIso)
         {
             // adaptive: bisect until the chord error is below tol
@@ -57,19 +88,17 @@ public sealed class NEdge
             }
             Sub(T0, T1, V0.P, V1.P, 0);
             res[^1] = V1.P;
-            _samples = new SampleCache(res, tol);
-            return res;
+            return new SampleCache(res, tol);
         }
         int n = Curve is NLine ? 1 : Math.Max(Curve.Samples(T0, T1, tol), 1);
         if (Curve is NCircle ci) n = Math.Max(n, (int)Math.Ceiling((T1 - T0) / (2 * Math.PI) * SurfaceDef.SegmentsFor(ci.R)));
         var pts = new List<Vec3>(n + 1);
         for (int i = 0; i <= n; i++) pts.Add(Curve.Eval(T0 + (T1 - T0) * i / n));
         pts[0] = V0.P; pts[^1] = V1.P;
-        _samples = new SampleCache(pts, tol);
-        return pts;
+        return new SampleCache(pts, tol);
     }
 
-    public void InvalidateSamples() { _samples = null; _box = null; }
+    public void InvalidateSamples() { _samples = null; _banded = null; _box = null; }
     /// <summary>Takes over another edge's cached bounds (same curve, same parameter range: a clone).</summary>
     internal void CopyBounds(NEdge from) => _box = from._box;
 
@@ -106,11 +135,10 @@ public sealed class NEdge
         if (_box is { } bc && bc.Tol <= tol * 1.0001) b = bc.Box;
         else
         {
-            var pts = Samples(tol);
-            var c = _samples;
+            var c = SamplesAt(tol);
             b = Box3.Empty;
-            foreach (var p in pts) b.Add(p);
-            _box = new BoxCache(b, c != null && ReferenceEquals(c.Points, pts) ? c.Tol : tol);
+            foreach (var p in c.Points) b.Add(p);
+            _box = new BoxCache(b, c.Tol);
         }
         // pad by the chord tolerance so sampled bounds enclose the curve
         b.Add(b.Min - new Vec3(tol, tol, tol)); b.Add(b.Max + new Vec3(tol, tol, tol));
@@ -126,9 +154,9 @@ public sealed class NCoedge
     public NCoedge(NEdge e, bool forward) { Edge = e; Forward = forward; }
     public NVertex Start => Forward ? Edge.V0 : Edge.V1;
     public NVertex End => Forward ? Edge.V1 : Edge.V0;
-    public List<Vec3> Points(double tol)
+    public List<Vec3> Points(double tol, bool finest = false)
     {
-        var s = Edge.Samples(tol);
+        var s = finest ? Edge.FinestSamples(tol) : Edge.Samples(tol);
         if (Forward) return s;
         var r = new List<Vec3>(s); r.Reverse(); return r;
     }

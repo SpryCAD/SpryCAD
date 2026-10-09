@@ -232,8 +232,10 @@ public sealed class NBoolean
     /// </summary>
     NDomain Build(NFace f, double tol)
     {
-        if (!Local) return NDomain.Of(f, tol);
-        return NDomain.Cached(f, tol);
+        // the finest boundary samples: points next to a curved boundary (a fillet's contact line) are classified
+        // against the sampled polygon, so it is kept as close to the curve as edge/surface intersection sampled it
+        if (!Local) return NDomain.Of(f, tol, finest: true);
+        return NDomain.Cached(f, tol, finest: true);
     }
 
     NBody Execute(NBody A, NBody B, BoolOp op)
@@ -659,7 +661,7 @@ public sealed class NBoolean
         {
             // the distance profile is read along the more finely sampled edge (a line has a single segment)
             var (x, y) = key;
-            bool flip = x.Samples(_sampleTol * 500).Count < y.Samples(_sampleTol * 500).Count;
+            bool flip = x.FinestSamples(_sampleTol * 500).Count < y.FinestSamples(_sampleTol * 500).Count;
             r = flip ? CurveCrossings(y, x).Select(c => (c.tb, c.ta, c.p, c.reach)).ToList() : CurveCrossings(x, y).Select(c => (c.ta, c.tb, c.p, c.reach)).ToList();
             _crossings[key] = r;
         }
@@ -680,7 +682,7 @@ public sealed class NBoolean
             var coincidentTol = _tol * 100;
             if (Math.Abs(qa.X - qb.X) > coincidentTol || Math.Abs(Math.IEEERemainder(qa.Y - qb.Y, lead)) > coincidentTol) return res;
         }
-        var pa = a.Samples(_sampleTol * 500); var pb = b.Samples(_sampleTol * 500);
+        var pa = a.FinestSamples(_sampleTol * 500); var pb = b.FinestSamples(_sampleTol * 500);
         double lo(NEdge x) => Math.Min(x.T0, x.T1); double hi(NEdge x) => Math.Max(x.T0, x.T1);
         double Par(NEdge x, Vec3 p, double hint)
         {
@@ -1176,7 +1178,7 @@ public sealed class NBoolean
         var hes = new List<HalfEdge>();
         HalfEdge Make(NEdge e, bool fwd)
         {
-            var pts = e.Samples(_sampleTol * 500);
+            var pts = e.FinestSamples(_sampleTol * 500);
             var uv = dom.MapAlong(pts);
             if (!fwd) Array.Reverse(uv);
             var h = new HalfEdge { Edge = e, Forward = fwd, From = fwd ? e.V0 : e.V1, To = fwd ? e.V1 : e.V0, Uv = uv };

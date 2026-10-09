@@ -16,7 +16,8 @@ or checked against the old ones (see *Checking a change* below).
 | `d7e143e` | `NIntersect.Trace` crossings, adjacency and chaining in flat stamped arrays; `NSurface.FGrad` gives `F_` and `Grad` from one evaluation for `ProjectToIntersection` (results bit for bit; traced time on the handwheel about halved, Torus × Cylinder ~310 to ~155 ms summed) |
 | `d9974b7` | `BSplineCurve.Derivs` (exact first and second derivatives) and `ClosestParam` (bracketed Newton); `NSpline.Param` uses it after the sample scan instead of 60 golden-section steps; `FitSpline` measures each point on its own span and adds every bad span's worst point per pass, with no `NSpline` per pass (`sec.makeedge` 4–5× faster; results bit for bit on every sample and demo variant) |
 | `bb6b89e` | `NDomain`: boxes over runs of 16 boundary segments (UV and 3D, built on first use); `ContainsUV` skips runs the ray cannot cross, `BoundaryDistance` compares squared distances and skips runs farther than the best, and `Classify` measures only up to its limit (results bit for bit; `sec.midclass` about 1.5–3× faster: gear 23 to 13 ms, acme screw 21 to 6 ms) |
-| (next) | `NBoolean` vertex matching: the snap pool hashed on a grid (the lowest-index match, as the scan; a scan below 33 vertices), `MergeVertices` rewriting edge ends once (replacements followed in the order made), and `ImprintSplitVertices` and `Sew` finding candidate vertices by x range, in list order; `split.cand`/`roots`/`apply`/`imprint` timers (results bit for bit; `split.imprint` about 3×: spur-gear-nice ~20 to ~7 ms) |
+| `7f68541` | `NBoolean` vertex matching: the snap pool hashed on a grid (the lowest-index match, as the scan; a scan below 33 vertices), `MergeVertices` rewriting edge ends once (replacements followed in the order made), and `ImprintSplitVertices` and `Sew` finding candidate vertices by x range, in list order; `split.cand`/`roots`/`apply`/`imprint` timers (results bit for bit; `split.imprint` about 3×: spur-gear-nice ~20 to ~7 ms) |
+| (next) | Edge samples per tolerance band: `NEdge.Samples` gives a sampling at most 4× finer than asked (a second cache beside the finest), `FinestSamples` the old behaviour for the readers that need it (face split, curve crossings, the boolean's domains). B-reps bit for bit; display meshes now follow their own tolerance at boundaries (display tessellation 2–5× faster, display mesh up to 2.5×: acme screw 145 to 32 ms and 205 to 95 ms) |
 
 ## Where the time goes now
 
@@ -45,9 +46,12 @@ profile; the profile's times are summed over threads). On the heavy samples (`sa
    mostly `Map` (the surface's `UV`) and `Project`; `ExactBoundaryDistance` is still linear in the coedges.
 4. **Vertex matching in `NBoolean`**: done (see above). In `bool.edge splits` what is left is mostly
    `split.crossings` (curve × curve on faces) and the edge/surface roots.
-5. **Edge sample cache** (`NEdge.Samples`): it keeps the finest sampling any caller asked for, and `EdgeSurface` asks
-   for `tol*50`. Later domains and display boundaries then carry many more points than they need. A cache per
-   tolerance band would fix it, but `SplitFace` relies on the fine samples, so validate.
+5. **Edge sample cache**: banded (see above), but the boolean's domains still read the finest samples
+   (`_tol·50`, about 200× finer than the domains' tolerance). Giving them coarse samples makes rebuilds 20–30% faster
+   (handwheel ~500 to ~390 ms, bolt-and-nut ~110 to ~80 ms), but breaks the stepped-shaft shoulder fillets (an edge
+   used 3 times) because `Classify` decides points near a curved boundary against the sampled polygon. A fix would
+   decide those points from the exact edge curves (the polygon's side is wrong within its chord error), then switch
+   the domains to coarse samples. Measure `sec.domains` too: building a domain maps every sample to UV.
 6. **B-spline interpolation** (`Exact/Curves.cs` `Interpolate`/`SolveBanded`): builds a dense (n+1)² matrix and
    clones it. STEP rational curves push n into the thousands (hundreds of MB). Store the band only.
 7. **NURBS core** (`NNurbs.DerivsIn`):
