@@ -16,8 +16,10 @@ namespace SpryCad.App;
 /// version. The installer it downloads must match the signed SHA-256; it runs silently once SpryCAD has closed
 /// (after the usual questions about unsaved parts), into the same install (per user or all users), and starts
 /// SpryCAD again if asked to. Linux updates through the package manager (apt).
-/// The feed's URL and the channel are built in by the workflow (SPRYCAD_UPDATE_URL, SPRYCAD_UPDATE_CHANNEL in the
-/// .csproj); a local build has neither and never checks.
+/// The feed's URL and the build's channel are built in by the workflow (SPRYCAD_UPDATE_URL, SPRYCAD_UPDATE_CHANNEL
+/// in the .csproj); a local build has neither and never checks. The user can pick the other channel in Options
+/// (UserSettings.UpdateChannel), which then holds through updates: a dev build installed from the dev feed keeps
+/// following stable if that was picked, and the other way round.
 /// </summary>
 static class Updater
 {
@@ -35,7 +37,13 @@ static class Updater
     /// <summary>The newest version in a feed, and its Windows installer.</summary>
     internal sealed record Release(string Version, string Name, Uri Url, string Sha256, long Size);
 
-    static readonly string? BaseUrl = Metadata("UpdateUrl"), Channel = Metadata("UpdateChannel");
+    static readonly string? BaseUrl = Metadata("UpdateUrl"), BuildChannel = Metadata("UpdateChannel");
+
+    /// <summary>The channels, as the feeds are named: tagged releases, and every change on master.</summary>
+    public static readonly string[] Channels = { "stable", "dev" };
+
+    /// <summary>The channel this copy follows: the user's choice, else the one it was built for.</summary>
+    public static string? Channel => UserSettings.UpdateChannel is { } c && Channels.Contains(c) ? c : BuildChannel;
 
     static string? Metadata(string key) => Assembly.GetEntryAssembly()?.GetCustomAttributes<AssemblyMetadataAttribute>()
         .FirstOrDefault(a => a.Key == key)?.Value is { Length: > 0 } v ? v : null;
@@ -48,7 +56,7 @@ static class Updater
     static bool Installed => File.Exists(Path.Combine(AppContext.BaseDirectory, "unins000.exe"));
 
     /// <summary>This copy can update itself: Windows, a published build with a feed, installed by the setup.</summary>
-    public static bool CanUpdate => OperatingSystem.IsWindows() && BaseUrl != null && Channel != null && Installed;
+    public static bool CanUpdate => OperatingSystem.IsWindows() && BaseUrl != null && BuildChannel != null && Installed;
 
     static readonly HttpClient Http = MakeClient();
 
@@ -145,10 +153,11 @@ static class Updater
     /// <summary>The channel's feed, verified; null when its signature does not match (or it is for another channel).</summary>
     internal static async Task<Release?> Fetch()
     {
-        var url = $"{BaseUrl!.TrimEnd('/')}/updates/{Channel}.json";
+        var channel = Channel!;
+        var url = $"{BaseUrl!.TrimEnd('/')}/updates/{channel}.json";
         var feed = await Http.GetByteArrayAsync(url);
         var sig = await Http.GetStringAsync(url + ".sig");
-        return Parse(feed, sig, PublicKey, Channel!);
+        return Parse(feed, sig, PublicKey, channel);
     }
 
     /// <summary>

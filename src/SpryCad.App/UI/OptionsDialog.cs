@@ -227,11 +227,20 @@ public static class OptionsDialog
             Updater.CanUpdate
                 ? "A newer version is offered, never installed without asking. Help > Check for Updates looks at any time."
                 : "This copy cannot update itself (a local build, or not installed by the setup).");
+        var channel = f.Row("Channel", Combo(new[] { "Stable: releases", "Dev: every change, as it is made" },
+                Math.Max(0, Array.IndexOf(Updater.Channels, Updater.Channel ?? "stable"))),
+            "Dev builds have the newest features and fixes first, and are tested less. Switching to Stable moves you to the next release newer than your version; nothing is downgraded.");
+        channel.IsEnabled = Updater.CanUpdate;
         return new Commit(() => null, () => () =>
         {
             var on = check.IsChecked == true;
             if (on && !UserSettings.CheckForUpdates) UserSettings.SkippedUpdate = null; // turned back on: offer everything again
             UserSettings.CheckForUpdates = on;
+            if (Updater.CanUpdate && channel.SelectedIndex >= 0 && Updater.Channels[channel.SelectedIndex] != Updater.Channel)
+            {
+                UserSettings.UpdateChannel = Updater.Channels[channel.SelectedIndex];
+                UserSettings.SkippedUpdate = null; // a version skipped on one channel is no reason to skip on the other
+            }
         });
     }
 

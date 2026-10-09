@@ -62,6 +62,8 @@ public static class UserSettings
     public static bool CheckForUpdates { get; set; } = true;
     /// <summary>The version the user chose to skip: not offered again at start (Help > Check for Updates still does).</summary>
     public static string? SkippedUpdate { get; set; }
+    /// <summary>The update channel picked in Options ("stable" or "dev"); null: the one the installed build came from.</summary>
+    public static string? UpdateChannel { get; set; }
 
     public static void Load()
     {
@@ -87,6 +89,7 @@ public static class UserSettings
                 else if (k == nameof(PartsSort) && Enum.TryParse<PartsOrder>(v, out var po)) PartsSort = po;
                 else if (k == nameof(CheckForUpdates)) CheckForUpdates = v == "1";
                 else if (k == nameof(SkippedUpdate)) SkippedUpdate = v.Length > 0 ? v : null;
+                else if (k == nameof(UpdateChannel)) UpdateChannel = v.Length > 0 ? v : null;
             }
         }
         catch { /* defaults */ }
@@ -113,6 +116,7 @@ public static class UserSettings
             lines.Add($"{nameof(PartsSort)}={PartsSort}");
             lines.Add($"{nameof(CheckForUpdates)}={(CheckForUpdates ? 1 : 0)}");
             if (SkippedUpdate != null) lines.Add($"{nameof(SkippedUpdate)}={SkippedUpdate}");
+            if (UpdateChannel != null) lines.Add($"{nameof(UpdateChannel)}={UpdateChannel}");
             File.WriteAllLines(StorePath, lines);
         }
         catch { /* preferences are a convenience only */ }

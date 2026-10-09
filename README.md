@@ -130,8 +130,9 @@ tarball and run `./install.sh`: it installs into `~/.local/share/sprycad` with a
 file type and a `sprycad` command (`./uninstall.sh` removes them).
 
 CI (`.github/workflows/packages.yml`) publishes every push to master to the **dev** channel and every version tag
-to **stable**: a signed apt repository, the downloads, and an update feed (`updates/<channel>.json`), all on
-Cloudflare R2; GitHub releases link to the files there. On Debian or Ubuntu (`dev` in place of `stable` for the
+to **stable**: signed apt and dnf repositories, the downloads, and an update feed (`updates/<channel>.json`), all
+on Cloudflare R2; GitHub releases link to the files there. The Windows app checks that feed (Options > Updates
+picks the channel). On Debian or Ubuntu (`dev` in place of `stable` for the
 latest master build):
 
 ```bash
@@ -140,6 +141,29 @@ curl -fsSL https://download.sprycad.com/apt/sprycad-archive-keyring.gpg | sudo t
 echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/sprycad.gpg] https://download.sprycad.com/apt stable main" | sudo tee /etc/apt/sources.list.d/sprycad.list
 sudo apt update && sudo apt install sprycad
 ```
+On Fedora, RHEL, Rocky or Alma (`sprycad-dev.repo` for the latest master build):
+
+```bash
+sudo curl -fsSL -o /etc/yum.repos.d/sprycad.repo https://download.sprycad.com/rpm/sprycad-stable.repo
+sudo dnf install sprycad
+```
+
+### Website
+
+`site/` is the website (sprycad.com): a home page and a download page with every version of each channel and the
+install steps for Windows and Linux. Plain static files, no build. It reads the version lists `downloads/stable.json`
+and `downloads/dev.json` that `build/publish-r2.py` writes to R2 (until a channel's first publish with one, only its
+latest version, from the update feed). One-time setup:
+
+- Cloudflare Pages: Create > Pages > connect this repository; production branch `master`, no build command, build
+  output directory `site`. Add the custom domain `sprycad.com`.
+- The R2 bucket's CORS policy (bucket Settings > CORS policy), so the pages can read the lists; any origin, as the
+  files are public anyway (and so previews and `localhost` work too):
+  ```json
+  [{ "AllowedOrigins": ["*"], "AllowedMethods": ["GET", "HEAD"], "AllowedHeaders": ["*"], "MaxAgeSeconds": 3600 }]
+  ```
+
+To preview locally: `python -m http.server -d site`, then `/download.html` (`/download` on Pages).
 
 ### Tests
 

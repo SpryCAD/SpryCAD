@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Download SpryCAD</title>
+  <meta name="description" content="Download SpryCAD for Windows and Linux, any released version, with install instructions.">
+  <link rel="icon" href="/img/logo.png">
+  <link rel="stylesheet" href="/style.css">
+  <script src="/download.js" defer></script>
+</head>
+<body>
+  <header class="site">
+    <div class="wrap">
+      <a class="brand" href="/"><img src="/img/logo.png" alt="">SpryCAD</a>
+      <nav>
+        <a href="/download" aria-current="page">Download</a>
+        <a href="https://github.com/SpryCAD/SpryCAD">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <div class="page-title">
+      <h1>Download SpryCAD</h1>
+      <p class="muted">64-bit Windows 10/11 and Linux (x86-64). Pick a release channel, a version and your system.</p>
+    </div>
+
+    <div class="picker">
+      <div>
+        <label id="lbl-channel">Channel</label>
+        <div class="seg" role="group" aria-labelledby="lbl-channel" id="channel">
+          <button type="button" data-value="stable">Stable</button>
+          <button type="button" data-value="dev">Dev builds</button>
+        </div>
+      </div>
+      <div>
+        <label for="version">Version</label>
+        <select id="version" disabled><option>Loading…</option></select>
+      </div>
+      <div>
+        <label id="lbl-os">System</label>
+        <div class="seg" role="group" aria-labelledby="lbl-os" id="os">
+          <button type="button" data-value="windows">Windows</button>
+          <button type="button" data-value="linux">Linux</button>
+        </div>
+      </div>
+      <div class="meta" id="meta"></div>
+    </div>
+
+    <div id="notice"></div>
+    <div id="content"></div>
+  </main>
+
+  <footer class="site">
+    <div class="wrap">SpryCAD · <a href="/">Home</a> · <a href="https://github.com/SpryCAD/SpryCAD/releases">Release notes</a></div>
+  </footer>
+</body>
+</html>

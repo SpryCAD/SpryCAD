@@ -2,7 +2,8 @@
 # Linux package build: publish the app for linux-x64 into ./publish/linux-x64, generate the demo parts, and pack
 #   publish/SpryCAD-<version>-linux-x64.tar.gz
 # with install.sh / uninstall.sh (per-user menu entry, icon and .sprt / .sasm file types; see installer/linux), and, where
-# dpkg-deb exists, publish/sprycad_<version>_amd64.deb.
+# dpkg-deb exists, publish/sprycad_<version>_amd64.deb, and where rpmbuild exists too,
+# publish/sprycad-<version>-<release>.x86_64.rpm.
 # Runs on Linux, macOS or Git Bash on Windows (GNU tar sets the Linux file modes either way).
 # Usage:  build/make-linux-package.sh
 set -euo pipefail
@@ -105,5 +106,61 @@ Description: Fast, lightweight parametric 3D CAD
 EOF
 echo "== building $deb =="
 dpkg-deb --root-owner-group -Zxz --build "$pkg" "$deb"
-rm -rf "$pkg"
+rm -rf "$pkg/DEBIAN"
 echo "== .deb ready -> $deb =="
+
+# 7) The .rpm (Fedora, RHEL, Rocky, Alma, ...), where rpmbuild exists, from the same tree as the .deb. Version
+#    0.0.1, release 1 on the tag; a dev build is release 1.dev.3, which rpm sorts after 1 (and dev.10 after dev.9)
+#    on every rpm version (the newer "^" would need rpm 4.15). Its requirements are named by library (soname), not
+#    package, so they hold on any of those distributions; ICU is loaded by name at run time, so it is required by
+#    package. Automatic requirements are off: the .NET runtime ships libraries for optional tracing (LTTng) that
+#    nothing needs. As for the .deb, the menu, MIME and icon caches refresh through those packages' own triggers.
+if command -v rpmbuild >/dev/null; then
+  if [ "$dev" = 0 ]; then rpmrel=1; else rpmrel="1.dev.$dev"; fi
+  rpm="$root/publish/sprycad-$base-$rpmrel.x86_64.rpm"
+  top="$root/publish/rpm-build"
+  rm -rf "$top" "$rpm"
+  mkdir -p "$top/SPECS"
+  cat > "$top/SPECS/sprycad.spec" <<EOF
+Name: sprycad
+Version: $base
+Release: $rpmrel
+Summary: Fast, lightweight parametric 3D CAD
+License: MIT
+URL: https://github.com/SpryCAD/SpryCAD
+BuildArch: x86_64
+AutoReqProv: no
+Requires: libc.so.6()(64bit), libstdc++.so.6()(64bit), libgcc_s.so.1()(64bit), libicu
+Requires: libX11.so.6()(64bit), libICE.so.6()(64bit), libSM.so.6()(64bit), libfontconfig.so.1()(64bit), libGL.so.1()(64bit)
+%global debug_package %{nil}
+%global __os_install_post %{nil}
+%global _build_id_links none
+
+%description
+SpryCAD is open-source parametric 3D CAD with a SolidWorks-style workflow,
+its own exact B-rep geometry kernel, and STEP and STL export.
+
+%install
+cp -a "$pkg/." %{buildroot}/
+
+%files
+%defattr(-,root,root,-)
+/opt/sprycad
+/usr/bin/sprycad
+/usr/share/applications/sprycad.desktop
+/usr/share/icons/hicolor/256x256/apps/sprycad.png
+/usr/share/icons/hicolor/256x256/mimetypes/application-x-sprycad-part.png
+/usr/share/icons/hicolor/256x256/mimetypes/application-x-sprycad-assembly.png
+/usr/share/mime/packages/sprycad.xml
+%doc /usr/share/doc/sprycad
+EOF
+  echo "== building $rpm =="
+  rpmbuild -bb --quiet --define "_topdir $top" --define "_rpmdir $top/RPMS" --define "_binary_payload w9.xzdio" \
+    "$top/SPECS/sprycad.spec"
+  mv "$top/RPMS/x86_64/$(basename "$rpm")" "$rpm"
+  rm -rf "$top"
+  echo "== .rpm ready -> $rpm =="
+else
+  echo "== rpmbuild not found: skipping the .rpm =="
+fi
+rm -rf "$pkg"
