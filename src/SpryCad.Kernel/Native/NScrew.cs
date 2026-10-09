@@ -116,6 +116,7 @@ public sealed class ScrewSurface
     public double U1 { get; }
     readonly double[] _vs;   // generator samples (closest-point seeds)
     readonly Vec3[] _gs;
+    readonly double[] _gz, _gang; // their height and angle in the motion's frame
 
     public ScrewSurface(ScrewMotion motion, NCurve gen, double v0, double v1, double u0, double u1)
     {
@@ -123,9 +124,22 @@ public sealed class ScrewSurface
         const int n = 16;
         _vs = new double[n + 1]; _gs = new Vec3[n + 1];
         for (int i = 0; i <= n; i++) { _vs[i] = V0 + (V1 - V0) * i / n; _gs[i] = Gen.Eval(_vs[i]); }
+        _gz = new double[n + 1]; _gang = new double[n + 1];
+        for (int i = 0; i <= n; i++) { var lg = motion.Local(_gs[i]); _gz[i] = lg.Z; _gang[i] = Math.Atan2(lg.Y, lg.X); }
         MaxRadius = _gs.Max(g => Radial(g));
         MinRadius = _gs.Min(g => Radial(g));
+        // a line, or an arc of at most a half turn between samples: every generator point is within the longest
+        // sample spacing of a sample, so its radius within that of the samples' range
+        if (Gen is NLine || Gen is NCircle && Math.Abs(V1 - V0) / n <= Math.PI)
+        {
+            double gap = 0;
+            for (int i = 1; i <= n; i++) gap = Math.Max(gap, Vec3.Distance(_gs[i], _gs[i - 1]));
+            _radialPad = gap;
+        }
     }
+
+    // how far the generator's radius may leave [MinRadius, MaxRadius] between its samples (NaN: not known)
+    readonly double _radialPad = double.NaN;
 
     public double MaxRadius { get; }
     public double MinRadius { get; }
@@ -183,17 +197,16 @@ public sealed class ScrewSurface
         if (!double.IsNaN(uHint) && !double.IsNaN(vHint)) seeds.Add((uHint, vHint, (Eval(uHint, vHint) - p).LengthSq));
         for (int i = 0; i < _vs.Length; i++)
         {
-            var lg = Motion.Local(_gs[i]);
-            double angG = Math.Atan2(lg.Y, lg.X);
-            var u = angP - angG;
+            // (the sample's frame coordinates and its point on the generator, taken once)
+            var u = angP - _gang[i];
             // the turn that brings the sample to p's height (any turn when the motion does not advance)
             if (Math.Abs(Motion.K) > 1e-12)
             {
-                var uh = (lp.Z - lg.Z) / Motion.K;
+                var uh = (lp.Z - _gz[i]) / Motion.K;
                 u += Math.Round((uh - u) / (2 * Math.PI)) * 2 * Math.PI;
             }
             else if (!double.IsNaN(uHint)) u = NCurve.Wrap(u, uHint);
-            seeds.Add((u, _vs[i], (Eval(u, _vs[i]) - p).LengthSq));
+            seeds.Add((u, _vs[i], (Motion.Move(u, _gs[i]) - p).LengthSq));
         }
         seeds.Sort((a, b) => a.d2.CompareTo(b.d2));
         (double u, double v, Vec3 c, double dist) best = (0, 0, p, double.MaxValue);
@@ -296,13 +309,21 @@ public sealed class ScrewSurface
         if (!(t1 > t0)) return res;
         double F(double t) => SignedDistance(o + d * t);
         var onTol = 1e-7 * scale;
+        // the surface lies between radii MinRadius and MaxRadius (padded) about the axis: a step of the ray outside
+        // that band crosses nothing, and a hit is within onTol·100 of the surface, so in the band too. Such steps are
+        // not sampled; every step that touches the band is, from the same points as when all are.
+        var band = double.IsNaN(_radialPad) ? null : RadialBand(o, d, _radialPad + onTol * 100 + 1e-9 * scale);
         // steps short against the gap between turns and the generator's size
         var step = Math.Max(1e-6 * scale, Math.Min(Math.Abs(Motion.Lead) > 0 ? Math.Abs(Motion.Lead) / 8 : scale, Math.Max(MaxRadius, 1e-3) / 8)) / dl;
         int n = Math.Clamp((int)Math.Ceiling((t1 - t0) / step), 8, 20000);
-        double pt = t0, pf = F(t0);
+        double pt = t0, pf = double.NaN;
+        bool havePf = false;
         for (int i = 1; i <= n; i++)
         {
-            var t = t0 + (t1 - t0) * i / n; var f = F(t);
+            var t = t0 + (t1 - t0) * i / n;
+            if (band != null && !band(pt, t)) { pt = t; havePf = false; continue; }
+            if (!havePf) { pf = F(pt); havePf = true; }
+            var f = F(t);
             if (pf * f <= 0 && !(pf == 0 && f == 0))
             {
                 var r = pf == 0 ? pt : f == 0 ? t : Roots.Bisect(F, pt, t);
@@ -315,6 +336,25 @@ public sealed class ScrewSurface
             pt = t; pf = f;
         }
         return res;
+    }
+
+    /// <summary>Whether the ray's points between ta and tb come within [MinRadius − pad, MaxRadius + pad] of the axis.</summary>
+    Func<double, double, bool> RadialBand(Vec3 o, Vec3 d, double pad)
+    {
+        var lo = Motion.Local(o);
+        double dx = Vec3.Dot(d, Motion.X), dy = Vec3.Dot(d, Motion.Y);
+        // r²(t) = qa t² + qb t + qc, convex
+        double qa = dx * dx + dy * dy, qb = 2 * (lo.X * dx + lo.Y * dy), qc = lo.X * lo.X + lo.Y * lo.Y;
+        double rin = Math.Max(0, MinRadius - pad), rout = MaxRadius + pad;
+        double rin2 = rin * rin, rout2 = rout * rout;
+        double R2(double t) => (qa * t + qb) * t + qc;
+        return (ta, tb) =>
+        {
+            double a = R2(ta), b = R2(tb), hi = Math.Max(a, b), lo2 = Math.Min(a, b);
+            if (qa > 0) { var tv = -qb / (2 * qa); if (tv > ta && tv < tb) lo2 = Math.Min(lo2, R2(tv)); }
+            // NaN: not ruled out
+            return !(lo2 > rout2 || hi < rin2);
+        };
     }
 
     public ScrewSurface Transformed(in Transform t) => new(Motion.Transformed(t), Gen.Transformed(t), V0, V1, U0, U1);

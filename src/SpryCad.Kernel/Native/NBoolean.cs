@@ -1474,14 +1474,24 @@ public sealed class NBoolean
             return Vec3.Dot(nf, ng) > 0 ? State.OnSame : State.OnOpposite;
         }
         var dbg = Trace != null && Environment.GetEnvironmentVariable("FC_TRACE_RAY") is { } tr && f.Tag.Name.Contains(tr);
+        // the faces of a thread share one screw surface: its crossings (a long march) are found once per ray
+        Dictionary<ScrewSurface, List<double>>? screwHits = null;
         foreach (var d in RayDirs)
         {
             int count = 0; bool ok = true;
             List<string>? hits = dbg ? new() : null;
+            screwHits?.Clear();
             foreach (var g in other)
             {
                 if (!RayHitsBox(p, d, FBox(g), _onTol * 4)) continue;
-                foreach (var t in g.Surface.RayHits(p, d))
+                List<double> gHits;
+                if (g.Surface.Kind == SurfaceKind.Screw)
+                {
+                    screwHits ??= new(ReferenceEqualityComparer.Instance);
+                    if (!screwHits.TryGetValue(g.Surface.Screw!, out gHits!)) screwHits[g.Surface.Screw!] = gHits = g.Surface.RayHits(p, d);
+                }
+                else gHits = g.Surface.RayHits(p, d);
+                foreach (var t in gHits)
                 {
                     if (t < -_onTol) continue;
                     var q = p + d * t;

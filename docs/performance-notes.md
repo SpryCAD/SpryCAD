@@ -21,6 +21,7 @@ or checked against the old ones (see *Checking a change* below).
 | `f87f849` | `NDomain.Classify` refines the boundary next to a point (within twice the sampling tolerance): the coedges near it are resampled at `tol/100` and the distance and crossing tests run on that; the boolean's domains then use coarse samples and `EdgeSurface` no longer samples every candidate edge at `_tol·50` (curve crossings ask for those samples themselves). Exact mass properties and every demo variant the same; geometry hashes (`FC_DET_GEOMETRY`) the same except the last bits of a crossing vertex on the acme screw. `sec.domains` 3–4×, `bool.classify` ~30% faster; bolt-and-nut ~20%, acme screw ~10% faster rebuilds, the heavy samples within noise |
 | `e323738` | `Classify`'s refinement: near segments found through the 16-segment boxes, coedges no nearer than the band not measured, fine UV mapped only for the crossing test, crossing parity as the polygon's flipped by the swapped segments, the exact distance over the swapped coedges only (results bit for bit; `sec.midclass` 2–3× faster: handwheel 25 to 9 ms, spur-gear-nice 30 to 15 ms) |
 | `ff6ab13` | `BSplineCurve.Interpolate` stores only the band of its system (4p + 1 entries a row, every entry the elimination reads or writes) instead of a dense (n+1)² matrix and its clone; the dense matrix is rebuilt only for the general fallback (results bit for bit; 3,000 points: 144 MB to 0.3 MB) |
+| (next) | Screw-surface ray casts: the crossings of a screw surface found once per ray when several faces share it (a thread's seam-split faces); steps of the march outside the generator's radial band about the axis (padded by its sample spacing and the hit tolerance) not sampled; the closest-point seeds' frame coordinates taken once (results bit for bit; `cls.rays` about 1.5–2× faster on the threaded parts) |
 
 ## Where the time goes now
 
@@ -55,8 +56,10 @@ profile; the profile's times are summed over threads). On the heavy samples (`sa
    the six derivative sums in one pass over flat poles was tried: bit for bit, but no measurable gain (a 4×4 cubic:
    `DersBasis` twice per call and the quotient rule dominate). Homogeneous poles in one pass would change rounding.
    Newton stops only on a step below 1e-15; a residual test would change results.
-8. **Screw-surface ray casts** (`ScrewSurface.RayHits`): up to 20,000 unhinted `Closest` calls per ray. Warm-start
-   from the previous sample with the global search as fallback. Ray parity must not change.
+8. **Screw-surface ray casts**: done for what stays bit for bit (see above). Each step inside the band still runs an
+   unhinted `Closest` (17 seeds, 3 Gauss-Newton solves). Warm-starting from the previous step would follow one turn
+   where the nearest point jumps between turns; skipping by the step's distance is not safe either, since `Closest`
+   can return a farther foot. Both would need parity checks against the full march.
 9. **Mass properties**:
    - `NMass.Partials` uses finite differences for B-spline and offset surfaces; `Nurbs.Derivs` is exact.
    - `Breaks` samples more panels than 8-point Gauss needs.
