@@ -72,6 +72,81 @@ static class ExactTests
                 }
             }
         });
+        t.Test("B-spline interpolation in band storage matches the dense solve bit for bit", () =>
+        {
+            // the dense interpolation (Piegl & Tiller A9.1, the band eliminated in a full matrix), as it was
+            static BSplineCurve Dense(IReadOnlyList<Vec3> pts, int degree)
+            {
+                int n = pts.Count - 1, p = Math.Min(degree, n);
+                var uk = new double[n + 1];
+                double total = 0;
+                for (int k = 1; k <= n; k++) total += Vec3.Distance(pts[k], pts[k - 1]);
+                if (total < 1e-15) total = 1;
+                for (int k = 1; k <= n; k++) uk[k] = uk[k - 1] + Vec3.Distance(pts[k], pts[k - 1]) / total;
+                uk[n] = 1;
+                var U = new double[n + p + 2];
+                for (int i = n + 1; i < U.Length; i++) U[i] = 1;
+                for (int j = 1; j <= n - p; j++) { double s = 0; for (int i = j; i <= j + p - 1; i++) s += uk[i]; U[j + p] = s / p; }
+                int Span(double u)
+                {
+                    if (u >= U[n + 1]) return n;
+                    if (u <= U[p]) return p;
+                    int low = p, high = n + 1, mid = (low + high) / 2;
+                    while (u < U[mid] || u >= U[mid + 1]) { if (u < U[mid]) high = mid; else low = mid; mid = (low + high) / 2; }
+                    return mid;
+                }
+                double[] Basis(int i, double u)
+                {
+                    var N = new double[p + 1]; var left = new double[p + 1]; var right = new double[p + 1];
+                    N[0] = 1;
+                    for (int j = 1; j <= p; j++)
+                    {
+                        left[j] = u - U[i + 1 - j]; right[j] = U[i + j] - u;
+                        double saved = 0;
+                        for (int r = 0; r < j; r++)
+                        {
+                            var den = right[r + 1] + left[j - r];
+                            var temp = den != 0 ? N[r] / den : 0;
+                            N[r] = saved + right[r + 1] * temp; saved = left[j - r] * temp;
+                        }
+                        N[j] = saved;
+                    }
+                    return N;
+                }
+                int m = n + 1, w = 2 * p + 1;
+                var M = new double[m, m];
+                for (int k = 0; k <= n; k++) { int sp = Span(uk[k]); var N = Basis(sp, uk[k]); for (int i = 0; i <= p; i++) M[k, sp - p + i] = N[i]; }
+                var x = pts.ToArray();
+                for (int c = 0; c < m; c++)
+                {
+                    var piv = M[c, c];
+                    for (int r = c + 1; r < Math.Min(m, c + w); r++)
+                    {
+                        var f = M[r, c] / piv;
+                        if (f == 0) continue;
+                        for (int k = c; k < Math.Min(m, c + w); k++) M[r, k] -= f * M[c, k];
+                        x[r] -= x[c] * f;
+                    }
+                }
+                for (int r = m - 1; r >= 0; r--) { var s = x[r]; for (int k = r + 1; k < Math.Min(m, r + w); k++) s -= x[k] * M[r, k]; x[r] = s / M[r, r]; }
+                return new BSplineCurve(p, x, U);
+            }
+            static bool Same(double a, double b) => BitConverter.DoubleToInt64Bits(a) == BitConverter.DoubleToInt64Bits(b);
+            var rnd = new Random(11);
+            foreach (var count in new[] { 2, 3, 4, 5, 9, 40, 257, 600 })
+                foreach (var degree in new[] { 1, 2, 3, 5 })
+                {
+                    // a wandering curve with uneven spacing (some points close together)
+                    var pts = new List<Vec3>();
+                    var q = Vec3.Zero;
+                    for (int i = 0; i < count; i++) { q += new Vec3(rnd.NextDouble() * (i % 7 == 0 ? 0.01 : 1), rnd.NextDouble() - 0.5, Math.Sin(i * 0.3)); pts.Add(q); }
+                    var a = BSplineCurve.Interpolate(pts, degree); var b = Dense(pts, degree);
+                    t.Eq(a.Poles.Length, b.Poles.Length);
+                    for (int i = 0; i < a.Poles.Length; i++)
+                        t.True(Same(a.Poles[i].X, b.Poles[i].X) && Same(a.Poles[i].Y, b.Poles[i].Y) && Same(a.Poles[i].Z, b.Poles[i].Z), $"pole {i} of {count} points, degree {degree}");
+                    t.True(a.Knots.Zip(b.Knots).All(k => Same(k.First, k.Second)), "knots");
+                }
+        });
         var dir = Path.Combine(Path.GetTempPath(), "sprycad-tests");
         Directory.CreateDirectory(dir);
         void Step(string name, Solid s)

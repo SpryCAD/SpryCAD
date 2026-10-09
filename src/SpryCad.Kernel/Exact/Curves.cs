@@ -258,46 +258,65 @@ public sealed record BSplineCurve(int Degree, Vec3[] Poles, double[] Knots) : Ex
             for (int i = j; i <= j + p - 1; i++) s += uk[i];
             U[j + p] = s / p;
         }
-        // banded system A P = Q (solved densely; edges have at most a few hundred points)
-        var A = new double[n + 1, n + 1];
+        // banded system A P = Q: row k holds the p + 1 basis values at uk[k], from column span - p
+        var spans = new int[n + 1];
+        var basis = new double[n + 1][];
         for (int k = 0; k <= n; k++)
         {
-            int span = FindSpan(n, p, uk[k], U);
-            var N = Basis(span, uk[k], p, U);
-            for (int i = 0; i <= p; i++) A[k, span - p + i] = N[i];
+            spans[k] = FindSpan(n, p, uk[k], U);
+            basis[k] = Basis(spans[k], uk[k], p, U);
         }
-        var P = SolveBanded(A, pts.ToArray(), n + 1, p);
+        var P = SolveBanded(spans, basis, pts.ToArray(), n + 1, p);
         return new BSplineCurve(p, P, U);
     }
 
     /// <summary>
     /// Gaussian elimination limited to the band of the interpolation matrix (row k has non-zeros only in columns
     /// span-p..span); collocation matrices with averaged knots are totally positive, so no pivoting is needed.
-    /// O(n p²) instead of O(n³).
+    /// O(n p²) time; only the band is stored: every entry the elimination reads or writes lies within 2·(2p + 1) - 1
+    /// columns centred on the diagonal (O(n p) memory: imported curves have thousands of points).
     /// </summary>
-    static Vec3[] SolveBanded(double[,] A, Vec3[] b, int n, int p)
+    static Vec3[] SolveBanded(int[] spans, double[][] basis, Vec3[] b, int n, int p)
     {
-        var M = (double[,])A.Clone(); var x = (Vec3[])b.Clone();
-        int w = 2 * p + 1;
+        int w = 2 * p + 1, W = 2 * w - 1;
+        // M[r, k] at r·W + (k - r + w - 1)
+        var M = new double[(long)n * W];
+        for (int r = 0; r < n; r++)
+            for (int i = 0; i <= p; i++)
+            {
+                int k = spans[r] - p + i, o = k - r + w - 1;
+                // outside the band: never read (the dense elimination below does not reach it either)
+                if (o >= 0 && o < W) M[(long)r * W + o] = basis[r][i];
+            }
+        double At(int r, int k) => M[(long)r * W + (k - r + w - 1)];
+        var x = (Vec3[])b.Clone();
         for (int c = 0; c < n; c++)
         {
-            var piv = M[c, c];
-            if (Math.Abs(piv) < 1e-300) return SolveDense(A, b, n); // not banded as expected: the general solver
+            var piv = At(c, c);
+            if (Math.Abs(piv) < 1e-300) return SolveDense(Dense(spans, basis, n, p), b, n); // not banded as expected: the general solver
             for (int r = c + 1; r < Math.Min(n, c + w); r++)
             {
-                var f = M[r, c] / piv;
+                var f = At(r, c) / piv;
                 if (f == 0) continue;
-                for (int k = c; k < Math.Min(n, c + w); k++) M[r, k] -= f * M[c, k];
+                for (int k = c; k < Math.Min(n, c + w); k++) M[(long)r * W + (k - r + w - 1)] -= f * At(c, k);
                 x[r] -= x[c] * f;
             }
         }
         for (int r = n - 1; r >= 0; r--)
         {
             var s = x[r];
-            for (int k = r + 1; k < Math.Min(n, r + w); k++) s -= x[k] * M[r, k];
-            x[r] = s / M[r, r];
+            for (int k = r + 1; k < Math.Min(n, r + w); k++) s -= x[k] * At(r, k);
+            x[r] = s / At(r, r);
         }
         return x;
+    }
+
+    static double[,] Dense(int[] spans, double[][] basis, int n, int p)
+    {
+        var A = new double[n, n];
+        for (int r = 0; r < n; r++)
+            for (int i = 0; i <= p; i++) A[r, spans[r] - p + i] = basis[r][i];
+        return A;
     }
 
     static Vec3[] SolveDense(double[,] A, Vec3[] b, int n)
