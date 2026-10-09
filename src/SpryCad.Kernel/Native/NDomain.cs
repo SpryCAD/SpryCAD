@@ -20,8 +20,6 @@ public sealed class NDomain
     readonly double _tol;
     /// <summary>Per loop, each coedge's run of points: segments Start..End-1 (segment k from point k to k + 1).</summary>
     readonly List<(NCoedge c, int start, int end)[]> _runs = new();
-    // near-boundary classification: coedges resampled finely (UV, 3D), by (loop, run)
-    readonly System.Collections.Concurrent.ConcurrentDictionary<(int, int), (Vec2[] uv, Vec3[] p3)> _fine = new();
 
     NDomain(NFace f, double tol)
     {
@@ -306,72 +304,76 @@ public sealed class NDomain
         // only compared with this limit: runs farther than it need not be measured
         var bd = BoundaryDistanceBelow(p, near);
         if (!(bd < near)) return ContainsUV(Map(p)) ? 1 : -1;
-        var refined = Refined(p, near);
-        bd = refined.dist;
+        var (rd, swapped) = Refined(p, near);
+        bd = rd;
         if (bd < onTol) return 0;
         // within the chord error of the fine samples: decide on the exact edge curves (a point on a true arc can lie
-        // outside its polyline)
-        if (bd < FineTol * 2 + onTol && ExactBoundaryDistance(p) < onTol) return 0;
-        return refined.inside(Map(p)) ? 1 : -1;
+        // outside its polyline). Only the swapped coedges can be that near: another's polygon is at least near away,
+        // its vertices on it and its curve within the sampling tolerance of it
+        if (bd < FineTol * 2 + onTol && ExactNearDistance(p, swapped) < onTol) return 0;
+        return InsideRefined(Map(p), swapped) ? 1 : -1;
     }
 
     /// <summary>The chord tolerance of the boundary next to a point being classified.</summary>
     double FineTol => _tol / 100;
 
+    // per loop: the run each segment belongs to (-1: none, along a pole); built on first use, one reference
+    int[][]? _segRun;
+
+    int[][] SegRuns()
+    {
+        if (_segRun is { } sr) return sr;
+        var res = new int[Loops3.Count][];
+        for (int li = 0; li < Loops3.Count; li++)
+        {
+            var r = new int[Loops3[li].Length];
+            Array.Fill(r, -1);
+            var runs = _runs[li];
+            for (int ri = 0; ri < runs.Length; ri++) for (int k = runs[ri].start; k < runs[ri].end; k++) r[k] = ri;
+            res[li] = r;
+        }
+        return _segRun = res;
+    }
+
     /// <summary>
     /// The boundary with the coedges within <paramref name="near"/> of p resampled at <see cref="FineTol"/> (the finest
-    /// sampling the edge has, if finer): the distance from p to it, and its crossing test.
+    /// sampling the edge has, if finer): which runs are swapped, in loop and run order, and the distance from p to
+    /// that boundary where it is below near (segments no nearer than near are not measured: the callers compare the
+    /// distance only with limits below it).
     /// </summary>
-    (double dist, Func<Vec2, bool> inside) Refined(Vec3 p, double near)
+    (double dist, List<(int loop, int run)> swapped) Refined(Vec3 p, double near)
     {
         var swapped = new List<(int loop, int run)>();
         double best = double.MaxValue;
+        var boxes = Boxes3(); var segRun = SegRuns();
         for (int li = 0; li < Loops3.Count; li++)
         {
             var l = Loops3[li]; int n = l.Length;
-            var runs = _runs[li];
-            var covered = new bool[n];
-            for (int ri = 0; ri < runs.Length; ri++)
+            int first = swapped.Count;
+            foreach (var bx in boxes[li])
             {
-                var (_, a, b) = runs[ri];
-                for (int k = a; k < b; k++) covered[k] = true;
-                double d = double.MaxValue;
-                for (int k = a; k < b; k++) d = Math.Min(d, SegDist(l[k], l[(k + 1) % n], p));
-                if (!(d >= near)) swapped.Add((li, ri));
-                else best = Math.Min(best, d);
-            }
-            // segments of no coedge (along a pole): kept
-            for (int k = 0; k < n; k++) if (!covered[k]) best = Math.Min(best, SegDist(l[k], l[(k + 1) % n], p));
-        }
-        var fine = swapped.Select(x => Fine(x.loop, x.run)).ToList();
-        foreach (var (_, f3) in fine)
-            for (int k = 0; k + 1 < f3.Length; k++) best = Math.Min(best, SegDist(f3[k], f3[k + 1], p));
-        bool Inside(Vec2 q)
-        {
-            bool inside = false;
-            // (b, a) as the polygon test's (j, i): the crossing computed from the later end
-            void Seg(Vec2 b, Vec2 a)
-            {
-                if ((a.Y > q.Y) != (b.Y > q.Y) && q.X < (b.X - a.X) * (q.Y - a.Y) / (b.Y - a.Y) + a.X) inside = !inside;
-            }
-            for (int li = 0; li < Loops.Count; li++)
-            {
-                var poly = Loops[li]; int n = poly.Length;
-                var runs = _runs[li];
-                var swappedHere = new bool[n];
-                for (int w = 0; w < swapped.Count; w++)
+                // the box's distance (less a margin for the rounding of the segment points) bounds its segments'
+                var e = Vec3.Max(Vec3.Max(bx.Min - p, p - bx.Max), Vec3.Zero);
+                var pad = 1e-9 * ((bx.Max - bx.Min).Length + bx.Min.Length + bx.Max.Length + p.Length);
+                if (e.Length - pad >= near) continue;
+                for (int k = bx.Start; k < bx.End; k++)
                 {
-                    if (swapped[w].loop != li) continue;
-                    var (_, a, b) = runs[swapped[w].run];
-                    for (int k = a; k < b; k++) swappedHere[k] = true;
-                    var fu = fine[w].uv;
-                    for (int k = 0; k + 1 < fu.Length; k++) Seg(fu[k], fu[k + 1]);
+                    var d = SegDist(l[k], l[(k + 1) % n], p);
+                    if (d >= near) continue;
+                    int ri = segRun[li][k];
+                    // segments of no coedge (along a pole) are kept; a coedge near p is swapped for its fine points
+                    if (ri < 0) best = Math.Min(best, d);
+                    else if (!swapped.Contains((li, ri))) swapped.Add((li, ri));
                 }
-                for (int k = 0; k < n; k++) if (!swappedHere[k]) Seg(poly[k], poly[(k + 1) % n]);
             }
-            return inside;
+            swapped.Sort(first, swapped.Count - first, null);
         }
-        return (best, Inside);
+        foreach (var (li, ri) in swapped)
+        {
+            var f3 = Fine3(li, ri).p3;
+            for (int k = 0; k + 1 < f3.Length; k++) best = Math.Min(best, SegDist(f3[k], f3[k + 1], p));
+        }
+        return (best, swapped);
 
         static double SegDist(Vec3 a, Vec3 b, Vec3 p)
         {
@@ -382,16 +384,62 @@ public sealed class NDomain
     }
 
     /// <summary>
-    /// A coedge's points at <see cref="FineTol"/> (or its edge's finest sampling, if finer) in this domain's UV: mapped
-    /// from the run's first point onward, and ending on the run's first point and the next run's exactly, so the
-    /// boundary stays closed where the run is swapped in.
+    /// The crossing test on the refined boundary: crossing parity adds, so it is the polygon's, flipped by each crossing
+    /// of a swapped-out segment and of a fine one (each computed as the polygon test computes it).
     /// </summary>
-    (Vec2[] uv, Vec3[] p3) Fine(int li, int ri) => _fine.GetOrAdd((li, ri), _ =>
+    bool InsideRefined(Vec2 q, List<(int loop, int run)> swapped)
+    {
+        bool inside = ContainsUV(q);
+        // (b, a) as the polygon test's (j, i): the crossing computed from the later end
+        void Seg(Vec2 b, Vec2 a)
+        {
+            if ((a.Y > q.Y) != (b.Y > q.Y) && q.X < (b.X - a.X) * (q.Y - a.Y) / (b.Y - a.Y) + a.X) inside = !inside;
+        }
+        foreach (var (li, ri) in swapped)
+        {
+            var poly = Loops[li]; int n = poly.Length;
+            var (_, a, b) = _runs[li][ri];
+            for (int k = a; k < b; k++) Seg(poly[k], poly[(k + 1) % n]);
+            var fu = FineUv(li, ri);
+            for (int k = 0; k + 1 < fu.Length; k++) Seg(fu[k], fu[k + 1]);
+        }
+        return inside;
+    }
+
+    /// <summary>The exact distance of the swapped coedges (the others are farther than onTol: see Classify).</summary>
+    double ExactNearDistance(Vec3 p, List<(int loop, int run)> swapped)
+    {
+        double best = double.MaxValue;
+        foreach (var (li, ri) in swapped) best = Math.Min(best, ExactDistance(_runs[li][ri].c.Edge, p));
+        return best;
+    }
+
+    // near-boundary classification: coedges resampled finely, by (loop, run): the samples, and the 3D points ending
+    // on the run's first point and the next run's exactly (so the boundary stays closed where the run is swapped in);
+    // their UV mapped on first use
+    readonly System.Collections.Concurrent.ConcurrentDictionary<(int, int), (List<Vec3> pts, Vec3[] p3)> _fine3 = new();
+    readonly System.Collections.Concurrent.ConcurrentDictionary<(int, int), Vec2[]> _fineUv = new();
+
+    (List<Vec3> pts, Vec3[] p3) Fine3(int li, int ri) => _fine3.GetOrAdd((li, ri), _ =>
+    {
+        var (c, a, b) = _runs[li][ri];
+        var l3 = Loops3[li]; int n = l3.Length;
+        var pts = c.Points(FineTol, finest: true);
+        var p3 = pts.ToArray();
+        p3[0] = l3[a]; p3[^1] = l3[b % n];
+        return (pts, p3);
+    });
+
+    /// <summary>
+    /// A swapped coedge's fine points in this domain's UV: mapped from the run's first point onward, ending on the run's
+    /// first point and the next run's exactly.
+    /// </summary>
+    Vec2[] FineUv(int li, int ri) => _fineUv.GetOrAdd((li, ri), _ =>
     {
         var s = Face.Surface;
-        var (c, a, b) = _runs[li][ri];
-        var poly = Loops[li]; var l3 = Loops3[li]; int n = poly.Length;
-        var pts = c.Points(FineTol, finest: true);
+        var (_, a, b) = _runs[li][ri];
+        var poly = Loops[li]; int n = poly.Length;
+        var pts = Fine3(li, ri).pts;
         var uv = new Vec2[pts.Count];
         double hu = poly[a].X, hv = poly[a].Y * VSign;
         for (int i = 0; i < pts.Count; i++)
@@ -403,25 +451,24 @@ public sealed class NDomain
         }
         for (int i = 0; i < pts.Count; i++)
             if (s.IsPole(pts[i]) && pts.Count > 1) { var j = i == 0 ? 1 : i - 1; uv[i] = new Vec2(uv[j].X, uv[i].Y); }
-        var p3 = pts.ToArray();
-        uv[0] = poly[a]; p3[0] = l3[a];
-        uv[^1] = poly[b % n]; p3[^1] = l3[b % n];
-        return (uv, p3);
+        uv[0] = poly[a]; uv[^1] = poly[b % n];
+        return uv;
     });
 
     /// <summary>Distance from p to the face's exact boundary curves.</summary>
     public double ExactBoundaryDistance(Vec3 p)
     {
         double best = double.MaxValue;
-        foreach (var c in Face.Coedges)
-        {
-            var e = c.Edge;
-            double lo = Math.Min(e.T0, e.T1), hi = Math.Max(e.T0, e.T1);
-            var t = e.Curve.Param(p, e.Curve.Periodic ? 0.5 * (lo + hi) : null);
-            var q = t < lo ? e.Curve.Eval(lo) : t > hi ? e.Curve.Eval(hi) : e.Curve.Eval(t);
-            best = Math.Min(best, Math.Min(Vec3.Distance(p, q), Math.Min(Vec3.Distance(p, e.V0.P), Vec3.Distance(p, e.V1.P))));
-        }
+        foreach (var c in Face.Coedges) best = Math.Min(best, ExactDistance(c.Edge, p));
         return best;
+    }
+
+    static double ExactDistance(NEdge e, Vec3 p)
+    {
+        double lo = Math.Min(e.T0, e.T1), hi = Math.Max(e.T0, e.T1);
+        var t = e.Curve.Param(p, e.Curve.Periodic ? 0.5 * (lo + hi) : null);
+        var q = t < lo ? e.Curve.Eval(lo) : t > hi ? e.Curve.Eval(hi) : e.Curve.Eval(t);
+        return Math.Min(Vec3.Distance(p, q), Math.Min(Vec3.Distance(p, e.V0.P), Vec3.Distance(p, e.V1.P)));
     }
 
     public double SignedArea()

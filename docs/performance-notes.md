@@ -18,7 +18,8 @@ or checked against the old ones (see *Checking a change* below).
 | `bb6b89e` | `NDomain`: boxes over runs of 16 boundary segments (UV and 3D, built on first use); `ContainsUV` skips runs the ray cannot cross, `BoundaryDistance` compares squared distances and skips runs farther than the best, and `Classify` measures only up to its limit (results bit for bit; `sec.midclass` about 1.5–3× faster: gear 23 to 13 ms, acme screw 21 to 6 ms) |
 | `7f68541` | `NBoolean` vertex matching: the snap pool hashed on a grid (the lowest-index match, as the scan; a scan below 33 vertices), `MergeVertices` rewriting edge ends once (replacements followed in the order made), and `ImprintSplitVertices` and `Sew` finding candidate vertices by x range, in list order; `split.cand`/`roots`/`apply`/`imprint` timers (results bit for bit; `split.imprint` about 3×: spur-gear-nice ~20 to ~7 ms) |
 | `3f9f50d` | Edge samples per tolerance band: `NEdge.Samples` gives a sampling at most 4× finer than asked (a second cache beside the finest), `FinestSamples` the old behaviour for the readers that need it (face split, curve crossings, the boolean's domains). B-reps bit for bit; display meshes now follow their own tolerance at boundaries (display tessellation 2–5× faster, display mesh up to 2.5×: acme screw 145 to 32 ms and 205 to 95 ms) |
-| (next) | `NDomain.Classify` refines the boundary next to a point (within twice the sampling tolerance): the coedges near it are resampled at `tol/100` and the distance and crossing tests run on that; the boolean's domains then use coarse samples and `EdgeSurface` no longer samples every candidate edge at `_tol·50` (curve crossings ask for those samples themselves). Exact mass properties and every demo variant the same; geometry hashes (`FC_DET_GEOMETRY`) the same except the last bits of a crossing vertex on the acme screw. `sec.domains` 3–4×, `bool.classify` ~30% faster; bolt-and-nut ~20%, acme screw ~10% faster rebuilds, the heavy samples within noise |
+| `f87f849` | `NDomain.Classify` refines the boundary next to a point (within twice the sampling tolerance): the coedges near it are resampled at `tol/100` and the distance and crossing tests run on that; the boolean's domains then use coarse samples and `EdgeSurface` no longer samples every candidate edge at `_tol·50` (curve crossings ask for those samples themselves). Exact mass properties and every demo variant the same; geometry hashes (`FC_DET_GEOMETRY`) the same except the last bits of a crossing vertex on the acme screw. `sec.domains` 3–4×, `bool.classify` ~30% faster; bolt-and-nut ~20%, acme screw ~10% faster rebuilds, the heavy samples within noise |
+| (next) | `Classify`'s refinement: near segments found through the 16-segment boxes, coedges no nearer than the band not measured, fine UV mapped only for the crossing test, crossing parity as the polygon's flipped by the swapped segments, the exact distance over the swapped coedges only (results bit for bit; `sec.midclass` 2–3× faster: handwheel 25 to 9 ms, spur-gear-nice 30 to 15 ms) |
 
 ## Where the time goes now
 
@@ -47,9 +48,7 @@ profile; the profile's times are summed over threads). On the heavy samples (`sa
    mostly `Map` (the surface's `UV`) and `Project`; `ExactBoundaryDistance` is still linear in the coedges.
 4. **Vertex matching in `NBoolean`**: done (see above). In `bool.edge splits` what is left is mostly
    `split.crossings` (curve × curve on faces) and the edge/surface roots.
-5. **Edge sample cache**: done (see above). `Classify`'s refinement allocates and scans every segment of the face
-   for each point in the band; `sec.midclass` rose a little. Per-run boxes (as `BoundaryDistanceBelow` has) and
-   cached run distances would cut it.
+5. **Edge sample cache**: done (see above).
 6. **B-spline interpolation** (`Exact/Curves.cs` `Interpolate`/`SolveBanded`): builds a dense (n+1)² matrix and
    clones it. STEP rational curves push n into the thousands (hundreds of MB). Store the band only.
 7. **NURBS core** (`NNurbs.DerivsIn`):
