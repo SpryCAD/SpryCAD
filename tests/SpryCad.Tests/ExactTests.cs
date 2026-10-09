@@ -40,6 +40,38 @@ static class ExactTests
 
     public static void Run(TestRunner t)
     {
+        t.Test("B-spline derivatives and closest points match brute force", () =>
+        {
+            // a wavy 3D interpolant (uneven knots) and a degree-5 curve with a double interior knot
+            var pts = Enumerable.Range(0, 12).Select(i => new Vec3(i * (1 + 0.3 * Math.Sin(i)), Math.Sin(i * 0.9) * 3, Math.Cos(i * 0.4) * 2)).ToList();
+            var a = BSplineCurve.Interpolate(pts, 3);
+            var b = new BSplineCurve(5, Enumerable.Range(0, 9).Select(i => new Vec3(i, Math.Sin(i), i % 3)).ToArray(),
+                new double[] { 0, 0, 0, 0, 0, 0, 0.3, 0.6, 0.6, 1, 1, 1, 1, 1, 1 });
+            foreach (var s in new[] { a, b })
+            {
+                for (int k = 1; k < 50; k++)
+                {
+                    double u = k / 50.0, h = 1e-5;
+                    s.Derivs(u, out var c, out var d1, out var d2);
+                    t.True(Vec3.Distance(c, s.Eval(u)) < 1e-12, $"point at {u}");
+                    var fd1 = (s.Eval(u + h) - s.Eval(u - h)) / (2 * h);
+                    var fd2 = (s.Eval(u + h) - c * 2 + s.Eval(u - h)) / (h * h);
+                    t.True(Vec3.Distance(d1, fd1) < 1e-5 * (1 + d1.Length), $"first derivative at {u}");
+                    if (Math.Abs(u - 0.3) > 2 * h && Math.Abs(u - 0.6) > 2 * h)
+                        t.True(Vec3.Distance(d2, fd2) < 1e-2 * (1 + d2.Length), $"second derivative at {u}");
+                }
+                var ns = new SpryCad.Kernel.Native.NSpline(s);
+                var rnd = new Random(3);
+                for (int k = 0; k < 200; k++)
+                {
+                    var p = s.Eval(rnd.NextDouble()) + new Vec3(rnd.NextDouble() - 0.5, rnd.NextDouble() - 0.5, rnd.NextDouble() - 0.5);
+                    var d = Vec3.Distance(ns.Eval(ns.Param(p)), p);
+                    double best = double.MaxValue;
+                    for (int i = 0; i <= 20000; i++) best = Math.Min(best, Vec3.Distance(s.Eval(i / 20000.0), p));
+                    t.True(d <= best + 1e-9, $"closest point {d} vs brute force {best}");
+                }
+            }
+        });
         var dir = Path.Combine(Path.GetTempPath(), "sprycad-tests");
         Directory.CreateDirectory(dir);
         void Step(string name, Solid s)

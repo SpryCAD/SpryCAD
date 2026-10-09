@@ -245,7 +245,10 @@ public sealed class NSpline : NCurve
         int best = 0; double bd = double.MaxValue;
         for (int i = 0; i < _samples.Length; i++) { var d = (_samples[i] - p).LengthSq; if (d < bd) { bd = d; best = i; } }
         double lo = Math.Max(0, (best - 1) / 128.0), hi = Math.Min(1, (best + 1) / 128.0);
-        // golden section on distance
+        // Newton in the samples' bracket; never worse than the nearest sample
+        var t = S.ClosestParam(p, lo, hi, best / 128.0);
+        if (!double.IsNaN(t)) return (Eval(t) - p).LengthSq <= bd ? t : best / 128.0;
+        // golden section on distance (derivatives not finite)
         for (int it = 0; it < 60; it++)
         {
             var m1 = lo + (hi - lo) * 0.382; var m2 = lo + (hi - lo) * 0.618;

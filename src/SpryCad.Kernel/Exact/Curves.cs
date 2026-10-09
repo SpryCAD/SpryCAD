@@ -73,6 +73,119 @@ public sealed record BSplineCurve(int Degree, Vec3[] Poles, double[] Knots) : Ex
         return r;
     }
 
+    /// <summary>Point, first and second derivative at u (Piegl &amp; Tiller A2.3).</summary>
+    public void Derivs(double u, out Vec3 c, out Vec3 d1, out Vec3 d2)
+    {
+        int p = Degree, n = Poles.Length - 1;
+        u = Math.Clamp(u, Knots[p], Knots[n + 1]);
+        int span = FindSpan(n, p, u, Knots);
+        int w = p + 1;
+        // ndu: basis values (upper triangle, row r column j at [r·w + j]) and knot differences (lower)
+        Span<double> ndu = p < 12 ? stackalloc double[w * w] : new double[w * w];
+        Span<double> left = p < 12 ? stackalloc double[w] : new double[w];
+        Span<double> right = p < 12 ? stackalloc double[w] : new double[w];
+        Span<double> a = p < 12 ? stackalloc double[2 * w] : new double[2 * w];
+        Span<double> ders = p < 12 ? stackalloc double[3 * w] : new double[3 * w];
+        ndu[0] = 1;
+        for (int j = 1; j <= p; j++)
+        {
+            left[j] = u - Knots[span + 1 - j];
+            right[j] = Knots[span + j] - u;
+            double saved = 0;
+            for (int r = 0; r < j; r++)
+            {
+                ndu[j * w + r] = right[r + 1] + left[j - r];
+                var temp = ndu[r * w + j - 1] / ndu[j * w + r];
+                ndu[r * w + j] = saved + right[r + 1] * temp;
+                saved = left[j - r] * temp;
+            }
+            ndu[j * w + j] = saved;
+        }
+        int nd = Math.Min(2, p);
+        for (int j = 0; j <= p; j++) ders[j] = ndu[j * w + p];
+        for (int r = 0; r <= p; r++)
+        {
+            int s1 = 0, s2 = w;
+            a[0] = 1;
+            for (int k = 1; k <= nd; k++)
+            {
+                double d = 0;
+                int rk = r - k, pk = p - k;
+                if (r >= k) { a[s2] = a[s1] / ndu[(pk + 1) * w + rk]; d = a[s2] * ndu[rk * w + pk]; }
+                int j1 = rk >= -1 ? 1 : -rk, j2 = r - 1 <= pk ? k - 1 : p - r;
+                for (int j = j1; j <= j2; j++)
+                {
+                    a[s2 + j] = (a[s1 + j] - a[s1 + j - 1]) / ndu[(pk + 1) * w + rk + j];
+                    d += a[s2 + j] * ndu[(rk + j) * w + pk];
+                }
+                if (r <= pk) { a[s2 + k] = -a[s1 + k - 1] / ndu[(pk + 1) * w + r]; d += a[s2 + k] * ndu[r * w + pk]; }
+                ders[k * w + r] = d;
+                (s1, s2) = (s2, s1);
+            }
+        }
+        double f = p;
+        for (int k = 1; k <= nd; k++) { for (int j = 0; j <= p; j++) ders[k * w + j] *= f; f *= p - k; }
+        c = d1 = d2 = Vec3.Zero;
+        for (int j = 0; j <= p; j++)
+        {
+            var P = Poles[span - p + j];
+            c += P * ders[j];
+            d1 += P * ders[w + j];
+            if (nd == 2) d2 += P * ders[2 * w + j];
+        }
+    }
+
+    /// <summary>
+    /// Parameter of the point nearest p in [lo, hi], from t: Newton on (c - p)·c' kept inside the bracket (bisection
+    /// where it would leave it) when the bracket holds a minimum, else the nearer of the ends and clamped Newton.
+    /// NaN if the derivatives are not finite (coincident knots).
+    /// </summary>
+    public double ClosestParam(Vec3 p, double lo, double hi, double t)
+    {
+        double G(double s, out double gp, out double d2)
+        {
+            Derivs(s, out var c, out var d1, out var dd);
+            var e = c - p;
+            gp = Vec3.Dot(d1, d1) + Vec3.Dot(e, dd);
+            d2 = e.LengthSq;
+            return Vec3.Dot(e, d1);
+        }
+        double glo = G(lo, out _, out var dlo), ghi = G(hi, out _, out var dhi);
+        if (!double.IsFinite(glo) || !double.IsFinite(ghi)) return double.NaN;
+        var eps = 1e-14;
+        if (glo < 0 && ghi > 0)
+        {
+            double a = lo, b = hi, s = Math.Clamp(t, lo, hi);
+            for (int it = 0; it < 80; it++)
+            {
+                var g = G(s, out var gp, out _);
+                if (!double.IsFinite(g)) return double.NaN;
+                if (g == 0) break;
+                if (g < 0) a = s; else b = s;
+                var sn = gp > 1e-300 ? s - g / gp : 0.5 * (a + b);
+                if (!(sn > a && sn < b)) sn = 0.5 * (a + b);
+                bool done = Math.Abs(sn - s) < eps || b - a < eps;
+                s = sn;
+                if (done) break;
+            }
+            return s;
+        }
+        // no sign change: an end, or a minimum Newton finds from t
+        double best = dlo <= dhi ? lo : hi, bd = Math.Min(dlo, dhi);
+        double q = Math.Clamp(t, lo, hi);
+        for (int it = 0; it < 40; it++)
+        {
+            var g = G(q, out var gp, out _);
+            if (!double.IsFinite(g) || gp <= 1e-300) break;
+            var qn = Math.Clamp(q - g / gp, lo, hi);
+            bool done = Math.Abs(qn - q) < eps;
+            q = qn;
+            if (done) break;
+        }
+        G(q, out _, out var dq);
+        return dq < bd ? q : best;
+    }
+
     public override IEnumerable<Vec3> Sample(Vec3 from, Vec3 to, bool closed, double chordTol)
     {
         int n = Math.Clamp(Poles.Length * 4, 8, 400);

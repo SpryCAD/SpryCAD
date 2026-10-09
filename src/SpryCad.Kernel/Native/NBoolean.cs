@@ -916,7 +916,9 @@ public sealed class NBoolean
 
     /// <summary>
     /// Cubic B-spline through a minimal subset of the exact points (Douglas-Peucker seed), refined until
-    /// every exact point lies within tol of the spline.
+    /// every exact point lies within tol of the spline. A point is measured against the stretch of spline between
+    /// the kept points either side of it (never nearer than the whole spline, so the fit is never looser); each
+    /// pass adds the worst point of every stretch that is out.
     /// </summary>
     static BSplineCurve? FitSpline(List<Vec3> pts, double tol)
     {
@@ -940,20 +942,41 @@ public sealed class NBoolean
         // at least a few interior points so the cubic follows curved sections
         if (keep.Count < 4 && n >= 4) { keep.Add(n / 3); keep.Add(2 * n / 3); }
         if (keep.Count == 2) return null;
+        var add = new List<int>();
         for (int iter = 0; iter < 40; iter++)
         {
-            var sel = keep.Select(i => pts[i]).ToList();
+            var ki = keep.ToArray();
+            var sel = ki.Select(i => pts[i]).ToList();
             var sp = BSplineCurve.Interpolate(sel, 3);
-            var ns = new NSpline(sp);
-            double worst = 0; int wi = -1;
-            for (int i = 1; i < n - 1; i++)
+            // the kept points' parameters (Interpolate's chord lengths)
+            var uk = new double[ki.Length];
+            double total = 0;
+            for (int k = 1; k < ki.Length; k++) total += Vec3.Distance(sel[k], sel[k - 1]);
+            if (total < 1e-15) total = 1;
+            for (int k = 1; k < ki.Length; k++) uk[k] = uk[k - 1] + Vec3.Distance(sel[k], sel[k - 1]) / total;
+            uk[^1] = 1;
+            add.Clear();
+            for (int k = 0; k + 1 < ki.Length; k++)
             {
-                if (keep.Contains(i)) continue;
-                var dist = Vec3.Distance(ns.Eval(ns.Param(pts[i])), pts[i]);
-                if (dist > worst) { worst = dist; wi = i; }
+                int a = ki[k], b = ki[k + 1];
+                if (b - a < 2) continue;
+                // chord length along the exact points for each one's starting parameter
+                double run = 0, len = 0;
+                for (int i = a + 1; i <= b; i++) len += Vec3.Distance(pts[i], pts[i - 1]);
+                double worst = 0; int wi = -1;
+                for (int i = a + 1; i < b; i++)
+                {
+                    run += Vec3.Distance(pts[i], pts[i - 1]);
+                    var t0 = uk[k] + (uk[k + 1] - uk[k]) * (len > 0 ? run / len : 0.5);
+                    var t = sp.ClosestParam(pts[i], uk[k], uk[k + 1], t0);
+                    if (double.IsNaN(t)) t = t0;
+                    var dist = Vec3.Distance(sp.Eval(t), pts[i]);
+                    if (dist > worst) { worst = dist; wi = i; }
+                }
+                if (worst > tol) add.Add(wi);
             }
-            if (worst <= tol || wi < 0) return sp;
-            keep.Add(wi);
+            if (add.Count == 0) return sp;
+            foreach (var i in add) keep.Add(i);
         }
         return BSplineCurve.Interpolate(keep.Select(i => pts[i]).ToList(), 3);
     }
