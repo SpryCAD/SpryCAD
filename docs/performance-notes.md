@@ -13,6 +13,7 @@ or checked against the old ones (see *Checking a change* below).
 | `ebcb470` | Display normals of free-form faces searched once per point; screw surfaces keep their last closest point and sweep box; the rebuild cache keyed by prefix hash (undo/redo/preview hits); compact JSON in memory; no DOF analysis per sketch-drag move; camera matrices cached |
 | `4d0e6b2` | Ear clipping with a z-order index; `CdtMesh` in flat arrays; NTess interior grid by row crossings and boxed boundary runs (display tessellation ~1.7× faster) |
 | `ab36f00` | Plane × cone (exact conics, apex lines) and plane × torus (closed-form points) instead of traced |
+| (next) | `NIntersect.Trace` crossings, adjacency and chaining in flat stamped arrays; `NSurface.FGrad` gives `F_` and `Grad` from one evaluation for `ProjectToIntersection` (results bit for bit; traced time on the handwheel about halved, Torus × Cylinder ~310 to ~155 ms summed) |
 
 ## Where the time goes now
 
@@ -28,12 +29,10 @@ profile; the profile's times are summed over threads). On the heavy samples (`sa
 ## Kernel: open items, roughly by expected gain
 
 1. **`NIntersect.Trace` internals** (results must stay identical):
-   - `edgePts`, `adj` and `used` are tuple-keyed dictionaries plus a `HashSet`. Every node has degree ≤ 2, so flat
-     stamped arrays work, as the grid already does. Keep the chaining order: keys in first-insertion order, degree-1
-     nodes first.
    - `Densify` always splits at depth 0 and then projects twice at depth 1. That is about 3 projections per
      segment; the extra points change results.
-   - `ProjectToIntersection` calls `F_` and then `Grad` with no hint.
+   - `ProjectToIntersection` starts every point from scratch; `trace.grid` (the block test and lazy `F_` values) is
+     now about as large as the march and the projection.
 2. **`NBoolean.FitSpline` and `NSpline.Param`**:
    - `Param` costs about 250 B-spline evaluations: a 129-sample scan plus 60 golden-section steps at 2 evaluations
      each. It also ignores `hint`.

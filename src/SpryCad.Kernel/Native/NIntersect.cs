@@ -1018,6 +1018,8 @@ public static class NIntersect
     [ThreadStatic] static double[]? _grid;
     [ThreadStatic] static int[]? _gridStamp;
     [ThreadStatic] static int _stamp;
+    [ThreadStatic] static int[]? _cross, _seg0, _seg1, _deg;
+    [ThreadStatic] static Vec2[]? _crossPt;
 
     public static List<NPolyline> Trace(NFace fa, NSurface sb, double tol, NDomain? domain = null)
     {
@@ -1033,7 +1035,13 @@ public static class NIntersect
         // thread's grid, valid where stamped with this trace's number: nothing is allocated or cleared per trace)
         var g = _grid ??= new double[(nu + 1) * (nv + 1)];
         var have = _gridStamp ??= new int[(nu + 1) * (nv + 1)];
-        if (++_stamp == int.MaxValue) { Array.Clear(have); _stamp = 1; }
+        int nk = (nu + 1) * (nv + 1) * 2;
+        var cross = _cross ??= new int[nk];  // stamp·2 + 1: crosses, stamp·2: does not
+        var cpt = _crossPt ??= new Vec2[nk];
+        var seg0 = _seg0 ??= new int[nk];    // a crossing's segments in the order they were added
+        var seg1 = _seg1 ??= new int[nk];
+        var deg = _deg ??= new int[nk];      // stamp·4 + degree
+        if (++_stamp == int.MaxValue / 4) { Array.Clear(have); Array.Clear(cross); Array.Clear(deg); _stamp = 1; }
         int stamp = _stamp;
         double G(int i, int j)
         {
@@ -1063,21 +1071,32 @@ public static class NIntersect
             }
         pg.Dispose();
         var pm = Prof.Time("trace.march");
-        // marching squares: crossing points on cell edges, keyed so neighbours share them
-        var edgePts = new Dictionary<(int, int, int), Vec2>(); // (i, j, dir 0=u,1=v)
+        // marching squares: crossing points on cell edges, numbered (i, j, dir 0=u,1=v) → (i·(nv+1) + j)·2 + dir so
+        // neighbours share them; this thread's arrays, valid where stamped with this trace's number. A crossing
+        // lies on the edges of at most two cells, each giving it one segment, so its degree is at most 2.
         bool Cross(int i, int j, int dir)
         {
-            var key = (i, j, dir);
-            if (edgePts.ContainsKey(key)) return true;
+            int key = (i * (nv + 1) + j) * 2 + dir;
+            if (cross[key] >> 1 == stamp) return (cross[key] & 1) != 0;
             double a = G(i, j), b = dir == 0 ? G(i + 1, j) : G(i, j + 1);
-            if (a * b > 0) return false;
+            if (a * b > 0) { cross[key] = stamp * 2; return false; }
             var t = a / (a - b);
             var pa = UV(i, j); var pb = dir == 0 ? UV(i + 1, j) : UV(i, j + 1);
-            edgePts[key] = Vec2.Lerp(pa, pb, t);
+            cpt[key] = Vec2.Lerp(pa, pb, t);
+            cross[key] = stamp * 2 + 1;
             return true;
         }
-        var segs = new List<((int, int, int) a, (int, int, int) b)>();
-        Span<(int, int, int)> keys = stackalloc (int, int, int)[4];
+        int Key(int i, int j, int dir) => (i * (nv + 1) + j) * 2 + dir;
+        var segA = new List<int>(); var segB = new List<int>();
+        var nodes = new List<int>(); // in first-use order
+        void Link(int k, int s)
+        {
+            int d = deg[k] >> 2 == stamp ? deg[k] & 3 : 0;
+            if (d == 0) { nodes.Add(k); seg0[k] = s; } else seg1[k] = s;
+            deg[k] = stamp * 4 + d + 1;
+        }
+        void AddSeg(int a, int b) { int s = segA.Count; segA.Add(a); segB.Add(b); Link(a, s); Link(b, s); }
+        Span<int> keys = stackalloc int[4];
         for (int bi = 0; bi < nb; bi++)
             for (int bj = 0; bj < nb; bj++)
             {
@@ -1086,52 +1105,54 @@ public static class NIntersect
                     for (int j = bj * block; j < (bj + 1) * block; j++)
                     {
                         int n = 0;
-                        if (Cross(i, j, 0)) keys[n++] = (i, j, 0);
-                        if (Cross(i + 1, j, 1)) keys[n++] = (i + 1, j, 1);
-                        if (Cross(i, j + 1, 0)) keys[n++] = (i, j + 1, 0);
-                        if (Cross(i, j, 1)) keys[n++] = (i, j, 1);
-                        if (n == 2) segs.Add((keys[0], keys[1]));
+                        if (Cross(i, j, 0)) keys[n++] = Key(i, j, 0);
+                        if (Cross(i + 1, j, 1)) keys[n++] = Key(i + 1, j, 1);
+                        if (Cross(i, j + 1, 0)) keys[n++] = Key(i, j + 1, 0);
+                        if (Cross(i, j, 1)) keys[n++] = Key(i, j, 1);
+                        if (n == 2) AddSeg(keys[0], keys[1]);
                         else if (n == 4)
                         {
                             // saddle: decide by the centre value
                             var c = sb.F_(dom.Eval(Vec2.Lerp(UV(i, j), UV(i + 1, j + 1), 0.5)));
-                            if (c * G(i, j) > 0) { segs.Add((keys[0], keys[1])); segs.Add((keys[2], keys[3])); }
-                            else { segs.Add((keys[0], keys[3])); segs.Add((keys[1], keys[2])); }
+                            if (c * G(i, j) > 0) { AddSeg(keys[0], keys[1]); AddSeg(keys[2], keys[3]); }
+                            else { AddSeg(keys[0], keys[3]); AddSeg(keys[1], keys[2]); }
                         }
                     }
             }
-        // chain segments
-        var adj = new Dictionary<(int, int, int), List<(int, int, int)>>();
-        foreach (var (a, b) in segs)
-        {
-            if (!adj.TryGetValue(a, out var la)) adj[a] = la = new(); la.Add(b);
-            if (!adj.TryGetValue(b, out var lb)) adj[b] = lb = new(); lb.Add(a);
-        }
         pm.Dispose();
         using var pp = Prof.Time("trace.project");
-        var used = new HashSet<((int, int, int), (int, int, int))>();
+        // chain segments: ends (degree 1) first, then the rest, each in first-use order
+        var used = new bool[segA.Count];
         var result = new List<NPolyline>();
-        bool Use((int, int, int) a, (int, int, int) b) => used.Add((a, b)) & used.Add((b, a));
-        foreach (var start in adj.Keys.OrderBy(k => adj[k].Count == 1 ? 0 : 1).ToList())
+        int Deg(int k) => deg[k] & 3;
+        int Other(int s, int k) => segA[s] == k ? segB[s] : segA[s];
+        var order = new List<int>(nodes.Count);
+        foreach (var k in nodes) if (Deg(k) == 1) order.Add(k);
+        foreach (var k in nodes) if (Deg(k) != 1) order.Add(k);
+        var chain = new List<int>();
+        foreach (var start in order)
         {
-            foreach (var first in adj[start].ToList())
+            for (int f = 0; f < Deg(start); f++)
             {
-                if (used.Contains((start, first))) continue;
-                var chain = new List<(int, int, int)> { start };
-                var cur = first;
-                Use(start, cur);
+                int s = f == 0 ? seg0[start] : seg1[start];
+                if (used[s]) continue;
+                chain.Clear(); chain.Add(start);
+                used[s] = true;
+                var cur = Other(s, start);
                 while (true)
                 {
                     chain.Add(cur);
                     if (cur == start) break;
-                    var nexts = adj[cur].Where(n => !used.Contains((cur, n))).ToList();
-                    if (nexts.Count == 0) break;
-                    Use(cur, nexts[0]);
-                    cur = nexts[0];
+                    int next = -1;
+                    if (!used[seg0[cur]]) next = seg0[cur];
+                    else if (Deg(cur) == 2 && !used[seg1[cur]]) next = seg1[cur];
+                    if (next < 0) break;
+                    used[next] = true;
+                    cur = Other(next, cur);
                 }
                 bool closed = chain.Count > 3 && chain[0] == chain[^1];
-                var pts = new List<Vec3>();
-                foreach (var k in chain) pts.Add(NSurface.ProjectToIntersection(sa, sb, dom.Eval(edgePts[k])));
+                var pts = new List<Vec3>(chain.Count);
+                foreach (var k in chain) pts.Add(NSurface.ProjectToIntersection(sa, sb, dom.Eval(cpt[k])));
                 if (closed) pts.RemoveAt(pts.Count - 1);
                 pts = Densify(pts, closed, sa, sb, tol);
                 if (pts.Count >= 2) result.Add(new NPolyline(pts, closed));

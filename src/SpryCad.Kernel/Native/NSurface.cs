@@ -252,6 +252,61 @@ public sealed class NSurface
     }
 
     /// <summary>
+    /// <see cref="F_"/> and <see cref="Grad"/> at p from one evaluation (the same values bit for bit: one local
+    /// frame and radius for the analytic kinds, one closest-point search for the others).
+    /// </summary>
+    public double FGrad(Vec3 p, out Vec3 grad)
+    {
+        switch (Kind)
+        {
+            case SurfaceKind.Plane: grad = F.Normal; return F.ToLocal3(p).Z;
+            case SurfaceKind.Pipe:
+                {
+                    var (s, c, dist) = Spine!.Closest(p);
+                    grad = dist > 1e-300 ? (p - c) / dist : Spine.Frame(s).N1;
+                    return dist - R;
+                }
+            case SurfaceKind.Screw:
+                {
+                    var (u, v, c, d) = Screw!.Closest(p);
+                    grad = Screw.NormalAt(u, v);
+                    return Vec3.Dot(p - c, grad) >= 0 ? d : -d;
+                }
+            case SurfaceKind.BSpline:
+                {
+                    var c = Nurbs!.Closest(p);
+                    grad = Nurbs.Normal(c.u, c.v);
+                    return Vec3.Dot(p - c.c, grad) >= 0 ? c.dist : -c.dist;
+                }
+            case SurfaceKind.Offset: return Base!.FGrad(p, out grad) - R;
+        }
+        var l = F.ToLocal3(p);
+        var rr = Math.Sqrt(l.X * l.X + l.Y * l.Y);
+        var radial = rr > 1e-300 ? (F.XDir * l.X + F.YDir * l.Y) / rr : F.XDir;
+        switch (Kind)
+        {
+            case SurfaceKind.Cylinder: grad = radial; return rr - R;
+            case SurfaceKind.Cone:
+                grad = radial * Math.Cos(R2) - F.Normal * Math.Sin(R2);
+                return (rr - (R + l.Z * Math.Tan(R2))) * Math.Cos(R2);
+            case SurfaceKind.Sphere:
+                {
+                    var d = p - F.Origin; var len = d.Length;
+                    grad = len > 1e-300 ? d / len : F.Normal;
+                    return Math.Sqrt(l.X * l.X + l.Y * l.Y + l.Z * l.Z) - R;
+                }
+            case SurfaceKind.Torus:
+                {
+                    var dr = rr - R; var len = Math.Sqrt(dr * dr + l.Z * l.Z);
+                    grad = len > 1e-300 ? (radial * dr + F.Normal * l.Z) / len : radial;
+                    return len - R2;
+                }
+        }
+        grad = F.Normal;
+        return 0;
+    }
+
+    /// <summary>
     /// Nearest point of A ∩ B to p by minimum-norm Gauss-Newton on (F_a, F_b) = 0; near-tangent pairs fall back
     /// to alternating projection steps.
     /// </summary>
@@ -260,9 +315,8 @@ public sealed class NSurface
         var q = p;
         for (int it = 0; it < 40; it++)
         {
-            var fa = a.F_(q); var fb = b.F_(q);
+            var fa = a.FGrad(q, out var na); var fb = b.FGrad(q, out var nb);
             if (Math.Abs(fa) < tol && Math.Abs(fb) < tol) return q;
-            var na = a.Grad(q); var nb = b.Grad(q);
             double g11 = Vec3.Dot(na, na), g12 = Vec3.Dot(na, nb), g22 = Vec3.Dot(nb, nb);
             var det = g11 * g22 - g12 * g12;
             Vec3 step;
