@@ -73,7 +73,60 @@ public sealed class NBoolean
     readonly double _onTol;    // "on the boundary" for UV/domain decisions
     readonly double _sampleTol;
     readonly Dictionary<NFace, NDomain> _domains = new(ReferenceEqualityComparer.Instance);
-    readonly List<NVertex> _pool = new();
+    readonly VertexPool _pool;
+
+    /// <summary>
+    /// Vertices in the order they were added, hashed on a grid: <see cref="Find"/> gives the first one (lowest index)
+    /// within the radius (_tol·10), as a scan of the list would.
+    /// </summary>
+    sealed class VertexPool
+    {
+        readonly List<NVertex> _items = new();
+        readonly Dictionary<(long, long, long), List<int>> _grid = new();
+        readonly double _cell, _r;
+        // cells four times the radius: a point within it of p lies in p's cell, or in the next one on a side p is
+        // within a quarter cell of (0.3 here: a margin for the rounding of the division)
+        public VertexPool(double r) { _r = r; _cell = r * 4; }
+        public IReadOnlyList<NVertex> Items => _items;
+        public void Clear() { _items.Clear(); _grid.Clear(); }
+        (long, long, long) K(Vec3 p) => ((long)Math.Floor(p.X / _cell), (long)Math.Floor(p.Y / _cell), (long)Math.Floor(p.Z / _cell));
+        void Hash(int i)
+        {
+            var k = K(_items[i].P);
+            if (!_grid.TryGetValue(k, out var l)) _grid[k] = l = new();
+            l.Add(i);
+        }
+        public void Add(NVertex v) { _items.Add(v); Hash(_items.Count - 1); }
+        public void AddRange(IEnumerable<NVertex> vs) { foreach (var v in vs) Add(v); }
+        /// <summary>The first vertex nearer p than the pool's radius.</summary>
+        public NVertex? Find(Vec3 p)
+        {
+            // a few vertices: scanned (the same answer)
+            if (_items.Count <= 32)
+            {
+                foreach (var v in _items) if (Vec3.Distance(v.P, p) < _r) return v;
+                return null;
+            }
+            var (x, y, z) = K(p);
+            static (int, int) Reach(double c, long k)
+            {
+                var f = c - k; // the position in the cell, 0..1
+                return (f < 0.3 ? -1 : 0, f > 0.7 ? 1 : 0);
+            }
+            var (x0, x1) = Reach(p.X / _cell, x); var (y0, y1) = Reach(p.Y / _cell, y); var (z0, z1) = Reach(p.Z / _cell, z);
+            int best = int.MaxValue;
+            for (long dx = x0; dx <= x1; dx++)
+                for (long dy = y0; dy <= y1; dy++)
+                    for (long dz = z0; dz <= z1; dz++)
+                        if (_grid.TryGetValue((x + dx, y + dy, z + dz), out var l))
+                            foreach (var i in l)
+                            {
+                                if (i >= best) break; // indices ascend within a cell
+                                if (Vec3.Distance(_items[i].P, p) < _r) best = i;
+                            }
+            return best == int.MaxValue ? null : _items[best];
+        }
+    }
     // faces of either operand whose box does not reach the other operand: the boolean leaves them as they are
     // (never split, outside the other body), so every stage skips them and its cost follows the size of the change
     readonly HashSet<NFace> _far = new(ReferenceEqualityComparer.Instance);
@@ -133,6 +186,7 @@ public sealed class NBoolean
         _tol = 1e-7 * Math.Max(10, scale);
         _onTol = 5e-6 * Math.Max(10, scale);
         _sampleTol = 2e-6 * Math.Max(10, scale);
+        _pool = new VertexPool(_tol * 10);
     }
 
     enum State { Out, In, OnSame, OnOpposite }
@@ -197,7 +251,7 @@ public sealed class NBoolean
         FindEdgeSplits(A, B, splits, onSurface);
         FindEdgeSplits(B, A, splits, onSurface);
         using (Prof.Time("split.crossings")) CrossOnSurfaceEdges(onSurface, splits);
-        ImprintSplitVertices(A, B, splits);
+        using (Prof.Time("split.imprint")) ImprintSplitVertices(A, B, splits);
         Lap("edge splits");
         ApplySplits(ActiveFaces(A).ToList(), splits); ApplySplits(ActiveFaces(B).ToList(), splits);
         _domains.Clear();
@@ -406,26 +460,61 @@ public sealed class NBoolean
         _pool.Clear();
         _pool.AddRange(VerticesOf(NearEdges(ActiveFaces(A))));
         var edgesB = NearEdges(ActiveFaces(B));
+        // each vertex of B is replaced by the first pool vertex near it, in turn: a replacement made later applies
+        // to the ends already moved onto that vertex, so an end follows the replacements in the order they were made
+        var moved = new Dictionary<NVertex, (NVertex to, int step)>(ReferenceEqualityComparer.Instance);
+        int step = 0;
         foreach (var v in VerticesOf(edgesB))
         {
-            var m = _pool.FirstOrDefault(p => Vec3.Distance(p.P, v.P) < _tol * 10);
+            var m = _pool.Find(v.P);
             if (m == null) { _pool.Add(v); continue; }
-            foreach (var e in edgesB)
-            {
-                if (ReferenceEquals(e.V0, v)) e.V0 = m;
-                if (ReferenceEquals(e.V1, v)) e.V1 = m;
-            }
+            moved[v] = (m, step++);
         }
+        if (moved.Count == 0) return;
+        NVertex Final(NVertex x)
+        {
+            int after = -1;
+            while (moved.TryGetValue(x, out var mv) && mv.step > after) { x = mv.to; after = mv.step; }
+            return x;
+        }
+        foreach (var e in edgesB) { e.V0 = Final(e.V0); e.V1 = Final(e.V1); }
     }
 
     NVertex Snap(Vec3 p)
     {
-        foreach (var v in _pool) if (Vec3.Distance(v.P, p) < _tol * 10) return v;
+        if (_pool.Find(p) is { } found) return found;
         var nv = new NVertex(p);
         if (Trace != null && Environment.GetEnvironmentVariable("FC_TRACE_SNAP") is { } ts && p.ToString().Contains(ts))
-            T($"  new vertex {p}#{Id(nv)}: nearest pool vertex at {_pool.Min(v => Vec3.Distance(v.P, p)):g3}; " + string.Join(" / ", Environment.StackTrace.Split((char)10).Skip(2).Take(3).Select(x => x.Trim())));
+            T($"  new vertex {p}#{Id(nv)}: nearest pool vertex at {_pool.Items.Min(v => Vec3.Distance(v.P, p)):g3}; " + string.Join(" / ", Environment.StackTrace.Split((char)10).Skip(2).Take(3).Select(x => x.Trim())));
         _pool.Add(nv);
         return nv;
+    }
+
+    /// <summary>
+    /// A list of vertices sorted by x: <see cref="InRange"/> gives the list positions of those with lo ≤ x ≤ hi, in
+    /// list order (a scan of the list testing a box would meet them in that order).
+    /// </summary>
+    sealed class ByX
+    {
+        readonly double[] _x;
+        readonly int[] _at;
+        public ByX(IReadOnlyList<NVertex> vs)
+        {
+            // NaN never lies in a range: left out
+            var at = new List<int>(vs.Count);
+            for (int i = 0; i < vs.Count; i++) if (!double.IsNaN(vs[i].P.X)) at.Add(i);
+            _at = at.ToArray();
+            _x = _at.Select(i => vs[i].P.X).ToArray();
+            Array.Sort(_x, _at);
+        }
+        public void InRange(double lo, double hi, List<int> res)
+        {
+            res.Clear();
+            int a = 0, b = _x.Length;
+            while (a < b) { int m = (a + b) >> 1; if (_x[m] < lo) a = m + 1; else b = m; }
+            for (int k = a; k < _x.Length && _x[k] <= hi; k++) res.Add(_at[k]);
+            res.Sort();
+        }
     }
 
     // ------------------------------------------------------------------------------------------
@@ -439,18 +528,22 @@ public sealed class NBoolean
         // the edge/surface roots of every candidate pair, found in parallel (pure geometry); the splits are then
         // made in order, as before
         var cand = new List<(NEdge e, NFace f)>();
+        var pc = Prof.Time("split.cand");
         foreach (var e in NearEdges(ActiveFaces(X)))
         {
             var eb = e.Bounds(_sampleTol * 500);
             foreach (var (f, box) in fboxes)
                 if (eb.Overlaps(box, _onTol)) cand.Add((e, f));
         }
+        pc.Dispose();
         var found = new NIntersect.EdgeHits[cand.Count];
-        Parallel.For(0, cand.Count, k =>
-        {
-            var (e, f) = cand[k];
-            using (Prof.Time(Prof.Enabled ? $"split.{e.Curve.GetType().Name}x{f.Surface.Kind}" : "")) found[k] = NIntersect.EdgeSurface(e, f.Surface, _tol);
-        });
+        using (Prof.Time("split.roots"))
+            Parallel.For(0, cand.Count, k =>
+            {
+                var (e, f) = cand[k];
+                using (Prof.Time(Prof.Enabled ? $"split.{e.Curve.GetType().Name}x{f.Surface.Kind}" : "")) found[k] = NIntersect.EdgeSurface(e, f.Surface, _tol);
+            });
+        using var pa = Prof.Time("split.apply");
         for (int k = 0; k < cand.Count; k++)
         {
             var (e, f) = cand[k];
@@ -763,12 +856,17 @@ public sealed class NBoolean
         List<NVertex> Near(NBody b) => ohi.X < olo.X || ohi.Y < olo.Y || ohi.Z < olo.Z ? new() : VerticesOf(NearEdges(ActiveFaces(b))).Where(v => overlap.Contains(v.P, _onTol)).ToList();
         var forA = verts.Concat(Near(B)).Distinct(ReferenceEqualityComparer.Instance).Cast<NVertex>().ToList();
         var forB = verts.Concat(Near(A)).Distinct(ReferenceEqualityComparer.Instance).Cast<NVertex>().ToList();
-        foreach (var (e, cand) in NearEdges(ActiveFaces(A)).Select(e => (e, forA)).Concat(NearEdges(ActiveFaces(B)).Select(e => (e, forB))))
+        var xA = new ByX(forA); var xB = new ByX(forB);
+        var inBox = new List<int>();
+        foreach (var (e, cand, byX) in NearEdges(ActiveFaces(A)).Select(e => (e, forA, xA)).Concat(NearEdges(ActiveFaces(B)).Select(e => (e, forB, xB))))
         {
             if (cand.Count == 0) continue;
             var box = e.Bounds(_sampleTol * 500);
-            foreach (var v in cand)
+            // only vertices within the box's x range can pass its test below
+            byX.InRange(box.Min.X - _onTol, box.Max.X + _onTol, inBox);
+            foreach (var iv in inBox)
             {
+                var v = cand[iv];
                 if (ReferenceEquals(v, e.V0) || ReferenceEquals(v, e.V1) || !box.Contains(v.P, _onTol)) continue;
                 if (Vec3.Distance(v.P, e.V0.P) < _tol * 10 || Vec3.Distance(v.P, e.V1.P) < _tol * 10) continue;
                 double lo = Math.Min(e.T0, e.T1), hi = Math.Max(e.T0, e.T1);
@@ -1428,11 +1526,15 @@ public sealed class NBoolean
         // partially overlapping open edges (one split where the other is not): split at each other's vertices
         var openVerts = single.SelectMany(e => new[] { e.V0, e.V1 }).Distinct(ReferenceEqualityComparer.Instance).Cast<NVertex>().ToList();
         var splits = new Dictionary<NEdge, List<(double t, NVertex v)>>(ReferenceEqualityComparer.Instance);
+        var byX = new ByX(openVerts);
+        var inBox = new List<int>();
         foreach (var e in single)
         {
             var box = e.Bounds(_sampleTol * 500);
-            foreach (var v in openVerts)
+            byX.InRange(box.Min.X - _onTol, box.Max.X + _onTol, inBox);
+            foreach (var iv in inBox)
             {
+                var v = openVerts[iv];
                 if (ReferenceEquals(v, e.V0) || ReferenceEquals(v, e.V1) || !box.Contains(v.P, _onTol)) continue;
                 var t = e.Curve.Param(v.P, e.Curve.Periodic ? 0.5 * (e.T0 + e.T1) : null);
                 if (t <= Math.Min(e.T0, e.T1) + 1e-9 || t >= Math.Max(e.T0, e.T1) - 1e-9) continue;

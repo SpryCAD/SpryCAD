@@ -16,6 +16,7 @@ or checked against the old ones (see *Checking a change* below).
 | `d7e143e` | `NIntersect.Trace` crossings, adjacency and chaining in flat stamped arrays; `NSurface.FGrad` gives `F_` and `Grad` from one evaluation for `ProjectToIntersection` (results bit for bit; traced time on the handwheel about halved, Torus × Cylinder ~310 to ~155 ms summed) |
 | `d9974b7` | `BSplineCurve.Derivs` (exact first and second derivatives) and `ClosestParam` (bracketed Newton); `NSpline.Param` uses it after the sample scan instead of 60 golden-section steps; `FitSpline` measures each point on its own span and adds every bad span's worst point per pass, with no `NSpline` per pass (`sec.makeedge` 4–5× faster; results bit for bit on every sample and demo variant) |
 | `bb6b89e` | `NDomain`: boxes over runs of 16 boundary segments (UV and 3D, built on first use); `ContainsUV` skips runs the ray cannot cross, `BoundaryDistance` compares squared distances and skips runs farther than the best, and `Classify` measures only up to its limit (results bit for bit; `sec.midclass` about 1.5–3× faster: gear 23 to 13 ms, acme screw 21 to 6 ms) |
+| (next) | `NBoolean` vertex matching: the snap pool hashed on a grid (the lowest-index match, as the scan; a scan below 33 vertices), `MergeVertices` rewriting edge ends once (replacements followed in the order made), and `ImprintSplitVertices` and `Sew` finding candidate vertices by x range, in list order; `split.cand`/`roots`/`apply`/`imprint` timers (results bit for bit; `split.imprint` about 3×: spur-gear-nice ~20 to ~7 ms) |
 
 ## Where the time goes now
 
@@ -26,6 +27,9 @@ profile; the profile's times are summed over threads). On the heavy samples (`sa
 - **`NIntersect.Trace`** (`trace.march`, `trace.project`, `trace.grid`). These are surface pairs with no closed form:
   Cone × Cylinder on the gear (~600 ms summed), Torus × Cylinder on the handwheel (~400 ms).
 - **`sec.makeedge`**: `NBoolean.FitSpline` over traced polylines (~300 ms on the gear).
+- After the October work, `spur-gear-nice` rebuilds in ~490 ms (from ~710); traced Cone × Cylinder is still the leader
+  (`trace.project` ~400 ms, `trace.march` ~350 ms, `trace.grid` ~160 ms summed). `spur-gear-nice.sprt` is a personal
+  part, ignored by git: ask for it.
 - **Display mesh build**: `mesh.topology`, `topo.weld`, `topo.edges`, `mesh.emit`.
 
 ## Kernel: open items, roughly by expected gain
@@ -39,9 +43,8 @@ profile; the profile's times are summed over threads). On the heavy samples (`sa
    samples for the scan; `Param` still ignores `hint`.
 3. **`NDomain.Classify`, `BoundaryDistance` and `ContainsUV`**: done (see above). What is left of `sec.midclass` is probably
    mostly `Map` (the surface's `UV`) and `Project`; `ExactBoundaryDistance` is still linear in the coedges.
-4. **Vertex matching in `NBoolean`**: `MergeVertices` and `Snap` match linearly (O(V²)). Use a grid hash as
-   `WeldVertices` has, and return the lowest-index match to stay deterministic. `ImprintSplitVertices` and `Sew` are
-   O(E·V) with no box prefilter.
+4. **Vertex matching in `NBoolean`**: done (see above). In `bool.edge splits` what is left is mostly
+   `split.crossings` (curve × curve on faces) and the edge/surface roots.
 5. **Edge sample cache** (`NEdge.Samples`): it keeps the finest sampling any caller asked for, and `EdgeSurface` asks
    for `tol*50`. Later domains and display boundaries then carry many more points than they need. A cache per
    tolerance band would fix it, but `SplitFace` relies on the fine samples, so validate.
