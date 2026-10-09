@@ -38,8 +38,8 @@
     for (const b of el.querySelectorAll('button')) b.setAttribute('aria-pressed', String(b.dataset.value === value));
   }
 
-  function pre(cmd) {
-    return `<pre><button class="copy" type="button">Copy</button><code>${esc(cmd)}</code></pre>`;
+  function pre(cmd, shell = 'bash') {
+    return `<div class="code"><div class="bar"><span>${shell}</span><button class="copy" type="button">Copy</button></div><pre><code>${esc(cmd)}</code></pre></div>`;
   }
 
   function fileRow(title, f, note) {
@@ -70,9 +70,9 @@
         ' Since this is not the newest version, it will offer to update.'}</p>
       <h3>Silent install</h3>
       <p>For scripted installs (add <code>/ALLUSERS</code> from an administrator prompt to install for everyone):</p>
-      ${pre(`.\\${w.name} /VERYSILENT /SUPPRESSMSGBOXES`)}
+      ${pre(`.\\${w.name} /VERYSILENT /SUPPRESSMSGBOXES`, 'powershell')}
       ${w.sha256 ? `<h3>Check the download</h3><p>In PowerShell, the hash should match the SHA-256 shown above:</p>
-      ${pre(`(Get-FileHash .\\${w.name} -Algorithm SHA256).Hash`)}` : ''}
+      ${pre(`(Get-FileHash .\\${w.name} -Algorithm SHA256).Hash`, 'powershell')}` : ''}
       <h3>Uninstall</h3>
       <p>Settings &rarr; Apps &rarr; Installed apps &rarr; SpryCAD &rarr; Uninstall.</p>`;
   }
@@ -181,7 +181,7 @@
     if (go) { e.preventDefault(); state.channel = go.dataset.go; state.version = null; render(); return; }
     const copy = e.target.closest('.copy');
     if (copy) {
-      const text = copy.nextElementSibling.textContent;
+      const text = copy.closest('.code').querySelector('pre').textContent;
       navigator.clipboard?.writeText(text).then(() => {
         copy.textContent = 'Copied';
         setTimeout(() => { copy.textContent = 'Copy'; }, 1500);
