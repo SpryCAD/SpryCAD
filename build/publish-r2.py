@@ -338,14 +338,21 @@ def is_ancestor(a, b):
 
 
 def publish_changelog(channel, version, published, keep, work):
-    """Adds this build's changes to changelog/<channel>.json and returns them: the subjects of the commits since the
-    channel's previous build (dev), or since the previous release tag (stable), newest first, merges left out. The
-    previous build is the newest entry older than this version whose commit is in this one's history; with none (the
-    first build, or history rewritten), changes since the last release tag. Stable keeps every entry, dev the newest
-    `keep`. Read by the app (Options > Updates > Change Log) and the website."""
+    """Adds this build's changes to changelog/<channel>.json and returns them: the `Changelog:` trailers of the commits
+    that landed on the branch since the channel's previous build (dev), or since the previous release tag (stable),
+    newest first. Only the branch's own line of history counts (--first-parent): a squash-merged pull request's commit,
+    whose message is the PR's description, a merge commit, or a commit made on master directly, never the commits
+    inside a merged feature branch. The message says what users will notice in lines at its end, one change each:
+        Changelog: Fillets on tangent edge chains no longer fail
+    and one without (internal work) is not listed. The previous build is the newest entry older than this
+    version whose commit is in this one's history; with none (the first build, or history rewritten), changes since
+    the last release tag. Stable keeps every entry, dev the newest `keep`. Read by the app (Options > Updates > Change
+    Log) and the website."""
     key = f'changelog/{channel}.json'
     local = work / 'changelog.json'
-    entries = json.loads(local.read_text()).get('versions', []) if get(key, local) else []
+    old = json.loads(local.read_text()) if get(key, local) else {}
+    # entries written before the trailers (every commit subject listed) are dropped: the log starts again
+    entries = old.get('versions', []) if old.get('format') == 2 else []
     entries = [e for e in entries if e['version'] != version]  # a rebuild replaces its entry
 
     head = git('rev-parse', 'HEAD')
@@ -356,18 +363,23 @@ def publish_changelog(channel, version, published, keep, work):
         since = next((e['commit'] for e in older if e.get('commit') and is_ancestor(e['commit'], head)), None)
     if since is None:
         # the release tag before this commit (on a tagged commit, the one before that tag)
-        r = subprocess.run(['git', 'describe', '--tags', '--abbrev=0', '--match', 'v[0-9]*', head + '^'],
-                           capture_output=True, text=True)
+        r = subprocess.run(['git', 'describe', '--tags', '--abbrev=0', '--first-parent', '--match', 'v[0-9]*',
+                            head + '^'], capture_output=True, text=True)
         since = r.stdout.strip() if r.returncode == 0 else None
     rng = f'{since}..{head}' if since else head
-    log = git('log', '--no-merges', '--max-count=200', '--format=%H%x1f%s', rng)
-    changes = [{'commit': c, 'subject': s} for c, s in (l.split('\x1f', 1) for l in log.splitlines() if l)]
+    # one record per commit (\x1d), its hash and its Changelog trailers (\x1e between them)
+    log = git('log', '--first-parent', '--max-count=500',
+              '--format=%H%x1f%(trailers:key=Changelog,valueonly,unfold,separator=%x1e)%x1d', rng)
+    changes = []
+    for rec in log.split('\x1d'):
+        c, _, values = rec.strip().partition('\x1f')
+        changes += [{'commit': c, 'subject': v.strip()} for v in values.split('\x1e') if v.strip()]
 
     entries.append({'version': version, 'published': published, 'commit': head, 'changes': changes})
     entries.sort(key=functools.cmp_to_key(lambda x, y: version_cmp(y['version'], x['version'])))
     if keep:
         entries = entries[:keep]
-    local.write_text(json.dumps({'channel': channel, 'versions': entries}, indent=2) + '\n')
+    local.write_text(json.dumps({'format': 2, 'channel': channel, 'versions': entries}, indent=2) + '\n')
     put(local, key, 'application/json', no_cache=True)
     return changes
 
@@ -441,7 +453,7 @@ def main():
         w, t = feed['windows']['installer'], feed['linux']['tarball']
         repo = os.environ.get('GITHUB_REPOSITORY', 'SpryCAD/SpryCAD')
         listed = ''.join(f"- {c['subject']} ([{c['commit'][:7]}](https://github.com/{repo}/commit/{c['commit']}))\n"
-                         for c in changes) or '- No changes since the previous release.\n'
+                         for c in changes) or '- No user-visible changes listed.\n'
         a.notes_out.write_text(f"""## Changes
 
 {listed}

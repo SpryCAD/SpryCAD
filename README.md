@@ -132,8 +132,24 @@ file type and a `sprycad` command (`./uninstall.sh` removes them).
 CI (`.github/workflows/packages.yml`) publishes every push to master to the **dev** channel and every version tag
 to **stable**: signed apt and dnf repositories, the downloads, and an update feed (`updates/<channel>.json`), all
 on Cloudflare R2; GitHub releases link to the files there. The Windows app checks that feed (Options > Updates
-picks the channel). On Debian or Ubuntu (`dev` in place of `stable` for the
-latest master build):
+picks the channel).
+
+Work happens on feature branches, merged into master by pull request (squash merge, the commit message being the
+PR's title and description). The change log (in the app under Help > Change Log, on the download page and in
+release notes) lists what those merges mark for users: one `Changelog:` line per change at the end of the PR
+description. Only master's own history is read, so lines in a branch's work-in-progress commits never appear, and a
+merge without any is internal.
+
+```
+Fillets: tangent chains solved together
+
+The technical description, as usual.
+
+Changelog: Fillets on tangent edge chains no longer fail
+Changelog: Fillet preview is faster on large parts
+```
+
+On Debian or Ubuntu (`dev` in place of `stable` for the latest master build):
 
 ```bash
 sudo install -d -m 0755 /etc/apt/keyrings
