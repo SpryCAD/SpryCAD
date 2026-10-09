@@ -126,11 +126,13 @@ static class Updater
     static async Task Offer(MainWindow w, Release r)
     {
         var mb = r.Size / (1024.0 * 1024.0);
-        var text = $"You have {CurrentVersion}. The update downloads now ({mb:0} MB) and installs when SpryCAD closes.";
+        var title = $"New version available: v{r.Version}";
+        var text = $"You are on v{CurrentVersion}. Would you like to update?";
+        var note = $"{mb:0} MB download. It installs when SpryCAD closes.";
         var buttons = new[] { "Update", "Later", "Skip This Version" };
-        var choice = Card.ShowAsync(w, CardKind.Question, $"SpryCAD {r.Version} is available", new[] { Card.Text(text) }, buttons, 0, 1) is { } shown
+        var choice = Card.ShowAsync(w, CardKind.Question, title, new[] { Card.Text(text), Card.Text(note, dim: true) }, buttons, 0, 1) is { } shown
             ? await shown
-            : await Dialogs.YesNo(w, "Update available", $"SpryCAD {r.Version} is available. {text}", "Update", "Later") ? 0 : 1;
+            : await Dialogs.YesNo(w, "Update available", $"{title}. {text} {note}", "Update", "Later") ? 0 : 1;
         if (choice == 2) { UserSettings.SkippedUpdate = r.Version; UserSettings.Save(); return; }
         if (choice != 0) return;
 
