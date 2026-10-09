@@ -64,7 +64,11 @@ def run(*cmd, **kw):
 
 
 def aws(*a, check=True):
-    return subprocess.run(['aws', *a, '--endpoint-url', ENDPOINT], check=check, text=True, capture_output=True)
+    r = subprocess.run(['aws', *a, '--endpoint-url', ENDPOINT], text=True, capture_output=True)
+    if check and r.returncode != 0:
+        # the CLI's own message says why (AccessDenied, NoSuchBucket, InvalidAccessKeyId, ...)
+        sys.exit(f"aws {' '.join(a[:2])} failed (exit {r.returncode}):\n{r.stderr.strip() or r.stdout.strip()}")
+    return r
 
 
 def put(local, key, content_type=None, no_cache=False):
