@@ -45,9 +45,10 @@ ARCH = 'amd64'
 
 
 def env(name, default=None):
-    v = os.environ.get(name, default)
-    if v is None:
-        sys.exit(f'{name} is not set')
+    # an unset GitHub secret or variable arrives as an empty string
+    v = os.environ.get(name) or default
+    if not v:
+        sys.exit(f'{name} is not set (or empty): add it under Settings > Secrets and variables > Actions')
     return v
 
 
