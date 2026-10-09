@@ -15,6 +15,8 @@
 #             R2_SECRET_ACCESS_KEY  ... and its secret access key
 #             APT_GPG_PRIVATE_KEY   armored private key that signs the apt repository (gpg --armor --export-secret-keys)
 #             APT_GPG_PASSPHRASE    its passphrase (leave unset for a key without one)
+#             UPDATE_SIGNING_KEY    PEM private key (ECDSA P-256) that signs the update feed; its public half is in
+#                                   src/SpryCad.App/Updater.cs
 #   Variables R2_BUCKET             the bucket name
 #             R2_PUBLIC_URL         the bucket's public URL: its custom domain (https://packages.example.com) or r2.dev URL
 name: Packages
@@ -43,8 +45,12 @@ jobs:
         shell: pwsh
         run: |
           if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
+      # The app checks this feed for updates (src/SpryCad.App/Updater.cs); a build without them never checks.
       - name: Build installer
         shell: pwsh
+        env:
+          SPRYCAD_UPDATE_URL: ${{ vars.R2_PUBLIC_URL }}
+          SPRYCAD_UPDATE_CHANNEL: ${{ github.ref_type == 'tag' && 'stable' || 'dev' }}
         run: ./build/make-installer.ps1
       # only to hand the file to the publish job: kept a day, R2 holds the packages
       - uses: actions/upload-artifact@v4
@@ -108,6 +114,7 @@ jobs:
       AWS_REQUEST_CHECKSUM_CALCULATION: when_required
       AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
       APT_GPG_PASSPHRASE: ${{ secrets.APT_GPG_PASSPHRASE }}
+      UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
     steps:
       - uses: actions/checkout@v4
         with:

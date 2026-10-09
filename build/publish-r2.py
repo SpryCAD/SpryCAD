@@ -8,18 +8,26 @@ Bucket layout (all under the bucket's public URL, R2_PUBLIC_URL):
   apt/pool/<channel>/main/s/sprycad/sprycad_<debver>_amd64.deb
   downloads/<channel>/<version>/                       the Windows installer and the Linux tarball
   updates/<channel>.json                               the update feed: latest version, URLs, SHA-256s
+  updates/<channel>.json.sig                           its signature: ECDSA P-256 over SHA-256, DER, base64
 
 Each channel has its own pool: a commit on master and its tag both build version 0.2.0, and two different files
 under one name would fail apt's checksums. Stable keeps every release; dev keeps the newest --keep-dev builds (the
 older .debs and downloads are deleted). The indexes are written last (Packages, then the signed Release), so a
 client never reads an index that names a file not yet uploaded.
 
+The feed is signed with UPDATE_SIGNING_KEY, whose public half is built into the app (src/SpryCad.App/Updater.cs):
+the app installs only what a feed it can verify names, so the R2 keys alone cannot ship an update. The feed is
+uploaded before its signature; an app reading between the two sees a mismatch and just checks again next time.
+
 Usage: build/publish-r2.py --channel dev --deb X.deb --tarball X.tar.gz --installer X.exe [--notes-out links.md]
-Needs: aws (CLI v2), dpkg-scanpackages (dpkg-dev), apt-ftparchive (apt-utils), gpg with the signing key imported.
+Needs: aws (CLI v2), dpkg-scanpackages (dpkg-dev), apt-ftparchive (apt-utils), gpg with the signing key imported,
+  openssl.
 Environment: R2_ACCOUNT_ID, R2_BUCKET, R2_PUBLIC_URL, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY (the R2 API token),
-  and optionally APT_GPG_KEY_ID (default: the first secret key) and APT_GPG_PASSPHRASE.
+  UPDATE_SIGNING_KEY (PEM private key, P-256), and optionally APT_GPG_KEY_ID (default: the first secret key) and
+  APT_GPG_PASSPHRASE.
 """
 import argparse
+import base64
 import datetime
 import functools
 import gzip
@@ -44,6 +52,7 @@ def env(name, default=None):
 
 
 BUCKET = env('R2_BUCKET')
+SIGNING_KEY = env('UPDATE_SIGNING_KEY')  # read first: a missing key stops the run before anything is uploaded
 ENDPOINT = f"https://{env('R2_ACCOUNT_ID')}.r2.cloudflarestorage.com"
 PUBLIC = env('R2_PUBLIC_URL').rstrip('/')
 
@@ -100,6 +109,18 @@ def sha256(path):
         for chunk in iter(lambda: f.read(1 << 20), b''):
             h.update(chunk)
     return h.hexdigest()
+
+
+def sign_feed(feed, sig, work):
+    """Signs the feed's bytes as uploaded: ECDSA P-256 over SHA-256, DER, base64 (.NET ECDsa.VerifyData with
+    DSASignatureFormat.Rfc3279DerSequence reads it)."""
+    key = work / 'update-key.pem'
+    key.touch(mode=0o600)
+    key.write_text(SIGNING_KEY.strip() + '\n')
+    der = work / 'feed.der'
+    run('openssl', 'dgst', '-sha256', '-sign', str(key), '-out', str(der), str(feed))
+    key.unlink()
+    sig.write_text(base64.b64encode(der.read_bytes()).decode() + '\n')
 
 
 def gpg_args():
@@ -223,7 +244,10 @@ def main():
     with tempfile.TemporaryDirectory() as tmp:
         f = Path(tmp) / 'feed.json'
         f.write_text(json.dumps(feed, indent=2) + '\n')
+        sig = Path(tmp) / 'feed.json.sig'
+        sign_feed(f, sig, Path(tmp))
         put(f, f'updates/{a.channel}.json', 'application/json', no_cache=True)
+        put(sig, f'updates/{a.channel}.json.sig', 'text/plain', no_cache=True)
 
     if keep:
         prune_downloads(a.channel, keep)

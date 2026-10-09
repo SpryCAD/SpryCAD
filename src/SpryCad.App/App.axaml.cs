@@ -95,6 +95,7 @@ public partial class App : Application
                 w.Activate();
                 _ = OpenFiles(w, files);
             }));
+            _ = Updater.CheckAtStart(w);
         }
         base.OnFrameworkInitializationCompleted();
     }

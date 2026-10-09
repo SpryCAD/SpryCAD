@@ -205,6 +205,7 @@ public partial class MainWindow
             Item("_Options...", () => _ = Dialogs.Options(this), null, "options")));
         MainMenu.Items.Add(Sub("_Help",
             Item("_Keyboard Shortcuts", () => _ = Dialogs.Shortcuts(this), null, "help"),
+            Item("Check for _Updates...", () => _ = Updater.CheckNow(this)),
             Item("_About SpryCAD", () => _ = Dialogs.About(this))));
     }
 

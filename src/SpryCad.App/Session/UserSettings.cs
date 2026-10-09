@@ -58,6 +58,10 @@ public static class UserSettings
     public static int TaskWidth { get; set; } = 300;
     /// <summary>How the list of open parts is ordered.</summary>
     public static PartsOrder PartsSort { get; set; } = PartsOrder.Tabs;
+    /// <summary>Look for a newer version at start (Windows, installed copies only: see Updater). On by default.</summary>
+    public static bool CheckForUpdates { get; set; } = true;
+    /// <summary>The version the user chose to skip: not offered again at start (Help > Check for Updates still does).</summary>
+    public static string? SkippedUpdate { get; set; }
 
     public static void Load()
     {
@@ -81,6 +85,8 @@ public static class UserSettings
                 else if (k == nameof(TaskOpen)) TaskOpen = v == "1";
                 else if (k == nameof(TaskWidth) && int.TryParse(v, out var dw)) TaskWidth = dw;
                 else if (k == nameof(PartsSort) && Enum.TryParse<PartsOrder>(v, out var po)) PartsSort = po;
+                else if (k == nameof(CheckForUpdates)) CheckForUpdates = v == "1";
+                else if (k == nameof(SkippedUpdate)) SkippedUpdate = v.Length > 0 ? v : null;
             }
         }
         catch { /* defaults */ }
@@ -105,6 +111,8 @@ public static class UserSettings
             lines.Add($"{nameof(TaskOpen)}={(TaskOpen ? 1 : 0)}");
             lines.Add($"{nameof(TaskWidth)}={TaskWidth}");
             lines.Add($"{nameof(PartsSort)}={PartsSort}");
+            lines.Add($"{nameof(CheckForUpdates)}={(CheckForUpdates ? 1 : 0)}");
+            if (SkippedUpdate != null) lines.Add($"{nameof(SkippedUpdate)}={SkippedUpdate}");
             File.WriteAllLines(StorePath, lines);
         }
         catch { /* preferences are a convenience only */ }

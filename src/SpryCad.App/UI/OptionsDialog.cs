@@ -29,11 +29,10 @@ public static class OptionsDialog
 
     sealed record Page(string Title, string Icon, Func<Form, Context, Commit> Build);
 
-    static readonly Page[] SystemPages =
-    {
-        new("View", "views", ViewPage),
-        new("Files", "folder", FilesPage),
-    };
+    // Updates: Windows only (Linux updates with its packages)
+    static readonly Page[] SystemPages = OperatingSystem.IsWindows()
+        ? new Page[] { new("View", "views", ViewPage), new("Files", "folder", FilesPage), new("Updates", "rebuild", UpdatesPage) }
+        : new Page[] { new("View", "views", ViewPage), new("Files", "folder", FilesPage) };
 
     static readonly Page[] DocumentPages =
     {
@@ -219,6 +218,21 @@ public static class OptionsDialog
                 if (keep.SelectedIndex >= 0) UserSettings.KeepDisplay = modes[keep.SelectedIndex];
                 if (keep.SelectedIndex == 0) UserSettings.KeepDisplaySeconds = seconds;
             });
+    }
+
+    static Commit UpdatesPage(Form f, Context c)
+    {
+        f.Section("Updates");
+        var check = f.Check("Check for updates when SpryCAD starts", UserSettings.CheckForUpdates,
+            Updater.CanUpdate
+                ? "A newer version is offered, never installed without asking. Help > Check for Updates looks at any time."
+                : "This copy cannot update itself (a local build, or not installed by the setup).");
+        return new Commit(() => null, () => () =>
+        {
+            var on = check.IsChecked == true;
+            if (on && !UserSettings.CheckForUpdates) UserSettings.SkippedUpdate = null; // turned back on: offer everything again
+            UserSettings.CheckForUpdates = on;
+        });
     }
 
     static Commit UnitsPage(Form f, Context c)

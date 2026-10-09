@@ -18,6 +18,8 @@ static class Program
         if (OperatingSystem.IsWindows()) t.SetApartmentState(ApartmentState.STA);
         t.Start();
         t.Join();
+        // an update the user accepted: its installer runs now that the app has closed
+        Updater.RunPending();
     }
 
     /// <summary>

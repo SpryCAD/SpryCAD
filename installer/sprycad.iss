@@ -123,6 +123,8 @@ Root: HKA; Subkey: "Software\Classes\.sasm\ShellEx\{{e357fccd-a995-4576-b01f-234
 Filename: "{app}\{#AppExe}"; Description: "Launch {#AppName}"; Flags: postinstall nowait skipifsilent
 ; or open a sample: one or the other (RunListClickCheck), as both would start two windows
 Filename: "{app}\{#AppExe}"; Parameters: """{code:SamplesDir}\Demos\spur-gear.sprt"""; Description: "Open a sample model (the spur gear)"; Flags: postinstall nowait skipifsilent unchecked
+; an update from the app (Updater.cs) that asked to restart: silent, /RELAUNCH=1, SpryCAD started again as the user
+Filename: "{app}\{#AppExe}"; Flags: nowait runasoriginaluser; Check: Relaunch
 
 [Messages]
 FinishedHeadingLabel=[name] is ready
@@ -134,6 +136,12 @@ function SamplesDir(Param: String): String;
 begin
   if IsAdminInstallMode then Result := ExpandConstant('{commondocs}\SpryCAD Samples')
   else Result := ExpandConstant('{userdocs}\SpryCAD Samples');
+end;
+
+// started by the app's updater with /RELAUNCH=1: start SpryCAD again when done
+function Relaunch: Boolean;
+begin
+  Result := WizardSilent and (ExpandConstant('{param:RELAUNCH|0}') = '1');
 end;
 
 // Launch and Open a sample are one or the other: ticking one clears the other
