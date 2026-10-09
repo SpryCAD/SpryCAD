@@ -18,7 +18,8 @@
 #             UPDATE_SIGNING_KEY    PEM private key (ECDSA P-256) that signs the update feed; its public half is in
 #                                   src/SpryCad.App/Updater.cs
 #   Variables R2_BUCKET             the bucket name
-#             R2_PUBLIC_URL         the bucket's public URL: https://download.sprycad.com (its custom domain)
+#             R2_PUBLIC_URL         the bucket's public URL: https://download.sprycad.com (its custom domain); a variable
+#                                   (a secret works too, but then the logs show it as ***)
 name: Packages
 
 on:
@@ -49,7 +50,7 @@ jobs:
       - name: Build installer
         shell: pwsh
         env:
-          SPRYCAD_UPDATE_URL: ${{ vars.R2_PUBLIC_URL }}
+          SPRYCAD_UPDATE_URL: ${{ vars.R2_PUBLIC_URL || secrets.R2_PUBLIC_URL }}
           SPRYCAD_UPDATE_CHANNEL: ${{ github.ref_type == 'tag' && 'stable' || 'dev' }}
         run: ./build/make-installer.ps1
       # only to hand the file to the publish job: kept a day, R2 holds the packages
@@ -107,7 +108,7 @@ jobs:
       # a secret or a variable, either works
       R2_ENDPOINT: ${{ secrets.R2_ENDPOINT || vars.R2_ENDPOINT }}
       R2_BUCKET: ${{ vars.R2_BUCKET || secrets.R2_BUCKET }}
-      R2_PUBLIC_URL: ${{ vars.R2_PUBLIC_URL }}
+      R2_PUBLIC_URL: ${{ vars.R2_PUBLIC_URL || secrets.R2_PUBLIC_URL }}
       AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
       AWS_DEFAULT_REGION: auto
