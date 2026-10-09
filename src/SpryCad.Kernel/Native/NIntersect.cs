@@ -77,10 +77,6 @@ public static class NIntersect
         double F(double t) => s.F_(c.Eval(t));
         double lo = Math.Min(e.T0, e.T1), hi = Math.Max(e.T0, e.T1);
         var res = new List<double>();
-        // the face split, curve crossings and the boolean's domains read the finest sampling an edge has
-        // (NEdge.FinestSamples): this one, for the edges near the other body. Other readers get samples near the
-        // tolerance they ask for.
-        e.Samples(tol * 50);
 
         // edge lying on the surface (fitted curves only within their fit tolerance: a boolean fits traced
         // sections within 50 tol of the exact intersection)

@@ -60,8 +60,8 @@ public sealed class NEdge
     }
 
     /// <summary>
-    /// Points within the chord tolerance, the finest sampling taken so far if that is finer (the face split follows
-    /// the boundary points that edge/surface intersection sampled finely).
+    /// Points within the chord tolerance, the finest sampling taken so far if that is finer (a face split follows the
+    /// boundary as finely as crossings or near-boundary classification sampled it).
     /// </summary>
     public List<Vec3> FinestSamples(double tol) => FinestAt(tol).Points;
 

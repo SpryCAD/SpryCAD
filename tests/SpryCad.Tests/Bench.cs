@@ -229,7 +229,7 @@ static class Bench
             if (vals.Distinct().Count() > 1) Console.WriteLine($"  face {key}: {string.Join("  ", vals.GroupBy(v => v).Select(g => $"x{g.Count()} {g.Key}"))}");
         }
         // per feature, a short hash of its result (compare between processes)
-        for (int k = 0; k < names.Count; k++) Console.WriteLine($"  {names[k],-20} {(uint)StableHash(prints[0][k]):X8}");
+        for (int k = 0; k < names.Count; k++) Console.WriteLine($"  {names[k],-20} {(uint)StableHash(prints[0][k]):X8}" + (Environment.GetEnvironmentVariable("FC_DET_PRINT") != null ? "  " + prints[0][k] : ""));
         Console.WriteLine(bad == 0 ? "every run matched" : $"{bad} features differ");
         return bad == 0 ? 0 : 1;
     }
@@ -329,6 +329,8 @@ static class Bench
         return h;
     }
 
+    static readonly bool GeometryOnly = Environment.GetEnvironmentVariable("FC_DET_GEOMETRY") != null;
+
     internal static string Fingerprint(ModelState s)
     {
         var parts = new List<string>();
@@ -339,9 +341,10 @@ static class Bench
             double sx = 0, sy = 0, sz = 0;
             foreach (var v in verts) { sx += v.P.X; sy += v.P.Y; sz += v.P.Z; }
             var faceNames = string.Join(",", nb.Faces.Select(f => f.Tag.Name).OrderBy(n => n, StringComparer.Ordinal));
-            var tols = string.Join(",", nb.Edges.Select(e => e.SampledTol).GroupBy(t => t).OrderBy(g => g.Key).Select(g => $"{g.Key:g3}x{g.Count()}"))
-                + $" order#{(uint)StableHash(string.Join(",", nb.Edges.Select(e => e.SampledTol.ToString("R")))):X8}"
-                + $" points#{PointsHash(nb):X16} curves#{CurvesHash(nb):X16} faces#{FacesHash(nb):X16}";
+            // FC_DET_GEOMETRY: the geometry alone (which edges are sampled, at which tolerance, is a cache detail)
+            var tols = (GeometryOnly ? "" : string.Join(",", nb.Edges.Select(e => e.SampledTol).GroupBy(t => t).OrderBy(g => g.Key).Select(g => $"{g.Key:g3}x{g.Count()}"))
+                + $" order#{(uint)StableHash(string.Join(",", nb.Edges.Select(e => e.SampledTol.ToString("R")))):X8}")
+                + (GeometryOnly ? "" : $" points#{PointsHash(nb):X16}") + $" curves#{CurvesHash(nb):X16} faces#{FacesHash(nb):X16}";
             parts.Add($"{nb.Faces.Count}f {nb.Edges.Count()}e {verts.Count}v sum({sx:0.######},{sy:0.######},{sz:0.######}) names#{faceNames.Length}:{(uint)StableHash(faceNames):X8} samples[{tols}]");
         }
         return string.Join(" | ", parts);

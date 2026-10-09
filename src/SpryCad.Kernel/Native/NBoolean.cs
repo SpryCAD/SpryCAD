@@ -232,10 +232,8 @@ public sealed class NBoolean
     /// </summary>
     NDomain Build(NFace f, double tol)
     {
-        // the finest boundary samples: points next to a curved boundary (a fillet's contact line) are classified
-        // against the sampled polygon, so it is kept as close to the curve as edge/surface intersection sampled it
-        if (!Local) return NDomain.Of(f, tol, finest: true);
-        return NDomain.Cached(f, tol, finest: true);
+        if (!Local) return NDomain.Of(f, tol);
+        return NDomain.Cached(f, tol);
     }
 
     NBody Execute(NBody A, NBody B, BoolOp op)
@@ -659,9 +657,10 @@ public sealed class NBoolean
         var key = swap ? (g, e) : (e, g);
         if (!_crossings.TryGetValue(key, out var r))
         {
-            // the distance profile is read along the more finely sampled edge (a line has a single segment)
+            // the distance profile is read along the more finely sampled edge (a line has a single segment); seeds from
+            // fine samples (the crossings of contact lines with face boundaries are shallow)
             var (x, y) = key;
-            bool flip = x.FinestSamples(_sampleTol * 500).Count < y.FinestSamples(_sampleTol * 500).Count;
+            bool flip = x.FinestSamples(_tol * 50).Count < y.FinestSamples(_tol * 50).Count;
             r = flip ? CurveCrossings(y, x).Select(c => (c.tb, c.ta, c.p, c.reach)).ToList() : CurveCrossings(x, y).Select(c => (c.ta, c.tb, c.p, c.reach)).ToList();
             _crossings[key] = r;
         }
@@ -682,7 +681,7 @@ public sealed class NBoolean
             var coincidentTol = _tol * 100;
             if (Math.Abs(qa.X - qb.X) > coincidentTol || Math.Abs(Math.IEEERemainder(qa.Y - qb.Y, lead)) > coincidentTol) return res;
         }
-        var pa = a.FinestSamples(_sampleTol * 500); var pb = b.FinestSamples(_sampleTol * 500);
+        var pa = a.FinestSamples(_tol * 50); var pb = b.FinestSamples(_tol * 50);
         double lo(NEdge x) => Math.Min(x.T0, x.T1); double hi(NEdge x) => Math.Max(x.T0, x.T1);
         double Par(NEdge x, Vec3 p, double hint)
         {

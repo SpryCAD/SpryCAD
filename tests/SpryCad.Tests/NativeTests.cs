@@ -72,7 +72,7 @@ static class NativeBoolTests
 
     public static void Run(TestRunner t)
     {
-        t.Test("Native domain: point tests match the plain loops bit for bit", () =>
+        t.Test("Native domain: point tests match the plain loops (bit for bit; classification as on a fine sampling)", () =>
         {
             // a plate with a hole pattern (long loops in many runs) and its hole walls; points everywhere and right
             // next to the boundary, against the tests over every segment
@@ -113,6 +113,8 @@ static class NativeBoolTests
             {
                 const double tol = 1e-3;
                 var d = NDomain.Of(f, tol);
+                // Classify refines the boundary next to a point to tol / 100: as the plain tests on that sampling
+                var dFine = NDomain.Of(f, tol / 100);
                 var pts = new List<Vec2>();
                 for (int k = 0; k < 400; k++)
                     pts.Add(new Vec2(d.UMin + (d.UMax - d.UMin) * (rnd.NextDouble() * 1.2 - 0.1), d.VMin + (d.VMax - d.VMin) * (rnd.NextDouble() * 1.2 - 0.1)));
@@ -128,10 +130,12 @@ static class NativeBoolTests
                     t.True(d.ContainsUV(uv) == InsideRef(d, uv), $"{f.Tag.Name}: inside at {uv}");
                     var bd = DistRef(d, p);
                     t.True(BitConverter.DoubleToInt64Bits(d.BoundaryDistance(p)) == BitConverter.DoubleToInt64Bits(bd), $"{f.Tag.Name}: distance at {uv}");
+                    var bf = DistRef(dFine, p);
                     foreach (var onTol in new[] { 1e-6, 1e-4, 1e-2 })
                     {
-                        int want = bd < onTol ? 0 : bd < tol * 2 + onTol && d.ExactBoundaryDistance(p) < onTol ? 0 : InsideRef(d, d.Map(p)) ? 1 : -1;
-                        t.Eq(d.Classify(p, onTol), want);
+                        int want = bf < onTol ? 0 : bf < tol / 100 * 2 + onTol && d.ExactBoundaryDistance(p) < onTol ? 0 : InsideRef(dFine, dFine.Map(p)) ? 1 : -1;
+                        var got = d.Classify(p, onTol);
+                        if (got != want) t.True(false, $"{f.Tag.Name}: classified {got}, finely sampled {want} at {uv} (onTol {onTol})");
                     }
                     n++;
                 }
