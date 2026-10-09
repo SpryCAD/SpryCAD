@@ -134,9 +134,11 @@ jobs:
       APT_GPG_PASSPHRASE: ${{ secrets.APT_GPG_PASSPHRASE }}
       UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
     steps:
+      # the build scripts, and the full history and tags for the changelog
       - uses: actions/checkout@v4
         with:
           sparse-checkout: build
+          fetch-depth: 0
       - uses: actions/download-artifact@v4
         with:
           path: packages

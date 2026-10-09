@@ -130,6 +130,24 @@
       ${t.sha256 ? `<h3>Check the download</h3><p>The hash should match the SHA-256 shown above:</p>${pre(`sha256sum ${t.name}`)}` : ''}` : ''}`;
   }
 
+  // The change logs (changelog/<channel>.json, written by build/publish-r2.py): each build's commit subjects. Loaded
+  // beside the version lists and shown when they arrive; a channel without one shows no changes.
+  let logs = { stable: [], dev: [] };
+  async function changelog(ch) {
+    const r = await fetch(`${BASE}/changelog/${ch}.json`, { cache: 'no-store' });
+    return r.ok ? (await r.json()).versions || [] : [];
+  }
+
+  function changes(rel, ch) {
+    const entry = logs[ch].find(e => e.version === rel.version);
+    if (!entry) return '';
+    const items = entry.changes.map(c => `<li>${esc(c.subject)} <span class="small muted">${esc(c.commit.slice(0, 7))}</span></li>`);
+    const list = items.length ? `<ul>${items.slice(0, 15).join('')}</ul>` +
+        (items.length > 15 ? `<details><summary>${items.length - 15} more</summary><ul>${items.slice(15).join('')}</ul></details>` : '')
+      : '<p class="muted">No changes listed.</p>';
+    return `<h2>What's new in ${esc(rel.version)}</h2>${list}`;
+  }
+
   function render() {
     const stableOk = data.stable.length > 0, devOk = data.dev.length > 0;
     if (state.channel !== 'stable' && state.channel !== 'dev') state.channel = stableOk ? 'stable' : 'dev';
@@ -160,7 +178,7 @@
     $('meta').innerHTML = rel ? `Published ${esc(day(rel.published))}${commit}` : '';
 
     if (rel) rel.channel = state.channel;
-    $('content').innerHTML = rel ? (state.os === 'windows' ? windows(rel, rel === list[0]) : linux(rel, rel === list[0])) : '';
+    $('content').innerHTML = rel ? (state.os === 'windows' ? windows(rel, rel === list[0]) : linux(rel, rel === list[0])) + changes(rel, state.channel) : '';
 
     const q = new URLSearchParams({ channel: state.channel, os: state.os });
     if (rel && rel !== list[0]) q.set('version', rel.version);
@@ -189,8 +207,14 @@
     }
   });
 
+  let listed = false;
+  Promise.all([changelog('stable'), changelog('dev')]).then(([stable, dev]) => {
+    logs = { stable, dev };
+    if (listed) render();
+  }, () => {});
   Promise.all([channel('stable'), channel('dev')]).then(([stable, dev]) => {
     data = { stable, dev };
+    listed = true;
     render();
   }, () => {
     $('version').innerHTML = '<option>Unavailable</option>';

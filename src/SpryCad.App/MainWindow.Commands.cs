@@ -206,6 +206,7 @@ public partial class MainWindow
         MainMenu.Items.Add(Sub("_Help",
             Item("_Keyboard Shortcuts", () => _ = Dialogs.Shortcuts(this), null, "help"),
             Item("Check for _Updates...", () => _ = Updater.CheckNow(this)),
+            Item("_Change Log...", () => _ = Updater.ShowChangelog(this)),
             Item("_About SpryCAD", () => _ = Dialogs.About(this))));
     }
 

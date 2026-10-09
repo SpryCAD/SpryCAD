@@ -2,7 +2,11 @@ using System.Diagnostics;
 using System.Reflection;
 using System.Security.Cryptography;
 using System.Text.Json;
+using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
+using Avalonia.Layout;
+using Avalonia.Media;
 using SpryCad.App.Session;
 using SpryCad.App.UI;
 
@@ -49,7 +53,7 @@ static class Updater
         .FirstOrDefault(a => a.Key == key)?.Value is { Length: > 0 } v ? v : null;
 
     /// <summary>This copy's version without the commit: 0.2.0 or 0.2.0-dev.3.</summary>
-    static string CurrentVersion => (Assembly.GetEntryAssembly()?.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?
+    public static string CurrentVersion => (Assembly.GetEntryAssembly()?.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?
         .InformationalVersion ?? "").Split('+')[0];
 
     /// <summary>Installed by the setup (which leaves its uninstaller beside the app), so a setup can update it.</summary>
@@ -57,6 +61,9 @@ static class Updater
 
     /// <summary>This copy can update itself: Windows, a published build with a feed, installed by the setup.</summary>
     public static bool CanUpdate => OperatingSystem.IsWindows() && BaseUrl != null && BuildChannel != null && Installed;
+
+    /// <summary>Where the published files are: the build's feed URL, else the public one (a local build shows the change log too).</summary>
+    static string FilesUrl => (BaseUrl ?? "https://download.sprycad.com").TrimEnd('/');
 
     static readonly HttpClient Http = MakeClient();
 
@@ -127,11 +134,10 @@ static class Updater
         if (choice == 2) { UserSettings.SkippedUpdate = r.Version; UserSettings.Save(); return; }
         if (choice != 0) return;
 
-        string file;
         try
         {
             var progress = new Progress<double>(f => w.Status($"Downloading SpryCAD {r.Version}... {f:P0}"));
-            file = await Download(r, progress);
+            await Download(r, progress);
         }
         catch (Exception ex)
         {
@@ -141,19 +147,27 @@ static class Updater
             return;
         }
         w.Status("");
-        _pending = file;
         var now = Card.ShowAsync(w, CardKind.Info, $"SpryCAD {r.Version} is ready to install",
             new[] { Card.Text("SpryCAD closes (asking about unsaved parts first), installs the update and starts again.") },
             new[] { "Restart Now", "When I Close SpryCAD" }, 0, 1) is { } ready ? await ready == 0 : false;
         if (!now) { w.Status($"SpryCAD {r.Version} installs when SpryCAD closes."); return; }
+        RestartNow(w);
+    }
+
+    /// <summary>The version downloaded and waiting to install when SpryCAD closes, if any.</summary>
+    internal static string? PendingVersion => _pending != null ? _release?.Version : null;
+
+    /// <summary>Closes SpryCAD to install the downloaded update, and starts it again after.</summary>
+    internal static void RestartNow(MainWindow w)
+    {
         _relaunch = true;
         w.Close(); // closing can still be cancelled: then it installs at the next close, and starts SpryCAD again
     }
 
-    /// <summary>The channel's feed, verified; null when its signature does not match (or it is for another channel).</summary>
-    internal static async Task<Release?> Fetch()
+    /// <summary>A channel's feed (this copy's by default), verified; null when its signature does not match (or it is for another channel).</summary>
+    internal static async Task<Release?> Fetch(string? channel = null)
     {
-        var channel = Channel!;
+        channel ??= Channel!;
         var url = $"{BaseUrl!.TrimEnd('/')}/updates/{channel}.json";
         var feed = await Http.GetByteArrayAsync(url);
         var sig = await Http.GetStringAsync(url + ".sig");
@@ -199,8 +213,11 @@ static class Updater
     internal static bool IsNewer(string candidate, string current) =>
         Key(candidate) is { } a && Key(current) is { } b && a.CompareTo(b) > 0;
 
-    /// <summary>Downloads the installer into a temporary folder and checks its size and SHA-256 against the feed.</summary>
-    static async Task<string> Download(Release r, IProgress<double> progress)
+    /// <summary>
+    /// Downloads the installer into a temporary folder, checks its size and SHA-256 against the feed, and queues it to
+    /// install when SpryCAD closes.
+    /// </summary>
+    internal static async Task Download(Release r, IProgress<double> progress)
     {
         var dir = Path.Combine(Path.GetTempPath(), "SpryCAD-update");
         Directory.CreateDirectory(dir);
@@ -223,7 +240,75 @@ static class Updater
         }
         if (!Matches(file, r)) { File.Delete(file); throw new InvalidDataException("the download does not match the published checksum."); }
         _release = r;
-        return file;
+        _pending = file;
+    }
+
+    /// <summary>One build in the change log: its version, when it was published, and its changes (commit subjects).</summary>
+    internal sealed record LogEntry(string Version, DateTimeOffset? Published, string[] Changes);
+
+    /// <summary>A channel's change log (changelog/&lt;channel&gt;.json, written by build/publish-r2.py), newest first.</summary>
+    internal static async Task<List<LogEntry>> FetchChangelog(string channel)
+    {
+        var list = new List<LogEntry>();
+        using var resp = await Http.GetAsync($"{FilesUrl}/changelog/{channel}.json");
+        if (resp.StatusCode == System.Net.HttpStatusCode.NotFound) return list; // nothing published on the channel yet
+        resp.EnsureSuccessStatusCode();
+        using var doc = JsonDocument.Parse(await resp.Content.ReadAsByteArrayAsync());
+        foreach (var v in doc.RootElement.GetProperty("versions").EnumerateArray())
+            list.Add(new LogEntry(v.GetProperty("version").GetString() ?? "",
+                v.TryGetProperty("published", out var p) && DateTimeOffset.TryParse(p.GetString(), out var d) ? d : null,
+                v.TryGetProperty("changes", out var c) ? c.EnumerateArray().Select(x => x.GetProperty("subject").GetString() ?? "").ToArray() : []));
+        return list;
+    }
+
+    /// <summary>
+    /// A channel's change log in a window (this copy's channel by default): each build newest first, with what it
+    /// changed; the installed build and newer ones marked.
+    /// </summary>
+    public static async Task ShowChangelog(Window owner, string? channel = null)
+    {
+        channel ??= Channel ?? (CurrentVersion.Contains("-dev.") ? "dev" : "stable");
+        List<LogEntry> log;
+        try { log = await FetchChangelog(channel); }
+        catch (Exception ex)
+        {
+            App.Log(ex, "Loading the change log");
+            await Dialogs.Message(owner, "Change log failed", $"The change log could not be loaded: {ex.Message}");
+            return;
+        }
+        var list = new StackPanel { Spacing = 2 };
+        if (log.Count == 0) list.Children.Add(new TextBlock { Text = "Nothing has been published on this channel yet.", Foreground = Palette.TextMuted });
+        foreach (var e in log)
+        {
+            var tag = e.Version == CurrentVersion ? "installed" : IsNewer(e.Version, CurrentVersion) ? "new" : null;
+            var head = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, Margin = new Thickness(0, list.Children.Count == 0 ? 0 : 14, 0, 4) };
+            head.Children.Add(new TextBlock { Text = e.Version, FontSize = TypeScale.Header, FontWeight = FontWeight.SemiBold, Foreground = Palette.Heading });
+            if (e.Published is { } d)
+                head.Children.Add(new TextBlock { Text = d.LocalDateTime.ToString("d MMM yyyy"), Foreground = Palette.TextMuted, VerticalAlignment = VerticalAlignment.Bottom });
+            if (tag != null)
+                head.Children.Add(new TextBlock { Text = tag, FontWeight = FontWeight.SemiBold, Foreground = tag == "new" ? Palette.Accent : Palette.TextSecondary, VerticalAlignment = VerticalAlignment.Bottom });
+            list.Children.Add(head);
+            if (e.Changes.Length == 0) list.Children.Add(new TextBlock { Text = "No changes listed.", Foreground = Palette.TextMuted });
+            foreach (var change in e.Changes)
+            {
+                // a bullet with the text hanging beside it
+                var row = new DockPanel { Margin = new Thickness(2, 1, 0, 1) };
+                var dot = new TextBlock { Text = "\u2022", Width = 14, Foreground = Palette.TextSecondary };
+                DockPanel.SetDock(dot, Dock.Left);
+                row.Children.Add(dot);
+                row.Children.Add(new TextBlock { Text = change, TextWrapping = TextWrapping.Wrap });
+                list.Children.Add(row);
+            }
+        }
+        var close = new Button { Content = "Close", IsDefault = true, IsCancel = true, MinWidth = 80, HorizontalContentAlignment = HorizontalAlignment.Center,
+            HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 12, 0, 0) };
+        var root = new DockPanel();
+        DockPanel.SetDock(close, Dock.Bottom);
+        root.Children.Add(close);
+        root.Children.Add(new ScrollViewer { Content = list, MaxHeight = 480, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled });
+        var w = Dialogs.MakeWindow($"Change Log ({(channel == "dev" ? "dev builds" : "releases")})", root, 640);
+        close.Click += (_, _) => w.Close();
+        await w.ShowDialog(owner);
     }
     static Release? _release;
 

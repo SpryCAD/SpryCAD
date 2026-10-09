@@ -222,15 +222,92 @@ public static class OptionsDialog
 
     static Commit UpdatesPage(Form f, Context c)
     {
-        f.Section("Updates");
-        var check = f.Check("Check for updates when SpryCAD starts", UserSettings.CheckForUpdates,
-            Updater.CanUpdate
-                ? "A newer version is offered, never installed without asking. Help > Check for Updates looks at any time."
-                : "This copy cannot update itself (a local build, or not installed by the setup).");
+        var can = Updater.CanUpdate;
+        f.Section("Version");
+        f.Row("Installed", new SelectableTextBlock { Text = Updater.CurrentVersion, VerticalAlignment = VerticalAlignment.Center });
         var channel = f.Row("Channel", Combo(new[] { "Stable: releases", "Dev: every change, as it is made" },
                 Math.Max(0, Array.IndexOf(Updater.Channels, Updater.Channel ?? "stable"))),
             "Dev builds have the newest features and fixes first, and are tested less. Switching to Stable moves you to the next release newer than your version; nothing is downgraded.");
-        channel.IsEnabled = Updater.CanUpdate;
+        channel.IsEnabled = can;
+        string Picked() => Updater.Channels[Math.Max(0, channel.SelectedIndex)];
+
+        // the newest version on the picked channel, checked when the page opens, with Check Now, Update and Restart Now
+        var latest = new TextBlock { VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.Wrap };
+        var checkNow = new Button { Content = "Check Now", IsEnabled = can };
+        var update = new Button { IsVisible = false };
+        var restart = new Button { Content = "Restart Now", IsVisible = false };
+        ToolTip.SetTip(restart, "Closes SpryCAD (asking about unsaved parts first), installs the update and starts SpryCAD again");
+        f.Row("Latest", new WrapPanel { Orientation = Orientation.Horizontal, ItemSpacing = 8, LineSpacing = 6, Children = { latest, checkNow, update, restart } });
+        var changes = f.Row("Changes", new Button { Content = "Change Log...", HorizontalAlignment = HorizontalAlignment.Left },
+            "What each build of the picked channel changed, newest first.");
+        changes.Click += (_, _) => _ = Updater.ShowChangelog(TopLevel.GetTopLevel(changes) as Window ?? c.Owner, Picked());
+
+        f.Section("Automatic checks");
+        var check = f.Check("Check for updates when SpryCAD starts", UserSettings.CheckForUpdates,
+            can ? "A newer version is offered, never installed without asking."
+                : "This copy cannot update itself (a local build, or not installed by the setup).");
+
+        Updater.Release? found = null;
+        int checks = 0;
+        async Task Check()
+        {
+            var mine = ++checks; // a newer check (the channel changed again) wins
+            checkNow.IsEnabled = false; update.IsVisible = false; found = null;
+            latest.Text = "Checking...";
+            string text;
+            try
+            {
+                var r = await Updater.Fetch(Picked());
+                if (mine != checks) return;
+                if (r == null) text = "The update information could not be verified. Try again later.";
+                else if (Updater.IsNewer(r.Version, Updater.CurrentVersion))
+                {
+                    found = r;
+                    text = $"{r.Version} is available";
+                    update.Content = $"Update to {r.Version}";
+                    update.IsVisible = true;
+                }
+                else text = $"{r.Version}: you are up to date";
+            }
+            catch (Exception ex)
+            {
+                if (mine != checks) return;
+                App.Log(ex, "Checking for updates");
+                text = $"Could not check: {ex.Message}";
+            }
+            latest.Text = text;
+            checkNow.IsEnabled = true;
+        }
+        void Ready(string version)
+        {
+            latest.Text = $"{version} is downloaded: it installs when SpryCAD closes.";
+            checkNow.IsEnabled = channel.IsEnabled = update.IsVisible = false;
+            restart.IsVisible = true;
+        }
+        checkNow.Click += (_, _) => _ = Check();
+        channel.SelectionChanged += (_, _) => { if (can && Updater.PendingVersion == null) _ = Check(); };
+        update.Click += async (_, _) =>
+        {
+            if (found is not { } r) return;
+            // the channel the update came from is the one followed from now on, even if Options is cancelled
+            if (Picked() != Updater.Channel) { UserSettings.UpdateChannel = Picked(); UserSettings.SkippedUpdate = null; UserSettings.Save(); }
+            update.IsEnabled = checkNow.IsEnabled = channel.IsEnabled = false;
+            try { await Updater.Download(r, new Progress<double>(p => latest.Text = $"Downloading {r.Version}... {p:P0}")); }
+            catch (Exception ex)
+            {
+                App.Log(ex, "Downloading an update");
+                latest.Text = $"The download failed: {ex.Message}";
+                update.IsEnabled = checkNow.IsEnabled = channel.IsEnabled = true;
+                return;
+            }
+            Ready(r.Version);
+        };
+        restart.Click += (_, _) => { (TopLevel.GetTopLevel(restart) as Window)?.Close(); Updater.RestartNow(c.Owner); };
+
+        if (Updater.PendingVersion is { } pending) Ready(pending);
+        else if (can) _ = Check();
+        else latest.Text = "Not checked: this copy cannot update itself.";
+
         return new Commit(() => null, () => () =>
         {
             var on = check.IsChecked == true;

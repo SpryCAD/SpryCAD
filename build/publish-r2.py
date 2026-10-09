@@ -15,6 +15,8 @@ Bucket layout (all under the bucket's public URL, R2_PUBLIC_URL):
                                                        website's version list (site/download.js reads it, by CORS)
   updates/<channel>.json                               the update feed: latest version, URLs, SHA-256s
   updates/<channel>.json.sig                           its signature: ECDSA P-256 over SHA-256, DER, base64
+  changelog/<channel>.json                             each build's changes (commit subjects), newest first: read by
+                                                       the app (Options > Updates) and the website
 
 Each channel has its own pool: a commit on master and its tag both build version 0.2.0, and two different files
 under one name would fail apt's checksums. Stable keeps every release; dev keeps the newest --keep-dev builds (the
@@ -327,6 +329,49 @@ def publish_index(channel, entry, work):
     put(local, key, 'application/json', no_cache=True)
 
 
+def git(*a):
+    return run('git', *a, capture_output=True).stdout.strip()
+
+
+def is_ancestor(a, b):
+    return subprocess.run(['git', 'merge-base', '--is-ancestor', a, b], capture_output=True).returncode == 0
+
+
+def publish_changelog(channel, version, published, keep, work):
+    """Adds this build's changes to changelog/<channel>.json and returns them: the subjects of the commits since the
+    channel's previous build (dev), or since the previous release tag (stable), newest first, merges left out. The
+    previous build is the newest entry older than this version whose commit is in this one's history; with none (the
+    first build, or history rewritten), changes since the last release tag. Stable keeps every entry, dev the newest
+    `keep`. Read by the app (Options > Updates > Change Log) and the website."""
+    key = f'changelog/{channel}.json'
+    local = work / 'changelog.json'
+    entries = json.loads(local.read_text()).get('versions', []) if get(key, local) else []
+    entries = [e for e in entries if e['version'] != version]  # a rebuild replaces its entry
+
+    head = git('rev-parse', 'HEAD')
+    since = None
+    if channel == 'dev':
+        older = sorted((e for e in entries if version_cmp(e['version'], version) < 0),
+                       key=functools.cmp_to_key(lambda x, y: version_cmp(y['version'], x['version'])))
+        since = next((e['commit'] for e in older if e.get('commit') and is_ancestor(e['commit'], head)), None)
+    if since is None:
+        # the release tag before this commit (on a tagged commit, the one before that tag)
+        r = subprocess.run(['git', 'describe', '--tags', '--abbrev=0', '--match', 'v[0-9]*', head + '^'],
+                           capture_output=True, text=True)
+        since = r.stdout.strip() if r.returncode == 0 else None
+    rng = f'{since}..{head}' if since else head
+    log = git('log', '--no-merges', '--max-count=200', '--format=%H%x1f%s', rng)
+    changes = [{'commit': c, 'subject': s} for c, s in (l.split('\x1f', 1) for l in log.splitlines() if l)]
+
+    entries.append({'version': version, 'published': published, 'commit': head, 'changes': changes})
+    entries.sort(key=functools.cmp_to_key(lambda x, y: version_cmp(y['version'], x['version'])))
+    if keep:
+        entries = entries[:keep]
+    local.write_text(json.dumps({'channel': channel, 'versions': entries}, indent=2) + '\n')
+    put(local, key, 'application/json', no_cache=True)
+    return changes
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument('--channel', choices=['dev', 'stable'], required=True)
@@ -388,9 +433,19 @@ def main():
     with tempfile.TemporaryDirectory() as tmp:
         publish_index(a.channel, entry, Path(tmp))
 
+    # 5) the changelog (dev keeps more entries than builds: the history outlives the files)
+    with tempfile.TemporaryDirectory() as tmp:
+        changes = publish_changelog(a.channel, version, feed['published'], keep * 7 if keep else 0, Path(tmp))
+
     if a.notes_out:
         w, t = feed['windows']['installer'], feed['linux']['tarball']
-        a.notes_out.write_text(f"""## Downloads
+        repo = os.environ.get('GITHUB_REPOSITORY', 'SpryCAD/SpryCAD')
+        listed = ''.join(f"- {c['subject']} ([{c['commit'][:7]}](https://github.com/{repo}/commit/{c['commit']}))\n"
+                         for c in changes) or '- No changes since the previous release.\n'
+        a.notes_out.write_text(f"""## Changes
+
+{listed}
+## Downloads
 
 | Platform | File | SHA-256 |
 |---|---|---|
