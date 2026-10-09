@@ -156,7 +156,7 @@
       notes.push(`<div class="notice">No dev builds are available right now.</div>`);
     $('notice').innerHTML = notes.join('');
 
-    const commit = rel?.commit ? ` · <a href="https://github.com/SpryCAD/SpryCAD/commit/${esc(rel.commit)}">${esc(rel.commit.slice(0, 7))}</a>` : '';
+    const commit = rel?.commit ? ` · ${esc(rel.commit.slice(0, 7))}` : '';
     $('meta').innerHTML = rel ? `Published ${esc(day(rel.published))}${commit}` : '';
 
     if (rel) rel.channel = state.channel;
