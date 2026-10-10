@@ -371,7 +371,7 @@ static partial class Demos
     {
         var d = Doc(("BaseY", "150"), ("BaseT", "20"), ("BaseX0", "215"), ("BaseX1", "60"), ("BaseW", "170"), ("BaseR", "15"), ("BaseDraft", "5"),
             ("BodyX0", "170"), ("BodyX1", "40"), ("BodyW", "116"), ("BodyDraft", "2"), ("BodyR", "20"), ("Fl", "8"), ("FlH", "16"),
-            ("WallR", "4"), ("RibR", "3"), ("RibT", "12"), ("RibIn", "50"), ("PedRibY", "110"), ("BaseRibX", "150"), ("BaseRibP", "90"), ("BaseRibOut", "80"), ("BaseRibH", "45"),
+            ("WallR", "4"), ("RibR", "3"), ("JointR", "5"), ("RibT", "12"), ("RibIn", "50"), ("PedRibY", "110"), ("BaseRibX", "150"), ("BaseRibP", "90"), ("BaseRibOut", "80"), ("BaseRibH", "45"),
             ("BrgIn", $"{HmBrgIn}"), ("BrgOut", $"{HmBrgOut}"), ("BrgW", "64"), ("BrgDrop", "40"), ("J", $"{HmJ}"), ("CapStud", "25"), ("PedR", "6"),
             ("HeadX", $"{-HmHeadX}"), ("BarrelD", "104"), ("BarrelEnd", "70"), ("FlangeD", "116"), ("FlangeT", "12"), ("StudPCD", "96"), ("NStud", "6"),
             ("HopX0", "175"), ("HopX1", "85"), ("HopW", "116"), ("HopH", "82"), ("HopWall", "7"), ("HopDraft", "2"), ("HopR", "12"), ("HopTopR", "4"), ("Jacket", "20"), ("FillD", "44"),
@@ -438,6 +438,19 @@ static partial class Demos
                 E($"{ped.Id}.S.L{pl[3]}", $"{ped.Id}.End", new Vec3(-V("BrgW/2"), -V("BrgDrop/2"), V("BrgOut"))),
             },
         });
+        // blended into the body's side where it stands out of it (suppressed: its back side meets the body's corner
+        // round; with the body lengthened to clear it, other fillets fail: docs/hit-and-miss-notes.md)
+        double SideZ0(double yAt) => V("BodyW/2") - (yAt + V("BaseY-BaseT")) * Math.Tan(V("BodyDraft") * Math.PI / 180);
+        var pedJ = d.AddFeature(new FilletFeature
+        {
+            Name = "Pedestal into the body", Radius = "JointR", Suppressed = true,
+            Edges =
+            {
+                E($"{ped.Id}.S.L{pl[1]}", YF(0), new Vec3(V("BrgW/2"), -V("BrgDrop/2"), SideZ0(-V("BrgDrop/2")))),
+                E($"{ped.Id}.S.L{pl[3]}", YF(0), new Vec3(-V("BrgW/2"), -V("BrgDrop/2"), SideZ0(-V("BrgDrop/2")))),
+                E($"{ped.Id}.S.L{pl[0]}", YF(0), new Vec3(0, -V("BrgDrop"), SideZ0(-V("BrgDrop")))),
+            },
+        });
         d.AddFeature(new MirrorFeature { Name = "Bearing pedestal, back", Seeds = { ped.Id, pedR.Id }, Plane = PlaneRef.Front });
         // a rib under each pedestal, down the body's side (Right: sketch x = -z)
         var pr = new Sk(d);
@@ -469,13 +482,13 @@ static partial class Demos
         // the cylinder: the barrel from the head's face along +X, the flange the head bolts to
         var cf = d.AddFeature(new PlaneFeature { Name = "Cylinder face", Base = PlaneRef.Right, Offset = "-HeadX" });
         var c = new Sk(d);
-        c.Circle(Sketch.OriginId, "BarrelD");
+        var barrelC = c.Circle(Sketch.OriginId, "BarrelD");
         var cs = d.AddFeature(new SketchFeature { Name = "Barrel", Plane = new PlaneRef { Feature = cf.Id }, Sketch = c.S });
-        d.AddFeature(new ExtrudeFeature { Name = "Barrel", SketchId = cs.Id, Depth = "HeadX-BarrelEnd" });
+        var barrel = d.AddFeature(new ExtrudeFeature { Name = "Barrel", SketchId = cs.Id, Depth = "HeadX-BarrelEnd" });
         var f = new Sk(d);
         f.Circle(Sketch.OriginId, "FlangeD");
         var fs = d.AddFeature(new SketchFeature { Name = "Flange", Plane = new PlaneRef { Feature = cf.Id }, Sketch = f.S });
-        d.AddFeature(new ExtrudeFeature { Name = "Flange", SketchId = fs.Id, Depth = "FlangeT" });
+        var flange = d.AddFeature(new ExtrudeFeature { Name = "Flange", SketchId = fs.Id, Depth = "FlangeT" });
         // the water hopper on the barrel, drafted, its corners rounded, cored out down past the bore
         var h = new Sk(d);
         var hl = h.Rect("-HopX0", "-HopW/2", "-HopX1", "HopW/2");
@@ -564,9 +577,9 @@ static partial class Demos
         // the cam gear's stud boss on the +Z side, bored for the stud
         var ci = d.AddFeature(new PlaneFeature { Name = "Cam boss start", Base = PlaneRef.Front, Offset = "CamIn" });
         var cb = new Sk(d);
-        cb.Circle(cb.P("-CamX", "0"), "CamD");
+        var camC = cb.Circle(cb.P("-CamX", "0"), "CamD");
         var cbs = d.AddFeature(new SketchFeature { Name = "Cam boss", Plane = new PlaneRef { Feature = ci.Id }, Sketch = cb.S });
-        d.AddFeature(new ExtrudeFeature { Name = "Cam boss", SketchId = cbs.Id, Depth = "GearZ-CamIn-1" });
+        var camBoss = d.AddFeature(new ExtrudeFeature { Name = "Cam boss", SketchId = cbs.Id, Depth = "GearZ-CamIn-1" });
         var ce = d.AddFeature(new PlaneFeature { Name = "Cam boss face", Base = PlaneRef.Front, Offset = "GearZ-1" });
         var ch = new Sk(d);
         ch.Point(ch.P("-CamX", "0"));
@@ -597,6 +610,26 @@ static partial class Demos
             bh.Point(bh.P(sx, sz));
         var bhs = d.AddFeature(new SketchFeature { Name = "Hold-down holes", Plane = new PlaneRef { Feature = bt.Id }, Sketch = bh.S });
         d.AddFeature(new HoleFeature { Name = "Hold-down holes", SketchId = bhs.Id, Diameter = "11", ThroughAll = true });
+        // the joints blended, as cast: the hopper into the barrel before and behind it, the head's flange into the
+        // barrel, the cam gear's boss into the body's side
+        string barrelFace = $"{barrel.Id}.S.C{barrelC}";
+        double up = V("BarrelD/2"), lean = V("BarrelD/2*tan(HopDraft)");
+        d.AddFeature(new FilletFeature
+        {
+            Name = "Hopper into the barrel", Radius = "JointR",
+            Edges = { E(HF(3), barrelFace, new Vec3(-V("HopX0") + lean, up, 0)), E(HF(1), barrelFace, new Vec3(-V("HopX1") - lean, up, 0)) },
+        });
+        d.AddFeature(new FilletFeature
+        {
+            Name = "Flange into the barrel", Radius = "JointR",
+            Edges = { E($"{flange.Id}.End", barrelFace, new Vec3(-V("HeadX-FlangeT"), 0, -up)) },
+        });
+        // (suppressed: fails in the kernel, docs/hit-and-miss-notes.md)
+        d.AddFeature(new FilletFeature
+        {
+            Name = "Cam boss into the body", Radius = "JointR", Suppressed = true,
+            Edges = { E($"{camBoss.Id}.S.C{camC}", Body(0), new Vec3(-V("CamX"), -V("CamD/2"), SideZ(-V("CamD/2")))) },
+        });
         d.Color = new[] { 0.72, 0.08, 0.07 };
         HmMaterial(d, "Cast iron");
         return d;
@@ -1338,6 +1371,22 @@ static partial class Demos
             Console.WriteLine($"{sw.ElapsedMilliseconds,7} ms {bodies} {(st.Ok ? "" : st.Error)} {string.Join("; ", st.Warnings)}");
             if (r.State.Bodies.Any(b => b.Solid.Native == null || b.Solid.Topology.OpenHalfEdges > 0)) { Console.WriteLine("  (stopped: the body is no longer exact and closed)"); break; }
         }
+        return 0;
+    }
+
+    /// <summary>
+    /// <c>-- engine-faces part feature x y z [r]</c>: the faces of an engine part near a point (within r, 3 mm by default)
+    /// after the named feature, by name, kind and box (finding the names to pick edges by).
+    /// </summary>
+    public static int EngineFaces(string name, string feature, Vec3 at, double r = 3)
+    {
+        var doc = HmParts.First(p => p.name.StartsWith(name, StringComparison.OrdinalIgnoreCase)).build();
+        var upTo = doc.Features.FindIndex(f => f.Name == feature) + 1;
+        var res = new Regenerator().Rebuild(doc, upTo > 0 ? upTo : doc.Features.Count);
+        var near = new Box3 { Min = at - new Vec3(r, r, r), Max = at + new Vec3(r, r, r) };
+        foreach (var b in res.State.Bodies)
+            foreach (var f in b.Mesh.Faces.Where(f => f.Bounds.Overlaps(near)))
+                Console.WriteLine($"{f.Name,-28} {f.Surface.Kind,-9} box {f.Bounds.Min} .. {f.Bounds.Max}");
         return 0;
     }
 

@@ -33,9 +33,31 @@ Commands (from the repository root):
    base's drafted corner fillets or the swept foot chamfer. The volume moved slightly too (3,644,484 to 3,644,687
    mm³). Repro: `verify-engine <dir> Casting`, then `featprof <dir>/Casting.sprt "Hold-down holes" 1`. Reported to
    the session that did the chamfer work.
-4. **Corner blends where tangent fillets meet** (the "run into each other" message): no longer seen on the engine
-   after #12, but the plans below for the general case stand.
-5. Not kernel: the open items under Messages, Modeling features (loft, whole-body blends), Assembly (cam and one-sided
+4. **Corner blends where tangent fillets meet** (the "run into each other" message): seen again on the cam gear's
+   boss. "Cam boss into the body" (`HmCasting`, suppressed): R5, one edge picked, the boss's cylinder (Ø36 along Z
+   at x = -72.1, y = 0, from z = 40 out to 72) with the body's 2° drafted +Z side, tangent edges following. The boss
+   pokes out through the body's side, above its top (y 0..18, past the "Wall tops" R4 round), and its back runs into
+   the hopper's side and the barrel's end, so the loop round it crosses several faces and two fillets: "the fillets
+   that run into neighbouring geometry also run into each other where both are tangent to the same face; that corner
+   cannot be blended yet". Repro: unsuppress it, `verify-engine - Casting`. The same R5 on the hopper's faces into
+   the barrel (front and back) and on the head's flange into the barrel works.
+5. **A mirror with a suppressed seed silently mirrors nothing.** "Bearing pedestal, back" mirrored the pedestal, its
+   corner rounds and "Pedestal into the body" (suppressed): no error, no warning, and the back pedestal was simply
+   missing (the casting 36,000 mm³ light), so later fillets ("Wall tops") failed with "run into each other" and
+   pointed the wrong way. Expected: mirror the seeds that are built and warn about the suppressed one, or fail with
+   "<seed> is suppressed". *Instead:* the suppressed fillet left out of the seeds.
+6. **A mirror whose seed fillet failed still says "Only extrude, revolve, sweep, ... can be patterned"** (on "Bearing
+   pedestal, back" when "Pedestal into the body" failed), not "<seed> failed: <its error>" as the fix in
+   `blend-quick-fixes` gives elsewhere.
+7. **A plane into a drafted corner round: "unsupported edge geometry".** "Pedestal into the body" (`HmCasting`,
+   suppressed): R5 on the pedestal's two sides and underside where they stand out of the body's 2° drafted side. The
+   pedestal's back side (x = 32) lands where the body's R20 corner round begins near the top (it starts at x ≈ 31.9
+   at y = 0, the draft moving it in), so that edge runs from the flat side onto the round: "Edge F12.S.L5 / F8.0.S.F:
+   unsupported edge geometry", and the edge with the flat side alone "could not be found". With the body lengthened
+   behind the crank (its back at 65 instead of 40, clear of the round) the pedestal's blend built and mirrored, but
+   then "Wall tops" failed ("run into each other") where its side segments meet the pedestal's blend: the corner case
+   (4). The body is kept at 40 and the blend suppressed. Repro: unsuppress it and add it to the mirror's seeds.
+8. Not kernel: the open items under Messages, Modeling features (loft, whole-body blends), Assembly (cam and one-sided
    contact, governor, flexible springs, smart fasteners, tapped holes in interference, STEP structure, materials in
    Core, an embedded sub-assembly from a model) and Appearance (colour per face, transparency).
 
