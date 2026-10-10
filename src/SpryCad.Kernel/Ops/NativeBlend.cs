@@ -24,6 +24,95 @@ public static class NativeBlend
         bool buildOnly = false, System.Runtime.CompilerServices.StrongBox<bool>? trimmedOut = null)
     {
         if (size <= 0) { errors.Add("Size must be greater than zero."); return body; }
+        // blends of both kinds meeting at a vertex (a hex socket's inside corners, concave, and its rim, convex): the odd
+        // one out at each such vertex first, then the others on the body it leaves, running on round what it blended
+        // (as two features would). At once, their tools can collide where they meet
+        // (only where all at once fails: where it works, a corner of three blends gets its patch, as before)
+        if (!buildOnly && Mixed(body.Native!, edges) is { } first)
+        {
+            var errs = new List<string>(); var probs = problemEdges == null ? null : new List<Vec3[]>(); var app = applied == null ? null : new List<(Solid, bool)>();
+            var once = ApplyOne(body, edges, size, fillet, prefix, errs, overflow, probs, app, chamfer, false, trimmedOut);
+            if (errs.Count == 0)
+            {
+                if (probs != null) problemEdges!.AddRange(probs);
+                if (app != null) applied!.AddRange(app);
+                return once;
+            }
+            var nb1 = Apply(body, first, size, fillet, prefix + ".c", errors, overflow, problemEdges, applied, chamfer, false, trimmedOut);
+            if (ReferenceEquals(nb1, body) || nb1.Native == null) return nb1;
+            var rest = Rest(body.Native!, nb1.Native, edges.Except(first).ToList(), prefix + ".c", size);
+            Debug?.Invoke($"mixed blends: {first.Count} first, then {rest.Count} edges");
+            return rest.Count == 0 ? nb1 : Apply(nb1, rest, size, fillet, prefix, errors, overflow, problemEdges, applied, chamfer, false, trimmedOut);
+        }
+        return ApplyOne(body, edges, size, fillet, prefix, errors, overflow, problemEdges, applied, chamfer, buildOnly, trimmedOut);
+    }
+
+    /// <summary>
+    /// The edges to blend first where selected edges of both kinds (convex, concave) meet at a vertex: at each such
+    /// vertex those of the kind fewer edges there have (concave on a tie). Null when there is no such vertex.
+    /// </summary>
+    static List<NEdge>? Mixed(NBody body, IReadOnlyList<NEdge> edges)
+    {
+        var kind = new Dictionary<NEdge, bool?>(ReferenceEqualityComparer.Instance);
+        foreach (var e in edges) kind[e] = e.Curve.Periodic && ReferenceEquals(e.V0, e.V1) ? null : Convex(e, e.Curve.Eval(0.5 * (e.T0 + e.T1)));
+        var at = new Dictionary<NVertex, List<NEdge>>(ReferenceEqualityComparer.Instance);
+        foreach (var e in edges)
+            foreach (var v in new[] { e.V0, e.V1 })
+            {
+                if (!at.TryGetValue(v, out var l)) at[v] = l = new();
+                if (!l.Contains(e)) l.Add(e);
+            }
+        var first = new List<NEdge>();
+        foreach (var l in at.Values)
+        {
+            var cv = l.Where(e => kind[e] == true).ToList(); var cc = l.Where(e => kind[e] == false).ToList();
+            if (cv.Count == 0 || cc.Count == 0) continue;
+            foreach (var e in cv.Count < cc.Count ? cv : cc) if (!first.Contains(e)) first.Add(e);
+        }
+        return first.Count == 0 || first.Count == edges.Count ? null : first;
+    }
+
+    /// <summary>
+    /// The edges still to blend on the body the first blends left: each one's remains (between the same faces,
+    /// nearest its middle), and the new edges between their faces and the first blends' faces, near where they
+    /// met (a fillet's arcs round a rounded corner, a chamfer's short lines across it).
+    /// </summary>
+    static List<NEdge> Rest(NBody before, NBody after, List<NEdge> edges, string firstPrefix, double size)
+    {
+        after.Link();
+        var res = new List<NEdge>();
+        static bool Between(NEdge e, string a, string b)
+        {
+            if (e.Uses.Count != 2) return false;
+            var x = e.Uses[0].Face.Tag.Name; var y = e.Uses[1].Face.Tag.Name;
+            return x == a && y == b || x == b && y == a;
+        }
+        foreach (var e in edges)
+        {
+            var a = e.Uses[0].Face.Tag.Name; var b = e.Uses[1].Face.Tag.Name;
+            var mid = e.Curve.Eval(0.5 * (e.T0 + e.T1));
+            var best = after.Edges.Where(x => Between(x, a, b)).OrderBy(x => x.Samples(1e-3).Min(q => Vec3.Distance(q, mid))).FirstOrDefault();
+            if (best != null && best.Samples(1e-3).Min(q => Vec3.Distance(q, mid)) < Math.Max(1e-3, 0.5 * Vec3.Distance(e.V0.P, e.V1.P)) && !res.Contains(best)) res.Add(best);
+        }
+        // the remains' faces against the first blends' faces, near the vertices they shared
+        var names = new HashSet<string>(edges.SelectMany(e => e.Uses.Select(u => u.Face.Tag.Name)));
+        var ends = edges.SelectMany(e => new[] { e.V0.P, e.V1.P }).ToList();
+        foreach (var x in after.Edges)
+        {
+            if (x.Uses.Count != 2 || res.Contains(x)) continue;
+            var n0 = x.Uses[0].Face.Tag.Name; var n1 = x.Uses[1].Face.Tag.Name;
+            bool blend0 = n0.StartsWith(firstPrefix + ".", StringComparison.Ordinal), blend1 = n1.StartsWith(firstPrefix + ".", StringComparison.Ordinal);
+            if (!(blend0 && names.Contains(n1) || blend1 && names.Contains(n0))) continue;
+            var m = x.Curve.Eval(0.5 * (x.T0 + x.T1));
+            if (ends.Any(p => Vec3.Distance(p, m) < 3 * size)) res.Add(x);
+        }
+        return res;
+    }
+
+    static Solid ApplyOne(Solid body, IReadOnlyList<NEdge> edges, double size, bool fillet, string prefix, List<string> errors,
+        bool overflow, List<Vec3[]>? problemEdges, List<(Solid tool, bool cut)>? applied, ChamferSize? chamfer,
+        bool buildOnly, System.Runtime.CompilerServices.StrongBox<bool>? trimmedOut)
+    {
         body.Native!.Link();
         var ch = chamfer ?? ChamferSize.Equal(size);
         // an unequal chamfer is measured on the same face all along a chain (e.g. the top face around a box):
@@ -65,7 +154,7 @@ public static class NativeBlend
             {
                 List<Solid>? tools; bool convex, fits; Solid? strip;
                 using (Prof.Time("blend.tools")) (tools, convex, fits, strip) = ForceRollingBall ? (null, false, false, null)
-                    : e.Curve is NCircle ? ArcTools(group, size, fillet, name, ch, RefIsFirst, direct, body.Native!) : LineTool(e, size, fillet, name, ch, RefIsFirst, direct, body.Native!);
+                    : e.Curve is NCircle ? ArcTools(group, size, fillet, name, ch, RefIsFirst, direct, body.Native!, edges) : LineTool(e, size, fillet, name, ch, RefIsFirst, direct, body.Native!, edges);
                 if (tools == null && fillet)
                 {
                     // any other pair of faces: rolling ball along the chain of edges this edge belongs to; first across
@@ -368,7 +457,7 @@ public static class NativeBlend
     static Vec3 Tangent(NCoedge c, double t) => (c.Edge.Curve.Deriv(t) * (c.Forward ? 1 : -1)).Normalized;
 
     static (List<Solid>? tools, bool convex, bool fits, Solid? strip) LineTool(NEdge e, double size, bool fillet, string name, ChamferSize ch, Func<NFace, NFace, bool> refIsFirst,
-        bool direct, NBody body)
+        bool direct, NBody body, IReadOnlyList<NEdge> selected)
     {
         var cA = e.Uses[0]; var cB = e.Uses[1];
         if (e.Curve is not NLine || cA.Face.Surface.Kind != SurfaceKind.Plane || cB.Face.Surface.Kind != SurfaceKind.Plane) return (null, false, false, null);
@@ -401,8 +490,8 @@ public static class NativeBlend
         // that face on one side, into the material beyond it, and falls short on the other. The tool is cut back to
         // the face, and an extension past the end, also cut back to it, fills the other side
         var ext = 3 * Math.Max(size, Math.Max(tlA, tlB));
-        var p0 = EndPlane(cA.Start, -t, cA.Face, cB.Face, new[] { e });
-        var p1 = EndPlane(cA.End, t, cA.Face, cB.Face, new[] { e });
+        var p0 = EndPlane(cA.Start, -t, cA.Face, cB.Face, new[] { e }, selected);
+        var p1 = EndPlane(cA.End, t, cA.Face, cB.Face, new[] { e }, selected);
         // (contact points the ends' faces cut off are not the blend's)
         bool Cut(Vec3 x) => p0 != null && p0.Distance(x) < 0 || p1 != null && p1.Distance(x) < 0;
         bool fits = true;
@@ -433,7 +522,7 @@ public static class NativeBlend
     }
 
     static (List<Solid>? tools, bool convex, bool fits, Solid? strip) ArcTools(List<NEdge> arcs, double size, bool fillet, string name, ChamferSize ch, Func<NFace, NFace, bool> refIsFirst,
-        bool direct, NBody body)
+        bool direct, NBody body, IReadOnlyList<NEdge> selected)
     {
         var e = arcs[0];
         var cP = e.Uses[0]; var cC = e.Uses[1];
@@ -513,7 +602,7 @@ public static class NativeBlend
                     var v = atStart ? startV : endV;
                     if (arcs.Count(o => ReferenceEquals(o.V0, v) || ReferenceEquals(o.V1, v)) > 1) continue; // joint inside the chain
                     var dirOut = atStart ? -DirAt(a0) : DirAt(a0 + sweep);
-                    if (delta > 1e-9 && EndPlane(v, dirOut, cP.Face, cC.Face, arcs) is { } pl)
+                    if (delta > 1e-9 && EndPlane(v, dirOut, cP.Face, cC.Face, arcs, selected) is { } pl)
                         extensions.Add((atStart ? a0 - delta : a0 + sweep, delta, pl, i));
                 }
             }
@@ -582,10 +671,33 @@ public static class NativeBlend
     /// angle (a face square to the edge already matches the tool's square end). Oriented with the edge next to
     /// the vertex on its positive side. Null when there is no single such face.
     /// </summary>
-    internal static Plane? EndPlane(NVertex v, Vec3 dirOut, NFace fa, NFace fb, IEnumerable<NEdge> blended)
+    internal static Plane? EndPlane(NVertex v, Vec3 dirOut, NFace fa, NFace fb, IEnumerable<NEdge> blended, IReadOnlyCollection<NEdge>? selected = null)
     {
         var inside = v.P - dirOut.Normalized * 1e-3;
         Plane? found = null;
+        // the next edge on one of the faces blended too (round a hole's rim, a box's top): the two meet on the plane
+        // bisecting the corner (the next face's plane cuts a hole's corner off, leaving it unblended)
+        if (selected != null)
+        {
+            Plane? miter = null; int count = 0;
+            foreach (var face in new[] { fa, fb })
+                foreach (var c in face.Coedges)
+                {
+                    var g = c.Edge;
+                    if (!ReferenceEquals(g.V0, v) && !ReferenceEquals(g.V1, v) || blended.Contains(g) || !selected.Contains(g) || IsSeam(g)) continue;
+                    var a = -dirOut.Normalized;
+                    var b = (ReferenceEquals(g.V0, v) ? g.Curve.Deriv(g.T0) : -g.Curve.Deriv(g.T1)).Normalized;
+                    var n = a - b;
+                    if (n.Length < 1e-6) continue;
+                    count++;
+                    miter = Plane.FromPointNormal(v.P, n.Normalized);
+                }
+            if (count == 1 && miter != null)
+            {
+                var cos = Math.Abs(Vec3.Dot(miter.Normal, dirOut.Normalized));
+                return cos > 0.9999 ? null : miter;
+            }
+        }
         foreach (var face in new[] { fa, fb })
             foreach (var c in face.Coedges)
             {
