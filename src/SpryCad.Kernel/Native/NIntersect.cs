@@ -1122,6 +1122,9 @@ public static class NIntersect
         // parameters, with the other surface's exact distance
         bool onParams = sa.Kind is SurfaceKind.BSpline or SurfaceKind.Offset && sb.Kind is not (SurfaceKind.BSpline or SurfaceKind.Offset or SurfaceKind.Pipe or SurfaceKind.Screw)
                         && sa.TryPartials(dom.UMin, dom.VMin * dom.VSign, out _, out _, out _);
+        // (in surface parameters: v signed as the face's; moves within a grid cell's few widths)
+        var range = (u0, u1, Math.Min(v0 * dom.VSign, v1 * dom.VSign), Math.Max(v0 * dom.VSign, v1 * dom.VSign));
+        var maxMove = 4 * Math.Max(Vec3.Distance(dom.Eval(UV(0, 0)), dom.Eval(UV(1, 1))), tol);
         // chain segments: ends (degree 1) first, then the rest, each in first-use order
         var used = new bool[segA.Count];
         var result = new List<NPolyline>();
@@ -1159,9 +1162,9 @@ public static class NIntersect
                     // densified between parameters
                     var uvs = new List<Vec2>(chain.Count);
                     pts = new List<Vec3>(chain.Count);
-                    foreach (var k in chain) { var (q, uv) = ProjectOnParams(sa, sb, new Vec2(cpt[k].X, cpt[k].Y * dom.VSign)); pts.Add(q); uvs.Add(uv); }
+                    foreach (var k in chain) { var (q, uv) = ProjectOnParams(sa, sb, new Vec2(cpt[k].X, cpt[k].Y * dom.VSign), range, maxMove); pts.Add(q); uvs.Add(uv); }
                     if (closed) { pts.RemoveAt(pts.Count - 1); uvs.RemoveAt(uvs.Count - 1); }
-                    pts = DensifyOnParams(pts, uvs, closed, sa, sb, tol);
+                    pts = DensifyOnParams(pts, uvs, closed, sa, sb, tol, range, maxMove);
                 }
                 else
                 {
@@ -1178,16 +1181,18 @@ public static class NIntersect
 
     /// <summary>Inserts exact midpoints until the chord error is below tol.</summary>
     /// <summary>
-    /// The point of a ∩ b near a's point at face parameters uv, found on a (Newton steps in its parameters, each the
-    /// smallest move across b's level sets): exactly on a, on b within rounding. Falls back to
-    /// <see cref="NSurface.ProjectToIntersection"/> where the steps do not converge.
+    /// The point of a ∩ b near a's point at surface parameters uv, found on a (Newton steps in its parameters, each the
+    /// smallest move across b's level sets): exactly on a, on b within rounding. The steps stay inside the parameter
+    /// box (the face's, with the tracing margin) and within maxMove of the start; otherwise, or where they do not
+    /// converge, <see cref="NSurface.ProjectToIntersection"/>.
     /// </summary>
-    static (Vec3 p, Vec2 uv) ProjectOnParams(NSurface a, NSurface b, Vec2 uv)
+    static (Vec3 p, Vec2 uv) ProjectOnParams(NSurface a, NSurface b, Vec2 uv, (double u0, double u1, double v0, double v1) range, double maxMove)
     {
         var start = uv;
+        var p0 = a.Eval(start.X, start.Y);
         for (int it = 0; it < 30; it++)
         {
-            if (!a.TryPartials(uv.X, uv.Y, out var S, out var Su, out var Sv)) break;
+            if (!a.TryPartials(uv.X, uv.Y, out var S, out var Su, out var Sv) || Vec3.Distance(S, p0) > maxMove) break;
             var f = b.FGrad(S, out var g);
             if (Math.Abs(f) < 1e-12 * Math.Max(1, S.Length)) return (S, uv);
             double ju = Vec3.Dot(g, Su), jv = Vec3.Dot(g, Sv);
@@ -1199,12 +1204,13 @@ public static class NIntersect
             var den = ju * du + jv * dv;
             if (!(Math.Abs(den) > 1e-300)) break;
             uv = new Vec2(uv.X - f * du / den, uv.Y - f * dv / den);
+            if (uv.X < range.u0 || uv.X > range.u1 || uv.Y < range.v0 || uv.Y > range.v1) break;
         }
-        var p = NSurface.ProjectToIntersection(a, b, a.Eval(start.X, start.Y));
-        return (p, start);
+        return (NSurface.ProjectToIntersection(a, b, p0), start);
     }
 
-    static List<Vec3> DensifyOnParams(List<Vec3> pts, List<Vec2> uvs, bool closed, NSurface a, NSurface b, double tol)
+    static List<Vec3> DensifyOnParams(List<Vec3> pts, List<Vec2> uvs, bool closed, NSurface a, NSurface b, double tol,
+        (double u0, double u1, double v0, double v1) range, double maxMove)
     {
         var res = new List<Vec3>();
         int n = pts.Count;
@@ -1220,7 +1226,7 @@ public static class NIntersect
         void Sub(Vec3 p, Vec2 pu, Vec3 q, Vec2 qu, int depth)
         {
             if (depth > 6) return;
-            var (m, mu) = ProjectOnParams(a, b, Vec2.Lerp(pu, qu, 0.5));
+            var (m, mu) = ProjectOnParams(a, b, Vec2.Lerp(pu, qu, 0.5), range, maxMove);
             if (Vec3.Distance(m, (p + q) * 0.5) < tol * 0.25 && depth > 0) return;
             if (Vec3.Distance(p, q) < tol) return;
             Sub(p, pu, m, mu, depth + 1);
