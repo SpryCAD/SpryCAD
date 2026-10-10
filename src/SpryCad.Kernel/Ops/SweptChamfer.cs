@@ -20,7 +20,9 @@ namespace SpryCad.Kernel;
 public static class SweptChamfer
 {
     /// <summary>The boolean's tool, and the direct blend's (null where it cannot be built).</summary>
-    public sealed record Result(Solid? Tool, bool Convex, bool Fits, string? Error, Solid? Strip = null);
+    /// <param name="Reach">Points of the space the boolean's tool reaches into past the edge's corner and past the legs'
+    /// ends (where that is taken, the strip, bounded by the faces, is the safer tool).</param>
+    public sealed record Result(Solid? Tool, bool Convex, bool Fits, string? Error, Solid? Strip = null, List<Vec3>? Reach = null);
 
     readonly record struct Piece(NEdge E, double Ta, double Tb, NFace A, NFace B);
 
@@ -197,7 +199,10 @@ public static class SweptChamfer
                     NFace f0 = labels[i][side], f1 = labels[i + 1][side];
                     if (ReferenceEquals(f0, f1)) continue;
                     // the seam between them, and where the leg's end (on f0's surface, extended) crosses it
-                    var g = f0.Coedges.Select(c => c.Edge).FirstOrDefault(e => e.Uses.Any(x => ReferenceEquals(x.Face, f1)));
+                    // (the seam may be split into several edges: the one where the leg's end crosses)
+                    var xi = LegOn(k, (double)i / scan, side, f0) ?? labels[i][side].Surface.Project(Frame(k, (double)i / scan)!.Value.P);
+                    var g = f0.Coedges.Select(c => c.Edge).Where(e => e.Uses.Any(x => ReferenceEquals(x.Face, f1)))
+                        .OrderBy(e => e.Samples(1e-3).Min(q => Vec3.Distance(q, xi))).FirstOrDefault();
                     if (g == null) { strippable = false; continue; }
                     double Sigma(double tau)
                     {
@@ -230,6 +235,7 @@ public static class SweptChamfer
         // ---- the intervals' faces (at their middles), the sections at the breakpoints (a crossing's on its seam)
         var faces = new NFace[ni][];
         var footMid = new Vec3[ni];
+        var reach = new List<Vec3>();
         (int k, double t0, double t1) Span(int i)
         {
             var b0 = brks[i]; var b1 = brks[Nx(i)];
@@ -241,6 +247,8 @@ public static class SweptChamfer
             var s = Section(k, 0.5 * (t0 + t1));
             if (s == null) return Fail(error!);
             faces[i] = s.F; footMid[i] = s.P;
+            foreach (var f in new[] { 0.5, 0.95 }) reach.Add(s.P + (s.Xc - s.P) * f);
+            reach.Add(Pt(s, 2)); reach.Add(Pt(s, 3));
         }
         for (int b = 0; b < nb; b++)
         {
@@ -351,7 +359,7 @@ public static class SweptChamfer
             catch (InvalidOperationException) { stripSolid = null; }
             if (stripSolid is { IsEmpty: true } or { Native: null }) stripSolid = null;
         }
-        return new Result(tool, convex.Value, fits, null, stripSolid);
+        return new Result(tool, convex.Value, fits, null, stripSolid, reach);
     }
 
     /// <summary>Diagnostics (tests/tools).</summary>
@@ -457,19 +465,53 @@ public static class SweptChamfer
             }
             return -1;
         }
-        // the seams a leg's end crosses: from the chain's vertex to the crossing
-        var seam = new Dictionary<int, (NEdge e, int k)>();
+        // the seams a leg's end crosses: from the chain's vertex to the crossing, along the edges between the two faces
+        // (a seam split into several: the whole ones up to the one crossed, and that one's part)
+        var seam = new Dictionary<int, (List<(NEdge e, bool up)> path, int k)>();
         for (int b = 0; b < nb; b++)
         {
             var br = brks[b];
             if (br.Side < 0) continue;
             var g = br.G!;
-            int k = ChainIndex(g.V0) is var k0 && k0 >= 0 ? k0 : ChainIndex(g.V1);
-            if (k < 0) { err = "a seam the chamfer crosses does not start at the chain"; return null; }
-            var atV0 = ChainIndex(g.V0) == k;
+            var common = g.Uses[0].Face.Coedges.Select(c => c.Edge).Where(e => e.Uses.Any(x => ReferenceEquals(x.Face, g.Uses[1].Face))).ToList();
+            // from g down to the chain: through its ends, edge by edge
+            List<NEdge>? down = null; NVertex? join = null; int k = -1;
+            foreach (var start in new[] { g.V0, g.V1 })
+            {
+                var path = new List<NEdge>(); var w = start; var at = g;
+                for (int guard = 0; guard < 64; guard++)
+                {
+                    if ((k = ChainIndex(w)) >= 0) break;
+                    var next = common.FirstOrDefault(e => !ReferenceEquals(e, at) && !path.Contains(e) && (ReferenceEquals(e.V0, w) || ReferenceEquals(e.V1, w)));
+                    if (next == null) break;
+                    path.Add(next); at = next;
+                    w = ReferenceEquals(next.V0, w) ? next.V1 : next.V0;
+                }
+                if (k >= 0) { down = path; join = start; break; }
+            }
+            if (down == null || join == null) { err = "a seam the chamfer crosses does not reach the chain"; return null; }
+            // up from the chain's vertex: the whole edges (new vertices at their joints), then g to the crossing
+            var list = new List<(NEdge e, bool up)>();
+            var vFoot = chainV[vertexB[k]];
+            var map = new Dictionary<NVertex, NVertex>(ReferenceEqualityComparer.Instance);
+            NVertex Mv(NVertex x) => map.TryGetValue(x, out var y) ? y : map[x] = new NVertex(x.P);
+            down.Reverse();
+            NVertex? lower = null;
+            for (int j = 0; j < down.Count; j++)
+            {
+                var e = down[j];
+                // its end toward the chain: the one it shares with the next edge down (or the chain's vertex)
+                var below = j == 0 ? (ChainIndex(e.V0) == k ? e.V0 : e.V1) : lower!;
+                var above = ReferenceEquals(e.V0, below) ? e.V1 : e.V0;
+                NVertex nb0 = j == 0 ? vFoot : Mv(below), nb1 = Mv(above);
+                bool upFwd = ReferenceEquals(e.V0, below);
+                list.Add((upFwd ? new NEdge(e.Curve, e.T0, e.T1, nb0, nb1) : new NEdge(e.Curve, e.T0, e.T1, nb1, nb0), upFwd));
+                lower = above;
+            }
+            var vJoin = down.Count == 0 ? vFoot : Mv(join);
             var tq = g.Curve.Param(V[b, br.Side].P, 0.5 * (g.T0 + g.T1));
-            var foot = chainV[vertexB[k]];
-            seam[b] = (atV0 ? new NEdge(g.Curve, g.T0, tq, foot, V[b, br.Side]) : new NEdge(g.Curve, tq, g.T1, V[b, br.Side], foot), k);
+            list.Add(ReferenceEquals(g.V0, join) ? (new NEdge(g.Curve, g.T0, tq, vJoin, V[b, br.Side]), true) : (new NEdge(g.Curve, tq, g.T1, V[b, br.Side], vJoin), false));
+            seam[b] = (list, k);
         }
         // across at a breakpoint of the chain's vertices (an open end, or where a band on a surface that closes on
         // itself is cut): from the foot to the leg's end, in the section plane
@@ -513,7 +555,7 @@ public static class SweptChamfer
                 // along the leg's end curve, from bs to be
                 for (int i = bs; i != be; i = Nx(i)) loop.Add((L[i, side], true));
                 // down to the chain at be, back along it to bs's foot, up at bs
-                if (seam.TryGetValue(be, out var se)) loop.Add((se.e, !ReferenceEquals(se.e.V0, chainV[vertexB[se.k]])));
+                if (seam.TryGetValue(be, out var se)) for (int j = se.path.Count - 1; j >= 0; j--) loop.Add((se.path[j].e, !se.path[j].up));
                 else loop.Add((Across(be, side), false));
                 int ke = Foot(be), ks = Foot(bs);
                 if (ke < 0 || ks < 0) { err = "a bound off the chain"; return null; }
@@ -522,7 +564,7 @@ public static class SweptChamfer
                     k = closed ? (k + n - 1) % n : k - 1;
                     loop.Add((chainE[k], !(pieces[k].Ta < pieces[k].Tb)));
                 }
-                if (seam.TryGetValue(bs, out var sb)) loop.Add((sb.e, ReferenceEquals(sb.e.V0, chainV[vertexB[sb.k]])));
+                if (seam.TryGetValue(bs, out var sb)) foreach (var x in sb.path) loop.Add((x.e, x.up));
                 else loop.Add((Across(bs, side), true));
                 var f = faces[bs < ni ? bs : ni - 1][side];
                 body.Faces.Add(Oriented(f.Surface, f, new FaceTag($"{name}.S.{(side == 0 ? "a" : "b")}", f.Surface.Kind == SurfaceKind.Plane ? SurfaceDef.PlaneDef : f.Surface.Def),

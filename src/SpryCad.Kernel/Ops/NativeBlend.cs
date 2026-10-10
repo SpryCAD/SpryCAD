@@ -110,7 +110,10 @@ public static class NativeBlend
                     entries.RemoveAll(x => x.group.All(set.Contains));
                     fails.RemoveAll(x => x.group.All(set.Contains));
                     foreach (var o in chain) if (!group.Contains(o)) { group.Add(o); done.Add(o); }
-                    (tools, convex, fits, strip) = (new List<Solid> { sc.Tool! }, sc.Convex, sc.Fits, sc.Strip);
+                    // its reach past the corner and the legs' ends, as the line and arc tools': where that space is taken (a
+                    // wall across a narrow gap), the strip bounded by the faces for the boolean too
+                    var tool = sc.Strip != null && sc.Reach != null && Taken(body.Native!, fa, fb, sc.Reach, sc.Convex) ? sc.Strip : sc.Tool!;
+                    (tools, convex, fits, strip) = (new List<Solid> { tool }, sc.Convex, sc.Fits, sc.Strip);
                 }
                 if (Debug != null)
                     Debug($"blend {name}: {string.Join(", ", group.Select(g => $"{g.Curve.GetType().Name}{g.V0.P}->{g.V1.P} [{string.Join("|", g.Uses.Select(u => u.Face.Tag.Name + ":" + u.Face.Surface.Kind))}]"))} -> tools={tools?.Count} fits={fits}");

@@ -141,6 +141,34 @@ static class DirectBlendTests
             Near("6 at 30°", Changed("casting foot, drafted, chamfered 6 at 30°"), onPlate ? Est(6, other, false) : Est(other, 6, false));
         });
 
+        t.Test("Swept chamfer over a hollow behind its corner: the boolean adds no more than the chamfer (the tool bounded by the faces)", () =>
+        {
+            // under the boss's front side the plate is 1 thick: the swept tool's point beyond the corner (inside, for
+            // a concave edge) lies in the pocket below, which the boolean would fill
+            foreach (var direct in new[] { false, true })
+            {
+                double Added(string name)
+                {
+                    var old = DirectBlend.Enabled;
+                    DirectBlend.Enabled = direct;
+                    try
+                    {
+                        var doc = Demos.BlendCases.First(c => c.name == name).build();
+                        var foot = doc.Features.First(f => f.Name == "Foot");
+                        Csg.ClearCache();
+                        var r0 = new Regenerator().Rebuild(doc, doc.Features.IndexOf(foot));
+                        var r1 = new Regenerator().Rebuild(doc, doc.Features.IndexOf(foot) + 1);
+                        t.True(r1.Status[foot.Id].Ok, $"{name}: {r1.Status[foot.Id].Error}");
+                        t.True(r1.State.Bodies[0].Solid.Native?.Validate() == null, $"{name}: valid");
+                        return KernelTests.Vex(r1.State.Bodies[0].Solid) - KernelTests.Vex(r0.State.Bodies[0].Solid);
+                    }
+                    finally { DirectBlend.Enabled = old; }
+                }
+                var plain = Added("casting foot, drafted, chamfered"); var hollow = Added("casting foot, drafted, chamfered, hollow under");
+                t.True(Math.Abs(hollow - plain) < 1e-6 * plain, $"{(direct ? "direct" : "boolean")}: added {hollow:R} over the hollow, {plain:R} without");
+            }
+        });
+
         t.Test("Chamfer on an open arc whose ends meet a slot's walls at an angle: cut back to the walls, not ending square", () =>
         {
             // a drafted hole's top rim (plate top / cone: the swept tool), a slot across it: the rim's arc ends on the

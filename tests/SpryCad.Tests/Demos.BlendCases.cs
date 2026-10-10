@@ -16,6 +16,7 @@ static partial class Demos
         ("casting foot, drafted, chamfered 6 x 3 flipped", () => CastingFoot("2", chamfer: c => { c.Type = ChamferType.DistanceDistance; c.Distance2 = "3"; c.Flip = true; })),
         ("casting foot, drafted, chamfered 6 at 30°", () => CastingFoot("2", chamfer: c => { c.Type = ChamferType.AngleDistance; c.Angle = "30"; })),
         ("boss top, drafted, chamfered", () => CastingFoot("2", chamfer: _ => { }, atTop: true)),
+        ("casting foot, drafted, chamfered, hollow under", () => CastingFoot("2", chamfer: _ => { }, hollow: true)),
         ("plate, drafted hole across a slot, rim chamfered", SlotHole),
         ("box, three edges at a corner", BoxCorner),
         ("plate, hole rims", PlateHoles),
@@ -31,7 +32,7 @@ static partial class Demos
     /// plate's top: one edge picked, the tangent edges following (a closed loop of lines and arcs). A casting's
     /// commonest blend.
     /// </summary>
-    static CadDocument CastingFoot(string draft, string? baseDraft = null, Action<ChamferFeature>? chamfer = null, bool atTop = false)
+    static CadDocument CastingFoot(string draft, string? baseDraft = null, Action<ChamferFeature>? chamfer = null, bool atTop = false, bool hollow = false)
     {
         var d = Doc(("BaseX", "100"), ("BaseY", "75"), ("BaseT", "20"), ("BossX", "60"), ("BossY", "40"), ("BossH", "60"), ("Draft", draft),
             ("Rc", "20"), ("Rf", "6"), ("BaseDraft", baseDraft ?? "0"), ("Rb", "15"));
@@ -72,6 +73,15 @@ static partial class Demos
                 E(F(2), F(3), new Vec3(-V("BossX"), V("BossY"), zm)), E(F(3), F(0), new Vec3(-V("BossX"), -V("BossY"), zm)),
             },
         });
+        if (hollow)
+        {
+            // a pocket from below under the boss's front side, leaving the plate 1 thick there: the space a concave
+            // blend's tool reaches into behind the corner is open
+            var u = new Sk(d);
+            u.Rect("-70", "-55", "70", "-25");
+            var us = d.AddFeature(new SketchFeature { Name = "Hollow", Plane = PlaneRef.Front, Sketch = u.S });
+            d.AddFeature(new ExtrudeFeature { Name = "Hollow", SketchId = us.Id, IsCut = true, Depth = "BaseT - 1" });
+        }
         // (top: the boss's top edge instead, convex, its side drafted in by BossH tan(Draft))
         var foot = atTop ? E($"{boss.Id}.End", F(0), new Vec3(0, -V("BossY - BossH * tan(Draft)"), V("BaseT + BossH")))
             : E($"{basePlate.Id}.End", F(0), new Vec3(0, -V("BossY"), V("BaseT")));
