@@ -43,6 +43,32 @@ static class AssemblyToolTests
             t.True(back.Find("C1/C2")!.Suppressed && back.Doc.Components[0].Part.Revision == sd.Revision, "the edit shows");
         });
 
+        t.Test("Assembly tools: an embedded part edited, put back and the assembly saved: opened again as edited", () =>
+        {
+            var dir = NewDir("tools-embedded-part");
+            var pp = Path.Combine(dir, "Pin.sprt");
+            Cylinder(pp, 5, 10);
+            var m = AssemblyModel.New();
+            var c = m.Insert(pp, Transform.Identity, embed: true);
+            var path = Path.Combine(dir, "Top.sasm");
+            m.Save(path);
+            File.Delete(pp);
+            // edited as the app does: the embedded copy written out, changed, saved, its bytes put back
+            var copy = Path.Combine(NewDir("tools-embedded-copy"), "Pin.sprt");
+            File.WriteAllBytes(copy, m.Doc.Files[c.Part.Embedded!]);
+            var doc = CadDocument.Load(copy);
+            ((SpryCad.Core.Sketching.SkCircle)doc.Features.OfType<SketchFeature>().Single().Sketch.Entities.Single(e => e is SpryCad.Core.Sketching.SkCircle)).R = 8;
+            doc.Save(copy);
+            // the assembly opened again from its file (its tab closed meanwhile), the edit put in, saved
+            var again = AssemblyModel.Open(AssemblyDocument.Load(path), path);
+            again.UpdateEmbedded(c.Part.Embedded!, File.ReadAllBytes(copy), defer: true);
+            again.Save(path);
+            var back = AssemblyModel.Open(AssemblyDocument.Load(path), path);
+            var shown = back.DisplayOf(back.Doc.Components[0])!;
+            t.True(shown.Source == PartSource.Embedded && Math.Abs(shown.Mesh.Bounds.Max.X - 8) < 1e-3, $"the edit kept ({shown.Source}, {shown.Mesh.Bounds.Max.X:0.###})");
+            t.True(back.Doc.Components[0].Part.Revision == doc.Revision, "its revision noted");
+        });
+
         t.Test("Assembly tools: sub-assembly configurations per instance; overrides of its components per instance", () =>
         {
             var dir = NewDir("tools-config");

@@ -423,28 +423,70 @@ public partial class MainWindow
         else await OpenFileAsync(file);
         var t = _parts.FirstOrDefault(x => (x.Asm?.FilePath ?? x.Session.FilePath) is { } p && PartIndex.SamePath(p, file));
         if (t == null) return;
-        t.EmbeddedIn = a; t.EmbeddedName = name;
+        t.EmbeddedIn = a; t.EmbeddedName = name; t.EmbeddedPath = a.FilePath;
         UpdateTabHeader(t);
-        Status($"Editing {Path.GetFileNameWithoutExtension(name)}, embedded in {a.Title.TrimEnd(' ', '*')}: Save puts it back into the assembly.");
+        Status($"Editing {Path.GetFileNameWithoutExtension(name)}, embedded in {a.Title.TrimEnd(' ', '*')}: Save puts it back into the assembly and saves the assembly.");
     }
 
-    /// <summary>A tab editing an embedded document saved: its file's bytes put back into its assembly. False if it is not one.</summary>
-    bool SaveEmbedded(PartTab t)
+    /// <summary>The assembly a tab's embedded document belongs to, if its tab is open (the one it was opened from, or a tab of its file).</summary>
+    AssemblySession? OpenEmbeddingAssembly(PartTab t)
     {
-        if (t.EmbeddedIn is not { } a || t.EmbeddedName is not { } name) return false;
-        if (!_parts.Any(p => p.Asm == a) || !a.Model.Doc.Files.ContainsKey(name))
+        if (t.EmbeddedIn is { } e && _parts.Any(p => p.Asm == e)) return e;
+        return t.EmbeddedPath is { } file ? _parts.FirstOrDefault(p => p.Asm?.FilePath is { } f && PartIndex.SamePath(f, file))?.Asm : null;
+    }
+
+    /// <summary>
+    /// A tab editing an embedded part or sub-assembly saved: the edit saved into its assembly, and the assembly saved
+    /// (as a virtual component's assembly is): to its file, or Save As when it has none yet. The assembly's tab is used
+    /// when open, else its file is opened, changed and saved without a tab. When the assembly cannot take it (never
+    /// saved and closed, or no longer holding it), the edit is offered Save As as a file of its own. Null when the tab is
+    /// not editing an embedded document; else whether it was saved (false: cancelled or failed, the edit kept unsaved).
+    /// </summary>
+    async Task<bool?> SaveEmbedded(PartTab t)
+    {
+        if (t.EmbeddedName is not { } name) return null;
+        var what = t.Asm != null ? "sub-assembly" : "part";
+        var a = OpenEmbeddingAssembly(t);
+        var background = false;
+        if (a == null && t.EmbeddedPath is { } asmFile && File.Exists(asmFile))
         {
-            Status("The assembly it was embedded in is closed (or no longer holds it): use Save As to keep it as a file.");
-            return true;
+            try { a = await Task.Run(() => PartsIndexStore.Use(_ => AssemblySession.Open(asmFile))); background = true; }
+            catch (Exception ex) { App.Log(ex, "Open assembly to save embedded"); a = null; }
         }
-        var file = t.Asm?.FilePath ?? t.Session.FilePath!;
-        if (t.Asm != null) t.Asm.Save(file); else t.Session.Save(file);
+        if (a == null || !a.Model.Doc.Files.ContainsKey(name))
+        {
+            var why = a == null
+                ? t.EmbeddedPath == null ? "its assembly was closed without being saved" : $"its assembly ({t.EmbeddedPath}) cannot be opened"
+                : "its assembly no longer holds it";
+            if (!await Dialogs.YesNo(this, "Save", $"This {what} cannot be saved into its assembly: {why}. Save it as a file of its own?", "Save As…")) return false;
+            return t.Asm != null ? await SaveAssembly(true) : await SaveAs();
+        }
+        // the edit written out, then into the assembly
+        var copy = t.Asm?.FilePath ?? t.Session.FilePath!;
+        if (t.Asm != null) t.Asm.Save(copy); else t.Session.Save(copy);
         a.BeginChange();
-        a.Model.UpdateEmbedded(name, File.ReadAllBytes(file), defer: true);
+        a.Model.UpdateEmbedded(name, await File.ReadAllBytesAsync(copy), defer: true);
         if (a.Model.HasMates) a.Model.SolveMates();
         a.EndChange();
-        _ = BuildPendingOf(a);
-        Status($"Saved into {a.Title.TrimEnd(' ', '*')} (save the assembly to keep it).");
+        // the assembly saved with it
+        var path = a.FilePath;
+        if (path == null)
+        {
+            var f = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+            {
+                Title = $"Save the Assembly Holding the {char.ToUpper(what[0]) + what[1..]}", DefaultExtension = "sasm",
+                SuggestedFileName = a.UntitledName + AssemblyDocument.FileExtension, FileTypeChoices = new[] { AssemblyType },
+            });
+            path = f?.TryGetLocalPath();
+            if (path == null) { Status($"Put into {a.Title.TrimEnd(' ', '*')}, which is not saved yet: save it to keep the {what}."); return true; }
+        }
+        a.Save(path);
+        RecentFiles.Add(path);
+        t.EmbeddedIn = background ? null : a;
+        t.EmbeddedPath = path;
+        UpdateTabHeader(t);
+        if (!background) _ = BuildPendingOf(a);
+        Status($"Saved into {Path.GetFileName(path)}" + (background ? "." : " (the assembly saved with it)."));
         return true;
     }
 
