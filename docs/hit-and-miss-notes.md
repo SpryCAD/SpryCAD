@@ -19,8 +19,14 @@ Commands (from the repository root):
 1. **Mirror of a fillet makes the body faceted, silently** (Kernel, first item below). Blocks filleting the ribs.
 2. **No warning when a feature leaves the body faceted.** Any fall back to facets should say so on the feature (and
    `verify-engine` shows only FAIL without a reason); everything after it on facets is slow (minutes).
-3. **The foot chamfer is slow:** the distance-distance chamfer round the body's foot (four straight edges, four R20
-   corner rounds, drafted side) takes the casting from about 1.3 s to 3.6-6.6 s.
+3. **Holes through the base: 20 s of B-spline tracing (worse on master b1c89a4).** With the distance-distance chamfer
+   round the body's foot, the casting went from about 1.3 s to 3.6-6.6 s; on master b1c89a4 (with #20 and #24) it
+   takes 33 s. Every feature is under 1.3 s except the last, "Hold-down holes" (four Ø11 through-holes in the 5°
+   drafted base plate at (x, z) = (-207, ±70), (52, ±70)): 19.8 s, all in the hole's boolean, `sec.trace` /
+   `trace.project` (40 s of CPU over 22 traces); two holes cross a B-spline face (`tr.BSplinexCylinder` x2): the
+   base's drafted corner fillets or the swept foot chamfer. The volume moved slightly too (3,644,484 to 3,644,687
+   mm³). Repro: `verify-engine <dir> Casting`, then `featprof <dir>/Casting.sprt "Hold-down holes" 1`. Reported to
+   the session that did the chamfer work.
 4. **Corner blends where tangent fillets meet** (the "run into each other" message): no longer seen on the engine
    after #12, but the plans below for the general case stand.
 5. Not kernel: the open items under Messages, Modeling features (loft, whole-body blends), Assembly (cam and one-sided
