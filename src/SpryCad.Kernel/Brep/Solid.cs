@@ -174,14 +174,7 @@ public sealed class Solid
         }
         var faces = new List<Face>();
         foreach (var s in list) faces.AddRange(s.Faces);
-        Native.NBody? nb = null;
-        if (list.Count > 0 && list.All(s => s.Native != null))
-        {
-            nb = new Native.NBody();
-            foreach (var s in list) nb.Faces.AddRange(s.Native!.Clone().Faces);
-            nb.Link();
-        }
-        return new Solid(faces) { Native = nb };
+        return new Solid(faces);
     }
 
     Topology? _topo;

@@ -25,7 +25,8 @@ or checked against the old ones (see *Checking a change* below).
 | `1a00a45` | Mass properties with exact surface derivatives: `NSurface.TryPartials` for B-splines, screw surfaces and offsets of B-splines (the normal's derivative from the base's second derivatives), `PipeSpine.SurfacePartials` along a pipe's spine (the frame's derivative from the spine's second derivative and the interpolated normal), instead of central differences (results within 3e-10 relative; spoked handwheel's exact integration ~450 to ~300 ms) |
 | `a95241f` | Mass properties: a contact curve's panels end at the spine's nodes (the curve is only C1 there) with 4 Gauss points each, instead of uniform panels across them with 8 (spoked handwheel 2.5e-9 nearer the converged volume, exact integration ~270 to ~155 ms). `Topology.Build` welding once for the quick and the full pass was tried: the quick pass already succeeds on every sample, nothing to gain |
 | `3c41711` | `DisplayMesh` shares vertices within a UI face (a corner reuses an earlier one at the same point with the same normal): the triangles as drawn are the same (`FC_DET_MESH_TRIS`), 3.5–5.5× fewer vertices (spoked handwheel 253k to 46k, 6.1 to 1.1 MB of positions and normals); `bench` prints the display mesh's triangles and vertices |
-| (next) | Tessellator triangles name their corners in their face's point list (`Face.Pool`, `PoolA..C`): `Topology.Build` welds each point once (the welder gives a bit-identical point its earlier index, so the result is the same bit for bit; spoked handwheel `topo.weld` ~50 to ~33 ms, display mesh ~10–15% faster) |
+| `0fe87db` | Tessellator triangles name their corners in their face's point list (`Face.Pool`, `PoolA..C`): `Topology.Build` welds each point once (the welder gives a bit-identical point its earlier index, so the result is the same bit for bit; spoked handwheel `topo.weld` ~50 to ~33 ms, display mesh ~10–15% faster) |
+| (next) | Small items: `SplitFace` prunes dangling sections from a worklist (the same edges remain in any order of removal), `AddSec` keeps a set beside each face's list, STEP import finds both units in one pass and compares type names ordinally, `Solid.Combine`'s unreachable block removed (results bit for bit) |
 
 ## Where the time goes now
 
@@ -74,14 +75,11 @@ profile; the profile's times are summed over threads). On the heavy samples (`sa
       `Face` object (and a 3-point loop array) per triangle; `Solid.Faces` is read widely. What is left of
       `topo.weld` is the grid search for each distinct point (~33 ms on the spoked handwheel).
     - `Topology.Build` welding once for its quick and full passes was tried: the quick pass succeeds on every sample.
-11. **Small items**:
+11. **Small items**: `SplitFace` pruning, `AddSec`, STEP units and ordinal names, `Solid.Combine` done (see above).
+    Left:
     - `NFace.ComputeBounds` builds a throwaway domain. Sharing the cached one changed results; see *Tried and rejected*.
-    - `ClassifyAll` runs `CoincidentWith` before the cheap box test.
     - `NFace.Coedges` is a LINQ `SelectMany` used in hot loops.
-    - `AddSec` uses `List.Contains`.
-    - `SplitFace` pruning and dedup are O(s²) to O(s³).
-    - STEP import uses culture-sensitive `EndsWith` (should be ordinal) and runs `Unit()` twice, each with sorts.
-    - `Solid.Combine` has an unreachable duplicate clone block.
+    - `SplitFace`'s duplicate-section check is O(s²) (small s in practice).
 
 ## Core and app: open items
 
@@ -115,6 +113,10 @@ profile; the profile's times are summed over threads). On the heavy samples (`sa
   - Startup: measure with `TieredCompilationQuickJit` on, and start `Warmup` after the window opens.
 
 ## Tried and rejected
+
+- **`ClassifyAll` box test before `CoincidentWith`**: slower (`cls.lone` 8 to 50 ms on spur-gear-nice). `FBox` computes a
+  face's bounds on first use, often for faces nothing else needs; `CoincidentWith` rejects most pairs at once (kinds).
+- **`Topology.Build` welding once for the quick and the full pass**: the quick pass succeeds on every sample.
 
 - **`Roots.Bisect` → Illinois/Brent**: about 2% on threads, but results changed on 136 of 358 feature hashes.
 - **`ComputeBounds` sharing the face's cached domain**: changes results. `Solid.Bounds` caches a finer domain that
