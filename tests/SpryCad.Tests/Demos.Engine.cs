@@ -34,6 +34,17 @@ static partial class Demos
     static double HmCamX => -(HmModule * (HmZCrank + HmZCam) / 2 + 0.1);
     static double HmPushZ => HmGearZ + HmGearB + HmEccT / 2;
 
+    /// <summary>A part's material, for mass properties (the densities the app's Mass Properties offers; rubber and glass typical).</summary>
+    static void HmMaterial(CadDocument d, string material)
+    {
+        d.Material = material;
+        d.Density = material switch
+        {
+            "Cast iron" => 7200, "Stainless steel" => 8000, "Brass" => 8500, "Copper" => 8940, "Rubber" => 1100, "Glass" => 2500,
+            _ => 7850,
+        };
+    }
+
     /// <summary>The piston's wrist pin (x) for a crank angle (radians, 0: the crank pin on +X).</summary>
     public static double HmPistonX(double crank) =>
         HmR * Math.Cos(crank) - Math.Sqrt(HmRod * HmRod - HmR * HmR * Math.Sin(crank) * Math.Sin(crank));
@@ -99,6 +110,7 @@ static partial class Demos
         var ks = d.AddFeature(new SketchFeature { Name = "Keyways", Plane = new PlaneRef { Feature = kp.Id }, Sketch = k.S });
         d.AddFeature(new ExtrudeFeature { Name = "Keyways", SketchId = ks.Id, IsCut = true, Reverse = true, Depth = "KeyT" });
         d.Color = new[] { 0.66, 0.67, 0.70 };
+        HmMaterial(d, "Steel (plain carbon)");
         return d;
     }
 
@@ -159,6 +171,7 @@ static partial class Demos
         var bos = d.AddFeature(new SketchFeature { Name = "Bolt holes", Plane = PlaneRef.Right, Sketch = bo.S });
         d.AddFeature(new ExtrudeFeature { Name = "Bolt holes", SketchId = bos.Id, IsCut = true, End = EndCondition.ThroughAllBoth });
         d.Color = new[] { 0.62, 0.63, 0.66 };
+        HmMaterial(d, "Steel (plain carbon)");
         return d;
     }
 
@@ -190,6 +203,7 @@ static partial class Demos
         var bos = d.AddFeature(new SketchFeature { Name = "Bolt holes", Plane = PlaneRef.Right, Sketch = bo.S });
         d.AddFeature(new ExtrudeFeature { Name = "Bolt holes", SketchId = bos.Id, IsCut = true, End = EndCondition.ThroughAllBoth });
         d.Color = new[] { 0.62, 0.63, 0.66 };
+        HmMaterial(d, "Steel (plain carbon)");
         return d;
     }
 
@@ -200,7 +214,7 @@ static partial class Demos
     static CadDocument HmPiston()
     {
         var d = Doc(("D", $"{HmBore}-0.2"), ("Crown", "25"), ("Skirt", "30"), ("CrownT", "8"), ("Wall", "4"),
-            ("Gw", "2"), ("Gd", "2.5"), ("G1", "4"), ("Gp", "5"), ("BossD", "22"), ("Wp", $"{HmWp}"), ("C", "0.8"));
+            ("Gw", "2"), ("Gd", "2.5"), ("G1", "4"), ("Gp", "5"), ("BossD", "22"), ("Wp", $"{HmWp}"), ("C", "0.8"), ("Slot", "32"), ("SlotW", "22"));
         // the half section on Front (x along the axis, y the radius), revolved about its edge on the axis
         var s = new Sk(d);
         var pts = new List<int> { s.P("-Crown", "0"), s.P("-Crown", "D/2") };
@@ -225,11 +239,17 @@ static partial class Demos
         b.Circle(Sketch.OriginId, "BossD");
         var bs = d.AddFeature(new SketchFeature { Name = "Pin bosses", Plane = PlaneRef.Front, Sketch = b.S });
         d.AddFeature(new ExtrudeFeature { Name = "Pin bosses", SketchId = bs.Id, End = EndCondition.MidPlane, Depth = "D-1.5*Wall" });
+        // room between the bosses for the rod's small end to swing (round the pin's axis)
+        var sl = new Sk(d);
+        sl.Circle(Sketch.OriginId, "Slot");
+        var sls = d.AddFeature(new SketchFeature { Name = "Rod slot", Plane = PlaneRef.Front, Sketch = sl.S });
+        d.AddFeature(new ExtrudeFeature { Name = "Rod slot", SketchId = sls.Id, IsCut = true, End = EndCondition.MidPlane, Depth = "SlotW" });
         var h = new Sk(d);
         h.Circle(Sketch.OriginId, "Wp");
         var hs = d.AddFeature(new SketchFeature { Name = "Pin bore", Plane = PlaneRef.Front, Sketch = h.S });
         d.AddFeature(new ExtrudeFeature { Name = "Pin bore", SketchId = hs.Id, IsCut = true, End = EndCondition.ThroughAllBoth });
         d.Color = new[] { 0.78, 0.79, 0.80 };
+        HmMaterial(d, "Cast iron");
         return d;
     }
 
@@ -248,6 +268,7 @@ static partial class Demos
             Edges = { E($"{pin.Id}.S.C{c}", $"{pin.Id}.Start", new Vec3(V("Wp/2"), 0, -V("L/2"))), E($"{pin.Id}.S.C{c}", $"{pin.Id}.End", new Vec3(V("Wp/2"), 0, V("L/2"))) },
         });
         d.Color = new[] { 0.70, 0.71, 0.74 };
+        HmMaterial(d, "Steel (plain carbon)");
         return d;
     }
 
@@ -332,6 +353,7 @@ static partial class Demos
         var ks = d.AddFeature(new SketchFeature { Name = "Keyway", Plane = new PlaneRef { Feature = kp.Id }, Sketch = k.S });
         d.AddFeature(new ExtrudeFeature { Name = "Keyway", SketchId = ks.Id, IsCut = true, Reverse = true, Depth = "KeyT+1" });
         d.Color = new[] { 0.72, 0.08, 0.07 };
+        HmMaterial(d, "Cast iron");
         return d;
     }
 
@@ -349,10 +371,10 @@ static partial class Demos
     {
         var d = Doc(("BaseY", "150"), ("BaseT", "20"), ("BaseX0", "215"), ("BaseX1", "60"), ("BaseW", "170"), ("BaseR", "15"), ("BaseDraft", "5"),
             ("BodyX0", "170"), ("BodyX1", "40"), ("BodyW", "116"), ("BodyDraft", "2"), ("BodyR", "20"), ("Rb", "6"),
-            ("BrgIn", $"{HmBrgIn}"), ("BrgOut", $"{HmBrgOut}"), ("BrgW", "60"), ("BrgDrop", "40"), ("J", $"{HmJ}"), ("CapStud", "22"),
+            ("BrgIn", $"{HmBrgIn}"), ("BrgOut", $"{HmBrgOut}"), ("BrgW", "64"), ("BrgDrop", "40"), ("J", $"{HmJ}"), ("CapStud", "25"),
             ("HeadX", $"{-HmHeadX}"), ("BarrelD", "104"), ("BarrelEnd", "70"), ("FlangeD", "116"), ("FlangeT", "12"), ("StudPCD", "96"), ("NStud", "6"),
             ("HopX0", "175"), ("HopX1", "85"), ("HopW", "116"), ("HopH", "82"), ("HopWall", "7"), ("HopDraft", "2"), ("HopR", "12"), ("Jacket", "20"), ("FillD", "44"),
-            ("LinerD", "66"), ("Bore", $"{HmBore}"),
+            ("LinerD", "66"), ("Bore", $"{HmBore}"), ("Relief", "58"), ("ReliefL", "8"),
             ("PitX1", "60"), ("PitW", "2*BrgIn"), ("PitBot", "110"),
             ("CamX", $"{-HmCamX}"), ("CamD", "36"), ("Stud", "16"), ("GearZ", $"{HmGearZ}"), ("CamIn", "40"),
             ("LugX", "172"), ("LugP", "24"), ("LugT", "10"), ("LugIn", "48"), ("PushZ", $"{HmPushZ}"), ("PushD", "8.4"),
@@ -445,6 +467,12 @@ static partial class Demos
         o.Circle(Sketch.OriginId, "Bore");
         var os = d.AddFeature(new SketchFeature { Name = "Bore", Plane = new PlaneRef { Feature = cf.Id }, Sketch = o.S });
         d.AddFeature(new ExtrudeFeature { Name = "Bore", SketchId = os.Id, IsCut = true, End = EndCondition.ThroughAll });
+        // a relief at the bore's open end, where the rod swings past it
+        var me = d.AddFeature(new PlaneFeature { Name = "Barrel end", Base = PlaneRef.Right, Offset = "-BarrelEnd" });
+        var rl = new Sk(d);
+        rl.Circle(Sketch.OriginId, "Relief");
+        var rls = d.AddFeature(new SketchFeature { Name = "Mouth relief", Plane = new PlaneRef { Feature = me.Id }, Sketch = rl.S });
+        d.AddFeature(new ExtrudeFeature { Name = "Mouth relief", SketchId = rls.Id, IsCut = true, Reverse = true, Depth = "ReliefL" });
         // the crank pit, through the body from above, open at the back
         var pt = d.AddFeature(new PlaneFeature { Name = "Pit top", Base = PlaneRef.Top, Offset = "BarrelD/2" });
         var k = new Sk(d);
@@ -505,6 +533,7 @@ static partial class Demos
         var bhs = d.AddFeature(new SketchFeature { Name = "Hold-down holes", Plane = new PlaneRef { Feature = bt.Id }, Sketch = bh.S });
         d.AddFeature(new HoleFeature { Name = "Hold-down holes", SketchId = bhs.Id, Diameter = "11", ThroughAll = true });
         d.Color = new[] { 0.72, 0.08, 0.07 };
+        HmMaterial(d, "Cast iron");
         return d;
     }
 
@@ -514,7 +543,7 @@ static partial class Demos
     /// </summary>
     static CadDocument HmBearingCap()
     {
-        var d = Doc(("J", $"{HmJ}"), ("W", "60"), ("L", $"{HmBrgOut - HmBrgIn}"), ("T", "14"), ("Hump", "18"), ("Stud", "22"), ("StudD", "8.5"),
+        var d = Doc(("J", $"{HmJ}"), ("W", "64"), ("L", $"{HmBrgOut - HmBrgIn}"), ("T", "14"), ("Hump", "17"), ("Stud", "25"), ("StudD", "8.5"),
             ("CupD", "14"), ("CupH", "4"), ("Tap", "6.8"), ("C", "1"));
         var s = new Sk(d);
         int a = s.P("-W/2", "0"), b = s.P("W/2", "0"), c = s.P("W/2", "T"), e = s.P("Hump", "T"), g = s.P("-Hump", "T", dimX: false), h = s.P("-W/2", "T");
@@ -544,6 +573,7 @@ static partial class Demos
         d.AddFeature(new HoleFeature { Name = "Oil hole", SketchId = chs.Id, Diameter = "Tap", ThroughAll = false, Depth = "T+Hump+CupH-J/2+1" });
         _ = cap; _ = hump;
         d.Color = new[] { 0.72, 0.08, 0.07 };
+        HmMaterial(d, "Cast iron");
         return d;
     }
 
@@ -556,7 +586,7 @@ static partial class Demos
     static CadDocument HmHead()
     {
         var d = Doc(("HeadX", $"{-HmHeadX}"), ("T", $"{HmHeadT}"), ("D", "116"), ("PCD", "96"), ("NStud", "6"), ("StudD", "8.5"), ("SpotD", "15"),
-            ("Vz", $"{HmValveZ}"), ("Stem", "6.2"), ("Seat", "20"), ("PortD", "18"), ("PortX", "210"), ("BossD", "28"), ("BossOut", "62"),
+            ("Vz", $"{HmValveZ}"), ("Stem", "6.2"), ("Seat", "22"), ("PortD", "18"), ("PortX", "210"), ("BossD", "28"), ("BossOut", "62"),
             ("GuideD", "14"), ("GuideH", "6"), ("PlugY", "18"), ("PlugD", "12.5"),
             ("PivX", "266"), ("PivZ", $"{(HmValveZ + HmPushZ) / 2}"), ("PinD", "8.2"), ("Gap", "5.5"), ("CheekT", "6"), ("CheekX", "278"), ("CheekZ0", "42"), ("CheekZ1", "62"),
             ("C", "1.5"));
@@ -629,6 +659,7 @@ static partial class Demos
         var pls = d.AddFeature(new SketchFeature { Name = "Plug hole", Plane = new PlaneRef { Feature = ot.Id }, Sketch = pl.S });
         d.AddFeature(new HoleFeature { Name = "Plug hole", SketchId = pls.Id, Diameter = "PlugD", ThroughAll = true });
         d.Color = new[] { 0.72, 0.08, 0.07 };
+        HmMaterial(d, "Cast iron");
         return d;
     }
 
@@ -643,6 +674,7 @@ static partial class Demos
             d.Equations.First(q => q.Name == n).Expr = e;
         foreach (var q in d.Equations) q.Exposed = false;
         d.Color = new[] { 0.85, 0.66, 0.28 };
+        HmMaterial(d, "Brass");
         return d;
     }
 
@@ -680,6 +712,7 @@ static partial class Demos
         d.AddFeature(new ExtrudeFeature { Name = "Collar", SketchId = ks.Id, Depth = "CollarT" });
         _ = c; _ = stud;
         d.Color = new[] { 0.66, 0.67, 0.70 };
+        HmMaterial(d, "Steel (plain carbon)");
         return d;
     }
 
@@ -699,6 +732,7 @@ static partial class Demos
             Edges = { E($"{rod.Id}.S.C{c}", $"{rod.Id}.Start", new Vec3(0, V("D/2"), 0)), E($"{rod.Id}.S.C{c}", $"{rod.Id}.End", new Vec3(V("Len"), V("D/2"), 0)) },
         });
         d.Color = new[] { 0.80, 0.81, 0.83 };
+        HmMaterial(d, "Steel (plain carbon)");
         return d;
     }
 
@@ -727,6 +761,7 @@ static partial class Demos
         var hs = d.AddFeature(new SketchFeature { Name = "Pivot", Plane = PlaneRef.Top, Sketch = h.S });
         d.AddFeature(new ExtrudeFeature { Name = "Pivot", SketchId = hs.Id, IsCut = true, End = EndCondition.ThroughAllBoth });
         d.Color = new[] { 0.72, 0.08, 0.07 };
+        HmMaterial(d, "Cast iron");
         return d;
     }
 
@@ -743,6 +778,7 @@ static partial class Demos
         var hs = d.AddFeature(new SketchFeature { Name = "Head", Plane = PlaneRef.Top, Sketch = h.S });
         d.AddFeature(new ExtrudeFeature { Name = "Head", SketchId = hs.Id, Depth = "HeadT" });
         d.Color = new[] { 0.80, 0.81, 0.83 };
+        HmMaterial(d, "Steel (plain carbon)");
         return d;
     }
 
@@ -760,6 +796,7 @@ static partial class Demos
         var sk = d.AddFeature(new SketchFeature { Name = "Section", Plane = PlaneRef.Front, Sketch = s.S });
         d.AddFeature(new RevolveFeature { Name = "Valve", SketchId = sk.Id, AxisEntity = L[^1], Angle = "360" });
         d.Color = new[] { 0.62, 0.63, 0.66 };
+        HmMaterial(d, "Stainless steel");
         return d;
     }
 
@@ -773,6 +810,7 @@ static partial class Demos
         var sk = d.AddFeature(new SketchFeature { Name = "Wire", Plane = PlaneRef.Front, Sketch = s.S });
         d.AddFeature(new HelicalSweepFeature { Name = "Coils", SketchId = sk.Id, Pitch = "(Len-Wire)/N", Revolutions = "N" });
         d.Color = new[] { 0.25, 0.25, 0.27 };
+        HmMaterial(d, "Steel (plain carbon)");
         return d;
     }
 
@@ -785,6 +823,7 @@ static partial class Demos
         var sk = d.AddFeature(new SketchFeature { Name = "Washer", Plane = PlaneRef.Right, Sketch = s.S });
         d.AddFeature(new ExtrudeFeature { Name = "Washer", SketchId = sk.Id, Reverse = true, Depth = "T" });
         d.Color = new[] { 0.80, 0.81, 0.83 };
+        HmMaterial(d, "Steel (plain carbon)");
         return d;
     }
 
@@ -825,6 +864,7 @@ static partial class Demos
         var (d, _, _) = HmRing("Funnel", new[] { ("Spig", "21.8"), ("In", "19"), ("Foot", "27"), ("Top", "40"), ("H", "40"), ("T", "3"), ("SpigL", "8") },
             ("In", "-SpigL"), ("Spig", "-SpigL"), ("Spig", "0"), ("Foot", "0"), ("Foot", "4"), ("Top", "H"), ("Top-T", "H"), ("In", "6"));
         d.Color = HmRed;
+        HmMaterial(d, "Steel (plain carbon)");
         return d;
     }
 
@@ -852,6 +892,7 @@ static partial class Demos
         var os = d.AddFeature(new SketchFeature { Name = "Outlet", Plane = new PlaneRef { Feature = top.Id }, Sketch = o.S });
         d.AddFeature(new HoleFeature { Name = "Outlet", SketchId = os.Id, Diameter = "Out", ThroughAll = false, Depth = "30" });
         d.Color = HmBlack;
+        HmMaterial(d, "Cast iron");
         return d;
     }
 
@@ -861,6 +902,7 @@ static partial class Demos
         var (d, rev, L) = HmRing("Ring", new[] { ("In", "8"), ("Out", "18.5"), ("H", "10"), ("Lip", "17"), ("C", "1.5") },
             ("In", "0"), ("Out", "0"), ("Out", "H-3"), ("Lip", "H"), ("In", "H"));
         d.Color = HmBrass;
+        HmMaterial(d, "Brass");
         return d;
     }
 
@@ -913,6 +955,7 @@ static partial class Demos
         double V(string e) => s.Eval(e);
         d.AddFeature(new ChamferFeature { Name = "Body end", Distance = "C", Edges = { E($"{body.Id}.S.C{bc}", $"{body.Id}.End", new Vec3(0, -V("Body/2"), V("L"))) } });
         d.Color = HmBrass;
+        HmMaterial(d, "Brass");
         return d;
     }
 
@@ -939,6 +982,7 @@ static partial class Demos
         var groove = d.AddFeature(new ExtrudeFeature { Name = "Knurl", SketchId = gs.Id, IsCut = true, Depth = "KnobT" });
         d.AddFeature(new CircularPatternFeature { Name = "Knurling", Seeds = { groove.Id }, Axis = new DirRef { Axis = "Z" }, Count = "N" });
         d.Color = HmBrass;
+        HmMaterial(d, "Brass");
         return d;
     }
 
@@ -949,7 +993,7 @@ static partial class Demos
     static CadDocument HmFuelLine(Vec3 start)
     {
         var d = Doc(("X0", $"{-start.X}"), ("Y0", $"{-start.Y}"), ("Z", $"{-start.Z}"), ("OD", "7"), ("ID", "4"), ("R", "15"),
-            ("Drop", "60"), ("Run", "70"), ("Y1", "132"));
+            ("Drop", "60"), ("Run", "70"), ("Y1", "130"));
         var sp = d.AddFeature(new PlaneFeature { Name = "Start", Base = PlaneRef.Top, Offset = "-Y0" });
         var p = new Sk(d);
         // Top: sketch y = -z
@@ -964,6 +1008,7 @@ static partial class Demos
         var ws = d.AddFeature(new SketchFeature { Name = "Route", Plane = new PlaneRef { Feature = pp.Id }, Sketch = w.S });
         d.AddFeature(new SweepFeature { Name = "Fuel line", ProfileSketchId = ps.Id, PathSketchId = ws.Id });
         d.Color = HmRed;
+        HmMaterial(d, "Copper");
         return d;
     }
 
@@ -990,6 +1035,7 @@ static partial class Demos
         var es = d.AddFeature(new SketchFeature { Name = "Terminal", Plane = new PlaneRef { Feature = tp.Id }, Sketch = e.S });
         d.AddFeature(new ExtrudeFeature { Name = "Terminal", SketchId = es.Id, Reverse = true, Depth = "TermL" });
         d.Color = new[] { 0.90, 0.90, 0.88 };
+        HmMaterial(d, "Steel (plain carbon)");
         return d;
     }
 
@@ -1003,17 +1049,23 @@ static partial class Demos
         var boot = d.AddFeature(new ExtrudeFeature { Name = "Boot", SketchId = ss.Id, Reverse = true, Depth = "L" });
         double V(string e) => s.Eval(e);
         d.AddFeature(new FilletFeature { Name = "End", Radius = "4", Edges = { E($"{boot.Id}.S.C{c}", $"{boot.Id}.End", new Vec3(-V("L"), V("D/2"), 0)) } });
+        // open at the plug's end, over the insulator and terminal
+        var o = new Sk(d);
+        o.Point(Sketch.OriginId);
+        var os = d.AddFeature(new SketchFeature { Name = "Socket", Plane = PlaneRef.Right, Sketch = o.S });
+        d.AddFeature(new HoleFeature { Name = "Socket", SketchId = os.Id, Diameter = "13", ThroughAll = false, Depth = "L-3" });
         // the lead: from the boot's end along -X, a bend, then down (-Y)
-        var lp = d.AddFeature(new PlaneFeature { Name = "Boot end", Base = PlaneRef.Right, Offset = "-(L-6)" });
+        var lp = d.AddFeature(new PlaneFeature { Name = "Boot end", Base = PlaneRef.Right, Offset = "-(L-2)" });
         var l = new Sk(d);
         l.Circle(Sketch.OriginId, "Lead");
         var ls = d.AddFeature(new SketchFeature { Name = "Lead section", Plane = new PlaneRef { Feature = lp.Id }, Sketch = l.S });
         var w = new Sk(d);
-        int a = w.P("-(L-6)", "0"), b = w.P("-(L+6)", "0"), cc = w.P("-(L+6)", "-R"), e = w.P("-(L+6+R)", "-R"), f = w.P("-(L+6+R)", "-(R+Run)");
+        int a = w.P("-(L-2)", "0"), b = w.P("-(L+6)", "0"), cc = w.P("-(L+6)", "-R"), e = w.P("-(L+6+R)", "-R"), f = w.P("-(L+6+R)", "-(R+Run)");
         w.Line(a, b); w.Arc(cc, b, e); w.Line(e, f);
         var ws = d.AddFeature(new SketchFeature { Name = "Lead route", Plane = PlaneRef.Front, Sketch = w.S });
         d.AddFeature(new SweepFeature { Name = "Lead", ProfileSketchId = ls.Id, PathSketchId = ws.Id });
         d.Color = HmBlack;
+        HmMaterial(d, "Rubber");
         return d;
     }
 
@@ -1024,16 +1076,18 @@ static partial class Demos
             ("Tap/2", "-TapL"), ("Tap/2", "0"), ("Hex", "0"), ("Hex", "HexH"), ("Cup", "HexH"), ("Cup", "HexH+CupH"), ("Lid", "HexH+CupH"), ("Lid", "HexH+CupH+LidH"));
         d.AddFeature(new FilletFeature { Name = "Lid", Radius = "3", Edges = { E($"{rev.Id}.R.L{L[7]}", $"{rev.Id}.R.L{L[8]}", new Vec3(8.5, 31, 0)) } });
         d.Color = HmBrass;
+        HmMaterial(d, "Brass");
         return d;
     }
 
     /// <summary>The cylinder's drip oiler, brass, up from y = 0: thread, base, a post through the glass, the top cap and its knob.</summary>
     static CadDocument HmOiler()
     {
-        var (d, _, _) = HmTurned("Oiler", new[] { ("Tap", "6.8"), ("TapL", "6"), ("Base", "11"), ("BaseH", "8"), ("Post", "3"), ("Glass", "22"), ("Top", "11.5"), ("TopH", "6"), ("Knob", "4"), ("KnobH", "8") },
+        var (d, _, _) = HmTurned("Oiler", new[] { ("Tap", "6.8"), ("TapL", "6"), ("Base", "9"), ("BaseH", "8"), ("Post", "3"), ("Glass", "22"), ("Top", "11.5"), ("TopH", "6"), ("Knob", "4"), ("KnobH", "8") },
             ("Tap/2", "-TapL"), ("Tap/2", "0"), ("Base", "0"), ("Base", "BaseH"), ("Post", "BaseH"), ("Post", "BaseH+Glass"), ("Top", "BaseH+Glass"), ("Top", "BaseH+Glass+TopH"),
             ("Knob", "BaseH+Glass+TopH"), ("Knob", "BaseH+Glass+TopH+KnobH"));
         d.Color = HmBrass;
+        HmMaterial(d, "Brass");
         return d;
     }
 
@@ -1042,6 +1096,7 @@ static partial class Demos
     {
         var (d, _, _) = HmRing("Glass", new[] { ("In", "8"), ("Out", "10"), ("H", "22") }, ("In", "0"), ("Out", "0"), ("Out", "H"), ("In", "H"));
         d.Color = new[] { 0.55, 0.62, 0.90 };
+        HmMaterial(d, "Glass");
         return d;
     }
 
@@ -1062,6 +1117,7 @@ static partial class Demos
         var hole = d.AddFeature(new HoleFeature { Name = "Screw hole", SketchId = hs.Id, Type = HoleType.Counterbore, Diameter = "Screw", CbDiameter = "Cb", CbDepth = "CbH", ThroughAll = true });
         d.AddFeature(new CircularPatternFeature { Name = "Screw holes", Seeds = { hole.Id }, Axis = new DirRef { Axis = "Z" }, Count = "4" });
         d.Color = HmBrass;
+        HmMaterial(d, "Brass");
         return d;
     }
 
@@ -1080,6 +1136,7 @@ static partial class Demos
         d.AddFeature(new CircularPatternFeature { Name = "Screw holes", Seeds = { hole.Id }, Axis = new DirRef { Axis = "Y" }, Count = "4" });
         _ = rev; _ = L;
         d.Color = HmSteel;
+        HmMaterial(d, "Steel (plain carbon)");
         return d;
     }
 
@@ -1106,6 +1163,7 @@ static partial class Demos
         var hs = d.AddFeature(new SketchFeature { Name = "Pivot", Plane = PlaneRef.Front, Sketch = h.S });
         d.AddFeature(new ExtrudeFeature { Name = "Pivot", SketchId = hs.Id, IsCut = true, End = EndCondition.ThroughAllBoth });
         d.Color = HmBrass;
+        HmMaterial(d, "Brass");
         return d;
     }
 
@@ -1115,6 +1173,7 @@ static partial class Demos
         var (d, rev, L) = HmRing("Foot", new[] { ("D", "12"), ("H", "10"), ("Tap", "4.25") }, ("Tap", "0"), ("D", "0"), ("D", "-H"), ("Tap", "-H"));
         _ = rev; _ = L;
         d.Color = HmBlack;
+        HmMaterial(d, "Rubber");
         return d;
     }
 
@@ -1128,6 +1187,7 @@ static partial class Demos
         var ss = d.AddFeature(new SketchFeature { Name = "Nut", Plane = PlaneRef.Front, Sketch = s.S });
         d.AddFeature(new ExtrudeFeature { Name = "Nut", SketchId = ss.Id, Depth = "H" });
         d.Color = HmBlack;
+        HmMaterial(d, "Steel (plain carbon)");
         return d;
     }
 
@@ -1144,320 +1204,6 @@ static partial class Demos
     static bool HmPlane(FaceRange f, Vec3 normal, double at, Func<Vec3, bool>? where = null) =>
         f.Surface.Kind == SurfaceKind.Plane && Vec3.Dot(f.FirstPlane.Normal, normal) > 0.999
         && Math.Abs(Vec3.Dot(f.FirstPlane.Origin, normal) - at) < 1e-6 && (where == null || where(f.Bounds.Center));
-
-    /// <summary>
-    /// The engine put together (its parts embedded): placed where they belong at the crank angle <see cref="HmCrank0"/>
-    /// and mated as they work: the crankshaft in its bearings, the flywheels and crank gear keyed to it (locks), the
-    /// rod on the crank pin and the wrist pin, the piston in the bore, the cam gear on its stud meshing 2:1 with the
-    /// crank gear, the push rod in its lugs riding on the cam gear's eccentric (tangent), the rocker on its pivot
-    /// between the push rod and the exhaust valve's stem (tangent each). Turn a flywheel and it all runs.
-    /// </summary>
-    static AssemblyModel HitAndMiss()
-    {
-        var m = AssemblyModel.New();
-        Component Add(CadDocument doc, string name, Transform t) => m.InsertEmbedded(doc, name, t);
-        static Transform T(double x, double y, double z) => Transform.Translation(new Vec3(x, y, z));
-        static Transform Rz(double a) => Transform.Rotation(Vec3.Zero, Vec3.UnitZ, a);
-        static Transform Ry(double a) => Transform.Rotation(Vec3.Zero, Vec3.UnitY, a);
-        double th = HmCrank0;
-        var pinAt = new Vec3(HmR * Math.Cos(th), HmR * Math.Sin(th), 0);
-        var px = HmPistonX(th);
-        var rodDir = Math.Atan2(-pinAt.Y, px - pinAt.X);
-
-        var casting = Add(HmCasting(), "Casting", Transform.Identity);
-        casting.Fixed = true;
-        var capDoc = HmBearingCap();
-        var cap1 = Add(capDoc, "Bearing cap", T(0, 0, HmBrgIn));
-        var cap2 = Add(capDoc, "Bearing cap", T(0, 0, -HmBrgIn) * Ry(Math.PI));
-        var crank = Add(HmCrankshaft(), "Crankshaft", Rz(th));
-        var fwDoc = HmFlywheel();
-        var fw1 = Add(fwDoc, "Flywheel", T(0, 0, HmFwZ) * Rz(th));
-        var fw2 = Add(fwDoc, "Flywheel", Rz(th) * T(0, 0, -HmFwZ) * Ry(Math.PI));
-        var crankGear = Add(HmGear(HmZCrank, HmJ), "Crank gear", T(0, 0, HmGearZ) * Rz(th + Math.PI / 2));
-        var rod = Add(HmConRod(), "Connecting rod", T(pinAt.X, pinAt.Y, 0) * Rz(rodDir + Math.PI));
-        var rodCap = Add(HmRodCap(), "Rod cap", T(pinAt.X, pinAt.Y, 0) * Rz(rodDir + Math.PI));
-        var piston = Add(HmPiston(), "Piston", T(px, 0, 0));
-        var wristPin = Add(HmWristPin(), "Wrist pin", T(px, 0, 0));
-        var head = Add(HmHead(), "Cylinder head", Transform.Identity);
-        var stud = Add(HmCamStud(), "Cam stud", T(HmCamX, 0, HmGearZ));
-        var camGear = Add(HmCamGear(), "Cam gear", T(HmCamX, 0, HmGearZ));
-        double rockerX = HmHeadX - HmHeadT - 35, stemEnd = HmHeadX - 65;
-        var pushRod = Add(HmPushRod(), "Push rod", T(stemEnd, 0, HmPushZ));
-        var rocker = Add(HmRocker(), "Rocker", T(rockerX, 0, (HmValveZ + HmPushZ) / 2));
-        var pivot = Add(HmPivotPin(), "Rocker pin", T(rockerX, 11.5, (HmValveZ + HmPushZ) / 2));
-        var valveDoc = HmValve(); var springDoc = HmValveSpring(); var retDoc = HmRetainer();
-        var exhaust = Add(valveDoc, "Valve", T(HmHeadX, 0, HmValveZ));
-        var intake = Add(valveDoc, "Valve", T(HmHeadX, 0, -HmValveZ));
-        double springAt = HmHeadX - HmHeadT - 6;
-        var exSpring = Add(springDoc, "Valve spring", T(springAt, 0, HmValveZ));
-        var inSpring = Add(springDoc, "Valve spring", T(springAt, 0, -HmValveZ));
-        var exRet = Add(retDoc, "Retainer", T(springAt - 16, 0, HmValveZ));
-        var inRet = Add(retDoc, "Retainer", T(springAt - 16, 0, -HmValveZ));
-        foreach (var c in m.Doc.Components) if (c != casting) c.Fixed = false;
-
-        MateRef F(Component c, Func<FaceRange, bool> which)
-        {
-            var faces = m.DisplayOf(c)!.Mesh.Faces;
-            if (faces.Any(which)) return FaceRef(m, c, which);
-            throw new InvalidOperationException($"no such face on {c.Name}: " + string.Join("; ", faces.Select(f =>
-                $"{f.Name} {f.Surface.Kind} r={f.Surface.Radius:0.###} ax={f.Surface.Axis} n={f.FirstPlane.Normal} o={f.FirstPlane.Origin} c={f.Bounds.Center}")));
-        }
-        MateRef Any(Component c) => m.RefTo(c.Id, m.DisplayOf(c)!.Mesh.Faces[0].Name)!;
-        var (X, Y, Z) = (Vec3.UnitX, Vec3.UnitY, Vec3.UnitZ);
-        const MateType Co = MateType.Coincident, Cc = MateType.Concentric, Lk = MateType.Lock, Tg = MateType.Tangent;
-        var top = m.RefTo(null, "Top")!;
-        double rj = HmJ / 2;
-
-        // the bearing caps on the pedestals
-        foreach (var cap in new[] { cap1, cap2 })
-        {
-            m.AddMate(Co, F(cap, f => HmPlane(f, -Y, 0)), top);
-            m.AddMate(Cc, F(cap, f => HmCyl(f, rj, Z)), F(casting, f => HmCyl(f, rj, Z)));
-            var side = cap == cap1 ? 1 : -1;
-            m.AddMate(Co, F(cap, f => HmPlane(f, -Z, 0)), F(casting, f => HmPlane(f, -side * Z, -HmBrgIn)));
-        }
-        // the crankshaft in its bearings, a gap to the bearing at the +Z web
-        var journal = F(crank, f => HmCyl(f, rj, Z, p => p.Z > HmBrgOut));
-        m.AddMate(Cc, journal, F(casting, f => HmCyl(f, rj, Z)));
-        m.AddMate(Co, F(crank, f => HmPlane(f, Z, HmWebIn + HmWebT)), F(casting, f => HmPlane(f, -Z, -HmBrgIn)), HmBrgIn - HmWebIn - HmWebT);
-        // the flywheels and the crank gear keyed to it
-        foreach (var fw in new[] { fw1, fw2 })
-        {
-            m.AddMate(Cc, F(fw, f => HmCyl(f, rj, Z)), journal);
-            m.AddMate(Lk, Any(crank), Any(fw));
-        }
-        m.AddMate(Cc, F(crankGear, f => HmCyl(f, rj, Z)), journal);
-        m.AddMate(Lk, Any(crank), Any(crankGear));
-        // the rod on the crank pin beside the +Z web, its cap bolted on; the piston in the bore on its wrist pin
-        m.AddMate(Cc, F(rod, f => HmCyl(f, HmPin / 2, Z)), F(crank, f => HmCyl(f, HmPin / 2, Z)));
-        m.AddMate(Co, F(rod, f => HmPlane(f, Z, 11, p => p.X > -20)), F(crank, f => HmPlane(f, -Z, -HmWebIn)), HmWebIn - 11);
-        m.AddMate(Lk, Any(rod), Any(rodCap));
-        m.AddMate(Cc, F(piston, f => HmCyl(f, (HmBore - 0.2) / 2, X)), F(casting, f => HmCyl(f, HmBore / 2, X)));
-        m.AddMate(Cc, F(wristPin, f => HmCyl(f, HmWp / 2, Z)), F(piston, f => HmCyl(f, HmWp / 2, Z)));
-        m.AddMate(Lk, Any(piston), Any(wristPin));
-        m.AddMate(Cc, F(rod, f => HmCyl(f, HmWp / 2, Z)), F(wristPin, f => HmCyl(f, HmWp / 2, Z)));
-        // the head on the cylinder's flange, two of its studs' holes on the flange's
-        m.AddMate(Co, F(head, f => HmPlane(f, X, HmHeadX)), F(casting, f => HmPlane(f, -X, -HmHeadX)));
-        foreach (var yy in new[] { 48.0, -48.0 })
-            m.AddMate(Cc, F(head, f => HmCyl(f, 4.25, X, p => Math.Abs(p.Y - yy) < 1)), F(casting, f => HmCyl(f, 3.4, X, p => Math.Abs(p.Y - yy) < 1 && Math.Abs(p.Z) < 1)));
-        // the cam gear's stud pressed into its boss; the gear on it beside the crank gear, meshing 2:1
-        m.AddMate(Cc, F(stud, f => HmCyl(f, 8, Z)), F(casting, f => HmCyl(f, 8, Z)));
-        m.AddMate(Lk, Any(casting), Any(stud));
-        var camBore = F(camGear, f => HmCyl(f, 8, Z));
-        m.AddMate(Cc, camBore, F(stud, f => HmCyl(f, 8, Z)));
-        m.AddMate(Co, F(camGear, f => HmPlane(f, -Z, 0)), F(crankGear, f => HmPlane(f, -Z, 0)));
-        m.AddMate(MateType.Gear, F(crankGear, f => HmCyl(f, rj, Z)), camBore, setup: g => { g.RatioA = HmZCrank; g.RatioB = HmZCam; });
-        // the push rod in its lugs, on the eccentric; the rocker on its pivot between the push rod and the exhaust valve
-        var rodEnd = HmPushRod().Equations.First(q => q.Name == "Len").Expr;
-        double len = double.Parse(rodEnd, System.Globalization.CultureInfo.InvariantCulture);
-        m.AddMate(Cc, F(pushRod, f => HmCyl(f, 4, X)), F(casting, f => HmCyl(f, 4.2, X)));
-        m.AddMate(Tg, F(pushRod, f => HmPlane(f, X, len)), F(camGear, f => HmCyl(f, HmEccD / 2, Z)));
-        m.AddMate(Cc, F(rocker, f => HmCyl(f, 4.1, Y)), F(head, f => HmCyl(f, 4.1, Y)));
-        m.AddMate(Co, F(rocker, f => HmPlane(f, Y, 5)), F(head, f => HmPlane(f, -Y, -5.5)), 0.5);
-        m.AddMate(Tg, F(rocker, f => HmCyl(f, 4, Y, p => p.Z > 0)), F(pushRod, f => HmPlane(f, -X, 0)));
-        m.AddMate(Cc, F(pivot, f => HmCyl(f, 4, Y)), F(head, f => HmCyl(f, 4.1, Y)));
-        m.AddMate(Co, F(pivot, f => HmPlane(f, -Y, 0)), F(head, f => HmPlane(f, Y, 11.5)));
-        // the valves in their guides: the exhaust held on the rocker, the intake (opened by the suction) closed
-        foreach (var (v, z) in new[] { (exhaust, HmValveZ), (intake, -HmValveZ) })
-            m.AddMate(Cc, F(v, f => HmCyl(f, 3, X, p => p.X < -20)), F(head, f => HmCyl(f, 3.1, X, p => Math.Abs(p.Z - z) < 1)));
-        m.AddMate(Tg, F(rocker, f => HmCyl(f, 4, Y, p => p.Z < 0)), F(exhaust, f => HmPlane(f, -X, 65)));
-        m.AddMate(Co, F(intake, f => HmPlane(f, X, 0)), F(head, f => HmPlane(f, X, HmHeadX)));
-        // the springs on the guide bosses, the retainers on the valves (the springs do not compress: notes)
-        foreach (var s in new[] { exSpring, inSpring }) m.AddMate(Lk, Any(head), Any(s));
-        m.AddMate(Lk, Any(exhaust), Any(exRet));
-        m.AddMate(Lk, Any(intake), Any(inRet));
-
-        // ---- the fittings
-        Component Fitting(CadDocument doc, string name, Transform t) { var c = Add(doc, name, t); c.Fixed = false; return c; }
-        // the hopper's funnel, the exhaust and its muffler, the mixer and its needle valve, the fuel line
-        var funnel = Fitting(HmFunnel(), "Funnel", T(-130, 82, 0));
-        m.AddMate(Cc, F(funnel, f => HmCyl(f, 21.8, Y)), F(casting, f => HmCyl(f, 22, Y)));
-        m.AddMate(Co, F(funnel, f => HmPlane(f, -Y, 0)), F(casting, f => HmPlane(f, Y, 82)));
-        var muffler = Fitting(HmMuffler(), "Muffler", T(-210, 62, HmValveZ));
-        m.AddMate(Cc, F(muffler, f => HmCyl(f, 9, Y)), F(head, f => HmCyl(f, 9, Y)));
-        m.AddMate(Co, F(muffler, f => HmPlane(f, -Y, 0)), F(head, f => HmPlane(f, Y, 62)));
-        var mufflerCap = Fitting(HmMufflerCap(), "Muffler cap", T(-210, 62 + 190, HmValveZ));
-        m.AddMate(Cc, F(mufflerCap, f => HmCyl(f, 8, Y)), F(muffler, f => HmCyl(f, 8, Y)));
-        m.AddMate(Co, F(mufflerCap, f => HmPlane(f, -Y, 0)), F(muffler, f => HmPlane(f, Y, 190)));
-        var mixerAt = T(-210, 0, -62) * Ry(Math.PI);
-        var mixer = Fitting(HmMixer(), "Mixer", mixerAt);
-        m.AddMate(Cc, F(mixer, f => HmCyl(f, 9, Z)), F(head, f => HmCyl(f, 9, Z)));
-        m.AddMate(Co, F(mixer, f => HmPlane(f, -Z, 0)), F(head, f => HmPlane(f, -Z, 62)));
-        m.AddMate(MateType.Parallel, F(mixer, f => HmPlane(f, Y, 38)), top);
-        var needle = Fitting(HmNeedleValve(), "Needle valve", mixerAt * T(0, 0, 40));
-        m.AddMate(Cc, F(needle, f => HmCyl(f, 3, Z)), F(mixer, f => HmCyl(f, 3, Z)));
-        m.AddMate(Co, F(needle, f => HmPlane(f, -Z, 0)), F(mixer, f => HmPlane(f, Z, 40)));
-        var fuel = Fitting(HmFuelLine(new Vec3(-210, -24, -78)), "Fuel line", Transform.Identity);
-        m.AddMate(Lk, Any(casting), Any(fuel));
-        // the spark plug and its boot
-        var plug = Fitting(HmSparkPlug(), "Spark plug", T(HmHeadX - HmHeadT, -18, 0));
-        m.AddMate(Cc, F(plug, f => HmCyl(f, 6.25, X)), F(head, f => HmCyl(f, 6.25, X)));
-        m.AddMate(Co, F(plug, f => HmPlane(f, X, 0)), F(head, f => HmPlane(f, -X, -(HmHeadX - HmHeadT))));
-        var boot = Fitting(HmPlugBoot(), "Plug boot", T(HmHeadX - HmHeadT - 22, -18, 0));
-        m.AddMate(Lk, Any(plug), Any(boot));
-        // the oil cups on the bearing caps, the drip oiler (and its glass) on the cylinder
-        var cupDoc = HmOilCup();
-        foreach (var (cap, z) in new[] { (cap1, 50.0), (cap2, -50.0) })
-        {
-            var cup = Fitting(cupDoc, "Oil cup", T(0, 36, z));
-            m.AddMate(Cc, F(cup, f => HmCyl(f, 3.4, Y)), F(cap, f => HmCyl(f, 3.4, Y)));
-            m.AddMate(Co, F(cup, f => HmPlane(f, -Y, 0)), F(cap, f => HmPlane(f, Y, 36)));
-        }
-        var oiler = Fitting(HmOiler(), "Oiler", T(-77, 56, 0));
-        m.AddMate(Cc, F(oiler, f => HmCyl(f, 3.4, Y)), F(casting, f => HmCyl(f, 3.4, Y, p => Math.Abs(p.X + 77) < 1)));
-        m.AddMate(Co, F(oiler, f => HmPlane(f, -Y, 0)), F(casting, f => HmPlane(f, Y, 56)));
-        var glass = Fitting(HmOilerGlass(), "Oiler glass", T(-77, 64, 0));
-        m.AddMate(Lk, Any(oiler), Any(glass));
-        // on the flywheels: the brass hub caps (the outer one over the belt pulley), the governor's weights
-        var capDocB = HmHubCap();
-        var fw1At = fw1.Placement.ToTransform(); var fw2At = fw2.Placement.ToTransform();
-        var hubCap1 = Fitting(capDocB, "Hub cap", fw1At * T(0, 0, 20));
-        var pulley = Fitting(HmPulley(), "Pulley", fw2At * T(0, 0, 20) * Transform.Rotation(Vec3.Zero, X, Math.PI / 2));
-        var hubCap2 = Fitting(capDocB, "Hub cap", fw2At * T(0, 0, 26));
-        m.AddMate(Lk, Any(fw1), Any(hubCap1));
-        m.AddMate(Lk, Any(fw2), Any(pulley));
-        m.AddMate(Lk, Any(fw2), Any(hubCap2));
-        var weightDoc = HmGovernorWeight();
-        foreach (var a in new[] { 0.0, Math.PI })
-        {
-            var wt = Fitting(weightDoc, "Governor weight", fw1At * Rz(a) * T(55, 0, 11) * Rz(Math.PI / 2));
-            m.AddMate(Lk, Any(fw1), Any(wt));
-        }
-        // the feet under the base
-        var footDoc = HmFoot();
-        var feet = new List<(Component foot, double x, double z)>();
-        foreach (var (x, z) in new[] { (-207.0, -70.0), (-207.0, 70.0), (52.0, -70.0), (52.0, 70.0) })
-        {
-            var foot = Fitting(footDoc, "Foot", T(x, -150, z));
-            m.AddMate(Cc, F(foot, f => HmCyl(f, 4.25, Y)), F(casting, f => HmCyl(f, 5.5, Y, p => Math.Abs(p.X - x) < 1 && Math.Abs(p.Z - z) < 1)));
-            m.AddMate(Co, F(foot, f => HmPlane(f, Y, 0)), F(casting, f => HmPlane(f, -Y, 150)));
-            feet.Add((foot, x, z));
-        }
-
-        // ---- the screws: one socket head cap screw part, configured for each size and length
-        var screwDoc = SocketScrew();
-        Component Screw(string size, string length, Transform t)
-        {
-            var c = Fitting(screwDoc, "Socket screw", t);
-            m.Configure(new[] { c }, screwDoc, new Dictionary<string, string> { ["Size"] = size, ["L"] = length });
-            return c;
-        }
-        // a screw on its hole: the shank on the hole's axis, the head's underside on the face (k: the head's height)
-        void Seat(Component screw, double d, double k, MateRef hole, MateRef face)
-        {
-            m.AddMate(Cc, F(screw, f => HmCyl(f, d / 2, Z)), hole);
-            m.AddMate(Co, F(screw, f => HmPlane(f, Z, k)), face);
-        }
-        static Transform Rx(double a) => Transform.Rotation(Vec3.Zero, Vec3.UnitX, a);
-        // the head's six, through its spot faces into the flange
-        for (int i = 0; i < 6; i++)
-        {
-            double t = i * Math.PI / 3, sy = 48 * Math.Cos(t), sz = 48 * Math.Sin(t);
-            var sc = Screw("M8", "50", T(HmHeadX - HmHeadT + 1 - 8, sy, sz) * Ry(Math.PI / 2));
-            Seat(sc, 8, 8, F(head, f => HmCyl(f, 4.25, X, p => Math.Abs(p.Y - sy) < 1 && Math.Abs(p.Z - sz) < 1)),
-                F(head, f => HmPlane(f, -X, -(HmHeadX - HmHeadT + 1), p => Math.Abs(p.Y - sy) < 8 && Math.Abs(p.Z - sz) < 8)));
-        }
-        // the bearing caps' four, down through the shoulders into the pedestals
-        foreach (var (cap, z) in new[] { (cap1, 50.0), (cap2, -50.0) })
-            foreach (var x in new[] { -22.0, 22.0 })
-            {
-                var sc = Screw("M8", "40", T(x, 22, z) * Rx(Math.PI / 2));
-                // (the cap's own coordinates: its length along +Z from its inner face, the second cap turned round)
-                Seat(sc, 8, 8, F(cap, f => HmCyl(f, 4.25, Y, p => Math.Abs(Math.Abs(p.X) - 22) < 1 && Math.Sign(p.X) == Math.Sign(cap == cap1 ? x : -x))),
-                    F(cap, f => HmPlane(f, Y, 14, p => Math.Sign(p.X) == Math.Sign(cap == cap1 ? x : -x))));
-            }
-        // the rod cap's two, through the cap into the rod's block, nutted
-        var rodAt = rod.Placement.ToTransform();
-        var nutDoc = HmHexNut(10, 5, 6.4);
-        foreach (var by in new[] { -20.0, 20.0 })
-        {
-            var sc = Screw("M6", "35", rodAt * T(20, by, 0) * Ry(-Math.PI / 2));
-            Seat(sc, 6, 6, F(rodCap, f => HmCyl(f, 3.2, X, p => Math.Abs(p.Y - by) < 1)), F(rodCap, f => HmPlane(f, X, 14)));
-            var nut = Fitting(nutDoc, "Hex nut", rodAt * T(-16, by, 0) * Ry(-Math.PI / 2));
-            m.AddMate(Cc, F(nut, f => HmCyl(f, 3.2, Z)), F(rod, f => HmCyl(f, 3.2, X, p => Math.Abs(p.Y - by) < 1)));
-            m.AddMate(Co, F(nut, f => HmPlane(f, -Z, 0)), F(rod, f => HmPlane(f, -X, 16)));
-        }
-        // the hub caps' four each (through the pulley's web too on the outer flywheel)
-        foreach (var (fw, cap, under, screwL) in new[] { (fw1, hubCap1, 23.0, "12"), (fw2, hubCap2, 29.0, "16") })
-            for (int i = 0; i < 4; i++)
-            {
-                double t = Math.PI / 4 + i * Math.PI / 2, hx = 19 * Math.Cos(t), hy = 19 * Math.Sin(t);
-                var sc = Screw("M5", screwL, fw.Placement.ToTransform() * T(hx, hy, under + 5) * Rx(Math.PI));
-                Seat(sc, 5, 5, F(cap, f => HmCyl(f, 2.75, Z, p => Math.Abs(p.X - hx) < 1 && Math.Abs(p.Y - hy) < 1)),
-                    F(cap, f => HmPlane(f, Z, 3, p => Math.Abs(p.X - hx) < 5 && Math.Abs(p.Y - hy) < 5)));
-            }
-        // the base's hold-down screws into the feet
-        foreach (var (foot, x, z) in feet)
-        {
-            var sc = Screw("M10", "25", T(x, -120, z) * Rx(Math.PI / 2));
-            Seat(sc, 10, 10, F(casting, f => HmCyl(f, 5.5, Y, p => Math.Abs(p.X - x) < 1 && Math.Abs(p.Z - z) < 1)),
-                F(casting, f => HmPlane(f, Y, -130)));
-        }
-        return m;
-    }
-
-    /// <summary>The assembly as a picture: every component where it is, in its part's colour.</summary>
-    static byte[] HmPicture(AssemblyModel m, int size = 900, double turn = 0)
-    {
-        // the whole engine turned about the vertical (the thumbnail's camera is fixed)
-        var view = Transform.Rotation(Vec3.Zero, Vec3.UnitY, turn * Math.PI / 180);
-        return Thumbnail.Render(m.Doc.Components.Select(c => (AssemblyModel.PlacedMesh(m.DisplayOf(c)!.Mesh, view * c.Placement.ToTransform()), m.DisplayOf(c)!.Color ?? new[] { 0.7, 0.7, 0.7 })), size);
-    }
-
-    /// <summary>
-    /// <c>-- engine-asm [outDir]</c>: the engine assembled; the mates checked to hold as placed, then a flywheel turned
-    /// two whole turns (as a motor would) checking the piston and the cam gear follow; the assembly and pictures written.
-    /// </summary>
-    public static int EngineAssembly(string? dir)
-    {
-        var sw = System.Diagnostics.Stopwatch.StartNew();
-        var m = HitAndMiss();
-        Console.WriteLine($"{m.Doc.Components.Count} components, {m.Doc.Mates.Count} mates, built in {sw.ElapsedMilliseconds} ms");
-        int bad = 0;
-        foreach (var p in m.Parts.Values.Where(p => p.Problem != null || p.Mesh.Indices.Length == 0)) { Console.WriteLine($"part problem: {p.Problem ?? "empty"}"); bad++; }
-        var first = m.SolveMates();
-        var failed = first.Failed().Select(id => m.Doc.Mates.First(x => x.Id == id)).Select(x => $"{x.Name} ({x.Type})").ToList();
-        Console.WriteLine($"as placed: {(first.Satisfied ? "satisfied" : "NOT satisfied: " + string.Join(", ", failed))}, moved {first.Moved.Count}: "
-            + string.Join(", ", first.Moved.Select(id => m.Doc.Find(id)!.Name)));
-        if (!first.Satisfied || first.Moved.Count > 0) bad++;
-        if (dir != null)
-        {
-            Directory.CreateDirectory(dir);
-            foreach (var turn in new[] { 0, 90, 180, 270 })
-                File.WriteAllBytes(Path.Combine(dir, $"engine-view{turn}.png"), HmPicture(m, 900, turn));
-        }
-        // the motor: the +Z flywheel turned about its axis, the rest solved each step
-        var fw = m.Doc.Components.First(c => c.Name.StartsWith("Flywheel"));
-        var crank = m.Doc.Components.First(c => c.Name.StartsWith("Crankshaft"));
-        var piston = m.Doc.Components.First(c => c.Name.StartsWith("Piston"));
-        var cam = m.Doc.Components.First(c => c.Name.StartsWith("Cam gear"));
-        var valve = m.Doc.Components.First(c => c.Name.StartsWith("Valve") && c.Placement.ToTransform().Point(Vec3.Zero).Z > 0);
-        var others = m.Doc.Components.Where(x => !x.Fixed && x != fw).Select(x => x.Id).ToHashSet();
-        double Angle(Component c) { var x = c.Placement.ToTransform().Vector(Vec3.UnitX); return Math.Atan2(x.Y, x.X); }
-        double crank0 = Angle(crank), cam0 = Angle(cam);
-        double worstPiston = 0, worstCam = 0, liftMin = double.MaxValue, liftMax = double.MinValue;
-        int steps = 0;
-        sw.Restart();
-        const int perTurn = 36;
-        for (int i = 1; i <= 2 * perTurn; i++, steps++)
-        {
-            fw.Placement = Placement.From(Transform.Rotation(Vec3.Zero, Vec3.UnitZ, 2 * Math.PI / perTurn) * fw.Placement.ToTransform());
-            var res = m.SolveMates(others);
-            if (!res.Satisfied) { Console.WriteLine($"motor step {i}: mates fail ({string.Join(", ", res.Failed().Select(id => m.Doc.Mates.First(x => x.Id == id).Type))})"); bad++; break; }
-            var turned = 2 * Math.PI * i / perTurn;
-            var a = Angle(crank);
-            worstPiston = Math.Max(worstPiston, Math.Abs(piston.Placement.ToTransform().Point(Vec3.Zero).X - HmPistonX(a)));
-            worstCam = Math.Max(worstCam, Math.Abs(Math.IEEERemainder(Angle(cam) - cam0 + turned / 2, 2 * Math.PI)));
-            var lift = valve.Placement.ToTransform().Point(Vec3.Zero).X - HmHeadX;
-            liftMin = Math.Min(liftMin, lift); liftMax = Math.Max(liftMax, lift);
-            if (dir != null && i % 9 == 0) File.WriteAllBytes(Path.Combine(dir, $"engine-{i:00}.png"), HmPicture(m, 500));
-        }
-        Console.WriteLine($"{steps} motor steps in {sw.ElapsedMilliseconds} ms: piston off the kinematics by {worstPiston:0.######}, cam gear off half the crank's turn by {worstCam:0.######} rad, exhaust valve lift {liftMin:0.###} to {liftMax:0.###} mm");
-        Console.WriteLine($"crank back to {Math.IEEERemainder(Angle(crank) - crank0, 2 * Math.PI):0.######} rad of where it started");
-        if (worstPiston > 1e-4 || worstCam > 1e-4 || liftMin < -1e-4) bad++;
-        if (dir != null) m.Save(Path.Combine(dir, "hit-and-miss.sasm"));
-        return bad;
-    }
 
     // ------------------------------------------------------------------------------------------
     // checking

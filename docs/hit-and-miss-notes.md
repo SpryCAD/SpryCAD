@@ -9,8 +9,10 @@ Commands (from the repository root):
   the ones whose name contains `part`), reports failures, warnings and sketches not fully defined; with `outDir`, saves
   each part and a picture of it there.
 - `... -- engine-steps <part>`: one part rebuilt a feature at a time, each step's time.
-- `... -- engine-asm [outDir]`: assembles the engine, checks the mates hold as placed, turns a flywheel two turns and
-  checks the piston, cam gear and exhaust valve follow; with `outDir`, writes `hit-and-miss.sasm` and pictures.
+- `... -- engine-asm [outDir]`: assembles the engine, checks the mates hold as placed, turns the crankshaft two turns
+  and checks the piston, cam gear and exhaust valve follow; with `outDir`, also checks interference (as placed and at
+  8 points through the turns), prints the mass, and writes `hit-and-miss.sasm`, the indented bill of materials
+  (`bom.csv`) and pictures.
 
 ## Kernel
 
@@ -90,8 +92,26 @@ Commands (from the repository root):
 
 ## Assembly
 
-- **Subassemblies** (coming: worktree `nested-assemblies`): the engine would group as crank and flywheels, valve
-  train, cylinder head with its fittings, mixer, and fasteners.
+- **Subassemblies. DONE (master `757f12e`), used.** The engine is now 21 top level components over 9 embedded
+  sub-assemblies (`Demos.Engine.Assembly.cs`): the crankshaft assembly (rigid: crankshaft, crank gear, and the two
+  flywheel sub-assemblies nested in it), the connecting rod, piston, two bearing caps, drip oiler (rigid), and the
+  cylinder head (flexible: the rocker and exhaust valve move in it, mated to the push rod at the top). Screws repeat
+  by component patterns (head 6 round its axis, hub caps 4, rod cap and bearing caps 2, feet 2 x 2). It all worked
+  the first time: the same mates held, the motion was the same to the last digit. Built in code, a sub-assembly has to
+  be saved to a file and inserted (`InsertAssembly(path, ..., embed: true)`), then its paths cleared by hand; an
+  `InsertEmbedded(AssemblyModel)` like the parts' would be simpler.
+- **Interference detection, used: it found five real mistakes.** The rod's small end inside the piston's pin
+  bosses (5341 mm³: no room was left for it), the bearing caps' screw heads on the cap's hump, the valves standing
+  1 mm proud of their seats (the countersink 20 across, not 22), the spark plug's boot solid over the plug, the oiler
+  clipping the hopper; and, checked at 8 points through two turns, the rod grazing the bore's mouth (a relief added).
+  What remains is 22 screws in their tapped holes (each the thread's minor diameter, so the shank overlaps it): a
+  screw's thread in a tapped hole of the same thread is not interference and should not be reported (or be listed
+  apart as "threaded"). The valve springs also collide with their retainers as the valve opens (they cannot
+  compress, below), so the demo's motion check leaves them out.
+- **Materials.** The list of materials and densities lives in the app (`MainWindow.MassProps.cs`), so code (and the
+  demos) set `Material` and `Density` by hand (`HmMaterial`); a list in Core would let the bill of materials and mass
+  properties share it, and add rubber and glass. With them: the engine weighs 48.9 kg, its centre of mass about 71 mm
+  ahead of the crank and 31 mm below it.
 - **Cam / one-sided contact.** The exhaust valve should be worked by a cam (a lobe with a dwell) and close on its seat
   while the follower lifts off. Mates have no cam (a tangent to a non-round profile) and contact is always two-sided.
   *Instead:* a round eccentric on the cam gear and tangents all the way to the valve: the valve lifts as a sine over
