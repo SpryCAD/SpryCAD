@@ -13,6 +13,9 @@ public partial class App : Application
     /// The first entry of a run is preceded by the version, OS and GL driver, so a log sent with a bug report says
     /// what it came from; past 1 MB the log moves to error.log.1 (replacing the one before) and starts again.
     /// </summary>
+    /// <summary>A plain line in the log (diagnostics the user turned on).</summary>
+    public static void Note(string message) => Write(message);
+
     public static void Log(Exception? ex, string? context = null)
     {
         if (ex == null) return;

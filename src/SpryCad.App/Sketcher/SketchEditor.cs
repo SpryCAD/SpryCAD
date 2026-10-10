@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.Media.Immutable;
 using SpryCad.App.Session;
 using SpryCad.App.Viewport;
 using SpryCad.Core;
@@ -1770,7 +1771,28 @@ public sealed partial class SketchEditor : IViewportMode
 
     public Canvas? Overlay { get; set; }
     readonly Dictionary<int, Border> _labels = new();
-    readonly List<Border> _glyphs = new();
+    // the overlay's marks, kept from one update to the next (an update repositions them; creating, styling and
+    // attaching new controls on every mouse move was most of its cost): relations by constraint id, On Edge marks by
+    // entity id, anchors by point id
+    readonly Dictionary<int, Border> _relGlyphs = new(), _linkGlyphs = new(), _anchorGlyphs = new();
+    static readonly IBrush RelBack = new ImmutableSolidColorBrush(Color.FromArgb(230, 200, 240, 200));
+    static readonly IBrush RelBackSelected = new ImmutableSolidColorBrush(Color.FromRgb(120, 170, 255));
+    static readonly IBrush RelBorder = new ImmutableSolidColorBrush(Color.FromRgb(60, 140, 60));
+    static readonly IBrush LinkBack = new ImmutableSolidColorBrush(Color.FromArgb(230, 210, 228, 250));
+    static readonly IBrush LinkBorder = new ImmutableSolidColorBrush(Color.FromRgb(70, 110, 170));
+    static readonly IBrush LinkFore = new ImmutableSolidColorBrush(Color.FromRgb(40, 70, 130));
+    static readonly IBrush DanglingBack = new ImmutableSolidColorBrush(Color.FromArgb(230, 245, 225, 195));
+    static readonly IBrush DanglingBorder = new ImmutableSolidColorBrush(Color.FromRgb(158, 102, 26));
+    static readonly IBrush DanglingFore = new ImmutableSolidColorBrush(Color.FromRgb(130, 80, 15));
+    static readonly IBrush LabelBack = new ImmutableSolidColorBrush(Color.FromArgb(200, 255, 255, 255));
+    static Cursor? _handCursor;
+    static Cursor HandCursor => _handCursor ??= new Cursor(StandardCursorType.Hand);
+
+    /// <summary>Removes the marks whose ids were not seen in this update.</summary>
+    void Prune(Dictionary<int, Border> marks, HashSet<int> seen)
+    {
+        foreach (var id in marks.Keys.Where(k => !seen.Contains(k)).ToList()) { Overlay!.Children.Remove(marks[id]); marks.Remove(id); }
+    }
     Border? _previewLabel;
     Border? _snapLabel;
 
@@ -1841,79 +1863,97 @@ public sealed partial class SketchEditor : IViewportMode
         else if (_previewLabel != null) _previewLabel.IsVisible = false;
 
         // relation glyphs
-        foreach (var g in _glyphs) Overlay.Children.Remove(g);
-        _glyphs.Clear();
-        if (!ShowRelations) return;
-        var perEntity = new Dictionary<int, int>();
-        foreach (var c in Sk.Constraints.Where(c => !c.IsDimension))
+        var seenRel = new HashSet<int>(); var seenLink = new HashSet<int>(); var seenAnchor = new HashSet<int>();
+        if (ShowRelations)
         {
-            var pos = GlyphPos(c, perEntity);
-            if (pos == null) continue;
-            var sel = Selected.Contains(new SkRef(SkRefKind.Constraint, c.Id));
-            var gb = new Border
+            var perEntity = new Dictionary<int, int>();
+            foreach (var c in Sk.Constraints.Where(c => !c.IsDimension))
             {
-                Background = sel ? new SolidColorBrush(Color.FromRgb(120, 170, 255)) : new SolidColorBrush(Color.FromArgb(230, 200, 240, 200)),
-                BorderBrush = new SolidColorBrush(Color.FromRgb(60, 140, 60)),
-                BorderThickness = new Thickness(1),
-                Padding = new Thickness(2, 0),
-                CornerRadius = new CornerRadius(2),
-                Child = new TextBlock { Text = Glyph(c.Type), FontSize = 10, Foreground = Brushes.DarkGreen, FontWeight = FontWeight.Bold },
-                IsHitTestVisible = true,
-                Cursor = new Cursor(StandardCursorType.Hand),
-            };
-            ToolTip.SetTip(gb, RelationName(c.Type));
-            var cid = c.Id;
-            gb.PointerPressed += (_, e) =>
+                var pos = GlyphPos(c, perEntity);
+                if (pos == null) continue;
+                var sel = Selected.Contains(new SkRef(SkRefKind.Constraint, c.Id));
+                if (!_relGlyphs.TryGetValue(c.Id, out var gb))
+                {
+                    gb = new Border
+                    {
+                        BorderBrush = RelBorder,
+                        BorderThickness = new Thickness(1),
+                        Padding = new Thickness(2, 0),
+                        CornerRadius = new CornerRadius(2),
+                        Child = new TextBlock { FontSize = 10, Foreground = Brushes.DarkGreen, FontWeight = FontWeight.Bold },
+                        IsHitTestVisible = true,
+                        Cursor = HandCursor,
+                    };
+                    var cid = c.Id;
+                    gb.PointerPressed += (_, e) =>
+                    {
+                        if (!e.KeyModifiers.HasFlag(KeyModifiers.Control)) Selected.Clear();
+                        var r = new SkRef(SkRefKind.Constraint, cid);
+                        if (!Selected.Contains(r)) Selected.Add(r);
+                        SelectionChanged?.Invoke();
+                        UpdateOverlay(_vp);
+                        _vp.Redraw();
+                        e.Handled = true;
+                    };
+                    _relGlyphs[c.Id] = gb;
+                    Overlay.Children.Add(gb);
+                }
+                // (a relation's type does not change under its id, but set it as the mark is reused)
+                ((TextBlock)gb.Child!).Text = Glyph(c.Type);
+                ToolTip.SetTip(gb, RelationName(c.Type));
+                gb.Background = sel ? RelBackSelected : RelBack;
+                var s = Screen(pos.Value);
+                Canvas.SetLeft(gb, s.X + 6); Canvas.SetTop(gb, s.Y + 4);
+                seenRel.Add(c.Id);
+            }
+            // converted geometry: one On Edge mark on each entity, not an anchor on each of its points
+            foreach (var e in Sk.Entities.Where(e => e.Link != null))
             {
-                if (!e.KeyModifiers.HasFlag(KeyModifiers.Control)) Selected.Clear();
-                var r = new SkRef(SkRefKind.Constraint, cid);
-                if (!Selected.Contains(r)) Selected.Add(r);
-                SelectionChanged?.Invoke();
-                UpdateOverlay(_vp);
-                _vp.Redraw();
-                e.Handled = true;
-            };
-            var s = Screen(pos.Value);
-            Canvas.SetLeft(gb, s.X + 6); Canvas.SetTop(gb, s.Y + 4);
-            Overlay.Children.Add(gb);
-            _glyphs.Add(gb);
-        }
-        // fixed points
-        // converted geometry: one On Edge mark on each entity, not an anchor on each of its points
-        foreach (var e in Sk.Entities.Where(e => e.Link != null))
-        {
-            if (MidOf(e) is not { } at) continue;
-            var s = Screen(at);
-            var gb = new Border
-            {
+                if (MidOf(e) is not { } at) continue;
+                if (!_linkGlyphs.TryGetValue(e.Id, out var gb))
+                {
+                    gb = new Border
+                    {
+                        BorderThickness = new Thickness(1),
+                        Padding = new Thickness(2, 0), CornerRadius = new CornerRadius(2),
+                        Child = new TextBlock { Text = "⛓", FontSize = 9 },
+                        IsHitTestVisible = false,
+                    };
+                    _linkGlyphs[e.Id] = gb;
+                    Overlay.Children.Add(gb);
+                }
                 // dangling (its model edge gone): SolidWorks' dangling brown
-                Background = e.Dangling ? new SolidColorBrush(Color.FromArgb(230, 245, 225, 195)) : new SolidColorBrush(Color.FromArgb(230, 210, 228, 250)),
-                BorderBrush = e.Dangling ? new SolidColorBrush(Color.FromRgb(158, 102, 26)) : new SolidColorBrush(Color.FromRgb(70, 110, 170)), BorderThickness = new Thickness(1),
-                Padding = new Thickness(2, 0), CornerRadius = new CornerRadius(2),
-                Child = new TextBlock { Text = "⛓", FontSize = 9, Foreground = e.Dangling ? new SolidColorBrush(Color.FromRgb(130, 80, 15)) : new SolidColorBrush(Color.FromRgb(40, 70, 130)) },
-                IsHitTestVisible = false,
-            };
-            ToolTip.SetTip(gb, e.Dangling ? "Dangling: its model edge is no longer in the model" : "On Edge: converted from the model, follows it");
-            Canvas.SetLeft(gb, s.X + 4); Canvas.SetTop(gb, s.Y + 2);
-            Overlay.Children.Add(gb);
-            _glyphs.Add(gb);
-        }
-        var refPoints = Sk.Entities.Where(e => e.IsReference || e.Link != null).SelectMany(e => e.PointIds).ToHashSet();
-        foreach (var p in Sk.Points.Where(p => p.Fixed && p.Id != Sketch.OriginId && !refPoints.Contains(p.Id)))
-        {
-            var s = Screen(p.P);
-            var gb = new Border
+                gb.Background = e.Dangling ? DanglingBack : LinkBack;
+                gb.BorderBrush = e.Dangling ? DanglingBorder : LinkBorder;
+                ((TextBlock)gb.Child!).Foreground = e.Dangling ? DanglingFore : LinkFore;
+                ToolTip.SetTip(gb, e.Dangling ? "Dangling: its model edge is no longer in the model" : "On Edge: converted from the model, follows it");
+                var s = Screen(at);
+                Canvas.SetLeft(gb, s.X + 4); Canvas.SetTop(gb, s.Y + 2);
+                seenLink.Add(e.Id);
+            }
+            // fixed points
+            var refPoints = Sk.Entities.Where(e => e.IsReference || e.Link != null).SelectMany(e => e.PointIds).ToHashSet();
+            foreach (var p in Sk.Points.Where(p => p.Fixed && p.Id != Sketch.OriginId && !refPoints.Contains(p.Id)))
             {
-                Background = new SolidColorBrush(Color.FromArgb(230, 200, 240, 200)),
-                BorderBrush = new SolidColorBrush(Color.FromRgb(60, 140, 60)), BorderThickness = new Thickness(1),
-                Padding = new Thickness(2, 0), CornerRadius = new CornerRadius(2),
-                Child = new TextBlock { Text = "⚓", FontSize = 9, Foreground = Brushes.DarkGreen },
-                IsHitTestVisible = false,
-            };
-            Canvas.SetLeft(gb, s.X + 6); Canvas.SetTop(gb, s.Y - 16);
-            Overlay.Children.Add(gb);
-            _glyphs.Add(gb);
+                if (!_anchorGlyphs.TryGetValue(p.Id, out var gb))
+                {
+                    gb = new Border
+                    {
+                        Background = RelBack,
+                        BorderBrush = RelBorder, BorderThickness = new Thickness(1),
+                        Padding = new Thickness(2, 0), CornerRadius = new CornerRadius(2),
+                        Child = new TextBlock { Text = "⚓", FontSize = 9, Foreground = Brushes.DarkGreen },
+                        IsHitTestVisible = false,
+                    };
+                    _anchorGlyphs[p.Id] = gb;
+                    Overlay.Children.Add(gb);
+                }
+                var s = Screen(p.P);
+                Canvas.SetLeft(gb, s.X + 6); Canvas.SetTop(gb, s.Y - 16);
+                seenAnchor.Add(p.Id);
+            }
         }
+        Prune(_relGlyphs, seenRel); Prune(_linkGlyphs, seenLink); Prune(_anchorGlyphs, seenAnchor);
     }
 
     /// <summary>The middle of a line or arc, the top of a circle (where an entity's mark goes).</summary>
@@ -1970,7 +2010,7 @@ public sealed partial class SketchEditor : IViewportMode
 
     static Border MakeLabel() => new()
     {
-        Background = new SolidColorBrush(Color.FromArgb(200, 255, 255, 255)),
+        Background = LabelBack,
         Padding = new Thickness(3, 0),
         CornerRadius = new CornerRadius(2),
         Child = new TextBlock { FontSize = 12, FontWeight = FontWeight.SemiBold },
@@ -2006,9 +2046,13 @@ public sealed partial class SketchEditor : IViewportMode
         if (Overlay == null) return;
         CloseModifyBox(false);
         foreach (var b in _labels.Values) Overlay.Children.Remove(b);
-        foreach (var g in _glyphs) Overlay.Children.Remove(g);
+        foreach (var marks in new[] { _relGlyphs, _linkGlyphs, _anchorGlyphs })
+        {
+            foreach (var g in marks.Values) Overlay.Children.Remove(g);
+            marks.Clear();
+        }
         if (_previewLabel != null) Overlay.Children.Remove(_previewLabel);
         if (_snapLabel != null) Overlay.Children.Remove(_snapLabel);
-        _labels.Clear(); _glyphs.Clear(); _previewLabel = null; _snapLabel = null;
+        _labels.Clear(); _previewLabel = null; _snapLabel = null;
     }
 }
