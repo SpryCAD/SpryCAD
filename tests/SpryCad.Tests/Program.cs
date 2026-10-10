@@ -118,6 +118,7 @@ static class Program
         if (args.Length > 0 && args[0] == "blendab") return BlendAB.Run(args.Length > 1 ? args[1] : null);
         if (args.Length > 0 && args[0] == "matebench") return MateBench.Run(args[1..]);
         if (args.Length > 0 && args[0] == "sketchfuzz") return SketchFuzz.Cli(args[1..]);
+        if (args.Length > 0 && args[0] == "sketchbench") return SketchBench.Run(args[1..]);
         if (args.Length > 0 && args[0] == "demos") return Demos.Write(args.Length > 1 ? args[1] : Path.Combine(Path.GetTempPath(), "fc-demos"));
         if (args.Length > 1 && args[0] == "containerize") return Demos.Containerize(args.Skip(1));
         if (args.Length > 2 && args[0] == "validate") return Validate.Run(args[1], args[2]);
