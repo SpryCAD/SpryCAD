@@ -199,6 +199,7 @@ static class Program
         if (args.Length > 1 && args[0] == "boolstep") return BoolStep.Run(args[1], args.Length > 2 ? int.Parse(args[2]) : 0);
         if (args.Length > 1 && args[0] == "engine-steps") return Demos.EngineSteps(args[1]);
         if (args.Length > 0 && args[0] == "engine-asm") return Demos.EngineAssembly(args.Length > 1 ? args[1] : null);
+        if (args.Length > 0 && args[0] == "engine-drag") return EngineDrag.Run(args[1..]);
         if (args.Length > 0 && args[0] == "verify-engine") return Demos.VerifyEngine(args.Length > 1 && args[1] != "-" ? args[1] : null, args.Length > 2 ? args[2] : null);
         if (args.Length > 0 && args[0] == "matebench") return MateBench.Run(args[1..]);
         if (args.Length > 1 && args[0] == "meshsize") return MeshSizeBench.Run(args[1..]);
