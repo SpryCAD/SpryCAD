@@ -602,6 +602,36 @@ public static class SketchSolver
             if (e is SkCircle c && s.RadiusVars.TryGetValue(c.Id, out var ir)) c.R = Math.Abs(x[ir]);
     }
 
+    /// <summary>
+    /// The equations in independent clusters (equations sharing a variable, and so on), each in ascending order:
+    /// J Jᵀ is block diagonal over them, and a Cholesky factorization of it yields exactly zero across blocks, so each
+    /// block is factored and solved on its own (O(Σ k³) instead of O(m³)) with the same results.
+    /// </summary>
+    static int[][] Clusters(System s, int n)
+    {
+        int m = s.Eqs.Count;
+        var parent = new int[m];
+        for (int i = 0; i < m; i++) parent[i] = i;
+        int Find(int a) { while (parent[a] != a) a = parent[a] = parent[parent[a]]; return a; }
+        var owner = new int[n];
+        Array.Fill(owner, -1);
+        for (int i = 0; i < m; i++)
+            foreach (var v in s.Eqs[i].Vars)
+            {
+                if (owner[v] < 0) owner[v] = i;
+                else { int a = Find(owner[v]), b = Find(i); if (a != b) parent[Math.Max(a, b)] = Math.Min(a, b); }
+            }
+        var byRoot = new Dictionary<int, List<int>>();
+        var order = new List<List<int>>();
+        for (int i = 0; i < m; i++)
+        {
+            int r = Find(i);
+            if (!byRoot.TryGetValue(r, out var l)) { byRoot[r] = l = new List<int>(); order.Add(l); }
+            l.Add(i);
+        }
+        return order.Select(l => l.ToArray()).ToArray();
+    }
+
     /// <summary>Runs damped Gauss-Newton; returns final max residual.</summary>
     static double Iterate(System s, double[] x, int maxIter)
     {
@@ -610,37 +640,93 @@ public static class SketchSolver
         var F = Eval(s, x);
         double norm = Norm2(F), maxAbs = MaxAbs(F);
         double mu = 1e-9;
+        // each equation's derivatives at its own variables only (Eqs[i].Vars order): a dense row would be zero elsewhere
         var J = new double[m][];
+        for (int i = 0; i < m; i++) J[i] = new double[s.Eqs[i].Vars.Length];
         var xNew = new double[n];
+        var blocks = Clusters(s, n);
+        // a cluster with fewer variables than equations (a drag's pull and hold terms on top of the relations) is solved
+        // in its variables: (JᵀJ + c I) Δ = Jᵀ F, the same step as Jᵀ (J Jᵀ + c I)⁻¹ F for any c > 0, from a smaller system
+        var bvars = blocks.Select(b => b.SelectMany(i => s.Eqs[i].Vars).Distinct().Order().ToArray()).ToArray();
+        var inVars = blocks.Select((b, bi) => bvars[bi].Length < b.Length).ToArray();
+        var local = new int[n];
+        foreach (var vs in bvars) for (int k = 0; k < vs.Length; k++) local[vs[k]] = k;
+        var Ab = blocks.Select((b, bi) => inVars[bi] ? new double[bvars[bi].Length, bvars[bi].Length] : new double[b.Length, b.Length]).ToArray();
+        var diag = new double[m];
         for (int it = 0; it < maxIter && maxAbs > Tol; it++)
         {
-            Jacobian(s, x, J);
-            // A = J J^T + mu I   (m x m)
-            var A = new double[m, m];
-            for (int i = 0; i < m; i++)
-                for (int j = i; j < m; j++)
+            SparseJacobian(s, x, J);
+            // A = J J^T + mu I   (m x m), block by block (zero between clusters)
+            for (int i = 0; i < m; i++) { double d = 0; foreach (var g in J[i]) d += g * g; diag[i] = d; }
+            for (int bi = 0; bi < blocks.Length; bi++)
+            {
+                var b = blocks[bi]; var A = Ab[bi];
+                if (inVars[bi])
                 {
-                    double sum = 0;
-                    var ri = J[i]; var rj = J[j];
-                    foreach (var v in s.Eqs[i].Vars) sum += ri[v] * rj[v];
-                    A[i, j] = sum; A[j, i] = sum;
+                    // JᵀJ over the cluster's variables
+                    Array.Clear(A);
+                    foreach (var i in b)
+                    {
+                        var ri = J[i]; var vi = s.Eqs[i].Vars;
+                        for (int k1 = 0; k1 < vi.Length; k1++)
+                            for (int k2 = 0; k2 < vi.Length; k2++) A[local[vi[k1]], local[vi[k2]]] += ri[k1] * ri[k2];
+                    }
+                    continue;
                 }
+                for (int li = 0; li < b.Length; li++)
+                    for (int lj = li; lj < b.Length; lj++)
+                    {
+                        int i = b[li], j = b[lj];
+                        double sum = 0;
+                        var ri = J[i]; var rj = J[j];
+                        var vi = s.Eqs[i].Vars; var vj = s.Eqs[j].Vars;
+                        // (a variable of i's that j does not have adds a zero: skipped)
+                        for (int k = 0; k < vi.Length; k++)
+                        {
+                            int at = Array.IndexOf(vj, vi[k]);
+                            if (at >= 0) sum += ri[k] * rj[at];
+                        }
+                        A[li, lj] = sum; A[lj, li] = sum;
+                    }
+            }
             bool improved = false;
             for (int attempt = 0; attempt < 8; attempt++)
             {
-                var Am = (double[,])A.Clone();
-                double trace = 0; for (int i = 0; i < m; i++) trace += Am[i, i];
+                double trace = 0; for (int i = 0; i < m; i++) trace += diag[i];
                 var lam = mu * Math.Max(1, trace / m);
-                for (int i = 0; i < m; i++) Am[i, i] += lam + 1e-14;
-                var y = SolveSym(Am, F, m);
-                if (y == null) { mu *= 10; continue; }
                 Array.Copy(x, xNew, n);
-                for (int i = 0; i < m; i++)
+                bool solved = true;
+                for (int bi = 0; bi < blocks.Length && solved; bi++)
                 {
-                    var yi = y[i]; if (yi == 0) continue;
-                    var ri = J[i];
-                    foreach (var v in s.Eqs[i].Vars) xNew[v] -= ri[v] * yi;
+                    var b = blocks[bi];
+                    if (inVars[bi])
+                    {
+                        var vs = bvars[bi];
+                        var g = new double[vs.Length];
+                        foreach (var i in b)
+                        {
+                            var ri = J[i]; var vi = s.Eqs[i].Vars;
+                            for (int k = 0; k < vi.Length; k++) g[local[vi[k]]] += ri[k] * F[i];
+                        }
+                        var d = SolveSym(Ab[bi], g, vs.Length, lam + 1e-14);
+                        if (d == null) { solved = false; break; }
+                        for (int k = 0; k < vs.Length; k++) xNew[vs[k]] -= d[k];
+                    }
+                    else
+                    {
+                        var rhs = new double[b.Length];
+                        for (int k = 0; k < b.Length; k++) rhs[k] = F[b[k]];
+                        var y = SolveSym(Ab[bi], rhs, b.Length, lam + 1e-14);
+                        if (y == null) { solved = false; break; }
+                        for (int k = 0; k < b.Length; k++)
+                        {
+                            var yi = y[k]; if (yi == 0) continue;
+                            var ri = J[b[k]]; var vi = s.Eqs[b[k]].Vars;
+                            for (int q = 0; q < vi.Length; q++) xNew[vi[q]] -= ri[q] * yi;
+                        }
+                    }
                 }
+                if (!solved) { mu *= 10; continue; }
                 var Fn = Eval(s, xNew);
                 var nn = Norm2(Fn);
                 if (nn < norm || MaxAbs(Fn) < Tol)
@@ -663,6 +749,26 @@ public static class SketchSolver
         var F = new double[s.Eqs.Count];
         for (int i = 0; i < F.Length; i++) F[i] = s.Eqs[i].F(x) * s.Eqs[i].Weight;
         return F;
+    }
+
+    /// <summary><see cref="Jacobian"/>'s values at each equation's own variables (row i in Eqs[i].Vars order).</summary>
+    static void SparseJacobian(System s, double[] x, double[][] J)
+    {
+        for (int i = 0; i < s.Eqs.Count; i++)
+        {
+            var row = J[i];
+            var eq = s.Eqs[i];
+            for (int k = 0; k < eq.Vars.Length; k++)
+            {
+                int v = eq.Vars[k];
+                var old = x[v];
+                var h = 1e-7 * Math.Max(1, Math.Abs(old));
+                x[v] = old + h; var fp = eq.F(x);
+                x[v] = old - h; var fm = eq.F(x);
+                x[v] = old;
+                row[k] = (fp - fm) / (2 * h) * eq.Weight;
+            }
+        }
     }
 
     static void Jacobian(System s, double[] x, double[][] J)
@@ -688,13 +794,13 @@ public static class SketchSolver
     static double Norm2(double[] F) { double s = 0; foreach (var f in F) s += f * f; return s; }
     static double MaxAbs(double[] F) { double s = 0; foreach (var f in F) s = Math.Max(s, Math.Abs(f)); return s; }
 
-    /// <summary>Cholesky solve of a symmetric positive (semi)definite system.</summary>
-    static double[]? SolveSym(double[,] A, double[] b, int n)
+    /// <summary>Cholesky solve of a symmetric positive (semi)definite system, shifted by shift on its diagonal.</summary>
+    static double[]? SolveSym(double[,] A, double[] b, int n, double shift = 0)
     {
         var L = new double[n, n];
         for (int j = 0; j < n; j++)
         {
-            double sum = A[j, j];
+            double sum = shift == 0 ? A[j, j] : A[j, j] + shift;
             for (int k = 0; k < j; k++) sum -= L[j, k] * L[j, k];
             if (sum <= 1e-300) return null;
             var ljj = Math.Sqrt(sum);

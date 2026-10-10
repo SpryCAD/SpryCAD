@@ -83,12 +83,16 @@ profile; the profile's times are summed over threads). On the heavy samples (`sa
 
 ## Core and app: open items
 
-- **Sketch solver** (`Sketch/Solver.cs`):
-  - Dense m×m systems, allocated per damping attempt.
-  - Split equations into independent clusters (union-find over `Eq.Vars`) and skip converged clusters.
-  - Drop equations with no variables.
-  - Analytic derivatives for the common constraints.
-  - `WouldOverDefine` ranks the whole sketch twice.
+- **Sketch solver** (`Sketch/Solver.cs`): measure with `-- sketchbench [samples dir] [rounds] [grid sizes]` (solve,
+  DOF analysis, ten drag steps and the over-define check on every sample sketch and on grids of dimensioned
+  rectangles, with a hash of the results to compare builds).
+  - Done: Gauss-Newton solves each independent cluster of equations as its own block (J Jᵀ is block diagonal, and a
+    Cholesky of it gives exact zeros across blocks: bit for bit), from a Jacobian kept at each equation's own variables;
+    a cluster with more equations than variables (a drag's pull and hold terms) is solved in its variables,
+    (JᵀJ + cI) Δ = Jᵀ F (the same step mathematically; drags round differently, rebuilds of every sample are bit for
+    bit). Ten drag steps: tooth-gap sketch 35 to 10 ms, 6×6 grid 5.7 s to 57 ms, 10×10 grid 135 s to 0.35 s.
+  - Left: skipping converged clusters; equations with no variables; analytic derivatives (the Jacobian is central
+    differences); `Analyze` and `WouldOverDefine` reduce the whole dense Jacobian (6–20 ms on the 10×10 grid).
 - **Mate solver** (`Assembly/MateSolver.cs`): already sparse. Solve the connected pieces separately and skip those
   already within tolerance. `Settle` runs two full solves.
 - **Regenerator**:
