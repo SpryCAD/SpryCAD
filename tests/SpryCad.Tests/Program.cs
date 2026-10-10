@@ -45,6 +45,29 @@ static class Program
         if (args.Length > 7 && args[0] == "fillet") return Hang.Run(args);
         if (args.Length > 2 && args[0] == "rb") return RollingBallTool.Run(args);
         if (args.Length > 1 && args[0] == "import") return ImportTool.Run(args);
+        if (args.Length > 1 && args[0] == "savebench")
+        {
+            // what an autosave holds the UI for: a part with an imported model of about the given MB
+            var step = File.ReadAllBytes(args[1]);
+            int mb = args.Length > 2 ? int.Parse(args[2]) : 20;
+            var big = new byte[mb * 1024 * 1024];
+            for (int o = 0; o < big.Length; o += step.Length) Array.Copy(step, 0, big, o, Math.Min(step.Length, big.Length - o));
+            var doc = new SpryCad.Core.Model.CadDocument();
+            doc.AddFile("imports/m.step", big);
+            doc.Equations.Add(new SpryCad.Core.Model.Equation { Name = "W", Expr = "10" });
+            var tmp = Path.Combine(Path.GetTempPath(), "sprycad-savebench.sprt");
+            for (int r = 0; r < 3; r++)
+            {
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                doc.Save(tmp);
+                var save = sw.Elapsed.TotalMilliseconds; sw.Restart();
+                var copy = doc.Clone();
+                var clone = sw.Elapsed.TotalMilliseconds;
+                Console.WriteLine($"{mb} MB attachment, run {r}: save {save:0} ms, clone (what the UI waits for now) {clone:0.0} ms");
+            }
+            File.Delete(tmp);
+            return 0;
+        }
         if (args.Length > 1 && args[0] == "unfold") return UnfoldTool.Run(args);
         if (args.Length > 1 && args[0] == "loadtime")
         {

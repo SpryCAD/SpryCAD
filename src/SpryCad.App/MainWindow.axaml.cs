@@ -635,17 +635,37 @@ public partial class MainWindow : Window
     /// Saves every tab with unsaved changes to the autosave folder: autosave.sprt, autosave-2.sprt, ... all in the
     /// same tick, which is how Recover Autosave tells one session's files from older ones.
     /// </summary>
+    // an autosave still writing (the next tick waits for it)
+    Task? _autosaving;
+
     void AutoSave()
     {
+        if (_autosaving is { IsCompleted: false }) return;
         var dirty = _parts.Where(t => t.Session.Dirty).ToList();
         if (dirty.Count == 0) return;
+        // copies of the parts, written off the UI thread: compressing an imported model's file takes long enough to be
+        // felt, and saving gives the document a new revision, which the part being edited should not get from this
+        var copies = new List<(CadDocument doc, string path)>();
         try
         {
-            Directory.CreateDirectory(AutosaveDir);
             for (int i = 0; i < dirty.Count; i++)
-                dirty[i].Session.Doc.Save(Path.Combine(AutosaveDir, "autosave" + (i == 0 ? "" : $"-{i + 1}") + CadDocument.FileExtension));
+            {
+                var src = dirty[i].Session.Doc;
+                var copy = src.Clone();
+                copy.Display = src.Display;
+                copies.Add((copy, Path.Combine(AutosaveDir, "autosave" + (i == 0 ? "" : $"-{i + 1}") + CadDocument.FileExtension)));
+            }
         }
-        catch { /* best effort */ }
+        catch { return; /* best effort */ }
+        _autosaving = Task.Run(() =>
+        {
+            try
+            {
+                Directory.CreateDirectory(AutosaveDir);
+                foreach (var (doc, path) in copies) doc.Save(path);
+            }
+            catch { /* best effort */ }
+        });
     }
 
     async void OnClosing(object? sender, WindowClosingEventArgs e)
