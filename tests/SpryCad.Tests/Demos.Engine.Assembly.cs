@@ -121,7 +121,7 @@ static partial class Demos
         if (!pulley)
         {
             // the governor's weights on two opposite spokes (pinned to them: they do not swing, see the notes)
-            var wt = a.Add(HmGovernorWeight(), "Governor weight", HmT(55, 0, 11) * HmRz(Math.PI / 2));
+            var wt = a.Add(HmGovernorWeight(), "Governor weight", HmT(55, 0, 13) * HmRz(Math.PI / 2));
             a.Mate(MateType.Lock, a.Any(fw), a.Any(wt));
             a.M.AddPattern(PatternKind.Circular, new[] { wt }, bore, 2, 180);
         }

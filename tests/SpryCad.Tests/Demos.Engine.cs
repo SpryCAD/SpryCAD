@@ -279,9 +279,9 @@ static partial class Demos
     /// </summary>
     static CadDocument HmFlywheel()
     {
-        var d = Doc(("D", "280"), ("RimW", "40"), ("RimT", "20"), ("Crown", "1.5"), ("HubD", "56"), ("HubIn", "30"), ("HubOut", "20"),
-            ("Bore", $"{HmJ}"), ("KeyW", "6"), ("KeyT", "3"), ("NS", "6"), ("SpW", "26"), ("SpT", "14"), ("SpDraft", "1.5"),
-            ("Rf", "5"), ("Rh", "3"), ("Rr", "3"), ("C", "1.5"), ("CapPCD", "38"));
+        var d = Doc(("D", "280"), ("RimW", "40"), ("RimT", "20"), ("Crown", "1.5"), ("HubD", "72"), ("HubIn", "30"), ("HubOut", "20"),
+            ("Bore", $"{HmJ}"), ("KeyW", "6"), ("KeyT", "3"), ("NS", "6"), ("SpW", "30"), ("SpT", "16"), ("SpDraft", "3"),
+            ("Rf", "5"), ("Rh", "4"), ("Rr", "3"), ("C", "1.5"), ("CapPCD", "38"));
         // the rim's section on Right (sketch x = -z, y = y), revolved about the axis (the sketch's x axis)
         var r = new Sk(d);
         int a = r.P("-RimW/2", "D/2-RimT"), b = r.P("RimW/2", "D/2-RimT"), c = r.P("RimW/2", "D/2-Crown"), e = r.P("-RimW/2", "D/2-Crown");
@@ -371,9 +371,9 @@ static partial class Demos
     {
         var d = Doc(("BaseY", "150"), ("BaseT", "20"), ("BaseX0", "215"), ("BaseX1", "60"), ("BaseW", "170"), ("BaseR", "15"), ("BaseDraft", "5"),
             ("BodyX0", "170"), ("BodyX1", "40"), ("BodyW", "116"), ("BodyDraft", "2"), ("BodyR", "20"), ("Rb", "6"),
-            ("BrgIn", $"{HmBrgIn}"), ("BrgOut", $"{HmBrgOut}"), ("BrgW", "64"), ("BrgDrop", "40"), ("J", $"{HmJ}"), ("CapStud", "25"),
+            ("BrgIn", $"{HmBrgIn}"), ("BrgOut", $"{HmBrgOut}"), ("BrgW", "64"), ("BrgDrop", "40"), ("J", $"{HmJ}"), ("CapStud", "25"), ("PedR", "6"),
             ("HeadX", $"{-HmHeadX}"), ("BarrelD", "104"), ("BarrelEnd", "70"), ("FlangeD", "116"), ("FlangeT", "12"), ("StudPCD", "96"), ("NStud", "6"),
-            ("HopX0", "175"), ("HopX1", "85"), ("HopW", "116"), ("HopH", "82"), ("HopWall", "7"), ("HopDraft", "2"), ("HopR", "12"), ("Jacket", "20"), ("FillD", "44"),
+            ("HopX0", "175"), ("HopX1", "85"), ("HopW", "116"), ("HopH", "82"), ("HopWall", "7"), ("HopDraft", "2"), ("HopR", "12"), ("HopTopR", "4"), ("Jacket", "20"), ("FillD", "44"),
             ("LinerD", "66"), ("Bore", $"{HmBore}"), ("Relief", "58"), ("ReliefL", "8"),
             ("PitX1", "60"), ("PitW", "2*BrgIn"), ("PitBot", "110"),
             ("CamX", $"{-HmCamX}"), ("CamD", "36"), ("Stud", "16"), ("GearZ", $"{HmGearZ}"), ("CamIn", "40"),
@@ -418,10 +418,20 @@ static partial class Demos
         // the main bearings' lower halves, from BrgIn out to BrgOut each side
         var bp = d.AddFeature(new PlaneFeature { Name = "Bearing inner face", Base = PlaneRef.Front, Offset = "BrgIn" });
         var p = new Sk(d);
-        p.Rect("-BrgW/2", "-BrgDrop", "BrgW/2", "0");
+        var pl = p.Rect("-BrgW/2", "-BrgDrop", "BrgW/2", "0");
         var ps = d.AddFeature(new SketchFeature { Name = "Bearing pedestal", Plane = new PlaneRef { Feature = bp.Id }, Sketch = p.S });
         var ped = d.AddFeature(new ExtrudeFeature { Name = "Bearing pedestal", SketchId = ps.Id, Depth = "BrgOut-BrgIn" });
-        d.AddFeature(new MirrorFeature { Name = "Bearing pedestal, back", Seeds = { ped.Id }, Plane = PlaneRef.Front });
+        // its outer corners rounded (the caps' are too)
+        var pedR = d.AddFeature(new FilletFeature
+        {
+            Name = "Pedestal corners", Radius = "PedR",
+            Edges =
+            {
+                E($"{ped.Id}.S.L{pl[1]}", $"{ped.Id}.End", new Vec3(V("BrgW/2"), -V("BrgDrop/2"), V("BrgOut"))),
+                E($"{ped.Id}.S.L{pl[3]}", $"{ped.Id}.End", new Vec3(-V("BrgW/2"), -V("BrgDrop/2"), V("BrgOut"))),
+            },
+        });
+        d.AddFeature(new MirrorFeature { Name = "Bearing pedestal, back", Seeds = { ped.Id, pedR.Id }, Plane = PlaneRef.Front });
         // the cylinder: the barrel from the head's face along +X, the flange the head bolts to
         var cf = d.AddFeature(new PlaneFeature { Name = "Cylinder face", Base = PlaneRef.Right, Offset = "-HeadX" });
         var c = new Sk(d);
@@ -447,6 +457,13 @@ static partial class Demos
                 E(HF(0), HF(1), new Vec3(-V("HopX1"), hy, V("HopW/2"))), E(HF(1), HF(2), new Vec3(-V("HopX1"), hy, -V("HopW/2"))),
                 E(HF(2), HF(3), new Vec3(-V("HopX0"), hy, -V("HopW/2"))), E(HF(3), HF(0), new Vec3(-V("HopX0"), hy, V("HopW/2"))),
             },
+        });
+        // the top's edge rounded all round (one edge picked, the rest follow tangent): suppressed until the kernel
+        // blends tangent neighbours (docs/hit-and-miss-notes.md)
+        d.AddFeature(new FilletFeature
+        {
+            Name = "Hopper top edge", Radius = "HopTopR", Suppressed = true,
+            Edges = { E(HF(0), $"{hop.Id}.End", new Vec3(-V("(HopX0+HopX1)/2"), V("HopH"), V("HopW/2-HopH*tan(HopDraft)"))) },
         });
         var ht = d.AddFeature(new PlaneFeature { Name = "Under the hopper's top", Base = PlaneRef.Top, Offset = "HopH-HopWall" });
         var w = new Sk(d);
@@ -544,13 +561,24 @@ static partial class Demos
     static CadDocument HmBearingCap()
     {
         var d = Doc(("J", $"{HmJ}"), ("W", "64"), ("L", $"{HmBrgOut - HmBrgIn}"), ("T", "14"), ("Hump", "17"), ("Stud", "25"), ("StudD", "8.5"),
-            ("CupD", "14"), ("CupH", "4"), ("Tap", "6.8"), ("C", "1"));
+            ("CupD", "14"), ("CupH", "4"), ("Tap", "6.8"), ("C", "1"), ("R", "6"));
         var s = new Sk(d);
         int a = s.P("-W/2", "0"), b = s.P("W/2", "0"), c = s.P("W/2", "T"), e = s.P("Hump", "T"), g = s.P("-Hump", "T", dimX: false), h = s.P("-W/2", "T");
         int hc = s.P("0", "T");
-        s.Line(a, b); s.Line(b, c); s.Line(c, e); var hump = s.Arc(hc, e, g); s.Line(g, h); s.Line(h, a);
+        s.Line(a, b); var right = s.Line(b, c); s.Line(c, e); s.Arc(hc, e, g); s.Line(g, h); var left = s.Line(h, a);
         var sk = d.AddFeature(new SketchFeature { Name = "Cap", Plane = PlaneRef.Front, Sketch = s.S });
         var cap = d.AddFeature(new ExtrudeFeature { Name = "Cap", SketchId = sk.Id, Depth = "L" });
+        // the outer end's corners rounded, as the pedestal's under it
+        double V(string ex) => s.Eval(ex);
+        d.AddFeature(new FilletFeature
+        {
+            Name = "Outer corners", Radius = "R",
+            Edges =
+            {
+                E($"{cap.Id}.S.L{right}", $"{cap.Id}.End", new Vec3(V("W/2"), V("T/2"), V("L"))),
+                E($"{cap.Id}.S.L{left}", $"{cap.Id}.End", new Vec3(-V("W/2"), V("T/2"), V("L"))),
+            },
+        });
         var j = new Sk(d);
         j.Circle(Sketch.OriginId, "J");
         var js = d.AddFeature(new SketchFeature { Name = "Bore", Plane = PlaneRef.Front, Sketch = j.S });
@@ -571,7 +599,6 @@ static partial class Demos
         ch.Point(ch.P("0", "-L/2"));
         var chs = d.AddFeature(new SketchFeature { Name = "Oil hole", Plane = new PlaneRef { Feature = top.Id }, Sketch = ch.S });
         d.AddFeature(new HoleFeature { Name = "Oil hole", SketchId = chs.Id, Diameter = "Tap", ThroughAll = false, Depth = "T+Hump+CupH-J/2+1" });
-        _ = cap; _ = hump;
         d.Color = new[] { 0.72, 0.08, 0.07 };
         HmMaterial(d, "Cast iron");
         return d;

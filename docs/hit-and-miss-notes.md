@@ -45,7 +45,10 @@ Commands (from the repository root):
   vertical edges filleted R20) blended R6 into the base plate's top, one edge picked, tangent edges following: with
   draft, "the fillets that run into neighbouring geometry also run into each other ... cannot be blended yet";
   without draft, "the edges are not all between the same two faces" on each corner fillet's edge. A very common
-  casting operation. *Instead:* no blend. To fix:
+  casting operation. *Instead:* no blend. The convex case fails the same way: the hopper (a rectangle extruded 82 up
+  with 2° draft, its four vertical edges filleted R12) with its top edge rounded R4 all round (one edge picked,
+  tangent edges following) gives "the fillets that run into neighbouring geometry also run into each other where both
+  are tangent to the same face". (`HmCasting`, feature "Hopper top edge", left out.) To fix:
   - "Run into each other" (`NativeBlend.Apply`, the trimmed branch) is a catch-all for a failed boolean, not a corner
     step that gives up. Each tool is trimmed against the body alone (`TrimToEdge`), then applied one at a time; two
     blends tangent to the same face meet tangentially and the second boolean fails. Cheaper: where neighbouring
@@ -108,6 +111,13 @@ Commands (from the repository root):
   screw's thread in a tapped hole of the same thread is not interference and should not be reported (or be listed
   apart as "threaded"). The valve springs also collide with their retainers as the valve opens (they cannot
   compress, below), so the demo's motion check leaves them out.
+- **STEP export flattens sub-assemblies.** `StepWriter.WriteAssembly` takes one level, so the app (and the demo's
+  `AssemblyStep`, changed to match) writes every part where it is, named by its path ("Crankshaft assembly<1>-Flywheel,
+  governor side<1>-Hub cap<1>"): the structure is lost in other CAD systems. With threads modeled the engine's STEP is
+  27 MB.
+- **File size.** `hit-and-miss.sasm` is 5.9 MB (the linkage 0.2 MB): each embedded sub-assembly carries its parts and
+  their mesh caches, and the crankshaft assembly carries both flywheel sub-assemblies (3.3 MB of the total). Parts used
+  in several sub-assemblies (the socket screw: in five of them) are stored once per sub-assembly.
 - **Materials.** The list of materials and densities lives in the app (`MainWindow.MassProps.cs`), so code (and the
   demos) set `Material` and `Density` by hand (`HmMaterial`); a list in Core would let the bill of materials and mass
   properties share it, and add rubber and glass. With them: the engine weighs 48.9 kg, its centre of mass about 71 mm
