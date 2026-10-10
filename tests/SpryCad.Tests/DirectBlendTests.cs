@@ -138,6 +138,19 @@ static class DirectBlendTests
             }
         });
 
+        t.Test("Fillet tangent propagation keeps to edges of one kind (not on from a convex edge to a concave one)", () =>
+        {
+            // a drafted block's side top edge (convex) runs straight on under a box that overhangs the narrower top,
+            // level with it (concave there): one edge picked on the block's own top rounds that edge only
+            foreach (var direct in new[] { true, false })
+            {
+                var f = BlendAB.Build(() => Demos.BlendCases.First(c => c.name == "drafted block, top edge under an overhang").build(), direct, reps: 1).feats.First(x => x.name == "Top edge");
+                t.True(f.error == null && f.valid == null, $"{f.error} {f.valid}");
+                var blends = f.names.Where(n => n.EndsWith(".S.F", StringComparison.Ordinal) || n.EndsWith(".Blend", StringComparison.Ordinal)).ToList();
+                t.True(blends.Count == 1 && blends[0].StartsWith("F6.0.", StringComparison.Ordinal), $"{(direct ? "direct" : "boolean")}: blend faces {string.Join(", ", blends)}");
+            }
+        });
+
         t.Test("Direct blend: off (FC_BLEND=boolean) applies nothing directly", () =>
         {
             var before = DirectBlend.Counts;

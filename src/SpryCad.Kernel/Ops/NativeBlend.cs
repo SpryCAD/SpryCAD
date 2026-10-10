@@ -86,17 +86,12 @@ public static class NativeBlend
                 if (Debug != null)
                     Debug($"blend {name}: {string.Join(", ", group.Select(g => $"{g.Curve.GetType().Name}{g.V0.P}->{g.V1.P} [{string.Join("|", g.Uses.Select(u => u.Face.Tag.Name + ":" + u.Face.Surface.Kind))}]"))} -> tools={tools?.Count} fits={fits}");
                 if (tools == null) { Fail("unsupported edge geometry."); continue; }
-                if (!fits)
+                // a tool running past the faces it blends is cut back to the neighbouring geometry below, once the
+                // chains are settled (trimmed: still to cut)
+                if (!fits && !overflow)
                 {
-                    using var _tr = Prof.Time("blend.trim");
-                    var trimmed = overflow ? TrimToEdge(body, tools, convex, group, fa, fb) : null;
-                    if (trimmed == null)
-                    {
-                        Fail($"the {(fillet ? "fillet" : "chamfer")} does not fit: it runs past the faces it blends. Use a smaller size.");
-                        continue;
-                    }
-                    tools = new List<Solid> { trimmed };
-                    strip = null;
+                    Fail($"the {(fillet ? "fillet" : "chamfer")} does not fit: it runs past the faces it blends. Use a smaller size.");
+                    continue;
                 }
                 entries.Add((tools, convex, direct ? strip : null, name, group, !fits));
             }
@@ -129,6 +124,53 @@ public static class NativeBlend
                 entries.Add((new List<Solid> { rb.Tool! }, rb.Convex, direct ? rb.Tool : null, name0, chain, false));
                 bad.ExceptWith(chain);
             }
+        }
+        // "keep edge": the tools running past their faces cut back where they meet the neighbouring geometry. The
+        // pieces of one tangent chain (lines split where a face beside them changes, running on into an arc) are
+        // glued first and cut as one: cut apart, they meet face to face at their joints, where applying them one by
+        // one fails
+        var pending = Enumerable.Range(0, entries.Count).Where(k => entries[k].trimmed).ToList();
+        if (pending.Count > 0)
+        {
+            using var _tr = Prof.Time("blend.trim");
+            var par = pending.ToDictionary(k => k, k => k);
+            int Find(int x) { while (par[x] != x) x = par[x] = par[par[x]]; return x; }
+            var none = new HashSet<NEdge>(ReferenceEqualityComparer.Instance);
+            foreach (var k in pending)
+            {
+                var chain = new HashSet<NEdge>(entries[k].group.SelectMany(e => TangentChain(e, edges, none)), ReferenceEqualityComparer.Instance);
+                foreach (var j in pending)
+                    if (j != k && entries[j].convex == entries[k].convex && entries[j].group.Any(chain.Contains)) par[Find(j)] = Find(k);
+            }
+            var cut = new List<(List<Solid> tools, bool convex, Solid? strip, string name, List<NEdge> group, bool trimmed)>();
+            List<NFace> FacesOf(IEnumerable<NEdge> es) => es.SelectMany(e => e.Uses.Select(u => u.Face)).Distinct(ReferenceEqualityComparer.Instance).Cast<NFace>().ToList();
+            foreach (var cluster in pending.GroupBy(Find).Select(g => g.ToList()))
+            {
+                var all = cluster.SelectMany(k => entries[k].group).ToList();
+                if (cluster.Count > 1 && cluster.All(k => entries[k].strip != null)
+                    && DirectBlend.Glue(cluster.Select(k => new DirectBlend.Tool(entries[k].strip!, entries[k].convex, entries[k].name, size)).ToList(), out _) is { } glued
+                    && TrimToEdge(body, new List<Solid> { glued.Strip }, glued.Convex, all, FacesOf(all)) is { } one)
+                {
+                    // (by boolean: a tool cut back to neighbouring geometry is not applied directly yet)
+                    cut.Add((new List<Solid> { one }, glued.Convex, null, entries[cluster[0]].name, all, true));
+                    continue;
+                }
+                foreach (var k in cluster)
+                {
+                    var x = entries[k];
+                    var faces = FacesOf(x.group);
+                    var t = TrimToEdge(body, x.tools, x.convex, x.group, faces);
+                    if (t == null)
+                    {
+                        var (fa, fb) = Faces(x.group[0]);
+                        fails.Add((x.group, $"Edge {fa.Tag.Name} / {fb.Tag.Name}: the {(fillet ? "fillet" : "chamfer")} does not fit: it runs past the faces it blends. Use a smaller size."));
+                        continue;
+                    }
+                    cut.Add((new List<Solid> { t }, x.convex, null, x.name, x.group, true));
+                }
+            }
+            foreach (var k in pending.OrderByDescending(k => k)) entries.RemoveAt(k);
+            entries.AddRange(cut);
         }
         foreach (var (group, msg) in fails)
         {
@@ -166,11 +208,12 @@ public static class NativeBlend
                 corners.AddRange(pieces.Select((c, j) => new DirectBlend.Tool(c.piece, c.convex, $"{prefix}.C{j}", size)));
             }
         }
-        if (!anyTrimmed && entries.Any(x => x.strip != null))
+        if (entries.Any(x => x.strip != null))
         {
             var idx = Enumerable.Range(0, entries.Count).Where(k => entries[k].strip != null).ToList();
             var left = new List<int>();
-            var nb = DirectBlend.Apply(body.Native!, idx.Select(k => new DirectBlend.Tool(entries[k].strip!, entries[k].convex, entries[k].name, size)).Concat(corners).ToList(), left);
+            var offered = idx.Select(k => new DirectBlend.Tool(entries[k].strip!, entries[k].convex, entries[k].name, size)).Concat(corners).ToList();
+            var nb = DirectBlend.Apply(body.Native!, offered, left);
             if (nb != null)
             {
                 result = NTess.ToSolid(nb);
@@ -181,7 +224,7 @@ public static class NativeBlend
         }
         foreach (var k in byBoolean) (entries[k].convex ? cutTools : addTools).AddRange(entries[k].tools);
         if (cutTools.Count == 0 && addTools.Count == 0) return result;
-        if (anyTrimmed)
+        if (byBoolean.Any(k => entries[k].trimmed))
         {
             // trimmed blends of neighbouring edges can touch each other along tangent curves; merged with each
             // other first that contact is non-manifold, so they are applied to the body one at a time instead
@@ -558,7 +601,7 @@ public static class NativeBlend
     /// only those touching the blended edge are kept (pieces beyond an obstacle are not part of the blend).
     /// Null if nothing sensible remains.
     /// </summary>
-    static Solid? TrimToEdge(Solid body, List<Solid> tools, bool convex, List<NEdge> edges, NFace fa, NFace fb)
+    static Solid? TrimToEdge(Solid body, List<Solid> tools, bool convex, List<NEdge> edges, IReadOnlyCollection<NFace> blended)
     {
         var tool = tools.Count == 1 ? tools[0] : Csg.UnionAll(tools);
         if (tool.Native == null) return null;
@@ -572,8 +615,7 @@ public static class NativeBlend
         var pts = edges.SelectMany(e => e.Samples(1e-3)).ToList();
         foreach (var f in body.Native!.Faces)
         {
-            if (ReferenceEquals(f, fa) || ReferenceEquals(f, fb)) continue;
-            if (f.Surface.CoincidentWith(fa.Surface, 1e-9) || f.Surface.CoincidentWith(fb.Surface, 1e-9)) continue;
+            if (blended.Any(b => ReferenceEquals(f, b) || f.Surface.CoincidentWith(b.Surface, 1e-9))) continue;
             if (!f.Bounds().Overlaps(box, 1e-6)) continue;
             // the side the tool must not reach: the material behind the face (concave blends add material in
             // the open space) or the open space in front of it (convex blends remove material)
@@ -707,6 +749,24 @@ public static class NativeBlend
         return x.SequenceEqual(y);
     }
 
+    /// <summary>
+    /// Whether the edge is convex (the material's angle between its faces under 180°) near point p on it (null: the
+    /// faces tangent there, or the edge not between two faces).
+    /// </summary>
+    static bool? Convex(NEdge e, Vec3 p)
+    {
+        if (e.Uses.Count != 2) return null;
+        var t = e.Curve.Param(p, e.Curve.Periodic ? 0.5 * (e.T0 + e.T1) : null);
+        // a little inside the edge (its end may be a vertex where faces are tangent)
+        t = Math.Clamp(t, e.T0, e.T1) * 0.999 + 0.0005 * (e.T0 + e.T1);
+        var q = e.Curve.Eval(t);
+        var cA = e.Uses[0]; var cB = e.Uses[1];
+        var nA = Outward(cA.Face, q); var nB = Outward(cB.Face, q);
+        var uB = Vec3.Cross(nB, e.Curve.Deriv(t) * (cB.Forward ? 1 : -1));
+        if (uB.Length < 1e-12 || Math.Abs(Vec3.Dot(nA, nB)) > 1 - 1e-9) return null;
+        return Vec3.Dot(uB.Normalized, nA) < 0;
+    }
+
     /// <summary>A seam: both sides are the same named face on the same surface (an artifact of face splitting).</summary>
     public static bool IsSeam(NEdge e)
         => e.Uses.Count == 2 && e.Uses[0].Face.Tag.Name == e.Uses[1].Face.Tag.Name
@@ -747,7 +807,9 @@ public static class NativeBlend
                     // the other pieces of a seam-split edge: same named faces on the same surfaces
                     bool sibling = SameFaces(e, o) && (e.Curve is NCircle ec && o.Curve is NCircle oc ? SameCircle(ec, oc) : RollingBall.SameSurfaces(e, o));
                     bool cont = false;
-                    if (tangent && !sibling)
+                    // on along a tangent edge of the same kind: not from a convex edge onto a concave one (a drafted
+                    // side's top edge running on under an overhang level with the top)
+                    if (tangent && !sibling && Convex(e, v.P) == Convex(o, v.P))
                         foreach (var oStart in new[] { true, false })
                         {
                             if (!ReferenceEquals(oStart ? o.V0 : o.V1, v)) continue;

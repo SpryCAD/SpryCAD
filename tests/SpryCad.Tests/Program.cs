@@ -38,7 +38,8 @@ static class Program
     static int Main(string[] args)
     {
         if (Environment.GetEnvironmentVariable("FC_TOPO") != null) SpryCad.Kernel.Topology.Debug = Console.WriteLine;
-        if (Environment.GetEnvironmentVariable("FC_BLEND") != null) { SpryCad.Kernel.NativeBlend.Debug = Console.WriteLine; SpryCad.Kernel.RollingBall.Debug = Console.WriteLine; }
+        // (FC_BLEND=boolean only turns direct blends off)
+        if (Environment.GetEnvironmentVariable("FC_BLEND") is { } fcBlend && fcBlend != "boolean") { SpryCad.Kernel.NativeBlend.Debug = Console.WriteLine; SpryCad.Kernel.RollingBall.Debug = Console.WriteLine; }
         if (Environment.GetEnvironmentVariable("FC_BOOL") != null) SpryCad.Kernel.Native.NBoolean.Trace = Console.WriteLine;
         if (Environment.GetEnvironmentVariable("FC_SHELL") != null) SpryCad.Kernel.Native.NShell.Debug = Console.WriteLine;
         if (args.Length > 7 && args[0] == "fillet") return Hang.Run(args);

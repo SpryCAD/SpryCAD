@@ -84,7 +84,7 @@ public static class DirectBlend
     /// face of another, facing the other way (the two ends cancel, their edges become one). Null (and why) when
     /// they meet otherwise, or are of different kinds (adding and removing material).
     /// </summary>
-    static Tool? Glue(List<Tool> tools, out string? why)
+    internal static Tool? Glue(List<Tool> tools, out string? why)
     {
         why = null;
         if (tools.Any(t => t.Strip.Native == null || t.Convex != tools[0].Convex)) { why = "mixed tools"; return null; }
@@ -505,6 +505,8 @@ public static class DirectBlend
     static bool Inside(NEdge e, Vec3 p, double tol, out double t)
     {
         t = 0;
+        // (a fitted curve: within its fit tolerance, as Coincide)
+        if (e.Curve is NSpline ns) tol = Math.Max(tol, 10 * ns.FitTol);
         if (!e.Bounds().Contains(p, tol)) return false;
         if (Vec3.Distance(p, e.V0.P) <= tol || Vec3.Distance(p, e.V1.P) <= tol) return false;
         t = e.Curve.Param(p, e.Curve.Periodic ? 0.5 * (e.T0 + e.T1) : null);
@@ -632,9 +634,14 @@ public static class DirectBlend
             foreach (var p in pl.Pts) yield return p;
     }
 
-    /// <summary>Whether two edges with the same end vertices are the same curve between them.</summary>
+    /// <summary>
+    /// Whether two edges with the same end vertices are the same curve between them (within the fit tolerance of
+    /// fitted curves: a pattern copy's edge and the instance's own are fitted apart).
+    /// </summary>
     static bool Coincide(NEdge a, NEdge b, double tol)
     {
+        static double Fit(NCurve c) => c is NSpline ns ? ns.FitTol : 0;
+        var near = Math.Max(10 * tol, 10 * (Fit(a.Curve) + Fit(b.Curve)));
         foreach (var s in new[] { 0.25, 0.5, 0.75 })
         {
             var p = a.At(s);
@@ -645,7 +652,7 @@ public static class DirectBlend
                 while (t < b.T0) t += per;
                 while (t > b.T1) t -= per;
             }
-            if (t < b.T0 - 1e-9 || t > b.T1 + 1e-9 || Vec3.Distance(b.Curve.Eval(t), p) > 10 * tol) return false;
+            if (t < b.T0 - 1e-9 || t > b.T1 + 1e-9 || Vec3.Distance(b.Curve.Eval(t), p) > near) return false;
         }
         return true;
     }
