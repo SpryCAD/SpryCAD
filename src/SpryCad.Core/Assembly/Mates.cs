@@ -378,8 +378,25 @@ public sealed class Mate
                     Vec(db.Point(tb.Point(q)) - da.Point(ta.Point(rel.Point(q))));
                 return true;
             }
-            case MateType.Gear or MateType.Screw:
-                return false;
+            case MateType.Gear:
+            {
+                // each side's turn about its own axis, from a direction fixed in the assembly
+                if (DAngleAbout(W0A, ta.Vector(UA), a.D, Vec3.Zero, da.Dir(ta.Vector(UA)), da.Dir(a.D)) is not { } dA
+                    || DAngleAbout(W0B, tb.Vector(UB), b.D, Vec3.Zero, db.Dir(tb.Vector(UB)), db.Dir(b.D)) is not { } dB) return false;
+                r.Add((RatioA * dA + (Reverse ? -1 : 1) * RatioB * dB) / Math.Max(1e-9, Math.Max(RatioA, RatioB)));
+                return true;
+            }
+            case MateType.Screw:
+            {
+                var u = ta.Vector(UA); var w = tb.Vector(UB);
+                if (DAngleAbout(u, w, a.D, da.Dir(u), db.Dir(w), da.Dir(a.D)) is not { } dTh) return false;
+                var dDa0 = da.Dir(a.D); var dDb0 = db.Dir(b.D);
+                var v0 = b.P - a.P; var dv0 = db.Point(b.P) - da.Point(a.P);
+                Vec(Vec3.Cross(dDa0, b.D) + Vec3.Cross(a.D, dDb0));
+                Vec(DPerp(v0, a.D, dv0, dDa0));
+                r.Add(Vec3.Dot(dv0, a.D) + Vec3.Dot(v0, dDa0) - (Reverse ? -1 : 1) * Value * dTh / (2 * Math.PI));
+                return true;
+            }
         }
         var (sa, sb) = (da, db);
         if ((int)a.Kind > (int)b.Kind) { (a, b) = (b, a); (sa, sb) = (db, da); }
@@ -496,6 +513,25 @@ public sealed class Mate
             }
         }
         return true;
+    }
+
+    /// <summary>
+    /// How <see cref="AngleAbout"/>(u, v, d) changes as u, v and d change by du, dv and dd; null where it has no
+    /// direction to measure (u or v along d).
+    /// </summary>
+    static double? DAngleAbout(Vec3 u, Vec3 v, Vec3 d, Vec3 du, Vec3 dv, Vec3 dd)
+    {
+        // the directions across d, and their changes
+        var up = u - d * Vec3.Dot(u, d); var vp = v - d * Vec3.Dot(v, d);
+        var dup = du - dd * Vec3.Dot(u, d) - d * (Vec3.Dot(du, d) + Vec3.Dot(u, dd));
+        var dvp = dv - dd * Vec3.Dot(v, d) - d * (Vec3.Dot(dv, d) + Vec3.Dot(v, dd));
+        // atan2(y, x) with x = up.vp, y = (up x vp).d
+        double x = Vec3.Dot(up, vp), y = Vec3.Dot(Vec3.Cross(up, vp), d);
+        double q = x * x + y * y;
+        if (q < 1e-24) return null;
+        double dx = Vec3.Dot(dup, vp) + Vec3.Dot(up, dvp);
+        double dy = Vec3.Dot(Vec3.Cross(dup, vp) + Vec3.Cross(up, dvp), d) + Vec3.Dot(Vec3.Cross(up, vp), dd);
+        return (x * dy - y * dx) / q;
     }
 
     /// <summary>The alignment nearest how two references lie now (for a new mate), the side, and inside / outside.</summary>

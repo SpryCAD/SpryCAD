@@ -309,7 +309,6 @@ public static class MateSolver
                 return true;
             }
             var m = mates[k];
-            if (m.Type is MateType.Gear or MateType.Screw) return false;
             var ga = geoA[k].Placed(curA[k]); var gb = geoB[k].Placed(curB[k]);
             var still = new Mate.Twist(Vec3.Zero, Vec3.Zero, Vec3.Zero);
             // (a mate between two references of one component: its rows against that component, both sides moving)
