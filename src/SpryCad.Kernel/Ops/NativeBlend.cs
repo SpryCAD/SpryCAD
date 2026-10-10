@@ -527,7 +527,10 @@ public static class NativeBlend
         var e = arcs[0];
         var cP = e.Uses[0]; var cC = e.Uses[1];
         if (cP.Face.Surface.Kind != SurfaceKind.Plane) (cP, cC) = (cC, cP);
-        if (cP.Face.Surface.Kind != SurfaceKind.Plane || cC.Face.Surface.Kind != SurfaceKind.Cylinder) return (null, false, false, null);
+        // a plane square to a cylinder (a hole's or a boss's rim) or to a cone about the same axis (a drafted boss's or
+        // a countersink's rim): the profile revolved about the axis
+        if (cP.Face.Surface.Kind != SurfaceKind.Plane || cC.Face.Surface.Kind is not (SurfaceKind.Cylinder or SurfaceKind.Cone)) return (null, false, false, null);
+        bool cone = cC.Face.Surface.Kind == SurfaceKind.Cone;
         var cs = cC.Face.Surface;
         var ax = cs.Axis;
         var tm = 0.5 * (e.T0 + e.T1);
@@ -545,17 +548,25 @@ public static class NativeBlend
         var uC2 = new Vec2(0, Math.Sign(Vec3.Dot(uC, ax)));
         var nP2 = new Vec2(0, Math.Sign(Vec3.Dot(nP, ax)));
         var nC2 = new Vec2(Math.Sign(Vec3.Dot(nC, rho)), 0);
+        // (radius, height) of the edge; a cone's side leans in the (radius, height) plane
+        var rE = cs.R;
+        if (cone)
+        {
+            rE = (rel - ax * h0).Length;
+            uC2 = new Vec2(Vec3.Dot(uC, rho), Vec3.Dot(uC, ax)).Normalized;
+            nC2 = new Vec2(Vec3.Dot(nC, rho), Vec3.Dot(nC, ax)).Normalized;
+        }
         var (dP, dC) = fillet ? (size, size) : EdgeBlend.ChamferLegs(uP2, uC2, ch, refIsFirst(cP.Face, cC.Face));
-        var prof = EdgeBlend.Profile2D(uP2, uC2, nP2, nC2, new Vec2(cs.R, h0), dP, fillet, convex, dC);
+        var prof = EdgeBlend.Profile2D(uP2, uC2, nP2, nC2, new Vec2(rE, h0), dP, fillet, convex, dC);
         if (prof == null) return (null, convex, false, null);
         // the direct blend's tool: the same profile bounded by the faces, revolved over the same arc (none for an
         // arc whose ends meet faces at an angle: those need the extensions)
-        var sprof = direct ? EdgeBlend.Profile2D(uP2, uC2, nP2, nC2, new Vec2(cs.R, h0), dP, fillet, convex, dC, atCorner: true) : null;
+        var sprof = direct ? EdgeBlend.Profile2D(uP2, uC2, nP2, nC2, new Vec2(rE, h0), dP, fillet, convex, dC, atCorner: true) : null;
         if (prof.Verts.Any(v => v.P.X < -1e-9)) throw new InvalidOperationException("size too large for this edge");
         var (tlP, tlC) = TangentLengths(uP2, uC2, size, fillet, dP, dC);
         var tlc = Math.Max(tlP, tlC);
-        var onPlane = new Vec2(cs.R, h0) + uP2 * tlP;   // (radius, height) of the tangent circle on the plane
-        var onCyl = new Vec2(cs.R, h0) + uC2 * tlC;     // ... and on the cylinder
+        var onPlane = new Vec2(rE, h0) + uP2 * tlP;   // (radius, height) of the tangent circle on the plane
+        var onCyl = new Vec2(rE, h0) + uC2 * tlC;     // ... and on the cylinder
 
         var refDir = cs.F.XDir; var yDir = Vec3.Cross(ax, refDir);
         double Ang(Vec3 p) { var r = p - cs.Origin; return Math.Atan2(Vec3.Dot(r, yDir), Vec3.Dot(r, refDir)); }
@@ -578,10 +589,10 @@ public static class NativeBlend
                 {
                     var a = a0 + sweep * s0;
                     var dir = refDir * Math.Cos(a) + yDir * Math.Sin(a);
-                    foreach (var f in new[] { 0.5, 0.95 }) pts.Add(cs.Origin + dir * (cs.R + o2.X * f) + ax * (h0 + o2.Y * f));
+                    foreach (var f in new[] { 0.5, 0.95 }) pts.Add(cs.Origin + dir * (rE + o2.X * f) + ax * (h0 + o2.Y * f));
                 }
             if (Taken(body, cP.Face, cC.Face, pts, convex)
-                && EdgeBlend.Profile2D(uP2, uC2, nP2, nC2, new Vec2(cs.R, h0), dP, fillet, convex, dC, atCorner: true) is { } bounded)
+                && EdgeBlend.Profile2D(uP2, uC2, nP2, nC2, new Vec2(rE, h0), dP, fillet, convex, dC, atCorner: true) is { } bounded)
                 prof = bounded;
         }
         // chain ends meeting a face at an angle (e.g. a keyway wall across a bore): extensions past the ends, each
@@ -589,7 +600,7 @@ public static class NativeBlend
         var extensions = new List<(double a0, double sweep, Plane plane, int arc)>();
         if (ranges.Sum(r => r.sweep) < 2 * Math.PI - 1e-6)
         {
-            var delta = Math.Min(Math.Min(3 * Math.Max(size, tlc) / cs.R, Math.PI / 4), (2 * Math.PI - ranges.Sum(r => r.sweep)) / 2);
+            var delta = Math.Min(Math.Min(3 * Math.Max(size, tlc) / rE, Math.PI / 4), (2 * Math.PI - ranges.Sum(r => r.sweep)) / 2);
             static double Wrap2(double a) { a %= 2 * Math.PI; return a > Math.PI ? a - 2 * Math.PI : a < -Math.PI ? a + 2 * Math.PI : a; }
             Vec3 DirAt(double a) => -refDir * Math.Sin(a) + yDir * Math.Cos(a);
             for (int i = 0; i < arcs.Count; i++)
@@ -634,16 +645,56 @@ public static class NativeBlend
                 ? Builders.Revolve(new[] { new ProfileRegion(sprof) }, frame, Vec2.Zero, new Vec2(0, 1), 2 * Math.PI, name) : null;
             return (tools, convex, fits, full);
         }
+        Solid Piece(ProfileLoop pr, double from, double sweep)
+        {
+            var startDir = refDir * Math.Cos(from) + yDir * Math.Sin(from);
+            return Builders.Revolve(new[] { new ProfileRegion(pr) }, new Frame(cs.Origin, startDir, ax, Vec3.Cross(startDir, ax)), Vec2.Zero, new Vec2(0, 1), sweep, name);
+        }
+        // whether an end's plane cuts the profile revolved over (from, to): a long arc curves back across the plane of
+        // the face its end meets (a slot's wall across a hole's rim), where the plane is no end of it
+        bool Reaches(Plane pl, double from, double to)
+        {
+            for (int i = 0; i <= 16; i++)
+            {
+                var a = from + (to - from) * i / 16;
+                var dir = refDir * Math.Cos(a) + yDir * Math.Sin(a);
+                foreach (var v in prof.Verts) if (pl.Distance(cs.Origin + dir * v.P.X + ax * v.P.Y) < -1e-9) return true;
+            }
+            return false;
+        }
+        // (the end lengths next to the ends cut back, and whether a plane reaches past them)
+        (double s, double e, bool split) Ends(List<(double a0, double sweep, Plane plane, int arc)> mine, double a0, double sweep)
+        {
+            double s = a0, e = a0 + sweep;
+            foreach (var x in mine)
+            {
+                if (Math.Abs(x.a0 + x.sweep - a0) < 1e-9) s = a0 + Math.Min(x.sweep, sweep / 2);
+                else e = a0 + sweep - Math.Min(x.sweep, sweep / 2);
+            }
+            return (s, e, e - s > 1e-9 && mine.Any(x => Reaches(x.plane, s, e)));
+        }
         for (int k = 0; k < ranges.Count; k++)
         {
             var (a0, sweep) = ranges[k];
             if (sweep < 1e-9) continue;
-            var startDir = refDir * Math.Cos(a0) + yDir * Math.Sin(a0);
-            var pframe = new Frame(cs.Origin, startDir, ax, Vec3.Cross(startDir, ax));
-            var piece = Builders.Revolve(new[] { new ProfileRegion(prof) }, pframe, Vec2.Zero, new Vec2(0, 1), sweep, name);
-            // cut back to the faces its ends meet at an angle (as the line tool's)
-            foreach (var x in extensions) if (x.arc == k) piece = Trim(piece, x.plane);
-            if (!piece.IsEmpty) tools.Add(piece);
+            var mine = extensions.Where(x => x.arc == k).ToList();
+            var (ms, me, split) = Ends(mine, a0, sweep);
+            if (!split)
+            {
+                var piece = Piece(prof, a0, sweep);
+                // cut back to the faces its ends meet at an angle (as the line tool's)
+                foreach (var x in mine) piece = Trim(piece, x.plane);
+                if (!piece.IsEmpty) tools.Add(piece);
+                continue;
+            }
+            // the plane would cut the middle too: only the ends cut back, the middle whole
+            foreach (var x in mine)
+            {
+                var atStart = Math.Abs(x.a0 + x.sweep - a0) < 1e-9;
+                var end = Trim(atStart ? Piece(prof, a0, ms - a0) : Piece(prof, me, a0 + sweep - me), x.plane);
+                if (!end.IsEmpty) tools.Add(end);
+            }
+            tools.Add(Piece(prof, ms, me - ms));
         }
         Solid? strip = null;
         if (sprof != null && ranges.Count(r => r.sweep >= 1e-9) == 1)
@@ -653,15 +704,19 @@ public static class NativeBlend
             var (a0, sweep) = ranges[k];
             var mine = extensions.Where(x => x.arc == k).ToList();
             double from = a0, to = a0 + sweep;
-            foreach (var x in mine)
+
+            // (a plane cutting its middle too: left to the boolean)
+            if (!Ends(mine, a0, sweep).split)
             {
-                if (Math.Abs(x.a0 + x.sweep - a0) < 1e-9) from = x.a0;   // before the start
-                else to = x.a0 + x.sweep;                                // after the end
+                foreach (var x in mine)
+                {
+                    if (Math.Abs(x.a0 + x.sweep - a0) < 1e-9) from = x.a0;   // before the start
+                    else to = x.a0 + x.sweep;                                // after the end
+                }
+                strip = Piece(sprof, from, to - from);
+                foreach (var x in mine) strip = Trim(strip, x.plane);
+                if (strip.IsEmpty || strip.Native == null) strip = null;
             }
-            var startDir = refDir * Math.Cos(from) + yDir * Math.Sin(from);
-            strip = Builders.Revolve(new[] { new ProfileRegion(sprof) }, new Frame(cs.Origin, startDir, ax, Vec3.Cross(startDir, ax)), Vec2.Zero, new Vec2(0, 1), to - from, name);
-            foreach (var x in mine) strip = Trim(strip, x.plane);
-            if (strip.IsEmpty || strip.Native == null) strip = null;
         }
         return (tools, convex, fits, strip);
     }

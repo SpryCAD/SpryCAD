@@ -410,12 +410,16 @@ public sealed class NSurface
             case SurfaceKind.Torus: return Vec3.Distance(Origin, o.Origin) < tol && Math.Abs(R - o.R) < tol && Math.Abs(R2 - o.R2) < tol;
             case SurfaceKind.Cone:
                 {
-                    // compare radius at a common height
-                    var dir = Vec3.Dot(Axis, o.Axis) > 0 ? 1 : -1;
-                    if (dir < 0) return false;
-                    if (Math.Abs(R2 - o.R2) > 1e-10) return false;
-                    var h = Vec3.Dot(o.Origin - Origin, Axis);
-                    return Math.Abs(R + h * Math.Tan(R2) - o.R) < tol;
+                    // the same cone written either way: an axis with a negative half angle is the reversed axis with the
+                    // positive one (a drafted extrude's side and the same cone revolved); the same axis line, the same
+                    // radius at a common height
+                    var (a1, s1) = R2 < 0 ? (-Axis, -R2) : (Axis, R2);
+                    var (a2, s2) = o.R2 < 0 ? (-o.Axis, -o.R2) : (o.Axis, o.R2);
+                    if (Vec3.Dot(a1, a2) < 1 - 1e-10 || Math.Abs(s1 - s2) > 1e-10) return false;
+                    var d = o.Origin - Origin;
+                    var h = Vec3.Dot(d, a1);
+                    if ((d - a1 * h).Length > tol) return false;
+                    return Math.Abs(R + h * Math.Tan(s1) - o.R) < tol;
                 }
         }
         return false;
