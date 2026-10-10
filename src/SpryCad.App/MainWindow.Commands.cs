@@ -911,10 +911,10 @@ public partial class MainWindow
     {
         if (!await ResolvePendingEdit()) return false;
         if (Asm != null) return await SaveAssembly(false);
-        // an embedded part being edited: saved back into its assembly
-        if (_tab.EmbeddedIn != null)
+        // an embedded part being edited: saved back into its assembly (and the assembly saved)
+        if (_tab.EmbeddedName != null)
         {
-            try { if (SaveEmbedded(_tab)) return true; }
+            try { if (await SaveEmbedded(_tab) is { } done) return done; }
             catch (Exception ex) { App.Log(ex, "Save embedded"); await Dialogs.Message(this, "Save failed", ex.Message); return false; }
         }
         if (Session.FilePath == null) return await SaveAs();
@@ -939,7 +939,7 @@ public partial class MainWindow
         {
             Session.Save(path); RecentFiles.Add(path); Status("Saved " + path);
             // (an embedded part saved as a file of its own: no longer tied to the assembly)
-            _tab.EmbeddedIn = null; _tab.EmbeddedName = null; UpdateTabHeader(_tab);
+            _tab.EmbeddedIn = null; _tab.EmbeddedName = null; _tab.EmbeddedPath = null; UpdateTabHeader(_tab);
             return true;
         }
         catch (Exception ex) { App.Log(ex, "Save failed"); await Dialogs.Message(this, "Save failed", ex.Message); return false; }

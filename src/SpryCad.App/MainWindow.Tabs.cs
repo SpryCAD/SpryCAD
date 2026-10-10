@@ -27,6 +27,8 @@ public partial class MainWindow
         /// </summary>
         public AssemblySession? EmbeddedIn;
         public string? EmbeddedName;
+        /// <summary>The embedding assembly's file (found again by it once its tab is closed; null: never saved).</summary>
+        public string? EmbeddedPath;
         public Border Header = null!;
         public TextBlock Label = null!;
         /// <summary>The camera when last left; null until then (the view is fitted to the part instead).</summary>

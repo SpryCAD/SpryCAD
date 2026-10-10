@@ -126,7 +126,9 @@ public partial class MainWindow : IAssemblyHost
     internal bool IsAssemblyActive => Asm != null;
 
     static string TitleOf(PartTab t) =>
-        (t.Asm?.Title ?? t.Session.Title) + (t.EmbeddedIn is { } e ? $" (in {e.Title.TrimEnd(' ', '*')})" : "");
+        (t.Asm?.Title ?? t.Session.Title) + (t.EmbeddedName == null ? ""
+            : t.EmbeddedIn is { } e ? $" (in {e.Title.TrimEnd(' ', '*')})"
+            : t.EmbeddedPath is { } p ? $" (in {Path.GetFileNameWithoutExtension(p)})" : " (embedded)");
     static bool DirtyOf(PartTab t) => t.Asm?.Dirty ?? t.Session.Dirty;
 
     /// <summary>The design tree tab's content: the part's tree and the assembly's (the active document's shows).</summary>
@@ -632,10 +634,10 @@ public partial class MainWindow : IAssemblyHost
     {
         if (Asm is not { } a) return false;
         var path = a.FilePath;
-        // an embedded sub-assembly being edited: saved back into its assembly
-        if (!saveAs && _tab.EmbeddedIn != null)
+        // an embedded sub-assembly being edited: saved back into its assembly (and the assembly saved)
+        if (!saveAs && _tab.EmbeddedName != null)
         {
-            try { if (SaveEmbedded(_tab)) return true; }
+            try { if (await SaveEmbedded(_tab) is { } done) return done; }
             catch (Exception ex) { App.Log(ex, "Save embedded"); await Dialogs.Message(this, "Save failed", ex.Message); return false; }
         }
         if (saveAs || path == null)
@@ -655,7 +657,7 @@ public partial class MainWindow : IAssemblyHost
             a.Save(path);
             RecentFiles.Add(path);
             Status("Saved " + path);
-            if (saveAs && _tab.EmbeddedIn != null) { _tab.EmbeddedIn = null; _tab.EmbeddedName = null; UpdateTabHeader(_tab); }
+            if (saveAs && _tab.EmbeddedName != null) { _tab.EmbeddedIn = null; _tab.EmbeddedName = null; _tab.EmbeddedPath = null; UpdateTabHeader(_tab); }
             return true;
         }
         catch (Exception ex) { App.Log(ex, "Save failed"); await Dialogs.Message(this, "Save failed", ex.Message); return false; }

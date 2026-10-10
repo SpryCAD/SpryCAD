@@ -183,6 +183,8 @@ public sealed partial class AssemblyModel
                 Parts.Remove(g.Key);
                 foreach (var k in Parts.Keys.Where(k => OfPart(k, g.Key)).ToList()) Parts.Remove(k);
                 LoadPart(g.Key, defer);
+                // its new revision noted now (a display still to be built would not note it when saved)
+                foreach (var c in g) if (DisplayOf(c)?.Part?.Revision is { } rev) c.Part.Revision = rev;
             }
         }
     }
