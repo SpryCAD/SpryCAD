@@ -209,12 +209,16 @@ public static class OptionsDialog
         Sync();
         f.Row("Keep the display", new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, Children = { keep, slower } },
             "A container keeps the part as last built, so it shows at once when opened while it rebuilds (larger files). Plain JSON files never do.");
+        f.Section("Saving assemblies");
+        var meshes = f.Check("Keep the parts' meshes", UserSettings.AssemblyMeshes,
+            "The assembly opens without rebuilding its parts, and shows parts that have gone missing (larger files). Otherwise its parts are rebuilt when it opens; lightweight parts always keep theirs.");
         double seconds = UserSettings.KeepDisplaySeconds;
         return new Commit(
             () => keep.SelectedIndex != 0 || (Expr.TryEval(secs.Text, null, out seconds, out _) && seconds >= 0) ? null : "Keep the display: a number of seconds, 0 or more.",
             () => () =>
             {
                 UserSettings.SaveContainer = container.IsChecked == true;
+                UserSettings.AssemblyMeshes = meshes.IsChecked == true;
                 if (keep.SelectedIndex >= 0) UserSettings.KeepDisplay = modes[keep.SelectedIndex];
                 if (keep.SelectedIndex == 0) UserSettings.KeepDisplaySeconds = seconds;
             });

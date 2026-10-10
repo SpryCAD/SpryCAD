@@ -358,5 +358,42 @@ static class NestedAssemblyTests
             var gone = AssemblyModel.Open(AssemblyDocument.Load(path), path);
             t.True(gone.Subs.Values.Single() is { Source: SubSource.Cache, Problem: not null } && gone.PlacedParts().Count(p => p.pd.Mesh.Indices.Length > 0) == 3, "missing: shown from the copy the assembly kept");
         });
+
+        t.Test("Assemblies saved without their parts' meshes: none kept, nor in embedded sub-assemblies, but lightweight parts'", () =>
+        {
+            var dir = NewDir("nested-no-meshes");
+            var subPath = PinSleeve(dir);
+            string bp = Path.Combine(dir, "Base.sprt"), lp = Path.Combine(dir, "Light.sprt");
+            Cylinder(bp, 20, 5); Cylinder(lp, 3, 8);
+            var m = AssemblyModel.New();
+            m.Insert(bp, Transform.Identity);
+            var light = m.Insert(lp, Transform.Translation(new Vec3(0, 50, 0)));
+            var sub = m.InsertAssembly(subPath, Transform.Translation(new Vec3(100, 0, 0)), embed: true);
+            light.Lightweight = true;
+            t.True(AssemblyContainer.Load(m.Doc.Files[sub.Part.Embedded!], "sub").Caches.Count == 2, "the embedded copy has its parts' meshes");
+            var path = Path.Combine(dir, "Top.sasm");
+            try
+            {
+                AssemblyModel.KeepMeshes = false;
+                m.Save(path);
+            }
+            finally { AssemblyModel.KeepMeshes = true; }
+            var doc = AssemblyDocument.Load(path);
+            var lk = AssemblyDocument.CacheKey(light.Part.PartId!, light.Part.Revision);
+            t.True(doc.Caches.Keys.SequenceEqual(new[] { lk }) && doc.Files.Keys.Count(f => f.StartsWith("cache/")) == 1, $"only the lightweight part's ({string.Join(", ", doc.Caches.Keys)})");
+            var sd = AssemblyContainer.Load(doc.Files[sub.Part.Embedded!], "sub");
+            t.True(sd.Caches.Count == 0 && !sd.Files.Keys.Any(f => f.StartsWith("cache/")), "none in the embedded copy");
+            t.Eq(sd.Revision, doc.Find(sub.Id)!.Part.Revision);
+
+            // opened again: the parts rebuilt, the lightweight one shown from its mesh
+            var back = AssemblyModel.Open(doc, path);
+            t.True(back.PlacedParts().Count(p => p.pd.Mesh.Indices.Length > 0) == 4, "every part shown");
+            t.Eq(back.DisplayOf(back.Doc.Find(light.Id)!)!.Source, PartSource.Cache);
+            t.True(back.Parts.Values.Where(p => p.Source != PartSource.Cache).All(p => !p.Cached), "the others built");
+
+            // kept again: saved with them
+            back.Save(path);
+            t.Eq(AssemblyDocument.Load(path).Caches.Count, 2);
+        });
     }
 }
