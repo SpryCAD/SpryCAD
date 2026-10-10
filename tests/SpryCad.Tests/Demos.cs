@@ -89,24 +89,24 @@ static partial class Demos
         m.RefTo(c.Id, m.DisplayOf(c)!.Mesh.Faces.First(which).Name)!;
 
     /// <summary>
-    /// The three-start Acme lead screw and its nut as an assembly: the two parts of acme-lead-screw.sprt apart
-    /// (embedded), the nut on the screw where it fits, held by a Screw mate of the thread's lead (N·P): drag the nut
-    /// and it turns as it travels.
+    /// The three-start Acme lead screw and its nut as an assembly: the two parts of acme-lead-screw.sprt each a part
+    /// of its own (embedded), modelled about its origin, the nut on the screw where it fits, held by a Screw mate of
+    /// the thread's lead (N·P): drag the nut and it turns as it travels.
     /// </summary>
     static SpryCad.Core.Assembly.AssemblyModel LeadScrewAssembly()
     {
-        var both = AcmeLeadScrew();
-        var cut = both.Features.FindIndex(f => f.Name == "Nut");
-        var screw = CadDocument.FromJson(both.ToJson()); screw.Features.RemoveRange(cut, screw.Features.Count - cut);
-        var nut = CadDocument.FromJson(both.ToJson()); nut.Features.RemoveRange(0, cut);
+        var screw = Doc(("D", "20"), ("P", "4"), ("N", "3"), ("L", "80"), ("J", "12"), ("JL", "20"));
+        AcmeScrew(screw);
+        var nut = Doc(("D", "20"), ("P", "4"), ("N", "3"), ("S", "30"), ("NutL", "24"), ("Clr", "0.2"));
+        AcmeNut(nut, "0");
         screw.Color = new[] { 0.62, 0.64, 0.68 }; nut.Color = new[] { 0.80, 0.62, 0.30 };
-        var r = new Regenerator().Rebuild(both);
-        double gap = r.EquationValues["Gap"], lead = r.EquationValues["P"] * r.EquationValues["N"], j = r.EquationValues["J"];
+        var r = new Regenerator().Rebuild(screw);
+        double lead = r.EquationValues["P"] * r.EquationValues["N"], j = r.EquationValues["J"];
         return Embedded(new[] { ("Screw", screw), ("Nut", nut) }, (m, paths) =>
         {
             var s = m.Insert(paths["Screw"], Transform.Identity, embed: true);
-            // the nut part is modelled beside the screw (Gap along X): moved onto its axis it fits as it is
-            var n = m.Insert(paths["Nut"], Transform.Translation(new Vec3(-gap, 0, 0)), embed: true);
+            // both parts on their origins: the nut, where it is, is on the screw where it fits
+            var n = m.Insert(paths["Nut"], Transform.Identity, embed: true);
             var journal = FaceRef(m, s, f => f.Surface.Kind == SurfaceKind.Cylinder && Math.Abs(f.Surface.Radius - j / 2) < 1e-6);
             var bore = FaceRef(m, n, f => f.Surface.Kind == SurfaceKind.Cylinder && f.Surface.Radius < r.EquationValues["D"] / 2);
             m.AddMate(SpryCad.Core.Assembly.MateType.Screw, journal, bore, lead);
@@ -288,7 +288,8 @@ static partial class Demos
                 }
                 foreach (var c in sk.Constraints.Where(c => c.Type == CType.PointOnCircle))
                 {
-                    var p = sk.P(c.Refs[0]); var a = (SkArc)sk.Entity(c.Refs[1])!;
+                    if (sk.Entity(c.Refs[1]) is not SkArc a) continue;
+                    var p = sk.P(c.Refs[0]);
                     var dev = (p - sk.P(a.Center)).Length - (sk.P(a.Start) - sk.P(a.Center)).Length;
                     if (Math.Abs(dev) > 1e-6) Console.WriteLine($"   on-arc {c.Refs[0]} -> arc {c.Refs[1]} deviation {dev:g3}");
                 }
@@ -916,18 +917,9 @@ static partial class Demos
     static CadDocument BoltAndNut()
     {
         var d = Doc(("D", "10"), ("P", "1.5"), ("L", "30"), ("S", "16"), ("HeadH", "6.4"), ("NutH", "8"), ("Gap", "30"), ("Clr", "0.15"));
-        int[] Hex(Sk k, string x0)
-        {
-            string X(string e) => x0 == "0" ? e : $"{x0}+{e}";
-            return new[]
-            {
-                k.P(X("S/2"), "S/(2*sqrt(3))"), k.P(X("0"), "S/sqrt(3)"), k.P(X("-S/2"), "S/(2*sqrt(3))"),
-                k.P(X("-S/2"), "-S/(2*sqrt(3))"), k.P(X("0"), "-S/sqrt(3)"), k.P(X("S/2"), "-S/(2*sqrt(3))"),
-            };
-        }
-        // bolt: head on Front, shank on a plane at the head's top
+        // bolt: head (a hexagon about the origin) on Front, shank on a plane at the head's top
         var h = new Sk(d);
-        h.Poly(Hex(h, "0"));
+        h.Polygon(Sketch.OriginId, 6, "S");
         var hs = d.AddFeature(new SketchFeature { Name = "Head", Plane = PlaneRef.Front, Sketch = h.S });
         d.AddFeature(new ExtrudeFeature { Name = "Head", SketchId = hs.Id, Depth = "HeadH" });
         var top = d.AddFeature(new PlaneFeature { Name = "Head top", Base = PlaneRef.Front, Offset = "HeadH" });
@@ -941,10 +933,12 @@ static partial class Demos
             Name = "Bolt thread", End = ThreadEnd.UpToNext, Clearance = "Clr",
             Face = new FaceRef { Name = $"{shank.Id}.S.C{shc}", Hint = new Vec3(V("D/2"), 0, V("HeadH+L-1")) },
         });
-        // nut: a separate body beside the bolt, its hole the thread's minor diameter
+        // nut: a separate body beside the bolt (a hexagon about a point Gap along X), its hole the thread's minor
+        // diameter about the same point
         var n = new Sk(d);
-        n.Poly(Hex(n, "Gap"));
-        var hole = n.Circle(n.P("Gap", "0"), "D-1.0825*P");
+        var nc = n.P("Gap", "0");
+        n.Polygon(nc, 6, "S");
+        var hole = n.Circle(nc, "D-1.0825*P");
         var ns = d.AddFeature(new SketchFeature { Name = "Nut", Plane = PlaneRef.Front, Sketch = n.S });
         var nut = d.AddFeature(new ExtrudeFeature { Name = "Nut", SketchId = ns.Id, Depth = "NutH", Merge = false });
         d.AddFeature(new ThreadFeature
@@ -959,13 +953,20 @@ static partial class Demos
     /// A multi-start Acme lead screw: a rod of diameter D with an N-start Acme thread of pitch P (29° included angle,
     /// basic depth P/2, flat at the root 0.3707 P) over its length L, a journal of diameter J at one end and a 45°
     /// lead-in chamfer at the other. One helical cut of lead N·P, patterned N times about the axis. Beside it, its
-    /// nut (a separate body): a hex across flats S, NutL long, its bore the minor diameter, threaded by the screw's
-    /// tooth with a clearance Clr all round, swept and patterned the same way about the bore's axis.
+    /// nut (a separate body, <see cref="AcmeNut"/>) about a point Gap along X.
     /// </summary>
     static CadDocument AcmeLeadScrew()
     {
         var d = Doc(("D", "20"), ("P", "4"), ("N", "3"), ("L", "80"), ("J", "12"), ("JL", "20"),
                     ("S", "30"), ("NutL", "24"), ("Clr", "0.2"), ("Gap", "D+S"));
+        AcmeScrew(d);
+        AcmeNut(d, "Gap");
+        return d;
+    }
+
+    /// <summary>The screw of <see cref="AcmeLeadScrew"/> (D, P, N, L, J, JL), on the origin along +Z.</summary>
+    static void AcmeScrew(CadDocument d)
+    {
         // the rod on Front (along +Z), the journal on its far end
         var r = new Sk(d);
         var rc = r.Circle(Sketch.OriginId, "D");
@@ -991,13 +992,23 @@ static partial class Demos
         var gs = d.AddFeature(new SketchFeature { Name = "Thread space", Plane = PlaneRef.Top, Sketch = g.S });
         var groove = d.AddFeature(new HelicalSweepFeature { Name = "Thread", SketchId = gs.Id, IsCut = true, Pitch = "P*N", Revolutions = "(L+2*P)/(P*N)" });
         d.AddFeature(new CircularPatternFeature { Name = "Starts", Seeds = { groove.Id }, Axis = new DirRef { Axis = "Z" }, Count = "N" });
+    }
 
-        // the nut, Gap along X: a hex with a bore of the minor diameter (just clear of the screw's root), its ends
-        // chamfered into the bore
+    /// <summary>
+    /// The nut of <see cref="AcmeLeadScrew"/> (D, P, N, S, NutL, Clr) about a point x0 along X (the origin when "0"),
+    /// along +Z: a hex across flats S, NutL long, its bore the minor diameter, threaded by the screw's tooth with a
+    /// clearance Clr all round, swept and patterned the same way about the bore's axis.
+    /// </summary>
+    static void AcmeNut(CadDocument d, string x0)
+    {
+        string X(string e) => x0 == "0" ? e : $"{x0}+{e}";
+        // a hex about the centre with a bore of the minor diameter (just clear of the screw's root) about the same
+        // point, its ends chamfered into the bore
         var n = new Sk(d);
-        n.Poly(n.P("Gap+S/2", "S/(2*sqrt(3))"), n.P("Gap", "S/sqrt(3)"), n.P("Gap-S/2", "S/(2*sqrt(3))"),
-               n.P("Gap-S/2", "-S/(2*sqrt(3))"), n.P("Gap", "-S/sqrt(3)"), n.P("Gap+S/2", "-S/(2*sqrt(3))"));
-        var bore = n.Circle(n.P("Gap", "0"), "D-P+2*Clr");
+        double V(string e) => n.Eval(e);
+        var centre = x0 == "0" ? Sketch.OriginId : n.P(x0, "0");
+        n.Polygon(centre, 6, "S");
+        var bore = n.Circle(centre, "D-P+2*Clr");
         var ns = d.AddFeature(new SketchFeature { Name = "Nut", Plane = PlaneRef.Front, Sketch = n.S });
         var nut = d.AddFeature(new ExtrudeFeature { Name = "Nut", SketchId = ns.Id, Depth = "NutL", Merge = false });
         string boreFace = $"{nut.Id}.S.C{bore}";
@@ -1006,8 +1017,8 @@ static partial class Demos
             Name = "Nut lead-ins", Distance = "P/2",
             Edges =
             {
-                E(boreFace, $"{nut.Id}.Start", new Vec3(V("Gap+D/2-P/2+Clr"), 0, 0)),
-                E(boreFace, $"{nut.Id}.End", new Vec3(V("Gap+D/2-P/2+Clr"), 0, V("NutL"))),
+                E(boreFace, $"{nut.Id}.Start", new Vec3(V(X("D/2-P/2+Clr")), 0, 0)),
+                E(boreFace, $"{nut.Id}.End", new Vec3(V(X("D/2-P/2+Clr")), 0, V("NutL"))),
             },
         });
         // the nut's thread space is the screw's tooth (P - 0.3707 P wide at the screw's root, narrowing at 14.5° a
@@ -1016,16 +1027,15 @@ static partial class Demos
         var ng = new Sk(d);
         string Ri = "D/2-P/2+Clr-0.5", Rn = "D/2+Clr";
         string Hi = "0.31465*P-(Clr-0.5)*tan(14.5)+Clr", Hn = "0.31465*P-(P/2+Clr)*tan(14.5)+Clr";
-        ng.Poly(ng.P($"Gap+{Ri}", $"P/2-({Hi})"), ng.P($"Gap+{Rn}", $"P/2-({Hn})"), ng.P($"Gap+{Rn}", $"P/2+{Hn}"), ng.P($"Gap+{Ri}", $"P/2+{Hi}"));
-        ng.Centerline(ng.P("Gap", "0"), ng.P("Gap", "-NutL"));
+        ng.Poly(ng.P(X(Ri), $"P/2-({Hi})"), ng.P(X(Rn), $"P/2-({Hn})"), ng.P(X(Rn), $"P/2+{Hn}"), ng.P(X(Ri), $"P/2+{Hi}"));
+        ng.Centerline(x0 == "0" ? Sketch.OriginId : ng.P(x0, "0"), ng.P(x0, "-NutL"));
         var ngs = d.AddFeature(new SketchFeature { Name = "Nut thread space", Plane = PlaneRef.Top, Sketch = ng.S });
         var nutGroove = d.AddFeature(new HelicalSweepFeature { Name = "Nut thread", SketchId = ngs.Id, IsCut = true, Pitch = "P*N", Revolutions = "(NutL+2*P)/(P*N)" });
         d.AddFeature(new CircularPatternFeature
         {
             Name = "Nut starts", Seeds = { nutGroove.Id }, Count = "N",
-            Axis = new DirRef { Face = new FaceRef { Name = boreFace, Hint = new Vec3(V("Gap+D/2-P/2+Clr"), 0, V("NutL/2")) } },
+            Axis = new DirRef { Face = new FaceRef { Name = boreFace, Hint = new Vec3(V(X("D/2-P/2+Clr")), 0, V("NutL/2")) } },
         });
-        return d;
     }
 
     static CadDocument Doc(params (string name, string expr)[] eqs)
@@ -1120,6 +1130,28 @@ static partial class Demos
             var ids = new List<int>();
             for (int i = 0; i < pts.Length; i++) ids.Add(Line(pts[i], pts[(i + 1) % pts.Length]));
             return ids;
+        }
+
+        /// <summary>
+        /// Regular polygon of an even number of sides about a centre point, as the Polygon tool draws it (corners on a
+        /// construction circle about the centre, the sides equal), then one side Vertical and the size dimensioned
+        /// across the flats (between that side and the one opposite). Lines from the corner just above the right
+        /// flat, counter-clockwise.
+        /// </summary>
+        public List<int> Polygon(int center, int sides, string acrossFlats)
+        {
+            var c = _s.P(center);
+            double af = Eval(acrossFlats), r = af / 2 / Math.Cos(Math.PI / sides);
+            var circle = _s.Add(new SkCircle { Center = center, R = r, Construction = true });
+            var corners = Enumerable.Range(0, sides).Select(i => Free(c.X + r * Math.Cos(Math.PI * (2 * i + 1) / sides), c.Y + r * Math.Sin(Math.PI * (2 * i + 1) / sides))).ToArray();
+            var L = Poly(corners);
+            foreach (var p in corners) OnArc(p, circle.Id);
+            for (int i = 1; i < sides; i++) _s.AddConstraint(CType.Equal, L[0], L[i]);
+            _s.AddConstraint(CType.Vertical, L[^1]);
+            var k = _s.AddConstraint(CType.Distance, L[^1], L[sides / 2 - 1]);
+            k.Expr = acrossFlats; k.Value = af;
+            SketchSolver.CaptureSign(_s, k);
+            return L;
         }
 
         public int Circle(int center, string diameter)
