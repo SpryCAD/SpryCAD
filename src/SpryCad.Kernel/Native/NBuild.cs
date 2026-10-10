@@ -184,6 +184,141 @@ public static class NBuild
         return body;
     }
     /// <summary>
+    /// Exact extrusion of profile regions along the frame normal from the plane p0 to the plane p1 (null: z0 / z1, square
+    /// to the normal): a prism whose ends lean (a blend's tool ending on the face its end meets, or on the plane
+    /// bisecting a corner). Lines end in lines on the planes, arcs in ellipses. The planes keep the prism on their
+    /// positive side. Null where a plane is (nearly) along the normal or the ends cross inside the profile.
+    /// </summary>
+    public static NBody? ExtrudeBetween(IEnumerable<ProfileRegion> regions, Frame frame, Plane? p0, double z0, Plane? p1, double z1, string prefix)
+    {
+        var u = frame.Normal;
+        foreach (var pl in new[] { p0, p1 })
+            if (pl != null && Math.Abs(Vec3.Dot(pl.Normal, u)) < 0.05) return null;
+        var start = p0 ?? Plane.FromPointNormal(frame.ToWorld(0, 0, z0), u);
+        var end = p1 ?? Plane.FromPointNormal(frame.ToWorld(0, 0, z1), -u);
+        // (the start keeps the prism towards +u, the end towards -u)
+        if (Vec3.Dot(start.Normal, u) < 0 || Vec3.Dot(end.Normal, u) > 0) return null;
+        double Z(Plane pl, double x, double y) => -pl.Distance(frame.ToWorld(x, y, 0)) / Vec3.Dot(pl.Normal, u);
+        var body = new NBody();
+        var startTag = new FaceTag(prefix + ".Start", SurfaceDef.PlaneDef);
+        var endTag = new FaceTag(prefix + ".End", SurfaceDef.PlaneDef);
+        var sideTags = new Dictionary<string, FaceTag>();
+        // a cap's edge along a side: a line between its ends, or the ellipse where the plane crosses the arc's cylinder
+        (NEdge e, bool fwd) CapEdge(Plane pl, Seg s, NVertex a, NVertex b)
+        {
+            if (s.Arc == null)
+            {
+                var d = b.P - a.P;
+                return (new NEdge(new NLine(a.P, d), 0, d.Length, a, b), true);
+            }
+            var c0 = frame.ToWorld(s.Arc.Center.X, s.Arc.Center.Y, 0);
+            var cc = c0 + u * (-pl.Distance(c0) / Vec3.Dot(pl.Normal, u));
+            var r = s.Arc.Radius;
+            NCurve curve;
+            var minor = Vec3.Cross(u, pl.Normal);
+            if (minor.Length < 1e-9) curve = new NCircle(cc, u, frame.XDir, r);
+            else
+            {
+                var y = minor.Normalized; var x = Vec3.Cross(y, pl.Normal).Normalized;
+                curve = new NEllipse(cc, x, y, r / Math.Abs(Vec3.Dot(pl.Normal, u)), r);
+            }
+            // the part of it over the profile's arc: through the arc's middle, carried along the normal onto the plane
+            var c2 = s.Arc.Center; var a0 = (s.A - c2).Angle; var a1 = (s.B - c2).Angle;
+            var dd = a1 - a0;
+            if (s.Ccw) { while (dd <= 0) dd += 2 * Math.PI; } else { while (dd >= 0) dd -= 2 * Math.PI; }
+            var m2 = c2 + Vec2.FromAngle(a0 + dd / 2, r);
+            var mid = frame.ToWorld(m2.X, m2.Y, Z(pl, m2.X, m2.Y));
+            static double Up(double t, double from) { while (t <= from) t += 2 * Math.PI; while (t > from + 2 * Math.PI) t -= 2 * Math.PI; return t; }
+            double ta = curve.Param(a.P), tb = Up(curve.Param(b.P), ta), tm = Up(curve.Param(mid), ta);
+            // a to b with the parameter increasing through the middle, else b to a
+            return tm < tb ? (new NEdge(curve, ta, tb, a, b), true) : (new NEdge(curve, tb - 2 * Math.PI, ta, b, a), false);
+        }
+        foreach (var reg0 in regions)
+        {
+            var reg = reg0.Normalized();
+            // (the caps on the planes as given, facing out: as a prism cut back to them by a boolean leaves them, so they
+            // merge with the faces they meet when the tool is applied)
+            var startFace = new NFace(NSurface.FromPlane(start), false, startTag);
+            var endFace = new NFace(NSurface.FromPlane(end), false, endTag);
+            foreach (var loop in reg.AllLoops())
+            {
+                var segs = Segments(loop);
+                if (segs.Count == 0) continue;
+                int m = segs.Count;
+                var vb = new NVertex[m]; var vt = new NVertex[m];
+                for (int i = 0; i < m; i++)
+                {
+                    double x = segs[i].A.X, y = segs[i].A.Y, zb = Z(start, x, y), zt = Z(end, x, y);
+                    if (zt - zb < 1e-9) return null;
+                    vb[i] = new NVertex(frame.ToWorld(x, y, zb));
+                    vt[i] = new NVertex(frame.ToWorld(x, y, zt));
+                }
+                var vert = new NEdge[m];
+                for (int i = 0; i < m; i++) vert[i] = new NEdge(new NLine(vb[i].P, u), 0, Vec3.Distance(vb[i].P, vt[i].P), vb[i], vt[i]);
+                var bottom = new (NEdge e, bool fwd)[m]; var top = new (NEdge e, bool fwd)[m];
+                for (int i = 0; i < m; i++)
+                {
+                    int j = (i + 1) % m;
+                    bottom[i] = CapEdge(start, segs[i], vb[i], vb[j]);
+                    top[i] = CapEdge(end, segs[i], vt[i], vt[j]);
+                }
+                for (int i = 0; i < m; i++)
+                {
+                    int j = (i + 1) % m;
+                    var s = segs[i];
+                    var name = prefix + ".S." + s.Name;
+                    NSurface surf; bool sense;
+                    if (s.Arc == null)
+                    {
+                        var d = (frame.ToWorld(segs[j].A.X, segs[j].A.Y, 0) - frame.ToWorld(s.A.X, s.A.Y, 0)).Normalized;
+                        surf = NSurface.FromPlane(Plane.FromPointNormal(vb[i].P, Vec3.Cross(d, u)));
+                        sense = true;
+                    }
+                    else
+                    {
+                        var def = new SurfaceDef
+                        {
+                            Kind = SurfaceKind.Cylinder, Origin = frame.ToWorld(s.Arc.Center.X, s.Arc.Center.Y, 0), Axis = u,
+                            RefDir = frame.XDir, Radius = s.Arc.Radius, Segments = s.Arc.Segments,
+                        };
+                        surf = new NSurface(def);
+                        sense = s.Ccw;
+                    }
+                    if (!sideTags.TryGetValue(name, out var tag))
+                        sideTags[name] = tag = new FaceTag(name, s.Arc == null ? SurfaceDef.PlaneDef : surf.Def);
+                    Vec3? anchor = null;
+                    if (s.Arc != null)
+                    {
+                        var c2 = s.Arc.Center; var a0 = (s.A - c2).Angle; var a1 = (s.B - c2).Angle;
+                        var d = a1 - a0;
+                        if (s.Ccw) { while (d <= 0) d += 2 * Math.PI; } else { while (d >= 0) d -= 2 * Math.PI; }
+                        var mid = c2 + Vec2.FromAngle(a0 + d / 2, s.Arc.Radius);
+                        anchor = frame.ToWorld(mid.X, mid.Y, 0.5 * (Z(start, mid.X, mid.Y) + Z(end, mid.X, mid.Y)));
+                    }
+                    var f = new NFace(surf, sense, tag, anchor);
+                    var l = new NLoop();
+                    l.Coedges.Add(new NCoedge(bottom[i].e, bottom[i].fwd));
+                    l.Coedges.Add(new NCoedge(vert[j], true));
+                    l.Coedges.Add(new NCoedge(top[i].e, !top[i].fwd));
+                    l.Coedges.Add(new NCoedge(vert[i], false));
+                    f.Loops.Add(l);
+                    body.Faces.Add(f);
+                }
+                var endLoop = new NLoop();
+                for (int i = 0; i < m; i++) endLoop.Coedges.Add(new NCoedge(top[i].e, top[i].fwd));
+                endFace.Loops.Add(endLoop);
+                var startLoop = new NLoop();
+                for (int i = m - 1; i >= 0; i--) startLoop.Coedges.Add(new NCoedge(bottom[i].e, !bottom[i].fwd));
+                startFace.Loops.Add(startLoop);
+            }
+            body.Faces.Add(startFace);
+            body.Faces.Add(endFace);
+        }
+        body.Link();
+        return body.Validate() == null ? body : null;
+    }
+
+    /// <summary>
     /// Exact revolution of profile regions about an axis in the sketch plane (angle in radians, ≤ 2π).
     /// Surfaces: planes, cylinders, cones (lines) and spheres / tori (arcs). Revolutions are split into
     /// pieces of at most 180° so every face is a non-wrapping patch (seam rule).

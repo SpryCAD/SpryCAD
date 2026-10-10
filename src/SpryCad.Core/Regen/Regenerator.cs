@@ -313,6 +313,21 @@ public sealed class Regenerator
         return (values, errors);
     }
 
+    /// <summary>
+    /// Per-edge blend errors ("Edge A / B: why") with the same reason given once, the edges after it; else as they are.
+    /// </summary>
+    static string BlendErrors(List<string> errors)
+    {
+        var parsed = errors.Select(e =>
+        {
+            var i = e.StartsWith("Edge ", StringComparison.Ordinal) ? e.IndexOf(": ", StringComparison.Ordinal) : -1;
+            return i < 0 ? (edge: (string?)null, why: e) : (edge: e[5..i], why: e[(i + 2)..]);
+        }).ToList();
+        return string.Join(" | ", parsed.GroupBy(x => x.why).Select(g =>
+            g.All(x => x.edge != null) && g.Count() > 1 ? $"{g.Key} ({string.Join(", ", g.Select(x => x.edge))})"
+            : string.Join(" | ", g.Select(x => x.edge == null ? x.why : $"Edge {x.edge}: {x.why}"))));
+    }
+
     // ------------------------------------------------------------------------------------------
 
     /// <summary>Tests: whether unions of touching pattern copies may reuse a rotated earlier union, and how many did.</summary>
@@ -953,7 +968,7 @@ public sealed class Regenerator
             // naming the edges (highlighted in the viewport) instead of silently skipping some
             if (errors.Count > 0)
                 throw new FeatureException(errors.Count == 1 ? errors[0]
-                    : $"{errors.Count} edges cannot be {(fillet ? "filleted" : "chamfered")}: " + string.Join(" | ", errors));
+                    : $"{errors.Count} edges cannot be {(fillet ? "filleted" : "chamfered")}: " + BlendErrors(errors));
             State = State.With(bodies);
             return true;
         }
