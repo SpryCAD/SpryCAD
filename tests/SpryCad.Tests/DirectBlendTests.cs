@@ -151,6 +151,28 @@ static class DirectBlendTests
             }
         });
 
+        t.Test("Fillet beside other geometry: the tool reaches past the edge's corner only into empty space (a taller wall across a narrow gap left whole)", () =>
+        {
+            // the boolean's tool reaches past the corner (half the size) to keep clear of the faces it blends; with a
+            // wall 2 mm across the gap, that reach cut a wedge out of it
+            foreach (var direct in new[] { true, false })
+            {
+                var old = DirectBlend.Enabled;
+                DirectBlend.Enabled = direct;
+                try
+                {
+                    var doc = Demos.BlendCases.First(c => c.name == "wall beside a taller one").build();
+                    var r = new Regenerator().Rebuild(doc);
+                    foreach (var f in doc.Features) t.True(r.Status[f.Id].Ok, $"{f.Name}: {r.Status[f.Id].Error}");
+                    // the high wall and the base under it: 29 x 40 x 30 + 29 x 40 x 10
+                    var right = Csg.Intersect(r.State.Bodies[0].Solid, Builders.Box(new Vec3(1, -30, -5), new Vec3(40, 30, 50)));
+                    var v = KernelTests.Vex(right);
+                    t.True(Math.Abs(v - 46400) < 1e-6 * v, $"{(direct ? "direct" : "boolean")}: the high wall {v:R}, not 46400");
+                }
+                finally { DirectBlend.Enabled = old; }
+            }
+        });
+
         t.Test("Direct blend: off (FC_BLEND=boolean) applies nothing directly", () =>
         {
             var before = DirectBlend.Counts;

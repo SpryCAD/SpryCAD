@@ -17,6 +17,7 @@ static partial class Demos
         ("box, top edges", () => BoxAll(topOnly: true)),
         ("pocket, floor and corners", Pocket),
         ("drafted block, top edge under an overhang", Overhang),
+        ("wall beside a taller one", NarrowGap),
     };
 
     /// <summary>
@@ -174,6 +175,35 @@ static partial class Demos
         {
             Name = "Top edge", Radius = "R",
             Edges = { E($"{block.Id}.S.L{l[0]}", $"{block.Id}.End", new Vec3(V("X/2"), y, V("H"))) },
+        });
+        return d;
+    }
+
+    /// <summary>
+    /// Two walls on a base with a 2 mm gap between them, the left one 30 high, the right one 40: the left wall's top
+    /// edge at the gap filleted R8 (the space beyond that edge's corner, across the gap, is the taller wall).
+    /// </summary>
+    static CadDocument NarrowGap()
+    {
+        var d = Doc(("X", "30"), ("Y", "20"), ("G", "1"), ("H1", "30"), ("H2", "40"), ("R", "8"));
+        var b = new Sk(d);
+        b.Rect("-X", "-Y", "X", "Y");
+        var bs = d.AddFeature(new SketchFeature { Name = "Base", Plane = PlaneRef.Front, Sketch = b.S });
+        d.AddFeature(new ExtrudeFeature { Name = "Base", SketchId = bs.Id, Depth = "10" });
+        var top = d.AddFeature(new PlaneFeature { Name = "Base top", Base = PlaneRef.Front, Offset = "10" });
+        var w1 = new Sk(d);
+        var l1 = w1.Rect("-X", "-Y", "-G", "Y");
+        var w1s = d.AddFeature(new SketchFeature { Name = "Low wall", Plane = new PlaneRef { Feature = top.Id }, Sketch = w1.S });
+        var low = d.AddFeature(new ExtrudeFeature { Name = "Low wall", SketchId = w1s.Id, Depth = "H1-10" });
+        var w2 = new Sk(d);
+        w2.Rect("G", "-Y", "X", "Y");
+        var w2s = d.AddFeature(new SketchFeature { Name = "High wall", Plane = new PlaneRef { Feature = top.Id }, Sketch = w2.S });
+        d.AddFeature(new ExtrudeFeature { Name = "High wall", SketchId = w2s.Id, Depth = "H2-10" });
+        double V(string e) => b.Eval(e);
+        d.AddFeature(new FilletFeature
+        {
+            Name = "Gap edge", Radius = "R", TangentPropagation = false,
+            Edges = { E($"{low.Id}.End", $"{low.Id}.S.L{l1[1]}", new Vec3(-V("G"), 0, V("H1"))) },
         });
         return d;
     }
