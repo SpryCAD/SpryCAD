@@ -304,6 +304,31 @@ static class ConfigTests
             t.True(modeled < d.Mesh.Volume - 1, $"thread cut on export: {modeled:0} < {d.Mesh.Volume:0}");
         });
 
+        t.Test("Assemblies: threads shown all modeled or as set (View > Threads), the caches kept as set", () =>
+        {
+            var dir = Path.Combine(Path.GetTempPath(), "fc-config-tests", Guid.NewGuid().ToString("N")[..8]);
+            Directory.CreateDirectory(dir);
+            var ap = Path.Combine(dir, "Screws.sasm");
+            Demos.ScrewSizes().Save(ap);
+            var m = Core.Assembly.AssemblyModel.Open(Core.Assembly.AssemblyDocument.Load(ap), ap, defer: true);
+            var m12 = m.Doc.Components[^1];
+            var cosmetic = m.DisplayOf(m12)!;
+            t.True(cosmetic.Cached && cosmetic.Threads.Count == 1, "as set: cosmetic, from the cache");
+            var caches = m.Doc.Caches.ToDictionary(kv => kv.Key, kv => m.Doc.Files[kv.Value]);
+
+            m.SetThreads(ThreadDisplay.Modeled);
+            t.Eq(m.Pending.Count, 7);
+            foreach (var job in m.PendingJobs()) t.True(m.Install(job, job.Build()), "installed");
+            var modeled = m.DisplayOf(m12)!;
+            t.True(modeled.Threads.Count == 0 && !modeled.Cached, "modeled: no cosmetic thread");
+            t.True(modeled.Mesh.Volume < cosmetic.Mesh.Volume - 1 && modeled.Mesh.Indices.Length > cosmetic.Mesh.Indices.Length, "the thread cut");
+            m.RefreshCaches();
+            t.True(m.Doc.Caches.All(kv => ReferenceEquals(m.Doc.Files[kv.Value], caches[kv.Key])), "the caches as set kept");
+
+            m.SetThreads(ThreadDisplay.AsSet);
+            t.True(m.Pending.Count == 0 && m.DisplayOf(m12)!.Cached && m.DisplayOf(m12)!.Threads.Count == 1, "as set again: from the caches");
+        });
+
         t.Test("Assemblies open from their caches when current; others built afterwards (geometry version, part revision)", () =>
         {
             var dir = Path.Combine(Path.GetTempPath(), "fc-config-tests", Guid.NewGuid().ToString("N")[..8]);

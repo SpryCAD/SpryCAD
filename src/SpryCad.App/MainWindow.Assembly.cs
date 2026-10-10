@@ -209,6 +209,18 @@ public partial class MainWindow : IAssemblyHost
         await BuildPendingOf(s);
     }
 
+    /// <summary>How threads are shown (View > Threads): in the part, or in the assembly and all it holds.</summary>
+    Core.Regen.ThreadDisplay ThreadMode => Asm?.Model.Threads ?? Session.Threads;
+
+    /// <summary>Shows threads another way: the part rebuilt, or the assembly's parts built again in the background.</summary>
+    async Task SetThreadMode(Core.Regen.ThreadDisplay mode)
+    {
+        if (Asm is not { } a) { Session.Threads = mode; return; }
+        a.Model.SetThreads(mode);
+        RefreshAssemblyScene();
+        await BuildPendingOf(a);
+    }
+
     /// <summary>An assembly's displays waiting to be built: built in the background, the busy text saying which while it is shown.</summary>
     async Task BuildPendingOf(AssemblySession s)
     {
