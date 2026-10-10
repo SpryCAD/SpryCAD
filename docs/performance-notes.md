@@ -106,8 +106,14 @@ profile; the profile's times are summed over threads). On the heavy samples (`sa
   - `DocumentSession`: done (no display meshes for a result a newer request has superseded).
   - Equations: done. One naming another still pending waits for it without being evaluated (no exception per pass);
     the pass limit that stopped a chain listed after the ones it uses (three or more) before its end is gone.
-  - `ResolveDir` from an edge tessellates the whole intermediate body; try `ResolveNativeEdge` first, as the other
-    resolvers do.
+  - `ResolveDir` from an edge: done. It finds the edge on the native B-rep first (`ResolveNativeEdge`), giving the
+    same direction as the facet lookup (a straight edge runs along the loop of the face whose name sorts first).
+    No sample uses an edge direction: `-- edgedir in.sprt out.sprt` makes one with each linear pattern's axis
+    replaced by an edge along it. Enclosure's patterns 7.7 to 2.7 ms and 13.5 to 3.4 ms; results identical
+    (geometry, display mesh and mass properties). On heat-sink a later feature's hash changes: the old lookup
+    tessellated the body, which left edge samples cached that the later feature then used (mass properties the
+    same to every digit). A planar face as a direction still tessellates: its origin is the centroid of the
+    facet nearest the hint, which the native face cannot reproduce.
 - **Viewport** (`ViewportControl`, `SketchEditor`):
   - Sketch overlay: relation, On Edge and anchor marks are kept by id and repositioned (no new controls, brushes or
     native cursors per update). Measured with `SPRYCAD_PROFILE_OVERLAY=1` (the log gets each 2 s's updates, average

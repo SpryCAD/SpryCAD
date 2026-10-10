@@ -9,6 +9,37 @@ namespace SpryCad.Tests;
 /// <summary>Rebuild benchmark: <c>dotnet run -c Release -- bench file.sprt [runs]</c>.</summary>
 static class Bench
 {
+    /// <summary>
+    /// <c>-- edgedir in.sprt out.sprt</c>: each linear pattern's X/Y/Z direction replaced by a straight model edge
+    /// along it, so a rebuild resolves a direction from an edge (no sample does).
+    /// </summary>
+    public static int EdgeDirections(string input, string output)
+    {
+        var doc = CadDocument.Load(input);
+        var r = new Regenerator().Rebuild(doc);
+        int changed = 0;
+        for (int i = 1; i < r.States.Count; i++)
+        {
+            if (doc.Features[i] is not LinearPatternFeature lp || lp.Direction.Axis == null) continue;
+            var (_, want) = Resolver.ResolveDir(lp.Direction, r.States[i - 1]);
+            foreach (var b in r.States[i - 1].Bodies)
+            {
+                var nb = b.Solid.Native; if (nb == null) continue;
+                nb.Link();
+                var e = nb.Edges.FirstOrDefault(e => e.Uses.Count == 2 && e.Curve is NLine
+                    && Math.Abs(Vec3.Dot((e.V1.P - e.V0.P).Normalized, want)) > 1 - 1e-12 && e.Uses[0].Face.Tag.Name != e.Uses[1].Face.Tag.Name);
+                if (e == null) continue;
+                lp.Direction = new DirRef { Edge = new EdgeRef { A = e.Uses[0].Face.Tag.Name, B = e.Uses[1].Face.Tag.Name, Body = b.Id, Hint = (e.V0.P + e.V1.P) * 0.5 } };
+                Console.WriteLine($"{lp.Name}: edge {lp.Direction.Edge.A} / {lp.Direction.Edge.B}");
+                changed++;
+                break;
+            }
+        }
+        doc.Save(output, container: true);
+        Console.WriteLine($"{changed} directions changed");
+        return changed > 0 ? 0 : 1;
+    }
+
     public static void Run(string file, int runs)
     {
         var json = CadDocument.Load(file).ToJson(); // plain or container

@@ -291,6 +291,33 @@ public static class Resolver
         throw new FeatureException("No reference curve selected.");
     }
 
+    /// <summary>
+    /// Direction of a straight edge, or the axis of a round face beside a curved one, as the facet lookup gives
+    /// them: a straight edge runs along the loop of the face whose name sorts first. Null when the edge is not
+    /// found on the native B-rep (the facet lookup then decides).
+    /// </summary>
+    static (Vec3 origin, Vec3 dir)? NativeEdgeDir(EdgeRef r, ModelState st)
+    {
+        if (ResolveNativeEdge(r, st) is not { edge: var e }) return null;
+        var (first, second) = string.CompareOrdinal(e.Uses[0].Face.Tag.Name, e.Uses[1].Face.Tag.Name) <= 0
+            ? (e.Uses[0], e.Uses[1]) : (e.Uses[1], e.Uses[0]);
+        if (IsStraight(e)) { var a = first.Start.P; return (a, (first.End.P - a).Normalized); }
+        foreach (var u in new[] { first, second })
+            if (u.Face.Tag.Surface is { IsCurved: true } s) return (s.Origin, s.Axis.Normalized);
+        return null;
+
+        // as TopoEdge.IsLinear on the edge's samples
+        static bool IsStraight(Kernel.Native.NEdge e)
+        {
+            if (e.Curve is Kernel.Native.NLine) return true;
+            if (ReferenceEquals(e.V0, e.V1)) return false;
+            var pts = e.Samples(1e-3);
+            var a = pts[0]; var d = (pts[^1] - a).Normalized;
+            foreach (var p in pts) { var v = p - a; if ((v - d * Vec3.Dot(v, d)).Length > 1e-5) return false; }
+            return true;
+        }
+    }
+
     /// <summary>Resolves a direction/axis to (point on axis, unit direction).</summary>
     public static (Vec3 origin, Vec3 dir) ResolveDir(DirRef r, ModelState st)
     {
@@ -309,6 +336,8 @@ public static class Resolver
         }
         if (r.Edge != null)
         {
+            // from the exact edge (finding it among the facets would tessellate the whole body)
+            if (NativeEdgeDir(r.Edge, st) is { } nd) return nd;
             var (b, e) = ResolveEdge(r.Edge, st);
             if (e.IsLinear) return (e.Start, (e.End - e.Start).Normalized);
             // circular edge: use the axis of the adjacent cylinder
