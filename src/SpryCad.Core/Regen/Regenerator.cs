@@ -89,6 +89,7 @@ public sealed class Regenerator
                     {
                         Cancel = cancel,
                         ThreadMode = ThreadOverride,
+                        Earlier = status,
                         Detail = progress == null ? null : d => progress(new RegenProgress(i, count, f.Id, f.Name, d)),
                     };
                     using (Prof.Time("feature." + f.GetType().Name)) ctx.Execute();
@@ -304,6 +305,8 @@ public sealed class Regenerator
         public ModelState State = state;
         public CancellationToken Cancel;
         public ThreadDisplay ThreadMode;
+        /// <summary>The features before this one: whether each was built, and why not.</summary>
+        public IReadOnlyDictionary<string, FeatureStatus> Earlier = new Dictionary<string, FeatureStatus>();
         /// <summary>Progress within the feature (e.g. "instance 7 of 24").</summary>
         public Action<string>? Detail;
 
@@ -1134,7 +1137,13 @@ public sealed class Regenerator
             foreach (var seedId in seeds)
             {
                 if (!State.Tools.TryGetValue(seedId, out var tool))
+                {
+                    // a seed that could have been patterned but was not built: say why, not that it is the wrong kind
+                    if (Earlier.TryGetValue(seedId, out var seedStatus) && seedStatus.Error != null)
+                        throw new FeatureException($"{Describe(seedId)} failed: {seedStatus.Error}");
+                    if (seedStatus is { Suppressed: true }) throw new FeatureException($"{Describe(seedId)} is suppressed.");
                     throw new FeatureException("Only extrude, revolve, sweep, helical sweep, thread, hole, fillet, chamfer, pattern and mirror features can be patterned.");
+                }
                 var copies = new List<(int i, Solid tool)>();
                 var plain = new List<int>();
                 // instances whose blend is solved again (their edges are not the seed's edges moved)
