@@ -370,7 +370,8 @@ static partial class Demos
     static CadDocument HmCasting()
     {
         var d = Doc(("BaseY", "150"), ("BaseT", "20"), ("BaseX0", "215"), ("BaseX1", "60"), ("BaseW", "170"), ("BaseR", "15"), ("BaseDraft", "5"),
-            ("BodyX0", "170"), ("BodyX1", "40"), ("BodyW", "116"), ("BodyDraft", "2"), ("BodyR", "20"), ("Rb", "6"),
+            ("BodyX0", "170"), ("BodyX1", "40"), ("BodyW", "116"), ("BodyDraft", "2"), ("BodyR", "20"), ("Fl", "8"), ("FlH", "16"),
+            ("WallR", "4"), ("RibT", "12"), ("RibIn", "50"), ("PedRibY", "110"), ("BaseRibX", "150"), ("BaseRibP", "90"), ("BaseRibOut", "80"), ("BaseRibH", "45"),
             ("BrgIn", $"{HmBrgIn}"), ("BrgOut", $"{HmBrgOut}"), ("BrgW", "64"), ("BrgDrop", "40"), ("J", $"{HmJ}"), ("CapStud", "25"), ("PedR", "6"),
             ("HeadX", $"{-HmHeadX}"), ("BarrelD", "104"), ("BarrelEnd", "70"), ("FlangeD", "116"), ("FlangeT", "12"), ("StudPCD", "96"), ("NStud", "6"),
             ("HopX0", "175"), ("HopX1", "85"), ("HopW", "116"), ("HopH", "82"), ("HopWall", "7"), ("HopDraft", "2"), ("HopR", "12"), ("HopTopR", "4"), ("Jacket", "20"), ("FillD", "44"),
@@ -414,7 +415,18 @@ static partial class Demos
                 E(YF(2), YF(3), new Vec3(-V("BodyX0"), yy, -V("BodyW/2"))), E(YF(3), YF(0), new Vec3(-V("BodyX0"), yy, V("BodyW/2"))),
             },
         });
-        // (blending the body into the base all round fails: docs/hit-and-miss-notes.md)
+        // (blending the body into the base all round fails: docs/hit-and-miss-notes.md) A flared plinth instead: the
+        // body's outline (its rounded corners) Fl out, drafted in to meet the body's side FlH up
+        var fp = new Sk(d);
+        // (the corners' centres are the body's: its outline and this one share them)
+        string X0 = "-(BodyX0+Fl)", X1 = "BodyX1+Fl", Ylo = "-(BodyW/2+Fl)", Yhi = "BodyW/2+Fl";
+        string Cx0 = "-(BodyX0-BodyR)", Cx1 = "BodyX1-BodyR", Cylo = "-(BodyW/2-BodyR)", Cyhi = "BodyW/2-BodyR";
+        int q0 = fp.P(Cx0, Ylo), q1 = fp.P(Cx1, Ylo), q2 = fp.P(X1, Cylo), q3 = fp.P(X1, Cyhi),
+            q4 = fp.P(Cx1, Yhi), q5 = fp.P(Cx0, Yhi), q6 = fp.P(X0, Cyhi), q7 = fp.P(X0, Cylo);
+        int c1 = fp.P(Cx1, Cylo), c2 = fp.P(Cx1, Cyhi), c3 = fp.P(Cx0, Cyhi), c4 = fp.P(Cx0, Cylo);
+        fp.Line(q0, q1); fp.Arc(c1, q1, q2); fp.Line(q2, q3); fp.Arc(c2, q3, q4); fp.Line(q4, q5); fp.Arc(c3, q5, q6); fp.Line(q6, q7); fp.Arc(c4, q7, q0);
+        var fps = d.AddFeature(new SketchFeature { Name = "Plinth", Plane = new PlaneRef { Feature = bt.Id }, Sketch = fp.S });
+        d.AddFeature(new ExtrudeFeature { Name = "Plinth", SketchId = fps.Id, Depth = "FlH", Draft = "atan((Fl+FlH*tan(BodyDraft))/FlH)" });
         // the main bearings' lower halves, from BrgIn out to BrgOut each side
         var bp = d.AddFeature(new PlaneFeature { Name = "Bearing inner face", Base = PlaneRef.Front, Offset = "BrgIn" });
         var p = new Sk(d);
@@ -432,6 +444,20 @@ static partial class Demos
             },
         });
         d.AddFeature(new MirrorFeature { Name = "Bearing pedestal, back", Seeds = { ped.Id, pedR.Id }, Plane = PlaneRef.Front });
+        // a rib under each pedestal, down the body's side (Right: sketch x = -z)
+        var pr = new Sk(d);
+        pr.Poly(pr.P("-RibIn", "-BrgDrop"), pr.P("-BrgOut", "-BrgDrop"), pr.P("-RibIn", "-PedRibY"));
+        var prs = d.AddFeature(new SketchFeature { Name = "Pedestal rib", Plane = PlaneRef.Right, Sketch = pr.S });
+        var pedRib = d.AddFeature(new ExtrudeFeature { Name = "Pedestal rib", SketchId = prs.Id, End = EndCondition.MidPlane, Depth = "RibT" });
+        d.AddFeature(new MirrorFeature { Name = "Pedestal rib, back", Seeds = { pedRib.Id }, Plane = PlaneRef.Front });
+        // ribs from the body's side out over the base, two each side
+        var rp = d.AddFeature(new PlaneFeature { Name = "Base rib plane", Base = PlaneRef.Right, Offset = "-BaseRibX" });
+        var br = new Sk(d);
+        br.Poly(br.P("-RibIn", "-(BaseY-BaseT)"), br.P("-BaseRibOut", "-(BaseY-BaseT)"), br.P("-RibIn", "-(BaseY-BaseT-BaseRibH)"));
+        var brs = d.AddFeature(new SketchFeature { Name = "Base rib", Plane = new PlaneRef { Feature = rp.Id }, Sketch = br.S });
+        var baseRib = d.AddFeature(new ExtrudeFeature { Name = "Base rib", SketchId = brs.Id, End = EndCondition.MidPlane, Depth = "RibT-2" });
+        var baseRibs = d.AddFeature(new LinearPatternFeature { Name = "Base ribs", Seeds = { baseRib.Id }, Direction = new DirRef { Axis = "X" }, Spacing = "BaseRibP", Count = "2" });
+        d.AddFeature(new MirrorFeature { Name = "Base ribs, back", Seeds = { baseRib.Id, baseRibs.Id }, Plane = PlaneRef.Front });
         // the cylinder: the barrel from the head's face along +X, the flange the head bolts to
         var cf = d.AddFeature(new PlaneFeature { Name = "Cylinder face", Base = PlaneRef.Right, Offset = "-HeadX" });
         var c = new Sk(d);
@@ -493,9 +519,25 @@ static partial class Demos
         // the crank pit, through the body from above, open at the back
         var pt = d.AddFeature(new PlaneFeature { Name = "Pit top", Base = PlaneRef.Top, Offset = "BarrelD/2" });
         var k = new Sk(d);
-        k.Rect("-BarrelEnd", "-PitW/2", "PitX1", "PitW/2");
+        var kl = k.Rect("-BarrelEnd", "-PitW/2", "PitX1", "PitW/2");
         var ks = d.AddFeature(new SketchFeature { Name = "Crank pit", Plane = new PlaneRef { Feature = pt.Id }, Sketch = k.S });
-        d.AddFeature(new ExtrudeFeature { Name = "Crank pit", SketchId = ks.Id, IsCut = true, Reverse = true, Depth = "BarrelD/2+PitBot" });
+        var pit = d.AddFeature(new ExtrudeFeature { Name = "Crank pit", SketchId = ks.Id, IsCut = true, Reverse = true, Depth = "BarrelD/2+PitBot" });
+        // the walls' tops rounded either side of the pedestals: inside along the pit, outside along the body's sides
+        // (Top: sketch y = -z, so the pit's first line is its +Z wall)
+        double side = V("BodyW/2-(BaseY-BaseT)*tan(BodyDraft)"), pw = V("PitW/2");
+        string Body(int i) => $"{body.Id}.S.L{yl[i]}";
+        d.AddFeature(new FilletFeature
+        {
+            Name = "Pit edges", Radius = "WallR",
+            Edges = { E($"{pit.Id}.S.L{kl[0]}", $"{body.Id}.End", new Vec3(-50, 0, pw)), E($"{pit.Id}.S.L{kl[2]}", $"{body.Id}.End", new Vec3(-50, 0, -pw)) },
+        });
+        // the outsides' top edges: each fails alone in the kernel (docs/hit-and-miss-notes.md), kept suppressed
+        var sideEdges = new[]
+        {
+            ("+Z front", E(Body(0), $"{body.Id}.End", new Vec3(-43, 0, side))), ("+Z back", E(Body(0), $"{body.Id}.End", new Vec3(36, 0, side))),
+            ("-Z front", E(Body(2), $"{body.Id}.End", new Vec3(-60, 0, -side))), ("-Z back", E(Body(2), $"{body.Id}.End", new Vec3(36, 0, -side))),
+        };
+        foreach (var (n, e) in sideEdges) d.AddFeature(new FilletFeature { Name = "Side top edge, " + n, Radius = "WallR", Edges = { e }, Suppressed = true });
         // the main bearings' bore, the cap studs' tapped holes
         var j = new Sk(d);
         j.Circle(Sketch.OriginId, "J");

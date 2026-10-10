@@ -62,6 +62,18 @@ Commands (from the repository root):
     choose A by vote across the pieces, either side; where B changes at an angle (not tangentially), the same corner
     join as above (~150-300 lines). Not yet clear why the undrafted R20 corners skip `ArcTools`: the
     `NativeBlend.Debug` line in `Apply` prints the surface kinds and would show it.
+- **A single convex edge fails with "run into each other".** Casting: the body's top edge along its side (the drafted
+  side face, 2°, and the flat top at y = 0), R4, each segment a fillet of its own with one edge: the four segments
+  (either side, before and behind the bearing pedestal; they run into the hopper or the cam gear's boss at one end and
+  the pedestal at the other, or into the body's R20 corner fillet at the back) each fail with "the fillets that run
+  into neighbouring geometry also run into each other where both are tangent to the same face; that corner cannot be
+  blended yet", though there is one fillet. The same R4 on the pit's inner top edges (vertical wall, flat top, ending
+  at the barrel and the pedestal) works. So the message is the trimmed branch's catch-all (above); the difference may
+  be the draft (the side face is not perpendicular to the top) or the ends running out over curved faces (the corner
+  fillet, the cam boss's cylinder). Repro: `HmCasting`, features "Side top edge, ..." (suppressed): unsuppress one and
+  `verify-engine - Casting`. Also: two short segments of the pit's top edge (x 32..40, behind the pedestals) are not
+  found as an edge between the pit's wall and the body's top (`F48.S.L5` / `F7.End`): the top there may carry the
+  pedestal's name after the union. *Instead:* only the pit's front edges rounded.
 - **A sketch of overlapping closed loops extrudes to a broken body, silently.** Rocker: a rectangle with circles
   overlapping its ends and middle, in one sketch, extruded: no error or warning, but the body is open (not a valid
   solid). Either union the regions or say why. *Instead:* three sketches, three extrudes. To fix:
@@ -115,9 +127,14 @@ Commands (from the repository root):
   `AssemblyStep`, changed to match) writes every part where it is, named by its path ("Crankshaft assembly<1>-Flywheel,
   governor side<1>-Hub cap<1>"): the structure is lost in other CAD systems. With threads modeled the engine's STEP is
   27 MB.
-- **File size.** `hit-and-miss.sasm` is 5.9 MB (the linkage 0.2 MB): each embedded sub-assembly carries its parts and
-  their mesh caches, and the crankshaft assembly carries both flywheel sub-assemblies (3.3 MB of the total). Parts used
-  in several sub-assemblies (the socket screw: in five of them) are stored once per sub-assembly.
+- **File size: an option not to store meshes.** `hit-and-miss.sasm` is 5.9 MB (the linkage 0.2 MB). Counted through
+  the nested containers: mesh caches 6.35 MB, thumbnails 0.11 MB, the documents themselves (features, sketches, mates)
+  0.09 MB, so 97% is cache and the file would be about 0.2 MB without. The caches are written by
+  `AssemblyModel.RefreshCaches` (`cache/{id}-{revision}[-config].mesh`), once per embedded part per assembly level, so
+  a part used in several sub-assemblies (the socket screw: five) is cached in each, and the casting's alone is 0.45 MB.
+  An option (per assembly, or at Save As / Pack and Go: "Store display meshes") that skips them would suit demos,
+  version control and mailing; the cost is a rebuild of every part on open (the engine: about 5 s). Possibly also a
+  per-part threshold (cache only parts that are slow to rebuild), or one cache shared down the nesting.
 - **Materials.** The list of materials and densities lives in the app (`MainWindow.MassProps.cs`), so code (and the
   demos) set `Material` and `Density` by hand (`HmMaterial`); a list in Core would let the bill of materials and mass
   properties share it, and add rubber and glass. With them: the engine weighs 48.9 kg, its centre of mass about 71 mm
