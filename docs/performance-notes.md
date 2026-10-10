@@ -47,8 +47,10 @@ profile; the profile's times are summed over threads). On the heavy samples (`sa
 1. **`NIntersect.Trace` internals** (results must stay identical):
    - `Densify` always splits at depth 0 and then projects twice at depth 1. That is about 3 projections per
      segment; the extra points change results.
-   - `ProjectToIntersection` starts every point from scratch; `trace.grid` (the block test and lazy `F_` values) is
-     now about as large as the march and the projection.
+   - `ProjectToIntersection` starts every point from scratch (warm starts would change results).
+   - Done: the block test's grid-node points are kept (blocks share their corners and edge middles) and reused by
+     the grid values: `trace.grid` about 40% less (spur-gear-nice 58–68 to 33–38 ms, handwheel 76–93 to 52–58 ms
+     summed), bit for bit. What is left of tracing is the projection (~250 ms summed on spur-gear-nice) and the march.
 2. **`NBoolean.FitSpline` and `NSpline.Param`**: done (see above). The `NSpline` constructor still evaluates 129
    samples for the scan; `Param` still ignores `hint`.
 3. **`NDomain.Classify`, `BoundaryDistance` and `ContainsUV`**: done (see above). What is left of `sec.midclass` is probably
