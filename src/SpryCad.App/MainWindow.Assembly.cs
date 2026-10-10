@@ -12,7 +12,8 @@ using Transform = SpryCad.Kernel.Transform;
 namespace SpryCad.App;
 
 /// <summary>
-/// Assemblies, in document tabs as parts are (SolidWorks): an assembly tab shows its components in the design tree,
+/// Assemblies, in document tabs as parts are (SolidWorks): an assembly tab shows its components (parts, and other
+/// assemblies as sub-assemblies: rigid, or flexible with their own mates solved in it) in the design tree,
 /// the Assembly tab of the CommandManager (Insert Components, Fix, Float, Lightweight, Open Part) and the components
 /// placed in the graphics area, where floating ones are dragged into place (<see cref="AssemblyMode"/>). Save, Save As,
 /// Close, Undo / Redo and Delete act on the assembly. Parts are found by identity wherever they went; a part not found
@@ -76,8 +77,10 @@ public partial class MainWindow : IAssemblyHost
     async Task ExportAssembly(string kind)
     {
         if (Asm is not { } a) return;
-        var keys = a.Model.Doc.Components.Where(c => !c.Suppressed).Select(AssemblyModel.DisplayKey).Distinct().ToList();
-        var missing = keys.Where(k => a.Model.Parts.GetValueOrDefault(k)?.Doc == null).ToList();
+        // every part at every depth, each display (a part, as configured, in the assembly holding it) once
+        var placed = a.Model.PlacedParts().ToList();
+        var keys = placed.Select(x => x.pd).Distinct().ToList();
+        var missing = keys.Where(pd => pd.Doc == null).ToList();
         if (keys.Count == 0) { await Dialogs.Message(this, "Export", "The assembly has no components to export."); return; }
         var type = kind == "step"
             ? new FilePickerFileType("STEP AP214") { Patterns = new[] { "*.step", "*.stp" } }
@@ -98,17 +101,18 @@ public partial class MainWindow : IAssemblyHost
             {
                 var live = keys.Except(missing).ToList();
                 // each part's solids, built from its document (threads modeled, as part exports do)
-                var solids = live.ToDictionary(k => k, k => new Core.Regen.Regenerator { ThreadOverride = Core.Regen.ThreadDisplay.Modeled }.Rebuild(model.Parts[k].Doc!).State.Bodies.Select(b => (b.Id, b.Solid)).ToList());
-                var comps = model.Doc.Components.Where(c => !c.Suppressed && live.Contains(AssemblyModel.DisplayKey(c))).ToList();
+                var solids = live.ToDictionary(k => k, k => new Core.Regen.Regenerator { ThreadOverride = Core.Regen.ThreadDisplay.Modeled }.Rebuild(k.Doc!).State.Bodies.Select(b => (b.Id, b.Solid)).ToList());
+                var comps = placed.Where(x => x.pd.Doc != null).ToList();
                 using var fs = File.Create(path);
                 if (kind == "step")
                 {
-                    // (a configured part named with its configuration: "Screw (M4, Length 12)")
-                    string NameOf(Component c) { var l = model.ConfigLabel(c); return c.Name.Split('<')[0] + (l.Length > 0 ? $" ({l})" : ""); }
-                    var parts = live.Select(k => (NameOf(model.ComponentsShowing(k).First()), (IReadOnlyList<(string, Solid)>)solids[k])).ToList();
-                    StepWriter.WriteAssembly(fs, baseName, parts, comps.Select(c => (live.IndexOf(AssemblyModel.DisplayKey(c)), c.Name, c.Placement.ToTransform())).ToList());
+                    // (a configured part named with its configuration: "Screw (M4, Length 12)"; the parts of
+                    // sub-assemblies placed where they are in this one)
+                    string NameOf(Occurrence o) { var l = o.Owner.ConfigLabel(o.Component); return o.Component.Name.Split('<')[0] + (l.Length > 0 ? $" ({l})" : ""); }
+                    var parts = live.Select(k => (NameOf(comps.First(x => x.pd == k).o), (IReadOnlyList<(string, Solid)>)solids[k])).ToList();
+                    StepWriter.WriteAssembly(fs, baseName, parts, comps.Select(x => (live.IndexOf(x.pd), model.NameAt(x.o.Path).Replace('/', '-'), x.o.World)).ToList());
                 }
-                else StlWriter.Write(fs, comps.SelectMany(c => solids[AssemblyModel.DisplayKey(c)].Select(s => s.Solid.Transformed(c.Placement.ToTransform()))));
+                else StlWriter.Write(fs, comps.SelectMany(x => solids[x.pd].Select(s => s.Solid.Transformed(x.o.World))));
             });
             Status($"Exported {path}" + (missing.Count > 0 ? $" ({missing.Count} part(s) left out: shown only from the assembly's copy; resolve them first)" : ""));
         }
@@ -121,7 +125,8 @@ public partial class MainWindow : IAssemblyHost
     /// <summary>The active document is an assembly (for dialogs outside the window, e.g. Options).</summary>
     internal bool IsAssemblyActive => Asm != null;
 
-    static string TitleOf(PartTab t) => t.Asm?.Title ?? t.Session.Title;
+    static string TitleOf(PartTab t) =>
+        (t.Asm?.Title ?? t.Session.Title) + (t.EmbeddedIn is { } e ? $" (in {e.Title.TrimEnd(' ', '*')})" : "");
     static bool DirtyOf(PartTab t) => t.Asm?.Dirty ?? t.Session.Dirty;
 
     /// <summary>The design tree tab's content: the part's tree and the assembly's (the active document's shows).</summary>
@@ -129,24 +134,13 @@ public partial class MainWindow : IAssemblyHost
     {
         PanelHost.Children.Remove(Tree);
         _asmTree = new AssemblyTree { IsVisible = false };
-        _asmTree.Selected += id => SelectComponent(id);
+        _asmTree.Selected += id => SelectComponent(id, exact: true);
         _asmTree.MateSelected += SelectMate;
         _asmTree.Opened += OpenComponent;
         _asmTree.MateCommand += OnMateCommand;
-        _asmTree.Command += (id, cmd) =>
-        {
-            if (Asm is not { } a) return;
-            a.Selected = id; a.SelectedMate = null;
-            switch (cmd)
-            {
-                case "open": OpenComponent(id); break;
-                case "fix": SetFixed(true); break;
-                case "float": SetFixed(false); break;
-                case "lightweight": ToggleLightweight(); break;
-                case "configure": _ = ConfigureComponent(); break;
-                case "delete": DeleteComponent(); break;
-            }
-        };
+        _asmTree.Command += OnComponentCommand;
+        _asmTree.AssemblyCommand += OnAssemblyCommand;
+        _asmTree.PatternCommand += OnPatternCommand;
         InitPartDrop();
         return new Panel { Children = { Tree, _asmTree } };
     }
@@ -173,15 +167,57 @@ public partial class MainWindow : IAssemblyHost
     {
         var t = AddTab(new DocumentSession());
         t.Asm = s;
+        // its parts and sub-assemblies saved (here or anywhere else): shown as they now are
+        s.Watcher = new SourceWatcher(files => _ = ReloadSources(t, files));
+        s.Watcher.Watch(s.Model.SourceFiles());
         s.Changed += () =>
         {
             UpdateTabHeader(t);
             if (t == _tab) OnAssemblyChanged();
             // its preview in the list of open documents follows it
             if (_partRows.TryGetValue(t, out var row)) _ = LoadThumb(t, row.Image);
+            // (components inserted, removed, found: the files watched follow)
+            s.Watcher?.Watch(s.Model.SourceFiles());
         };
         UpdateTabHeader(t);
+        if (!_watchingActivation)
+        {
+            // back in the window: files changed meanwhile that the watchers missed (network folders) are caught by time
+            _watchingActivation = true;
+            Activated += (_, _) => { foreach (var p in _parts) p.Asm?.Watcher?.CheckStamps(); };
+        }
         return t;
+    }
+
+    bool _watchingActivation;
+
+    /// <summary>
+    /// Files of an open assembly's parts or sub-assemblies were written: what was saved with changes is shown as it
+    /// now is (only that: other parts are not read), then built in the background as when opening.
+    /// </summary>
+    async Task ReloadSources(PartTab t, IReadOnlyCollection<string> files)
+    {
+        if (t.Asm is not { } s || !_parts.Contains(t)) return;
+        List<string> changed;
+        try { changed = s.Reload(files); }
+        catch (Exception ex) { App.Log(ex, "Reload assembly sources"); return; }
+        if (changed.Count == 0) return;
+        if (_tab == t)
+            Status($"Updated from {(changed.Count == 1 ? "its saved file" : "their saved files")}: {string.Join(", ", changed.Take(4))}{(changed.Count > 4 ? $" and {changed.Count - 4} more" : "")}.");
+        await BuildPendingOf(s);
+    }
+
+    /// <summary>An assembly's displays waiting to be built: built in the background, the busy text saying which while it is shown.</summary>
+    async Task BuildPendingOf(AssemblySession s)
+    {
+        if (!s.Model.AnyPending) return;
+        await s.BuildPending(p =>
+        {
+            if (_tab?.Asm != s) return;
+            BusyText.IsVisible = p != null;
+            if (p != null) BusyText.Text = p;
+        });
+        if (_tab?.Asm == s) BusyText.IsVisible = false;
     }
 
     /// <summary>Opens an assembly in a tab (its tab shown if it is open already); its parts found and built in the background.</summary>
@@ -194,7 +230,7 @@ public partial class MainWindow : IAssemblyHost
         catch (Exception ex) { App.Log(ex, "Open Assembly"); await Dialogs.Message(this, "Open Assembly", $"{Path.GetFileName(path)} could not be opened: {ex.Message}"); return; }
         var blank = IsUntouched(_tab) ? _tab : null;
         var t = AddAssemblyTab(s);
-        RecentFiles.Add(path);
+        if (!IsEmbeddedCopy(path)) RecentFiles.Add(path);
         if (!await SwitchTo(t)) return;
         if (blank != null && blank != t) RemoveTab(blank);
         Viewport.StandardView("Trimetric", fit: true, animate: false);
@@ -202,16 +238,7 @@ public partial class MainWindow : IAssemblyHost
         var opened = notes.Count == 0 ? "Opened " + path : notes.Count == 1 ? notes[0] : $"Opened {Path.GetFileName(path)}: {notes.Count} notes about its parts (under the tree)";
         Status(opened);
         // parts without a current display cache: built now, each shown when done (the busy text says which)
-        if (s.Model.Pending.Count > 0)
-        {
-            await s.BuildPending(p =>
-            {
-                if (_tab?.Asm != s) return;
-                BusyText.IsVisible = p != null;
-                if (p != null) BusyText.Text = p;
-            });
-            if (_tab?.Asm == s) BusyText.IsVisible = false;
-        }
+        await BuildPendingOf(s);
     }
 
     /// <summary>
@@ -232,6 +259,7 @@ public partial class MainWindow : IAssemblyHost
         if (asm && _activeTab != "Assembly") ShowTab("Assembly");
         else if (!asm && _activeTab == "Assembly") ShowTab("Features");
         _asmHover = null;
+        ClearAssemblyView();
         // (a part's planes are named as the assembly's: the assembly's marks go with it)
         if (!asm) Viewport.Marked = Array.Empty<(SelItem, Rgba)>();
         if (asm) OnAssemblyChanged();
@@ -266,16 +294,20 @@ public partial class MainWindow : IAssemblyHost
         var inst = new List<MeshInstance>();
         var threads = new List<Core.Regen.CosmeticThread>();
         var box = Box3.Empty;
-        foreach (var c in a.Model.Doc.Components)
+        // (a component, or a sub-assembly with all it holds)
+        static bool Under(string path, string? of) => of != null && (path == of || path.StartsWith(of + "/", StringComparison.Ordinal));
+        var explode = ShownExplode(a);
+        foreach (var (o, pd) in a.Model.PlacedParts())
         {
-            if (c.Suppressed || a.Model.DisplayOf(c) is not { } pd || pd.Mesh.Indices.Length == 0) continue;
-            var col = c.Color ?? pd.Color;
+            if (pd.Mesh.Indices.Length == 0 || IsolatedOut(o.Path)) continue;
+            var col = o.Color ?? pd.Color;
             var rgba = new Rgba((float)col[0], (float)col[1], (float)col[2]);
             // while faces are picked (Mate, Motor) the components keep their colors: the faces are highlighted
-            if (!PickingFaces && c.Id == a.Selected) rgba = MixColor(rgba, ViewportControl.SelectColor, 0.55f);
-            else if (!PickingFaces && c.Id == _asmHover) rgba = MixColor(rgba, new Rgba(1f, 0.8f, 0.5f), 0.35f);
-            var t = c.Placement.ToTransform();
-            inst.Add(new MeshInstance(c.Id, pd.Mesh, ModelMatrix(t), rgba, FaceHighlights(c.Id)));
+            if (_clashes?.Contains(o.Path) == true) rgba = MixColor(rgba, new Rgba(0.95f, 0.15f, 0.1f), 0.75f);
+            else if (!PickingFaces && Under(o.Path, a.Selected)) rgba = MixColor(rgba, ViewportControl.SelectColor, 0.55f);
+            else if (!PickingFaces && Under(o.Path, _asmHover)) rgba = MixColor(rgba, new Rgba(1f, 0.8f, 0.5f), 0.35f);
+            var t = Drawn(o, explode);
+            inst.Add(new MeshInstance(o.Path, pd.Mesh, ModelMatrix(t), rgba, FaceHighlights(o.Path)));
             // its cosmetic threads, placed with it
             foreach (var th in pd.Threads)
                 threads.Add(th with { Origin = t.Point(th.Origin), Axis = t.Vector(th.Axis), RefDir = t.Vector(th.RefDir) });
@@ -287,25 +319,37 @@ public partial class MainWindow : IAssemblyHost
         Viewport.BendLines = Array.Empty<ViewportControl.BendLine>();
         Viewport.CosmeticThreads = threads;
         Viewport.Sketches = Array.Empty<SketchDisplay>();
-        Viewport.Planes = new List<PlaneDisplay>
+        var planes = new List<PlaneDisplay>
         {
             new("Front", null, Frame.Front, half), new("Top", null, Frame.Top, half), new("Right", null, Frame.Right, half),
         };
+        // a sub-assembly's origin plane picked (or hovered on the Mate page): drawn where the sub-assembly is
+        static Frame Placed(Frame f, Transform t) => new(t.Point(f.Origin), t.Vector(f.XDir), t.Vector(f.YDir), t.Vector(f.Normal));
+        var subPlanes = (PagePicks ?? (SelectedMate() is { } spm ? new List<MateRef> { spm.A, spm.B } : new List<MateRef>())).Append(_hoverPick)
+            .Where(r => r is { Component: { } } && a.Model.Find(r.Component) is { Component.IsAssembly: true }).ToList();
+        foreach (var r in subPlanes)
+        {
+            var f = r!.Face switch { "Top" => Frame.Top, "Right" => Frame.Right, _ => Frame.Front };
+            if (!planes.Any(p => p.FeatureId == r.Component && p.Name == r.Face))
+                planes.Add(new PlaneDisplay(r.Face, r.Component, Placed(f, a.Model.WorldOf(r.Component!)), Math.Max(10, a.Model.WorldBounds(r.Component!).Diagonal * 0.4)));
+        }
+        Viewport.Planes = planes;
         Viewport.ShowPlanes = _showPlanes || inst.Count == 0;
         // the origin planes the selected mate (or the Mate page's picks) use: shown highlighted as its faces are (the
         // pick selected in the Mate Selections box in full blue, the other paler); one hovered on the page in orange
         var refs = PagePicks ?? (SelectedMate() is { } sm ? new List<MateRef> { sm.A, sm.B } : new List<MateRef>());
         var marked = new List<(SelItem, Rgba)>();
-        static SelItem PlaneItem(string name) => new() { Kind = SelKind.Plane, Name = name };
-        if (_hoverPick is { Component: null } hp) marked.Add((PlaneItem(hp.Face), ViewportControl.HoverColor));
+        static SelItem PlaneItem(string name, string? owner = null) => new() { Kind = SelKind.Plane, Name = name, FeatureId = owner };
+        bool IsPlane(MateRef r) => r.Component == null || a.Model.Find(r.Component) is { Component.IsAssembly: true };
+        if (_hoverPick is { } hp && IsPlane(hp)) marked.Add((PlaneItem(hp.Face, hp.Component), ViewportControl.HoverColor));
         for (int i = 0; i < refs.Count; i++)
-            if (refs[i].Component == null) marked.Add((PlaneItem(refs[i].Face), PickColor(i)));
+            if (IsPlane(refs[i])) marked.Add((PlaneItem(refs[i].Face, refs[i].Component), PickColor(i)));
         // a round face picked: its axis drawn; a center: a cross there. While picking, a round face under the
         // pointer shows its axis too (what a click on it mates)
         static SelItem AxisItem((Vec3 a, Vec3 b) s) => new() { Kind = SelKind.Axis, Point = (s.a + s.b) * 0.5, Normal = (s.b - s.a).Normalized, AxisHalfLength = Vec3.Distance(s.a, s.b) / 2 };
         for (int i = 0; i < refs.Count; i++)
         {
-            if (refs[i].Component is not { } rc) continue;
+            if (refs[i].Component is not { } rc || IsPlane(refs[i])) continue;
             if (refs[i].End != null) marked.Add((new SelItem { Kind = SelKind.Vertex, IsCenter = true, Point = a.Model.World(refs[i]).P }, PickColor(i)));
             else if (refs[i].Kind == MateGeomKind.Axis && a.Model.AxisSegment(rc, refs[i].Face) is { } seg) marked.Add((AxisItem(seg), PickColor(i)));
         }
@@ -323,11 +367,22 @@ public partial class MainWindow : IAssemblyHost
     {
         void Tip(string tip) => ToolTip.SetTip(CommandBar.Children[^1], tip);
         Cmd("insertcomp", "Insert\nComponents", InsertComponentCommand);
-        Tip("Insert Components\nBrings parts into the assembly: open parts or files, linked (an edit to the part shows in every assembly using it) or embedded (kept inside the assembly: one self-contained file).");
+        Tip("Insert Components\nBrings parts and sub-assemblies into the assembly: open parts or files, linked (an edit to the part shows in every assembly using it) or embedded (kept inside the assembly: one self-contained file). A sub-assembly is rigid (moves as one) or flexible (its own mates solved here, so its parts move).");
         Cmd("mates", "Mate", MateCommand);
         Tip("Mate\nPositions components relative to each other: pick two faces (or a face and an origin plane), then coincident, parallel, perpendicular, concentric, distance or angle.");
         Cmd("motor", "Motor", MotorCommand);
         Tip("Motor\nTurns a component about the axis of a round face at a set speed; its mates carry the rest (a gear drives its mate, a crank its linkage). Play, Pause, Reset.");
+        Cmd("lpattern", "Linear\nPattern", () => PatternPage(PatternKind.Linear));
+        Tip("Linear Component Pattern\nCopies components along a direction (a face's normal or axis, or an origin plane's normal); the copies follow their seeds.");
+        Cmd("cpattern", "Circular\nPattern", () => PatternPage(PatternKind.Circular));
+        Tip("Circular Component Pattern\nCopies components around an axis (a round face's, or an origin plane's normal); the copies follow their seeds.");
+        Cmd("mirror", "Mirror\nComponents", () => PatternPage(PatternKind.Mirror));
+        Tip("Mirror Components\nCopies components mirrored across a plane: symmetric parts turned over (no opposite-hand part is made).");
+        Sep();
+        Cmd("formsub", "Form\nSub-assembly", () => FormSubAssemblyPage());
+        Tip("Form New Sub-assembly\nMakes components into a new sub-assembly (a file of its own, or embedded), where they are; the mates among them go with them.");
+        Cmd("replace", "Replace\nComponent", () => _ = ReplaceComponent());
+        Tip("Replace Component\nSwaps the selected component's part or sub-assembly for another file, keeping its place and its mates where the faces are there.");
         Sep();
         Cmd("fix", "Fix", () => SetFixed(true));
         Tip("Fix\nFixes the selected component where it is.");
@@ -342,7 +397,20 @@ public partial class MainWindow : IAssemblyHost
         UpdateConfigureButton(force: true);
         Sep();
         Cmd("open", "Open\nPart", () => { if (Asm?.Selected is { } id) OpenComponent(id); });
-        Tip("Open Part\nOpens the selected component's part in a tab of its own (double-click does too).");
+        Tip("Open Part\nOpens the selected component's part (or sub-assembly) in a tab of its own (double-click does too); an embedded one is edited there and saved back into the assembly.");
+        Sep();
+        Cmd("hide", "Hide /\nShow", ToggleHidden);
+        Tip("Hide / Show\nHides the selected component (it is still mated, counted and solved), or shows it again. A sub-assembly's component is hidden in this assembly only.");
+        Cmd("isolate", "Isolate", () => Isolate());
+        Tip("Isolate\nShows only the selected component; Isolate again shows everything.");
+        Cmd("explode", "Exploded\nView", ExplodeCommand);
+        Tip("Exploded View\nMoves components apart along directions, step by step (or all at once from where they are), to show how the assembly goes together.");
+        Cmd("interference", "Interference\nDetection", InterferenceCommand);
+        Tip("Interference Detection\nFinds parts that overlap (share volume) and shows each pair in red.");
+        Cmd("bom", "Bill of\nMaterials", BomCommand);
+        Tip("Bill of Materials\nThe parts and sub-assemblies with their quantities: indented, top level only, or parts only; copied or exported as CSV.");
+        Cmd("packgo", "Pack\nand Go", () => _ = PackAndGoCommand());
+        Tip("Pack and Go\nCopies the assembly and every file it uses to a folder (or a zip), optionally renamed, the copies referring to each other.");
     }
 
     Button? _configureButton;
@@ -359,50 +427,59 @@ public partial class MainWindow : IAssemblyHost
         var id = Asm?.Selected;
         if (!force && id == _configureFor) return;
         _configureFor = id;
-        _configureButton.IsEnabled = FindComponent(id) is { } c && Asm!.Model.PartDocument(c)?.UserParameters().Count > 0;
+        _configureButton.IsEnabled = id != null && !id.Contains('/') && FindComponent(id) is { IsAssembly: false } c && Asm!.Model.PartDocument(c)?.UserParameters().Count > 0;
     }
 
     // ------------------------------------------------------------------------------------------
     // commands
 
     /// <summary>
-    /// Insert Component (PropertyManager): the parts open in other tabs, or Browse… for files; linked, or embedded in
-    /// the assembly. The first component is fixed at the origin, the others go beside the assembly.
+    /// Insert Component (PropertyManager): the parts and assemblies open in other tabs, or Browse… for files; parts
+    /// linked or embedded in the assembly; assemblies (sub-assemblies, linked) rigid or flexible. The first component
+    /// is fixed at the origin, the others go beside the assembly.
     /// </summary>
     void InsertComponentCommand()
     {
-        if (Asm == null) return;
+        if (Asm is not { } self) return;
         var page = new PmPage("Insert Component", "insertcomp");
-        var s = page.Section("Part to Insert");
-        page.Info(s, "Pick an open part (double-click inserts it), or Browse… for part files.");
+        var s = page.Section("Part/Assembly to Insert");
+        page.Info(s, "Pick an open part or assembly (double-click inserts it), or Browse… for files.");
         var list = new ListBox { MaxHeight = 280, MinHeight = 60 };
         foreach (var t in _parts.Where(t => t.Asm == null && t.Session.FilePath != null))
             list.Items.Add(new ListBoxItem { Content = TitleOf(t), Tag = t.Session.FilePath });
-        if (list.Items.Count == 0) page.Info(s, "No saved part is open.");
+        // (saved assemblies other than this one: sub-assemblies)
+        foreach (var t in _parts.Where(t => t.Asm is { FilePath: not null } x && x != self))
+            list.Items.Add(new ListBoxItem { Content = new StackPanel { Orientation = Avalonia.Layout.Orientation.Horizontal, Spacing = 6, Children = { Icons.Make("assembly", 16), new TextBlock { Text = TitleOf(t) } } }, Tag = t.Asm!.FilePath });
+        if (list.Items.Count == 0) page.Info(s, "No saved part or assembly is open.");
         else s.Children.Add(list);
         var browse = new Button { Content = "Browse…", Margin = new Thickness(0, 6, 0, 0) };
         s.Children.Add(browse);
         var o = page.Section("Options");
         bool embed = false;
-        page.Check(o, "Embed in the assembly", () => embed, v => embed = v);
+        page.Check(o, "Embed parts in the assembly", () => embed, v => embed = v);
         page.Info(o, "Embedded parts are kept inside the assembly: one file to keep or share (a small assembly, a hinge). Linked parts stay in their files.");
+        var sa = page.Section("Sub-assemblies");
+        bool flexible = false;
+        page.Combo(sa, "Solve as", new List<(bool, string)> { (false, "Rigid"), (true, "Flexible") }, () => flexible, v => flexible = v);
+        page.Info(sa, "Rigid: moves as one body, its parts where its own file has them. Flexible: its own mates are solved with this assembly's, so its parts move here (a linkage that works, a slide that slides); this assembly keeps where they are. Change it later from the component's menu.");
         void Close() { ShowPage(null); HideConfirmCorner(); }
         async Task InsertAndClose(IReadOnlyList<string> paths)
         {
             Close();
-            await InsertParts(paths, embed);
+            await InsertParts(paths, embed, flexible);
         }
         async void Ok()
         {
             if ((list.SelectedItem as ListBoxItem)?.Tag is string path) await InsertAndClose(new[] { path });
-            else Status("Pick a part in the list, or Browse… for one.");
+            else Status("Pick a part or an assembly in the list, or Browse… for one.");
         }
         list.DoubleTapped += (_, _) => Ok();
         browse.Click += async (_, _) =>
         {
             var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
             {
-                Title = "Insert Component", FileTypeFilter = new[] { FcadType }, AllowMultiple = true,
+                Title = "Insert Component", AllowMultiple = true,
+                FileTypeFilter = new[] { new FilePickerFileType("SpryCAD Part or Assembly") { Patterns = new[] { "*" + CadDocument.FileExtension, "*" + AssemblyDocument.FileExtension } }, FcadType, AssemblyType },
             });
             var paths = files.Select(f => f.TryGetLocalPath()).OfType<string>().ToList();
             if (paths.Count > 0) await InsertAndClose(paths);
@@ -413,7 +490,7 @@ public partial class MainWindow : IAssemblyHost
         ShowConfirmCorner(Ok, Close, "OK: insert the part picked (Enter)", "Cancel (Esc)");
     }
 
-    async Task InsertParts(IReadOnlyList<string> paths, bool embed)
+    async Task InsertParts(IReadOnlyList<string> paths, bool embed, bool flexible = false)
     {
         if (Asm is not { } a) return;
         a.BeginChange();
@@ -424,7 +501,8 @@ public partial class MainWindow : IAssemblyHost
             try
             {
                 var at = PlaceBeside(a.Model);
-                var c = await Task.Run(() => PartsIndexStore.Use(_ => a.Model.Insert(p, at, embed)));
+                // (assemblies are linked, never embedded: sub-assemblies)
+                var c = await Task.Run(() => PartsIndexStore.Use(_ => AssemblyModel.IsAssemblyFile(p) ? a.Model.InsertAssembly(p, at, flexible) : a.Model.Insert(p, at, embed)));
                 last = c.Id;
             }
             catch (Exception ex) { App.Log(ex, "Insert Component"); await Dialogs.Message(this, "Insert Component", $"{Path.GetFileName(p)} could not be inserted: {ex.Message}"); }
@@ -433,7 +511,10 @@ public partial class MainWindow : IAssemblyHost
         a.Selected = last;
         a.EndChange();
         Viewport.ZoomToFit();
-        Status($"Inserted {paths.Count} component{(paths.Count == 1 ? "" : "s")}{(embed ? " (embedded)" : "")}. Drag a floating component (-) to move it; Shift+drag turns it.");
+        var subs = paths.Count(AssemblyModel.IsAssemblyFile);
+        Status($"Inserted {paths.Count} component{(paths.Count == 1 ? "" : "s")}{(embed && subs < paths.Count ? " (parts embedded)" : "")}" +
+               (subs > 0 ? $"{(subs == 1 ? ", a sub-assembly" : $", {subs} sub-assemblies")} {(flexible ? "flexible (its mates solved here)" : "rigid")}" : "") +
+               ". Drag a floating component (-) to move it; Shift+drag turns it.");
     }
 
     /// <summary>Where a new component goes: the origin for the first, else beside the assembly along +X.</summary>
@@ -441,29 +522,57 @@ public partial class MainWindow : IAssemblyHost
     {
         var b = Box3.Empty;
         foreach (var c in m.Doc.Components)
-            if (m.DisplayOf(c) is { } pd && !pd.Mesh.Bounds.IsEmpty)
-            {
-                var t = c.Placement.ToTransform(); var mb = pd.Mesh.Bounds;
-                for (int k = 0; k < 8; k++)
-                    b.Add(t.Point(new Vec3((k & 1) == 0 ? mb.Min.X : mb.Max.X, (k & 2) == 0 ? mb.Min.Y : mb.Max.Y, (k & 4) == 0 ? mb.Min.Z : mb.Max.Z)));
-            }
+            if (!c.Suppressed && m.WorldBounds(c.Id) is { IsEmpty: false } cb) { b.Add(cb.Min); b.Add(cb.Max); }
         return b.IsEmpty ? Transform.Identity : Transform.Translation(new Vec3(b.Max.X + 0.2 * Math.Max(10, b.Diagonal), 0, 0));
+    }
+
+    /// <summary>
+    /// The selected component, if it is one of the assembly's own (a part of a sub-assembly is changed in the
+    /// sub-assembly: said so). Null: nothing to act on.
+    /// </summary>
+    Component? SelectedOwn()
+    {
+        if (Asm is not { } a || FindComponent(a.Selected) is not { } c) { Status("Select a component first."); return null; }
+        if (a.Selected!.Contains('/'))
+        {
+            // (a sub-assembly's component: hide, suppress and color it from its menu, for this instance)
+            var sub = a.Model.Find(a.Selected[..a.Selected.IndexOf('/')])!.Component;
+            Status($"{c.Name} is part of the sub-assembly {sub.Name}: open the sub-assembly to change it, or select {sub.Name} itself.");
+            return null;
+        }
+        return c;
     }
 
     void SetFixed(bool fix)
     {
-        if (Asm is not { } a || FindComponent(a.Selected) is not { } c) { Status("Select a component first."); return; }
+        if (Asm is not { } a || SelectedOwn() is not { } c) return;
+        if (c.Pattern != null) { Status($"{c.Name} is a copy made by a pattern: the pattern places it."); return; }
         if (c.Fixed == fix) return;
         a.BeginChange();
         c.Fixed = fix;
         // floating now: the mates may move it (and fixed: others may have to move instead)
-        if (a.Model.Doc.Mates.Count > 0) a.Model.SolveMates();
+        if (a.Model.HasMates) a.Model.SolveMates();
         a.EndChange();
+    }
+
+    /// <summary>A sub-assembly made flexible (its own mates solved here, its parts free to move) or rigid (as its file has it).</summary>
+    void SetFlexible(bool flexible)
+    {
+        if (Asm is not { } a || SelectedOwn() is not { } c) return;
+        if (!c.IsAssembly) { Status($"{c.Name} is a part: only sub-assemblies are rigid or flexible."); return; }
+        if (c.Flexible == flexible) return;
+        a.BeginChange();
+        a.Model.SetFlexible(c, flexible);
+        if (a.Model.HasMates) a.Model.SolveMates();
+        a.EndChange();
+        Status(flexible ? $"{c.Name}: flexible (its own mates are solved in this assembly: drag its parts, run a motor on them)."
+            : $"{c.Name}: rigid (moves as one body, its parts where its file has them).");
     }
 
     void ToggleLightweight()
     {
-        if (Asm is not { } a || FindComponent(a.Selected) is not { } c) { Status("Select a component first."); return; }
+        if (Asm is not { } a || SelectedOwn() is not { } c) return;
+        if (c.IsAssembly) { Status($"{c.Name} is a sub-assembly: set its parts lightweight in it."); return; }
         a.BeginChange();
         var key = ComponentResolver.Key(c.Part);
         var light = !c.Lightweight;
@@ -481,7 +590,8 @@ public partial class MainWindow : IAssemblyHost
     /// </summary>
     async Task ConfigureComponent()
     {
-        if (Asm is not { } a || FindComponent(a.Selected) is not { } c) { Status("Select a component first."); return; }
+        if (Asm is not { } a || SelectedOwn() is not { } c) return;
+        if (c.IsAssembly) { Status($"{c.Name} is a sub-assembly: configure its parts in it."); return; }
         var partName = c.Name.Split('<')[0];
         if (a.Model.PartDocument(c) is not { } part) { await Dialogs.Message(this, "Configure", $"{c.Name}: its part was not found, so it cannot be configured."); return; }
         if (part.UserParameters().Count == 0)
@@ -499,7 +609,7 @@ public partial class MainWindow : IAssemblyHost
         a.BeginChange();
         try { a.Model.Configure(comps, part, ch.values); }
         catch (Exception ex) { App.Log(ex, "Configure failed"); a.AbandonChange(); await Dialogs.Message(this, "Configure failed", ex.Message); return; }
-        if (a.Model.Doc.Mates.Count > 0) a.Model.SolveMates();
+        if (a.Model.HasMates) a.Model.SolveMates();
         a.EndChange();
         var problem = a.Model.DisplayOf(c)?.Problem;
         Status($"{(comps.Count > 1 ? $"{comps.Count} instances of {partName}" : c.Name)}: {part.Label(ch.values)}" + (problem != null ? $" (could not be built: {problem})" : "."));
@@ -509,7 +619,8 @@ public partial class MainWindow : IAssemblyHost
     {
         // (Delete with a mate selected in the tree deletes the mate)
         if (Asm is { SelectedMate: { } mateId } && _mating == null) { OnMateCommand(mateId, "delete"); return; }
-        if (Asm is not { } a || FindComponent(a.Selected) is not { } c) return;
+        if (Asm is not { } a || a.Selected == null || SelectedOwn() is not { } c) return;
+        if (c.Pattern != null) { Status($"{c.Name} is a copy made by a pattern: edit the pattern (fewer instances) or delete it."); return; }
         a.BeginChange();
         a.Model.Remove(c);
         a.Selected = null;
@@ -521,6 +632,12 @@ public partial class MainWindow : IAssemblyHost
     {
         if (Asm is not { } a) return false;
         var path = a.FilePath;
+        // an embedded sub-assembly being edited: saved back into its assembly
+        if (!saveAs && _tab.EmbeddedIn != null)
+        {
+            try { if (SaveEmbedded(_tab)) return true; }
+            catch (Exception ex) { App.Log(ex, "Save embedded"); await Dialogs.Message(this, "Save failed", ex.Message); return false; }
+        }
         if (saveAs || path == null)
         {
             var f = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
@@ -538,6 +655,7 @@ public partial class MainWindow : IAssemblyHost
             a.Save(path);
             RecentFiles.Add(path);
             Status("Saved " + path);
+            if (saveAs && _tab.EmbeddedIn != null) { _tab.EmbeddedIn = null; _tab.EmbeddedName = null; UpdateTabHeader(_tab); }
             return true;
         }
         catch (Exception ex) { App.Log(ex, "Save failed"); await Dialogs.Message(this, "Save failed", ex.Message); return false; }
@@ -557,6 +675,8 @@ public partial class MainWindow : IAssemblyHost
 
     public void HoverComponent(string? id)
     {
+        // (a part of a rigid sub-assembly: the sub-assembly, which moves as one)
+        if (id != null && Asm is { } a) id = a.Model.Selectable(id);
         if (id == _asmHover) return;
         _asmHover = id;
         RefreshAssemblyScene();
@@ -572,7 +692,7 @@ public partial class MainWindow : IAssemblyHost
         _asmTree.SelectMateRow(id);
         if (SelectedMate() is { } m)
         {
-            string Of(MateRef r) => r.Component == null ? r.Face + " Plane" : $"{FindComponent(r.Component)?.Name} ({(r.End != null ? "center of " : "")}{r.Face})";
+            string Of(MateRef r) => r.Component == null ? r.Face + " Plane" : $"{a.Model.NameAt(r.Component)} ({(r.End != null ? "center of " : "")}{r.Face})";
             Status($"{m.Name}: {Of(m.A)} and {Of(m.B)}{(m.Suppressed ? ", suppressed" : "")} (double-click to edit)");
         }
     }
@@ -580,27 +700,47 @@ public partial class MainWindow : IAssemblyHost
     /// <summary>The mate selected in the tree (none while the Mate page shows its own picks).</summary>
     Mate? SelectedMate() => Asm is { SelectedMate: { } id } a && _mating == null ? a.Model.Doc.Mates.FirstOrDefault(m => m.Id == id) : null;
 
-    public void SelectComponent(string? id)
+    public void SelectComponent(string? id) => SelectComponent(id, exact: false);
+
+    /// <summary>
+    /// Selects a component (by path). Clicked in the graphics area (not <paramref name="exact"/>), a part of a rigid
+    /// sub-assembly selects the sub-assembly, which moves as one; in the tree, the row clicked.
+    /// </summary>
+    void SelectComponent(string? id, bool exact)
     {
+        if (Asm is { } sa && id != null && !exact) id = sa.Model.Selectable(id);
         if (Asm is not { } a || (a.Selected == id && a.SelectedMate == null)) return;
         a.SelectedMate = null;
         a.Selected = id;
         RefreshAssemblyScene();
         _asmTree.Select(id);
-        if (FindComponent(id) is { } c)
-            Status($"{c.Name}: {(c.Fixed ? "fixed" : "floating (drag to move, Shift+drag to turn)")}" +
-                   (c.Part.Embedded != null ? ", embedded" : a.Model.Resolution.Parts.GetValueOrDefault(ComponentResolver.Key(c.Part))?.Path is { } p ? ", " + p : ""));
+        if (a.Model.Find(id) is { } o)
+        {
+            var c = o.Component;
+            var how = a.Model.Movable(o.Path) is not { } mv ? "fixed"
+                : mv != o.Path ? $"moves with {a.Model.NameAt(mv)} (drag to move it)" : "floating (drag to move, Shift+drag to turn)";
+            var kind = c.IsAssembly ? (c.Flexible ? "flexible sub-assembly, " : "rigid sub-assembly, ") : "";
+            Status($"{a.Model.NameAt(o.Path)}: {kind}{how}" +
+                   (c.Part.Embedded != null ? ", embedded" : o.Owner.Resolution.Parts.GetValueOrDefault(ComponentResolver.Key(c.Part))?.Path is { } p ? ", " + p : ""));
+        }
     }
 
     public void OpenComponent(string id)
     {
-        if (FindComponent(id) is not { } c || Asm is not { } a) return;
-        if (c.Part.Embedded != null) { Status($"{c.Name} is embedded in the assembly: editing embedded parts comes later."); return; }
-        if (a.Model.Resolution.Parts.GetValueOrDefault(ComponentResolver.Key(c.Part))?.Path is not { } path) { Status($"{c.Name}: its part was not found."); return; }
-        _ = OpenFileAsync(path);
+        if (Asm is not { } a || a.Model.Find(id) is not { } o) return;
+        var c = o.Component;
+        if (c.Part.Embedded != null) { _ = EditEmbedded(a, o); return; }
+        if (o.Owner.Resolution.Parts.GetValueOrDefault(ComponentResolver.Key(c.Part))?.Path is not { } path) { Status($"{c.Name}: its {(c.IsAssembly ? "assembly" : "part")} was not found."); return; }
+        _ = c.IsAssembly ? OpenAssembly(path) : OpenFileAsync(path);
     }
 
-    public Component? FindComponent(string? id) => id != null ? Asm?.Model.Doc.Find(id) : null;
+    /// <summary>The component at a path (one of the assembly's own, or of a sub-assembly).</summary>
+    public Component? FindComponent(string? id) => id != null ? Asm?.Model.Find(id)?.Component : null;
+    // (not while exploded: what is shown is not where it is)
+    public string? Movable(string id) => _exploded ? null : Asm?.Model.Movable(id);
+    public Transform WorldOf(string id) => Asm?.Model.WorldOf(id) ?? Transform.Identity;
+    public void SetWorld(string id, Transform world) => Asm?.Model.SetWorld(id, world);
+    public Box3 BoundsOf(string id) => Asm?.Model.WorldBounds(id) ?? Box3.Empty;
     public void BeginAssemblyChange() => Asm?.BeginChange();
     public void EndAssemblyChange() => Asm?.EndChange();
 }

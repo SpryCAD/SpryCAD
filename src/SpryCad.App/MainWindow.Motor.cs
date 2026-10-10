@@ -27,8 +27,7 @@ public partial class MainWindow
         public DispatcherTimer? Timer;
         public DateTime Last;
         /// <summary>Where everything was when the page opened (Reset, Cancel), and the turns the mates had counted.</summary>
-        public Dictionary<string, Placement> Start = new();
-        public Dictionary<string, (double a, double b)> Turns = new();
+        public PoseState? Start;
         /// <summary>How far it has turned (degrees, for the readout).</summary>
         public double Turned;
         public Action? Update;
@@ -44,19 +43,14 @@ public partial class MainWindow
         if (Asm is not { } a) return;
         if (_mating != null) { Status("Finish the open Mate page first (OK or Cancel)."); return; }
         if (_motor != null) return;
-        if (a.Model.Doc.Mates.Count == 0) { Status("Add mates first: the motor turns a component and its mates carry the rest."); return; }
+        if (!a.Model.HasMates) { Status("Add mates first: the motor turns a component and its mates carry the rest."); return; }
         a.BeginChange();
-        var st = new Motoring
-        {
-            Start = a.Model.Doc.Components.ToDictionary(c => c.Id, c => c.Placement),
-            Turns = a.Model.Doc.Mates.ToDictionary(m => m.Id, m => (m.AngleA, m.AngleB)),
-        };
+        // (where everything is, flexible sub-assemblies' parts too, and the turns the gears and screws have counted)
+        var st = new Motoring { Start = a.Model.CapturePoses() };
         _motor = st;
         void Restore()
         {
-            foreach (var c in a.Model.Doc.Components) if (st.Start.TryGetValue(c.Id, out var p)) c.Placement = p;
-            // the gears' and screws' counted turns as they were (else they would count from where the motor left them)
-            foreach (var m in a.Model.Doc.Mates) if (st.Turns.TryGetValue(m.Id, out var t)) (m.AngleA, m.AngleB) = t;
+            a.Model.Restore(st.Start!);
             st.Turned = 0;
         }
 
@@ -112,7 +106,7 @@ public partial class MainWindow
         // the mates move everything else
         void Tick()
         {
-            if (_motor != st || st.Axis is not { Component: { } id } ax || FindComponent(id) is not { } c) { Run(false); return; }
+            if (_motor != st || st.Axis is not { Component: { } id } ax || a.Model.Movable(id) is not { } body) { Run(false); return; }
             var now = DateTime.UtcNow;
             var dt = Math.Min(0.1, (now - st.Last).TotalSeconds);
             st.Last = now;
@@ -120,19 +114,19 @@ public partial class MainWindow
             var step = Math.Clamp(st.Rpm * 2 * Math.PI / 60 * dt, -2.0, 2.0) * (st.Reverse ? -1 : 1);
             if (step == 0) return;
             var g = a.Model.World(ax);
-            c.Placement = Placement.From(Transform.Rotation(g.P, g.D, step) * c.Placement.ToTransform());
-            var others = a.Model.Doc.Components.Where(x => !x.Fixed && x.Id != id).Select(x => x.Id).ToHashSet();
+            // (what turns: the component, or the rigid sub-assembly it is part of)
+            a.Model.SetWorld(body, Transform.Rotation(g.P, g.D, step) * a.Model.WorldOf(body));
+            var others = a.Model.MovableComponents().Where(x => x != body).ToHashSet();
             var res = a.Model.SolveMates(others);
             st.Turned += step * 180 / Math.PI;
             if (!res.Satisfied)
             {
                 // the mates do not let it turn (it is held some other way, or the mechanism locks up): back a step
-                c.Placement = Placement.From(Transform.Rotation(g.P, g.D, -step) * c.Placement.ToTransform());
+                a.Model.SetWorld(body, Transform.Rotation(g.P, g.D, -step) * a.Model.WorldOf(body));
                 a.Model.SolveMates(others);
                 st.Turned -= step * 180 / Math.PI;
                 Run(false);
-                var failed = res.Failed().Select(m => a.Model.Doc.Mates.FirstOrDefault(x => x.Id == m)?.Name).Where(n => n != null);
-                Status($"The motor stopped: the mates do not let {c.Name} turn further ({string.Join(", ", failed)}).");
+                Status($"The motor stopped: the mates do not let {a.Model.NameAt(body)} turn further ({string.Join(", ", res.Failed().Select(m => MateName(a.Model, m)))}).");
             }
             RefreshAssemblyScene();
             turnedLbl.Text = $"Turned {st.Turned:0.#}°";
@@ -142,8 +136,7 @@ public partial class MainWindow
         {
             if (st.Axis is { } ax)
             {
-                var c = FindComponent(ax.Component);
-                axisLbl.Text = $"{c?.Name}: turning about the axis of the face picked";
+                axisLbl.Text = $"{(ax.Component != null ? a.Model.NameAt(ax.Component) : "")}: turning about the axis of the face picked";
             }
             else axisLbl.Text = "(no face picked)";
             var running = st.Timer?.IsEnabled == true;
@@ -163,7 +156,7 @@ public partial class MainWindow
         }
         void Ok()
         {
-            var moved = a.Model.Doc.Components.Any(c => st.Start.TryGetValue(c.Id, out var p) && !ReferenceEquals(p, c.Placement));
+            var moved = st.Start!.Moved(a.Model);
             Close();
             // where the motor left it: an undo point (nothing moved: none)
             if (moved) { a.EndChange(); Status("Kept where the motor left it."); }
@@ -184,16 +177,26 @@ public partial class MainWindow
         Status("Motor: click a round face of the component to turn, then Play.");
     }
 
+    /// <summary>A mate by its id (the assembly's, or a flexible sub-assembly's by its path: "C3/M1") as named in the tree.</summary>
+    static string MateName(AssemblyModel m, string id)
+    {
+        if (m.Doc.Mates.FirstOrDefault(x => x.Id == id) is { } own) return own.Name;
+        var i = id.LastIndexOf('/');
+        if (i > 0 && m.Find(id[..i]) is { } o && o.Owner.SubOf(o.Component)?.Model?.Doc.Mates.FirstOrDefault(x => x.Id == id[(i + 1)..]) is { } sub)
+            return $"{sub.Name} in {m.NameAt(id[..i])}";
+        return id;
+    }
+
     /// <summary>A face clicked while the Motor page is open: the axis to turn about, if it is round and its component floats.</summary>
     void MotorPick(string component, string face)
     {
         if (_motor is not { } st || Asm is not { } a) return;
-        var c = FindComponent(component);
-        if (a.Model.RefTo(component, face) is not { Kind: MateGeomKind.Axis } r) { Status($"{c?.Name}: pick a round face (a bore or a shaft): the motor turns about its axis."); return; }
-        if (c is { Fixed: true }) { Status($"{c.Name} is fixed: pick a face of a floating component."); return; }
+        var name = a.Model.NameAt(component);
+        if (a.Model.RefTo(component, face) is not { Kind: MateGeomKind.Axis } r) { Status($"{name}: pick a round face (a bore or a shaft): the motor turns about its axis."); return; }
+        if (a.Model.Movable(component) is not { } body) { Status($"{name} is fixed: pick a face of a floating component."); return; }
         st.Timer?.Stop();
         st.Axis = r;
         st.Update?.Invoke();
-        Status($"Motor: {c?.Name} turns about that axis. Play to run it.");
+        Status($"Motor: {a.Model.NameAt(body)} turns about that axis. Play to run it.");
     }
 }

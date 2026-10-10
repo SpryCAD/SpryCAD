@@ -130,17 +130,31 @@ public static class NativeBlend
             finally { Csg.NoFallback = old; }
             return result;
         }
-        Solid? cu = null, au = null;
-        using (Prof.Time("blend.toolunion"))
+        // exact or failed, never the faceted fallback: it stops at a wall-clock deadline, so whether it finishes
+        // (and leaves a faceted body that every later boolean must then cut without a deadline) varied from run to run
+        var oldExact = Csg.NoFallback;
+        Csg.NoFallback = true;
+        try
         {
-            if (cutTools.Count > 0) cu = Csg.UnionAll(cutTools);
-            if (addTools.Count > 0) au = Csg.UnionAll(addTools);
+            Solid? cu = null, au = null;
+            using (Prof.Time("blend.toolunion"))
+            {
+                if (cutTools.Count > 0) cu = Csg.UnionAll(cutTools);
+                if (addTools.Count > 0) au = Csg.UnionAll(addTools);
+            }
+            using (Prof.Time("blend.apply"))
+            {
+                if (cu != null) result = Csg.Subtract(result, cu);
+                if (au != null) result = Csg.Union(result, au);
+            }
         }
-        using (Prof.Time("blend.apply"))
+        catch (InvalidOperationException ex)
         {
-            if (cu != null) result = Csg.Subtract(result, cu);
-            if (au != null) result = Csg.Union(result, au);
+            errors.Add($"the {(fillet ? "fillet" : "chamfer")} cannot be joined to the body ({ex.Message}). Try a smaller size.");
+            problemEdges?.AddRange(edges.Select(e => e.Samples(1e-3).ToArray()));
+            return body;
         }
+        finally { Csg.NoFallback = oldExact; }
         return result;
     }
 

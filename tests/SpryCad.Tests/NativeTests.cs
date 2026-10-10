@@ -232,6 +232,28 @@ static class NativeBoolTests
             }
         });
 
+        t.Test("Native blend: an open chain across faces ends at its last vertex (oval spoke into a hub); a pattern names its failed seed", () =>
+        {
+            // a flywheel's oval spoke (lines and arcs, drafted) filleted into the hub: one open chain whose B face
+            // changes (side, arc, side, arc). Its far end cap once took the chain's first vertex, running back
+            // across the spoke's foot: "edge used 3 times" from the boolean, then the faceted fallback
+            var dir = AppContext.BaseDirectory;
+            while (dir != null && !Directory.Exists(Path.Combine(dir, "samples"))) dir = Path.GetDirectoryName(dir);
+            var file = Path.Combine(dir!, "tests", "SpryCad.Tests", "models", "flywheel-wide-spokes.sprt");
+            var doc = CadDocument.Load(file);
+            var hub = doc.Features.First(f => f.Name == "Spoke to hub");
+            var r = new Regenerator().Rebuild(doc, doc.Features.IndexOf(hub) + 1);
+            t.True(r.Status[hub.Id].Ok, $"Spoke to hub: {r.Status[hub.Id].Error}");
+            var body = r.State.Bodies[0].Solid.Native;
+            t.True(body != null && body.Validate() == null, $"the filleted body is exact and closed: {body?.Validate()}");
+            // the seed too big for the hub: the pattern says why the seed failed, not that it cannot be patterned
+            doc.Equations.First(e => e.Name == "Rh").Expr = "40";
+            r = new Regenerator().Rebuild(doc);
+            var pattern = doc.Features.First(f => f.Name == "Spokes");
+            t.True(r.Status[hub.Id].Error != null, "an R40 fillet does not fit");
+            t.True(r.Status[pattern.Id].Error?.StartsWith("Spoke to hub failed: ") == true, $"Spokes: {r.Status[pattern.Id].Error}");
+        });
+
         t.Test("Pattern: instances to skip", () =>
         {
             var dir = AppContext.BaseDirectory;

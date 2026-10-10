@@ -12,6 +12,17 @@ public interface IAssemblyHost
     void SelectComponent(string? id);
     void OpenComponent(string id);
     Component? FindComponent(string? id);
+    /// <summary>
+    /// What dragging the component at a path moves (itself, or the rigid sub-assembly carrying it); null when nothing
+    /// there can move (fixed).
+    /// </summary>
+    string? Movable(string id);
+    /// <summary>Where the component at a path is in the assembly.</summary>
+    Transform WorldOf(string id);
+    /// <summary>Puts the component at a path (a movable one) at a placement in the assembly.</summary>
+    void SetWorld(string id, Transform world);
+    /// <summary>The box around the parts at and under a path, in the assembly.</summary>
+    Box3 BoundsOf(string id);
     /// <summary>Before a change (undo point).</summary>
     void BeginAssemblyChange();
     /// <summary>After a change (unsaved; tree and title updated).</summary>
@@ -34,11 +45,12 @@ public interface IAssemblyHost
 /// moves it in the view's plane through the point grabbed, Shift+drag turns it about its middle (left-right about the
 /// view's up, up-down about its right), its mates holding it (it moves only as they let it: where they stop it sliding,
 /// a drag turns it so the grabbed point follows the cursor as far as they allow). A fixed component is not
-/// dragged. While faces are being picked (the Mate page), hover and click pick faces instead.
+/// dragged; a part of a rigid sub-assembly drags the sub-assembly, a floating part of a flexible one itself. While
+/// faces are being picked (the Mate page), hover and click pick faces instead.
 /// </summary>
 public sealed class AssemblyMode(IAssemblyHost host) : IViewportMode
 {
-    Component? _drag;
+    string? _drag;
     Vec3 _grab, _normal, _center;
     Point _last;
     bool _turn, _moved;
@@ -50,14 +62,14 @@ public sealed class AssemblyMode(IAssemblyHost host) : IViewportMode
         if (host.PickingFaces) { var f = vp.PickInstance(p.X, p.Y); host.HoverFace(f?.id, f?.face); return; }
         if (_drag == null) { host.HoverComponent(vp.PickInstance(p.X, p.Y)?.id); return; }
         if (!_moved) { host.BeginAssemblyChange(); _moved = true; }
-        var t = _drag.Placement.ToTransform();
+        var t = host.WorldOf(_drag);
         (Vec3, Vec3, Vec3)? pull = null;
         if (_turn)
         {
             double dx = p.X - _last.X, dy = p.Y - _last.Y;
             var up = Camera.V(vp.Camera.Up); var right = Camera.V(vp.Camera.Right);
             var r = Transform.Rotation(_center, up, dx * 0.01) * Transform.Rotation(_center, right, dy * 0.01);
-            _drag.Placement = Placement.From(r * t);
+            host.SetWorld(_drag, r * t);
         }
         else
         {
@@ -66,17 +78,17 @@ public sealed class AssemblyMode(IAssemblyHost host) : IViewportMode
             var den = Vec3.Dot(d, _normal);
             if (Math.Abs(den) < 1e-12) return;
             var hit = o + d * (Vec3.Dot(_grab - o, _normal) / den);
-            _drag.Placement = Placement.From(Transform.Translation(hit - _grab) * t);
+            host.SetWorld(_drag, Transform.Translation(hit - _grab) * t);
             _grab = hit;
             // where the mates stop it sliding there, it turns (and what it is mated to moves) as far as they let the
             // point follow the cursor: a gear on its axis turns with the cursor round it
-            pull = (_drag.Placement.ToTransform().RigidInverse().Point(hit), o, d);
+            pull = (host.WorldOf(_drag).RigidInverse().Point(hit), o, d);
         }
         _last = new Point(p.X, p.Y);
         // the mates pull it back onto them: the grabbed point goes where they leave it
-        var dragged = _drag.Placement.ToTransform();
-        host.Dragged(_drag.Id, pull);
-        _grab = _drag.Placement.ToTransform().Point(dragged.RigidInverse().Point(_grab));
+        var dragged = host.WorldOf(_drag);
+        host.Dragged(_drag, pull);
+        _grab = host.WorldOf(_drag).Point(dragged.RigidInverse().Point(_grab));
     }
 
     public void PointerDown(ViewportControl vp, PointerInfo p)
@@ -85,14 +97,13 @@ public sealed class AssemblyMode(IAssemblyHost host) : IViewportMode
         if (host.PickingFaces) { if (hit is { face: { } face } fh) host.PickFace(fh.id, face); return; }
         if (p.ClickCount >= 2) { if (hit is { } dh) host.OpenComponent(dh.id); return; }
         host.SelectComponent(hit?.id);
-        if (hit is not { } h || host.FindComponent(h.id) is not { Fixed: false } c) return;
-        _drag = c; _grab = h.point; _moved = false; _turn = p.Shift;
+        if (hit is not { } h || host.Movable(h.id) is not { } target) return;
+        _drag = target; _grab = h.point; _moved = false; _turn = p.Shift;
         _normal = vp.Camera.Ray(p.X, p.Y).dir;
         _last = new Point(p.X, p.Y);
         // its middle: the placed box's center
-        var mesh = vp.Instances.FirstOrDefault(i => i.Id == c.Id).Mesh;
-        var b = mesh?.Bounds ?? Box3.Empty;
-        _center = b.IsEmpty ? h.point : c.Placement.ToTransform().Point(b.Center);
+        var b = host.BoundsOf(target);
+        _center = b.IsEmpty ? h.point : b.Center;
     }
 
     public void PointerUp(ViewportControl vp, PointerInfo p)
