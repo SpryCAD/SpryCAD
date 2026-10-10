@@ -65,7 +65,7 @@ public static class NativeBlend
             {
                 List<Solid>? tools; bool convex, fits; Solid? strip;
                 using (Prof.Time("blend.tools")) (tools, convex, fits, strip) = ForceRollingBall ? (null, false, false, null)
-                    : e.Curve is NCircle ? ArcTools(group, size, fillet, name, ch, RefIsFirst, direct) : LineTool(e, size, fillet, name, ch, RefIsFirst, direct);
+                    : e.Curve is NCircle ? ArcTools(group, size, fillet, name, ch, RefIsFirst, direct, body.Native!) : LineTool(e, size, fillet, name, ch, RefIsFirst, direct, body.Native!);
                 if (tools == null && fillet)
                 {
                     // any other pair of faces: rolling ball along the chain of edges this edge belongs to; first across
@@ -362,7 +362,7 @@ public static class NativeBlend
     static Vec3 Tangent(NCoedge c, double t) => (c.Edge.Curve.Deriv(t) * (c.Forward ? 1 : -1)).Normalized;
 
     static (List<Solid>? tools, bool convex, bool fits, Solid? strip) LineTool(NEdge e, double size, bool fillet, string name, ChamferSize ch, Func<NFace, NFace, bool> refIsFirst,
-        bool direct)
+        bool direct, NBody body)
     {
         var cA = e.Uses[0]; var cB = e.Uses[1];
         if (e.Curve is not NLine || cA.Face.Surface.Kind != SurfaceKind.Plane || cB.Face.Surface.Kind != SurfaceKind.Plane) return (null, false, false, null);
@@ -378,6 +378,18 @@ public static class NativeBlend
         var (dA, dB) = fillet ? (size, size) : EdgeBlend.ChamferLegs(P(uA), P(uB), ch, refIsFirst(cA.Face, cB.Face));
         var loop = EdgeBlend.Profile2D(P(uA), P(uB), P(nA), P(nB), Vec2.Zero, dA, fillet, convex, dB);
         if (loop == null) return (null, convex, false, null);
+        // the profile reaches past the corner (half the size, outside a convex edge, inside a concave one): where
+        // that space is taken (a wall across a narrow gap, a void behind), the profile bounded by the faces instead
+        {
+            var o2 = (P(nA) + P(nB)).Normalized * ((convex ? 1 : -1) * Math.Max(dA, dB) * 0.5);
+            var off = x * o2.X + y * o2.Y;
+            var pts = new List<Vec3>();
+            foreach (var s0 in new[] { 0.1, 0.3, 0.5, 0.7, 0.9 })
+                foreach (var f in new[] { 0.5, 0.95 })
+                    pts.Add(E + t * (L * s0) + off * f);
+            if (Taken(body, cA.Face, cB.Face, pts, convex) && EdgeBlend.Profile2D(P(uA), P(uB), P(nA), P(nB), Vec2.Zero, dA, fillet, convex, dB, atCorner: true) is { } bounded)
+                loop = bounded;
+        }
         var (tlA, tlB) = TangentLengths(P(uA), P(uB), size, fillet, dA, dB);
         // ends meeting a face at an angle (an edge of a drafted boss on the plate): the tool's square end leans past
         // that face on one side, into the material beyond it, and falls short on the other. The tool is cut back to
@@ -415,7 +427,7 @@ public static class NativeBlend
     }
 
     static (List<Solid>? tools, bool convex, bool fits, Solid? strip) ArcTools(List<NEdge> arcs, double size, bool fillet, string name, ChamferSize ch, Func<NFace, NFace, bool> refIsFirst,
-        bool direct)
+        bool direct, NBody body)
     {
         var e = arcs[0];
         var cP = e.Uses[0]; var cC = e.Uses[1];
@@ -460,6 +472,22 @@ public static class NativeBlend
             var a0 = Ang(arc.V0.P); var sweep = Wrap(Ang(arc.V1.P) - a0);
             if (Wrap(Ang(arc.Mid) - a0) > sweep) { a0 = Ang(arc.V1.P); sweep = Wrap(Ang(arc.V0.P) - a0); }
             ranges.Add((a0, sweep));
+        }
+        // the profile's reach past the corner, as the line tool's: where its space is taken, the profile bounded by the
+        // faces instead
+        {
+            var o2 = (nP2 + nC2).Normalized * ((convex ? 1 : -1) * Math.Max(dP, dC) * 0.5);
+            var pts = new List<Vec3>();
+            foreach (var (a0, sweep) in ranges)
+                foreach (var s0 in new[] { 0.1, 0.3, 0.5, 0.7, 0.9 })
+                {
+                    var a = a0 + sweep * s0;
+                    var dir = refDir * Math.Cos(a) + yDir * Math.Sin(a);
+                    foreach (var f in new[] { 0.5, 0.95 }) pts.Add(cs.Origin + dir * (cs.R + o2.X * f) + ax * (h0 + o2.Y * f));
+                }
+            if (Taken(body, cP.Face, cC.Face, pts, convex)
+                && EdgeBlend.Profile2D(uP2, uC2, nP2, nC2, new Vec2(cs.R, h0), dP, fillet, convex, dC, atCorner: true) is { } bounded)
+                prof = bounded;
         }
         // chain ends meeting a face at an angle (e.g. a keyway wall across a bore): extensions past the ends, each
         // cut back to its face
@@ -730,6 +758,23 @@ public static class NativeBlend
     {
         new Vec3(0.5773, 0.5774, 0.5775).Normalized, new Vec3(-0.3121, 0.8410, 0.4419).Normalized, new Vec3(0.7071, -0.1213, -0.6965).Normalized,
     };
+
+    /// <summary>
+    /// Whether the space a tool reaches into past an edge's corner is taken: material beside a convex edge (the tool,
+    /// subtracted, would cut it), open space beside a concave one (added, it would fill it). Only the exact test where
+    /// a face other than the edge's two reaches into that space's box (otherwise it is as the two faces leave it).
+    /// </summary>
+    static bool Taken(NBody body, NFace fa, NFace fb, List<Vec3> pts, bool convex)
+    {
+        var box = Box3.Empty;
+        foreach (var p in pts) box.Add(p);
+        if (!body.Faces.Any(f => !ReferenceEquals(f, fa) && !ReferenceEquals(f, fb) && f.Bounds().Overlaps(box, 1e-6))) return false;
+        using var _ = Prof.Time("blend.reach");
+        body.Link();
+        var doms = new Dictionary<NFace, NDomain>(ReferenceEqualityComparer.Instance);
+        foreach (var f in body.Faces) doms[f] = NDomain.Cached(f, 1e-3);
+        return pts.Any(p => Inside(body, doms, p) == convex);
+    }
 
     /// <summary>Whether p lies inside the body (ray parity on the exact faces).</summary>
     public static bool PointInside(NBody body, Vec3 p)
