@@ -147,7 +147,8 @@ public static class EdgeBlend
     /// (into the faces), nA/nB are the outward face normals. A chamfer runs from <paramref name="size"/> along
     /// face A to <paramref name="sizeB"/> (default: the same) along face B.
     /// </summary>
-    internal static ProfileLoop? Profile2D(Vec2 uA, Vec2 uB, Vec2 nA, Vec2 nB, Vec2 E, double size, bool fillet, bool convex, double sizeB = double.NaN)
+    internal static ProfileLoop? Profile2D(Vec2 uA, Vec2 uB, Vec2 nA, Vec2 nB, Vec2 E, double size, bool fillet, bool convex, double sizeB = double.NaN,
+        bool atCorner = false)
     {
         uA = uA.Normalized; uB = uB.Normalized;
         var cosT = Math.Clamp(Vec2.Dot(uA, uB), -1, 1);
@@ -155,10 +156,11 @@ public static class EdgeBlend
         if (theta < 1e-3 || theta > Math.PI - 1e-3) return null;
         if (double.IsNaN(sizeB)) sizeB = size;
         // the tool reaches slightly past the corner (outside for cuts, inside for additions); its sides from the
-        // leg ends to there stay off the faces, so only the chamfer triangle acts on the body
+        // leg ends to there stay off the faces, so only the chamfer triangle acts on the body. atCorner: its sides
+        // end at the corner, on the faces (a direct blend's tool, whose sides are the strips the blend replaces)
         var outDir = (nA + nB).Normalized;
         if (outDir.LengthSq < 0.5) return null;
-        var X = E + outDir * (convex ? 1 : -1) * Math.Max(size, sizeB) * 0.5;
+        var X = atCorner ? E : E + outDir * (convex ? 1 : -1) * Math.Max(size, sizeB) * 0.5;
         var loop = new ProfileLoop();
         if (!fillet)
         {
