@@ -22,7 +22,8 @@ or checked against the old ones (see *Checking a change* below).
 | `e323738` | `Classify`'s refinement: near segments found through the 16-segment boxes, coedges no nearer than the band not measured, fine UV mapped only for the crossing test, crossing parity as the polygon's flipped by the swapped segments, the exact distance over the swapped coedges only (results bit for bit; `sec.midclass` 2–3× faster: handwheel 25 to 9 ms, spur-gear-nice 30 to 15 ms) |
 | `ff6ab13` | `BSplineCurve.Interpolate` stores only the band of its system (4p + 1 entries a row, every entry the elimination reads or writes) instead of a dense (n+1)² matrix and its clone; the dense matrix is rebuilt only for the general fallback (results bit for bit; 3,000 points: 144 MB to 0.3 MB) |
 | `3f2183d` | Screw-surface ray casts: the crossings of a screw surface found once per ray when several faces share it (a thread's seam-split faces); steps of the march outside the generator's radial band about the axis (padded by its sample spacing and the hit tolerance) not sampled; the closest-point seeds' frame coordinates taken once (results bit for bit; `cls.rays` about 1.5–2× faster on the threaded parts) |
-| (next) | Mass properties with exact surface derivatives: `NSurface.TryPartials` for B-splines, screw surfaces and offsets of B-splines (the normal's derivative from the base's second derivatives), `PipeSpine.SurfacePartials` along a pipe's spine (the frame's derivative from the spine's second derivative and the interpolated normal), instead of central differences (results within 3e-10 relative; spoked handwheel's exact integration ~450 to ~300 ms) |
+| `1a00a45` | Mass properties with exact surface derivatives: `NSurface.TryPartials` for B-splines, screw surfaces and offsets of B-splines (the normal's derivative from the base's second derivatives), `PipeSpine.SurfacePartials` along a pipe's spine (the frame's derivative from the spine's second derivative and the interpolated normal), instead of central differences (results within 3e-10 relative; spoked handwheel's exact integration ~450 to ~300 ms) |
+| (next) | Mass properties: a contact curve's panels end at the spine's nodes (the curve is only C1 there) with 4 Gauss points each, instead of uniform panels across them with 8 (spoked handwheel 2.5e-9 nearer the converged volume, exact integration ~270 to ~155 ms). `Topology.Build` welding once for the quick and the full pass was tried: the quick pass already succeeds on every sample, nothing to gain |
 
 ## Where the time goes now
 
@@ -61,12 +62,10 @@ profile; the profile's times are summed over threads). On the heavy samples (`sa
    unhinted `Closest` (17 seeds, 3 Gauss-Newton solves). Warm-starting from the previous step would follow one turn
    where the nearest point jumps between turns; skipping by the step's distance is not safe either, since `Closest`
    can return a farther foot. Both would need parity checks against the full march.
-9. **Mass properties**: exact derivatives done (see above). Panels: fewer is not free. Contact and section curves
-   are the pipe spine (cubic Hermite, C1 at its nodes) projected on a surface, and uniform panels straddle the nodes,
-   so the integral converges slowly: from the current 1/4 of the curve's samples, 4× more panels still moves volumes
-   by up to 3e-8 and Ixx by 2e-6; 4× fewer moves them by 3e-7 and 1e-5. Panels at the spine's nodes (as polylines get
-   at their vertices) should be both more accurate and allow fewer Gauss points per panel. The curves' `Deriv` is a
-   central difference (two projections each).
+9. **Mass properties**: done (see above). Against panels at the frame's samples too (the pipe's frame is
+   interpolated linearly, 8 samples a spine segment), the result moves by 1e-12 at 7× the cost: the nodes are what
+   matters. Other curves (helices, fitted splines) still converge slowly: 4× more panels moves the acme screw's Ixx by
+   1e-6. The curves' `Deriv` is a central difference (two projections each for a contact curve).
 10. **Display pipeline**:
     - `NTess` emits one `Face` object per triangle, then `Topology.Build` re-welds every corner through a dictionary.
       Indexed per-face output would skip the weld.
