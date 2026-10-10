@@ -226,6 +226,54 @@ static class DirectBlendTests
             t.True(dvs[0] > 0 && Math.Abs(dvs[0] - dvs[1]) < 1e-4 * dvs[0], $"added {dvs[0]:R} and {dvs[1]:R}");
         });
 
+        t.Test("Hex socket (socket cap screw): rim and floor blends mitred at the corners; inside corners and rim in one feature", () =>
+        {
+            // the sample screw's socket: a hexagon, apothem 2.5, 3 deep. A blend round a polygon's edges, mitred at its
+            // corners, is its cross-section along the sides plus, at each corner, twice tan(half the turn) times the
+            // cross-section's first moment about the wall: added outside the hole (rim), taken off inside (floor)
+            var dir = AppContext.BaseDirectory;
+            while (dir != null && !Directory.Exists(Path.Combine(dir, "samples"))) dir = Path.GetDirectoryName(dir);
+            var path = Path.Combine(dir!, "samples", "demos", "socket-screw.sprt");
+            double r = 0.5, P = 6 * 2 * 2.5 * Math.Tan(Math.PI / 6), corners = 6 * Math.Tan(Math.PI / 6);
+            // per unit length: the fillet's (the square less the quarter disc) and the chamfer's triangle; their moments
+            double af = r * r * (1 - Math.PI / 4), mf = r * r * r * (5.0 / 6 - Math.PI / 4), ac = r * r / 2, mc = r * r * r / 6;
+            double Changed(Func<Kernel.Native.NEdge, bool> which, Func<List<EdgeRef>, Feature[]> feats)
+            {
+                var doc = CadDocument.Load(path);
+                var sock = doc.Features.First(f => f.Name == "Socket" && f is ExtrudeFeature);
+                var r0 = new Regenerator().Rebuild(doc, doc.Features.IndexOf(sock) + 1);
+                var nb = r0.State.Bodies[0].Solid.Native!;
+                nb.Link();
+                var refs = nb.Edges.Where(e => e.Uses.Count == 2 && e.Uses.Any(u => u.Face.Tag.Name.StartsWith(sock.Id + ".")) && which(e))
+                    .Select(e => new EdgeRef { A = e.Uses[0].Face.Tag.Name, B = e.Uses[1].Face.Tag.Name, Hint = e.Curve.Eval(0.5 * (e.T0 + e.T1)) }).ToList();
+                var fs = feats(refs);
+                for (int i = 0; i < fs.Length; i++) { fs[i].Name = $"Blend {i}"; doc.Features.Insert(doc.Features.IndexOf(sock) + 1 + i, fs[i]); }
+                var r1 = new Regenerator().Rebuild(doc, doc.Features.IndexOf(fs[^1]) + 1);
+                foreach (var f in fs) t.True(r1.Status[f.Id].Ok, $"{f.Name}: {r1.Status[f.Id].Error}");
+                t.True(r1.State.Bodies[0].Solid.Native?.Validate() == null, "valid");
+                return KernelTests.Vex(r1.State.Bodies[0].Solid) - KernelTests.Vex(r0.State.Bodies[0].Solid);
+            }
+            var sockId = "F4";
+            bool Vert(Kernel.Native.NEdge e) => e.Uses.All(u => u.Face.Tag.Name.StartsWith(sockId + ".S"));
+            bool Floor(Kernel.Native.NEdge e) => e.Uses.Any(u => u.Face.Tag.Name == sockId + ".End");
+            bool Rim(Kernel.Native.NEdge e) => !Vert(e) && !Floor(e);
+            Feature Fil(List<EdgeRef> es) => new FilletFeature { Radius = "0.5", Edges = es };
+            Feature Cha(List<EdgeRef> es) => new ChamferFeature { Distance = "0.5", Edges = es };
+            void Near(string what, double v, double e) => t.True(Math.Abs(v - e) < 1e-6 + 1e-5 * Math.Abs(e), $"{what}: {v:R}, expected {e:R}");
+            // the rim (convex, round the hole: outside it) used to stop short of each corner, leaving it unblended
+            Near("rim chamfer", Changed(Rim, es => new[] { Cha(es) }), -(ac * P + 2 * corners * mc));
+            Near("rim fillet", Changed(Rim, es => new[] { Fil(es) }), -(af * P + 2 * corners * mf));
+            Near("floor fillet", Changed(Floor, es => new[] { Fil(es) }), af * P - 2 * corners * mf);
+            // the inside corners (concave) and the rim (convex) in one feature: as the corners first, then the rim
+            // running on round them, in two (at once their tools collided at the rim's corners)
+            var two = Changed(e => Vert(e) || Rim(e), es => new[] { Fil(es.Where(x => x.A.StartsWith(sockId + ".S") && x.B.StartsWith(sockId + ".S")).ToList()), Fil(es.Where(x => !(x.A.StartsWith(sockId + ".S") && x.B.StartsWith(sockId + ".S"))).ToList()) });
+            Near("corners and rim filleted at once", Changed(e => Vert(e) || Rim(e), es => new[] { Fil(es) }), two);
+            // chamfered: the corners' triangles (120° apart) along the depth 3; the rim round the twelve-sided outline
+            // they leave (sides 2.887 - 1 and 0.866, turns of 30°)
+            double cornerTri = 0.5 * r * r * Math.Sin(2 * Math.PI / 3) * 3 * 6, p12 = 6 * (2.5 * 2 * Math.Tan(Math.PI / 6) - 1) + 6 * 2 * r * Math.Sin(Math.PI / 3);
+            Near("corners and rim chamfered at once", Changed(e => Vert(e) || Rim(e), es => new[] { Cha(es) }), cornerTri - (ac * p12 + 2 * 12 * Math.Tan(Math.PI / 12) * mc));
+        });
+
         t.Test("Fillet round a spoke's foot on a rim (undrafted): the tangent chain as one tool when its pieces overflow", () =>
         {
             // the oval spoke's straight side meets the rim along a circle (the exact arc tool), its round ends and
