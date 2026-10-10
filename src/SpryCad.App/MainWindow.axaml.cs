@@ -103,7 +103,10 @@ public partial class MainWindow : Window
     {
         UpdateUndoButtons();
         RefreshScene();
-        RebuildTree();
+        // a preview's result: the tree shows the document and the real result, which a preview leaves as they were
+        // (it rebuilds a copy; a change to the document rebuilds the tree itself)
+        if (!(Session.PreviewActive && Asm == null && ReferenceEquals(_treeDoc, Session.Doc) && ReferenceEquals(_treeResult, Session.Result)))
+            RebuildTree();
         var r = Session.Result;
         if (r != null)
         {
@@ -165,11 +168,30 @@ public partial class MainWindow : Window
         RebuildTree();
     }
 
+    // what the feature tree was last built from
+    object? _treeDoc, _treeResult;
+
     void RebuildTree()
     {
         if (Asm is { } a) { _asmTree.Show(a); return; }
+        var t0 = TreeProfile ? System.Diagnostics.Stopwatch.GetTimestamp() : 0;
+        _treeDoc = Session.Doc; _treeResult = Session.Result;
         Tree.Rebuild(Session.Doc, Session.Title.TrimEnd(' ', '*'), Session.Result);
         if (FlyoutHost.IsVisible) RebuildFlyoutTree();
+        if (TreeProfile) NoteTree(System.Diagnostics.Stopwatch.GetElapsedTime(t0).TotalMilliseconds);
+    }
+
+    // SPRYCAD_PROFILE_TREE: the feature tree's rebuilds (count, average and worst time) written to the log every 2 s
+    static readonly bool TreeProfile = Environment.GetEnvironmentVariable("SPRYCAD_PROFILE_TREE") != null;
+    int _trCalls; double _trMs, _trMax; long _trSince = System.Diagnostics.Stopwatch.GetTimestamp();
+
+    void NoteTree(double ms)
+    {
+        _trCalls++; _trMs += ms; _trMax = Math.Max(_trMax, ms);
+        var span = System.Diagnostics.Stopwatch.GetElapsedTime(_trSince).TotalSeconds;
+        if (span < 2) return;
+        App.Note($"tree: {_trCalls} rebuilds in {span:0.0} s, {_trMs / _trCalls:0.00} ms average, {_trMax:0.00} ms worst ({Session.Doc.Features.Count} features)");
+        _trCalls = 0; _trMs = 0; _trMax = 0; _trSince = System.Diagnostics.Stopwatch.GetTimestamp();
     }
 
     /// <summary>Pushes the current rebuild result (or rolled back / preview state) into the viewport.</summary>

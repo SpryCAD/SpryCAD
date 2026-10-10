@@ -163,6 +163,14 @@ public static class Icons
     static IBrush Stroke => Palette.Text;
     static IBrush Accent => Palette.Accent;
 
+    // each path parsed once and shared by every icon drawn with it (the tree makes its icons on every rebuild)
+    static readonly Dictionary<string, Geometry> _parsed = new();
+    static Geometry Parsed(string path)
+    {
+        if (!_parsed.TryGetValue(path, out var g)) _parsed[path] = g = Geometry.Parse(path);
+        return g;
+    }
+
     public static Control Make(string name, double size = 20, IBrush? stroke = null, IBrush? accent = null)
     {
         var canvas = new Canvas { Width = 24, Height = 24 };
@@ -170,7 +178,7 @@ public static class Icons
         {
             canvas.Children.Add(new Path
             {
-                Data = Geometry.Parse(d.path),
+                Data = Parsed(d.path),
                 Stroke = stroke ?? Stroke,
                 StrokeThickness = 1.6,
                 StrokeLineCap = PenLineCap.Round,
@@ -179,7 +187,7 @@ public static class Icons
             if (d.accent != null)
                 canvas.Children.Add(new Path
                 {
-                    Data = Geometry.Parse(d.accent),
+                    Data = Parsed(d.accent),
                     Stroke = accent ?? Accent,
                     StrokeThickness = 1.8,
                     StrokeLineCap = PenLineCap.Round,

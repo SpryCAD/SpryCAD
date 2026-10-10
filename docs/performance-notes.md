@@ -116,8 +116,10 @@ profile; the profile's times are summed over threads). On the heavy samples (`sa
   - Assembly hover ray-tests every triangle; cull by face boxes as `PickItem` does.
 - **Sketch lookups**: `Sketch.Point`, `Entity` and `P` are linear scans used per entity per frame. Selection is a
   `List`.
-- **Feature tree**: rebuilt fully 2–3 times per edit and on every preview tick. Icon SVG paths are re-parsed each
-  time.
+- **Feature tree**: no longer rebuilt for a preview's result (it shows the document and the real result, which a
+  preview leaves alone); icon paths parsed once; one rollback-bar cursor. Measured with `SPRYCAD_PROFILE_TREE=1`
+  editing Fillet1 of spur-gear-nice with four previews: one rebuild (the cancel) instead of five; a rebuild of the
+  18-feature tree costs 3–11 ms either way. Still rebuilt in full on each document change and real result.
 - **Dynamic geometry**: cosmetic thread helices and sketches are rebuilt and re-uploaded every frame.
 - **Saving and startup**:
   - Autosave re-hashes and recompresses attachments every time; cache them per array instance.
