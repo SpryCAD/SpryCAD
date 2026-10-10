@@ -14,7 +14,36 @@ Commands (from the repository root):
   8 points through the turns), prints the mass, and writes `hit-and-miss.sasm`, the indented bill of materials
   (`bom.csv`) and pictures.
 
+## To fix (open)
+
+1. **Mirror of a fillet makes the body faceted, silently** (Kernel, first item below). Blocks filleting the ribs.
+2. **No warning when a feature leaves the body faceted.** Any fall back to facets should say so on the feature (and
+   `verify-engine` shows only FAIL without a reason); everything after it on facets is slow (minutes).
+3. **The foot chamfer is slow:** the distance-distance chamfer round the body's foot (four straight edges, four R20
+   corner rounds, drafted side) takes the casting from about 1.3 s to 3.6-6.6 s.
+4. **Corner blends where tangent fillets meet** (the "run into each other" message): no longer seen on the engine
+   after #12, but the plans below for the general case stand.
+5. Not kernel: the open items under Messages, Modeling features (loft, whole-body blends), Assembly (cam and one-sided
+   contact, governor, flexible springs, smart fasteners, tapped holes in interference, STEP structure, materials in
+   Core, an embedded sub-assembly from a model) and Appearance (colour per face, transparency).
+
 ## Kernel
+
+- **Mirroring a filleted rib makes the whole body faceted, silently (OPEN; blocks the rib fillets).** Casting: a
+  triangular rib under the bearing pedestal (Right plane, extruded mid-plane 12), then "Pedestal rib fillets" R3 (four
+  edges: the rib's two faces with the body's drafted side, and with the pedestal's underside): exact, 134 ms. Then
+  "Pedestal rib, back", a Mirror of the rib and its fillet across Front: the body comes out faceted (not native), with
+  no error or warning on the feature; every later boolean then runs on facets (the casting's rebuild 57 s instead of
+  about 5 s, and `verify-engine` reports only FAIL). Mirroring the rib alone has always been fine. `engine-steps
+  Casting` prints, per step, whether the body is exact and closed and stops at the first that is not. Repro: in
+  `HmCasting`, take `Suppressed = true` off "Pedestal rib fillets" and add it (`pedRibR`) to the mirror's seeds, then
+  `engine-steps Casting` (step 18). To fix: the mirror of a blend (the copied blend tool, or the mirrored fillet
+  applied to the other rib), and the silent fall to facets (a warning at least). *Instead:* the fillets suppressed,
+  the rib mirrored alone.
+- **The body's foot: a chamfer now (WORKS, slow).** The distance-distance chamfer (16 up the side, 8 out over the
+  base) round the foot, one edge picked, the rest following round the R20 corners: exact, the same volume as the
+  drafted plinth it replaced. The casting's rebuild went from about 1.3 s to 3.6-6.6 s with it. A fillet there instead
+  (R6) is untried since the fixes.
 
 - **Intermittent hang rebuilding the flywheel with wider spokes. FIXED (branch `blend-quick-fixes`).** `HmFlywheel`
   with `SpW = 32`, `SpT = 18` (instead of 26 / 14), saved as `repro/flywheel-wide-spokes.sprt`; reproduced 2 runs in 6
@@ -48,7 +77,9 @@ Commands (from the repository root):
   casting operation. *Instead:* no blend. The convex case fails the same way: the hopper (a rectangle extruded 82 up
   with 2° draft, its four vertical edges filleted R12) with its top edge rounded R4 all round (one edge picked,
   tangent edges following) gives "the fillets that run into neighbouring geometry also run into each other where both
-  are tangent to the same face". (`HmCasting`, feature "Hopper top edge", left out.) To fix:
+  are tangent to the same face". (`HmCasting`, feature "Hopper top edge", left out.) **Hopper top edge: FIXED after
+  #12** (exact, in the part now). The foot is a chamfer now (above); the R6 fillet there is untried. The plans, for
+  the general case:
   - "Run into each other" (`NativeBlend.Apply`, the trimmed branch) is a catch-all for a failed boolean, not a corner
     step that gives up. Each tool is trimmed against the body alone (`TrimToEdge`), then applied one at a time; two
     blends tangent to the same face meet tangentially and the second boolean fails. Cheaper: where neighbouring
@@ -62,7 +93,9 @@ Commands (from the repository root):
     choose A by vote across the pieces, either side; where B changes at an angle (not tangentially), the same corner
     join as above (~150-300 lines). Not yet clear why the undrafted R20 corners skip `ArcTools`: the
     `NativeBlend.Debug` line in `Apply` prints the surface kinds and would show it.
-- **A single convex edge fails with "run into each other".** Casting: the body's top edge along its side (the drafted
+- **A single convex edge fails with "run into each other". FIXED after #12:** the front segments now fillet (with the
+  pit's edges, one feature "Wall tops"). The "back" segments and the pit's two short back segments were my mistake,
+  not the kernel's: behind the pedestals the body's side is its R20 corner round, so there is no such edge. Was: Casting: the body's top edge along its side (the drafted
   side face, 2°, and the flat top at y = 0), R4, each segment a fillet of its own with one edge: the four segments
   (either side, before and behind the bearing pedestal; they run into the hopper or the cam gear's boss at one end and
   the pedestal at the other, or into the body's R20 corner fillet at the back) each fail with "the fillets that run
@@ -74,7 +107,8 @@ Commands (from the repository root):
   `verify-engine - Casting`. Also: two short segments of the pit's top edge (x 32..40, behind the pedestals) are not
   found as an edge between the pit's wall and the body's top (`F48.S.L5` / `F7.End`): the top there may carry the
   pedestal's name after the union. *Instead:* only the pit's front edges rounded.
-- **A sketch of overlapping closed loops extrudes to a broken body, silently.** Rocker: a rectangle with circles
+- **A sketch of overlapping closed loops extrudes to a broken body, silently. FIXED (#13: extruded as their union).**
+  The rocker is still three sketches (as a designer might model it anyway). Was: Rocker: a rectangle with circles
   overlapping its ends and middle, in one sketch, extruded: no error or warning, but the body is open (not a valid
   solid). Either union the regions or say why. *Instead:* three sketches, three extrudes. To fix:
   `ProfileExtractor.Extract` only joins curves at shared sketch points (crossing curves are never split), and
