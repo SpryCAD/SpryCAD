@@ -363,6 +363,24 @@ static class DirectBlendTests
             }
         });
 
+        t.Test("Mirror of a fillet whose pieces go one at a time: the copy filleted the same, the body exact (not faceted)", () =>
+        {
+            // the rib's fillets into the plate and the wall meet where the rib meets both; their tools, joined to be
+            // copied, made the whole body faceted (on a worker thread, the faceted fallback was not refused)
+            var doc = Demos.BlendCases.First(c => c.name == "rib against a wall, filleted and mirrored").build();
+            int Index(string name) => doc.Features.FindIndex(f => f.Name == name);
+            var reg = new Regenerator();
+            double Vol(int n) { var r = reg.Rebuild(doc, n); return KernelTests.Vex(r.State.Bodies[0].Solid); }
+            var beforeRib = Vol(Index("Rib"));
+            var filleted = Vol(Index("Rib fillets") + 1);
+            var res = reg.Rebuild(doc);
+            foreach (var f in doc.Features) t.True(res.Status[f.Id].Ok && res.Status[f.Id].Warnings.Count == 0, $"{f.Name}: {res.Status[f.Id].Error} {string.Join("; ", res.Status[f.Id].Warnings)}");
+            var nb = res.State.Bodies[0].Solid.Native;
+            t.True(nb != null && nb.Validate() == null, $"exact and closed: {nb?.Validate()}");
+            var mirrored = KernelTests.Vex(res.State.Bodies[0].Solid);
+            t.True(Math.Abs(mirrored - beforeRib - 2 * (filleted - beforeRib)) < 1e-6 * mirrored, $"the copy adds {mirrored - filleted:R}, the rib and its fillets {filleted - beforeRib:R}");
+        });
+
         t.Test("Direct blend: off (FC_BLEND=boolean) applies nothing directly", () =>
         {
             var before = DirectBlend.Counts;

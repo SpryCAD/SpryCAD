@@ -41,7 +41,14 @@ public sealed class ToolInfo
 /// blend again where they are not (e.g. a groove patterned onto a fillet: the fillet on its rim runs differently).
 /// </summary>
 public sealed record BlendSpec(List<SpryCad.Core.Model.EdgeRef> Refs, double Size, bool Fillet, bool Propagate, bool Overflow,
-    SpryCad.Kernel.ChamferSize? Chamfer, List<SpryCad.Kernel.Vec3[]> Edges, double Length);
+    SpryCad.Kernel.ChamferSize? Chamfer, List<SpryCad.Kernel.Vec3[]> Edges, double Length)
+{
+    /// <summary>
+    /// Its tools were cut back to neighbouring geometry and applied one at a time (joined, they meet face to face): a
+    /// pattern solves it again on each instance rather than copying the tools joined.
+    /// </summary>
+    public bool OneAtATime { get; init; }
+}
 
 /// <summary>
 /// A thread shown cosmetically (not modeled): a helix of the given lead on the cylinder of <c>Radius</c> about the

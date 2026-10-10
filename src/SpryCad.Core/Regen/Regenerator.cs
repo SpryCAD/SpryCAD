@@ -95,6 +95,11 @@ public sealed class Regenerator
                     // (the kernel's long operations stop between their stages too)
                     using (Kernel.Cancellation.Use(cancel))
                     using (Prof.Time("feature." + f.GetType().Name)) ctx.Execute();
+                    // an exact body left faceted (a boolean fell back to facets): said, or nothing shows why everything
+                    // after it is slow and approximate
+                    if (state.Bodies.All(b => b.Solid.Native != null) && ctx.State.Bodies.Any(b => b.Solid.Native == null))
+                        st.Warnings.Add("The result is no longer exact (an exact boolean failed" + (Csg.LastFallbackReason is { } why ? ": " + why : "")
+                            + "), so the features after it are slower and approximate.");
                     state = ctx.State;
                 }
                 catch (OperationCanceledException) { throw; }
@@ -929,6 +934,7 @@ public sealed class Regenerator
             var bodies = new List<Body>();
             var errors = new List<string>();
             var applied = new List<(Solid tool, bool cut)>();
+            var oneAtATime = new System.Runtime.CompilerServices.StrongBox<bool>();
             var blended = new List<Vec3[]>(); double blendedLength = 0;
             foreach (var b in State.Bodies)
             {
@@ -936,7 +942,7 @@ public sealed class Regenerator
                 List<Kernel.Native.NEdge> edges; using (Prof.Time("blend.expand")) edges = NativeBlend.Expand(b.Solid.Native!, seeds, propagate);
                 using (Prof.Time("blend.snapshot")) { blended.AddRange(edges.Select(EdgePoints)); blendedLength += edges.Sum(TrueLength); }
                 using var _bt = Prof.Time("blend.total");
-                var r = NativeBlend.Apply(b.Solid, edges, size, fillet, f.Id, errors, overflow, status.ProblemEdges, applied, chamfer);
+                var r = NativeBlend.Apply(b.Solid, edges, size, fillet, f.Id, errors, overflow, status.ProblemEdges, applied, chamfer, trimmedOut: oneAtATime);
                 bodies.Add(new Body { Id = b.Id, Solid = r });
             }
             // a blend on one body with tools of one kind can be patterned/mirrored like a cut or boss (its copies
@@ -944,9 +950,18 @@ public sealed class Regenerator
             if (errors.Count == 0 && byBody.Count == 1 && applied.Count > 0 && applied.All(t => t.cut == applied[0].cut))
             {
                 var tools = applied.Select(t => t.tool).ToList();
-                State.Tools[f.Id] = new ToolInfo(() => tools.Count == 1 ? tools[0] : Csg.UnionAll(tools), applied[0].cut, true)
+                // (joined on first use, by a pattern's worker threads too: exact or failed, never faceted)
+                State.Tools[f.Id] = new ToolInfo(() =>
                 {
-                    Blend = new BlendSpec(refs.Select(r => r.Clone()).ToList(), size, fillet, propagate, overflow, chamfer, blended, blendedLength),
+                    if (tools.Count == 1) return tools[0];
+                    var old = Csg.NoFallback;
+                    Csg.NoFallback = true;
+                    try { return Csg.UnionAll(tools); }
+                    catch (InvalidOperationException ex) { throw new FeatureException($"The {(fillet ? "fillet" : "chamfer")}'s pieces cannot be joined to be copied: {ex.Message}"); }
+                    finally { Csg.NoFallback = old; }
+                }, applied[0].cut, true)
+                {
+                    Blend = new BlendSpec(refs.Select(r => r.Clone()).ToList(), size, fillet, propagate, overflow, chamfer, blended, blendedLength) { OneAtATime = oneAtATime.Value },
                 };
             }
             // all or nothing (as SolidWorks): a fillet that cannot be made on every edge fails as a whole,
@@ -1172,7 +1187,9 @@ public sealed class Regenerator
                     if (skipped.Contains(i)) continue;
                     Cancel.ThrowIfCancellationRequested();
                     Detail?.Invoke($"{Describe(seedId)}, instance {i + 2} of {transforms.Count + 1}");
-                    if (tool.Blend is { } bs0 && InstanceEdges(bs0, seeds, transforms[i], i) is { } inst && !inst.same)
+                    // (a blend whose tools go one at a time: solved again even where its edges are the seed's moved,
+                    // its copies cannot be joined)
+                    if (tool.Blend is { } bs0 && InstanceEdges(bs0, seeds, transforms[i], i) is { } inst && (!inst.same || bs0.OneAtATime))
                     {
                         toSolve.Add((i, inst.body, inst.edges, inst.tol));
                         continue;
@@ -1250,7 +1267,9 @@ public sealed class Regenerator
                 }
                 // (the instances solved again first, as when they were solved one by one)
                 if (resolved.Count > 0) ApplySolved(resolved, seedId, transforms.Count + 1, everything);
-                everything.Add(tool.Tool);
+                // (a blend whose tools go one at a time is not joined: such a pattern cannot be patterned again)
+                if (tool.Blend is { OneAtATime: true }) mixed = true;
+                else everything.Add(tool.Tool);
                 if (copies.Count > 0)
                 {
                     var before = State;
