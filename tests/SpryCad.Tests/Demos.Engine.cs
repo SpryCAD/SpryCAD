@@ -447,10 +447,9 @@ static partial class Demos
         // filleted into the body's side and under the pedestal
         double SideZ(double yAt) => V("BodyW/2") - (yAt + V("BaseY-BaseT")) * Math.Tan(V("BodyDraft") * Math.PI / 180);
         double rt = V("RibT/2"), ry = -V("(BrgDrop+PedRibY)/2");
-        // (suppressed and left out of the mirror: mirrored, the body comes out faceted; docs/hit-and-miss-notes.md)
-        d.AddFeature(new FilletFeature
+        var pedRibR = d.AddFeature(new FilletFeature
         {
-            Name = "Pedestal rib fillets", Radius = "RibR", Suppressed = true,
+            Name = "Pedestal rib fillets", Radius = "RibR",
             Edges =
             {
                 E($"{pedRib.Id}.Start", YF(0), new Vec3(-rt, ry, SideZ(ry))), E($"{pedRib.Id}.End", YF(0), new Vec3(rt, ry, SideZ(ry))),
@@ -458,7 +457,7 @@ static partial class Demos
                 E($"{pedRib.Id}.End", $"{ped.Id}.S.L{pl[0]}", new Vec3(rt, -V("BrgDrop"), V("BrgOut") - 6)),
             },
         });
-        d.AddFeature(new MirrorFeature { Name = "Pedestal rib, back", Seeds = { pedRib.Id }, Plane = PlaneRef.Front });
+        d.AddFeature(new MirrorFeature { Name = "Pedestal rib, back", Seeds = { pedRib.Id, pedRibR.Id }, Plane = PlaneRef.Front });
         // ribs from the body's side out over the base, two each side
         var rp = d.AddFeature(new PlaneFeature { Name = "Base rib plane", Base = PlaneRef.Right, Offset = "-BaseRibX" });
         var br = new Sk(d);

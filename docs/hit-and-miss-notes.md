@@ -16,10 +16,15 @@ Commands (from the repository root):
 
 ## To fix (open)
 
-1. **Mirror of a fillet makes the body faceted, silently** (Kernel, first item below). Blocks filleting the ribs.
-2. **No warning when a feature leaves the body faceted.** Any fall back to facets should say so on the feature (and
-   `verify-engine` shows only FAIL without a reason); everything after it on facets is slow (minutes).
-3. **Holes through the base: 20 s of B-spline tracing (worse on master b1c89a4).** With the distance-distance chamfer
+1. ~~Mirror of a fillet makes the body faceted, silently.~~ **FIXED (#29)**: the pedestal ribs' fillets are mirrored
+   with them now, exact at every step (`engine-steps Casting`), the mirror 98 ms.
+2. ~~No warning when a feature leaves the body faceted.~~ **FIXED (#29)**: a feature that turns an exact body
+   faceted now warns why.
+3. **Holes through the base: 20 s of B-spline tracing. Fix in PR #31 (`fix-bspline-hole-trace`), not merged yet:**
+   the trace on the swept foot chamfer's B-spline missed the curve near its edge, and the retrace on the hole's face
+   snapped some 12,650 points with the B-spline's slow closest-point search; with it, the hole feature 28 s → 94 ms,
+   the casting about 1.5 s. The 203 mm³ the volume moved is not this bug but the blend changes since 55eba57 (chamfer
+   ends cut back to their faces #20, mitred hole corners #22, cut-back fillets #24). Was: with the distance-distance chamfer
    round the body's foot, the casting went from about 1.3 s to 3.6-6.6 s; on master b1c89a4 (with #20 and #24) it
    takes 33 s. Every feature is under 1.3 s except the last, "Hold-down holes" (four Ø11 through-holes in the 5°
    drafted base plate at (x, z) = (-207, ±70), (52, ±70)): 19.8 s, all in the hole's boolean, `sec.trace` /
@@ -35,7 +40,8 @@ Commands (from the repository root):
 
 ## Kernel
 
-- **Mirroring a filleted rib makes the whole body faceted, silently (OPEN; blocks the rib fillets).** Casting: a
+- **Mirroring a filleted rib makes the whole body faceted, silently. FIXED (#29: one-at-a-time fillets solved per
+  instance; faceting warned).** The fillets are back in the part and in the mirror's seeds. Was: Casting: a
   triangular rib under the bearing pedestal (Right plane, extruded mid-plane 12), then "Pedestal rib fillets" R3 (four
   edges: the rib's two faces with the body's drafted side, and with the pedestal's underside): exact, 134 ms. Then
   "Pedestal rib, back", a Mirror of the rib and its fillet across Front: the body comes out faceted (not native), with
