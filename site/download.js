@@ -140,11 +140,10 @@
 
   function changes(rel, ch) {
     const entry = logs[ch].find(e => e.version === rel.version);
-    if (!entry) return '';
+    if (!entry || !entry.changes.length) return '';  // a build of internal changes only has nothing to show
     const items = entry.changes.map(c => `<li>${esc(c.subject)} <span class="small muted">${esc(c.commit.slice(0, 7))}</span></li>`);
-    const list = items.length ? `<ul>${items.slice(0, 15).join('')}</ul>` +
-        (items.length > 15 ? `<details><summary>${items.length - 15} more</summary><ul>${items.slice(15).join('')}</ul></details>` : '')
-      : '<p class="muted">No changes listed.</p>';
+    const list = `<ul>${items.slice(0, 15).join('')}</ul>` +
+        (items.length > 15 ? `<details><summary>${items.length - 15} more</summary><ul>${items.slice(15).join('')}</ul></details>` : '');
     return `<h2>What's new in ${esc(rel.version)}</h2>${list}`;
   }
 

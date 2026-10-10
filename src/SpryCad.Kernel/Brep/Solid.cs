@@ -16,6 +16,13 @@ public sealed class Face
         Plane = plane; Tag = tag; Loops = loops;
     }
 
+    /// <summary>
+    /// A tessellator's triangle: the point list its corners came from and their indices in it (equal indices are the
+    /// same point), so stitching can weld each point once. Null for other faces.
+    /// </summary>
+    internal List<Vec3>? Pool;
+    internal int PoolA, PoolB, PoolC;
+
     public Face(Plane plane, FaceTag tag, params Vec3[] outer) : this(plane, tag, new List<Vec3[]> { outer }) { }
 
     public Vec3[] Outer => Loops[0];
@@ -167,14 +174,7 @@ public sealed class Solid
         }
         var faces = new List<Face>();
         foreach (var s in list) faces.AddRange(s.Faces);
-        Native.NBody? nb = null;
-        if (list.Count > 0 && list.All(s => s.Native != null))
-        {
-            nb = new Native.NBody();
-            foreach (var s in list) nb.Faces.AddRange(s.Native!.Clone().Faces);
-            nb.Link();
-        }
-        return new Solid(faces) { Native = nb };
+        return new Solid(faces);
     }
 
     Topology? _topo;

@@ -36,7 +36,12 @@ static class Bench
             var msw = Stopwatch.StartNew();
             using (Prof.Time("display.mesh")) foreach (var b in r.State.Bodies) _ = b.Mesh; // display mesh (GPU buffers source)
             meshTimes.Add(msw.Elapsed.TotalMilliseconds);
-            if (i == 0) { Console.WriteLine($"  cold: {ms:0} ms"); continue; }
+            if (i == 0)
+            {
+                Console.WriteLine($"  cold: {ms:0} ms");
+                Console.WriteLine($"  display mesh: {r.State.Bodies.Sum(b => b.Mesh.Indices.Length / 3)} triangles, {r.State.Bodies.Sum(b => b.Mesh.Positions.Length / 3)} vertices");
+                continue;
+            }
             times.Add(ms);
             if (Environment.GetEnvironmentVariable("FC_RUNS") != null) Console.WriteLine($"    run {i}: {ms:0.0} ms");
             foreach (var f in doc.Features)
@@ -321,9 +326,16 @@ static class Bench
             foreach (var l in f.Loops) { Mix((ulong)l.Length); foreach (var p in l) P(p); }
         }
         var m = DisplayMesh.Build(s);
-        foreach (var x in m.Positions) Mix(BitConverter.SingleToUInt32Bits(x));
-        foreach (var x in m.Normals) Mix(BitConverter.SingleToUInt32Bits(x));
-        foreach (var x in m.Indices) Mix((ulong)x);
+        if (Environment.GetEnvironmentVariable("FC_DET_MESH_TRIS") != null)
+            // the triangles as drawn (each index's position and normal), whatever the vertex layout
+            foreach (var i in m.Indices)
+                for (int k = 0; k < 3; k++) { Mix(BitConverter.SingleToUInt32Bits(m.Positions[3 * i + k])); Mix(BitConverter.SingleToUInt32Bits(m.Normals[3 * i + k])); }
+        else
+        {
+            foreach (var x in m.Positions) Mix(BitConverter.SingleToUInt32Bits(x));
+            foreach (var x in m.Normals) Mix(BitConverter.SingleToUInt32Bits(x));
+            foreach (var x in m.Indices) Mix((ulong)x);
+        }
         foreach (var x in m.EdgeLines) Mix(BitConverter.SingleToUInt32Bits(x));
         foreach (var fr in m.Faces) { Mix((ulong)fr.IndexStart); Mix((ulong)fr.IndexCount); }
         return h;

@@ -23,6 +23,10 @@ public static class NMass
         0.3626837833783620, 0.3137066458778873, 0.2223810344533745, 0.1012285362903763,
     };
 
+    // Gauss-Legendre, 4 points on [-1, 1] (panels between a contact curve's nodes: smooth and short)
+    static readonly double[] GX4 = { -0.8611363115940526, -0.3399810435848563, 0.3399810435848563, 0.8611363115940526 };
+    static readonly double[] GW4 = { 0.3478548451374538, 0.6521451548625461, 0.6521451548625461, 0.3478548451374538 };
+
     /// <summary>The integrals MassProps works from (V, ∫x, ∫y, ∫z, ∫x², ∫y², ∫z², ∫xy, ∫yz, ∫zx) and the area.</summary>
     public sealed record Integrals(double[] S, double Area);
 
@@ -98,6 +102,7 @@ public static class NMass
                 var e = c.Edge;
                 var breaks = Breaks(e, scale);
                 int np = breaks.Count - 1;
+                var gx = e.Curve is NContact ? GX4 : GX; var gw = e.Curve is NContact ? GW4 : GW; int ng = gx.Length;
                 // the start vertex, for the closure check and the unwrapping hints
                 var startP = c.Forward ? e.V0.P : e.V1.P;
                 var su = s.UV(startP, hu, hv);
@@ -109,10 +114,10 @@ public static class NMass
                     int pk = c.Forward ? pi : np - 1 - pi;
                     double ta = breaks[pk], tb = breaks[pk + 1];
                     double half = 0.5 * (tb - ta), mid = 0.5 * (ta + tb);
-                    for (int gi = 0; gi < 8; gi++)
+                    for (int gi = 0; gi < ng; gi++)
                     {
-                        int g = c.Forward ? gi : 7 - gi;
-                        var t = mid + half * GX[g];
+                        int g = c.Forward ? gi : ng - 1 - gi;
+                        var t = mid + half * gx[g];
                         var p = e.Curve.Eval(t);
                         var uv = s.UV(p, hu, hv);
                         if (double.IsNaN(uv.X)) uv = new Vec2(hu, uv.Y);
@@ -125,7 +130,7 @@ public static class NMass
                         var det = a11 * a22 - a12 * a12;
                         double dvdt = det > 1e-12 * a11 * a22 ? (a11 * b2 - a12 * b1) / det : a22 > 0 ? b2 / a22 : 0;
                         // traversal runs against t on a reversed coedge
-                        pts.Add((uv.X, uv.Y, dvdt * GW[g] * half * (c.Forward ? 1 : -1)));
+                        pts.Add((uv.X, uv.Y, dvdt * gw[g] * half * (c.Forward ? 1 : -1)));
                     }
                 }
                 var endP = c.Forward ? e.V1.P : e.V0.P;
@@ -206,7 +211,7 @@ public static class NMass
         }
     }
 
-    /// <summary>Breakpoints of the edge's parameter range: panels short enough for 8-point Gauss on the curve.</summary>
+    /// <summary>Breakpoints of the edge's parameter range: panels short enough for Gauss on the curve, and at its kinks.</summary>
     static List<double> Breaks(NEdge e, double scale)
     {
         double t0 = e.T0, t1 = e.T1;
@@ -216,6 +221,17 @@ public static class NMass
         {
             case NLine: n = 1; break;
             case NCircle or NEllipse: n = Math.Max(1, (int)Math.Ceiling(Math.Abs(t1 - t0) / (Math.PI / 8))); break;
+            case NContact nc:
+                {
+                    // the spine's nodes: the curve is C1 there (a cubic Hermite projected on the support), so panels
+                    // across them converge slowly; between them it is smooth (4 Gauss points a panel)
+                    double lo = Math.Min(t0, t1), hi = Math.Max(t0, t1);
+                    res.Add(lo);
+                    foreach (var k in nc.Spine.S) if (k > lo + 1e-12 && k < hi - 1e-12) res.Add(k);
+                    res.Add(hi);
+                    if (t1 < t0) res.Reverse();
+                    return res;
+                }
             case NPolyline pl:
                 {
                     // the polyline's own vertices (the integrand has a kink at each)

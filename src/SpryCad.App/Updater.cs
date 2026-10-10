@@ -279,18 +279,21 @@ static class Updater
             return;
         }
         var list = new StackPanel { Spacing = 2 };
-        if (log.Count == 0) list.Children.Add(new TextBlock { Text = "Nothing has been published on this channel yet.", Foreground = Palette.TextMuted });
-        foreach (var e in log)
+        list.Children.Add(new TextBlock { Text = $"You have v{CurrentVersion}.", Foreground = Palette.TextSecondary, Margin = new Thickness(0, 0, 0, 4) });
+        // builds whose changes were all internal list nothing, and are left out
+        var listed = log.Where(e => e.Changes.Length > 0).ToList();
+        if (listed.Count == 0)
+            list.Children.Add(new TextBlock { Text = "No changes have been listed on this channel yet.", Foreground = Palette.TextMuted, Margin = new Thickness(0, 10, 0, 0) });
+        foreach (var e in listed)
         {
             var tag = e.Version == CurrentVersion ? "installed" : IsNewer(e.Version, CurrentVersion) ? "new" : null;
-            var head = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, Margin = new Thickness(0, list.Children.Count == 0 ? 0 : 14, 0, 4) };
+            var head = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, Margin = new Thickness(0, 14, 0, 4) };
             head.Children.Add(new TextBlock { Text = e.Version, FontSize = TypeScale.Header, FontWeight = FontWeight.SemiBold, Foreground = Palette.Heading });
             if (e.Published is { } d)
                 head.Children.Add(new TextBlock { Text = d.LocalDateTime.ToString("d MMM yyyy"), Foreground = Palette.TextMuted, VerticalAlignment = VerticalAlignment.Bottom });
             if (tag != null)
                 head.Children.Add(new TextBlock { Text = tag, FontWeight = FontWeight.SemiBold, Foreground = tag == "new" ? Palette.Accent : Palette.TextSecondary, VerticalAlignment = VerticalAlignment.Bottom });
             list.Children.Add(head);
-            if (e.Changes.Length == 0) list.Children.Add(new TextBlock { Text = "No changes listed.", Foreground = Palette.TextMuted });
             foreach (var change in e.Changes)
             {
                 // a bullet with the text hanging beside it
