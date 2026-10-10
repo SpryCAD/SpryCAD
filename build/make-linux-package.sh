@@ -88,15 +88,18 @@ find "$pkg" -type d -exec chmod 755 {} +
 find "$pkg" -type f -exec chmod 644 {} +
 chmod 755 "$pkg/opt/sprycad/SpryCAD"
 [ -f "$pkg/opt/sprycad/createdump" ] && chmod 755 "$pkg/opt/sprycad/createdump"
-# The app is self-contained (.NET included); it still needs the C/C++ runtime, ICU (whose package name carries
-# its version: newest first, back to Ubuntu 22.04) and, for Avalonia, X11, fontconfig and OpenGL.
+# The app is self-contained (.NET included); it still needs the C/C++ runtime, ICU and, for Avalonia, X11,
+# fontconfig and OpenGL. ICU's package name carries its version, and .NET loads whichever is installed, so any
+# from 80 down to 60 does: Ubuntu 18.04 (60), 20.04 and Mint 20 (66), Debian 11 (67), 22.04 (70), Debian 12 (72),
+# 24.04 (74) and on. Older systems' C runtime is libgcc1 (Ubuntu 18.04, Debian 10).
+icu=$(for v in $(seq 80 -1 60); do printf 'libicu%s | ' "$v"; done)
 cat > "$pkg/DEBIAN/control" <<EOF
 Package: sprycad
 Version: $debver
 Architecture: amd64
 Maintainer: Kurt Jacobson <kcjengr@gmail.com>
 Installed-Size: $(du -sk "$pkg/opt" | cut -f1)
-Depends: libc6, libgcc-s1, libstdc++6, libicu78 | libicu77 | libicu76 | libicu74 | libicu72 | libicu70, libx11-6, libice6, libsm6, libfontconfig1, libgl1
+Depends: libc6, libgcc-s1 | libgcc1, libstdc++6, ${icu% | }, libx11-6, libice6, libsm6, libfontconfig1, libgl1
 Section: graphics
 Priority: optional
 Homepage: https://github.com/SpryCAD/SpryCAD

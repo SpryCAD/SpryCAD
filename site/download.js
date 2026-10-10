@@ -104,7 +104,7 @@
       </div>
 
       <h2>Debian and Ubuntu: from the apt repository</h2>
-      <p>Recommended: SpryCAD then updates along with the rest of the system. Ubuntu 22.04 or newer, Debian 12 or newer.
+      <p>Recommended: SpryCAD then updates along with the rest of the system. Ubuntu 20.04 or newer (Linux Mint 20 or newer), Debian 11 or newer.
         ${rel.channel === 'dev' ? 'This adds the <strong>dev</strong> channel (every build of the main branch).' : ''}</p>
       ${pre(apt.join('\n'))}
       <p class="small muted">Start it from the applications menu or with <code>sprycad</code>. Remove it with
