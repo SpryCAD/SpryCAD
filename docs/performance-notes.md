@@ -97,8 +97,11 @@ profile; the profile's times are summed over threads). On the heavy samples (`sa
   step ~60 ms (100: 64 and 28 ms); one connected piece, so splitting does not help it. Already sparse. Solve the connected pieces separately and skip those
   already within tolerance. `Settle` runs two full solves.
 - **Regenerator**:
-  - Cancellation is only checked between features, so pass the token into the boolean and blend loops.
-  - `DocumentSession` builds display meshes before its stale check.
+  - Cancellation: done. The rebuild's token is ambient in the kernel (`Kernel.Cancellation`), checked between a
+    boolean's stages and a blend's edge groups; the kernel's catch-alls let `OperationCanceledException` through, so a
+    cancellation is never cached as a failure or sent to the facet fallback. Further checks belong on the calling
+    thread (inside a `Parallel` body the exception arrives wrapped unless the loop has the same token).
+  - `DocumentSession`: done (no display meshes for a result a newer request has superseded).
   - Equations: done. One naming another still pending waits for it without being evaluated (no exception per pass);
     the pass limit that stopped a chain listed after the ones it uses (three or more) before its end is gone.
   - `ResolveDir` from an edge tessellates the whole intermediate body; try `ResolveNativeEdge` first, as the other

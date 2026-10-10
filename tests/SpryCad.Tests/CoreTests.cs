@@ -28,6 +28,35 @@ static class CoreTests
 
     public static void Run(TestRunner t)
     {
+        t.Test("Rebuild cancelled during a feature (a pattern of fillets) stops with a cancellation and leaves nothing behind in the cache", () =>
+        {
+            var root = AppContext.BaseDirectory;
+            while (!Directory.Exists(Path.Combine(root, "samples"))) root = Path.GetDirectoryName(root)!;
+            var file = Path.Combine(root, "samples", "spoked-handwheel.sprt");
+            // the control: a second rebuild on a regenerator that was never cancelled (the sample caches of states taken
+            // from its cache differ from a fresh rebuild's, so compare like with like)
+            var control = new Regenerator();
+            var docC = CadDocument.Load(file);
+            control.Rebuild(docC);
+            var reference = Bench.Fingerprints(control.Rebuild(docC), geometryOnly: true);
+            var regen = new Regenerator();
+            var doc = CadDocument.Load(file);
+            // cancelled once the rebuild is under way (inside the grips' or spokes' booleans and fillets)
+            using var cts = new CancellationTokenSource();
+            bool cancelled = false;
+            var sw = Stopwatch.StartNew();
+            try
+            {
+                regen.Rebuild(doc, null, cts.Token, p => { if (p.Index >= 4) cts.Cancel(); });
+            }
+            catch (OperationCanceledException) { cancelled = true; }
+            t.True(cancelled, "the rebuild stops with a cancellation, not an error");
+            // the same regenerator (its cache) builds the part as a fresh one does
+            var again = regen.Rebuild(doc);
+            t.True(again.Status.Values.All(s => s.Error == null), "no feature failed: " + string.Join("; ", again.Status.Values.Where(s => s.Error != null).Select(s => s.Error)));
+            t.True(Bench.Fingerprints(again, geometryOnly: true).SequenceEqual(reference), "the part after a cancelled rebuild is the part");
+        });
+
         t.Test("Equations: waiting for the ones they use gives the values and errors of evaluating in passes, without the exceptions", () =>
         {
             // the plain passes, as they were: every pending equation tried each pass until a pass changes nothing

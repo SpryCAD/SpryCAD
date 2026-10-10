@@ -43,7 +43,7 @@ public static class EdgeBlend
                 if (tool == null) { errors.Add($"Edge {e.FaceA} / {e.FaceB}: unsupported edge geometry."); continue; }
                 (convex ? cutTools : addTools).Add(tool);
             }
-            catch (Exception ex) { errors.Add($"Edge {e.FaceA} / {e.FaceB}: {ex.Message}"); }
+            catch (Exception ex) when (ex is not OperationCanceledException) { errors.Add($"Edge {e.FaceA} / {e.FaceB}: {ex.Message}"); }
         }
         var result = body;
         if (cutTools.Count > 0) result = Csg.Subtract(result, Csg.UnionAll(cutTools));

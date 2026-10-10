@@ -92,6 +92,8 @@ public sealed class Regenerator
                         Earlier = status,
                         Detail = progress == null ? null : d => progress(new RegenProgress(i, count, f.Id, f.Name, d)),
                     };
+                    // (the kernel's long operations stop between their stages too)
+                    using (Kernel.Cancellation.Use(cancel))
                     using (Prof.Time("feature." + f.GetType().Name)) ctx.Execute();
                     state = ctx.State;
                 }

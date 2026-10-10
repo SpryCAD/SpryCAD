@@ -239,7 +239,7 @@ public sealed class NBoolean
     NBody Execute(NBody A, NBody B, BoolOp op)
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();
-        void Lap(string what) { if (Prof.Enabled) Prof.Add("bool." + what, sw.Elapsed.TotalMilliseconds); T($"[{sw.ElapsedMilliseconds} ms] {what}"); sw.Restart(); }
+        void Lap(string what) { if (Prof.Enabled) Prof.Add("bool." + what, sw.Elapsed.TotalMilliseconds); T($"[{sw.ElapsedMilliseconds} ms] {what}"); sw.Restart(); Cancellation.Check(); }
         FindFar(A, B);
         MergeVertices(A, B);
         A.Link(); B.Link();

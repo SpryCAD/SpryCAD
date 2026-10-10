@@ -20,7 +20,7 @@ public static class Builders
                 var nb = Native.NBuild.Extrude(regs, frame, z0, z1, prefix);
                 if (nb.Validate() == null) return Native.NTess.ToSolid(nb);
             }
-            catch (Exception) { /* fall back to the facet builder */ }
+            catch (Exception ex) when (ex is not OperationCanceledException) { /* fall back to the facet builder */ }
         }
         return ExtrudeFacets(regs, frame, z0, z1, prefix);
     }
@@ -111,7 +111,7 @@ public static class Builders
                     : Native.NBuild.Revolve(regs, frame, axisPoint, axisDir, angle, prefix);
                 if (nb.Validate() == null) return Native.NTess.ToSolid(nb);
             }
-            catch (Exception) { /* fall back */ }
+            catch (Exception ex) when (ex is not OperationCanceledException) { /* fall back */ }
         }
         return RevolveFacets(regs, frame, axisPoint, axisDir, angle, prefix, segmentsOverride, stepAngles);
     }

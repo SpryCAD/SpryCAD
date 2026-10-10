@@ -604,7 +604,7 @@ public static class DirectBlend
     static IEnumerable<Vec3> Meet(NFace bf, NSurface s, Box3 bb, double tol, NDomain bd)
     {
         List<NCurve>? exact = null;
-        try { exact = NIntersect.Analytic(bf.Surface, s, tol); } catch (Exception) { }
+        try { exact = NIntersect.Analytic(bf.Surface, s, tol); } catch (Exception ex) when (ex is not OperationCanceledException) { }
         if (exact != null && exact.All(c => c is NLine or NCircle or NEllipse or NPolyline))
         {
             foreach (var c in exact)
