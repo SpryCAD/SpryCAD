@@ -69,6 +69,7 @@ public sealed partial class AssemblyModel
     static AssemblyModel Open(AssemblyDocument doc, string? path, PartIndex? index, IEnumerable<string>? searchRoots, bool defer, AssemblyModel? parent)
     {
         var m = new AssemblyModel(doc, path, index, searchRoots, parent);
+        if (parent != null) m.Threads = parent.Threads;
         m.Resolution = ComponentResolver.Resolve(doc, path, index, searchRoots);
         m.Notes.AddRange(m.Resolution.Notes);
         foreach (var g in doc.Components.GroupBy(c => ComponentResolver.Key(c.Part)).ToList())
@@ -80,6 +81,24 @@ public sealed partial class AssemblyModel
     }
 
     public static AssemblyModel New() => new(new AssemblyDocument(), null, null);
+
+    /// <summary>
+    /// How its parts' threads are shown (View > Threads), its sub-assemblies' too: as each thread is set (as the
+    /// caches have them), or all modeled or all cosmetic (<see cref="SetThreads"/>).
+    /// </summary>
+    public ThreadDisplay Threads { get; private set; }
+
+    /// <summary>
+    /// Shows the threads of its parts and its sub-assemblies' another way: their displays built again (later:
+    /// <see cref="PendingJobs"/>; lightweight ones kept as their caches show them). Mates are not solved here.
+    /// </summary>
+    public void SetThreads(ThreadDisplay mode)
+    {
+        if (Threads == mode) return;
+        Threads = mode;
+        foreach (var key in Doc.Components.Where(c => !c.IsAssembly).Select(c => ComponentResolver.Key(c.Part)).Distinct().ToList()) LoadPart(key, defer: true);
+        foreach (var sub in Subs.Values) sub.Model?.SetThreads(mode);
+    }
 
     /// <summary>
     /// Which display a component shows: its part's key (<see cref="ComponentResolver.Key"/>), and its configuration
@@ -143,7 +162,7 @@ public sealed partial class AssemblyModel
             {
                 var built = doc.Configured(first.Parameters);
                 // a cache of this very revision and configuration, made by this code: as good as a rebuild
-                if (doc.Id != null && CacheOf(doc.Id, doc.Revision, config) is { } current && MeshCache.VersionOf(current) == GeometryVersion.Current)
+                if (Threads == ThreadDisplay.AsSet && doc.Id != null && CacheOf(doc.Id, doc.Revision, config) is { } current && MeshCache.VersionOf(current) == GeometryVersion.Current)
                 {
                     try
                     {
@@ -167,7 +186,7 @@ public sealed partial class AssemblyModel
                 }
                 try
                 {
-                    Parts[g.Key] = BuildDisplay(doc, built, src, config);
+                    Parts[g.Key] = BuildDisplay(doc, built, src, config, Threads);
                     continue;
                 }
                 catch (Exception ex) { why = ex.Message; }
@@ -183,10 +202,10 @@ public sealed partial class AssemblyModel
         }
     }
 
-    /// <summary>A display built from a part (<paramref name="built"/>: the part as configured).</summary>
-    static PartDisplay BuildDisplay(CadDocument part, CadDocument built, PartSource src, string config)
+    /// <summary>A display built from a part (<paramref name="built"/>: the part as configured), its threads shown as <paramref name="mode"/> says.</summary>
+    static PartDisplay BuildDisplay(CadDocument part, CadDocument built, PartSource src, string config, ThreadDisplay mode)
     {
-        var (mesh, threads) = Build(built);
+        var (mesh, threads) = Build(built, mode);
         return new PartDisplay { Mesh = mesh, Threads = threads, Color = part.Color, Source = src, Revision = part.Revision, Doc = built, Part = part, Config = config };
     }
 
@@ -203,7 +222,9 @@ public sealed partial class AssemblyModel
         public required string Name { get; init; }
         /// <summary>The assembly whose display it is (this one, or a sub-assembly's).</summary>
         public AssemblyModel? Owner { get; init; }
-        public PartDisplay Build() => BuildDisplay(Placeholder.Part!, Placeholder.Doc!, Placeholder.Source, Placeholder.Config);
+        /// <summary>How its threads are shown (the assembly's <see cref="Threads"/> when the job was made).</summary>
+        public ThreadDisplay Threads { get; init; }
+        public PartDisplay Build() => BuildDisplay(Placeholder.Part!, Placeholder.Doc!, Placeholder.Source, Placeholder.Config, Threads);
     }
 
     /// <summary>
@@ -218,7 +239,7 @@ public sealed partial class AssemblyModel
             var key = DisplayKey(c);
             if (!Pending.Contains(key) || jobs.Any(j => j.Key == key) || Parts.GetValueOrDefault(key) is not { Doc: not null, Part: not null } pd) continue;
             var config = ConfigLabel(c);
-            jobs.Add(new PendingJob { Key = key, Placeholder = pd, Name = c.Name.Split('<')[0] + (config.Length > 0 ? $" ({config})" : ""), Owner = this });
+            jobs.Add(new PendingJob { Key = key, Placeholder = pd, Name = c.Name.Split('<')[0] + (config.Length > 0 ? $" ({config})" : ""), Owner = this, Threads = Threads });
         }
         foreach (var sub in Subs.Values)
             if (sub.Model != null) jobs.AddRange(sub.Model.PendingJobs().Where(j => !jobs.Any(x => x.Owner == j.Owner && x.Key == j.Key)));
@@ -306,10 +327,13 @@ public sealed partial class AssemblyModel
     byte[]? CacheOf(string partId, string? revision, string config) =>
         Doc.Caches.TryGetValue(AssemblyDocument.CacheKey(partId, revision, config), out var name) && Doc.Files.TryGetValue(name, out var data) ? data : null;
 
-    /// <summary>A part's display: its rebuilt bodies as one mesh, and its cosmetic threads (drawn as helices).</summary>
-    public static (DisplayMesh mesh, List<CosmeticThread> threads) Build(CadDocument doc)
+    /// <summary>
+    /// A part's display: its rebuilt bodies as one mesh, and its cosmetic threads (drawn as helices); its threads
+    /// shown as each is set, or as <paramref name="threads"/> says.
+    /// </summary>
+    public static (DisplayMesh mesh, List<CosmeticThread> threads) Build(CadDocument doc, ThreadDisplay threads = ThreadDisplay.AsSet)
     {
-        var r = new Regenerator().Rebuild(doc);
+        var r = new Regenerator { ThreadOverride = threads }.Rebuild(doc);
         return (Merge(r.State.Bodies.Select(b => b.Mesh)), r.State.Cosmetics.Values.ToList());
     }
 
@@ -372,7 +396,7 @@ public sealed partial class AssemblyModel
             Resolution.Parts[key] = new PartResolution(embed ? PartStatus.Embedded : PartStatus.Found, embed ? null : partPath, false, null);
         if (!Parts.ContainsKey(key))
         {
-            var (mesh, threads) = Build(doc);
+            var (mesh, threads) = Build(doc, Threads);
             Parts[key] = new PartDisplay { Mesh = mesh, Threads = threads, Color = doc.Color, Source = embed ? PartSource.Embedded : PartSource.File, Revision = doc.Revision, Doc = doc, Part = doc };
         }
         return c;
@@ -401,7 +425,7 @@ public sealed partial class AssemblyModel
         if (!Resolution.Parts.ContainsKey(key)) Resolution.Parts[key] = new PartResolution(PartStatus.Embedded, null, false, null);
         if (!Parts.ContainsKey(key))
         {
-            var (mesh, threads) = Build(doc);
+            var (mesh, threads) = Build(doc, Threads);
             Parts[key] = new PartDisplay { Mesh = mesh, Threads = threads, Color = doc.Color, Source = PartSource.Embedded, Revision = doc.Revision, Doc = doc, Part = doc };
         }
         return c;
@@ -671,7 +695,8 @@ public sealed partial class AssemblyModel
     /// <summary>
     /// The caches for the parts as shown now: each part shown from its file or embedded copy has its revision's
     /// mesh cached (and its components the revision noted), made again when an older version of the code made it; caches
-    /// no component uses are dropped. Displays still waiting to be built keep the cache they show. Without
+    /// no component uses are dropped. Displays still waiting to be built keep the cache they show. Displays with their
+    /// threads shown otherwise than as set (<see cref="Threads"/>) are not cached: the caches they had are kept. Without
     /// <see cref="KeepMeshes"/> only lightweight components' parts are cached, here and in the embedded sub-assemblies.
     /// </summary>
     public void RefreshCaches()
@@ -685,6 +710,11 @@ public sealed partial class AssemblyModel
             {
                 foreach (var c in ComponentsShowing(key)) c.Part.Revision = pd.Revision;
                 drop.Add(ck);
+                continue;
+            }
+            if (Threads != ThreadDisplay.AsSet)
+            {
+                foreach (var c in ComponentsShowing(key)) c.Part.Revision = pd.Revision;
                 continue;
             }
             var stale = Doc.Caches.TryGetValue(ck, out var had) && (!Doc.Files.TryGetValue(had, out var bytes) || MeshCache.VersionOf(bytes) != GeometryVersion.Current);
