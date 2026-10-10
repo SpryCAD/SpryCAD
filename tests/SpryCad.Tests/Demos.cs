@@ -38,6 +38,7 @@ static partial class Demos
         ("gears.sasm", GearPair),
         ("screw-sizes.sasm", ScrewSizes),
         ("linkage.sasm", Linkage),
+        ("hit-and-miss.sasm", HitAndMiss),
     };
 
     /// <summary>
@@ -1107,6 +1108,20 @@ static partial class Demos
                 return L;
             }
             return Poly(P(x0, y0), P(x1, y0), P(x1, y1), P(x0, y1));
+        }
+
+        /// <summary>Point drawn at (x, y) whose position comes from relations (tangency, radii), no coordinate dimensions.</summary>
+        public int Q(string x, string y) => Free(Eval(x), Eval(y));
+
+        /// <summary>A relation (its orientation taken from the sketch as drawn).</summary>
+        public void Rel(CType type, params int[] refs) => SketchSolver.CaptureSign(_s, _s.AddConstraint(type, refs));
+
+        /// <summary>A dimension by an expression (its orientation taken from the sketch as drawn).</summary>
+        public void Dim(CType type, string expr, params int[] refs)
+        {
+            var c = _s.AddConstraint(type, refs);
+            c.Expr = expr; c.Value = Math.Abs(Eval(expr));
+            SketchSolver.CaptureSign(_s, c);
         }
 
         /// <summary>Point whose position comes from relations only (no coordinate dimensions).</summary>

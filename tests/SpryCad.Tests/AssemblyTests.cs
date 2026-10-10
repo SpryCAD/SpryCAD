@@ -244,6 +244,12 @@ static class AssemblyTests
                 $"two turns: back where it started (crank {start.Item1:0.####} -> {end.Item1:0.####}, slider {start.Item2:0.###} -> {end.Item2:0.###})");
         });
 
+        t.Test("Hit and miss engine demo: every part rebuilds clean; the mates hold as placed; a flywheel turned twice runs the piston, the 2:1 cam gear and the exhaust valve", () =>
+        {
+            t.True(Demos.VerifyEngine(null, null) == 0, "the engine's parts rebuild without failures or warnings, their sketches fully defined");
+            t.True(Demos.EngineAssembly(null) == 0, "the engine assembles and runs (see the lines above)");
+        });
+
         t.Test("Mates: tangent, lock, distance limits, gear and screw", () =>
         {
             // tangent: the sleeve lying on the Top plane (its axis parallel to it, a radius above)
