@@ -16,6 +16,7 @@ static partial class Demos
         ("box, all edges", BoxAll),
         ("box, top edges", () => BoxAll(topOnly: true)),
         ("pocket, floor and corners", Pocket),
+        ("drafted block, top edge under an overhang", Overhang),
     };
 
     /// <summary>
@@ -147,6 +148,33 @@ static partial class Demos
             fillet.Edges.Add(E($"{pocket.Id}.End", F(i), new Vec3(mids[i].Item1, mids[i].Item2, floor)));
         }
         d.AddFeature(fillet);
+        return d;
+    }
+
+    /// <summary>
+    /// A drafted block with a box on its top as wide as the block's foot (so it overhangs the narrower top, level with
+    /// it, like a casting's hopper), the block's side top edge filleted with the tangent edges following: convex
+    /// along the block's own top, concave on under the overhang, running into the box's wall.
+    /// </summary>
+    static CadDocument Overhang()
+    {
+        var d = Doc(("X", "60"), ("Y", "40"), ("H", "60"), ("Draft", "2"), ("B0", "50"), ("B1", "10"), ("BH", "30"), ("R", "3"));
+        var s = new Sk(d);
+        var l = s.Rect("-X", "-Y", "X", "Y");
+        var ss = d.AddFeature(new SketchFeature { Name = "Block", Plane = PlaneRef.Front, Sketch = s.S });
+        var block = d.AddFeature(new ExtrudeFeature { Name = "Block", SketchId = ss.Id, Depth = "H", Draft = "Draft" });
+        var top = d.AddFeature(new PlaneFeature { Name = "Top", Base = PlaneRef.Front, Offset = "H" });
+        var b = new Sk(d);
+        b.Rect("-B0", "-Y", "-B1", "Y");
+        var bs = d.AddFeature(new SketchFeature { Name = "Box", Plane = new PlaneRef { Feature = top.Id }, Sketch = b.S });
+        d.AddFeature(new ExtrudeFeature { Name = "Box", SketchId = bs.Id, Depth = "BH" });
+        double V(string e) => s.Eval(e);
+        var y = -V("Y") + V("H") * Math.Tan(V("Draft") * Math.PI / 180);
+        d.AddFeature(new FilletFeature
+        {
+            Name = "Top edge", Radius = "R",
+            Edges = { E($"{block.Id}.S.L{l[0]}", $"{block.Id}.End", new Vec3(V("X/2"), y, V("H"))) },
+        });
         return d;
     }
 
