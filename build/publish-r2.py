@@ -337,8 +337,30 @@ def is_ancestor(a, b):
     return subprocess.run(['git', 'merge-base', '--is-ancestor', a, b], capture_output=True).returncode == 0
 
 
+def changelog_lines(message):
+    """The `Changelog:` lines of a commit message, in order. A line starting `Changelog:` begins one; the lines right
+    after it continue it (a long line wrapped, indented or not) until a blank line, another `Changelog:` line or
+    another trailer (`Key: value`). Git's own trailer parser drops the whole block when a wrapped line is not
+    indented, which is how they are usually written."""
+    out, cur = [], None
+    for line in message.splitlines():
+        m = re.match(r'\s*changelog:\s*(.*)$', line, re.I)
+        if m:
+            if cur is not None:
+                out.append(cur)
+            cur = m.group(1).strip()
+        elif cur is not None and line.strip() and not re.match(r'[A-Za-z][\w-]*: ', line):
+            cur += ' ' + line.strip()
+        elif cur is not None:
+            out.append(cur)
+            cur = None
+    if cur is not None:
+        out.append(cur)
+    return [s for s in out if s]
+
+
 def publish_changelog(channel, version, published, keep, work):
-    """Adds this build's changes to changelog/<channel>.json and returns them: the `Changelog:` trailers of the commits
+    """Adds this build's changes to changelog/<channel>.json and returns them: the `Changelog:` lines of the commits
     that landed on the branch since the channel's previous build (dev), or since the previous release tag (stable),
     newest first. Only the branch's own line of history counts (--first-parent): a squash-merged pull request's commit,
     whose message is the PR's description, a merge commit, or a commit made on master directly, never the commits
@@ -351,8 +373,9 @@ def publish_changelog(channel, version, published, keep, work):
     key = f'changelog/{channel}.json'
     local = work / 'changelog.json'
     old = json.loads(local.read_text()) if get(key, local) else {}
-    # entries written before the trailers (every commit subject listed) are dropped: the log starts again
-    entries = old.get('versions', []) if old.get('format') == 2 else []
+    # entries written by an earlier way of reading the messages are dropped: the log starts again, its first entry
+    # taking every line since the last release tag (format 1 listed every subject, 2 missed wrapped lines)
+    entries = old.get('versions', []) if old.get('format') == 3 else []
     entries = [e for e in entries if e['version'] != version]  # a rebuild replaces its entry
 
     head = git('rev-parse', 'HEAD')
@@ -367,19 +390,18 @@ def publish_changelog(channel, version, published, keep, work):
                             head + '^'], capture_output=True, text=True)
         since = r.stdout.strip() if r.returncode == 0 else None
     rng = f'{since}..{head}' if since else head
-    # one record per commit (\x1d), its hash and its Changelog trailers (\x1e between them)
-    log = git('log', '--first-parent', '--max-count=500',
-              '--format=%H%x1f%(trailers:key=Changelog,valueonly,unfold,separator=%x1e)%x1d', rng)
+    # one record per commit (\x1d): its hash and its whole message
+    log = git('log', '--first-parent', '--max-count=500', '--format=%H%x1f%B%x1d', rng)
     changes = []
     for rec in log.split('\x1d'):
-        c, _, values = rec.strip().partition('\x1f')
-        changes += [{'commit': c, 'subject': v.strip()} for v in values.split('\x1e') if v.strip()]
+        c, _, body = rec.strip().partition('\x1f')
+        changes += [{'commit': c, 'subject': s} for s in changelog_lines(body)]
 
     entries.append({'version': version, 'published': published, 'commit': head, 'changes': changes})
     entries.sort(key=functools.cmp_to_key(lambda x, y: version_cmp(y['version'], x['version'])))
     if keep:
         entries = entries[:keep]
-    local.write_text(json.dumps({'format': 2, 'channel': channel, 'versions': entries}, indent=2) + '\n')
+    local.write_text(json.dumps({'format': 3, 'channel': channel, 'versions': entries}, indent=2) + '\n')
     put(local, key, 'application/json', no_cache=True)
     return changes
 
