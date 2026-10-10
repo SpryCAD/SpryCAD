@@ -32,9 +32,10 @@ public static class MateSolver
 
     /// <summary>
     /// A component being dragged: its point <c>Local</c> (in its part) pulled toward the line from <c>Origin</c> along
-    /// <c>Dir</c> (the ray under the cursor).
+    /// <c>Dir</c> (the ray under the cursor). <c>Move</c>: how far the cursor moved it (in the view's plane), for a
+    /// component no mate moves (<see cref="AssemblyModel.SolveDrag"/>); the solve itself starts from where it is.
     /// </summary>
-    public sealed record Pull(string Component, Vec3 Local, Vec3 Origin, Vec3 Dir);
+    public sealed record Pull(string Component, Vec3 Local, Vec3 Origin, Vec3 Dir, Vec3 Move = default);
 
     /// <summary>
     /// A component carried by another (<c>Body</c>): placed at the body's placement times <c>Offset</c>, never solved
@@ -45,12 +46,47 @@ public static class MateSolver
     /// <summary>
     /// A drag: the mates solved with the grabbed point pulled toward the cursor's ray (gently, so the mates win:
     /// a component turns or slides only as they let it, and what it is mated to follows), then solved exactly. A gear
-    /// on its axis turns so the point grabbed follows the cursor round, its mate turning the other.
+    /// on its axis turns so the point grabbed follows the cursor round, its mate turning the other. Only what is mated
+    /// to the dragged component, through floating components, moves: the rest has nothing pulling it.
     /// </summary>
     public static Result SolveDrag(AssemblyDocument doc, Func<MateRef, MateGeom> local, Pull pull, IReadOnlyDictionary<string, Attachment>? attached = null)
     {
-        Solve(doc, local, null, 80, pull, attached);
-        return Solve(doc, local, null, 80, null, attached);
+        var linked = Linked(doc, pull.Component, attached);
+        var pulled = Solve(doc, local, linked, 80, pull, attached);
+        var res = Solve(doc, local, linked, 80, null, attached);
+        // moved by either (the caller copies back only what moved: the pull may have put a component where the
+        // exact solve leaves it)
+        res.Moved.UnionWith(pulled.Moved);
+        res.Solved.UnionWith(pulled.Solved);
+        res.Iterations += pulled.Iterations;
+        return res;
+    }
+
+    /// <summary>
+    /// The floating components mated to <paramref name="start"/>, directly or through other floating ones (a fixed
+    /// component holds what is mated to it apart from the rest), <paramref name="start"/> among them.
+    /// </summary>
+    static HashSet<string> Linked(AssemblyDocument doc, string start, IReadOnlyDictionary<string, Attachment>? attached)
+    {
+        var byId = new Dictionary<string, Component>();
+        foreach (var c in doc.Components) byId.TryAdd(c.Id, c);
+        string? Body(string? id) => id != null && attached != null && attached.TryGetValue(id, out var at) ? at.Body : id;
+        bool Floats(string? id) => id != null && byId.TryGetValue(id, out var c) && !c.Fixed && !c.Suppressed;
+        var adj = new Dictionary<string, List<string>>();
+        foreach (var m in doc.Mates)
+        {
+            if (m.Suppressed) continue;
+            var (a, b) = (Body(m.A.Component), Body(m.B.Component));
+            if (!Floats(a) || !Floats(b) || a == b) continue;
+            (adj.TryGetValue(a!, out var la) ? la : adj[a!] = new()).Add(b!);
+            (adj.TryGetValue(b!, out var lb) ? lb : adj[b!] = new()).Add(a!);
+        }
+        var seen = new HashSet<string> { start };
+        var q = new Queue<string>(); q.Enqueue(start);
+        while (q.Count > 0)
+            if (adj.TryGetValue(q.Dequeue(), out var nb))
+                foreach (var x in nb) if (seen.Add(x)) q.Enqueue(x);
+        return seen;
     }
 
     /// <summary>
@@ -124,12 +160,21 @@ public static class MateSolver
         }
 
         int nf = free.Count, n = nf * 6;
-        // a component moved by six numbers: a turn (about its pivot) and a move
+        // a component moved by six numbers, a turn w and a move m about its pivot. Pulled, as a screw motion (the
+        // exponential map): a step along a turn about any line, through the pivot or not, follows that turn exactly (a
+        // turn about the pivot and then a move would leave a crank turned on its journal off it by the turn squared
+        // times the pivot's distance from the journal, for the mates to pull back each step). Not otherwise: there the
+        // steps are small corrections, and free turns (a gear spinning on its axis) left costing nothing let them
+        // wander (a stack of gears knocked out of place was not solved back in 80 steps).
         Transform Moved(int i, double w0, double w1, double w2, double m0, double m1, double m2)
         {
-            var w = new Vec3(w0, w1, w2);
-            var rot = w.Length > 1e-15 ? Transform.Rotation(pivots[i], w / w.Length, w.Length) : Transform.Identity;
-            return Transform.Translation(new Vec3(m0, m1, m2)) * rot * placements[free[i].Id];
+            var w = new Vec3(w0, w1, w2); var m = new Vec3(m0, m1, m2);
+            double th = w.Length;
+            if (th <= 1e-15) return Transform.Translation(m) * placements[free[i].Id];
+            var k = w / th;
+            var km = Vec3.Cross(k, m);
+            if (pull != null) m += km * ((1 - Math.Cos(th)) / th) + Vec3.Cross(k, km) * ((th - Math.Sin(th)) / th);
+            return Transform.Translation(m) * Transform.Rotation(pivots[i], k, th) * placements[free[i].Id];
         }
         Transform[] Trial(double[] dx)
         {
@@ -144,7 +189,10 @@ public static class MateSolver
         string? CompA(int k) => k < mates.Count ? mates[k].A.Component : pull!.Component;
         string? CompB(int k) => k < mates.Count ? mates[k].B.Component : null;
         var pullDir = pull?.Dir.Normalized ?? Vec3.Zero;
-        const double pullWeight = 0.01;
+        // (well below: where the mates do not let the point reach the cursor, they give by the weight squared times the
+        // distance, and strained over mates that hold the same thing twice, a crank's tilt by its journal and its gear's
+        // face, they come back only slowly)
+        const double pullWeight = 1e-3;
         var buf = new List<double>();
         void MateRes(int k, in Transform ta, in Transform tb)
         {
@@ -189,10 +237,12 @@ public static class MateSolver
         var sky = Skyline.For(nf, Enumerable.Range(0, K).Where(k => ca[k] >= 0 && cb[k] >= 0 && ca[k] != cb[k]).Select(k => (ca[k], cb[k])));
         static double Sq(double[] v) { double s = 0; foreach (var a in v) s += a * a; return s; }
 
-        const double tol = 1e-10, h = 1e-6;
-        double lambda = 1e-3;
+        const double tol = 1e-10, h = 1e-6, maxTurn = 0.2;
         int it = 0;
         var r0 = Res(null);
+        // the damping: light where the steps are small and the mates nearly linear (a drag's pull from where they
+        // hold, a solve starting nearly satisfied), lightened fast as steps succeed
+        double lambda = pull != null ? 1e-6 : r0.Length > 0 && r0.Max(Math.Abs) < 1e-6 ? 1e-9 : 1e-3;
         // the Jacobian: for each mate, its rows against each of its (at most two) free components' six numbers
         var Ja = new double[K][]; var Jb = new double[K][];
         for (int k = 0; k < K; k++)
@@ -253,16 +303,22 @@ public static class MateSolver
             {
                 var dx = sky.SolveDamped(lambda, g);
                 if (dx == null) { lambda *= 10; continue; }
+                // no component turned more than maxTurn in one step (the whole step shortened alike): the mates are
+                // linearised about here, and a long turn taken on them at once can land what hangs on it on the
+                // other way of satisfying them (a piston on the far side of its crank)
+                double turn = 0;
+                for (int i = 0; i < nf; i++) turn = Math.Max(turn, Math.Sqrt(dx[6 * i] * dx[6 * i] + dx[6 * i + 1] * dx[6 * i + 1] + dx[6 * i + 2] * dx[6 * i + 2]));
+                if (turn > maxTurn) for (int j = 0; j < n; j++) dx[j] *= maxTurn / turn;
                 var trial = Trial(dx);
                 var r1 = Res(trial);
                 if (Sq(r1) < f0)
                 {
                     for (int i = 0; i < nf; i++) placements[free[i].Id] = trial[i];
                     // pulled, the residual stays (the cursor is where the mates do not let the point go): done when
-                    // it stops getting smaller
-                    if (pull != null && f0 - Sq(r1) < 1e-12 * (1 + f0)) { r0 = r1; break; }
+                    // it stops getting smaller (by a millionth: the exact solve follows)
+                    if (pull != null && f0 - Sq(r1) < 1e-6 * f0) { r0 = r1; break; }
                     r0 = r1;
-                    lambda = Math.Max(lambda / 4, 1e-12);
+                    lambda = Math.Max(lambda / 10, 1e-12);
                     stepped = true;
                 }
                 else lambda *= 6;
