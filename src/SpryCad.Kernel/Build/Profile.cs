@@ -112,7 +112,10 @@ public sealed class ProfileRegion
 
     public IEnumerable<ProfileLoop> AllLoops() { yield return Outer; foreach (var h in Holes) yield return h; }
 
-    /// <summary>Groups arbitrary closed loops into regions with even-odd nesting.</summary>
+    /// <summary>
+    /// Groups arbitrary closed loops into regions with even-odd nesting. Loops whose outlines cross (a circle over a
+    /// rectangle's end) do not nest: each is a region of its own, and the regions overlap (see <see cref="Overlap"/>).
+    /// </summary>
     public static List<ProfileRegion> FromLoops(IList<ProfileLoop> loops)
     {
         var n = loops.Count;
@@ -126,7 +129,7 @@ public sealed class ProfileRegion
             for (int j = 0; j < n; j++)
             {
                 if (i == j || area[j] <= area[i]) continue;
-                if (loops[j].Contains(probe))
+                if (loops[j].Contains(probe) && !Cross(loops[i], loops[j]))
                 {
                     depth[i]++;
                     if (parent[i] < 0 || area[j] < area[parent[i]]) parent[i] = j;
@@ -134,10 +137,40 @@ public sealed class ProfileRegion
             }
         }
         var regions = new Dictionary<int, ProfileRegion>();
+        // (in loop order: the same regions every time)
         for (int i = 0; i < n; i++)
             if (depth[i] % 2 == 0) regions[i] = new ProfileRegion(loops[i]);
         for (int i = 0; i < n; i++)
             if (depth[i] % 2 == 1 && parent[i] >= 0 && regions.TryGetValue(parent[i], out var r)) r.Holes.Add(loops[i]);
         return regions.Values.Select(r => r.Normalized()).ToList();
+    }
+
+    /// <summary>Whether two regions overlap: their outer outlines cross.</summary>
+    public static bool Overlap(ProfileRegion a, ProfileRegion b) => Cross(a.Outer, b.Outer);
+
+    /// <summary>Whether two loops' outlines cross (a segment of each passing through the other, not just touching).</summary>
+    public static bool Cross(ProfileLoop a, ProfileLoop b)
+    {
+        var pa = a.Points; var pb = b.Points;
+        if (pa.Length < 3 || pb.Length < 3) return false;
+        double minAx = pa.Min(p => p.X), maxAx = pa.Max(p => p.X), minAy = pa.Min(p => p.Y), maxAy = pa.Max(p => p.Y);
+        double minBx = pb.Min(p => p.X), maxBx = pb.Max(p => p.X), minBy = pb.Min(p => p.Y), maxBy = pb.Max(p => p.Y);
+        if (maxAx < minBx || maxBx < minAx || maxAy < minBy || maxBy < minAy) return false;
+        var eps = 1e-9 * Math.Max(1, Math.Max(maxAx - minAx, maxAy - minAy));
+        static double Orient(Vec2 p, Vec2 q, Vec2 r) => (q.X - p.X) * (r.Y - p.Y) - (q.Y - p.Y) * (r.X - p.X);
+        for (int i = 0; i < pa.Length; i++)
+        {
+            Vec2 a0 = pa[i], a1 = pa[(i + 1) % pa.Length];
+            for (int j = 0; j < pb.Length; j++)
+            {
+                Vec2 b0 = pb[j], b1 = pb[(j + 1) % pb.Length];
+                double d1 = Orient(b0, b1, a0), d2 = Orient(b0, b1, a1), d3 = Orient(a0, a1, b0), d4 = Orient(a0, a1, b1);
+                double la = (a1 - a0).Length, lb = (b1 - b0).Length;
+                // strictly on opposite sides, both ways (a crossing, not a touch at an end or along a segment)
+                if ((d1 > eps * lb && d2 < -eps * lb || d1 < -eps * lb && d2 > eps * lb) && (d3 > eps * la && d4 < -eps * la || d3 < -eps * la && d4 > eps * la))
+                    return true;
+            }
+        }
+        return false;
     }
 }

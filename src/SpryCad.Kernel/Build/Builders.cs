@@ -13,6 +13,10 @@ public static class Builders
     public static Solid Extrude(IEnumerable<ProfileRegion> regions, Frame frame, double z0, double z1, string prefix)
     {
         var regs = regions.ToList();
+        // regions overlapping (a sketch's closed contours crossing): each extruded on its own, then joined (one body
+        // of them all would cross itself)
+        if (regs.Count > 1 && Enumerable.Range(0, regs.Count).Any(i => Enumerable.Range(i + 1, regs.Count - i - 1).Any(j => ProfileRegion.Overlap(regs[i], regs[j]))))
+            return Csg.UnionAll(regs.Select(r => Extrude(new[] { r }, frame, z0, z1, prefix)).ToList());
         if (UseNative)
         {
             try
@@ -100,6 +104,9 @@ public static class Builders
         IReadOnlyList<double>? stepAngles = null)
     {
         var regs = regions.ToList();
+        // overlapping regions: each revolved on its own, then joined (as Extrude)
+        if (regs.Count > 1 && Enumerable.Range(0, regs.Count).Any(i => Enumerable.Range(i + 1, regs.Count - i - 1).Any(j => ProfileRegion.Overlap(regs[i], regs[j]))))
+            return Csg.UnionAll(regs.Select(r => Revolve(new[] { r }, frame, axisPoint, axisDir, angle, prefix, segmentsOverride, stepAngles)).ToList());
         if (UseNative)
         {
             try
