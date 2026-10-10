@@ -107,9 +107,11 @@ profile; the profile's times are summed over threads). On the heavy samples (`sa
   - `ResolveDir` from an edge tessellates the whole intermediate body; try `ResolveNativeEdge` first, as the other
     resolvers do.
 - **Viewport** (`ViewportControl`, `SketchEditor`):
-  - `Redraw()` rebuilds the sketch overlay synchronously on every input event, recreating every relation glyph
-    (brushes, a native `Cursor` each). Coalesce to once per frame, pool glyphs by constraint id, and cache the label
-    layout (a pan does not change it).
+  - Sketch overlay: relation, On Edge and anchor marks are kept by id and repositioned (no new controls, brushes or
+    native cursors per update). Measured with `SPRYCAD_PROFILE_OVERLAY=1` (the log gets each 2 s's updates, average
+    and worst time): on the gear's tooth-gap sketch (36 relations, mostly dimensions) hovering and zooming cost
+    0.74–0.94 ms an update before and 0.32–0.41 ms after; entering the sketch 143 to 86 ms worst. Under a millisecond
+    either way, so coalescing to once per frame and caching the label layout wait for a sketch where it shows.
   - `PickVertex` allocates per edge per move with no cull.
   - Assembly hover ray-tests every triangle; cull by face boxes as `PickItem` does.
 - **Sketch lookups**: `Sketch.Point`, `Entity` and `P` are linear scans used per entity per frame. Selection is a
