@@ -20,7 +20,8 @@ Commands (from the repository root):
    with them now, exact at every step (`engine-steps Casting`), the mirror 98 ms.
 2. ~~No warning when a feature leaves the body faceted.~~ **FIXED (#29)**: a feature that turns an exact body
    faceted now warns why.
-3. **Holes through the base: 20 s of B-spline tracing. Fix in PR #31 (`fix-bspline-hole-trace`), not merged yet:**
+3. ~~Holes through the base: 20 s of B-spline tracing.~~ **FIXED (#31)**: the casting rebuilds in 2.2 s on master
+   7913d0c (with the ribs' fillets). The cause:
    the trace on the swept foot chamfer's B-spline missed the curve near its edge, and the retrace on the hole's face
    snapped some 12,650 points with the B-spline's slow closest-point search; with it, the hole feature 28 s → 94 ms,
    the casting about 1.5 s. The 203 mm³ the volume moved is not this bug but the blend changes since 55eba57 (chamfer
