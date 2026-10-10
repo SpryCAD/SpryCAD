@@ -148,7 +148,7 @@ public static class NShell
         var cands = new List<NCurve>();
         if (!sa.CoincidentWith(sb, tol))
         {
-            try { var an = NIntersect.Analytic(sa, sb, fitTol); if (an != null) cands.AddRange(an); } catch { }
+            try { var an = NIntersect.Analytic(sa, sb, fitTol); if (an != null) cands.AddRange(an); } catch (Exception ex) when (ex is not OperationCanceledException) { }
         }
         // same-family fits (tangent faces give degenerate analytic intersections)
         switch (e.Curve)

@@ -812,7 +812,7 @@ public static class RollingBall
         // a closed fillet loop would join onto itself: keep the open chain (the ball does not go all the way round)
         if (P.Count < 2) return null;
         try { return new PipeSpine(P, D, seed.SupportA, seed.SupportB) { Rolls = seed.Rolls }; }
-        catch (Exception) { return null; }
+        catch (Exception ex) when (ex is not OperationCanceledException) { return null; }
     }
 
     static bool Side(NFace f, NFace like) => Family(f.Surface, like.Surface) && f.Sense == like.Sense;

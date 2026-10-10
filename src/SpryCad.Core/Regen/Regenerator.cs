@@ -92,6 +92,8 @@ public sealed class Regenerator
                         Earlier = status,
                         Detail = progress == null ? null : d => progress(new RegenProgress(i, count, f.Id, f.Name, d)),
                     };
+                    // (the kernel's long operations stop between their stages too)
+                    using (Kernel.Cancellation.Use(cancel))
                     using (Prof.Time("feature." + f.GetType().Name)) ctx.Execute();
                     state = ctx.State;
                 }
@@ -277,17 +279,34 @@ public sealed class Regenerator
         foreach (var e in all)
             if (names.Add(e.Name.Trim())) pending.Add(e);
             else twice[e.Name] = $"{e.Name.Trim()} is set twice (by a design table or another equation)";
-        for (int pass = 0; pass < pending.Count + 1 && pending.Count > 0; pass++)
+        // in passes until none succeeds. An equation naming another one still pending waits for it without being
+        // evaluated (an unknown name throws, and equations listed before what they use cost one exception per pass
+        // each); the pass that changes nothing evaluates every one left, for its error
+        var waiting = new HashSet<string>(pending.Select(e => e.Name.Trim()), StringComparer.OrdinalIgnoreCase);
+        var uses = pending.ToDictionary(e => e, e => string.IsNullOrWhiteSpace(e.Expr) ? new List<string>() : Expr.Identifiers(e.Expr).ToList());
+        // (each pass that evaluates one more shortens the list: the passes end; no count limit, which used to stop a
+        // chain of equations listed after the ones they use before its last was reached)
+        bool last = false;
+        while (pending.Count > 0)
         {
             var next = new List<Equation>();
             foreach (var e in pending)
             {
+                if (!last && uses[e].Any(n => waiting.Contains(n) && !values.ContainsKey(n))) { next.Add(e); continue; }
                 if (Expr.TryEval(e.Expr, n => values.TryGetValue(n, out var v) ? v : null, out var val, out var err))
+                {
                     values[e.Name.Trim()] = val;
+                    waiting.Remove(e.Name.Trim());
+                }
                 else { next.Add(e); errors[e.Name] = err ?? "error"; }
             }
             foreach (var e in pending.Except(next)) errors.Remove(e.Name);
-            if (next.Count == pending.Count) break;
+            if (next.Count == pending.Count)
+            {
+                // nothing more evaluates: once more with every one left tried, for the errors (as each pass did)
+                if (last) break;
+                last = true;
+            }
             pending = next;
         }
         foreach (var (n, msg) in twice) errors[n] = msg;

@@ -95,7 +95,7 @@ public static class NativeBlend
                 }
                 entries.Add((tools, convex, direct ? strip : null, name, group, !fits));
             }
-            catch (Exception ex) { Fail(ex.Message); }
+            catch (Exception ex) when (ex is not OperationCanceledException) { Fail(ex.Message); }
         }
         // a tangent chain whose pieces did not all fit (trimmed, or failed): the whole chain once more as one
         // rolling-ball tool, which has no ends at the joints to run past (a spoke's foot round on a rim: its straight
@@ -116,7 +116,7 @@ public static class NativeBlend
                 var name0 = mine.Count > 0 ? entries[mine[0]].name : $"{prefix}.{i++}";
                 RollingBall.Result rb;
                 try { using (Prof.Time("blend.tools")) rb = RollingBall.Build(chain, size, name0, OnFaces); }
-                catch (Exception) { continue; }
+                catch (Exception ex) when (ex is not OperationCanceledException) { continue; }
                 Debug?.Invoke($"whole tangent chain {name0}: {chain.Count} edges -> {rb.Error ?? (rb.Fits ? "fits" : "overflows")}");
                 if (rb.Error != null || !rb.Fits) continue;
                 foreach (var k in mine.OrderByDescending(k => k)) entries.RemoveAt(k);

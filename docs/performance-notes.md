@@ -93,12 +93,17 @@ profile; the profile's times are summed over threads). On the heavy samples (`sa
     bit). Ten drag steps: tooth-gap sketch 35 to 10 ms, 6×6 grid 5.7 s to 57 ms, 10×10 grid 135 s to 0.35 s.
   - Left: skipping converged clusters; equations with no variables; analytic derivatives (the Jacobian is central
     differences); `Analyze` and `WouldOverDefine` reduce the whole dense Jacobian (6–20 ms on the 10×10 grid).
-- **Mate solver** (`Assembly/MateSolver.cs`): already sparse. Solve the connected pieces separately and skip those
+- **Mate solver** (`Assembly/MateSolver.cs`): `matebench` on a stack of gears: 200 components solve in ~360 ms, a drag
+  step ~60 ms (100: 64 and 28 ms); one connected piece, so splitting does not help it. Already sparse. Solve the connected pieces separately and skip those
   already within tolerance. `Settle` runs two full solves.
 - **Regenerator**:
-  - Cancellation is only checked between features, so pass the token into the boolean and blend loops.
-  - `DocumentSession` builds display meshes before its stale check.
-  - Equations are ordered by trial and catch (about n²/2 exceptions); sort them topologically.
+  - Cancellation: done. The rebuild's token is ambient in the kernel (`Kernel.Cancellation`), checked between a
+    boolean's stages and a blend's edge groups; the kernel's catch-alls let `OperationCanceledException` through, so a
+    cancellation is never cached as a failure or sent to the facet fallback. Further checks belong on the calling
+    thread (inside a `Parallel` body the exception arrives wrapped unless the loop has the same token).
+  - `DocumentSession`: done (no display meshes for a result a newer request has superseded).
+  - Equations: done. One naming another still pending waits for it without being evaluated (no exception per pass);
+    the pass limit that stopped a chain listed after the ones it uses (three or more) before its end is gone.
   - `ResolveDir` from an edge tessellates the whole intermediate body; try `ResolveNativeEdge` first, as the other
     resolvers do.
 - **Viewport** (`ViewportControl`, `SketchEditor`):

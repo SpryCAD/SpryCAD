@@ -343,7 +343,12 @@ static class Bench
 
     static readonly bool GeometryOnly = Environment.GetEnvironmentVariable("FC_DET_GEOMETRY") != null;
 
-    internal static string Fingerprint(ModelState s)
+    /// <summary>Every feature's result, fingerprinted (compare rebuilds).</summary>
+    internal static List<string> Fingerprints(RegenResult r, bool geometryOnly = false) => r.States.Select(st => Fingerprint(st, geometryOnly)).ToList();
+
+    internal static string Fingerprint(ModelState s) => Fingerprint(s, GeometryOnly);
+
+    internal static string Fingerprint(ModelState s, bool geometryOnly)
     {
         var parts = new List<string>();
         foreach (var b in s.Bodies)
@@ -354,9 +359,9 @@ static class Bench
             foreach (var v in verts) { sx += v.P.X; sy += v.P.Y; sz += v.P.Z; }
             var faceNames = string.Join(",", nb.Faces.Select(f => f.Tag.Name).OrderBy(n => n, StringComparer.Ordinal));
             // FC_DET_GEOMETRY: the geometry alone (which edges are sampled, at which tolerance, is a cache detail)
-            var tols = (GeometryOnly ? "" : string.Join(",", nb.Edges.Select(e => e.SampledTol).GroupBy(t => t).OrderBy(g => g.Key).Select(g => $"{g.Key:g3}x{g.Count()}"))
+            var tols = (geometryOnly ? "" : string.Join(",", nb.Edges.Select(e => e.SampledTol).GroupBy(t => t).OrderBy(g => g.Key).Select(g => $"{g.Key:g3}x{g.Count()}"))
                 + $" order#{(uint)StableHash(string.Join(",", nb.Edges.Select(e => e.SampledTol.ToString("R")))):X8}")
-                + (GeometryOnly ? "" : $" points#{PointsHash(nb):X16}") + $" curves#{CurvesHash(nb):X16} faces#{FacesHash(nb):X16}";
+                + (geometryOnly ? "" : $" points#{PointsHash(nb):X16}") + $" curves#{CurvesHash(nb):X16} faces#{FacesHash(nb):X16}";
             parts.Add($"{nb.Faces.Count}f {nb.Edges.Count()}e {verts.Count}v sum({sx:0.######},{sy:0.######},{sz:0.######}) names#{faceNames.Length}:{(uint)StableHash(faceNames):X8} samples[{tols}]");
         }
         return string.Join(" | ", parts);
