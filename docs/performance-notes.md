@@ -122,7 +122,9 @@ profile; the profile's times are summed over threads). On the heavy samples (`sa
   18-feature tree costs 3–11 ms either way. Still rebuilt in full on each document change and real result.
 - **Dynamic geometry**: cosmetic thread helices and sketches are rebuilt and re-uploaded every frame.
 - **Saving and startup**:
-  - Autosave re-hashes and recompresses attachments every time; cache them per array instance.
+  - Autosave: done. It writes a copy of each part off the UI thread (one autosave at a time), and attachment hashes
+    are kept per byte array. `-- savebench <step file> [MB]`: with a 20 MB imported model the UI waited 260–560 ms an
+    autosave (hash and Optimal deflate on the UI thread), now ~0.1 ms; the save itself ~265 ms (hash cached).
   - Startup: measure with `TieredCompilationQuickJit` on, and start `Warmup` after the window opens.
 
 ## Tried and rejected
