@@ -4,7 +4,9 @@ namespace SpryCad.Kernel;
 
 /// <summary>
 /// Fillets and chamfers on native B-rep edges: tools are built from the exact edge curve and the adjacent
-/// faces' surfaces (no tessellation), then subtracted (convex) or added (concave) with native booleans.
+/// faces' surfaces (no tessellation), then applied straight to the faces they blend (<see cref="DirectBlend"/>), or
+/// where that cannot be (corners where blends meet, ends at an angle, blends trimmed by neighbouring geometry)
+/// subtracted (convex) or added (concave) with native booleans.
 /// Lines between planes and arcs between a plane and a perpendicular cylinder use extruded/revolved profiles;
 /// fillets on any other pair of faces use rolling-ball tools (<see cref="RollingBall"/>).
 /// </summary>
@@ -35,6 +37,11 @@ public static class NativeBlend
         bool anyTrimmed = false;
         var trimmedEdges = new List<NEdge>();
         var failedChains = new HashSet<NEdge>(ReferenceEqualityComparer.Instance);
+        // per edge (group): its tools for the boolean, and the tool a direct blend applies (null: none)
+        var entries = new List<(List<Solid> tools, bool convex, Solid? strip, string name, List<NEdge> group, bool trimmed)>();
+        // failures, reported once the chains below have had their second try
+        var fails = new List<(List<NEdge> group, string msg)>();
+        bool direct = DirectBlend.Enabled && !buildOnly;
         int i = 0;
         foreach (var e in edges)
         {
@@ -46,16 +53,12 @@ public static class NativeBlend
                 // arcs of one circle between the same faces form one rim (bodies split full circles)
                 foreach (var o in edges)
                     if (!done.Contains(o) && o.Curve is NCircle oc && SameCircle(c, oc) && SameFaces(e, o)) { group.Add(o); done.Add(o); }
-            void Fail(string msg)
-            {
-                errors.Add($"Edge {fa.Tag.Name} / {fb.Tag.Name}: {msg}");
-                problemEdges?.AddRange(group.Select(g => g.Samples(1e-3).ToArray()));
-            }
+            void Fail(string msg) => fails.Add((group, $"Edge {fa.Tag.Name} / {fb.Tag.Name}: {msg}"));
             try
             {
-                List<Solid>? tools; bool convex, fits;
-                using (Prof.Time("blend.tools")) (tools, convex, fits) = ForceRollingBall ? (null, false, false)
-                    : e.Curve is NCircle ? ArcTools(group, size, fillet, name, ch, RefIsFirst) : LineTool(e, size, fillet, name, ch, RefIsFirst);
+                List<Solid>? tools; bool convex, fits; Solid? strip;
+                using (Prof.Time("blend.tools")) (tools, convex, fits, strip) = ForceRollingBall ? (null, false, false, null)
+                    : e.Curve is NCircle ? ArcTools(group, size, fillet, name, ch, RefIsFirst, direct) : LineTool(e, size, fillet, name, ch, RefIsFirst, direct);
                 if (tools == null && fillet)
                 {
                     // any other pair of faces: rolling ball along the chain of edges this edge belongs to; first across
@@ -77,7 +80,8 @@ public static class NativeBlend
                         rb = RollingBall.Build(group, size, name, OnFaces);
                     }
                     if (rb.Error != null) { Fail(rb.Error); continue; }
-                    (tools, convex, fits) = (new List<Solid> { rb.Tool! }, rb.Convex, rb.Fits);
+                    // the rolling-ball tool's sides lie on the faces it blends: a direct blend applies it as it is
+                    (tools, convex, fits, strip) = (new List<Solid> { rb.Tool! }, rb.Convex, rb.Fits, rb.Tool);
                 }
                 if (Debug != null)
                     Debug($"blend {name}: {string.Join(", ", group.Select(g => $"{g.Curve.GetType().Name}{g.V0.P}->{g.V1.P} [{string.Join("|", g.Uses.Select(u => u.Face.Tag.Name + ":" + u.Face.Surface.Kind))}]"))} -> tools={tools?.Count} fits={fits}");
@@ -92,19 +96,91 @@ public static class NativeBlend
                         continue;
                     }
                     tools = new List<Solid> { trimmed };
-                    anyTrimmed = true;
-                    trimmedEdges.AddRange(group);
+                    strip = null;
                 }
-                (convex ? cutTools : addTools).AddRange(tools);
-                applied?.AddRange(tools.Select(t => (t, convex)));
+                entries.Add((tools, convex, direct ? strip : null, name, group, !fits));
             }
             catch (Exception ex) { Fail(ex.Message); }
+        }
+        // a tangent chain whose pieces did not all fit (trimmed, or failed): the whole chain once more as one
+        // rolling-ball tool, which has no ends at the joints to run past (a spoke's foot round on a rim: its straight
+        // sides by the exact tools, the rest by the rolling ball, overflowing where they meet)
+        if (fillet && !ForceRollingBall)
+        {
+            var bad = new HashSet<NEdge>(entries.Where(x => x.trimmed).SelectMany(x => x.group).Concat(fails.SelectMany(x => x.group)), ReferenceEqualityComparer.Instance);
+            foreach (var seed in bad.ToList())
+            {
+                if (!bad.Contains(seed)) continue;
+                var chain = TangentChain(seed, edges, new HashSet<NEdge>(ReferenceEqualityComparer.Instance));
+                var set = new HashSet<NEdge>(chain, ReferenceEqualityComparer.Instance);
+                var mine = Enumerable.Range(0, entries.Count).Where(k => entries[k].group.Any(set.Contains)).ToList();
+                var mineF = Enumerable.Range(0, fails.Count).Where(k => fails[k].group.Any(set.Contains)).ToList();
+                if (mine.Count + mineF.Count < 2) continue;
+                // the chain is exactly those tools' edges
+                if (mine.SelectMany(k => entries[k].group).Concat(mineF.SelectMany(k => fails[k].group)).Any(x => !set.Contains(x))) continue;
+                var name0 = mine.Count > 0 ? entries[mine[0]].name : $"{prefix}.{i++}";
+                RollingBall.Result rb;
+                try { using (Prof.Time("blend.tools")) rb = RollingBall.Build(chain, size, name0, OnFaces); }
+                catch (Exception) { continue; }
+                Debug?.Invoke($"whole tangent chain {name0}: {chain.Count} edges -> {rb.Error ?? (rb.Fits ? "fits" : "overflows")}");
+                if (rb.Error != null || !rb.Fits) continue;
+                foreach (var k in mine.OrderByDescending(k => k)) entries.RemoveAt(k);
+                foreach (var k in mineF.OrderByDescending(k => k)) fails.RemoveAt(k);
+                entries.Add((new List<Solid> { rb.Tool! }, rb.Convex, direct ? rb.Tool : null, name0, chain, false));
+                bad.ExceptWith(chain);
+            }
+        }
+        foreach (var (group, msg) in fails)
+        {
+            errors.Add(msg);
+            problemEdges?.AddRange(group.Select(g => g.Samples(1e-3).ToArray()));
+        }
+        foreach (var x in entries)
+        {
+            applied?.AddRange(x.tools.Select(t => (t, x.convex)));
+            if (x.trimmed) { anyTrimmed = true; trimmedEdges.AddRange(x.group); }
         }
         // the tools only (in applied): the caller applies them (e.g. pattern instances built in parallel)
         // (trimmedOut: whether they must be applied one at a time, as below)
         if (trimmedOut != null) trimmedOut.Value = anyTrimmed;
         if (buildOnly) return body;
         var result = body;
+        // direct first: the tools whose sides lie on the faces they blend change those faces (no boolean); the others
+        // (and all when some were trimmed: those go one at a time) by boolean
+        var byBoolean = Enumerable.Range(0, entries.Count).ToList();
+        // corners where three fillets meet (a box's corner rounded all round): the ball's patch there, the edges'
+        // tools shortened to it (the direct blend glues them into one)
+        var corners = new List<DirectBlend.Tool>();
+        if (direct && fillet && !anyTrimmed)
+        {
+            var lines = entries.Where(x => x.group.Count == 1 && x.group[0].Curve is NLine && x.group[0].Uses.Count == 2
+                && x.group[0].Uses.All(u => u.Face.Surface.Kind == SurfaceKind.Plane)).ToList();
+            if (lines.Count >= 3)
+            {
+                List<(Solid piece, bool convex)> pieces;
+                Dictionary<NEdge, Solid> shortened;
+                using (Prof.Time("blend.corners"))
+                    (shortened, pieces) = CornerBlend.Build(lines.Select(x => new CornerBlend.Line(x.group[0], x.convex, x.name)).ToList(), size, prefix);
+                for (int k = 0; k < entries.Count; k++)
+                    if (entries[k].group.Count == 1 && shortened.TryGetValue(entries[k].group[0], out var sh)) entries[k] = entries[k] with { strip = sh };
+                corners.AddRange(pieces.Select((c, j) => new DirectBlend.Tool(c.piece, c.convex, $"{prefix}.C{j}", size)));
+            }
+        }
+        if (!anyTrimmed && entries.Any(x => x.strip != null))
+        {
+            var idx = Enumerable.Range(0, entries.Count).Where(k => entries[k].strip != null).ToList();
+            var left = new List<int>();
+            var nb = DirectBlend.Apply(body.Native!, idx.Select(k => new DirectBlend.Tool(entries[k].strip!, entries[k].convex, entries[k].name, size)).Concat(corners).ToList(), left);
+            if (nb != null)
+            {
+                result = NTess.ToSolid(nb);
+                // (the corner pieces after the edges' tools: applied with them or not at all)
+                var directDone = idx.Where((k, j) => !left.Contains(j)).ToHashSet();
+                byBoolean = byBoolean.Where(k => !directDone.Contains(k)).ToList();
+            }
+        }
+        foreach (var k in byBoolean) (entries[k].convex ? cutTools : addTools).AddRange(entries[k].tools);
+        if (cutTools.Count == 0 && addTools.Count == 0) return result;
         if (anyTrimmed)
         {
             // trimmed blends of neighbouring edges can touch each other along tangent curves; merged with each
@@ -213,10 +289,11 @@ public static class NativeBlend
     /// <summary>Direction of the edge as traversed by the coedge, at curve parameter t.</summary>
     static Vec3 Tangent(NCoedge c, double t) => (c.Edge.Curve.Deriv(t) * (c.Forward ? 1 : -1)).Normalized;
 
-    static (List<Solid>? tools, bool convex, bool fits) LineTool(NEdge e, double size, bool fillet, string name, ChamferSize ch, Func<NFace, NFace, bool> refIsFirst)
+    static (List<Solid>? tools, bool convex, bool fits, Solid? strip) LineTool(NEdge e, double size, bool fillet, string name, ChamferSize ch, Func<NFace, NFace, bool> refIsFirst,
+        bool direct)
     {
         var cA = e.Uses[0]; var cB = e.Uses[1];
-        if (e.Curve is not NLine || cA.Face.Surface.Kind != SurfaceKind.Plane || cB.Face.Surface.Kind != SurfaceKind.Plane) return (null, false, false);
+        if (e.Curve is not NLine || cA.Face.Surface.Kind != SurfaceKind.Plane || cB.Face.Surface.Kind != SurfaceKind.Plane) return (null, false, false, null);
         var E = cA.Start.P; var dir = cA.End.P - E; var L = dir.Length; var t = dir / L;
         var nA = Outward(cA.Face, E); var nB = Outward(cB.Face, E);
         // faces lie to the left of their loops (seen from outside): n × direction points into the face
@@ -228,37 +305,56 @@ public static class NativeBlend
         Vec2 P(Vec3 v) => new(Vec3.Dot(v, x), Vec3.Dot(v, y));
         var (dA, dB) = fillet ? (size, size) : EdgeBlend.ChamferLegs(P(uA), P(uB), ch, refIsFirst(cA.Face, cB.Face));
         var loop = EdgeBlend.Profile2D(P(uA), P(uB), P(nA), P(nB), Vec2.Zero, dA, fillet, convex, dB);
-        if (loop == null) return (null, convex, false);
+        if (loop == null) return (null, convex, false, null);
         var (tlA, tlB) = TangentLengths(P(uA), P(uB), size, fillet, dA, dB);
+        // ends meeting a face at an angle (an edge of a drafted boss on the plate): the tool's square end leans past
+        // that face on one side, into the material beyond it, and falls short on the other. The tool is cut back to
+        // the face, and an extension past the end, also cut back to it, fills the other side
+        var ext = 3 * Math.Max(size, Math.Max(tlA, tlB));
+        var p0 = EndPlane(cA.Start, -t, cA.Face, cB.Face, new[] { e });
+        var p1 = EndPlane(cA.End, t, cA.Face, cB.Face, new[] { e });
+        // (contact points the ends' faces cut off are not the blend's)
+        bool Cut(Vec3 x) => p0 != null && p0.Distance(x) < 0 || p1 != null && p1.Distance(x) < 0;
         bool fits = true;
         for (int i = 0; i <= 16 && fits; i++)
         {
             var q = E + t * (L * i / 16);
-            fits = OnFaces(cA.Face, q + uA * tlA) && OnFaces(cB.Face, q + uB * tlB);
+            Vec3 xa = q + uA * tlA, xb = q + uB * tlB;
+            fits = (Cut(xa) || OnFaces(cA.Face, xa)) && (Cut(xb) || OnFaces(cB.Face, xb));
         }
-        var tools = new List<Solid> { Builders.Extrude(new[] { new ProfileRegion(loop) }, lframe, 0, L, name) };
-        // ends meeting a face at an angle: an extension past the end, cut back to that face
-        var ext = 3 * Math.Max(size, Math.Max(tlA, tlB));
-        if (EndPlane(cA.Start, -t, cA.Face, cB.Face, new[] { e }) is { } p0)
-            tools.Add(Trim(Builders.Extrude(new[] { new ProfileRegion(loop) }, lframe, -ext, 0, name), p0));
-        if (EndPlane(cA.End, t, cA.Face, cB.Face, new[] { e }) is { } p1)
-            tools.Add(Trim(Builders.Extrude(new[] { new ProfileRegion(loop) }, lframe, L, L + ext, name), p1));
+        var main = Builders.Extrude(new[] { new ProfileRegion(loop) }, lframe, 0, L, name);
+        if (p0 != null) main = Trim(main, p0);
+        if (p1 != null) main = Trim(main, p1);
+        var tools = new List<Solid> { main };
+        if (p0 != null) tools.Add(Trim(Builders.Extrude(new[] { new ProfileRegion(loop) }, lframe, -ext, 0, name), p0));
+        if (p1 != null) tools.Add(Trim(Builders.Extrude(new[] { new ProfileRegion(loop) }, lframe, L, L + ext, name), p1));
         tools.RemoveAll(x => x.IsEmpty);
-        return (tools, convex, fits);
+        // the direct blend's tool: the same profile bounded by the faces, its ends at an angle extended and cut back
+        // to the faces they meet (on those faces then, as its other faces are on the blended ones)
+        Solid? strip = null;
+        if (direct && EdgeBlend.Profile2D(P(uA), P(uB), P(nA), P(nB), Vec2.Zero, dA, fillet, convex, dB, atCorner: true) is { } sl)
+        {
+            strip = Builders.Extrude(new[] { new ProfileRegion(sl) }, lframe, p0 != null ? -ext : 0, p1 != null ? L + ext : L, name);
+            if (p0 != null) strip = Trim(strip, p0);
+            if (p1 != null) strip = Trim(strip, p1);
+            if (strip.IsEmpty || strip.Native == null) strip = null;
+        }
+        return (tools, convex, fits, strip);
     }
 
-    static (List<Solid>? tools, bool convex, bool fits) ArcTools(List<NEdge> arcs, double size, bool fillet, string name, ChamferSize ch, Func<NFace, NFace, bool> refIsFirst)
+    static (List<Solid>? tools, bool convex, bool fits, Solid? strip) ArcTools(List<NEdge> arcs, double size, bool fillet, string name, ChamferSize ch, Func<NFace, NFace, bool> refIsFirst,
+        bool direct)
     {
         var e = arcs[0];
         var cP = e.Uses[0]; var cC = e.Uses[1];
         if (cP.Face.Surface.Kind != SurfaceKind.Plane) (cP, cC) = (cC, cP);
-        if (cP.Face.Surface.Kind != SurfaceKind.Plane || cC.Face.Surface.Kind != SurfaceKind.Cylinder) return (null, false, false);
+        if (cP.Face.Surface.Kind != SurfaceKind.Plane || cC.Face.Surface.Kind != SurfaceKind.Cylinder) return (null, false, false, null);
         var cs = cC.Face.Surface;
         var ax = cs.Axis;
         var tm = 0.5 * (e.T0 + e.T1);
         var M = e.Curve.Eval(tm);
         var nP = Outward(cP.Face, M); var nC = Outward(cC.Face, M);
-        if (Math.Abs(Vec3.Dot(ax, nP)) < 0.999) return (null, false, false);
+        if (Math.Abs(Vec3.Dot(ax, nP)) < 0.999) return (null, false, false, null);
         var uP = Vec3.Cross(nP, Tangent(cP, tm)).Normalized;
         var uC = Vec3.Cross(nC, Tangent(cC, tm)).Normalized;
         bool convex = Vec3.Dot(uC, nP) < 0;
@@ -272,7 +368,10 @@ public static class NativeBlend
         var nC2 = new Vec2(Math.Sign(Vec3.Dot(nC, rho)), 0);
         var (dP, dC) = fillet ? (size, size) : EdgeBlend.ChamferLegs(uP2, uC2, ch, refIsFirst(cP.Face, cC.Face));
         var prof = EdgeBlend.Profile2D(uP2, uC2, nP2, nC2, new Vec2(cs.R, h0), dP, fillet, convex, dC);
-        if (prof == null) return (null, convex, false);
+        if (prof == null) return (null, convex, false, null);
+        // the direct blend's tool: the same profile bounded by the faces, revolved over the same arc (none for an
+        // arc whose ends meet faces at an angle: those need the extensions)
+        var sprof = direct ? EdgeBlend.Profile2D(uP2, uC2, nP2, nC2, new Vec2(cs.R, h0), dP, fillet, convex, dC, atCorner: true) : null;
         if (prof.Verts.Any(v => v.P.X < -1e-9)) throw new InvalidOperationException("size too large for this edge");
         var (tlP, tlC) = TangentLengths(uP2, uC2, size, fillet, dP, dC);
         var tlc = Math.Max(tlP, tlC);
@@ -290,17 +389,9 @@ public static class NativeBlend
             if (Wrap(Ang(arc.Mid) - a0) > sweep) { a0 = Ang(arc.V1.P); sweep = Wrap(Ang(arc.V0.P) - a0); }
             ranges.Add((a0, sweep));
         }
-        bool fits = true;
-        foreach (var (a0, sweep) in ranges)
-            for (int i = 0; i <= 24 && fits; i++)
-            {
-                var a = a0 + sweep * i / 24;
-                var dir = refDir * Math.Cos(a) + yDir * Math.Sin(a);
-                fits = OnFaces(cP.Face, cs.Origin + ax * onPlane.Y + dir * onPlane.X) && OnFaces(cC.Face, cs.Origin + ax * onCyl.Y + dir * onCyl.X);
-            }
         // chain ends meeting a face at an angle (e.g. a keyway wall across a bore): extensions past the ends, each
         // cut back to its face
-        var extensions = new List<(double a0, double sweep, Plane plane)>();
+        var extensions = new List<(double a0, double sweep, Plane plane, int arc)>();
         if (ranges.Sum(r => r.sweep) < 2 * Math.PI - 1e-6)
         {
             var delta = Math.Min(Math.Min(3 * Math.Max(size, tlc) / cs.R, Math.PI / 4), (2 * Math.PI - ranges.Sum(r => r.sweep)) / 2);
@@ -317,12 +408,23 @@ public static class NativeBlend
                     if (arcs.Count(o => ReferenceEquals(o.V0, v) || ReferenceEquals(o.V1, v)) > 1) continue; // joint inside the chain
                     var dirOut = atStart ? -DirAt(a0) : DirAt(a0 + sweep);
                     if (delta > 1e-9 && EndPlane(v, dirOut, cP.Face, cC.Face, arcs) is { } pl)
-                        extensions.Add((atStart ? a0 - delta : a0 + sweep, delta, pl));
+                        extensions.Add((atStart ? a0 - delta : a0 + sweep, delta, pl, i));
                 }
             }
         }
+        // (contact points the ends' faces cut off are not the blend's)
+        bool Cut(Vec3 x) => extensions.Any(e => e.plane.Distance(x) < 0);
+        bool fits = true;
+        foreach (var (a0, sweep) in ranges)
+            for (int i = 0; i <= 24 && fits; i++)
+            {
+                var a = a0 + sweep * i / 24;
+                var dir = refDir * Math.Cos(a) + yDir * Math.Sin(a);
+                Vec3 xp = cs.Origin + ax * onPlane.Y + dir * onPlane.X, xc = cs.Origin + ax * onCyl.Y + dir * onCyl.X;
+                fits = (Cut(xp) || OnFaces(cP.Face, xp)) && (Cut(xc) || OnFaces(cC.Face, xc));
+            }
         var tools = new List<Solid>();
-        foreach (var (xa, xs, pl) in extensions)
+        foreach (var (xa, xs, pl, _) in extensions)
         {
             var startDir = refDir * Math.Cos(xa) + yDir * Math.Sin(xa);
             var xf = new Frame(cs.Origin, startDir, ax, Vec3.Cross(startDir, ax));
@@ -333,16 +435,40 @@ public static class NativeBlend
         {
             var frame = new Frame(cs.Origin, refDir, ax, Vec3.Cross(refDir, ax));
             tools.Add(Builders.Revolve(new[] { new ProfileRegion(prof) }, frame, Vec2.Zero, new Vec2(0, 1), 2 * Math.PI, name));
-            return (tools, convex, fits);
+            var full = sprof != null && extensions.Count == 0
+                ? Builders.Revolve(new[] { new ProfileRegion(sprof) }, frame, Vec2.Zero, new Vec2(0, 1), 2 * Math.PI, name) : null;
+            return (tools, convex, fits, full);
         }
-        foreach (var (a0, sweep) in ranges)
+        for (int k = 0; k < ranges.Count; k++)
         {
+            var (a0, sweep) = ranges[k];
             if (sweep < 1e-9) continue;
             var startDir = refDir * Math.Cos(a0) + yDir * Math.Sin(a0);
             var pframe = new Frame(cs.Origin, startDir, ax, Vec3.Cross(startDir, ax));
-            tools.Add(Builders.Revolve(new[] { new ProfileRegion(prof) }, pframe, Vec2.Zero, new Vec2(0, 1), sweep, name));
+            var piece = Builders.Revolve(new[] { new ProfileRegion(prof) }, pframe, Vec2.Zero, new Vec2(0, 1), sweep, name);
+            // cut back to the faces its ends meet at an angle (as the line tool's)
+            foreach (var x in extensions) if (x.arc == k) piece = Trim(piece, x.plane);
+            if (!piece.IsEmpty) tools.Add(piece);
         }
-        return (tools, convex, fits);
+        Solid? strip = null;
+        if (sprof != null && ranges.Count(r => r.sweep >= 1e-9) == 1)
+        {
+            // one arc: revolved over it and over its extensions, cut back to the faces its ends meet at an angle
+            int k = ranges.FindIndex(r => r.sweep >= 1e-9);
+            var (a0, sweep) = ranges[k];
+            var mine = extensions.Where(x => x.arc == k).ToList();
+            double from = a0, to = a0 + sweep;
+            foreach (var x in mine)
+            {
+                if (Math.Abs(x.a0 + x.sweep - a0) < 1e-9) from = x.a0;   // before the start
+                else to = x.a0 + x.sweep;                                // after the end
+            }
+            var startDir = refDir * Math.Cos(from) + yDir * Math.Sin(from);
+            strip = Builders.Revolve(new[] { new ProfileRegion(sprof) }, new Frame(cs.Origin, startDir, ax, Vec3.Cross(startDir, ax)), Vec2.Zero, new Vec2(0, 1), to - from, name);
+            foreach (var x in mine) strip = Trim(strip, x.plane);
+            if (strip.IsEmpty || strip.Native == null) strip = null;
+        }
+        return (tools, convex, fits, strip);
     }
 
     /// <summary>
