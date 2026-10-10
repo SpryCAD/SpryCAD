@@ -28,6 +28,21 @@ echo "== publishing to $out =="
 dotnet publish "$proj" -c Release -r "$rid" --self-contained true -p:PublishReadyToRun=true -p:DebugType=none \
   "-p:Version=$ver" -o "$out"
 
+# The oldest glibc the packages declare (Ubuntu 18.04, Debian 10, RHEL 8): what .NET's runtime (libcoreclr,
+# libclrjit) needs, the most of any library shipped. Where objdump exists (Linux, CI), the build fails if a library
+# needs more, as a .NET, Skia or HarfBuzz update could, so the packages never install somewhere they cannot run;
+# then raise this and the oldest versions the download page names.
+glibc_min=2.27
+if command -v objdump >/dev/null; then
+  need=$(for f in "$out"/SpryCAD "$out"/*.so; do objdump -T "$f" 2>/dev/null; done | grep -o 'GLIBC_[0-9.]*' |
+    sed 's/GLIBC_//' | sort -V -u | tail -1)
+  if [ "$(printf '%s\n%s\n' "$need" "$glibc_min" | sort -V | tail -1)" != "$glibc_min" ]; then
+    echo "The build needs glibc $need, newer than glibc_min=$glibc_min: raise it (and the oldest systems named)." >&2
+    exit 1
+  fi
+  echo "== needs glibc $need (packages declare $glibc_min) =="
+fi
+
 # 3) Generate the parametric demo parts fresh; fails on a demo with a feature that does not rebuild.
 demos="$root/publish/demos"
 rm -rf "$demos"
@@ -89,9 +104,10 @@ find "$pkg" -type f -exec chmod 644 {} +
 chmod 755 "$pkg/opt/sprycad/SpryCAD"
 [ -f "$pkg/opt/sprycad/createdump" ] && chmod 755 "$pkg/opt/sprycad/createdump"
 # The app is self-contained (.NET included); it still needs the C/C++ runtime, ICU and, for Avalonia, X11,
-# fontconfig and OpenGL. ICU's package name carries its version, and .NET loads whichever is installed, so any
-# from 80 down to 60 does: Ubuntu 18.04 (60), 20.04 and Mint 20 (66), Debian 11 (67), 22.04 (70), Debian 12 (72),
-# 24.04 (74) and on. Older systems' C runtime is libgcc1 (Ubuntu 18.04, Debian 10).
+# fontconfig and OpenGL. The oldest systems it runs on are those with glibc_min (2.27, checked after the publish):
+# Ubuntu 18.04 and Mint 19, Debian 10, RHEL 8. ICU's package name carries its version, and .NET loads whichever is
+# installed, so any from 80 down to 60 does: Ubuntu 18.04 (60), Debian 10 (63), 20.04 and Mint 20 (66), Debian 11
+# (67), 22.04 (70), Debian 12 (72), 24.04 (74) and on. Older systems' C runtime is libgcc1 (Ubuntu 18.04, Debian 10).
 icu=$(for v in $(seq 80 -1 60); do printf 'libicu%s | ' "$v"; done)
 cat > "$pkg/DEBIAN/control" <<EOF
 Package: sprycad
@@ -99,7 +115,7 @@ Version: $debver
 Architecture: amd64
 Maintainer: Kurt Jacobson <kcjengr@gmail.com>
 Installed-Size: $(du -sk "$pkg/opt" | cut -f1)
-Depends: libc6, libgcc-s1 | libgcc1, libstdc++6, ${icu% | }, libx11-6, libice6, libsm6, libfontconfig1, libgl1
+Depends: libc6 (>= $glibc_min), libgcc-s1 | libgcc1, libstdc++6, ${icu% | }, libx11-6, libice6, libsm6, libfontconfig1, libgl1
 Section: graphics
 Priority: optional
 Homepage: https://github.com/SpryCAD/SpryCAD
@@ -133,7 +149,7 @@ License: MIT
 URL: https://github.com/SpryCAD/SpryCAD
 BuildArch: x86_64
 AutoReqProv: no
-Requires: libc.so.6()(64bit), libstdc++.so.6()(64bit), libgcc_s.so.1()(64bit), libicu
+Requires: libc.so.6(GLIBC_$glibc_min)(64bit), libstdc++.so.6()(64bit), libgcc_s.so.1()(64bit), libicu
 Requires: libX11.so.6()(64bit), libICE.so.6()(64bit), libSM.so.6()(64bit), libfontconfig.so.1()(64bit), libGL.so.1()(64bit)
 %global debug_package %{nil}
 %global __os_install_post %{nil}

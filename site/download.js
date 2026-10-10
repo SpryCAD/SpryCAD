@@ -104,7 +104,7 @@
       </div>
 
       <h2>Debian and Ubuntu: from the apt repository</h2>
-      <p>Recommended: SpryCAD then updates along with the rest of the system. Ubuntu 20.04 or newer (Linux Mint 20 or newer), Debian 11 or newer.
+      <p>Recommended: SpryCAD then updates along with the rest of the system. Ubuntu 18.04 or newer (Linux Mint 19 or newer), Debian 10 or newer.
         ${rel.channel === 'dev' ? 'This adds the <strong>dev</strong> channel (every build of the main branch).' : ''}</p>
       ${pre(apt.join('\n'))}
       <p class="small muted">Start it from the applications menu or with <code>sprycad</code>. Remove it with
@@ -115,7 +115,8 @@
       ${pre(`curl -fLO ${deb.url}\nsudo apt install ./${deb.name}`)}
 
       ${rpm ? `<h2>Fedora, RHEL, Rocky and Alma: from the dnf repository</h2>
-      <p>Packages are signed with the same key as the apt repository; dnf asks once to import it.</p>
+      <p>Fedora 28 or newer, RHEL, Rocky or Alma 8 or newer. Packages are signed with the same key as the apt
+        repository; dnf asks once to import it.</p>
       ${pre([`sudo curl -fsSL -o /etc/yum.repos.d/sprycad.repo ${base}/rpm/sprycad-${rel.channel}.repo`,
              latest ? 'sudo dnf install sprycad' : `sudo dnf install ${rpm.name.replace(/\.rpm$/, '')}`].join('\n'))}
       <p class="small muted">Remove it with <code>sudo dnf remove sprycad</code>.${latest ? '' :
@@ -123,7 +124,7 @@
 
       ${t ? `<h2>Any distribution: the tarball</h2>
       <p>Installs for your user only (no root) into <code>~/.local/share/sprycad</code>, with a menu entry, file types and a
-        <code>sprycad</code> command in <code>~/.local/bin</code>. Needs X11 or XWayland and OpenGL.</p>
+        <code>sprycad</code> command in <code>~/.local/bin</code>. Needs glibc 2.27 or newer (most distributions from 2018 on), X11 or XWayland, and OpenGL.</p>
       ${pre(`curl -fLO ${t.url}\ntar xzf ${t.name}\ncd ${dir}\n./install.sh`)}
       <p>To update, run the same steps with a newer tarball. To uninstall (your settings in <code>~/.config/SpryCAD</code> are kept):</p>
       ${pre('~/.local/share/sprycad/uninstall.sh')}
