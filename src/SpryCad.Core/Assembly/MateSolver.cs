@@ -134,6 +134,44 @@ public static class MateSolver
         var freeIdx = new Dictionary<string, int>();
         // a reference on a carried component moves its body
         string? BodyOf(string? id) => id != null && attached != null && attached.TryGetValue(id, out var at) ? at.Body : id;
+        // components locked together (a Lock that holds as they are) move as one, carried by one of them (a still one
+        // if any is: the group is still), the Lock between them left out: fewer to solve for
+        var groupOf = new Dictionary<string, string>();
+        string Root(string b) { while (groupOf.TryGetValue(b, out var up) && up != b) b = up; return b; }
+        bool Moves(string b) => byId[b] is { Fixed: false } c && (onlyMove == null || onlyMove.Contains(c.Id));
+        Transform AsPlaced(string? id) =>
+            id == null ? Transform.Identity
+            : attached != null && attached.TryGetValue(id, out var at) ? byId[at.Body].Placement.ToTransform() * at.Offset
+            : byId[id].Placement.ToTransform();
+        var locked = new HashSet<Mate>();
+        foreach (var m in mates)
+        {
+            if (m.Type != MateType.Lock || BodyOf(m.A.Component) is not { } ba || BodyOf(m.B.Component) is not { } bb || ba == bb) continue;
+            var (ta, tb) = (AsPlaced(m.A.Component), AsPlaced(m.B.Component));
+            var lr = new List<double>();
+            m.Residuals(L(m.A).Placed(ta), L(m.B).Placed(tb), ta, tb, lr);
+            if (lr.Max(Math.Abs) > 1e-9) continue;
+            locked.Add(m);
+            var (ra, rb) = (Root(ba), Root(bb));
+            if (ra == rb) continue;
+            if (!Moves(rb) && Moves(ra)) (ra, rb) = (rb, ra);
+            groupOf[rb] = ra;
+        }
+        if (groupOf.Count > 0)
+        {
+            var grouped = attached != null ? new Dictionary<string, Attachment>(attached) : new Dictionary<string, Attachment>();
+            Transform Body(string b) => byId[b].Placement.ToTransform();
+            foreach (var b in groupOf.Keys) grouped[b] = new Attachment(Root(b), Body(Root(b)).RigidInverse() * Body(b));
+            if (attached != null)
+                foreach (var (id, at) in attached)
+                    if (Root(at.Body) is var root && root != at.Body) grouped[id] = new Attachment(root, Body(root).RigidInverse() * Body(at.Body) * at.Offset);
+            attached = grouped;
+            mates.RemoveAll(locked.Contains);
+        }
+        // a pull on a component locked to another pulls the group's
+        var pullOff = Transform.Identity;
+        var pulled = pullComponent;
+        if (pullComponent != null && groupOf.ContainsKey(pullComponent)) { pullOff = attached![pullComponent].Offset; pullComponent = attached[pullComponent].Body; }
         foreach (var m in mates)
             foreach (var r in new[] { m.A, m.B })
                 if (BodyOf(r.Component) is { } b && byId[b] is { Fixed: false } c && (onlyMove == null || onlyMove.Contains(c.Id)) && !freeIdx.ContainsKey(c.Id))
@@ -349,10 +387,13 @@ public static class MateSolver
         bool ran = false;
         Result Run(Pull? drag, double tol, int maxIter)
         {
-            if (drag != null && drag.Component != pullComponent) throw new ArgumentException("The pull is on a component the solve was not set up for.");
-            pull = drag; pulling = pull != null; pullWeight = 1e-3; pullDir = pull?.Dir.Normalized ?? Vec3.Zero;
+            if (drag != null && drag.Component != pulled) throw new ArgumentException("The pull is on a component the solve was not set up for.");
+            // (none where nothing it pulls is solved for: a component locked to a still one)
+            pull = drag == null || pullComponent == null ? null : pulled == pullComponent ? drag : drag with { Component = pullComponent, Local = pullOff.Point(drag.Local) };
+            pulling = pull != null; pullWeight = 1e-3; pullDir = pull?.Dir.Normalized ?? Vec3.Zero;
             var res = new Result();
             foreach (var c in free) res.Solved.Add(c.Id);
+            foreach (var b in groupOf.Keys) if (freeIdx.ContainsKey(Root(b))) res.Solved.Add(b);
             // run again: from where the components are now (as the last run left them, or put back since)
             if (ran) for (int i = 0; i < nf; i++) placements[free[i].Id] = place[i] = free[i].Placement.ToTransform();
             ran = true;
