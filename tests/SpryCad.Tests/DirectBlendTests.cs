@@ -226,6 +226,30 @@ static class DirectBlendTests
             t.True(dvs[0] > 0 && Math.Abs(dvs[0] - dvs[1]) < 1e-4 * dvs[0], $"added {dvs[0]:R} and {dvs[1]:R}");
         });
 
+        t.Test("Prism with leaning ends (a blend's tool on the faces its ends meet): as extruded past them and cut back", () =>
+        {
+            // a half disc (a line and an arc: lines and an ellipse on each end) between two leaning planes, against the
+            // same extruded long and cut back by booleans (what the tools did before)
+            var loop = new ProfileLoop();
+            loop.Verts.Add(new ProfileVertex(new Vec2(-1, 0), "a"));
+            loop.AddArc(Vec2.Zero, 1, 0, Math.PI, true, "r");
+            var frame = new Frame(Vec3.Zero, Vec3.UnitX, Vec3.UnitY, Vec3.UnitZ);
+            var p0 = Plane.FromPointNormal(Vec3.Zero, new Vec3(0.3, 0.2, 1).Normalized);
+            var p1 = Plane.FromPointNormal(new Vec3(0, 0, 5), new Vec3(-0.2, 0.4, -1).Normalized);
+            var nb = Kernel.Native.NBuild.ExtrudeBetween(new[] { new ProfileRegion(loop) }, frame, p0, 0, p1, 5, "T");
+            t.True(nb != null && nb.Validate() == null, "built and valid");
+            Solid Cut(Solid s0, Plane pl)
+            {
+                var x = pl.Normal.AnyPerpendicular(); var y = Vec3.Cross(pl.Normal, x);
+                var rect = ProfileLoop.Polygon(new[] { new Vec2(-20, -20), new Vec2(20, -20), new Vec2(20, 20), new Vec2(-20, 20) }, "c");
+                return Csg.Subtract(s0, Builders.Extrude(new[] { new ProfileRegion(rect) }, new Frame(pl.Project(Vec3.Zero), x, y, pl.Normal), -20, 0, "c"));
+            }
+            var cut = Cut(Cut(Builders.Extrude(new[] { new ProfileRegion(loop) }, frame, -3, 8, "T"), p0), p1);
+            double v = KernelTests.Vex(Kernel.Native.NTess.ToSolid(nb!)), e = KernelTests.Vex(cut);
+            t.True(Math.Abs(v - e) < 1e-9 * e, $"volume {v:R}, cut back {e:R}");
+            t.True(nb!.Edges.Count(x => x.Curve is Kernel.Native.NEllipse) == 2, "an ellipse on each end");
+        });
+
         t.Test("Hex socket (socket cap screw): rim and floor blends mitred at the corners; inside corners and rim in one feature", () =>
         {
             // the sample screw's socket: a hexagon, apothem 2.5, 3 deep. A blend round a polygon's edges, mitred at its
@@ -272,6 +296,22 @@ static class DirectBlendTests
             // they leave (sides 2.887 - 1 and 0.866, turns of 30°)
             double cornerTri = 0.5 * r * r * Math.Sin(2 * Math.PI / 3) * 3 * 6, p12 = 6 * (2.5 * 2 * Math.Tan(Math.PI / 6) - 1) + 6 * 2 * r * Math.Sin(Math.PI / 3);
             Near("corners and rim chamfered at once", Changed(e => Vert(e) || Rim(e), es => new[] { Cha(es) }), cornerTri - (ac * p12 + 2 * 12 * Math.Tan(Math.PI / 12) * mc));
+            // the floor R1 after the corners rounded R0.5: the ball does not fit in them; said once, with the edges
+            {
+                var doc = CadDocument.Load(path);
+                var sock = doc.Features.First(f => f.Name == "Socket" && f is ExtrudeFeature);
+                var nb0 = new Regenerator().Rebuild(doc, doc.Features.IndexOf(sock) + 1).State.Bodies[0].Solid.Native!;
+                nb0.Link();
+                List<EdgeRef> Refs(Func<Kernel.Native.NEdge, bool> w) => nb0.Edges.Where(e => e.Uses.Count == 2 && e.Uses.Any(u => u.Face.Tag.Name.StartsWith(sockId + ".")) && w(e))
+                    .Select(e => new EdgeRef { A = e.Uses[0].Face.Tag.Name, B = e.Uses[1].Face.Tag.Name, Hint = e.Curve.Eval(0.5 * (e.T0 + e.T1)) }).ToList();
+                var rounds = new FilletFeature { Name = "Corners", Radius = "0.5", Edges = Refs(Vert) };
+                var floor = new FilletFeature { Name = "Floor", Radius = "1", Edges = Refs(Floor).Take(1).ToList() };
+                doc.Features.Insert(doc.Features.IndexOf(sock) + 1, rounds);
+                doc.Features.Insert(doc.Features.IndexOf(rounds) + 1, floor);
+                var rr = new Regenerator().Rebuild(doc, doc.Features.IndexOf(floor) + 1);
+                var err = rr.Status[floor.Id].Error ?? "";
+                t.True(!rr.Status[floor.Id].Ok && err.Contains("R1 does not fit inside the R0.5 round it runs along") && err.IndexOf("does not fit") == err.LastIndexOf("does not fit"), err);
+            }
         });
 
         t.Test("Fillet round a spoke's foot on a rim (undrafted): the tangent chain as one tool when its pieces overflow", () =>
@@ -361,6 +401,24 @@ static class DirectBlendTests
                 }
                 finally { DirectBlend.Enabled = old; }
             }
+        });
+
+        t.Test("Mirror of a fillet whose pieces go one at a time: the copy filleted the same, the body exact (not faceted)", () =>
+        {
+            // the rib's fillets into the plate and the wall meet where the rib meets both; their tools, joined to be
+            // copied, made the whole body faceted (on a worker thread, the faceted fallback was not refused)
+            var doc = Demos.BlendCases.First(c => c.name == "rib against a wall, filleted and mirrored").build();
+            int Index(string name) => doc.Features.FindIndex(f => f.Name == name);
+            var reg = new Regenerator();
+            double Vol(int n) { var r = reg.Rebuild(doc, n); return KernelTests.Vex(r.State.Bodies[0].Solid); }
+            var beforeRib = Vol(Index("Rib"));
+            var filleted = Vol(Index("Rib fillets") + 1);
+            var res = reg.Rebuild(doc);
+            foreach (var f in doc.Features) t.True(res.Status[f.Id].Ok && res.Status[f.Id].Warnings.Count == 0, $"{f.Name}: {res.Status[f.Id].Error} {string.Join("; ", res.Status[f.Id].Warnings)}");
+            var nb = res.State.Bodies[0].Solid.Native;
+            t.True(nb != null && nb.Validate() == null, $"exact and closed: {nb?.Validate()}");
+            var mirrored = KernelTests.Vex(res.State.Bodies[0].Solid);
+            t.True(Math.Abs(mirrored - beforeRib - 2 * (filleted - beforeRib)) < 1e-6 * mirrored, $"the copy adds {mirrored - filleted:R}, the rib and its fillets {filleted - beforeRib:R}");
         });
 
         t.Test("Direct blend: off (FC_BLEND=boolean) applies nothing directly", () =>

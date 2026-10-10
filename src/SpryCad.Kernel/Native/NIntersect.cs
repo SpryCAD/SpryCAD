@@ -1017,6 +1017,8 @@ public static class NIntersect
     [ThreadStatic] static int _stamp;
     [ThreadStatic] static int[]? _cross, _seg0, _seg1, _deg;
     [ThreadStatic] static Vec2[]? _crossPt;
+    [ThreadStatic] static Vec3[]? _pos;
+    [ThreadStatic] static int[]? _posStamp;
 
     public static List<NPolyline> Trace(NFace fa, NSurface sb, double tol, NDomain? domain = null)
     {
@@ -1038,13 +1040,24 @@ public static class NIntersect
         var seg0 = _seg0 ??= new int[nk];    // a crossing's segments in the order they were added
         var seg1 = _seg1 ??= new int[nk];
         var deg = _deg ??= new int[nk];      // stamp·4 + degree
-        if (++_stamp == int.MaxValue / 4) { Array.Clear(have); Array.Clear(cross); Array.Clear(deg); _stamp = 1; }
+        // the surface point at each grid node, shared by the block test and the grid values
+        var pos = _pos ??= new Vec3[(nu + 1) * (nv + 1)];
+        var posHave = _posStamp ??= new int[(nu + 1) * (nv + 1)];
+        if (++_stamp == int.MaxValue / 4) { Array.Clear(have); Array.Clear(cross); Array.Clear(deg); Array.Clear(posHave); _stamp = 1; }
         int stamp = _stamp;
+        Vec3 At(int i, int j)
+        {
+            int k = i * (nv + 1) + j;
+            if (posHave[k] == stamp) return pos[k];
+            posHave[k] = stamp;
+            return pos[k] = dom.Eval(UV(i, j));
+        }
         double G(int i, int j)
         {
             int k = i * (nv + 1) + j;
             if (have[k] == stamp) return g[k];
-            var v = sb.F_(dom.Eval(UV(i, j)));
+            // (a node the block test placed is reused; the rest of the fine grid is not stored)
+            var v = sb.F_(posHave[k] == stamp ? pos[k] : dom.Eval(UV(i, j)));
             have[k] = stamp;
             return g[k] = v == 0 ? 1e-300 : v;
         }
@@ -1062,7 +1075,7 @@ public static class NIntersect
                 for (int q = 0; q < 8; q++)
                 {
                     var (ii, jj) = q switch { 0 => (i0, j0), 1 => (i1, j0), 2 => (i0, j1), 3 => (i1, j1), 4 => (im, j0), 5 => (im, j1), 6 => (i0, jm), _ => (i1, jm) };
-                    r = Math.Max(r, Vec3.Distance(c, dom.Eval(UV(ii, jj))));
+                    r = Math.Max(r, Vec3.Distance(c, At(ii, jj)));
                 }
                 active[bi * nb + bj] = Math.Abs(sb.F_(c)) <= r * 1.25 + 1e-9;
             }

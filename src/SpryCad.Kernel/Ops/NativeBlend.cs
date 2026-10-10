@@ -31,7 +31,10 @@ public static class NativeBlend
         if (!buildOnly && Mixed(body.Native!, edges) is { } first)
         {
             var errs = new List<string>(); var probs = problemEdges == null ? null : new List<Vec3[]>(); var app = applied == null ? null : new List<(Solid, bool)>();
-            var once = ApplyOne(body, edges, size, fillet, prefix, errs, overflow, probs, app, chamfer, false, trimmedOut);
+            // (all at once only where it may do better: three or more blends of one kind at a vertex get a corner of
+            // their own there; else it fails where the kinds meet, and only costs time)
+            var once = Corner3(edges) ? ApplyOne(body, edges, size, fillet, prefix, errs, overflow, probs, app, chamfer, false, trimmedOut) : body;
+            if (!Corner3(edges)) errs.Add("staged");
             if (errs.Count == 0)
             {
                 if (probs != null) problemEdges!.AddRange(probs);
@@ -45,6 +48,19 @@ public static class NativeBlend
             return rest.Count == 0 ? nb1 : Apply(nb1, rest, size, fillet, prefix, errors, overflow, problemEdges, applied, chamfer, false, trimmedOut);
         }
         return ApplyOne(body, edges, size, fillet, prefix, errors, overflow, problemEdges, applied, chamfer, buildOnly, trimmedOut);
+    }
+
+    /// <summary>Whether three or more of the edges, of one kind (convex or concave), meet at a vertex.</summary>
+    static bool Corner3(IReadOnlyList<NEdge> edges)
+    {
+        var at = new Dictionary<(NVertex, bool?), int>();
+        foreach (var e in edges)
+        {
+            var k = Convex(e, e.Curve.Eval(0.5 * (e.T0 + e.T1)));
+            foreach (var v in ReferenceEquals(e.V0, e.V1) ? new[] { e.V0 } : new[] { e.V0, e.V1 })
+                if ((at[(v, k)] = at.GetValueOrDefault((v, k)) + 1) >= 3) return true;
+        }
+        return false;
     }
 
     /// <summary>
@@ -214,7 +230,8 @@ public static class NativeBlend
                     Fail($"the {(fillet ? "fillet" : "chamfer")} does not fit: it runs past the faces it blends. Use a smaller size.");
                     continue;
                 }
-                entries.Add((tools, convex, direct ? strip : null, name, group, !fits));
+                // (the tool bounded by the faces: applied directly, and the one cut back where a tool runs past its faces)
+                entries.Add((tools, convex, strip, name, group, !fits));
             }
             catch (Exception ex) when (ex is not OperationCanceledException) { Fail(ex.Message); }
         }
@@ -242,7 +259,7 @@ public static class NativeBlend
                 if (rb.Error != null || !rb.Fits) continue;
                 foreach (var k in mine.OrderByDescending(k => k)) entries.RemoveAt(k);
                 foreach (var k in mineF.OrderByDescending(k => k)) fails.RemoveAt(k);
-                entries.Add((new List<Solid> { rb.Tool! }, rb.Convex, direct ? rb.Tool : null, name0, chain, false));
+                entries.Add((new List<Solid> { rb.Tool! }, rb.Convex, rb.Tool, name0, chain, false));
                 bad.ExceptWith(chain);
             }
         }
@@ -272,22 +289,24 @@ public static class NativeBlend
                     && DirectBlend.Glue(cluster.Select(k => new DirectBlend.Tool(entries[k].strip!, entries[k].convex, entries[k].name, size)).ToList(), out _) is { } glued
                     && TrimToEdge(body, new List<Solid> { glued.Strip }, glued.Convex, all, FacesOf(all)) is { } one)
                 {
-                    // (by boolean: a tool cut back to neighbouring geometry is not applied directly yet)
-                    cut.Add((new List<Solid> { one }, glued.Convex, null, entries[cluster[0]].name, all, true));
+                    cut.Add((new List<Solid> { one }, glued.Convex, one, entries[cluster[0]].name, all, true));
                     continue;
                 }
                 foreach (var k in cluster)
                 {
                     var x = entries[k];
                     var faces = FacesOf(x.group);
-                    var t = TrimToEdge(body, x.tools, x.convex, x.group, faces);
+                    // the tool bounded by the faces where there is one: the boolean's reaches past the corner, and cut
+                    // back here that reach can be left exposed (material added, or taken, beyond the blend)
+                    var t = TrimToEdge(body, x.strip != null ? new List<Solid> { x.strip } : x.tools, x.convex, x.group, faces);
                     if (t == null)
                     {
                         var (fa, fb) = Faces(x.group[0]);
                         fails.Add((x.group, $"Edge {fa.Tag.Name} / {fb.Tag.Name}: the {(fillet ? "fillet" : "chamfer")} does not fit: it runs past the faces it blends. Use a smaller size."));
                         continue;
                     }
-                    cut.Add((new List<Solid> { t }, x.convex, null, x.name, x.group, true));
+                    // (applied directly too: its new faces lie on the neighbouring geometry's)
+                    cut.Add((new List<Solid> { t }, x.convex, x.strip != null ? t : null, x.name, x.group, true));
                 }
             }
             foreach (var k in pending.OrderByDescending(k => k)) entries.RemoveAt(k);
@@ -329,7 +348,7 @@ public static class NativeBlend
                 corners.AddRange(pieces.Select((c, j) => new DirectBlend.Tool(c.piece, c.convex, $"{prefix}.C{j}", size)));
             }
         }
-        if (entries.Any(x => x.strip != null))
+        if (direct && entries.Any(x => x.strip != null))
         {
             var idx = Enumerable.Range(0, entries.Count).Where(k => entries[k].strip != null).ToList();
             var left = new List<int>();
@@ -501,21 +520,25 @@ public static class NativeBlend
             Vec3 xa = q + uA * tlA, xb = q + uB * tlB;
             fits = (Cut(xa) || OnFaces(cA.Face, xa)) && (Cut(xb) || OnFaces(cB.Face, xb));
         }
-        var main = Builders.Extrude(new[] { new ProfileRegion(loop) }, lframe, 0, L, name);
-        if (p0 != null) main = Trim(main, p0);
-        if (p1 != null) main = Trim(main, p1);
-        var tools = new List<Solid> { main };
-        if (p0 != null) tools.Add(Trim(Builders.Extrude(new[] { new ProfileRegion(loop) }, lframe, -ext, 0, name), p0));
-        if (p1 != null) tools.Add(Trim(Builders.Extrude(new[] { new ProfileRegion(loop) }, lframe, L, L + ext, name), p1));
-        tools.RemoveAll(x => x.IsEmpty);
-        // the direct blend's tool: the same profile bounded by the faces, its ends at an angle extended and cut back
-        // to the faces they meet (on those faces then, as its other faces are on the blended ones)
-        Solid? strip = null;
-        if (direct && EdgeBlend.Profile2D(P(uA), P(uB), P(nA), P(nB), Vec2.Zero, dA, fillet, convex, dB, atCorner: true) is { } sl)
+        // the profile from end to end, its ends on those planes: built so (a prism with leaning ends), else extruded
+        // past them and cut back
+        Solid Between(ProfileLoop prof, bool extend)
         {
-            strip = Builders.Extrude(new[] { new ProfileRegion(sl) }, lframe, p0 != null ? -ext : 0, p1 != null ? L + ext : L, name);
-            if (p0 != null) strip = Trim(strip, p0);
-            if (p1 != null) strip = Trim(strip, p1);
+            if ((p0 != null || p1 != null) && NBuild.ExtrudeBetween(new[] { new ProfileRegion(prof) }, lframe, p0, 0, p1, L, name) is { } nb)
+                return NTess.ToSolid(nb);
+            var sol = Builders.Extrude(new[] { new ProfileRegion(prof) }, lframe, p0 != null && extend ? -ext : 0, p1 != null && extend ? L + ext : L, name);
+            if (p0 != null) sol = Trim(sol, p0);
+            if (p1 != null) sol = Trim(sol, p1);
+            return sol;
+        }
+        var tools = new List<Solid> { Between(loop, true) };
+        tools.RemoveAll(x => x.IsEmpty);
+        // the tool bounded by the faces (applied directly, or cut back where it runs past them), its ends at an angle on
+        // the faces they meet (on those faces then, as its other faces are on the blended ones)
+        Solid? strip = null;
+        if ((direct || !fits) && EdgeBlend.Profile2D(P(uA), P(uB), P(nA), P(nB), Vec2.Zero, dA, fillet, convex, dB, atCorner: true) is { } sl)
+        {
+            strip = Between(sl, true);
             if (strip.IsEmpty || strip.Native == null) strip = null;
         }
         return (tools, convex, fits, strip);
@@ -559,10 +582,12 @@ public static class NativeBlend
         var (dP, dC) = fillet ? (size, size) : EdgeBlend.ChamferLegs(uP2, uC2, ch, refIsFirst(cP.Face, cC.Face));
         var prof = EdgeBlend.Profile2D(uP2, uC2, nP2, nC2, new Vec2(rE, h0), dP, fillet, convex, dC);
         if (prof == null) return (null, convex, false, null);
-        // the direct blend's tool: the same profile bounded by the faces, revolved over the same arc (none for an
+        // the tool bounded by the faces (applied directly, or cut back where it runs past them), revolved over the same arc (none for an
         // arc whose ends meet faces at an angle: those need the extensions)
-        var sprof = direct ? EdgeBlend.Profile2D(uP2, uC2, nP2, nC2, new Vec2(rE, h0), dP, fillet, convex, dC, atCorner: true) : null;
-        if (prof.Verts.Any(v => v.P.X < -1e-9)) throw new InvalidOperationException("size too large for this edge");
+        var sprof = EdgeBlend.Profile2D(uP2, uC2, nP2, nC2, new Vec2(rE, h0), dP, fillet, convex, dC, atCorner: true);
+        // (the blend reaching across the axis: larger than the round it runs along, as a fillet in a hole's rounded corner)
+        if (prof.Verts.Any(v => v.P.X < -1e-9))
+            throw new InvalidOperationException($"{(fillet ? $"R{size:0.###}" : $"a {size:0.###} chamfer")} does not fit inside the R{rE:0.###} round it runs along: use a size smaller than {rE:0.###}.");
         var (tlP, tlC) = TangentLengths(uP2, uC2, size, fillet, dP, dC);
         var tlc = Math.Max(tlP, tlC);
         var onPlane = new Vec2(rE, h0) + uP2 * tlP;   // (radius, height) of the tangent circle on the plane
@@ -641,7 +666,7 @@ public static class NativeBlend
         {
             var frame = new Frame(cs.Origin, refDir, ax, Vec3.Cross(refDir, ax));
             tools.Add(Builders.Revolve(new[] { new ProfileRegion(prof) }, frame, Vec2.Zero, new Vec2(0, 1), 2 * Math.PI, name));
-            var full = sprof != null && extensions.Count == 0
+            var full = sprof != null && (direct || !fits) && extensions.Count == 0
                 ? Builders.Revolve(new[] { new ProfileRegion(sprof) }, frame, Vec2.Zero, new Vec2(0, 1), 2 * Math.PI, name) : null;
             return (tools, convex, fits, full);
         }
@@ -697,7 +722,7 @@ public static class NativeBlend
             tools.Add(Piece(prof, ms, me - ms));
         }
         Solid? strip = null;
-        if (sprof != null && ranges.Count(r => r.sweep >= 1e-9) == 1)
+        if (sprof != null && (direct || !fits) && ranges.Count(r => r.sweep >= 1e-9) == 1)
         {
             // one arc: revolved over it and over its extensions, cut back to the faces its ends meet at an angle
             int k = ranges.FindIndex(r => r.sweep >= 1e-9);

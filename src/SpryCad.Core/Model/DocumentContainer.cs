@@ -55,6 +55,11 @@ public static class DocumentContainer
 
     public static string Hash(byte[] data) => Convert.ToHexString(SHA256.HashData(data)).ToLowerInvariant();
 
+    // each attachment's hash, kept with its byte array (attachments are replaced, never changed in place): a save
+    // hashes only the files that are new since the last one
+    static readonly System.Runtime.CompilerServices.ConditionalWeakTable<byte[], string> _hashes = new();
+    static string HashOf(byte[] data) => _hashes.GetValue(data, Hash);
+
     /// <summary>
     /// The preview image saved in containers (and shown by Explorer as the file's thumbnail): the solid bodies of
     /// a rebuild, in the part's color. Null when there is nothing solid to show.
@@ -75,7 +80,7 @@ public static class DocumentContainer
         // the index in model.json always matches the files written
         doc.Attachments = doc.Files.Count == 0 ? null
             : doc.Files.OrderBy(f => f.Key, StringComparer.Ordinal)
-                .Select(f => new AttachmentInfo { Name = f.Key, Size = f.Value.LongLength, Sha256 = Hash(f.Value) }).ToList();
+                .Select(f => new AttachmentInfo { Name = f.Key, Size = f.Value.LongLength, Sha256 = HashOf(f.Value) }).ToList();
         var json = doc.ToJson();
         var tmp = path + ".saving";
         try

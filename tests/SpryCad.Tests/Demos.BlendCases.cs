@@ -27,6 +27,7 @@ static partial class Demos
         ("drafted block, top edge under an overhang", Overhang),
         ("drafted round boss, top and foot filleted", DraftedBoss),
         ("wall beside a taller one", NarrowGap),
+        ("rib against a wall, filleted and mirrored", MirroredRib),
     };
 
     /// <summary>
@@ -252,6 +253,43 @@ static partial class Demos
         var rt = V("D/2") - V("H") * Math.Tan(V("Draft") * Math.PI / 180);
         d.AddFeature(new FilletFeature { Name = "Boss top", Radius = "Rt", Edges = { E($"{boss.Id}.End", $"{boss.Id}.S.C{ci}", new Vec3(rt, 0, V("T+H"))) } });
         d.AddFeature(new FilletFeature { Name = "Boss foot", Radius = "Rf", Edges = { E($"{plate.Id}.End", $"{boss.Id}.S.C{ci}", new Vec3(V("D/2"), 0, V("T"))) } });
+        return d;
+    }
+
+    /// <summary>
+    /// A plate with a wall at either end, a rib against the left wall standing on the plate 2 mm from its edge, its
+    /// sides filleted R3 into the plate and the wall (the outer one runs past the plate's edge: cut back to it), then
+    /// the rib and its fillets mirrored.
+    /// </summary>
+    static CadDocument MirroredRib()
+    {
+        var d = Doc(("X", "50"), ("Y", "30"), ("W", "10"), ("H", "50"), ("RL", "30"), ("RT", "3"), ("RH", "40"), ("R", "3"));
+        var b = new Sk(d);
+        b.Rect("-X", "-Y", "X", "Y");
+        var bs = d.AddFeature(new SketchFeature { Name = "Plate", Plane = PlaneRef.Front, Sketch = b.S });
+        var plate = d.AddFeature(new ExtrudeFeature { Name = "Plate", SketchId = bs.Id, Depth = "10" });
+        var top = d.AddFeature(new PlaneFeature { Name = "Plate top", Base = PlaneRef.Front, Offset = "10" });
+        var w = new Sk(d);
+        var wl = w.Rect("-X", "-Y", "-(X-W)", "Y");
+        w.Rect("X-W", "-Y", "X", "Y");
+        var ws = d.AddFeature(new SketchFeature { Name = "Walls", Plane = new PlaneRef { Feature = top.Id }, Sketch = w.S });
+        var walls = d.AddFeature(new ExtrudeFeature { Name = "Walls", SketchId = ws.Id, Depth = "H-10" });
+        var r = new Sk(d);
+        var rl = r.Rect("-(X-W)", "Y-2-2*RT", "-(X-W-RL)", "Y-2");
+        var rs = d.AddFeature(new SketchFeature { Name = "Rib", Plane = new PlaneRef { Feature = top.Id }, Sketch = r.S });
+        var rib = d.AddFeature(new ExtrudeFeature { Name = "Rib", SketchId = rs.Id, Depth = "RH-10" });
+        double V(string e) => b.Eval(e);
+        double xm = -V("X-W-RL/2"), xw = -V("X-W"), zm = V("(RH+10)/2"), y0 = V("Y-2-2*RT"), y1 = V("Y-2");
+        var fil = d.AddFeature(new FilletFeature
+        {
+            Name = "Rib fillets", Radius = "R", TangentPropagation = false,
+            Edges =
+            {
+                E($"{rib.Id}.S.L{rl[0]}", $"{plate.Id}.End", new Vec3(xm, y0, 10)), E($"{rib.Id}.S.L{rl[2]}", $"{plate.Id}.End", new Vec3(xm, y1, 10)),
+                E($"{rib.Id}.S.L{rl[0]}", $"{walls.Id}.S.L{wl[1]}", new Vec3(xw, y0, zm)), E($"{rib.Id}.S.L{rl[2]}", $"{walls.Id}.S.L{wl[1]}", new Vec3(xw, y1, zm)),
+            },
+        });
+        d.AddFeature(new MirrorFeature { Name = "Rib, other end", Seeds = { rib.Id, fil.Id }, Plane = PlaneRef.Right });
         return d;
     }
 
