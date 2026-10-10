@@ -46,7 +46,12 @@ public static class ComponentResolver
         public PartResolution Of(Component c) => Parts[Key(c.Part)];
     }
 
-    public static string Key(PartRef r) => r.PartId ?? ("path:" + (r.AbsolutePath ?? r.Path ?? r.Embedded ?? ""));
+    /// <summary>
+    /// Which part (or sub-assembly) a reference is, for finding it: its identity; an embedded copy apart from the file
+    /// ("id@parts/Bolt.sprt": the two may differ); the path for a part saved before identities.
+    /// </summary>
+    public static string Key(PartRef r) =>
+        r.PartId != null ? r.PartId + (r.Embedded != null ? "@" + r.Embedded : "") : "path:" + (r.AbsolutePath ?? r.Path ?? r.Embedded ?? "");
 
     public static ResolveResult Resolve(AssemblyDocument asm, string? asmPath, PartIndex? index = null, IEnumerable<string>? searchRoots = null)
     {

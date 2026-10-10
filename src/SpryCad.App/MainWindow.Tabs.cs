@@ -21,6 +21,12 @@ public partial class MainWindow
         public readonly DocumentSession Session = session;
         /// <summary>The tab's assembly when it holds one (its part session then stays empty).</summary>
         public AssemblySession? Asm;
+        /// <summary>
+        /// An embedded part or sub-assembly being edited (a copy in a folder of its own): the assembly it is embedded in,
+        /// and its attachment there. Save puts it back.
+        /// </summary>
+        public AssemblySession? EmbeddedIn;
+        public string? EmbeddedName;
         public Border Header = null!;
         public TextBlock Label = null!;
         /// <summary>The camera when last left; null until then (the view is fitted to the part instead).</summary>
@@ -775,6 +781,10 @@ public partial class MainWindow
 
     void RemoveTab(PartTab t)
     {
+        t.Asm?.Watcher?.Dispose();
+        // an embedded document's copy (edited in this tab) thrown away
+        if (t.EmbeddedName != null && (t.Asm?.FilePath ?? t.Session.FilePath) is { } copy && IsEmbeddedCopy(copy))
+            try { Directory.Delete(Path.GetDirectoryName(copy)!, true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
         _parts.Remove(t);
         _recent.Remove(t);
         DocTabs.Children.Remove(t.Header);

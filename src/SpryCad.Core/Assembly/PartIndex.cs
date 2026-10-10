@@ -52,7 +52,7 @@ public sealed class PartIndex
         foreach (var k in Parts.Where(kv => kv.Value.Count == 0).Select(kv => kv.Key).ToList()) Parts.Remove(k);
     }
 
-    /// <summary>Records the file's identity (if it is a part with one).</summary>
+    /// <summary>Records the file's identity (if it is a part or an assembly with one).</summary>
     public bool RecordFile(string path)
     {
         var (id, rev) = DocumentContainer.ReadIdentity(path);
@@ -89,7 +89,10 @@ public sealed class PartIndex
         return n;
     }
 
-    /// <summary>The part files under a folder (skipping build, package and version-control folders).</summary>
+    /// <summary>
+    /// The part and assembly files under a folder (assemblies too: they are components of other assemblies), skipping
+    /// build, package and version-control folders.
+    /// </summary>
     public static IEnumerable<string> PartFiles(string root)
     {
         if (!Directory.Exists(root)) yield break;
@@ -99,7 +102,7 @@ public sealed class PartIndex
         {
             var dir = stack.Pop();
             string[] files, dirs;
-            try { files = Directory.GetFiles(dir, "*" + CadDocument.FileExtension); dirs = Directory.GetDirectories(dir); }
+            try { files = Directory.GetFiles(dir, "*" + CadDocument.FileExtension).Concat(Directory.GetFiles(dir, "*" + AssemblyDocument.FileExtension)).ToArray(); dirs = Directory.GetDirectories(dir); }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { continue; }
             Array.Sort(files, StringComparer.OrdinalIgnoreCase);
             foreach (var f in files) yield return f;

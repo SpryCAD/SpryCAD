@@ -39,7 +39,7 @@ public partial class MainWindow
         /// <summary>The mate being shown (added for the preview; removed when the setup changes or is cancelled).</summary>
         public Mate? Preview;
         /// <summary>Where the components were before the preview.</summary>
-        public Dictionary<string, Placement> Before = new();
+        public PoseState? Before;
         /// <summary>The pick selected in the Mate Selections box (-1: none): drawn in its own color.</summary>
         public int Focus = -1;
         /// <summary>The mate being edited (null: adding new ones); it stands in the list while no preview does.</summary>
@@ -62,7 +62,7 @@ public partial class MainWindow
     /// <summary>The color a mate's i-th reference is drawn in: full selection blue, paler while another is selected in the box.</summary>
     Rgba PickColor(int i) => _mating is { Focus: >= 0 } mt && mt.Focus != i ? PaleSelect : ViewportControl.SelectColor;
 
-    public bool PickingFaces => (_mating != null || _motor != null) && Asm != null;
+    public bool PickingFaces => (_mating != null || _motor != null || _patterning != null) && Asm != null;
 
     /// <summary>The picks not selected in the Mate Selections box while one is: a paler selection blue.</summary>
     static readonly Rgba PaleSelect = new(0.62f, 0.78f, 1.0f);
@@ -78,8 +78,9 @@ public partial class MainWindow
     public void PickFace(string component, string face)
     {
         if (_motor != null) { MotorPick(component, face); return; }
+        if (_patterning != null) { PatternPick(component, face); return; }
         if (_mating is not { } st || Asm is not { } a) return;
-        PickRef(a.Model.RefTo(component, face), $"{FindComponent(component)?.Name}: that face is not planar or round (it cannot be mated yet)");
+        PickRef(a.Model.RefTo(component, face), $"{a.Model.NameAt(component)}: that face is not planar or round (it cannot be mated yet)");
     }
 
     void PickRef(MateRef? r, string notMateable)
@@ -99,11 +100,13 @@ public partial class MainWindow
     public void Dragged(string component, (SpryCad.Kernel.Vec3 local, SpryCad.Kernel.Vec3 origin, SpryCad.Kernel.Vec3 dir)? pull = null)
     {
         if (Asm is not { } a) return;
-        if (a.Model.Doc.Mates.Count > 0)
+        if (a.Model.HasMates)
         {
             if (pull is { } p) a.Model.SolveDrag(new MateSolver.Pull(component, p.local, p.origin, p.dir));
             else a.Model.SolveMates();
         }
+        // (a pattern's copies follow a seed dragged)
+        else a.Model.ApplyPatterns();
         RefreshAssemblyScene();
     }
 
@@ -153,7 +156,7 @@ public partial class MainWindow
     };
 
     /// <summary>The Mate page: adding mates, or (<paramref name="editing"/>) changing one.</summary>
-    void MatePage(Mate? editing)
+    void MatePage(Mate? editing, bool repair = false)
     {
         if (Asm is not { } a) return;
         if (a.Model.Doc.Components.Count < 1) { Status("Insert components first."); return; }
@@ -172,11 +175,13 @@ public partial class MainWindow
             if (e.Min is { } lo && e.Max is { } hi) { st.Limits = true; st.Min = lo; st.Max = hi; }
             if (e.Type == MateType.Gear) { st.RatioA = e.RatioA; st.RatioB = e.RatioB; }
             st.Reverse = e.Reverse;
+            // repairing: the reference gone dropped, to be picked again
+            if (repair) st.Picks.RemoveAll(p => a.Model.Broken(p) != null);
         }
         _mating = st;
         Snapshot();
-        void Snapshot() { st.Before = a.Model.Doc.Components.ToDictionary(c => c.Id, c => c.Placement); }
-        void Restore() { foreach (var c in a.Model.Doc.Components) if (st.Before.TryGetValue(c.Id, out var p)) c.Placement = p; }
+        void Snapshot() { st.Before = a.Model.CapturePoses(); }
+        void Restore() { if (st.Before != null) a.Model.Restore(st.Before); }
         // an edited mate's name: kept, or the next of its new type's when the type changed (counted on OK)
         string? EditName(MateType t) => st.Editing is { } e && t != e.Type ? t + (a.Model.Doc.MateCounters.GetValueOrDefault(t.ToString()) + 1).ToString() : null;
         void DropPreview()
@@ -262,14 +267,19 @@ public partial class MainWindow
         clearPicks.Click += (_, _) => ClearPicks();
         box.ContextMenu = new ContextMenu { Items = { delPick, clearPicks } };
         sel.Children.Add(box);
+        // origin planes: the assembly's, or a sub-assembly's (at any depth)
+        string? planeOwner = null;
+        var owners = new List<(string?, string)> { (null, "the assembly") };
+        owners.AddRange(a.Model.Occurrences().Where(o => o.Component.IsAssembly && a.Model.SubOf(o.Component) != null).Select(o => ((string?)o.Path, a.Model.NameAt(o.Path))));
+        if (owners.Count > 1) page.Combo(sel, "Origin planes of", owners, () => planeOwner, v => planeOwner = v);
         var planes = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, Margin = new Thickness(0, 4, 0, 0) };
         foreach (var pl in AssemblyModel.OriginPlanes)
         {
             var b = new Button { Content = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, Children = { Icons.Make("plane", 14), new TextBlock { Text = pl } } }, Padding = new Thickness(6, 2), MinHeight = 0 };
-            ToolTip.SetTip(b, $"The assembly's {pl} plane");
-            b.Click += (_, _) => PickRef(a.Model.RefTo(null, pl), "");
+            ToolTip.SetTip(b, $"The {pl} plane of the assembly (or of the sub-assembly chosen above)");
+            b.Click += (_, _) => PickRef(a.Model.RefTo(planeOwner, pl), "");
             // hovered: the plane shown where it is (even with the planes hidden)
-            b.PointerEntered += (_, _) => HoverPick(a.Model.RefTo(null, pl));
+            b.PointerEntered += (_, _) => HoverPick(a.Model.RefTo(planeOwner, pl));
             b.PointerExited += (_, _) => HoverPick(null);
             planes.Children.Add(b);
         }
@@ -352,7 +362,9 @@ public partial class MainWindow
         opts.Children.Add(result);
 
         // a pick as SolidWorks lists it (Face<…>@Component), what it is in its tooltip
-        string Label(MateRef r) => r.Component == null ? $"{r.Face} Plane" : $"{(r.End != null ? "Center" : r.Kind == MateGeomKind.Axis ? "Axis" : "Face")}<{r.Face}>@{FindComponent(r.Component)?.Name}";
+        string Label(MateRef r) => r.Component == null ? $"{r.Face} Plane"
+            : a.Model.Find(r.Component) is { Component.IsAssembly: true } ? $"{r.Face} Plane@{a.Model.NameAt(r.Component)}"
+            : $"{(r.End != null ? "Center" : r.Kind == MateGeomKind.Axis ? "Axis" : "Face")}<{r.Face}>@{a.Model.NameAt(r.Component)}";
         string Describe(MateRef r) => r.Component == null ? $"The assembly's {r.Face} plane" : r.Kind switch
         {
             MateGeomKind.Plane => "A planar face",
@@ -442,7 +454,7 @@ public partial class MainWindow
         {
             _mating = null; _hoverFace = null; _hoverPick = null;
             // solved again as the mates now stand: a preview that could not be satisfied leaves no red behind
-            if (a.Model.Doc.Mates.Count > 0) a.Model.SolveMates();
+            if (a.Model.HasMates) a.Model.SolveMates();
             ShowPage(null); HideConfirmCorner();
             // each mate added made its own undo point; the one begun for the next is not needed
             a.AbandonChange();
@@ -494,6 +506,7 @@ public partial class MainWindow
     {
         if (Asm is not { } a || a.Model.Doc.Mates.FirstOrDefault(m => m.Id == id) is not { } mate) return;
         if (cmd == "edit") { MatePage(mate); return; }
+        if (cmd == "repair") { MatePage(mate, repair: true); Status($"{mate.Name}: pick the missing reference again, then OK."); return; }
         if (cmd == "rename") { _ = RenameMate(mate); return; }
         if (_mating != null) { Status("Finish the open Mate page first (OK or Cancel)."); return; }
         a.BeginChange();

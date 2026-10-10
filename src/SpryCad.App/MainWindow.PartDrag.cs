@@ -46,7 +46,9 @@ public partial class MainWindow
         if (Asm == null) return null;
         if (e.DataTransfer.TryGetValue(PartDragFormat) is { Length: > 0 } path) return new List<string> { path };
         return e.DataTransfer.TryGetFiles()?.Select(f => f.TryGetLocalPath()).OfType<string>()
-            .Where(p => Path.GetExtension(p).Equals(Core.Model.CadDocument.FileExtension, StringComparison.OrdinalIgnoreCase)).ToList();
+            .Where(p => Path.GetExtension(p).Equals(Core.Model.CadDocument.FileExtension, StringComparison.OrdinalIgnoreCase)
+                        // (another assembly: a rigid sub-assembly; never the assembly itself)
+                        || AssemblyModel.IsAssemblyFile(p) && (Asm.FilePath == null || !PartIndex.SamePath(Asm.FilePath, p))).ToList();
     }
 
     async Task InsertDropped(List<string> paths, Point? at)
@@ -65,8 +67,8 @@ public partial class MainWindow
                 var beside = PlaceBeside(a.Model);
                 var c = await Task.Run(() => PartsIndexStore.Use(_ => a.Model.Insert(p, beside, embed: false)));
                 // the first part stays at the origin; the others are centered where they were dropped (on the tree: beside)
-                if (!first && at is { } pt && a.Model.DisplayOf(c) is { } pd && !pd.Mesh.Bounds.IsEmpty)
-                    c.Placement = Placement.From(Transform.Translation(DropPoint(pt, anchor) - pd.Mesh.Bounds.Center));
+                if (!first && at is { } pt && a.Model.WorldBounds(c.Id) is { IsEmpty: false } wb)
+                    c.Placement = Placement.From(Transform.Translation(DropPoint(pt, anchor) - c.Placement.ToTransform().RigidInverse().Point(wb.Center)));
                 last = c.Id;
             }
             catch (Exception ex) { App.Log(ex, "Insert " + p); await Dialogs.Message(this, "Insert Component", $"{Path.GetFileName(p)} could not be inserted: {ex.Message}"); }
@@ -85,11 +87,7 @@ public partial class MainWindow
     {
         var b = Box3.Empty;
         foreach (var c in m.Doc.Components)
-            if (m.DisplayOf(c) is { } pd && !pd.Mesh.Bounds.IsEmpty)
-            {
-                var t = c.Placement.ToTransform();
-                b.Add(t.Point(pd.Mesh.Bounds.Min)); b.Add(t.Point(pd.Mesh.Bounds.Max));
-            }
+            if (!c.Suppressed && m.WorldBounds(c.Id) is { IsEmpty: false } cb) { b.Add(cb.Min); b.Add(cb.Max); }
         return b.IsEmpty ? Vec3.Zero : b.Center;
     }
 

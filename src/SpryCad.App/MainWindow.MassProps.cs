@@ -42,6 +42,8 @@ public partial class MainWindow
 
     void MassPropertiesCommand()
     {
+        // an assembly's: every part with its own material
+        if (Asm != null) { AssemblyMassCommand(); return; }
         if (_massWindow != null) { _massWindow.Activate(); return; }
 
         // material and density

@@ -160,6 +160,8 @@ static class Program
             HelicalTests.Run(t);
             ThreadFeatureTests.Run(t);
             AssemblyTests.Run(t);
+            NestedAssemblyTests.Run(t);
+            AssemblyToolTests.Run(t);
             SketchVisibilityTests.Run(t);
             SketchConvertTests.Run(t);
             RevolveAxisTests.Run(t);

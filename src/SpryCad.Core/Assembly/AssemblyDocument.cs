@@ -14,7 +14,7 @@ namespace SpryCad.Core.Assembly;
 /// again wherever it went.
 /// </para>
 /// </summary>
-public sealed class AssemblyDocument
+public sealed partial class AssemblyDocument
 {
     public const string FileExtension = ".sasm";
     public const int CurrentFormatVersion = 1;
@@ -39,6 +39,15 @@ public sealed class AssemblyDocument
     /// (<see cref="MeshCache"/>). Kept for the revisions the components last saw.
     /// </summary>
     public Dictionary<string, string> Caches { get; set; } = new();
+    /// <summary>The configurations (null: one, "Default", as the components are).</summary>
+    public List<AssemblyConfiguration>? Configurations { get; set; }
+    /// <summary>The active configuration's name (null: "Default").</summary>
+    public string? ActiveConfiguration { get; set; }
+    /// <summary>Exploded views.</summary>
+    public List<ExplodeView>? Explodes { get; set; }
+    /// <summary>Component patterns (and mirrors).</summary>
+    public List<ComponentPattern>? Patterns { get; set; }
+    public int NextPatternId { get; set; } = 1;
     /// <summary>Index of the embedded files (name, size, SHA-256), written on save.</summary>
     public List<AttachmentInfo>? Attachments { get; set; }
 
@@ -112,7 +121,7 @@ public sealed class AssemblyDocument
     public static AssemblyDocument Load(string path) => AssemblyContainer.Load(path);
 }
 
-/// <summary>A placed instance of a part.</summary>
+/// <summary>A placed instance of a part, or of another assembly (a sub-assembly: <see cref="PartRef.Assembly"/>).</summary>
 public sealed class Component
 {
     /// <summary>Instance id within the assembly ("C1", "C2", …): mates refer to it.</summary>
@@ -125,6 +134,9 @@ public sealed class Component
     /// <summary>Fixed in place (not moved by mates or dragging); otherwise floating.</summary>
     public bool Fixed { get; set; }
     public bool Suppressed { get; set; }
+    /// <summary>Not shown (still in the assembly: mated, counted, solved).</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+    public bool Hidden { get; set; }
     /// <summary>Shown from the display cache only (no rebuild of the part): fast to open, nothing to select but the mesh.</summary>
     public bool Lightweight { get; set; }
     /// <summary>Appearance override (RGB 0-1); null: the part's own color.</summary>
@@ -135,6 +147,35 @@ public sealed class Component
     /// part as it is.
     /// </summary>
     public Dictionary<string, string>? Parameters { get; set; }
+
+    /// <summary>A sub-assembly (its <see cref="Part"/> is an assembly file).</summary>
+    [System.Text.Json.Serialization.JsonIgnore] public bool IsAssembly => Part.Assembly;
+    /// <summary>
+    /// A sub-assembly whose own mates are solved with this assembly's, so its components move (a linkage that works
+    /// in the assembly using it). Otherwise rigid: it moves as one body, its components where its own file has them.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+    public bool Flexible { get; set; }
+    /// <summary>
+    /// A flexible sub-assembly's components where this instance has them, by their path in it ("C2", "C4/C1" in a
+    /// sub-assembly of it), each relative to the sub-assembly holding it; those not listed are where the sub-assembly's
+    /// own file has them. Null: all of them.
+    /// </summary>
+    public Dictionary<string, Placement>? Poses { get; set; }
+    /// <summary>
+    /// A flexible sub-assembly's gear and screw mates' counted turns (<see cref="Mate.AngleA"/>, <see cref="Mate.AngleB"/>)
+    /// in this instance, by the mate's path ("M3", "C4/M1"); those not listed as its file has them.
+    /// </summary>
+    public Dictionary<string, double[]>? Turns { get; set; }
+    /// <summary>A sub-assembly's configuration for this instance (null: the one its file has active).</summary>
+    public string? Configuration { get; set; }
+    /// <summary>
+    /// A sub-assembly's components as this instance shows them (hidden, suppressed, colored), by their path in it; the
+    /// sub-assembly's file is not changed.
+    /// </summary>
+    public Dictionary<string, ComponentOverride>? Overrides { get; set; }
+    /// <summary>The component pattern this is a copy made by (<see cref="ComponentPattern.Id"/>): placed by it.</summary>
+    public string? Pattern { get; set; }
 }
 
 /// <summary>
@@ -152,6 +193,9 @@ public sealed class PartRef
     public string? AbsolutePath { get; set; }
     /// <summary>The part embedded in the assembly (an attachment, "parts/…") instead of a file: a virtual part.</summary>
     public string? Embedded { get; set; }
+    /// <summary>An assembly file (<see cref="AssemblyDocument.Id"/> its identity), not a part: a sub-assembly.</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+    public bool Assembly { get; set; }
 
     public PartRef Clone() => (PartRef)MemberwiseClone();
 }

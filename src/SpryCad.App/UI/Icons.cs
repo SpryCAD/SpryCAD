@@ -47,6 +47,21 @@ public static class Icons
         ["insertcomp"] = ("M10 10h11v11H10z", "M2 3l6 6 M8 4v5H3"),
         ["float"] = ("M8 8h8v8H8z", "M12 2v4 M12 18v4 M2 12h4 M18 12h4"),
         ["lightweight"] = ("M4 8h12v12H4z", "M14 4h6v6"),
+        // sub-assemblies made and taken apart: blocks gathered into a box; a box opened with its blocks coming out
+        ["formsub"] = ("M2 2h20v20H2z", "M6 12h5v6H6z M13 6h5v6h-5z"),
+        ["dissolve"] = ("M2 8h12v12H2z", "M15 3h6v6h-6z M10 4l4 0 M17 12v4"),
+        ["replace"] = ("M3 3h8v8H3z M13 13h8v8h-8z", "M15 7h4v4 M9 17H5v-4"),
+        // exploded view: a block with its parts pushed apart along arrows
+        ["explode"] = ("M9 9h6v6H9z M3 3h4v4H3z M17 17h4v4h-4z", "M7 7l2 2 M17 17l-2-2"),
+        // two blocks overlapping, the overlap in the accent
+        ["interference"] = ("M3 3h11v11H3z M10 10h11v11H10z", "M10 10h4v4h-4z"),
+        // a list with its quantities
+        ["bom"] = ("M3 4h18v16H3z M3 9h18 M3 14h18 M16 4v16", "M5 6.5h8"),
+        // a box with files going in
+        ["packgo"] = ("M3 10h18v11H3z M3 10l3-5h12l3 5", "M12 2v9 M9 8l3 3 3-3"),
+        // one block shown, the others faint
+        ["isolate"] = ("M3 15h5v5H3z M16 4h5v5h-5z", "M9 9h6v6H9z"),
+        ["appearance"] = ("M12 3a9 9 0 1 0 0 18c1.5 0 2-1 2-2s-1-2 0-3 2 0 4 0 3-2 3-4c0-5-4-9-9-9z", "M7 11a1 1 0 1 0 0.01 0z M11 7a1 1 0 1 0 0.01 0z M16 9a1 1 0 1 0 0.01 0z"),
         ["plane"] = ("M2 17l5-10h15l-5 10z", null),
         ["combine"] = ("M9 12m-6 0a6 6 0 1 0 12 0a6 6 0 1 0-12 0 M15 12m-6 0a6 6 0 1 0 12 0a6 6 0 1 0-12 0", null),
         // sheet metal: a bent sheet unrolled flat, its bend line dashed; flatten: folded and flat with an arrow
