@@ -169,6 +169,31 @@ static class DirectBlendTests
             }
         });
 
+        t.Test("Holes beside and through a swept chamfer's foot at a rounded corner: traced quickly, exact", () =>
+        {
+            // a hole through the plate grazing the chamfer's B-spline face near its edge: the trace on the B-spline misses
+            // it, the one on the hole's face (with the B-spline's slow distance) found the hole casting's curves in
+            // 20 s each, and past the patch's edge curves that are not there (1-3 s here)
+            var doc = Demos.BlendCases.First(c => c.name == "casting foot, drafted, chamfered 6 x 3").build();
+            var body = new Regenerator().Rebuild(doc, doc.Features.Count).State.Bodies[0].Solid;
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            foreach (var r in new[] { 26.0, 27, 28, 29, 30 })
+            {
+                Csg.ClearCache();
+                var cut = Csg.Subtract(body, Builders.Cylinder(new Vec3(40 + r * 0.7071, -20 - r * 0.7071, -1), Vec3.UnitZ, 3, 40, "H"));
+                t.True(cut.Native != null && cut.Native.Validate() == null, $"r {r}: exact and valid");
+                // (clear of the chamfer: the plate's 20 only)
+                var dv = KernelTests.Vex(body) - KernelTests.Vex(cut);
+                t.True(Math.Abs(dv - Math.PI * 9 * 20) < 1e-6 * dv, $"r {r}: removed {dv:R}");
+            }
+            t.True(sw.ElapsedMilliseconds < 2000, $"{sw.ElapsedMilliseconds} ms for five holes");
+            // through the chamfer: more than the plate's
+            Csg.ClearCache();
+            var through = Csg.Subtract(body, Builders.Cylinder(new Vec3(40 + 22 * 0.7071, -20 - 22 * 0.7071, -1), Vec3.UnitZ, 3, 40, "H"));
+            t.True(through.Native != null && through.Native.Validate() == null, "through: exact and valid");
+            t.True(KernelTests.Vex(body) - KernelTests.Vex(through) > Math.PI * 9 * 20 + 1, "through: the chamfer's material too");
+        });
+
         t.Test("Chamfer on an open arc whose ends meet a slot's walls at an angle: cut back to the walls, not ending square", () =>
         {
             // a drafted hole's top rim (plate top / cone: the swept tool), a slot across it: the rim's arc ends on the

@@ -1135,6 +1135,17 @@ public static class NIntersect
         // parameters, with the other surface's exact distance
         bool onParams = sa.Kind is SurfaceKind.BSpline or SurfaceKind.Offset && sb.Kind is not (SurfaceKind.BSpline or SurfaceKind.Offset or SurfaceKind.Pipe or SurfaceKind.Screw)
                         && sa.TryPartials(dom.UMin, dom.VMin * dom.VSign, out _, out _, out _);
+        // traced on an analytic face against a B-spline (a small face it crosses near the B-spline's edge, where the
+        // trace on the B-spline missed it): the points projected in the B-spline's parameters instead, each found
+        // there once (its closest-point search is slow)
+        bool onOther = !onParams && sb.Kind == SurfaceKind.BSpline && sa.Kind is not (SurfaceKind.BSpline or SurfaceKind.Offset or SurfaceKind.Pipe or SurfaceKind.Screw);
+        var anyRange = (double.MinValue, double.MaxValue, double.MinValue, double.MaxValue);
+        bool InPatch(Vec2 uv)
+        {
+            var nb = sb.Nurbs!;
+            double eu = 1e-6 * (nb.U1 - nb.U0), ev = 1e-6 * (nb.V1 - nb.V0);
+            return (nb.ClosedU || uv.X >= nb.U0 - eu && uv.X <= nb.U1 + eu) && (nb.ClosedV || uv.Y >= nb.V0 - ev && uv.Y <= nb.V1 + ev);
+        }
         // (in surface parameters: v signed as the face's; moves within a grid cell's few widths)
         var range = (u0, u1, Math.Min(v0 * dom.VSign, v1 * dom.VSign), Math.Max(v0 * dom.VSign, v1 * dom.VSign));
         var maxMove = 4 * Math.Max(Vec3.Distance(dom.Eval(UV(0, 0)), dom.Eval(UV(1, 1))), tol);
@@ -1178,6 +1189,24 @@ public static class NIntersect
                     foreach (var k in chain) { var (q, uv) = ProjectOnParams(sa, sb, new Vec2(cpt[k].X, cpt[k].Y * dom.VSign), range, maxMove); pts.Add(q); uvs.Add(uv); }
                     if (closed) { pts.RemoveAt(pts.Count - 1); uvs.RemoveAt(uvs.Count - 1); }
                     pts = DensifyOnParams(pts, uvs, closed, sa, sb, tol, range, maxMove);
+                }
+                else if (onOther)
+                {
+                    var uvs = new List<Vec2>(chain.Count);
+                    pts = new List<Vec3>(chain.Count);
+                    Vec2? prev = null;
+                    foreach (var k in chain)
+                    {
+                        var p = dom.Eval(cpt[k]);
+                        var uvB = prev is { } h ? sb.UV(p, h.X, h.Y) : sb.UV(p);
+                        var (q, uv) = ProjectOnParams(sb, sa, uvB, anyRange, maxMove);
+                        pts.Add(q); uvs.Add(uv); prev = uv;
+                    }
+                    if (closed) { pts.RemoveAt(pts.Count - 1); uvs.RemoveAt(uvs.Count - 1); }
+                    // (past the patch's edge the B-spline's distance changes sign with nothing crossing: a chain all
+                    // off the patch is not an intersection)
+                    if (!uvs.Any(InPatch)) continue;
+                    pts = DensifyOnParams(pts, uvs, closed, sb, sa, tol, anyRange, maxMove);
                 }
                 else
                 {
