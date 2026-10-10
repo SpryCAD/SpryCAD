@@ -181,10 +181,6 @@ latest version, from the update feed). One-time setup:
 
 To preview locally: `python -m http.server -d site`, then `/download.html` (`/download` on Pages).
 
-The home page shows the spur gear sample in 3D (three.js): `site/img/gear.stl`, exported by `dotnet run
-build/site-gear.cs`; run it again when the sample or the geometry code changes how the gear looks. Fonts (IBM Plex)
-come from Google Fonts and three.js from cdnjs and jsDelivr, as `site/_headers` allows.
-
 ### Tests
 
 ```bash
