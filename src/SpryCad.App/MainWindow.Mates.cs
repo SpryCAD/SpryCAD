@@ -107,6 +107,15 @@ public partial class MainWindow
         RefreshAssemblyScene();
     }
 
+    public void DragStarted(string component) => Asm?.Model.BeginDrag(component);
+
+    public void DragEnded()
+    {
+        if (Asm is not { } a) return;
+        a.Model.EndDrag();
+        RefreshAssemblyScene();
+    }
+
     /// <summary>The faces drawn highlighted on a component: the one under the cursor, and the Mate page's picks.</summary>
     List<(string face, Rgba color)>? FaceHighlights(string componentId)
     {

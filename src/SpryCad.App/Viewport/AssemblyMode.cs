@@ -39,6 +39,10 @@ public interface IAssemblyHost
     /// moves is moved by <c>move</c>.
     /// </summary>
     void Dragged(string component, (Vec3 local, Vec3 origin, Vec3 dir, Vec3 move)? pull = null);
+    /// <summary>A drag of a component (its grabbed point following the cursor) starts: its solve set up for the moves.</summary>
+    void DragStarted(string component);
+    /// <summary>The drag is over (the mates solved exactly).</summary>
+    void DragEnded();
 }
 
 /// <summary>
@@ -62,7 +66,7 @@ public sealed class AssemblyMode(IAssemblyHost host) : IViewportMode
     {
         if (host.PickingFaces) { var f = vp.PickInstance(p.X, p.Y); host.HoverFace(f?.id, f?.face); return; }
         if (_drag == null) { host.HoverComponent(vp.PickInstance(p.X, p.Y)?.id); return; }
-        if (!_moved) { host.BeginAssemblyChange(); _moved = true; }
+        if (!_moved) { host.BeginAssemblyChange(); _moved = true; if (!_turn) host.DragStarted(_drag); }
         var t = host.WorldOf(_drag);
         (Vec3, Vec3, Vec3, Vec3)? pull = null;
         if (_turn)
@@ -110,7 +114,11 @@ public sealed class AssemblyMode(IAssemblyHost host) : IViewportMode
 
     public void PointerUp(ViewportControl vp, PointerInfo p)
     {
-        if (_drag != null && _moved) host.EndAssemblyChange();
+        if (_drag != null && _moved)
+        {
+            if (!_turn) host.DragEnded();
+            host.EndAssemblyChange();
+        }
         _drag = null;
     }
 

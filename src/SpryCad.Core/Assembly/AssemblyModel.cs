@@ -636,25 +636,87 @@ public sealed partial class AssemblyModel
     /// A component dragged: the mates solved with its grabbed point pulled toward the cursor's ray, from where
     /// everything is (the mates holding); a component no mate moves is moved by the pull's <c>Move</c> instead. A drag
     /// the mates held before and could not be solved to hold after is not taken: everything stays where it was.
+    /// Between <see cref="BeginDrag"/> and <see cref="EndDrag"/>, on the drag's solve set up once, to
+    /// <see cref="DragTolerance"/>.
     /// </summary>
     public MateSolver.Result SolveDrag(MateSolver.Pull pull)
     {
         var held = LastSolve?.Satisfied == true;
         var before = held ? CapturePoses() : null;
-        var res = Solve(null, pull);
+        var d = _drag?.Component == pull.Component ? _drag : null;
+        var flatBefore = d?.Flat is { } fb ? FlatState(fb) : null;
+        MateSolver.Result res;
+        if (d != null)
+        {
+            res = d.Session.Run(d.Flat?.PullOnBody(pull) ?? pull, DragTolerance);
+            if (d.Flat != null) WriteBack(d.Flat, res);
+        }
+        else res = Solve(null, pull);
         if (!res.Solved.Contains(pull.Component) && pull.Move != Vec3.Zero)
         {
             SetWorld(pull.Component, Transform.Translation(pull.Move) * WorldOf(pull.Component));
+            if (d?.Flat?.Doc.Find(pull.Component) is { } fc) fc.Placement = Placement.From(WorldOf(pull.Component));
             res.Moved.Add(pull.Component);
         }
         if (before != null && !res.Satisfied)
         {
             Restore(before);
+            if (flatBefore != null) flatBefore();
             return LastSolve!;
         }
         LastSolve = res;
-        ApplyPatterns();
+        // (pattern copies follow their seeds: the drag's flattened copy of the assembly with them)
+        if (ApplyPatterns() && d?.Flat is { } f)
+            foreach (var o in f.Occs)
+                if (o.Rel == null) f.Doc.Find(o.Path)!.Placement = o.Component.Placement;
         return LastSolve;
+    }
+
+    /// <summary>
+    /// How near the mates are held while a component is dragged (mm, or radians for directions): far below what shows,
+    /// and well inside <see cref="MateSolver.Result.Satisfied"/>; <see cref="EndDrag"/> solves them exactly.
+    /// </summary>
+    public const double DragTolerance = 1e-7;
+
+    /// <summary>A drag's solve, set up when it starts (<see cref="BeginDrag"/>).</summary>
+    sealed record DragState(string Component, Flat? Flat, MateSolver.Session Session);
+    DragState? _drag;
+
+    /// <summary>
+    /// A drag of a component starts: its solve is set up once (the assembly flattened, the mates and references looked
+    /// up, what moves with it found) for every mouse move of it; nothing but the drag may move components until
+    /// <see cref="EndDrag"/>.
+    /// </summary>
+    public void BeginDrag(string component)
+    {
+        var f = Flatten();
+        var body = f != null && f.Attached.TryGetValue(component, out var at) ? at.Body : component;
+        _drag = new DragState(component, f, MateSolver.PrepareDrag(f?.Doc ?? Doc, Local, body, f?.Attached));
+    }
+
+    /// <summary>The drag is over: the mates solved exactly, from where it left them.</summary>
+    public MateSolver.Result? EndDrag()
+    {
+        if (_drag is not { } d) return null;
+        _drag = null;
+        if (LastSolve?.Satisfied != true) return LastSolve;
+        var res = d.Session.Run();
+        if (d.Flat != null) WriteBack(d.Flat, res);
+        LastSolve = res;
+        ApplyPatterns();
+        return res;
+    }
+
+    /// <summary>The flattened assembly's placements and turns as they are, and how to put them back.</summary>
+    static Action FlatState(Flat f)
+    {
+        var placed = f.Doc.Components.Select(c => (c, c.Placement)).ToList();
+        var turns = f.Doc.Mates.Select(m => (m, m.AngleA, m.AngleB)).ToList();
+        return () =>
+        {
+            foreach (var (c, p) in placed) c.Placement = p;
+            foreach (var (m, a, b) in turns) (m.AngleA, m.AngleB) = (a, b);
+        };
     }
 
     /// <summary>The placement of a reference's component in the assembly (the identity for the assembly's planes).</summary>

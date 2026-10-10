@@ -50,7 +50,29 @@ public static class MateSolver
     /// to the dragged component, through floating components, moves: the rest has nothing pulling it.
     /// </summary>
     public static Result SolveDrag(AssemblyDocument doc, Func<MateRef, MateGeom> local, Pull pull, IReadOnlyDictionary<string, Attachment>? attached = null)
-        => Solve(doc, local, Linked(doc, pull.Component, attached), 80, pull, attached);
+        => PrepareDrag(doc, local, pull.Component, attached).Run(pull);
+
+    /// <summary>
+    /// A drag's solve set up once, for every mouse move of it (<see cref="Session.Run"/> with the pull): the dragged
+    /// component and what is mated to it through floating components.
+    /// </summary>
+    public static Session PrepareDrag(AssemblyDocument doc, Func<MateRef, MateGeom> local, string component, IReadOnlyDictionary<string, Attachment>? attached = null)
+        => Prepare(doc, local, Linked(doc, component, attached), attached, component);
+
+    /// <summary>
+    /// A solve set up (the mates and references looked up, the components to move, the rows, the order of the normal
+    /// equations), to be run any number of times while nothing but the solves themselves moves the components.
+    /// </summary>
+    public sealed class Session
+    {
+        readonly Func<Pull?, double, int, Result> _run;
+        internal Session(Func<Pull?, double, int, Result> run) => _run = run;
+        /// <summary>
+        /// Solves from where the components are: with a pull (on the component it was set up for), pulled then exactly;
+        /// to <paramref name="tol"/> (the largest residual left, mm or radians).
+        /// </summary>
+        public Result Run(Pull? pull = null, double tol = 1e-10, int maxIter = 80) => _run(pull, tol, maxIter);
+    }
 
     /// <summary>
     /// The floating components mated to <paramref name="start"/>, directly or through other floating ones (a fixed
@@ -87,16 +109,16 @@ public static class MateSolver
     /// </summary>
     public static Result Solve(AssemblyDocument doc, Func<MateRef, MateGeom> local, ISet<string>? onlyMove = null, int maxIter = 80,
         IReadOnlyDictionary<string, Attachment>? attached = null)
-        => Solve(doc, local, onlyMove, maxIter, null, attached);
+        => Prepare(doc, local, onlyMove, attached, null).Run(null, 1e-10, maxIter);
 
     /// <summary>
-    /// The solve; with a pull, in two stages on one setup: the mates with the pull (until it stops getting smaller),
-    /// then the mates alone, exactly (<paramref name="maxIter"/> steps each).
+    /// The solve set up; <paramref name="pullComponent"/>: the component a drag pulls (a row for the pull). Each run, with
+    /// a pull, is in two stages: the mates with the pull (until it stops getting smaller), then the mates alone.
     /// </summary>
-    static Result Solve(AssemblyDocument doc, Func<MateRef, MateGeom> local, ISet<string>? onlyMove, int maxIter, Pull? pull,
-        IReadOnlyDictionary<string, Attachment>? attached)
+    static Session Prepare(AssemblyDocument doc, Func<MateRef, MateGeom> local, ISet<string>? onlyMove,
+        IReadOnlyDictionary<string, Attachment>? attached, string? pullComponent)
     {
-        var res = new Result();
+        Pull? pull = null;
         var byId = new Dictionary<string, Component>();
         foreach (var c in doc.Components) byId.TryAdd(c.Id, c);
         // each reference's geometry looked up once (finding a face among a part's faces is not free)
@@ -120,8 +142,7 @@ public static class MateSolver
                     free.Add(c);
                 }
         // a pull on a component no mate moves: nothing to solve (the drag moved it)
-        if (pull != null && !freeIdx.ContainsKey(pull.Component)) pull = null;
-        foreach (var c in free) res.Solved.Add(c.Id);
+        if (pullComponent != null && !freeIdx.ContainsKey(pullComponent)) pullComponent = null;
         var placements = doc.Components.ToDictionary(c => c.Id, c => c.Placement.ToTransform());
         Transform BodyPlacement(string id, Transform[]? trial) => trial != null && freeIdx.TryGetValue(id, out var i) ? trial[i] : placements[id];
         Transform PlacementOf(string? id, Transform[]? trial) =>
@@ -154,7 +175,7 @@ public static class MateSolver
         }
 
         int nf = free.Count, n = nf * 6;
-        bool pulling = pull != null;
+        bool pulling = false;
         // the free components' placements (by index), as the solve has them
         var place = free.Select(c => placements[c.Id]).ToArray();
         // a component moved by six numbers, a turn w and a move m about its pivot. Pulled, as a screw motion (the
@@ -182,10 +203,10 @@ public static class MateSolver
 
         // the mates' rows: each mate's residuals at a fixed place in the vector, and which free components it moves with;
         // a pull's rows after them (its component's grabbed point off the cursor's ray, weighted well below the mates)
-        int K = mates.Count + (pull != null ? 1 : 0);
-        string? CompA(int k) => k < mates.Count ? mates[k].A.Component : pull!.Component;
+        int K = mates.Count + (pullComponent != null ? 1 : 0);
+        string? CompA(int k) => k < mates.Count ? mates[k].A.Component : pullComponent;
         string? CompB(int k) => k < mates.Count ? mates[k].B.Component : null;
-        var pullDir = pull?.Dir.Normalized ?? Vec3.Zero;
+        var pullDir = Vec3.Zero;
         // (well below: where the mates do not let the point reach the cursor, they give by the weight squared times the
         // distance, and strained over mates that hold the same thing twice, a crank's tilt by its journal and its gear's
         // face, they come back only slowly)
@@ -204,7 +225,8 @@ public static class MateSolver
                 mates[k].Residuals(geoA[k].Placed(ta), geoB[k].Placed(tb), ta, tb, buf);
                 return;
             }
-            var v = ta.Point(pull!.Local) - pull.Origin;
+            if (pull == null) { buf.Add(0); buf.Add(0); buf.Add(0); return; }
+            var v = ta.Point(pull.Local) - pull.Origin;
             v -= pullDir * Vec3.Dot(v, pullDir);
             buf.Add(pullWeight * v.X); buf.Add(pullWeight * v.Y); buf.Add(pullWeight * v.Z);
         }
@@ -213,7 +235,7 @@ public static class MateSolver
         Transform Offset(string? id) => id != null && attached != null && attached.TryGetValue(id, out var at) ? at.Offset : Transform.Identity;
         for (int k = 0; k < K; k++)
         {
-            ca[k] = k < mates.Count ? FreeOf(mates[k].A) : freeIdx[pull!.Component];
+            ca[k] = k < mates.Count ? FreeOf(mates[k].A) : freeIdx[pullComponent!];
             cb[k] = k < mates.Count ? FreeOf(mates[k].B) : -1;
             offA[k] = Offset(CompA(k)); offB[k] = Offset(CompB(k));
             fixA[k] = PlacementOf(CompA(k), null); fixB[k] = PlacementOf(CompB(k), null);
@@ -249,12 +271,12 @@ public static class MateSolver
         var sky = Skyline.For(nf, Enumerable.Range(0, K).Where(k => ca[k] >= 0 && cb[k] >= 0 && ca[k] != cb[k]).Select(k => (ca[k], cb[k])));
         static double Sq(double[] v) { double s = 0; foreach (var a in v) s += a * a; return s; }
 
-        const double tol = 1e-10, h = 1e-6, maxTurn = 0.2;
-        var r0 = Res(null);
+        const double h = 1e-6, maxTurn = 0.2;
+        var r0 = Array.Empty<double>();
         // the damping: light where the steps are small and the mates nearly linear (a drag's pull from where they
         // hold, a solve starting nearly satisfied), lightened fast as steps succeed
         double Damping() => pulling ? 1e-6 : r0.Length > 0 && r0.Max(Math.Abs) < 1e-6 ? 1e-9 : 1e-3;
-        double lambda = Damping();
+        double lambda = 0;
         // the Jacobian: for each mate, its rows against each of its (at most two) free components' six numbers
         var Ja = new double[K][]; var Jb = new double[K][];
         for (int k = 0; k < K; k++)
@@ -274,8 +296,10 @@ public static class MateSolver
                       : new(Vec3.Zero, j == 3 ? Vec3.UnitX : j == 4 ? Vec3.UnitY : Vec3.UnitZ, pivot);
             if (k == mates.Count)
             {
-                // the grabbed point's offset from the ray: its motion less the part along the ray, weighted
-                var x = curA[k].Point(pull!.Local);
+                // the grabbed point's offset from the ray: its motion less the part along the ray, weighted (none
+                // without a pull: the row is there for the drag's other moves)
+                if (pull == null) { Array.Clear(Ja[k]); return true; }
+                var x = curA[k].Point(pull.Local);
                 for (int j = 0; j < 6; j++)
                 {
                     var dx = Unit(j, pivots[ca[k]]).Point(x);
@@ -323,153 +347,167 @@ public static class MateSolver
                 }
             }
         }
-        int it = 0, end = pulling ? 2 * maxIter : maxIter;
-        for (int stage = 0; stage < end && n > 0 && rows > 0; stage++, it++)
+        bool ran = false;
+        Result Run(Pull? drag, double tol, int maxIter)
         {
-            // pulled as far as it goes: the pull let go, the mates solved exactly from there
-            if (pulling && (stage == maxIter || r0.Max(Math.Abs) <= tol))
+            if (drag != null && drag.Component != pullComponent) throw new ArgumentException("The pull is on a component the solve was not set up for.");
+            pull = drag; pulling = pull != null; pullWeight = 1e-3; pullDir = pull?.Dir.Normalized ?? Vec3.Zero;
+            var res = new Result();
+            foreach (var c in free) res.Solved.Add(c.Id);
+            // run again: from where the components are now (as the last run left them, or put back since)
+            if (ran) for (int i = 0; i < nf; i++) placements[free[i].Id] = place[i] = free[i].Placement.ToTransform();
+            ran = true;
+            r0 = Res(null);
+            lambda = Damping();
+            int it = 0, end = pulling ? 2 * maxIter : maxIter;
+            for (int stage = 0; stage < end && n > 0 && rows > 0; stage++, it++)
             {
-                pulling = false; pullWeight = 0; stage = maxIter;
-                r0 = Res(null); lambda = Damping();
-            }
-            if (!pulling && r0.Max(Math.Abs) <= tol) break;
-            for (int k = 0; k < K; k++) { curA[k] = SideA(k, null); curB[k] = SideB(k, null); }
-            // the Jacobian exactly where the mate works its derivatives out (and the pull's), by central differences
-            // for the rest
-            for (int k = 0; k < K; k++) fd[k] = !Exact(k);
-            for (int i = 0; i < nf; i++)
-            {
-                bool any = false;
-                foreach (var k in matesOf[i]) any |= fd[k];
-                if (!any) continue;
-                for (int j = 0; j < 6; j++)
+                // pulled as far as it goes: the pull let go, the mates solved exactly from there
+                if (pulling && (stage == maxIter || r0.Max(Math.Abs) <= tol))
                 {
-                    // central differences: exact to h squared (deep chains of components, far from the origin, need it)
-                    Transform Step(double d) => Moved(i, j == 0 ? d : 0, j == 1 ? d : 0, j == 2 ? d : 0, j == 3 ? d : 0, j == 4 ? d : 0, j == 5 ? d : 0);
-                    var tp = Step(h); var tm = Step(-h);
-                    foreach (var k in matesOf[i])
+                    pulling = false; pullWeight = 0; stage = maxIter;
+                    r0 = Res(null); lambda = Damping();
+                }
+                if (!pulling && r0.Max(Math.Abs) <= tol) break;
+                for (int k = 0; k < K; k++) { curA[k] = SideA(k, null); curB[k] = SideB(k, null); }
+                // the Jacobian exactly where the mate works its derivatives out (and the pull's), by central differences
+                // for the rest
+                for (int k = 0; k < K; k++) fd[k] = !Exact(k);
+                for (int i = 0; i < nf; i++)
+                {
+                    bool any = false;
+                    foreach (var k in matesOf[i]) any |= fd[k];
+                    if (!any) continue;
+                    for (int j = 0; j < 6; j++)
                     {
-                        if (!fd[k]) continue;
-                        int nr = rowOf[k + 1] - rowOf[k];
-                        var J = ca[k] == i ? Ja[k] : Jb[k];
-                        MateRes(k, ca[k] == i ? tp * offA[k] : curA[k], cb[k] == i ? tp * offB[k] : curB[k]);
-                        for (int q = 0; q < nr; q++) J[q * 6 + j] = q < buf.Count ? buf[q] : 0;
-                        MateRes(k, ca[k] == i ? tm * offA[k] : curA[k], cb[k] == i ? tm * offB[k] : curB[k]);
-                        for (int q = 0; q < nr; q++) J[q * 6 + j] = (J[q * 6 + j] - (q < buf.Count ? buf[q] : 0)) / (2 * h);
+                        // central differences: exact to h squared (deep chains of components, far from the origin, need it)
+                        Transform Step(double d) => Moved(i, j == 0 ? d : 0, j == 1 ? d : 0, j == 2 ? d : 0, j == 3 ? d : 0, j == 4 ? d : 0, j == 5 ? d : 0);
+                        var tp = Step(h); var tm = Step(-h);
+                        foreach (var k in matesOf[i])
+                        {
+                            if (!fd[k]) continue;
+                            int nr = rowOf[k + 1] - rowOf[k];
+                            var J = ca[k] == i ? Ja[k] : Jb[k];
+                            MateRes(k, ca[k] == i ? tp * offA[k] : curA[k], cb[k] == i ? tp * offB[k] : curB[k]);
+                            for (int q = 0; q < nr; q++) J[q * 6 + j] = q < buf.Count ? buf[q] : 0;
+                            MateRes(k, ca[k] == i ? tm * offA[k] : curA[k], cb[k] == i ? tm * offB[k] : curB[k]);
+                            for (int q = 0; q < nr; q++) J[q * 6 + j] = (J[q * 6 + j] - (q < buf.Count ? buf[q] : 0)) / (2 * h);
+                        }
                     }
                 }
-            }
-            // B's rows from A's: a motion of A by a turn w about A's pivot pa and a move m is the motion of B by w about B's
-            // pivot pb and m + w x (pb - pa); both together leave the mate as it is, so
-            // Jb.m = -Ja.m and Jb.w_j = -Ja.w_j + Ja.m (e_j x (pb - pa))
-            for (int k = 0; k < K; k++)
-            {
-                if (!derived[k] || !fd[k]) continue;
-                int nr = rowOf[k + 1] - rowOf[k];
-                var d = pivots[cb[k]] - pivots[ca[k]];
-                var A = Ja[k]; var B = Jb[k];
-                for (int q = 0; q < nr; q++)
+                // B's rows from A's: a motion of A by a turn w about A's pivot pa and a move m is the motion of B by w about B's
+                // pivot pb and m + w x (pb - pa); both together leave the mate as it is, so
+                // Jb.m = -Ja.m and Jb.w_j = -Ja.w_j + Ja.m (e_j x (pb - pa))
+                for (int k = 0; k < K; k++)
                 {
-                    int o = q * 6;
-                    double m0 = A[o + 3], m1 = A[o + 4], m2 = A[o + 5];
-                    // e_0 x d = (0, -d.z, d.y), e_1 x d = (d.z, 0, -d.x), e_2 x d = (-d.y, d.x, 0)
-                    B[o] = -A[o] + (-m1 * d.Z + m2 * d.Y);
-                    B[o + 1] = -A[o + 1] + (m0 * d.Z - m2 * d.X);
-                    B[o + 2] = -A[o + 2] + (-m0 * d.Y + m1 * d.X);
-                    B[o + 3] = -m0; B[o + 4] = -m1; B[o + 5] = -m2;
-                }
-            }
-            // the normal equations JtJ dx = -Jt r, a 6x6 block at a time
-            sky.Clear();
-            var g = new double[n];
-            for (int k = 0; k < K; k++)
-            {
-                int nr = rowOf[k + 1] - rowOf[k], r = rowOf[k];
-                // (a mate between two references of one component: its rows count once, against that component)
-                int a = ca[k], b = cb[k] == ca[k] ? -1 : cb[k];
-                var A = Ja[k]; var B = Jb[k];
-                if (a >= 0) Gram(A, A, nr, r, a, g, blkAA);
-                if (b >= 0) Gram(B, B, nr, r, b, g, blkBB);
-                if (a >= 0) sky.AddBlock(a, a, blkAA);
-                if (b >= 0) sky.AddBlock(b, b, blkBB);
-                if (a >= 0 && b >= 0)
-                {
-                    // the block across: AtB at (a, b), its transpose at (b, a) (the one below the diagonal is kept)
-                    Array.Clear(blkAB);
+                    if (!derived[k] || !fd[k]) continue;
+                    int nr = rowOf[k + 1] - rowOf[k];
+                    var d = pivots[cb[k]] - pivots[ca[k]];
+                    var A = Ja[k]; var B = Jb[k];
                     for (int q = 0; q < nr; q++)
-                        for (int p = 0; p < 6; p++)
-                        {
-                            double ja = A[q * 6 + p];
-                            if (ja == 0) continue;
-                            for (int t = 0; t < 6; t++) blkAB[p * 6 + t] += ja * B[q * 6 + t];
-                        }
-                    sky.AddBlock(a, b, blkAB);
-                    for (int p = 0; p < 6; p++) for (int t = 0; t < 6; t++) blkBA[t * 6 + p] = blkAB[p * 6 + t];
-                    sky.AddBlock(b, a, blkBA);
+                    {
+                        int o = q * 6;
+                        double m0 = A[o + 3], m1 = A[o + 4], m2 = A[o + 5];
+                        // e_0 x d = (0, -d.z, d.y), e_1 x d = (d.z, 0, -d.x), e_2 x d = (-d.y, d.x, 0)
+                        B[o] = -A[o] + (-m1 * d.Z + m2 * d.Y);
+                        B[o + 1] = -A[o + 1] + (m0 * d.Z - m2 * d.X);
+                        B[o + 2] = -A[o + 2] + (-m0 * d.Y + m1 * d.X);
+                        B[o + 3] = -m0; B[o + 4] = -m1; B[o + 5] = -m2;
+                    }
                 }
-            }
-            double f0 = Sq(r0);
-            bool stepped = false;
-            for (int tries = 0; tries < 12 && !stepped; tries++)
-            {
-                var dx = sky.SolveDamped(lambda, g);
-                if (dx == null) { lambda *= 10; continue; }
-                // no component turned more than maxTurn in one step (the whole step shortened alike): the mates are
-                // linearised about here, and a long turn taken on them at once can land what hangs on it on the
-                // other way of satisfying them (a piston on the far side of its crank)
-                double turn = 0;
-                for (int i = 0; i < nf; i++) turn = Math.Max(turn, Math.Sqrt(dx[6 * i] * dx[6 * i] + dx[6 * i + 1] * dx[6 * i + 1] + dx[6 * i + 2] * dx[6 * i + 2]));
-                if (turn > maxTurn) for (int j = 0; j < n; j++) dx[j] *= maxTurn / turn;
-                var trial = Trial(dx);
-                var r1 = Res(trial);
-                if (Sq(r1) < f0)
+                // the normal equations JtJ dx = -Jt r, a 6x6 block at a time
+                sky.Clear();
+                var g = new double[n];
+                for (int k = 0; k < K; k++)
                 {
-                    for (int i = 0; i < nf; i++) placements[free[i].Id] = place[i] = trial[i];
-                    // pulled, the residual stays (the cursor is where the mates do not let the point go): done when
-                    // it stops getting smaller (by a millionth: the exact solve follows)
-                    if (pulling && f0 - Sq(r1) < 1e-6 * f0) { r0 = r1; stage = maxIter - 1; break; }
-                    r0 = r1;
-                    lambda = Math.Max(lambda / 10, 1e-12);
-                    stepped = true;
+                    int nr = rowOf[k + 1] - rowOf[k], r = rowOf[k];
+                    // (a mate between two references of one component: its rows count once, against that component)
+                    int a = ca[k], b = cb[k] == ca[k] ? -1 : cb[k];
+                    var A = Ja[k]; var B = Jb[k];
+                    if (a >= 0) Gram(A, A, nr, r, a, g, blkAA);
+                    if (b >= 0) Gram(B, B, nr, r, b, g, blkBB);
+                    if (a >= 0) sky.AddBlock(a, a, blkAA);
+                    if (b >= 0) sky.AddBlock(b, b, blkBB);
+                    if (a >= 0 && b >= 0)
+                    {
+                        // the block across: AtB at (a, b), its transpose at (b, a) (the one below the diagonal is kept)
+                        Array.Clear(blkAB);
+                        for (int q = 0; q < nr; q++)
+                            for (int p = 0; p < 6; p++)
+                            {
+                                double ja = A[q * 6 + p];
+                                if (ja == 0) continue;
+                                for (int t = 0; t < 6; t++) blkAB[p * 6 + t] += ja * B[q * 6 + t];
+                            }
+                        sky.AddBlock(a, b, blkAB);
+                        for (int p = 0; p < 6; p++) for (int t = 0; t < 6; t++) blkBA[t * 6 + p] = blkAB[p * 6 + t];
+                        sky.AddBlock(b, a, blkBA);
+                    }
                 }
-                else lambda *= 6;
+                double f0 = Sq(r0);
+                bool stepped = false;
+                for (int tries = 0; tries < 12 && !stepped; tries++)
+                {
+                    var dx = sky.SolveDamped(lambda, g);
+                    if (dx == null) { lambda *= 10; continue; }
+                    // no component turned more than maxTurn in one step (the whole step shortened alike): the mates are
+                    // linearised about here, and a long turn taken on them at once can land what hangs on it on the
+                    // other way of satisfying them (a piston on the far side of its crank)
+                    double turn = 0;
+                    for (int i = 0; i < nf; i++) turn = Math.Max(turn, Math.Sqrt(dx[6 * i] * dx[6 * i] + dx[6 * i + 1] * dx[6 * i + 1] + dx[6 * i + 2] * dx[6 * i + 2]));
+                    if (turn > maxTurn) for (int j = 0; j < n; j++) dx[j] *= maxTurn / turn;
+                    var trial = Trial(dx);
+                    var r1 = Res(trial);
+                    if (Sq(r1) < f0)
+                    {
+                        for (int i = 0; i < nf; i++) placements[free[i].Id] = place[i] = trial[i];
+                        // pulled, the residual stays (the cursor is where the mates do not let the point go): done when
+                        // it stops getting smaller (by a millionth: the exact solve follows)
+                        if (pulling && f0 - Sq(r1) < 1e-6 * f0) { r0 = r1; stage = maxIter - 1; break; }
+                        r0 = r1;
+                        lambda = Math.Max(lambda / 10, 1e-12);
+                        stepped = true;
+                    }
+                    else lambda *= 6;
+                }
+                if (!stepped && !pulling) break;
+                if (!stepped) stage = maxIter - 1;
             }
-            if (!stepped && !pulling) break;
-            if (!stepped) stage = maxIter - 1;
-        }
-        res.Iterations = it;
+            res.Iterations = it;
 
-        // the components moved, and what each mate is left with
-        foreach (var c in free)
-        {
-            var before = c.Placement.ToTransform(); var after = placements[c.Id];
-            if (Differs(before, after)) { c.Placement = Placement.From(after); res.Moved.Add(c.Id); }
-        }
-        // carried components go with their bodies
-        if (attached != null)
-            foreach (var (id, at) in attached)
-                if (res.Moved.Contains(at.Body) && byId.TryGetValue(id, out var c))
-                {
-                    c.Placement = Placement.From(placements[at.Body] * at.Offset);
-                    res.Moved.Add(id);
-                }
-        foreach (var m in doc.Mates)
-        {
-            if (m.Suppressed) continue;
-            var r = new List<double>();
-            if (Live(m.A) && Live(m.B) && Mate.Supports(m.Type, L(m.A), L(m.B)))
+            // the components moved, and what each mate is left with
+            foreach (var c in free)
             {
-                var (ga, gb) = (World(m.A, null), World(m.B, null));
-                var (ta, tb) = (PlacementOf(m.A.Component, null), PlacementOf(m.B.Component, null));
-                m.Residuals(ga, gb, ta, tb, r);
-                // the turns as they are now: the next solve counts on from here
-                m.Settle(ga, gb, ta, tb);
+                var before = c.Placement.ToTransform(); var after = placements[c.Id];
+                if (Differs(before, after)) { c.Placement = Placement.From(after); res.Moved.Add(c.Id); }
             }
-            else r.Add(double.PositiveInfinity);
-            res.Errors[m.Id] = r.Count == 0 ? 0 : r.Max(Math.Abs);
+            // carried components go with their bodies
+            if (attached != null)
+                foreach (var (id, at) in attached)
+                    if (res.Moved.Contains(at.Body) && byId.TryGetValue(id, out var c))
+                    {
+                        c.Placement = Placement.From(placements[at.Body] * at.Offset);
+                        res.Moved.Add(id);
+                    }
+            foreach (var m in doc.Mates)
+            {
+                if (m.Suppressed) continue;
+                var r = new List<double>();
+                if (Live(m.A) && Live(m.B) && Mate.Supports(m.Type, L(m.A), L(m.B)))
+                {
+                    var (ga, gb) = (World(m.A, null), World(m.B, null));
+                    var (ta, tb) = (PlacementOf(m.A.Component, null), PlacementOf(m.B.Component, null));
+                    m.Residuals(ga, gb, ta, tb, r);
+                    // the turns as they are now: the next solve counts on from here
+                    m.Settle(ga, gb, ta, tb);
+                }
+                else r.Add(double.PositiveInfinity);
+                res.Errors[m.Id] = r.Count == 0 ? 0 : r.Max(Math.Abs);
+            }
+            res.Satisfied = res.Errors.Values.All(e => e <= 1e-6);
+            return res;
         }
-        res.Satisfied = res.Errors.Values.All(e => e <= 1e-6);
-        return res;
+        return new Session(Run);
     }
 
     static bool Differs(Transform a, Transform b) =>
