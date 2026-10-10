@@ -46,8 +46,7 @@ public static class StepImport
     {
         var f = StepFile.Parse(data);
         var r = new StepImportResult();
-        r.UnitMm = LengthUnitMm(f);
-        double angleScale = AngleUnitRadians(f);
+        (r.UnitMm, var angleScale) = Units(f);
         var ctx = new Ctx(f, r.UnitMm * mmToUnits, angleScale, prefix, r.Warnings);
 
         var solids = f.OfType("MANIFOLD_SOLID_BREP").Concat(f.OfType("BREP_WITH_VOIDS")).Distinct().ToList();
@@ -102,11 +101,11 @@ public static class StepImport
         if (!IsAssembly(data)) return null;
         var f = StepFile.Parse(data);
         var res = new StepAssemblyResult();
-        res.UnitMm = LengthUnitMm(f);
-        var ctx = new Ctx(f, res.UnitMm * mmToUnits, AngleUnitRadians(f), prefix, res.Warnings);
+        (res.UnitMm, var angleUnit) = Units(f);
+        var ctx = new Ctx(f, res.UnitMm * mmToUnits, angleUnit, prefix, res.Warnings);
         bool IsBrep(StepInstance i) => i.Is("MANIFOLD_SOLID_BREP") || i.Is("BREP_WITH_VOIDS");
         StepInstance? Inst(object? a) => a is StepRef r && f.Instances.TryGetValue(r.Id, out var i) ? i : null;
-        List<object?>? RepArgs(StepInstance i) => i.Parts.FirstOrDefault(p => p.Type.EndsWith("REPRESENTATION") && p.Args.Count >= 2 && p.Args[1] is List<object?>).Args;
+        List<object?>? RepArgs(StepInstance i) => i.Parts.FirstOrDefault(p => p.Type.EndsWith("REPRESENTATION", StringComparison.Ordinal) && p.Args.Count >= 2 && p.Args[1] is List<object?>).Args;
 
         // representations related without a transformation: one shape split over them
         var plain = new Dictionary<int, List<int>>();
@@ -238,39 +237,38 @@ public static class StepImport
     // ------------------------------------------------------------------------------------------
     // units
 
-    static double LengthUnitMm(StepFile f) => Unit(f, "LENGTH_UNIT", length: true);
-
-    static double AngleUnitRadians(StepFile f) => Unit(f, "PLANE_ANGLE_UNIT", length: false);
-
     /// <summary>
-    /// The unit of the solids' geometry: from the context of the shape representation holding them (files often
-    /// carry other units too, e.g. a metre unit for presentation data); else from any unit context; else the
-    /// first such unit in the file.
+    /// The units of the solids' geometry (millimetres per length unit, radians per angle unit): from the context of
+    /// the shape representation holding them (files often carry other units too, e.g. a metre unit for presentation
+    /// data); else from any unit context; else the first such unit in the file. The file is scanned once for both.
     /// </summary>
-    static double Unit(StepFile f, string kind, bool length)
+    static (double mm, double rad) Units(StepFile f)
     {
         var solids = new HashSet<int>(f.OfType("MANIFOLD_SOLID_BREP").Concat(f.OfType("BREP_WITH_VOIDS")).Select(s => s.Id));
-        IEnumerable<StepInstance> Contexts()
+        var sorted = f.Instances.Values.OrderBy(i => i.Id).ToList();
+        // representations listing a solid among their items, then every unit context
+        var contexts = new List<StepInstance>();
+        foreach (var r in sorted)
         {
-            // representations listing a solid among their items, then every unit context
-            foreach (var r in f.Instances.Values.OrderBy(i => i.Id))
+            var args = r.Parts.FirstOrDefault(p => p.Type.EndsWith("SHAPE_REPRESENTATION", StringComparison.Ordinal)).Args;
+            if (args == null || args.Count < 3 || args[1] is not List<object?> items) continue;
+            if (items.Any(x => x is StepRef sr && solids.Contains(sr.Id)) && args[2] is StepRef cr && f.Instances.TryGetValue(cr.Id, out var ctx))
+                contexts.Add(ctx);
+        }
+        foreach (var c in sorted) if (c.Is("GLOBAL_UNIT_ASSIGNED_CONTEXT")) contexts.Add(c);
+        double Unit(string kind, bool length)
+        {
+            foreach (var ctx in contexts)
             {
-                var args = r.Parts.FirstOrDefault(p => p.Type.EndsWith("SHAPE_REPRESENTATION")).Args;
-                if (args == null || args.Count < 3 || args[1] is not List<object?> items) continue;
-                if (items.Any(x => x is StepRef sr && solids.Contains(sr.Id)) && args[2] is StepRef cr && f.Instances.TryGetValue(cr.Id, out var ctx))
-                    yield return ctx;
+                if (ctx.Part("GLOBAL_UNIT_ASSIGNED_CONTEXT") is not { } ua || ua.Count == 0 || ua[0] is not List<object?> units) continue;
+                foreach (var u in units)
+                    if (u is StepRef ur && f.Instances.TryGetValue(ur.Id, out var ui) && ui.Is(kind)) return UnitFactor(f, ui, length);
             }
-            foreach (var c in f.Instances.Values.Where(i => i.Is("GLOBAL_UNIT_ASSIGNED_CONTEXT")).OrderBy(i => i.Id)) yield return c;
+            foreach (var u in sorted)
+                if (u.Is(kind)) return UnitFactor(f, u, length);
+            return 1;
         }
-        foreach (var ctx in Contexts())
-        {
-            if (ctx.Part("GLOBAL_UNIT_ASSIGNED_CONTEXT") is not { } ua || ua.Count == 0 || ua[0] is not List<object?> units) continue;
-            foreach (var u in units)
-                if (u is StepRef ur && f.Instances.TryGetValue(ur.Id, out var ui) && ui.Is(kind)) return UnitFactor(f, ui, length);
-        }
-        foreach (var u in f.Instances.Values.OrderBy(i => i.Id))
-            if (u.Is(kind)) return UnitFactor(f, u, length);
-        return 1;
+        return (Unit("LENGTH_UNIT", true), Unit("PLANE_ANGLE_UNIT", false));
     }
 
     /// <summary>Millimetres (length) or radians (angle) per unit.</summary>
@@ -576,7 +574,7 @@ public static class StepImport
             "SURFACE_OF_REVOLUTION" => "surfaces of revolution",
             "SURFACE_OF_LINEAR_EXTRUSION" => "extruded surfaces",
             "OFFSET_SURFACE" => "offset surfaces",
-            _ => type.StartsWith("(") ? "free-form (B-spline) surfaces" : type.ToLowerInvariant().Replace('_', ' '),
+            _ => type.StartsWith("(", StringComparison.Ordinal) ? "free-form (B-spline) surfaces" : type.ToLowerInvariant().Replace('_', ' '),
         };
 
         /// <summary>EDGE_CURVE(name, start, end, curve, same_sense) as native edges from start to end (a closed edge in two halves).</summary>

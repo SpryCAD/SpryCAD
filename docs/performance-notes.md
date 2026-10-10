@@ -22,7 +22,11 @@ or checked against the old ones (see *Checking a change* below).
 | `e323738` | `Classify`'s refinement: near segments found through the 16-segment boxes, coedges no nearer than the band not measured, fine UV mapped only for the crossing test, crossing parity as the polygon's flipped by the swapped segments, the exact distance over the swapped coedges only (results bit for bit; `sec.midclass` 2–3× faster: handwheel 25 to 9 ms, spur-gear-nice 30 to 15 ms) |
 | `ff6ab13` | `BSplineCurve.Interpolate` stores only the band of its system (4p + 1 entries a row, every entry the elimination reads or writes) instead of a dense (n+1)² matrix and its clone; the dense matrix is rebuilt only for the general fallback (results bit for bit; 3,000 points: 144 MB to 0.3 MB) |
 | `3f2183d` | Screw-surface ray casts: the crossings of a screw surface found once per ray when several faces share it (a thread's seam-split faces); steps of the march outside the generator's radial band about the axis (padded by its sample spacing and the hit tolerance) not sampled; the closest-point seeds' frame coordinates taken once (results bit for bit; `cls.rays` about 1.5–2× faster on the threaded parts) |
-| (next) | Mass properties with exact surface derivatives: `NSurface.TryPartials` for B-splines, screw surfaces and offsets of B-splines (the normal's derivative from the base's second derivatives), `PipeSpine.SurfacePartials` along a pipe's spine (the frame's derivative from the spine's second derivative and the interpolated normal), instead of central differences (results within 3e-10 relative; spoked handwheel's exact integration ~450 to ~300 ms) |
+| `1a00a45` | Mass properties with exact surface derivatives: `NSurface.TryPartials` for B-splines, screw surfaces and offsets of B-splines (the normal's derivative from the base's second derivatives), `PipeSpine.SurfacePartials` along a pipe's spine (the frame's derivative from the spine's second derivative and the interpolated normal), instead of central differences (results within 3e-10 relative; spoked handwheel's exact integration ~450 to ~300 ms) |
+| #8 | Mass properties: a contact curve's panels end at the spine's nodes (the curve is only C1 there) with 4 Gauss points each, instead of uniform panels across them with 8 (spoked handwheel 2.5e-9 nearer the converged volume, exact integration ~270 to ~155 ms). `Topology.Build` welding once for the quick and the full pass was tried: the quick pass already succeeds on every sample, nothing to gain |
+| #8 | `DisplayMesh` shares vertices within a UI face (a corner reuses an earlier one at the same point with the same normal): the triangles as drawn are the same (`FC_DET_MESH_TRIS`), 3.5–5.5× fewer vertices (spoked handwheel 253k to 46k, 6.1 to 1.1 MB of positions and normals); `bench` prints the display mesh's triangles and vertices |
+| #8 | Tessellator triangles name their corners in their face's point list (`Face.Pool`, `PoolA..C`): `Topology.Build` welds each point once (the welder gives a bit-identical point its earlier index, so the result is the same bit for bit; spoked handwheel `topo.weld` ~50 to ~33 ms, display mesh ~10–15% faster) |
+| #8 | Small items: `SplitFace` prunes dangling sections from a worklist (the same edges remain in any order of removal), `AddSec` keeps a set beside each face's list, STEP import finds both units in one pass and compares type names ordinally, `Solid.Combine`'s unreachable block removed (results bit for bit) |
 
 ## Where the time goes now
 
@@ -61,24 +65,21 @@ profile; the profile's times are summed over threads). On the heavy samples (`sa
    unhinted `Closest` (17 seeds, 3 Gauss-Newton solves). Warm-starting from the previous step would follow one turn
    where the nearest point jumps between turns; skipping by the step's distance is not safe either, since `Closest`
    can return a farther foot. Both would need parity checks against the full march.
-9. **Mass properties**: exact derivatives done (see above). Panels: fewer is not free. Contact and section curves
-   are the pipe spine (cubic Hermite, C1 at its nodes) projected on a surface, and uniform panels straddle the nodes,
-   so the integral converges slowly: from the current 1/4 of the curve's samples, 4× more panels still moves volumes
-   by up to 3e-8 and Ixx by 2e-6; 4× fewer moves them by 3e-7 and 1e-5. Panels at the spine's nodes (as polylines get
-   at their vertices) should be both more accurate and allow fewer Gauss points per panel. The curves' `Deriv` is a
-   central difference (two projections each).
+9. **Mass properties**: done (see above). Against panels at the frame's samples too (the pipe's frame is
+   interpolated linearly, 8 samples a spine segment), the result moves by 1e-12 at 7× the cost: the nodes are what
+   matters. Other curves (helices, fitted splines) still converge slowly: 4× more panels moves the acme screw's Ixx by
+   1e-6. The curves' `Deriv` is a central difference (two projections each for a contact curve).
 10. **Display pipeline**:
-    - `NTess` emits one `Face` object per triangle, then `Topology.Build` re-welds every corner through a dictionary.
-      Indexed per-face output would skip the weld.
-    - `DisplayMesh` emits unshared vertices (3× the GPU memory within a face).
-11. **Small items**:
+    - `DisplayMesh` vertices shared: done (see above).
+    - `NTess` triangles carry their point list's indices: each point welded once (see above). They are still one
+      `Face` object (and a 3-point loop array) per triangle; `Solid.Faces` is read widely. What is left of
+      `topo.weld` is the grid search for each distinct point (~33 ms on the spoked handwheel).
+    - `Topology.Build` welding once for its quick and full passes was tried: the quick pass succeeds on every sample.
+11. **Small items**: `SplitFace` pruning, `AddSec`, STEP units and ordinal names, `Solid.Combine` done (see above).
+    Left:
     - `NFace.ComputeBounds` builds a throwaway domain. Sharing the cached one changed results; see *Tried and rejected*.
-    - `ClassifyAll` runs `CoincidentWith` before the cheap box test.
     - `NFace.Coedges` is a LINQ `SelectMany` used in hot loops.
-    - `AddSec` uses `List.Contains`.
-    - `SplitFace` pruning and dedup are O(s²) to O(s³).
-    - STEP import uses culture-sensitive `EndsWith` (should be ordinal) and runs `Unit()` twice, each with sorts.
-    - `Solid.Combine` has an unreachable duplicate clone block.
+    - `SplitFace`'s duplicate-section check is O(s²) (small s in practice).
 
 ## Core and app: open items
 
@@ -113,6 +114,10 @@ profile; the profile's times are summed over threads). On the heavy samples (`sa
 
 ## Tried and rejected
 
+- **`ClassifyAll` box test before `CoincidentWith`**: slower (`cls.lone` 8 to 50 ms on spur-gear-nice). `FBox` computes a
+  face's bounds on first use, often for faces nothing else needs; `CoincidentWith` rejects most pairs at once (kinds).
+- **`Topology.Build` welding once for the quick and the full pass**: the quick pass succeeds on every sample.
+
 - **`Roots.Bisect` → Illinois/Brent**: about 2% on threads, but results changed on 136 of 358 feature hashes.
 - **`ComputeBounds` sharing the face's cached domain**: changes results. `Solid.Bounds` caches a finer domain that
   booleans then reuse, which makes them order-dependent and slower to classify.
@@ -126,7 +131,9 @@ All of these run from `tests/SpryCad.Tests`, built with `dotnet build -c Release
 - **Results bit for bit**: `dotnet run -c Release --no-build -- determinism <file.sprt> 1` prints a hash per feature.
   Run it before and after (another process, or a `git worktree` of the old commit) over `samples/*.sprt` and
   `samples/demos/*.sprt`, and diff the output.
-- **Display bit for bit**: run the same with `FC_DET_MESH=1`, which adds a hash of the final facets and display mesh.
+- **Display bit for bit**: run the same with `FC_DET_MESH=1`, which adds a hash of the final facets and display mesh. With
+  `FC_DET_MESH_TRIS=1` as well, the display mesh is hashed as drawn (each index's position and normal), so a change of
+  vertex layout alone does not show.
 - **Geometry only**: `FC_DET_GEOMETRY=1` leaves the edge sample cache out of the hashes (which edges are sampled, at
   which tolerance); `FC_DET_PRINT=1` prints each feature's fingerprint after its hash, to see which part changed.
 - **Within tolerance**, when results are allowed to change:

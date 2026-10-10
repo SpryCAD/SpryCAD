@@ -259,7 +259,12 @@ public sealed class NBoolean
 
         // 3-4. section edges per face pair, imprints for coincident faces
         var sections = new Dictionary<NFace, List<NEdge>>(ReferenceEqualityComparer.Instance);
-        void AddSec(NFace f, NEdge e) { if (!sections.TryGetValue(f, out var l)) sections[f] = l = new(); if (!l.Contains(e)) l.Add(e); }
+        var secSets = new Dictionary<NFace, HashSet<NEdge>>(ReferenceEqualityComparer.Instance);
+        void AddSec(NFace f, NEdge e)
+        {
+            if (!sections.TryGetValue(f, out var l)) { sections[f] = l = new(); secSets[f] = new(ReferenceEqualityComparer.Instance); }
+            if (secSets[f].Add(e)) l.Add(e);
+        }
         var faceBoxA = new Dictionary<NFace, Box3>(ReferenceEqualityComparer.Instance);
         var faceBoxB = new Dictionary<NFace, Box3>(ReferenceEqualityComparer.Instance);
         using (Prof.Time("sec.boxes"))
@@ -1160,16 +1165,27 @@ public sealed class NBoolean
         void Inc(NVertex v) => vertexDeg[v] = vertexDeg.GetValueOrDefault(v) + 1;
         foreach (var c in f.Coedges) { Inc(c.Start); Inc(c.End); }
         foreach (var e in secs) { Inc(e.V0); Inc(e.V1); }
-        bool pruned = true;
-        while (pruned)
+        // (the edges left are the same whatever the order of removal: a worklist of edges at each touched vertex)
+        var atVertex = new Dictionary<NVertex, List<int>>(ReferenceEqualityComparer.Instance);
+        for (int i = 0; i < secs.Count; i++)
+            foreach (var v in new[] { secs[i].V0, secs[i].V1 })
+            {
+                if (!atVertex.TryGetValue(v, out var l)) atVertex[v] = l = new();
+                l.Add(i);
+            }
+        var removed = new bool[secs.Count];
+        var work = new Stack<int>(Enumerable.Range(0, secs.Count).Reverse());
+        while (work.Count > 0)
         {
-            pruned = false;
-            foreach (var e in secs.ToList())
-                if (vertexDeg[e.V0] < 2 || vertexDeg[e.V1] < 2)
-                {
-                    secs.Remove(e); vertexDeg[e.V0]--; vertexDeg[e.V1]--; pruned = true;
-                }
+            int i = work.Pop();
+            if (removed[i]) continue;
+            var e = secs[i];
+            if (vertexDeg[e.V0] >= 2 && vertexDeg[e.V1] >= 2) continue;
+            removed[i] = true; vertexDeg[e.V0]--; vertexDeg[e.V1]--;
+            foreach (var j in atVertex[e.V0]) if (!removed[j]) work.Push(j);
+            foreach (var j in atVertex[e.V1]) if (!removed[j]) work.Push(j);
         }
+        if (removed.Any(x => x)) secs = secs.Where((_, i) => !removed[i]).ToList();
         if (Trace != null && Environment.GetEnvironmentVariable("FC_TRACE_FACE") is { } tfs && f.Tag.Name.Contains(tfs))
             T($"  split {f.Tag.Name}: {secs.Count} sections after filtering: " + string.Join(" ", secs.Select(e => $"[{e.V0.P}#{Id(e.V0)}->{e.V1.P}#{Id(e.V1)} {e.Curve.GetType().Name[1..]} mid-gap {f.Coedges.Where(c => ReferenceEquals(c.Edge.V0, e.V0) || ReferenceEquals(c.Edge.V1, e.V0)).Select(c => Vec3.Distance(c.Edge.Mid, e.Mid)).DefaultIfEmpty(-1).Min():g3} fit {(e.Curve is NSpline ns2 ? ns2.FitTol : 0):g3} vs {f.Coedges.Select(c => c.Edge.Curve).OfType<NSpline>().Select(x => x.FitTol).DefaultIfEmpty(0).Max():g3} same curve {f.Coedges.Any(c => ReferenceEquals(c.Edge.Curve, e.Curve))}]")));
         if (secs.Count == 0) { yield return f; yield break; }
@@ -1334,6 +1350,7 @@ public sealed class NBoolean
         for (int i = 0; i < pieces.Count; i++)
             if (Active(pieces[i]))
             foreach (var g in near)
+                // (the surface test first: it rejects most pairs at once, where a face's box may first have to be computed)
                 if (pieces[i].Surface.CoincidentWith(g.Surface, _tol * 10) && FBox(pieces[i]).Overlaps(FBox(g), _onTol)) { lone[i] = true; break; }
         plone.Dispose();
         var punion = Prof.Time("cls.union");
