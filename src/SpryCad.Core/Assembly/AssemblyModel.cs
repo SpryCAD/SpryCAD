@@ -632,10 +632,27 @@ public sealed partial class AssemblyModel
 
     bool IsPatternCopy(string path) => Doc.Find(TopOf(path))?.Pattern != null;
 
-    /// <summary>A component dragged: the mates solved with its grabbed point pulled toward the cursor's ray.</summary>
+    /// <summary>
+    /// A component dragged: the mates solved with its grabbed point pulled toward the cursor's ray, from where
+    /// everything is (the mates holding); a component no mate moves is moved by the pull's <c>Move</c> instead. A drag
+    /// the mates held before and could not be solved to hold after is not taken: everything stays where it was.
+    /// </summary>
     public MateSolver.Result SolveDrag(MateSolver.Pull pull)
     {
-        LastSolve = Solve(null, pull);
+        var held = LastSolve?.Satisfied == true;
+        var before = held ? CapturePoses() : null;
+        var res = Solve(null, pull);
+        if (!res.Solved.Contains(pull.Component) && pull.Move != Vec3.Zero)
+        {
+            SetWorld(pull.Component, Transform.Translation(pull.Move) * WorldOf(pull.Component));
+            res.Moved.Add(pull.Component);
+        }
+        if (before != null && !res.Satisfied)
+        {
+            Restore(before);
+            return LastSolve!;
+        }
+        LastSolve = res;
         ApplyPatterns();
         return LastSolve;
     }
