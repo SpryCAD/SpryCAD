@@ -36,20 +36,20 @@ public static class AssemblyContainer
 
     /// <summary>
     /// The assembly as the bytes of its file (an assembly embedded in another): its identity given if it has none, a
-    /// new revision.
+    /// new revision (unless <paramref name="newRevision"/> is false: only its caches changed, not what it is).
     /// </summary>
-    public static byte[] ToBytes(AssemblyDocument asm)
+    public static byte[] ToBytes(AssemblyDocument asm, bool newRevision = true)
     {
         using var ms = new MemoryStream();
-        Write(asm, ms);
+        Write(asm, ms, newRevision);
         return ms.ToArray();
     }
 
-    static void Write(AssemblyDocument asm, Stream stream)
+    static void Write(AssemblyDocument asm, Stream stream, bool newRevision = true)
     {
         foreach (var name in asm.Files.Keys) DocumentContainer.CheckName(name);
         asm.Id ??= CadDocument.NewGuid();
-        asm.Revision = CadDocument.NewGuid();
+        if (newRevision || asm.Revision == null) asm.Revision = CadDocument.NewGuid();
         asm.Attachments = asm.Files.Count == 0 ? null
             : asm.Files.OrderBy(f => f.Key, StringComparer.Ordinal)
                 .Select(f => new AttachmentInfo { Name = f.Key, Size = f.Value.LongLength, Sha256 = DocumentContainer.Hash(f.Value) }).ToList();

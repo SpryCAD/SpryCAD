@@ -6,85 +6,139 @@
   <title>SpryCAD — parametric 3D CAD</title>
   <meta name="description" content="SpryCAD: a fast, light, fully parametric 3D CAD program for Windows and Linux.">
   <link rel="icon" href="/img/logo.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
   <link rel="stylesheet" href="/style.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/STLLoader.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js" defer></script>
+  <script src="/home.js" defer></script>
 </head>
 <body>
-  <header class="site">
+  <header class="pad">
     <div class="wrap">
       <a class="brand" href="/"><img src="/img/logo.png" alt="">SpryCAD</a>
-      <nav>
-        <a href="/download">Download</a>
-      </nav>
+      <nav><a href="#features">Features</a><a href="#parametric">Parametric</a><a href="/download">Download</a></nav>
+      <span class="sheet">SHEET 1 OF 2</span>
     </div>
   </header>
 
-  <main>
-    <section class="band">
-      <div class="wrap hero">
-        <span class="eyebrow">Parametric 3D CAD</span>
-        <h1>Precise models. No waiting.</h1>
-        <p class="lead">Sketch, dimension, extrude, fillet and assemble in a feature-tree workflow you already know.
-          A native desktop app for Windows and Linux.</p>
+  <main class="wrap">
+    <section class="hero">
+      <div>
+        <span class="tag">Parametric 3D CAD · Windows · Linux</span>
+        <h1>Model real parts.<br><em>Change anything.</em></h1>
+        <p class="lead">A feature-based 3D modeler with exact geometry and a history that rebuilds in milliseconds. Native, light, and fast.</p>
         <div class="actions">
-          <a class="btn primary" href="/download">Download SpryCAD <span class="arrow">&rarr;</span></a>
+          <a class="btn primary" href="/download">Download <span class="k" data-latest="version"></span></a>
+          <a class="btn" href="#parametric">See how it works</a>
         </div>
-        <ul class="specs">
-          <li><b>~1 s</b><span>Cold start</span></li>
-          <li><b>7–80 ms</b><span>Parameter edit</span></li>
-          <li><b>~3 MB</b><span>Own code</span></li>
-          <li><b>STEP AP214</b><span>Exact export</span></li>
-        </ul>
+        <div class="facts">
+          <div><b>~1 s</b><span>Cold start</span></div>
+          <div><b>7–80 ms</b><span>Edit rebuild</span></div>
+          <div><b>STEP</b><span>AP214 export</span></div>
+        </div>
+      </div>
+
+      <div>
+        <figure class="frame view">
+          <div class="bar"><span>spur-gear.sprt</span><span class="live">Live model</span></div>
+          <div class="body">
+            <div class="tree" aria-hidden="true">
+              <div class="pl">Front Plane</div>
+              <div class="pl">Top Plane</div>
+              <div class="pl">Right Plane</div>
+              <div class="feat">Blank</div>
+              <div class="cut">Tooth gap</div>
+              <div class="pat on">Teeth <span class="x">×36</span></div>
+              <div class="cut">Keyway</div>
+              <div class="cut">Web recess</div>
+              <div class="pl">Back face</div>
+              <div class="cut">Web recess (back)</div>
+              <div class="cut">Lightening hole</div>
+              <div class="pat">Lightening holes <span class="x">×6</span></div>
+              <div class="roll"></div>
+            </div>
+            <div class="stage" id="stage">
+              <canvas id="gl" aria-label="The spur gear sample, rendered in 3D; drag to turn it"></canvas>
+              <svg class="dim" id="dim" aria-hidden="true"></svg>
+              <svg class="triad" width="46" height="46" viewBox="0 0 46 46" aria-hidden="true">
+                <g stroke-width="1.5" fill="none"><path d="M10 36 L36 36" stroke="#c0392b"/><path d="M10 36 L10 10" stroke="#27935a"/><path d="M10 36 L26 24" stroke="#2f7bd6"/></g>
+                <g font-family="IBM Plex Mono, monospace" font-size="8" fill="#44574c"><text x="38" y="39">X</text><text x="7" y="8">Y</text><text x="28" y="23">Z</text></g>
+              </svg>
+              <span class="hint">DRAG TO ORBIT</span>
+            </div>
+          </div>
+        </figure>
+        <div class="tblock">
+          <div><small>Title</small><b>Spur gear</b></div>
+          <div><small>Module</small><b>2</b></div>
+          <div><small>Teeth</small><b>36</b></div>
+          <div><small>Face</small><b>14 mm</b></div>
+          <div><small>Drawn with</small><b>SpryCAD</b></div>
+        </div>
       </div>
     </section>
 
-    <div class="shot-wrap">
-      <div class="wrap">
-        <figure class="shot">
-          <img src="/img/screenshot.png" width="1402" height="912" alt="The SpryCAD main window with a part, its feature tree and the command tabs">
-        </figure>
+    <section class="block" id="features">
+      <div class="shead"><span class="no">A</span><h2>Built for real parts</h2><p>Detail A · Capabilities</p></div>
+      <div class="cards">
+        <div class="card"><span class="balloon">1</span><h3>Fully parametric</h3><p>Every feature rebuilds from its history. Dimensions take expressions, global variables and design tables.</p><div class="spec">W = 100 · W/2 + 5 · 1in</div></div>
+        <div class="card"><span class="balloon">2</span><h3>Fast rebuilds</h3><p>Only what follows a change rebuilds, in the background, with a live preview while you edit.</p><div class="spec">14 features · ~85 ms</div></div>
+        <div class="card"><span class="balloon">3</span><h3>Exact geometry</h3><p>True planes, cylinders, cones, spheres and tori, with exact edges and smooth silhouettes.</p><div class="spec">Analytic surfaces → STEP</div></div>
+        <div class="card"><span class="balloon">4</span><h3>Rolling-ball fillets</h3><p>Fillets between any faces, solved on the offset surfaces where no analytic blend exists.</p><div class="spec">Within 1e-8 mm</div></div>
+        <div class="card"><span class="balloon">5</span><h3>Assemblies with mates</h3><p>Coincident, concentric, distance, gear and screw mates, solved together as you drag.</p><div class="spec">.sasm · STEP assemblies</div></div>
+        <div class="card"><span class="balloon">6</span><h3>Open formats</h3><p>Native parts are readable, diffable JSON. Export STEP AP214 and binary STL.</p><div class="spec">.sprt · .step · .stl</div></div>
       </div>
-    </div>
+    </section>
 
-    <div class="wrap">
-      <div class="section-head">
-        <span class="eyebrow">Built for real parts</span>
-        <h2>Everything rebuilds from the history</h2>
+    <section class="block" id="parametric">
+      <div class="shead"><span class="no">B</span><h2>The gear above is its equations</h2><p>Section B · Parameters</p></div>
+      <div class="eqs">
+        <div class="text">
+          <h3>Change the module, the teeth follow</h3>
+          <p>The spur gear sample is driven by a handful of global variables. Its tooth gap, pitch, hub and lightening holes are all expressions of them, so editing <span class="mono">z</span> from 36 to 24 rebuilds the whole part.</p>
+          <p>Conditions can suppress features, and design tables give rows of sizes, so one part file can be a whole family of parts.</p>
+          <a class="btn" href="/download">Try it on the samples</a>
+        </div>
+        <table class="eq">
+          <thead><tr><th>Name</th><th>Expression</th><th class="v">Value</th></tr></thead>
+          <tbody>
+            <tr><td>m</td><td>2</td><td class="v">2</td></tr>
+            <tr><td>z</td><td>36</td><td class="v">36</td></tr>
+            <tr><td>PA</td><td>20</td><td class="v">20°</td></tr>
+            <tr><td>b</td><td>14</td><td class="v">14</td></tr>
+            <tr><td>r</td><td>m*z/2</td><td class="v">36</td></tr>
+            <tr><td>ra</td><td>r+m</td><td class="v">38</td></tr>
+            <tr><td>rf</td><td>r-1.25*m</td><td class="v">33.5</td></tr>
+            <tr><td>HubD</td><td>2.2*Bore</td><td class="v">30.8</td></tr>
+            <tr><td>LHR</td><td>(RimD+HubD)/4</td><td class="v">22.45</td></tr>
+          </tbody>
+        </table>
       </div>
-      <section class="features">
-        <div>
-          <span class="num">01</span>
-          <h3>Fully parametric</h3>
-          <p>Every feature rebuilds from its history. Dimensions take expressions, global variables and design tables.</p>
-        </div>
-        <div>
-          <span class="num">02</span>
-          <h3>Fast</h3>
-          <p>Incremental rebuilds in the background, so the window never blocks, with a live preview while you edit.</p>
-        </div>
-        <div>
-          <span class="num">03</span>
-          <h3>Exact geometry</h3>
-          <p>True planes, cylinders, cones, spheres and tori, exported to STEP as analytic surfaces.</p>
-        </div>
-        <div>
-          <span class="num">04</span>
-          <h3>Open formats</h3>
-          <p>Readable JSON part files, STEP and STL export, and assemblies with mates.</p>
-        </div>
-      </section>
+    </section>
 
-      <section class="cta">
+    <section class="block" id="download">
+      <div class="shead"><span class="no">C</span><h2>Download</h2><p data-latest="rev"></p></div>
+      <div class="dl">
         <div>
-          <h2>Get SpryCAD</h2>
-          <p>Windows installer, apt and dnf repositories, and a Linux tarball.</p>
+          <h3>Windows</h3>
+          <div class="sub">Windows 10 / 11 · x64 · per-user install</div>
+          <div class="row"><a class="btn primary" id="win-link" href="/download?os=windows">Download installer</a><span class="file" id="win-file"></span></div>
         </div>
-        <a class="btn primary" href="/download">Download <span class="arrow">&rarr;</span></a>
-      </section>
-    </div>
+        <div>
+          <h3>Linux</h3>
+          <div class="sub">apt · dnf · tarball · x86-64</div>
+          <pre>sudo apt install sprycad</pre>
+          <div class="row"><a class="btn" href="/download?os=linux">Set up the repository</a></div>
+        </div>
+      </div>
+    </section>
   </main>
 
-  <footer class="site">
-    <div class="wrap"><span class="brand-sm">SpryCAD</span><a href="/download">Download</a></div>
+  <footer class="pad">
+    <div class="wrap"><span class="brand-sm">SpryCAD</span><span>Parametric 3D CAD</span><a href="/download">Download</a><span>Dimensions in mm</span></div>
   </footer>
 </body>
 </html>

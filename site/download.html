@@ -6,60 +6,58 @@
   <title>Download SpryCAD</title>
   <meta name="description" content="Download SpryCAD for Windows and Linux, any released version, with install instructions.">
   <link rel="icon" href="/img/logo.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
   <link rel="stylesheet" href="/style.css">
   <script src="/download.js" defer></script>
 </head>
 <body>
-  <header class="site">
+  <header class="pad">
     <div class="wrap">
       <a class="brand" href="/"><img src="/img/logo.png" alt="">SpryCAD</a>
-      <nav>
-        <a href="/download" aria-current="page">Download</a>
-      </nav>
+      <nav><a href="/#features">Features</a><a href="/#parametric">Parametric</a><a href="/download" aria-current="page">Download</a></nav>
+      <span class="sheet">SHEET 2 OF 2</span>
     </div>
   </header>
 
-  <main>
-    <section class="band">
-      <div class="wrap page-title">
-        <span class="eyebrow">Download</span>
-        <h1>Get SpryCAD</h1>
-        <p class="lead">64-bit Windows 10/11 and Linux (x86-64). Pick a channel, a version and your system.</p>
-      </div>
-    </section>
+  <main class="wrap">
+    <div class="page-title">
+      <span class="tag">Download · Windows · Linux</span>
+      <h1>Get SpryCAD</h1>
+      <p class="lead">64-bit Windows 10/11 and Linux (x86-64). Pick a channel, a version and your system.</p>
+    </div>
 
-    <div class="wrap">
-      <div class="picker">
-        <div class="head"><strong>Release</strong><span class="meta" id="meta"></span></div>
-        <div class="body">
-          <div>
-            <label id="lbl-channel">Channel</label>
-            <div class="seg" role="group" aria-labelledby="lbl-channel" id="channel">
-              <button type="button" data-value="stable">Stable</button>
-              <button type="button" data-value="dev">Dev builds</button>
-            </div>
+    <div class="frame picker">
+      <div class="bar"><span>Release</span><span class="meta" id="meta"></span></div>
+      <div class="fields">
+        <div>
+          <label id="lbl-channel">Channel</label>
+          <div class="seg" role="group" aria-labelledby="lbl-channel" id="channel">
+            <button type="button" data-value="stable">Stable</button>
+            <button type="button" data-value="dev">Dev builds</button>
           </div>
-          <div>
-            <label for="version">Version</label>
-            <select id="version" disabled><option>Loading…</option></select>
-          </div>
-          <div>
-            <label id="lbl-os">System</label>
-            <div class="seg" role="group" aria-labelledby="lbl-os" id="os">
-              <button type="button" data-value="windows">Windows</button>
-              <button type="button" data-value="linux">Linux</button>
-            </div>
+        </div>
+        <div>
+          <label for="version">Version</label>
+          <select id="version" disabled><option>Loading…</option></select>
+        </div>
+        <div>
+          <label id="lbl-os">System</label>
+          <div class="seg" role="group" aria-labelledby="lbl-os" id="os">
+            <button type="button" data-value="windows">Windows</button>
+            <button type="button" data-value="linux">Linux</button>
           </div>
         </div>
       </div>
-
-      <div id="notice"></div>
-      <div id="content"></div>
     </div>
+
+    <div id="notice"></div>
+    <div id="content"></div>
   </main>
 
-  <footer class="site">
-    <div class="wrap"><span class="brand-sm">SpryCAD</span><a href="/">Home</a></div>
+  <footer class="pad">
+    <div class="wrap"><span class="brand-sm">SpryCAD</span><span>Parametric 3D CAD</span><a href="/">Home</a><span>Dimensions in mm</span></div>
   </footer>
 </body>
 </html>
