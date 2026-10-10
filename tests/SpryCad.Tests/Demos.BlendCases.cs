@@ -11,6 +11,7 @@ static partial class Demos
         ("casting foot, drafted", () => CastingFoot("2")),
         ("casting foot, undrafted", () => CastingFoot("0")),
         ("casting foot, plate drafted and rounded", () => CastingFoot("2", "5")),
+        ("casting foot, drafted, chamfered", () => CastingFoot("2", chamfer: true)),
         ("box, three edges at a corner", BoxCorner),
         ("plate, hole rims", PlateHoles),
         ("box, all edges", BoxAll),
@@ -24,7 +25,7 @@ static partial class Demos
     /// plate's top: one edge picked, the tangent edges following (a closed loop of lines and arcs). A casting's
     /// commonest blend.
     /// </summary>
-    static CadDocument CastingFoot(string draft, string? baseDraft = null)
+    static CadDocument CastingFoot(string draft, string? baseDraft = null, bool chamfer = false)
     {
         var d = Doc(("BaseX", "100"), ("BaseY", "75"), ("BaseT", "20"), ("BossX", "60"), ("BossY", "40"), ("BossH", "60"), ("Draft", draft),
             ("Rc", "20"), ("Rf", "6"), ("BaseDraft", baseDraft ?? "0"), ("Rb", "15"));
@@ -65,11 +66,10 @@ static partial class Demos
                 E(F(2), F(3), new Vec3(-V("BossX"), V("BossY"), zm)), E(F(3), F(0), new Vec3(-V("BossX"), -V("BossY"), zm)),
             },
         });
-        d.AddFeature(new FilletFeature
-        {
-            Name = "Foot", Radius = "Rf",
-            Edges = { E($"{basePlate.Id}.End", F(0), new Vec3(0, -V("BossY"), V("BaseT"))) },
-        });
+        var foot = E($"{basePlate.Id}.End", F(0), new Vec3(0, -V("BossY"), V("BaseT")));
+        // chamfered: drafted, the rounded corners meet the plate along ellipses (their axes lean)
+        if (chamfer) d.AddFeature(new ChamferFeature { Name = "Foot", Distance = "Rf", Edges = { foot } });
+        else d.AddFeature(new FilletFeature { Name = "Foot", Radius = "Rf", Edges = { foot } });
         return d;
     }
 

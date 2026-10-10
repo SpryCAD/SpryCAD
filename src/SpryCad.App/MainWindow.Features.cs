@@ -587,7 +587,6 @@ public partial class MainWindow
         // SolidWorks "overflow": where the blend runs into neighbouring geometry it is trimmed by it (keep edge)
         if (fillet) page.Check(p, "Overflow: trim at neighbouring faces", () => ((FilletFeature)f).Overflow, v => ((FilletFeature)f).Overflow = v);
         else page.Check(p, "Overflow: trim at neighbouring faces", () => ((ChamferFeature)f).Overflow, v => ((ChamferFeature)f).Overflow = v);
-        page.Info(p, "Supported: straight edges between planar faces, and circular edges (full or partial arcs) where a plane meets a cylinder.");
         BeginEdit(f, isNew, page, overlay: true, hint: edges.Count == 0 ? "Select edges in the graphics area." : null);
     }
 

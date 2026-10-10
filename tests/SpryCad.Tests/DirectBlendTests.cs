@@ -84,6 +84,23 @@ static class DirectBlendTests
             }
         });
 
+        t.Test("Chamfer round a drafted boss's foot: its rounded corners meet the plate along ellipses (one swept tool)", () =>
+        {
+            // the corner fillets' axes lean (draft 2°): the foot runs round lines and ellipses, which the exact tools
+            // do not cover ("unsupported edge geometry"); swept along the loop, the chamfer's cross-section (legs 6
+            // along the plate and the boss's side, 92° apart) adds its area along the loop
+            var a = BlendAB.Build(() => Demos.BlendCases.First(c => c.name == "casting foot, drafted, chamfered").build(), direct: true, reps: 1).feats;
+            var corners = a.First(f => f.name == "Boss corners"); var foot = a.First(f => f.name == "Foot");
+            t.True(foot.error == null, foot.error ?? "");
+            t.True(foot.valid == null, foot.valid ?? "");
+            double d = 6, rc = 20;
+            var area = 0.5 * d * d * Math.Sin(Math.PI / 2 + 2 * Math.PI / 180);
+            // the triangle's centroid a third of the legs out from the wall; round the corners nearly circles of Rc
+            var approx = area * (2 * (120 - 2 * rc) + 2 * (80 - 2 * rc) + 2 * Math.PI * (rc + d / 3));
+            var added = foot.vol - corners.vol;
+            t.True(Math.Abs(added - approx) < 0.01 * approx, $"added {added:R}, about {approx:R}");
+        });
+
         t.Test("Fillet round a spoke's foot on a rim (undrafted): the tangent chain as one tool when its pieces overflow", () =>
         {
             // the oval spoke's straight side meets the rim along a circle (the exact arc tool), its round ends and
