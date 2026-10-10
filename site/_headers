@@ -1,8 +1,9 @@
-# Cloudflare Pages response headers
+# Cloudflare Pages response headers. Fonts from Google Fonts, three.js (the home page's 3D view) from cdnjs and
+# jsDelivr, the version lists and change logs from R2.
 /*
   X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin
-  Content-Security-Policy: default-src 'self'; connect-src 'self' https://download.sprycad.com; img-src 'self'; style-src 'self'; script-src 'self'; base-uri 'none'; frame-ancestors 'none'
+  Content-Security-Policy: default-src 'self'; connect-src 'self' https://download.sprycad.com; img-src 'self' data:; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'self' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; base-uri 'none'; frame-ancestors 'none'
 
 /img/*
   Cache-Control: public, max-age=86400
