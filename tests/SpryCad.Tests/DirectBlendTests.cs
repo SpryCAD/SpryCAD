@@ -101,6 +101,131 @@ static class DirectBlendTests
             t.True(Math.Abs(added - approx) < 0.01 * approx, $"added {added:R}, about {approx:R}");
         });
 
+        t.Test("Chamfer types round a drafted boss (foot and top): the cross-section's area along the loop, the reference face kept all round", () =>
+        {
+            // the plate meets the boss's side at 92°, its top at 88° (draft 2°). Pappus: the triangle's area along the
+            // straight sides, and round the corners (R20) at the centroid's distance from the side
+            double dr = 2 * Math.PI / 180, rc = 20;
+            double Est(double plate, double wall, bool top)
+            {
+                var theta = top ? Math.PI / 2 - dr : Math.PI / 2 + dr;
+                var area = 0.5 * plate * wall * Math.Sin(theta);
+                // the centroid's distance from the side (horizontally): out over the plate, in under the top (the side
+                // leaning back towards it at the plate, away below the top)
+                var x = (plate - wall * Math.Sin(dr)) / 3;
+                var w = top ? 60 - 60 * Math.Tan(dr) : 60; var h = top ? 40 - 60 * Math.Tan(dr) : 40;
+                return area * (2 * (2 * w - 2 * rc) + 2 * (2 * h - 2 * rc) + 2 * Math.PI * (rc + (top ? -x : x)));
+            }
+            double Changed(string name)
+            {
+                var a = BlendAB.Build(() => Demos.BlendCases.First(c => c.name == name).build(), direct: true, reps: 1).feats;
+                var corners = a.First(f => f.name == "Boss corners"); var foot = a.First(f => f.name == "Foot");
+                t.True(foot.error == null, $"{name}: {foot.error}");
+                t.True(foot.valid == null, $"{name}: {foot.valid}");
+                return Math.Abs(foot.vol - corners.vol);
+            }
+            void Near(string name, double v, double e) => t.True(Math.Abs(v - e) < 2e-3 * e, $"{name}: {v:R}, about {e:R}");
+            // which face the distance is measured on: both are possible (the first edge's first face); flipped, the other
+            var other = 6 * Math.Sin(Math.PI / 6) / Math.Sin(Math.PI / 2 + dr + Math.PI / 6);
+            foreach (var (name, plate, wall, top) in new[]
+                     {
+                         ("casting foot, drafted, chamfered", 6.0, 6.0, false), ("boss top, drafted, chamfered", 6.0, 6.0, true),
+                     })
+                Near(name, Changed(name), Est(plate, wall, top));
+            var dd = Changed("casting foot, drafted, chamfered 6 x 3"); var ddf = Changed("casting foot, drafted, chamfered 6 x 3 flipped");
+            var (e63, e36) = (Est(6, 3, false), Est(3, 6, false));
+            bool onPlate = Math.Abs(dd - e63) < Math.Abs(dd - e36);
+            Near("6 x 3", dd, onPlate ? e63 : e36);
+            Near("6 x 3 flipped", ddf, onPlate ? e36 : e63);
+            // at 30° to the reference face: the same face as the distances'
+            Near("6 at 30°", Changed("casting foot, drafted, chamfered 6 at 30°"), onPlate ? Est(6, other, false) : Est(other, 6, false));
+        });
+
+        t.Test("Swept chamfer over a hollow behind its corner: the boolean adds no more than the chamfer (the tool bounded by the faces)", () =>
+        {
+            // under the boss's front side the plate is 1 thick: the swept tool's point beyond the corner (inside, for
+            // a concave edge) lies in the pocket below, which the boolean would fill
+            foreach (var direct in new[] { false, true })
+            {
+                double Added(string name)
+                {
+                    var old = DirectBlend.Enabled;
+                    DirectBlend.Enabled = direct;
+                    try
+                    {
+                        var doc = Demos.BlendCases.First(c => c.name == name).build();
+                        var foot = doc.Features.First(f => f.Name == "Foot");
+                        Csg.ClearCache();
+                        var r0 = new Regenerator().Rebuild(doc, doc.Features.IndexOf(foot));
+                        var r1 = new Regenerator().Rebuild(doc, doc.Features.IndexOf(foot) + 1);
+                        t.True(r1.Status[foot.Id].Ok, $"{name}: {r1.Status[foot.Id].Error}");
+                        t.True(r1.State.Bodies[0].Solid.Native?.Validate() == null, $"{name}: valid");
+                        return KernelTests.Vex(r1.State.Bodies[0].Solid) - KernelTests.Vex(r0.State.Bodies[0].Solid);
+                    }
+                    finally { DirectBlend.Enabled = old; }
+                }
+                var plain = Added("casting foot, drafted, chamfered"); var hollow = Added("casting foot, drafted, chamfered, hollow under");
+                t.True(Math.Abs(hollow - plain) < 1e-6 * plain, $"{(direct ? "direct" : "boolean")}: added {hollow:R} over the hollow, {plain:R} without");
+            }
+        });
+
+        t.Test("Chamfer on an open arc whose ends meet a slot's walls at an angle: cut back to the walls, not ending square", () =>
+        {
+            // a drafted hole's top rim (plate top / cone: the swept tool), a slot across it: the rim's arc ends on the
+            // walls at 11.5° and 53° to its square end. Square, the chamfer stopped short of one wall at each end (a
+            // step left) and leant past the other; extended and cut back, it reaches both. The removed volume is the
+            // whole rim's less the part in the slot: the chamfer's triangle (corner r 10, legs 1.5 along the top and
+            // down the wall, drafted 5°) at each radius over the slot's arc (y 2..8)
+            double Removed(bool slot)
+            {
+                var doc = Demos.BlendCases.First(c => c.name == "plate, drafted hole across a slot, rim chamfered").build();
+                if (!slot) doc.Features.First(f => f.Name == "Slot").Suppressed = true;
+                var rim = doc.Features.First(f => f.Name == "Rim");
+                var r0 = new Regenerator().Rebuild(doc, doc.Features.IndexOf(rim));
+                var r1 = new Regenerator().Rebuild(doc, doc.Features.IndexOf(rim) + 1);
+                t.True(r1.Status[rim.Id].Ok, r1.Status[rim.Id].Error ?? "");
+                t.True(r1.State.Bodies[0].Solid.Native?.Validate() == null, "valid");
+                return KernelTests.Vex(r0.State.Bodies[0].Solid) - KernelTests.Vex(r1.State.Bodies[0].Solid);
+            }
+            var dr = 5 * Math.PI / 180;
+            (double r, double z) E = (10, 12), A = (11.5, 12), B = (10 - 1.5 * Math.Sin(dr), 12 - 1.5 * Math.Cos(dr));
+            static double Side((double r, double z) p, (double r, double z) q, double r, double z) => (q.r - p.r) * (z - p.z) - (q.z - p.z) * (r - p.r);
+            double full = 0, inSlot = 0;
+            const int N = 600;
+            for (int i = 0; i < N; i++)
+                for (int j = 0; j < N; j++)
+                {
+                    double r = 9.8 + 1.8 * (i + 0.5) / N, z = 10.4 + 1.6 * (j + 0.5) / N;
+                    double s1 = Side(E, A, r, z), s2 = Side(A, B, r, z), s3 = Side(B, E, r, z);
+                    if ((s1 < 0 || s2 < 0 || s3 < 0) && (s1 > 0 || s2 > 0 || s3 > 0)) continue;
+                    full += 2 * Math.PI * r; inSlot += r * (Math.Asin(8 / r) - Math.Asin(2 / r));
+                }
+            var expected = 1 - inSlot / full;
+            var ratio = Removed(true) / Removed(false);
+            t.True(Math.Abs(ratio - expected) < 5e-4, $"the slotted rim's chamfer {ratio:R} of the whole rim's, expected {expected:R}");
+        });
+
+        t.Test("Fillet on a swept chamfer's edge, picked on a straight side or round a corner: the same loop", () =>
+        {
+            // the chamfer's pieces share one face name; the edge is found nearest the hint, and its tangent chain is
+            // the whole loop round the boss either way
+            var dvs = new List<double>();
+            foreach (var hint in new[] { new Vec3(0, -46, 20), new Vec3(40 + 26 * 0.7071, -20 - 26 * 0.7071, 20) })
+            {
+                var doc = Demos.BlendCases.First(c => c.name == "casting foot, drafted, chamfered").build();
+                var ch = doc.Features.Last();
+                var r0 = new Regenerator().Rebuild(doc, doc.Features.Count);
+                var plate = doc.Features.First(f => f.Name == "Base" && f is ExtrudeFeature).Id;
+                var fil = new FilletFeature { Name = "Chamfer edge", Radius = "1", Edges = { new EdgeRef { A = plate + ".End", B = ch.Id + ".1.S.F", Hint = hint } } };
+                doc.AddFeature(fil);
+                var r = new Regenerator().Rebuild(doc, doc.Features.Count);
+                t.True(r.Status[fil.Id].Ok, r.Status[fil.Id].Error ?? "");
+                t.True(r.State.Bodies[0].Solid.Native?.Validate() == null, "valid");
+                dvs.Add(KernelTests.Vex(r.State.Bodies[0].Solid) - KernelTests.Vex(r0.State.Bodies[0].Solid));
+            }
+            t.True(dvs[0] > 0 && Math.Abs(dvs[0] - dvs[1]) < 1e-4 * dvs[0], $"added {dvs[0]:R} and {dvs[1]:R}");
+        });
+
         t.Test("Fillet round a spoke's foot on a rim (undrafted): the tangent chain as one tool when its pieces overflow", () =>
         {
             // the oval spoke's straight side meets the rim along a circle (the exact arc tool), its round ends and

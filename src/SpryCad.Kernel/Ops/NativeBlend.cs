@@ -110,7 +110,10 @@ public static class NativeBlend
                     entries.RemoveAll(x => x.group.All(set.Contains));
                     fails.RemoveAll(x => x.group.All(set.Contains));
                     foreach (var o in chain) if (!group.Contains(o)) { group.Add(o); done.Add(o); }
-                    (tools, convex, fits, strip) = (new List<Solid> { sc.Tool! }, sc.Convex, sc.Fits, null);
+                    // its reach past the corner and the legs' ends, as the line and arc tools': where that space is taken (a
+                    // wall across a narrow gap), the strip bounded by the faces for the boolean too
+                    var tool = sc.Strip != null && sc.Reach != null && Taken(body.Native!, fa, fb, sc.Reach, sc.Convex) ? sc.Strip : sc.Tool!;
+                    (tools, convex, fits, strip) = (new List<Solid> { tool }, sc.Convex, sc.Fits, sc.Strip);
                 }
                 if (Debug != null)
                     Debug($"blend {name}: {string.Join(", ", group.Select(g => $"{g.Curve.GetType().Name}{g.V0.P}->{g.V1.P} [{string.Join("|", g.Uses.Select(u => u.Face.Tag.Name + ":" + u.Face.Surface.Kind))}]"))} -> tools={tools?.Count} fits={fits}");
@@ -242,7 +245,10 @@ public static class NativeBlend
             var idx = Enumerable.Range(0, entries.Count).Where(k => entries[k].strip != null).ToList();
             var left = new List<int>();
             var offered = idx.Select(k => new DirectBlend.Tool(entries[k].strip!, entries[k].convex, entries[k].name, size)).Concat(corners).ToList();
-            var nb = DirectBlend.Apply(body.Native!, offered, left);
+            NBody? nb;
+            // (a tool the direct blend cannot take after all: all by boolean)
+            try { nb = DirectBlend.Apply(body.Native!, offered, left); }
+            catch (InvalidOperationException ex) { Debug?.Invoke($"direct blend failed: {ex.Message}"); nb = null; }
             if (nb != null)
             {
                 result = NTess.ToSolid(nb);
@@ -576,7 +582,7 @@ public static class NativeBlend
     /// angle (a face square to the edge already matches the tool's square end). Oriented with the edge next to
     /// the vertex on its positive side. Null when there is no single such face.
     /// </summary>
-    static Plane? EndPlane(NVertex v, Vec3 dirOut, NFace fa, NFace fb, IEnumerable<NEdge> blended)
+    internal static Plane? EndPlane(NVertex v, Vec3 dirOut, NFace fa, NFace fb, IEnumerable<NEdge> blended)
     {
         var inside = v.P - dirOut.Normalized * 1e-3;
         Plane? found = null;
@@ -605,7 +611,7 @@ public static class NativeBlend
     }
 
     /// <summary>The part of the tool on the positive side of the plane.</summary>
-    static Solid Trim(Solid tool, Plane pl)
+    internal static Solid Trim(Solid tool, Plane pl)
     {
         var box = tool.Bounds; var pad = box.Diagonal + 1;
         var n = pl.Normal; var origin = pl.Project(box.Center);
