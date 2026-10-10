@@ -525,7 +525,8 @@ public static class RollingBall
 
         // ---- topology
         var VV = new NVertex[nj];
-        for (int k = 0; k < nj; k++) VV[k] = closed && k == n ? VV[0] : new NVertex(ChainVertex(k % n).P);
+        // (an open chain's last vertex is ChainVertex(n), its far end: not k % n, the start)
+        for (int k = 0; k < nj; k++) VV[k] = new NVertex(ChainVertex(k).P);
         var AV = new NVertex[ne]; var BV = new NVertex[ne]; var arc = new NEdge[ne];
         for (int i = 0; i < ne; i++)
         {

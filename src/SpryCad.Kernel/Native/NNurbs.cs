@@ -33,6 +33,8 @@ public sealed class NurbsSurface
     readonly Vec3[,] _cellC = new Vec3[G, G];
     readonly double[,] _cellR = new double[G, G];
     readonly double _scale;
+    // whether the v = V0 / V1 rows are poles (read in every Newton step)
+    readonly bool _poleV0, _poleV1;
 
     public NurbsSurface(int pu, int pv, Vec3[,] poles, double[,]? weights, double[] u, double[] v)
     {
@@ -72,6 +74,7 @@ public sealed class NurbsSurface
             for (int i = 1; i < nu && same; i++) if (Vec3.Distance(poles[i, row], poles[0, row]) > 1e-9 * _scale) same = false;
             if (same) Poles.Add((poles[0, row], vv));
         }
+        _poleV0 = Poles.Any(q => q.v == V0); _poleV1 = Poles.Any(q => q.v == V1);
     }
 
     /// <summary>The surface closes on itself in u (first and last pole columns coincide): u0 and u1 are the same points.</summary>
@@ -79,7 +82,8 @@ public sealed class NurbsSurface
     /// <summary>Closed in v (first and last pole rows coincide).</summary>
     public bool ClosedV { get; private set; }
 
-    bool PoleAt(double v) => Poles.Any(q => q.v == v);
+    // (Poles holds only rows at V0 and V1)
+    bool PoleAt(double v) => (v == V0 && _poleV0) || (v == V1 && _poleV1);
 
     public bool IsPole(Vec3 p) => Poles.Any(q => Vec3.Distance(q.p, p) < 1e-7 * _scale);
 
