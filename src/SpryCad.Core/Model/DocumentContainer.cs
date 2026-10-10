@@ -153,7 +153,8 @@ public static class DocumentContainer
             if (IsZip(bytes))
             {
                 using var zip = new ZipArchive(new MemoryStream(bytes), ZipArchiveMode.Read);
-                var model = zip.GetEntry(ModelEntry);
+                // (an assembly's identity is in its assembly.json)
+                var model = zip.GetEntry(ModelEntry) ?? zip.GetEntry(Assembly.AssemblyContainer.ModelEntry);
                 if (model == null) return (null, null);
                 json = Read(model);
             }

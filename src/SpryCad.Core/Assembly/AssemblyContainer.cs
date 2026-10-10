@@ -21,25 +21,10 @@ public static class AssemblyContainer
 
     public static void Save(AssemblyDocument asm, string path)
     {
-        foreach (var name in asm.Files.Keys) DocumentContainer.CheckName(name);
-        asm.Id ??= CadDocument.NewGuid();
-        asm.Revision = CadDocument.NewGuid();
-        asm.Attachments = asm.Files.Count == 0 ? null
-            : asm.Files.OrderBy(f => f.Key, StringComparer.Ordinal)
-                .Select(f => new AttachmentInfo { Name = f.Key, Size = f.Value.LongLength, Sha256 = DocumentContainer.Hash(f.Value) }).ToList();
-        var json = asm.ToJson();
         var tmp = path + ".saving";
         try
         {
-            using (var fs = File.Create(tmp))
-            using (var zip = new ZipArchive(fs, ZipArchiveMode.Create))
-            {
-                DocumentContainer.WriteMime(zip, DocumentContainer.AssemblyMime);
-                Write(zip, ModelEntry, Encoding.UTF8.GetBytes(json), CompressionLevel.Optimal);
-                foreach (var a in asm.Attachments ?? new())
-                    Write(zip, DocumentContainer.AttachmentFolder + a.Name, asm.Files[a.Name], CompressionLevel.Optimal);
-                if (asm.Thumbnail != null) Write(zip, DocumentContainer.ThumbnailEntry, asm.Thumbnail, CompressionLevel.NoCompression);
-            }
+            using (var fs = File.Create(tmp)) Write(asm, fs);
             File.Move(tmp, path, overwrite: true);
         }
         catch
@@ -49,9 +34,40 @@ public static class AssemblyContainer
         }
     }
 
-    public static AssemblyDocument Load(string path)
+    /// <summary>
+    /// The assembly as the bytes of its file (an assembly embedded in another): its identity given if it has none, a
+    /// new revision.
+    /// </summary>
+    public static byte[] ToBytes(AssemblyDocument asm)
     {
-        var bytes = File.ReadAllBytes(path);
+        using var ms = new MemoryStream();
+        Write(asm, ms);
+        return ms.ToArray();
+    }
+
+    static void Write(AssemblyDocument asm, Stream stream)
+    {
+        foreach (var name in asm.Files.Keys) DocumentContainer.CheckName(name);
+        asm.Id ??= CadDocument.NewGuid();
+        asm.Revision = CadDocument.NewGuid();
+        asm.Attachments = asm.Files.Count == 0 ? null
+            : asm.Files.OrderBy(f => f.Key, StringComparer.Ordinal)
+                .Select(f => new AttachmentInfo { Name = f.Key, Size = f.Value.LongLength, Sha256 = DocumentContainer.Hash(f.Value) }).ToList();
+        var json = asm.ToJson();
+        using var zip = new ZipArchive(stream, ZipArchiveMode.Create, leaveOpen: true);
+        DocumentContainer.WriteMime(zip, DocumentContainer.AssemblyMime);
+        Write(zip, ModelEntry, Encoding.UTF8.GetBytes(json), CompressionLevel.Optimal);
+        foreach (var a in asm.Attachments ?? new())
+            Write(zip, DocumentContainer.AttachmentFolder + a.Name, asm.Files[a.Name], CompressionLevel.Optimal);
+        if (asm.Thumbnail != null) Write(zip, DocumentContainer.ThumbnailEntry, asm.Thumbnail, CompressionLevel.NoCompression);
+    }
+
+    public static AssemblyDocument Load(string path) => Load(File.ReadAllBytes(path), Path.GetFileName(path));
+
+    /// <summary>An assembly from the bytes of its file (<paramref name="name"/>: what to call it in messages).</summary>
+    public static AssemblyDocument Load(byte[] bytes, string name)
+    {
+        var path = name;
         using var zip = new ZipArchive(new MemoryStream(bytes), ZipArchiveMode.Read);
         var model = zip.GetEntry(ModelEntry) ?? throw new InvalidDataException("Not a SpryCAD assembly (no assembly.json in the container).");
         var asm = AssemblyDocument.FromJson(Encoding.UTF8.GetString(Read(model)));

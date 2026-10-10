@@ -24,7 +24,8 @@ public sealed class AssemblySession
     /// <summary>Counts changes to what it looks like (a preview made of an older count is stale).</summary>
     public int Revision { get; private set; }
 
-    readonly Stack<string> _undo = new(), _redo = new();
+    /// <summary>The states to undo / redo to: the document's JSON and its embedded files (replaced, never changed in place: a copy of the map is enough).</summary>
+    readonly Stack<(string json, Dictionary<string, byte[]> files)> _undo = new(), _redo = new();
     public bool CanUndo => _undo.Count > 0;
     public bool CanRedo => _redo.Count > 0;
 
@@ -39,7 +40,7 @@ public sealed class AssemblySession
         var doc = AssemblyDocument.Load(path);
         var model = PartsIndexStore.Use(ix => AssemblyModel.Open(doc, path, ix, defer: true));
         // the mates as the parts are now (a part changed since: its components move to keep them)
-        if (doc.Mates.Count > 0) model.SolveMates();
+        if (model.HasMates) model.SolveMates();
         // references updated (parts found in new places): unsaved until saved
         return new AssemblySession(model, model.Resolution.Changed);
     }
@@ -71,16 +72,45 @@ public sealed class AssemblySession
                     if (Model.Install(job, built, problem)) { any = true; Shown(); }
                 }
             }
-            if (any && Model.Doc.Mates.Count > 0) { Model.SolveMates(); Shown(); }
+            if (any && Model.HasMates) { Model.SolveMates(); Shown(); }
         }
         finally { Building = false; progress?.Invoke(null); }
+    }
+
+    /// <summary>Watches its parts' and sub-assemblies' files (set by the window while the assembly is open in a tab).</summary>
+    public SourceWatcher? Watcher { get; set; }
+
+    /// <summary>
+    /// Parts or sub-assemblies whose files were written: those saved with changes shown as they now are (builds left
+    /// for <see cref="BuildPending"/>), the mates solved again. Not a change to the assembly itself (nothing to save).
+    /// What was shown again (none: nothing changed).
+    /// </summary>
+    public List<string> Reload(IReadOnlyCollection<string> files)
+    {
+        var changed = Model.ReloadChanged(files);
+        if (changed.Count == 0) return changed;
+        if (Model.HasMates) Model.SolveMates();
+        Shown();
+        return changed;
     }
 
     /// <summary>What it looks like changed, not the document (nothing to save): shown again.</summary>
     void Shown() { Revision++; Changed?.Invoke(); }
 
     /// <summary>Before a change: the state to undo to.</summary>
-    public void BeginChange() { _undo.Push(Model.Doc.ToJson()); _redo.Clear(); }
+    public void BeginChange() { _undo.Push(State()); _redo.Clear(); }
+
+    (string, Dictionary<string, byte[]>) State()
+    {
+        // (the active configuration's record up to date, so undoing to it restores it)
+        Model.Doc.RecordActiveConfiguration();
+        return (Model.Doc.ToJson(), new Dictionary<string, byte[]>(Model.Doc.Files, StringComparer.Ordinal));
+    }
+
+    /// <summary>
+    /// Forgets undo and redo (after a change undo here cannot reverse: a sub-assembly's file saved).
+    /// </summary>
+    public void ClearUndo() { _undo.Clear(); _redo.Clear(); }
 
     /// <summary>After a change: unsaved, and shown.</summary>
     public void EndChange() { Dirty = true; Revision++; Changed?.Invoke(); }
@@ -88,23 +118,32 @@ public sealed class AssemblySession
     /// <summary>Drops the state saved by <see cref="BeginChange"/> (the change did not happen).</summary>
     public void AbandonChange() { if (_undo.Count > 0) _undo.Pop(); }
 
-    public void Undo() { if (_undo.Count == 0) return; _redo.Push(Model.Doc.ToJson()); Restore(_undo.Pop()); }
-    public void Redo() { if (_redo.Count == 0) return; _undo.Push(Model.Doc.ToJson()); Restore(_redo.Pop()); }
+    public void Undo() { if (_undo.Count == 0) return; _redo.Push(State()); Restore(_undo.Pop()); }
+    public void Redo() { if (_redo.Count == 0) return; _undo.Push(State()); Restore(_redo.Pop()); }
 
-    void Restore(string json)
+    void Restore((string json, Dictionary<string, byte[]> files) s)
     {
-        var d = AssemblyDocument.FromJson(json);
+        var d = AssemblyDocument.FromJson(s.json);
         Model.Doc.Components = d.Components;
         Model.Doc.NextComponentId = d.NextComponentId;
         Model.Doc.Mates = d.Mates;
         Model.Doc.NextMateId = d.NextMateId;
         Model.Doc.MateCounters = d.MateCounters;
-        // parts no component uses any more are not shown; parts used again are built again
+        Model.Doc.Configurations = d.Configurations;
+        Model.Doc.ActiveConfiguration = d.ActiveConfiguration;
+        Model.Doc.Explodes = d.Explodes;
+        Model.Doc.Patterns = d.Patterns;
+        Model.Doc.NextPatternId = d.NextPatternId;
+        Model.Doc.Caches = d.Caches;
+        // embedded files as they were (an embedded part edited: its displays made again)
+        var changed = s.files.Where(kv => !Model.Doc.Files.TryGetValue(kv.Key, out var now) || !ReferenceEquals(now, kv.Value)).Select(kv => kv.Key).ToList();
+        Model.Doc.Files = new Dictionary<string, byte[]>(s.files, StringComparer.Ordinal);
+        foreach (var name in changed)
+            if (Model.Doc.Components.Any(c => c.Part.Embedded == name)) Model.UpdateEmbedded(name, s.files[name]);
+        // parts and sub-assemblies no component uses any more are not shown; those used again are loaded again
         // (and configurations: each configuration of a part has a display of its own)
-        foreach (var key in Model.Parts.Keys.Where(k => !Model.ComponentsShowing(k).Any()).ToList()) Model.Parts.Remove(key);
-        foreach (var key in Model.Doc.Components.Where(c => !Model.Parts.ContainsKey(AssemblyModel.DisplayKey(c))).Select(c => ComponentResolver.Key(c.Part)).Distinct().ToList())
-            Model.LoadPart(key);
-        if (Selected != null && Model.Doc.Find(Selected) == null) Selected = null;
+        Model.Sync();
+        if (Selected != null && Model.Find(Selected) == null) Selected = null;
         EndChange();
     }
 

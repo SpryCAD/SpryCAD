@@ -23,6 +23,8 @@ public static class MateSolver
         public Dictionary<string, double> Errors { get; } = new();
         /// <summary>Components moved.</summary>
         public HashSet<string> Moved { get; } = new();
+        /// <summary>The components solved for (floating ones that take part in a mate), moved or not.</summary>
+        public HashSet<string> Solved { get; } = new();
         public bool Satisfied { get; set; }
         public int Iterations { get; set; }
         public IEnumerable<string> Failed(double tol = 1e-6) => Errors.Where(e => e.Value > tol).Select(e => e.Key);
@@ -35,25 +37,34 @@ public static class MateSolver
     public sealed record Pull(string Component, Vec3 Local, Vec3 Origin, Vec3 Dir);
 
     /// <summary>
+    /// A component carried by another (<c>Body</c>): placed at the body's placement times <c>Offset</c>, never solved
+    /// for itself (the components of a rigid sub-assembly, the fixed ones of a flexible one). Mates on it move its body.
+    /// </summary>
+    public readonly record struct Attachment(string Body, Transform Offset);
+
+    /// <summary>
     /// A drag: the mates solved with the grabbed point pulled toward the cursor's ray (gently, so the mates win:
     /// a component turns or slides only as they let it, and what it is mated to follows), then solved exactly. A gear
     /// on its axis turns so the point grabbed follows the cursor round, its mate turning the other.
     /// </summary>
-    public static Result SolveDrag(AssemblyDocument doc, Func<MateRef, MateGeom> local, Pull pull)
+    public static Result SolveDrag(AssemblyDocument doc, Func<MateRef, MateGeom> local, Pull pull, IReadOnlyDictionary<string, Attachment>? attached = null)
     {
-        Solve(doc, local, null, 80, pull);
-        return Solve(doc, local);
+        Solve(doc, local, null, 80, pull, attached);
+        return Solve(doc, local, null, 80, null, attached);
     }
 
     /// <summary>
     /// Solves the assembly's unsuppressed mates, moving its floating components (only <paramref name="onlyMove"/>
     /// when given: a new mate moves its first component). <paramref name="local"/>: a reference's geometry in its
-    /// part's coordinates.
+    /// part's coordinates. <paramref name="attached"/>: components carried by others (<see cref="Attachment"/>), their
+    /// placements set from their bodies' after the solve.
     /// </summary>
-    public static Result Solve(AssemblyDocument doc, Func<MateRef, MateGeom> local, ISet<string>? onlyMove = null, int maxIter = 80)
-        => Solve(doc, local, onlyMove, maxIter, null);
+    public static Result Solve(AssemblyDocument doc, Func<MateRef, MateGeom> local, ISet<string>? onlyMove = null, int maxIter = 80,
+        IReadOnlyDictionary<string, Attachment>? attached = null)
+        => Solve(doc, local, onlyMove, maxIter, null, attached);
 
-    static Result Solve(AssemblyDocument doc, Func<MateRef, MateGeom> local, ISet<string>? onlyMove, int maxIter, Pull? pull)
+    static Result Solve(AssemblyDocument doc, Func<MateRef, MateGeom> local, ISet<string>? onlyMove, int maxIter, Pull? pull,
+        IReadOnlyDictionary<string, Attachment>? attached)
     {
         var res = new Result();
         var byId = new Dictionary<string, Component>();
@@ -69,20 +80,26 @@ public static class MateSolver
         var mates = doc.Mates.Where(m => !m.Suppressed && Live(m.A) && Live(m.B) && Mate.Supports(m.Type, L(m.A), L(m.B))).ToList();
         var free = new List<Component>();
         var freeIdx = new Dictionary<string, int>();
+        // a reference on a carried component moves its body
+        string? BodyOf(string? id) => id != null && attached != null && attached.TryGetValue(id, out var at) ? at.Body : id;
         foreach (var m in mates)
             foreach (var r in new[] { m.A, m.B })
-                if (r.Component != null && byId[r.Component] is { Fixed: false } c && (onlyMove == null || onlyMove.Contains(c.Id)) && !freeIdx.ContainsKey(c.Id))
+                if (BodyOf(r.Component) is { } b && byId[b] is { Fixed: false } c && (onlyMove == null || onlyMove.Contains(c.Id)) && !freeIdx.ContainsKey(c.Id))
                 {
                     freeIdx[c.Id] = free.Count;
                     free.Add(c);
                 }
         // a pull on a component no mate moves: nothing to solve (the drag moved it)
         if (pull != null && !freeIdx.ContainsKey(pull.Component)) pull = null;
+        foreach (var c in free) res.Solved.Add(c.Id);
         var placements = doc.Components.ToDictionary(c => c.Id, c => c.Placement.ToTransform());
+        Transform BodyPlacement(string id, Transform[]? trial) => trial != null && freeIdx.TryGetValue(id, out var i) ? trial[i] : placements[id];
         Transform PlacementOf(string? id, Transform[]? trial) =>
-            id == null ? Transform.Identity : trial != null && freeIdx.TryGetValue(id, out var i) ? trial[i] : placements[id];
+            id == null ? Transform.Identity
+            : attached != null && attached.TryGetValue(id, out var at) ? BodyPlacement(at.Body, trial) * at.Offset
+            : BodyPlacement(id, trial);
         MateGeom World(MateRef r, Transform[]? trial) => L(r).Placed(PlacementOf(r.Component, trial));
-        int FreeOf(MateRef r) => r.Component != null && freeIdx.TryGetValue(r.Component, out var i) ? i : -1;
+        int FreeOf(MateRef r) => BodyOf(r.Component) is { } b && freeIdx.TryGetValue(b, out var i) ? i : -1;
 
         // each free component turns about the middle of its references (well conditioned), in world coordinates
         var refPoints = new Vec3[free.Count]; var refCount = new int[free.Count];
@@ -260,6 +277,14 @@ public static class MateSolver
             var before = c.Placement.ToTransform(); var after = placements[c.Id];
             if (Differs(before, after)) { c.Placement = Placement.From(after); res.Moved.Add(c.Id); }
         }
+        // carried components go with their bodies
+        if (attached != null)
+            foreach (var (id, at) in attached)
+                if (res.Moved.Contains(at.Body) && byId.TryGetValue(id, out var c))
+                {
+                    c.Placement = Placement.From(placements[at.Body] * at.Offset);
+                    res.Moved.Add(id);
+                }
         foreach (var m in doc.Mates)
         {
             if (m.Suppressed) continue;

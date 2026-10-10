@@ -881,7 +881,7 @@ public partial class MainWindow
         {
             Viewport.ClearPivot();
             Session.Load(path);
-            if (!IsAutosave(path)) RecentFiles.Add(path);
+            if (!IsAutosave(path) && !IsEmbeddedCopy(path)) RecentFiles.Add(path);
             Status("Opened " + path);
             _tab.FitAfterLoad = Session.RequestedRevision;
             return true;
@@ -911,6 +911,12 @@ public partial class MainWindow
     {
         if (!await ResolvePendingEdit()) return false;
         if (Asm != null) return await SaveAssembly(false);
+        // an embedded part being edited: saved back into its assembly
+        if (_tab.EmbeddedIn != null)
+        {
+            try { if (SaveEmbedded(_tab)) return true; }
+            catch (Exception ex) { App.Log(ex, "Save embedded"); await Dialogs.Message(this, "Save failed", ex.Message); return false; }
+        }
         if (Session.FilePath == null) return await SaveAs();
         try { Session.Save(Session.FilePath); RecentFiles.Add(Session.FilePath); Status("Saved " + Session.FilePath); return true; }
         catch (Exception ex) { App.Log(ex, "Save failed"); await Dialogs.Message(this, "Save failed", ex.Message); return false; }
@@ -929,7 +935,13 @@ public partial class MainWindow
         });
         var path = f?.TryGetLocalPath();
         if (path == null) return false;
-        try { Session.Save(path); RecentFiles.Add(path); Status("Saved " + path); return true; }
+        try
+        {
+            Session.Save(path); RecentFiles.Add(path); Status("Saved " + path);
+            // (an embedded part saved as a file of its own: no longer tied to the assembly)
+            _tab.EmbeddedIn = null; _tab.EmbeddedName = null; UpdateTabHeader(_tab);
+            return true;
+        }
         catch (Exception ex) { App.Log(ex, "Save failed"); await Dialogs.Message(this, "Save failed", ex.Message); return false; }
     }
 
