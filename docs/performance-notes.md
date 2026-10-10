@@ -23,7 +23,8 @@ or checked against the old ones (see *Checking a change* below).
 | `ff6ab13` | `BSplineCurve.Interpolate` stores only the band of its system (4p + 1 entries a row, every entry the elimination reads or writes) instead of a dense (n+1)² matrix and its clone; the dense matrix is rebuilt only for the general fallback (results bit for bit; 3,000 points: 144 MB to 0.3 MB) |
 | `3f2183d` | Screw-surface ray casts: the crossings of a screw surface found once per ray when several faces share it (a thread's seam-split faces); steps of the march outside the generator's radial band about the axis (padded by its sample spacing and the hit tolerance) not sampled; the closest-point seeds' frame coordinates taken once (results bit for bit; `cls.rays` about 1.5–2× faster on the threaded parts) |
 | `1a00a45` | Mass properties with exact surface derivatives: `NSurface.TryPartials` for B-splines, screw surfaces and offsets of B-splines (the normal's derivative from the base's second derivatives), `PipeSpine.SurfacePartials` along a pipe's spine (the frame's derivative from the spine's second derivative and the interpolated normal), instead of central differences (results within 3e-10 relative; spoked handwheel's exact integration ~450 to ~300 ms) |
-| (next) | Mass properties: a contact curve's panels end at the spine's nodes (the curve is only C1 there) with 4 Gauss points each, instead of uniform panels across them with 8 (spoked handwheel 2.5e-9 nearer the converged volume, exact integration ~270 to ~155 ms). `Topology.Build` welding once for the quick and the full pass was tried: the quick pass already succeeds on every sample, nothing to gain |
+| `a95241f` | Mass properties: a contact curve's panels end at the spine's nodes (the curve is only C1 there) with 4 Gauss points each, instead of uniform panels across them with 8 (spoked handwheel 2.5e-9 nearer the converged volume, exact integration ~270 to ~155 ms). `Topology.Build` welding once for the quick and the full pass was tried: the quick pass already succeeds on every sample, nothing to gain |
+| (next) | `DisplayMesh` shares vertices within a UI face (a corner reuses an earlier one at the same point with the same normal): the triangles as drawn are the same (`FC_DET_MESH_TRIS`), 3.5–5.5× fewer vertices (spoked handwheel 253k to 46k, 6.1 to 1.1 MB of positions and normals); `bench` prints the display mesh's triangles and vertices |
 
 ## Where the time goes now
 
@@ -67,9 +68,11 @@ profile; the profile's times are summed over threads). On the heavy samples (`sa
    matters. Other curves (helices, fitted splines) still converge slowly: 4× more panels moves the acme screw's Ixx by
    1e-6. The curves' `Deriv` is a central difference (two projections each for a contact curve).
 10. **Display pipeline**:
-    - `NTess` emits one `Face` object per triangle, then `Topology.Build` re-welds every corner through a dictionary.
-      Indexed per-face output would skip the weld.
-    - `DisplayMesh` emits unshared vertices (3× the GPU memory within a face).
+    - `DisplayMesh` vertices shared: done (see above).
+    - `NTess` emits one `Face` object per triangle, then `Topology.Build` re-welds every corner through a dictionary
+      (`topo.weld` ~40–55 ms on the spoked handwheel). Indexed per-face output would skip the weld; `Solid.Faces`
+      (facets with their own loops) is read widely, so it is a larger change.
+    - `Topology.Build` welding once for its quick and full passes was tried: the quick pass succeeds on every sample.
 11. **Small items**:
     - `NFace.ComputeBounds` builds a throwaway domain. Sharing the cached one changed results; see *Tried and rejected*.
     - `ClassifyAll` runs `CoincidentWith` before the cheap box test.
@@ -125,7 +128,9 @@ All of these run from `tests/SpryCad.Tests`, built with `dotnet build -c Release
 - **Results bit for bit**: `dotnet run -c Release --no-build -- determinism <file.sprt> 1` prints a hash per feature.
   Run it before and after (another process, or a `git worktree` of the old commit) over `samples/*.sprt` and
   `samples/demos/*.sprt`, and diff the output.
-- **Display bit for bit**: run the same with `FC_DET_MESH=1`, which adds a hash of the final facets and display mesh.
+- **Display bit for bit**: run the same with `FC_DET_MESH=1`, which adds a hash of the final facets and display mesh. With
+  `FC_DET_MESH_TRIS=1` as well, the display mesh is hashed as drawn (each index's position and normal), so a change of
+  vertex layout alone does not show.
 - **Geometry only**: `FC_DET_GEOMETRY=1` leaves the edge sample cache out of the hashes (which edges are sampled, at
   which tolerance); `FC_DET_PRINT=1` prints each feature's fingerprint after its hash, to see which part changed.
 - **Within tolerance**, when results are allowed to change:

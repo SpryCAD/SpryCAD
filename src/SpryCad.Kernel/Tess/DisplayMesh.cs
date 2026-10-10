@@ -240,13 +240,33 @@ public sealed class DisplayMesh
                 cornerN[3 * k + 2] = f.Tag.Surface.NormalAt(pts[c], fn);
             }
         });
+        // a corner reuses the vertex of an earlier corner of the same UI face at the same point with the same normal
+        // (a smooth face: every corner at the point; a crease within a face keeps its sides apart): one slot per point
+        // for the face being emitted, and a map for points with more than one normal there
         var pos = new float[9 * nt]; var nrm = new float[9 * nt]; var idxOut = new int[3 * nt];
-        int nv = 0;
+        int nv = 0, ni = 0, faceId = 0;
+        var slotFace = new int[pts.Count]; var slotVert = new int[pts.Count];
+        var more = new Dictionary<(int p, float x, float y, float z), int>();
         string? curName = null; int curStart = 0; SurfaceDef? curSurf = null; Plane? curPlane = null; var curBox = Box3.Empty;
         void Flush()
         {
-            if (curName != null && nv > curStart)
-                m.Faces.Add(new FaceRange(curName, curStart, nv - curStart, curSurf!, curPlane!, curBox));
+            if (curName != null && ni > curStart)
+                m.Faces.Add(new FaceRange(curName, curStart, ni - curStart, curSurf!, curPlane!, curBox));
+        }
+        int Vertex(int pi, Vec3 p, Vec3 n)
+        {
+            float x = (float)n.X, y = (float)n.Y, z = (float)n.Z;
+            if (slotFace[pi] == faceId)
+            {
+                int v = slotVert[pi];
+                if (nrm[3 * v] == x && nrm[3 * v + 1] == y && nrm[3 * v + 2] == z) return v;
+                if (more.TryGetValue((pi, x, y, z), out var w)) return w;
+                more[(pi, x, y, z)] = nv;
+            }
+            else { slotFace[pi] = faceId; slotVert[pi] = nv; }
+            pos[3 * nv] = (float)p.X; pos[3 * nv + 1] = (float)p.Y; pos[3 * nv + 2] = (float)p.Z;
+            nrm[3 * nv] = x; nrm[3 * nv + 1] = y; nrm[3 * nv + 2] = z;
+            return nv++;
         }
         double vol = 0;
         foreach (var fi in order)
@@ -255,7 +275,8 @@ public sealed class DisplayMesh
             if (f.Tag.Name != curName)
             {
                 Flush();
-                curName = f.Tag.Name; curStart = nv; curSurf = f.Tag.Surface; curPlane = f.Plane; curBox = Box3.Empty;
+                curName = f.Tag.Name; curStart = ni; curSurf = f.Tag.Surface; curPlane = f.Plane; curBox = Box3.Empty;
+                faceId++; more.Clear();
             }
             var fn = f.Plane.Normal;
             var curved = f.Tag.Surface.IsCurved;
@@ -268,10 +289,7 @@ public sealed class DisplayMesh
                 {
                     var p = q == 0 ? pa : q == 1 ? pb : pc;
                     var n = curved ? cornerN[3 * k + q] : fn;
-                    idxOut[nv] = nv;
-                    pos[3 * nv] = (float)p.X; pos[3 * nv + 1] = (float)p.Y; pos[3 * nv + 2] = (float)p.Z;
-                    nrm[3 * nv] = (float)n.X; nrm[3 * nv + 1] = (float)n.Y; nrm[3 * nv + 2] = (float)n.Z;
-                    nv++;
+                    idxOut[ni++] = Vertex(q == 0 ? a : q == 1 ? b : c, p, n);
                     curBox.Add(p);
                     m.Bounds.Add(p);
                 }
@@ -279,6 +297,7 @@ public sealed class DisplayMesh
         }
         Flush();
         m.Volume = vol / 6;
+        Array.Resize(ref pos, 3 * nv); Array.Resize(ref nrm, 3 * nv);
         m.Positions = pos; m.Normals = nrm; m.Indices = idxOut;
 
         // ---- edge lines, refined with the same midpoints as the surfaces
