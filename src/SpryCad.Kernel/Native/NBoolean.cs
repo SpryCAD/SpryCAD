@@ -239,7 +239,7 @@ public sealed class NBoolean
     NBody Execute(NBody A, NBody B, BoolOp op)
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();
-        void Lap(string what) { if (Prof.Enabled) Prof.Add("bool." + what, sw.Elapsed.TotalMilliseconds); T($"[{sw.ElapsedMilliseconds} ms] {what}"); sw.Restart(); }
+        void Lap(string what) { if (Prof.Enabled) Prof.Add("bool." + what, sw.Elapsed.TotalMilliseconds); T($"[{sw.ElapsedMilliseconds} ms] {what}"); sw.Restart(); Cancellation.Check(); }
         FindFar(A, B);
         MergeVertices(A, B);
         A.Link(); B.Link();
@@ -307,11 +307,17 @@ public sealed class NBoolean
                 // a screw surface's signed distance jumps between its turns: trace on the screw face instead, with the
                 // other surface's (smooth) distance
                 if (fb.Surface.Kind == SurfaceKind.Screw && fa.Surface.Kind != SurfaceKind.Screw) (fa, fb) = (fb, fa);
+                // a B-spline's distance is a closest-point search: trace on the B-spline face, with the analytic
+                // surface's distance (exact and cheap)
+                bool onSpline = false;
+                if (fb.Surface.Kind == SurfaceKind.BSpline && fa.Surface.Kind is not (SurfaceKind.BSpline or SurfaceKind.Offset or SurfaceKind.Screw)) { (fa, fb) = (fb, fa); onSpline = true; }
                 var swt = System.Diagnostics.Stopwatch.StartNew();
                 List<NCurve> c; using (Prof.Time(Prof.Enabled ? $"tr.{fa.Surface.Kind}x{fb.Surface.Kind}" : "")) c = NIntersect.Trace(fa, fb.Surface, traceTol, traceDoms[fa]).Cast<NCurve>().ToList();
                 if (Prof.Enabled && c.Count == 0) Prof.Add($"tr.empty.{fa.Surface.Kind}x{fb.Surface.Kind}", 0);
                 // traced from the other side too (small faces)
-                if (c.Count == 0 && fa.Surface.Kind != SurfaceKind.Screw) c = NIntersect.Trace(fb, fa.Surface, traceTol, traceDoms[fb]).Cast<NCurve>().ToList();
+                // (from the analytic face only when it is the smaller: its grid then sees what the B-spline's missed; the
+                // B-spline's distance there is slow, and past the patch's edge its sign flips without a crossing)
+                if (c.Count == 0 && fa.Surface.Kind != SurfaceKind.Screw && (!onSpline || fb.Bounds().Diagonal < fa.Bounds().Diagonal)) c = NIntersect.Trace(fb, fa.Surface, traceTol, traceDoms[fb]).Cast<NCurve>().ToList();
                 pairCurves[i] = c;
                 if (Trace != null && Environment.GetEnvironmentVariable("FC_TRACE_SLOW") != null)
                     T($"  trace {fa.Tag.Name}({fa.Surface.Kind}) x {fb.Tag.Name}({fb.Surface.Kind}): {c.Count} curves, {string.Join(" ", c.Select(x => x is NPolyline pl ? pl.Pts.Length + "pts" : x.GetType().Name))} in {swt.ElapsedMilliseconds} ms");

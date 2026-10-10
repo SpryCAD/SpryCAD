@@ -243,13 +243,21 @@ public sealed record BSplineCurve(int Degree, Vec3[] Poles, double[] Knots) : Ex
     {
         int n = pts.Count - 1;
         if (n < 1) throw new ArgumentException("need at least two points");
-        int p = Math.Min(degree, n);
         var uk = new double[n + 1];
         double total = 0;
         for (int k = 1; k <= n; k++) total += Vec3.Distance(pts[k], pts[k - 1]);
         if (total < 1e-15) total = 1;
         for (int k = 1; k <= n; k++) uk[k] = uk[k - 1] + Vec3.Distance(pts[k], pts[k - 1]) / total;
         uk[n] = 1;
+        return Interpolate(pts, uk, degree);
+    }
+
+    /// <summary>Global interpolation through points at the given parameters (0 .. 1, increasing).</summary>
+    public static BSplineCurve Interpolate(IReadOnlyList<Vec3> pts, IReadOnlyList<double> uk, int degree = 3)
+    {
+        int n = pts.Count - 1;
+        if (n < 1 || uk.Count != pts.Count) throw new ArgumentException("need at least two points, one parameter each");
+        int p = Math.Min(degree, n);
         var U = new double[n + p + 2];
         for (int i = n + 1; i < U.Length; i++) U[i] = 1;
         for (int j = 1; j <= n - p; j++)

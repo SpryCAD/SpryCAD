@@ -28,6 +28,89 @@ static class CoreTests
 
     public static void Run(TestRunner t)
     {
+        t.Test("Rebuild cancelled during a feature (a pattern of fillets) stops with a cancellation and leaves nothing behind in the cache", () =>
+        {
+            var root = AppContext.BaseDirectory;
+            while (!Directory.Exists(Path.Combine(root, "samples"))) root = Path.GetDirectoryName(root)!;
+            var file = Path.Combine(root, "samples", "spoked-handwheel.sprt");
+            // the control: a second rebuild on a regenerator that was never cancelled (the sample caches of states taken
+            // from its cache differ from a fresh rebuild's, so compare like with like)
+            var control = new Regenerator();
+            var docC = CadDocument.Load(file);
+            control.Rebuild(docC);
+            var reference = Bench.Fingerprints(control.Rebuild(docC), geometryOnly: true);
+            var regen = new Regenerator();
+            var doc = CadDocument.Load(file);
+            // cancelled once the rebuild is under way (inside the grips' or spokes' booleans and fillets)
+            using var cts = new CancellationTokenSource();
+            bool cancelled = false;
+            var sw = Stopwatch.StartNew();
+            try
+            {
+                regen.Rebuild(doc, null, cts.Token, p => { if (p.Index >= 4) cts.Cancel(); });
+            }
+            catch (OperationCanceledException) { cancelled = true; }
+            t.True(cancelled, "the rebuild stops with a cancellation, not an error");
+            // the same regenerator (its cache) builds the part as a fresh one does
+            var again = regen.Rebuild(doc);
+            t.True(again.Status.Values.All(s => s.Error == null), "no feature failed: " + string.Join("; ", again.Status.Values.Where(s => s.Error != null).Select(s => s.Error)));
+            t.True(Bench.Fingerprints(again, geometryOnly: true).SequenceEqual(reference), "the part after a cancelled rebuild is the part");
+        });
+
+        t.Test("Equations: waiting for the ones they use gives the values and errors of evaluating in passes, without the exceptions", () =>
+        {
+            // the plain passes, as they were: every pending equation tried each pass until a pass changes nothing
+            static (Dictionary<string, double>, Dictionary<string, string>) Passes(List<Equation> eqs)
+            {
+                var values = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+                var errors = new Dictionary<string, string>();
+                var pending = new List<Equation>(); var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase); var twice = new Dictionary<string, string>();
+                foreach (var e in eqs) if (names.Add(e.Name.Trim())) pending.Add(e); else twice[e.Name] = $"{e.Name.Trim()} is set twice (by a design table or another equation)";
+                while (pending.Count > 0)
+                {
+                    var next = new List<Equation>();
+                    foreach (var e in pending)
+                    {
+                        if (Expr.TryEval(e.Expr, n => values.TryGetValue(n, out var v) ? v : null, out var val, out var err)) values[e.Name.Trim()] = val;
+                        else { next.Add(e); errors[e.Name] = err ?? "error"; }
+                    }
+                    foreach (var e in pending.Except(next)) errors.Remove(e.Name);
+                    if (next.Count == pending.Count) break;
+                    pending = next;
+                }
+                foreach (var (n, msg) in twice) errors[n] = msg;
+                return (values, errors);
+            }
+            // equations listed after the ones they use, a chain of them: all evaluate
+            {
+                var doc = new CadDocument();
+                for (int i = 0; i < 6; i++) doc.Equations.Add(new Equation { Name = $"c{i}", Expr = i == 5 ? "7" : $"c{i + 1} + 1" });
+                var (v, e) = Regenerator.EvaluateEquations(doc);
+                t.True(e.Count == 0 && v["c0"] == 12, $"reverse chain: c0 = {v.GetValueOrDefault("c0")}, errors {string.Join("; ", e)}");
+            }
+            var rnd = new Random(4);
+            var templates = new[] { "{0} + 1", "{0} * {1}", "max({0}, {1}) / 2", "sqrt({0} * {0} + 4)", "{0} - unknown1", "7", "{1} + 0.5", "-{0}" };
+            for (int trial = 0; trial < 300; trial++)
+            {
+                int n = rnd.Next(1, 25);
+                var eqs = new List<Equation>();
+                for (int i = 0; i < n; i++)
+                {
+                    string Ref() => rnd.Next(10) == 0 ? "ghost" : $"v{rnd.Next(n)}";
+                    var expr = string.Format(templates[rnd.Next(templates.Length)], Ref(), Ref());
+                    if (rnd.Next(15) == 0) expr = "";
+                    if (rnd.Next(20) == 0) expr = "3 +";
+                    eqs.Add(new Equation { Name = rnd.Next(30) == 0 && i > 0 ? $"V{rnd.Next(i)}" : $"v{i}", Expr = expr });
+                }
+                var doc = new CadDocument();
+                doc.Equations.AddRange(eqs);
+                var (va, ea) = Regenerator.EvaluateEquations(doc);
+                var (vb, eb) = Passes(eqs);
+                t.True(va.Count == vb.Count && va.All(kv => vb.TryGetValue(kv.Key, out var w) && BitConverter.DoubleToInt64Bits(w) == BitConverter.DoubleToInt64Bits(kv.Value)), $"trial {trial}: values");
+                t.True(ea.Count == eb.Count && ea.All(kv => eb.TryGetValue(kv.Key, out var w) && w == kv.Value), $"trial {trial}: errors {string.Join("; ", ea)} vs {string.Join("; ", eb)}");
+            }
+        });
+
         t.Test("Expressions", () =>
         {
             t.Near(Expr.Eval("2 + 3 * 4"), 14, 1e-12);

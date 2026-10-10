@@ -330,13 +330,15 @@ public sealed class DocumentSession
                 var rp = new RebuildProgress(preview, p.Index, p.Count, p.FeatureName, p.Detail, started.Elapsed.TotalSeconds, Remaining(p.Index) / 1000);
                 Dispatcher.UIThread.Post(() => Progress?.Invoke(rp));
             }
+            // a newer request of the same kind waiting: this result would not be shown
+            bool Stale() { lock (_lock) return (preview ? _pendingPreview : _pendingReal) != null; }
             try
             {
                 r = _regen.Rebuild(doc, null, cts.Token, Report);
                 foreach (var (id, st) in r.Status) if (st.Milliseconds > 0) _featureMs[id] = st.Milliseconds;
-                // build display meshes off the UI thread
-                foreach (var b in r.State.Bodies) _ = b.Mesh;
-                foreach (var s in r.States) foreach (var b in s.Bodies) if (!b.HasMesh && s == r.States[^1]) _ = b.Mesh;
+                // build display meshes off the UI thread (not for a result already superseded)
+                foreach (var b in r.State.Bodies) { if (Stale()) break; _ = b.Mesh; }
+                foreach (var s in r.States) foreach (var b in s.Bodies) if (!b.HasMesh && s == r.States[^1] && !Stale()) _ = b.Mesh;
             }
             catch (OperationCanceledException) { continue; } // superseded by a newer request
             catch (Exception ex)
@@ -346,9 +348,7 @@ public sealed class DocumentSession
                 continue;
             }
             finally { lock (_lock) _runningCts = null; }
-            bool stale;
-            lock (_lock) stale = (preview ? _pendingPreview : _pendingReal) != null;
-            if (stale) continue; // a newer request is waiting; skip publishing this one
+            if (Stale()) continue; // a newer request is waiting; skip publishing this one
             Dispatcher.UIThread.Post(() =>
             {
                 if (preview) { if (PreviewActive) PreviewResult = r; }

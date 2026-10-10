@@ -49,7 +49,7 @@ public static class Csg
                 Cache.Add(key, solid);
                 return solid;
             }
-            catch (Exception ex) { LastFallbackReason = ex.Message; Native.NBoolean.Trace?.Invoke("[fallback] " + ex.Message); }
+            catch (Exception ex) when (ex is not OperationCanceledException) { LastFallbackReason = ex.Message; Native.NBoolean.Trace?.Invoke("[fallback] " + ex.Message); }
             Interlocked.Increment(ref NativeFallback);
             if (NoFallback) throw new InvalidOperationException(LastFallbackReason ?? "boolean failed");
             // the facet engine is only a safety net here: bounded in time, so a hard case fails the feature

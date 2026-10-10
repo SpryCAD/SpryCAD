@@ -1118,6 +1118,10 @@ public static class NIntersect
             }
         pm.Dispose();
         using var pp = Prof.Time("trace.project");
+        // a B-spline (or its offset) traced against an analytic surface: points kept on it by Newton steps in its own
+        // parameters, with the other surface's exact distance
+        bool onParams = sa.Kind is SurfaceKind.BSpline or SurfaceKind.Offset && sb.Kind is not (SurfaceKind.BSpline or SurfaceKind.Offset or SurfaceKind.Pipe or SurfaceKind.Screw)
+                        && sa.TryPartials(dom.UMin, dom.VMin * dom.VSign, out _, out _, out _);
         // chain segments: ends (degree 1) first, then the rest, each in first-use order
         var used = new bool[segA.Count];
         var result = new List<NPolyline>();
@@ -1148,10 +1152,24 @@ public static class NIntersect
                     cur = Other(next, cur);
                 }
                 bool closed = chain.Count > 3 && chain[0] == chain[^1];
-                var pts = new List<Vec3>(chain.Count);
-                foreach (var k in chain) pts.Add(NSurface.ProjectToIntersection(sa, sb, dom.Eval(cpt[k])));
-                if (closed) pts.RemoveAt(pts.Count - 1);
-                pts = Densify(pts, closed, sa, sb, tol);
+                List<Vec3> pts;
+                if (onParams)
+                {
+                    // on a free-form face: projected in its parameters (its closest-point search is slow), then
+                    // densified between parameters
+                    var uvs = new List<Vec2>(chain.Count);
+                    pts = new List<Vec3>(chain.Count);
+                    foreach (var k in chain) { var (q, uv) = ProjectOnParams(sa, sb, new Vec2(cpt[k].X, cpt[k].Y * dom.VSign)); pts.Add(q); uvs.Add(uv); }
+                    if (closed) { pts.RemoveAt(pts.Count - 1); uvs.RemoveAt(uvs.Count - 1); }
+                    pts = DensifyOnParams(pts, uvs, closed, sa, sb, tol);
+                }
+                else
+                {
+                    pts = new List<Vec3>(chain.Count);
+                    foreach (var k in chain) pts.Add(NSurface.ProjectToIntersection(sa, sb, dom.Eval(cpt[k])));
+                    if (closed) pts.RemoveAt(pts.Count - 1);
+                    pts = Densify(pts, closed, sa, sb, tol);
+                }
                 if (pts.Count >= 2) result.Add(new NPolyline(pts, closed));
             }
         }
@@ -1159,6 +1177,58 @@ public static class NIntersect
     }
 
     /// <summary>Inserts exact midpoints until the chord error is below tol.</summary>
+    /// <summary>
+    /// The point of a ∩ b near a's point at face parameters uv, found on a (Newton steps in its parameters, each the
+    /// smallest move across b's level sets): exactly on a, on b within rounding. Falls back to
+    /// <see cref="NSurface.ProjectToIntersection"/> where the steps do not converge.
+    /// </summary>
+    static (Vec3 p, Vec2 uv) ProjectOnParams(NSurface a, NSurface b, Vec2 uv)
+    {
+        var start = uv;
+        for (int it = 0; it < 30; it++)
+        {
+            if (!a.TryPartials(uv.X, uv.Y, out var S, out var Su, out var Sv)) break;
+            var f = b.FGrad(S, out var g);
+            if (Math.Abs(f) < 1e-12 * Math.Max(1, S.Length)) return (S, uv);
+            double ju = Vec3.Dot(g, Su), jv = Vec3.Dot(g, Sv);
+            double guu = Vec3.Dot(Su, Su), guv = Vec3.Dot(Su, Sv), gvv = Vec3.Dot(Sv, Sv);
+            var det = guu * gvv - guv * guv;
+            if (!(det > 1e-300)) break;
+            // G⁻¹ J: the direction in parameters of steepest change of f per unit of distance on a
+            double du = (gvv * ju - guv * jv) / det, dv = (guu * jv - guv * ju) / det;
+            var den = ju * du + jv * dv;
+            if (!(Math.Abs(den) > 1e-300)) break;
+            uv = new Vec2(uv.X - f * du / den, uv.Y - f * dv / den);
+        }
+        var p = NSurface.ProjectToIntersection(a, b, a.Eval(start.X, start.Y));
+        return (p, start);
+    }
+
+    static List<Vec3> DensifyOnParams(List<Vec3> pts, List<Vec2> uvs, bool closed, NSurface a, NSurface b, double tol)
+    {
+        var res = new List<Vec3>();
+        int n = pts.Count;
+        int segs = closed ? n : n - 1;
+        for (int i = 0; i < segs; i++)
+        {
+            res.Add(pts[i]);
+            Sub(pts[i], uvs[i], pts[(i + 1) % n], uvs[(i + 1) % n], 0);
+        }
+        if (!closed) res.Add(pts[^1]);
+        return res;
+
+        void Sub(Vec3 p, Vec2 pu, Vec3 q, Vec2 qu, int depth)
+        {
+            if (depth > 6) return;
+            var (m, mu) = ProjectOnParams(a, b, Vec2.Lerp(pu, qu, 0.5));
+            if (Vec3.Distance(m, (p + q) * 0.5) < tol * 0.25 && depth > 0) return;
+            if (Vec3.Distance(p, q) < tol) return;
+            Sub(p, pu, m, mu, depth + 1);
+            res.Add(m);
+            Sub(m, mu, q, qu, depth + 1);
+        }
+    }
+
     static List<Vec3> Densify(List<Vec3> pts, bool closed, NSurface a, NSurface b, double tol)
     {
         var res = new List<Vec3>();

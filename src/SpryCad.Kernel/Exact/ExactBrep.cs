@@ -57,7 +57,7 @@ public sealed class ExactBrep
                 var nb = ExactBrepFactory.FromNative(solid.Native);
                 if (nb.Warnings.Count == 0) return nb;
             }
-            catch (Exception) { /* fall back to reconstruction from facets */ }
+            catch (Exception ex) when (ex is not OperationCanceledException) { /* fall back to reconstruction from facets */ }
         }
         var b = new ExactBrep();
         if (solid.IsEmpty) return b;

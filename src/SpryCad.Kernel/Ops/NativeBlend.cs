@@ -8,7 +8,8 @@ namespace SpryCad.Kernel;
 /// where that cannot be (corners where blends meet, ends at an angle, blends trimmed by neighbouring geometry)
 /// subtracted (convex) or added (concave) with native booleans.
 /// Lines between planes and arcs between a plane and a perpendicular cylinder use extruded/revolved profiles;
-/// fillets on any other pair of faces use rolling-ball tools (<see cref="RollingBall"/>).
+/// fillets on any other pair of faces use rolling-ball tools (<see cref="RollingBall"/>), chamfers the chamfer's
+/// cross-section swept along the edges' tangent chain (<see cref="SweptChamfer"/>).
 /// </summary>
 public static class NativeBlend
 {
@@ -31,6 +32,12 @@ public static class NativeBlend
         if (edges.Count > 0) { var (f0, f1) = Faces(edges[0]); (refA, refB) = ch.Flip ? (f1, f0) : (f0, f1); }
         static bool Like(NFace f, NFace? g) => g != null && (ReferenceEquals(f, g) || f.Surface.CoincidentWith(g.Surface, 1e-9));
         bool RefIsFirst(NFace x, NFace y) => Like(x, refA) || (!Like(y, refA) && (Like(y, refB) || !Like(x, refB) && !ch.Flip));
+        // chamfer legs along faces x and y, running along ux / uy from the edge
+        (double, double) Legs(NFace x, NFace y, Vec3 ux, Vec3 uy)
+        {
+            var (r, o) = ch.Legs(Math.Acos(Math.Clamp(Vec3.Dot(ux, uy), -1, 1)));
+            return RefIsFirst(x, y) ? (r, o) : (o, r);
+        }
         var cutTools = new List<Solid>();
         var addTools = new List<Solid>();
         var done = new HashSet<NEdge>(ReferenceEqualityComparer.Instance);
@@ -83,6 +90,28 @@ public static class NativeBlend
                     // the rolling-ball tool's sides lie on the faces it blends: a direct blend applies it as it is
                     (tools, convex, fits, strip) = (new List<Solid> { rb.Tool! }, rb.Convex, rb.Fits, rb.Tool);
                 }
+                if (tools == null && !fillet)
+                {
+                    // any other pair of faces: the chamfer swept along the tangent chain this edge belongs to, its
+                    // lines and arcs with exact tools of their own included (one tool: no joints meeting face to face)
+                    var chain = TangentChain(e, edges, new HashSet<NEdge>(ReferenceEqualityComparer.Instance));
+                    var set = new HashSet<NEdge>(chain, ReferenceEqualityComparer.Instance);
+                    bool Part(List<NEdge> g) => g.Any(set.Contains) && !g.All(set.Contains);
+                    if (entries.Any(x => Part(x.group)) || fails.Any(x => Part(x.group))) chain = TangentChain(e, edges, done);
+                    var sc = SweptChamfer.Build(chain, name, Legs, OnFaces);
+                    if (sc.Error != null && chain.Count > 1)
+                    {
+                        Debug?.Invoke($"swept chamfer {name}: {chain.Count} edges -> {sc.Error}");
+                        sc = SweptChamfer.Build(chain = new List<NEdge>(group), name, Legs, OnFaces);
+                    }
+                    Debug?.Invoke($"swept chamfer {name}: {chain.Count} edges -> {sc.Error ?? (sc.Fits ? "fits" : "overflows")}");
+                    if (sc.Error != null) { Fail(sc.Error); continue; }
+                    set = new HashSet<NEdge>(chain, ReferenceEqualityComparer.Instance);
+                    entries.RemoveAll(x => x.group.All(set.Contains));
+                    fails.RemoveAll(x => x.group.All(set.Contains));
+                    foreach (var o in chain) if (!group.Contains(o)) { group.Add(o); done.Add(o); }
+                    (tools, convex, fits, strip) = (new List<Solid> { sc.Tool! }, sc.Convex, sc.Fits, null);
+                }
                 if (Debug != null)
                     Debug($"blend {name}: {string.Join(", ", group.Select(g => $"{g.Curve.GetType().Name}{g.V0.P}->{g.V1.P} [{string.Join("|", g.Uses.Select(u => u.Face.Tag.Name + ":" + u.Face.Surface.Kind))}]"))} -> tools={tools?.Count} fits={fits}");
                 if (tools == null) { Fail("unsupported edge geometry."); continue; }
@@ -95,7 +124,7 @@ public static class NativeBlend
                 }
                 entries.Add((tools, convex, direct ? strip : null, name, group, !fits));
             }
-            catch (Exception ex) { Fail(ex.Message); }
+            catch (Exception ex) when (ex is not OperationCanceledException) { Fail(ex.Message); }
         }
         // a tangent chain whose pieces did not all fit (trimmed, or failed): the whole chain once more as one
         // rolling-ball tool, which has no ends at the joints to run past (a spoke's foot round on a rim: its straight
@@ -116,7 +145,7 @@ public static class NativeBlend
                 var name0 = mine.Count > 0 ? entries[mine[0]].name : $"{prefix}.{i++}";
                 RollingBall.Result rb;
                 try { using (Prof.Time("blend.tools")) rb = RollingBall.Build(chain, size, name0, OnFaces); }
-                catch (Exception) { continue; }
+                catch (Exception ex) when (ex is not OperationCanceledException) { continue; }
                 Debug?.Invoke($"whole tangent chain {name0}: {chain.Count} edges -> {rb.Error ?? (rb.Fits ? "fits" : "overflows")}");
                 if (rb.Error != null || !rb.Fits) continue;
                 foreach (var k in mine.OrderByDescending(k => k)) entries.RemoveAt(k);
