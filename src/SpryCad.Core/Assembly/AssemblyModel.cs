@@ -686,22 +686,37 @@ public sealed partial class AssemblyModel
     }
 
     /// <summary>
+    /// Whether assemblies keep their parts' meshes when saved (<see cref="RefreshCaches"/>), so they open without
+    /// rebuilding their parts and show parts that have gone missing. Off, only lightweight components' parts keep
+    /// theirs (they show from them): the files are much smaller, and the parts are rebuilt when the assembly opens.
+    /// </summary>
+    public static bool KeepMeshes { get; set; } = true;
+
+    /// <summary>
     /// The caches for the parts as shown now: each part shown from its file or embedded copy has its revision's
     /// mesh cached (and its components the revision noted), made again when an older version of the code made it; caches
     /// no component uses are dropped. Displays still waiting to be built keep the cache they show. Displays with their
-    /// threads shown otherwise than as set (<see cref="Threads"/>) are not cached: the caches they had are kept.
+    /// threads shown otherwise than as set (<see cref="Threads"/>) are not cached: the caches they had are kept. Without
+    /// <see cref="KeepMeshes"/> only lightweight components' parts are cached, here and in the embedded sub-assemblies.
     /// </summary>
     public void RefreshCaches()
     {
+        var drop = new HashSet<string>();
         foreach (var (key, pd) in Parts)
         {
             if (pd.Building || pd.Source is not (PartSource.File or PartSource.Embedded) || pd.Doc?.Id is not { } id) continue;
+            var ck = AssemblyDocument.CacheKey(id, pd.Revision, pd.Config);
+            if (!KeepMeshes && !ComponentsShowing(key).Any(c => c.Lightweight))
+            {
+                foreach (var c in ComponentsShowing(key)) c.Part.Revision = pd.Revision;
+                drop.Add(ck);
+                continue;
+            }
             if (Threads != ThreadDisplay.AsSet)
             {
                 foreach (var c in ComponentsShowing(key)) c.Part.Revision = pd.Revision;
                 continue;
             }
-            var ck = AssemblyDocument.CacheKey(id, pd.Revision, pd.Config);
             var stale = Doc.Caches.TryGetValue(ck, out var had) && (!Doc.Files.TryGetValue(had, out var bytes) || MeshCache.VersionOf(bytes) != GeometryVersion.Current);
             if (!Doc.Caches.ContainsKey(ck) || stale)
             {
@@ -721,6 +736,7 @@ public sealed partial class AssemblyModel
             // a linked sub-assembly's file kept as it is (it shows from this copy when the file goes missing)
             if (sub.Source != SubSource.File || sd.Id == null || comps.Count == 0) continue;
             var ck = AssemblyDocument.CacheKey(sd.Id, rev);
+            if (!KeepMeshes) { drop.Add(ck); continue; }
             if (Doc.Caches.ContainsKey(ck) || Resolution.Parts.GetValueOrDefault(ComponentResolver.Key(comps[0].Part))?.Path is not { } file) continue;
             try
             {
@@ -733,11 +749,39 @@ public sealed partial class AssemblyModel
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
         }
         var used = Doc.Components.Where(c => c.Part.PartId != null).Select(c => AssemblyDocument.CacheKey(c.Part.PartId!, c.Part.Revision, Configurations.KeyOf(c.Parameters))).ToHashSet();
-        foreach (var (ck, name) in Doc.Caches.Where(kv => !used.Contains(kv.Key)).ToList())
+        foreach (var (ck, name) in Doc.Caches.Where(kv => !used.Contains(kv.Key) || drop.Contains(kv.Key)).ToList())
         {
             Doc.Caches.Remove(ck);
             Doc.Files.Remove(name);
         }
+        if (!KeepMeshes) DropEmbeddedMeshes(Doc);
+    }
+
+    /// <summary>
+    /// The caches of an assembly's embedded sub-assemblies dropped, all the way down, but for their lightweight
+    /// components' parts (<see cref="KeepMeshes"/> off). Each copy keeps its revision: only its caches change, not
+    /// what it is. Whether any was.
+    /// </summary>
+    static bool DropEmbeddedMeshes(AssemblyDocument doc)
+    {
+        bool changed = false;
+        foreach (var e in doc.Components.Where(c => c.IsAssembly && c.Part.Embedded != null).Select(c => c.Part.Embedded!).Distinct().ToList())
+        {
+            if (!doc.Files.TryGetValue(e, out var bytes)) continue;
+            AssemblyDocument sd;
+            try { sd = AssemblyContainer.Load(bytes, e); }
+            catch (InvalidDataException) { continue; } // (a damaged copy: left as it is)
+            var light = sd.Components.Where(c => !c.IsAssembly && c.Lightweight && c.Part.PartId != null)
+                .Select(c => AssemblyDocument.CacheKey(c.Part.PartId!, c.Part.Revision, Configurations.KeyOf(c.Parameters))).ToHashSet();
+            var drop = sd.Caches.Where(kv => !light.Contains(kv.Key)).ToList();
+            foreach (var (ck, name) in drop) { sd.Caches.Remove(ck); sd.Files.Remove(name); }
+            if (DropEmbeddedMeshes(sd) | drop.Count > 0)
+            {
+                doc.Files[e] = AssemblyContainer.ToBytes(sd, newRevision: false);
+                changed = true;
+            }
+        }
+        return changed;
     }
 
     /// <summary>
