@@ -86,9 +86,26 @@ public sealed class Topology
         var pw = Prof.Time("topo.weld");
         var welder = new VertexWelder(FaceMerger.WeldTol * 10);
         var raw = new List<List<int[]>>();
+        // a tessellator's triangles name their corners in a shared point list: each point is welded at its first
+        // corner (the welder gives a bit-identical point its earlier index, so the later ones need not ask)
+        var pools = new Dictionary<List<Vec3>, int[]>(ReferenceEqualityComparer.Instance);
+        List<Vec3>? lastPool = null; int[]? map = null;
         foreach (var f in s.Faces)
         {
             var fl = new List<int[]>();
+            if (f.Pool is { } pool && f.Loops.Count == 1 && f.Loops[0].Length == 3)
+            {
+                if (!ReferenceEquals(pool, lastPool))
+                {
+                    lastPool = pool;
+                    if (!pools.TryGetValue(pool, out map)) { pools[pool] = map = new int[pool.Count]; Array.Fill(map, -1); }
+                }
+                var l = f.Loops[0];
+                int Id(int k, int pi) => map![pi] >= 0 ? map[pi] : map[pi] = welder.Add(l[k]);
+                fl.Add(new[] { Id(0, f.PoolA), Id(1, f.PoolB), Id(2, f.PoolC) });
+                raw.Add(fl);
+                continue;
+            }
             foreach (var l in f.Loops)
             {
                 var ids = new int[l.Length];

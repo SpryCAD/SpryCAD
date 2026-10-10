@@ -167,7 +167,7 @@ public static class NTess
         {
             var pl = Plane.FromPoints(p3[a], p3[b], p3[c]);
             if (pl == null) continue; // degenerate (pole)
-            outFaces.Add(new Face(pl, f.Tag, p3[a], p3[b], p3[c]));
+            outFaces.Add(new Face(pl, f.Tag, p3[a], p3[b], p3[c]) { Pool = p3, PoolA = a, PoolB = b, PoolC = c });
         }
     }
 
