@@ -11,7 +11,13 @@ static partial class Demos
         ("casting foot, drafted", () => CastingFoot("2")),
         ("casting foot, undrafted", () => CastingFoot("0")),
         ("casting foot, plate drafted and rounded", () => CastingFoot("2", "5")),
-        ("casting foot, drafted, chamfered", () => CastingFoot("2", chamfer: true)),
+        ("casting foot, drafted, chamfered", () => CastingFoot("2", chamfer: _ => { })),
+        ("casting foot, drafted, chamfered 6 x 3", () => CastingFoot("2", chamfer: c => { c.Type = ChamferType.DistanceDistance; c.Distance2 = "3"; })),
+        ("casting foot, drafted, chamfered 6 x 3 flipped", () => CastingFoot("2", chamfer: c => { c.Type = ChamferType.DistanceDistance; c.Distance2 = "3"; c.Flip = true; })),
+        ("casting foot, drafted, chamfered 6 at 30°", () => CastingFoot("2", chamfer: c => { c.Type = ChamferType.AngleDistance; c.Angle = "30"; })),
+        ("boss top, drafted, chamfered", () => CastingFoot("2", chamfer: _ => { }, atTop: true)),
+        ("casting foot, drafted, chamfered, hollow under", () => CastingFoot("2", chamfer: _ => { }, hollow: true)),
+        ("plate, drafted hole across a slot, rim chamfered", SlotHole),
         ("box, three edges at a corner", BoxCorner),
         ("plate, hole rims", PlateHoles),
         ("box, all edges", BoxAll),
@@ -26,7 +32,7 @@ static partial class Demos
     /// plate's top: one edge picked, the tangent edges following (a closed loop of lines and arcs). A casting's
     /// commonest blend.
     /// </summary>
-    static CadDocument CastingFoot(string draft, string? baseDraft = null, bool chamfer = false)
+    static CadDocument CastingFoot(string draft, string? baseDraft = null, Action<ChamferFeature>? chamfer = null, bool atTop = false, bool hollow = false)
     {
         var d = Doc(("BaseX", "100"), ("BaseY", "75"), ("BaseT", "20"), ("BossX", "60"), ("BossY", "40"), ("BossH", "60"), ("Draft", draft),
             ("Rc", "20"), ("Rf", "6"), ("BaseDraft", baseDraft ?? "0"), ("Rb", "15"));
@@ -67,9 +73,25 @@ static partial class Demos
                 E(F(2), F(3), new Vec3(-V("BossX"), V("BossY"), zm)), E(F(3), F(0), new Vec3(-V("BossX"), -V("BossY"), zm)),
             },
         });
-        var foot = E($"{basePlate.Id}.End", F(0), new Vec3(0, -V("BossY"), V("BaseT")));
-        // chamfered: drafted, the rounded corners meet the plate along ellipses (their axes lean)
-        if (chamfer) d.AddFeature(new ChamferFeature { Name = "Foot", Distance = "Rf", Edges = { foot } });
+        if (hollow)
+        {
+            // a pocket from below under the boss's front side, leaving the plate 1 thick there: the space a concave
+            // blend's tool reaches into behind the corner is open
+            var u = new Sk(d);
+            u.Rect("-70", "-55", "70", "-25");
+            var us = d.AddFeature(new SketchFeature { Name = "Hollow", Plane = PlaneRef.Front, Sketch = u.S });
+            d.AddFeature(new ExtrudeFeature { Name = "Hollow", SketchId = us.Id, IsCut = true, Depth = "BaseT - 1" });
+        }
+        // (top: the boss's top edge instead, convex, its side drafted in by BossH tan(Draft))
+        var foot = atTop ? E($"{boss.Id}.End", F(0), new Vec3(0, -V("BossY - BossH * tan(Draft)"), V("BaseT + BossH")))
+            : E($"{basePlate.Id}.End", F(0), new Vec3(0, -V("BossY"), V("BaseT")));
+        // chamfered: drafted, the rounded corners meet the plate (and the top) along ellipses (their axes lean)
+        if (chamfer != null)
+        {
+            var ch = new ChamferFeature { Name = "Foot", Distance = "Rf", Edges = { foot } };
+            chamfer(ch);
+            d.AddFeature(ch);
+        }
         else d.AddFeature(new FilletFeature { Name = "Foot", Radius = "Rf", Edges = { foot } });
         return d;
     }
@@ -209,6 +231,34 @@ static partial class Demos
     }
 
     /// <summary>A plate with through holes, their top rims filleted and bottom rims chamfered.</summary>
+    /// <summary>
+    /// A plate with a drafted hole (a cone: no exact chamfer tool), a slot off its centre line cutting across the
+    /// hole's rim: the rim's top edge, chamfered, is an open arc whose ends meet the slot's walls at an angle.
+    /// </summary>
+    static CadDocument SlotHole()
+    {
+        var d = Doc(("X", "50"), ("Y", "30"), ("T", "12"), ("D", "20"), ("Draft", "5"), ("C", "1.5"));
+        var s = new Sk(d);
+        s.Rect("-X", "-Y", "X", "Y");
+        var ss = d.AddFeature(new SketchFeature { Name = "Plate", Plane = PlaneRef.Front, Sketch = s.S });
+        var plate = d.AddFeature(new ExtrudeFeature { Name = "Plate", SketchId = ss.Id, Depth = "T" });
+        var top = d.AddFeature(new PlaneFeature { Name = "Top", Base = PlaneRef.Front, Offset = "T" });
+        var h = new Sk(d);
+        var c = h.Circle(h.P("0", "0"), "D");
+        var hs = d.AddFeature(new SketchFeature { Name = "Hole", Plane = new PlaneRef { Feature = top.Id }, Sketch = h.S });
+        var hole = d.AddFeature(new ExtrudeFeature { Name = "Hole", SketchId = hs.Id, IsCut = true, Depth = "T", Reverse = true, Draft = "Draft" });
+        var g = new Sk(d);
+        g.Rect("0", "2", "20", "8");
+        var gs = d.AddFeature(new SketchFeature { Name = "Slot", Plane = PlaneRef.Front, Sketch = g.S });
+        d.AddFeature(new ExtrudeFeature { Name = "Slot", SketchId = gs.Id, IsCut = true, End = EndCondition.ThroughAllBoth });
+        d.AddFeature(new ChamferFeature
+        {
+            Name = "Rim", Distance = "C",
+            Edges = { E($"{plate.Id}.End", $"{hole.Id}.S.C{c}", new Vec3(-s.Eval("D/2"), 0, s.Eval("T"))) },
+        });
+        return d;
+    }
+
     static CadDocument PlateHoles()
     {
         var d = Doc(("X", "50"), ("Y", "30"), ("T", "12"), ("D", "16"), ("P", "25"), ("R", "2"), ("C", "1"));

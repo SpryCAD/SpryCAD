@@ -806,8 +806,27 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
     public void Redraw()
     {
         RequestNextFrameRendering();
-        Mode?.UpdateOverlay(this);
+        if (OverlayProfile)
+        {
+            var t0 = Stopwatch.GetTimestamp();
+            Mode?.UpdateOverlay(this);
+            NoteOverlay(Stopwatch.GetElapsedTime(t0).TotalMilliseconds);
+        }
+        else Mode?.UpdateOverlay(this);
         CameraChanged?.Invoke();
+    }
+
+    // SPRYCAD_PROFILE_OVERLAY: the overlay updates (count, average and worst time) written to the log every 2 s
+    static readonly bool OverlayProfile = Environment.GetEnvironmentVariable("SPRYCAD_PROFILE_OVERLAY") != null;
+    int _ovCalls; double _ovMs, _ovMax; long _ovSince = Stopwatch.GetTimestamp();
+
+    void NoteOverlay(double ms)
+    {
+        _ovCalls++; _ovMs += ms; _ovMax = Math.Max(_ovMax, ms);
+        var span = Stopwatch.GetElapsedTime(_ovSince).TotalSeconds;
+        if (span < 2) return;
+        App.Note($"overlay: {_ovCalls} updates in {span:0.0} s ({_ovCalls / span:0} a second), {_ovMs / _ovCalls:0.00} ms average, {_ovMax:0.00} ms worst ({Mode?.GetType().Name})");
+        _ovCalls = 0; _ovMs = 0; _ovMax = 0; _ovSince = Stopwatch.GetTimestamp();
     }
 
     public void AnimateTo(Quaternion q, Vector3? target = null, float? halfHeight = null)

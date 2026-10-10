@@ -34,10 +34,11 @@ public interface IAssemblyHost
     void HoverFace(string? component, string? face);
     void PickFace(string component, string face);
     /// <summary>
-    /// A component was dragged to a new place: the mates pull it (and what it is mated to) back onto them, its point
-    /// <c>local</c> (in its part) kept as near the cursor's ray (<c>origin</c>, <c>dir</c>) as they let it when given.
+    /// A component was dragged: the mates pull it (and what it is mated to) back onto them, its point <c>local</c> (in
+    /// its part) kept as near the cursor's ray (<c>origin</c>, <c>dir</c>) as they let it when given; one no mate
+    /// moves is moved by <c>move</c>.
     /// </summary>
-    void Dragged(string component, (Vec3 local, Vec3 origin, Vec3 dir)? pull = null);
+    void Dragged(string component, (Vec3 local, Vec3 origin, Vec3 dir, Vec3 move)? pull = null);
 }
 
 /// <summary>
@@ -63,7 +64,7 @@ public sealed class AssemblyMode(IAssemblyHost host) : IViewportMode
         if (_drag == null) { host.HoverComponent(vp.PickInstance(p.X, p.Y)?.id); return; }
         if (!_moved) { host.BeginAssemblyChange(); _moved = true; }
         var t = host.WorldOf(_drag);
-        (Vec3, Vec3, Vec3)? pull = null;
+        (Vec3, Vec3, Vec3, Vec3)? pull = null;
         if (_turn)
         {
             double dx = p.X - _last.X, dy = p.Y - _last.Y;
@@ -78,14 +79,15 @@ public sealed class AssemblyMode(IAssemblyHost host) : IViewportMode
             var den = Vec3.Dot(d, _normal);
             if (Math.Abs(den) < 1e-12) return;
             var hit = o + d * (Vec3.Dot(_grab - o, _normal) / den);
-            host.SetWorld(_drag, Transform.Translation(hit - _grab) * t);
-            _grab = hit;
-            // where the mates stop it sliding there, it turns (and what it is mated to moves) as far as they let the
-            // point follow the cursor: a gear on its axis turns with the cursor round it
-            pull = (host.WorldOf(_drag).RigidInverse().Point(hit), o, d);
+            // the mates move it from where it is (holding), the grabbed point as near the cursor as they let it: where
+            // they stop it sliding there, it turns (and what it is mated to moves) as far as they let the point follow
+            // the cursor, a gear on its axis turning with the cursor round it. (Not moved to the cursor first: off its
+            // mates by a whole mouse move, what hangs on it could be solved back the other way, a piston past its crank.)
+            // One no mate moves follows the cursor.
+            pull = (t.RigidInverse().Point(_grab), o, d, hit - _grab);
         }
         _last = new Point(p.X, p.Y);
-        // the mates pull it back onto them: the grabbed point goes where they leave it
+        // the grabbed point goes where the solve leaves it
         var dragged = host.WorldOf(_drag);
         host.Dragged(_drag, pull);
         _grab = host.WorldOf(_drag).Point(dragged.RigidInverse().Point(_grab));

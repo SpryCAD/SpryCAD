@@ -187,6 +187,9 @@ public sealed class FeatureTree : UserControl
         _ => "part",
     };
 
+    static Cursor? _rollbackCursor;
+    static Cursor RollbackCursor => _rollbackCursor ??= new Cursor(StandardCursorType.SizeNorthSouth);
+
     void AddRollbackBar()
     {
         // a thin line, in a taller clear strip that takes the mouse: as easy to grab as a thick bar, lighter to look at
@@ -194,7 +197,7 @@ public sealed class FeatureTree : UserControl
         {
             Height = 10, Margin = new Thickness(14, 1, 8, 1), Background = Brushes.Transparent,
             Child = new Border { Height = 3, CornerRadius = new CornerRadius(1.5), Background = Palette.Accent, VerticalAlignment = VerticalAlignment.Center },
-            Cursor = new Cursor(StandardCursorType.SizeNorthSouth), Tag = "__rollback",
+            Cursor = RollbackCursor, Tag = "__rollback",
         };
         ToolTip.SetTip(bar, "Rollback bar: drag up or down to roll the model back.");
         bar.ZIndex = 1;
