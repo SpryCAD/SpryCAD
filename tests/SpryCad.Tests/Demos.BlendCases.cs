@@ -1,4 +1,5 @@
 using SpryCad.Core.Model;
+using SpryCad.Core.Sketching;
 using SpryCad.Kernel;
 
 namespace SpryCad.Tests;
@@ -24,6 +25,7 @@ static partial class Demos
         ("box, top edges", () => BoxAll(topOnly: true)),
         ("pocket, floor and corners", Pocket),
         ("drafted block, top edge under an overhang", Overhang),
+        ("drafted round boss, top and foot filleted", DraftedBoss),
         ("wall beside a taller one", NarrowGap),
         ("rib against a wall, filleted and mirrored", MirroredRib),
     };
@@ -228,6 +230,29 @@ static partial class Demos
             Name = "Gap edge", Radius = "R", TangentPropagation = false,
             Edges = { E($"{low.Id}.End", $"{low.Id}.S.L{l1[1]}", new Vec3(-V("G"), 0, V("H1"))) },
         });
+        return d;
+    }
+
+    /// <summary>
+    /// A round boss drafted 5° on a plate (its side a cone), its top edge filleted R3 and its foot R4: both rims a plane
+    /// square to a cone's axis.
+    /// </summary>
+    static CadDocument DraftedBoss()
+    {
+        var d = Doc(("X", "40"), ("Y", "40"), ("T", "10"), ("D", "40"), ("H", "30"), ("Draft", "5"), ("Rt", "3"), ("Rf", "4"));
+        var b = new Sk(d);
+        b.Rect("-X", "-Y", "X", "Y");
+        var bs = d.AddFeature(new SketchFeature { Name = "Plate", Plane = PlaneRef.Front, Sketch = b.S });
+        var plate = d.AddFeature(new ExtrudeFeature { Name = "Plate", SketchId = bs.Id, Depth = "T" });
+        var top = d.AddFeature(new PlaneFeature { Name = "Plate top", Base = PlaneRef.Front, Offset = "T" });
+        var c = new Sk(d);
+        var ci = c.Circle(Sketch.OriginId, "D");
+        var cs = d.AddFeature(new SketchFeature { Name = "Boss", Plane = new PlaneRef { Feature = top.Id }, Sketch = c.S });
+        var boss = d.AddFeature(new ExtrudeFeature { Name = "Boss", SketchId = cs.Id, Depth = "H", Draft = "Draft" });
+        double V(string e) => b.Eval(e);
+        var rt = V("D/2") - V("H") * Math.Tan(V("Draft") * Math.PI / 180);
+        d.AddFeature(new FilletFeature { Name = "Boss top", Radius = "Rt", Edges = { E($"{boss.Id}.End", $"{boss.Id}.S.C{ci}", new Vec3(rt, 0, V("T+H"))) } });
+        d.AddFeature(new FilletFeature { Name = "Boss foot", Radius = "Rf", Edges = { E($"{plate.Id}.End", $"{boss.Id}.S.C{ci}", new Vec3(V("D/2"), 0, V("T"))) } });
         return d;
     }
 
