@@ -457,6 +457,12 @@ public static class MateSolver
                     if (turn > maxTurn) for (int j = 0; j < n; j++) dx[j] *= maxTurn / turn;
                     var trial = Trial(dx);
                     var r1 = Res(trial);
+                    // too far: half the way first (one more residual), before damping and factoring again
+                    if (!(Sq(r1) < f0))
+                    {
+                        for (int j = 0; j < n; j++) dx[j] *= 0.5;
+                        trial = Trial(dx); r1 = Res(trial);
+                    }
                     if (Sq(r1) < f0)
                     {
                         for (int i = 0; i < nf; i++) placements[free[i].Id] = place[i] = trial[i];
