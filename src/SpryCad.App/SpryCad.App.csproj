@@ -19,8 +19,8 @@
     <TieredPGO>true</TieredPGO>
     <ServerGarbageCollector>false</ServerGarbageCollector>
     <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
-      <!-- geometry code is hot from the first rebuild: skip unoptimized tier-0 JIT (ReadyToRun code is still used) -->
-    <TieredCompilationQuickJit>false</TieredCompilationQuickJit>
+    <!-- QuickJit stays on (the default): with ReadyToRun, turning it off made startup ~280 ms slower and the first
+         rebuild no faster, as everything not precompiled had to be fully optimized before it first ran -->
   </PropertyGroup>
 
   <ItemGroup>

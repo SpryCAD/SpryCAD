@@ -127,7 +127,11 @@ profile; the profile's times are summed over threads). On the heavy samples (`sa
   - Autosave: done. It writes a copy of each part off the UI thread (one autosave at a time), and attachment hashes
     are kept per byte array. `-- savebench <step file> [MB]`: with a 20 MB imported model the UI waited 260–560 ms an
     autosave (hash and Optimal deflate on the UI thread), now ~0.1 ms; the save itself ~265 ms (hash cached).
-  - Startup: measure with `TieredCompilationQuickJit` on, and start `Warmup` after the window opens.
+  - Startup: done, measured from launch, measured from launch (with a part) to its first rebuild finished, on installer-style
+    ReadyToRun self-contained builds, 6–8 launches each, medians. `TieredCompilationQuickJit` back on (the default):
+    spur-gear 1498 to 1214 ms (rebuild 382 to 362 ms), hand-wheel 1271 to 1128 ms (rebuild 137 to 107 ms).
+    Tried and rejected: starting `Warmup` once the window has opened made the first rebuild slower (spur-gear
+    1874 ms, rebuild ~600 ms, with or without QuickJit) as the part's rebuild then raced the warm-up.
 
 ## Tried and rejected
 
