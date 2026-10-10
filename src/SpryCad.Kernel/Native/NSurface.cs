@@ -70,6 +70,46 @@ public sealed class NSurface
         _ => Normal(Eval(u, v)),
     };
 
+    /// <summary>
+    /// The point and its derivatives along the face parameters, exactly, for the free-form kinds: B-splines (knot
+    /// parameters scaled onto a full turn in a closed direction), screw surfaces, and offsets of B-splines (the normal's
+    /// derivative from the base's second derivatives). False elsewhere, and where an offset's base normal degenerates.
+    /// </summary>
+    public bool TryPartials(double u, double v, out Vec3 S, out Vec3 Su, out Vec3 Sv)
+    {
+        S = Su = Sv = default;
+        switch (Kind)
+        {
+            case SurfaceKind.Screw:
+                (S, Su, Sv) = Screw!.Partials(u, v);
+                return true;
+            case SurfaceKind.BSpline:
+                {
+                    var (p, pu, pv, _, _, _) = Nurbs!.Derivs(FromFaceU(u), FromFaceV(v));
+                    double cu = Nurbs.ClosedU ? (Nurbs.U1 - Nurbs.U0) / (2 * Math.PI) : 1, cv = Nurbs.ClosedV ? (Nurbs.V1 - Nurbs.V0) / (2 * Math.PI) : 1;
+                    S = p; Su = pu * cu; Sv = pv * cv;
+                    return true;
+                }
+            case SurfaceKind.Offset when Base!.Kind == SurfaceKind.BSpline:
+                {
+                    var nb = Base.Nurbs!;
+                    var (p, pu, pv, puu, puv, pvv) = nb.Derivs(Base.FromFaceU(u), Base.FromFaceV(v));
+                    var m = Vec3.Cross(pu, pv); var ml = m.Length;
+                    if (!(ml > 1e-12 * nb.Box.Diagonal * nb.Box.Diagonal)) return false;
+                    var n = m / ml;
+                    // the unit normal's derivatives: m's, less their part along n, over |m|
+                    var mu = Vec3.Cross(puu, pv) + Vec3.Cross(pu, puv);
+                    var mv = Vec3.Cross(puv, pv) + Vec3.Cross(pu, pvv);
+                    var nu = (mu - n * Vec3.Dot(n, mu)) / ml;
+                    var nv = (mv - n * Vec3.Dot(n, mv)) / ml;
+                    double cu = nb.ClosedU ? (nb.U1 - nb.U0) / (2 * Math.PI) : 1, cv = nb.ClosedV ? (nb.V1 - nb.V0) / (2 * Math.PI) : 1;
+                    S = p + n * R; Su = (pu + nu * R) * cu; Sv = (pv + nv * R) * cv;
+                    return true;
+                }
+        }
+        return false;
+    }
+
     /// <summary>A B-spline surface (parameters as in its knot vectors).</summary>
     public static NSurface BSpline(NurbsSurface s)
         => new(new SurfaceDef { Kind = SurfaceKind.BSpline, Origin = s.Box.Center, Axis = Vec3.UnitZ, RefDir = Vec3.UnitX, Nurbs = s });

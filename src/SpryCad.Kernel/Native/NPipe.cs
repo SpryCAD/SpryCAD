@@ -250,6 +250,43 @@ public sealed class PipeSpine
         return (T, n, Vec3.Cross(T, n));
     }
 
+    /// <summary>
+    /// The pipe's point at (θ, s) and its derivatives along θ and s, exactly (the frame's derivative from the spine's
+    /// second derivative and the interpolated normal's slope); false outside the spine's range, where it is held.
+    /// </summary>
+    public bool SurfacePartials(double theta, double s, double r, out Vec3 pt, out Vec3 dTheta, out Vec3 dS)
+    {
+        pt = dTheta = dS = default;
+        if (!(s > S[0] && s < S[^1])) return false;
+        Derivs(s, out var c, out var d1, out var d2);
+        var dl = d1.Length;
+        if (!(dl > 1e-300)) return false;
+        var T = d1 / dl;
+        var Ts = (d2 - T * Vec3.Dot(T, d2)) / dl;
+        int lo = 0, hi = _ss.Length - 1;
+        while (hi - lo > 1) { int k = (lo + hi) / 2; if (_ss[k] <= s) lo = k; else hi = k; }
+        var w = _ss[hi] - _ss[lo];
+        var f = (s - _ss[lo]) / w;
+        Vec3 nl, nls;
+        if (f >= 0 && f <= 1) { nl = _n1[lo] * (1 - f) + _n1[hi] * f; nls = (_n1[hi] - _n1[lo]) / w; }
+        else { nl = f < 0 ? _n1[lo] : _n1[hi]; nls = Vec3.Zero; }
+        // m = nl − T (T·nl), N1 = m / |m|, N2 = T × N1
+        var tn = Vec3.Dot(T, nl);
+        var m = nl - T * tn;
+        var ms = nls - Ts * tn - T * (Vec3.Dot(Ts, nl) + Vec3.Dot(T, nls));
+        var ml = m.Length;
+        if (!(ml > 1e-300)) return false;
+        var n1 = m / ml;
+        var n1s = (ms - n1 * Vec3.Dot(n1, ms)) / ml;
+        var n2 = Vec3.Cross(T, n1);
+        var n2s = Vec3.Cross(Ts, n1) + Vec3.Cross(T, n1s);
+        double co = Math.Cos(theta), sn = Math.Sin(theta);
+        pt = c + (n1 * co + n2 * sn) * r;
+        dTheta = (n1 * -sn + n2 * co) * r;
+        dS = d1 + (n1s * co + n2s * sn) * r;
+        return true;
+    }
+
     /// <summary>Point of the pipe of radius r at angle θ (about the spine) and spine parameter s.</summary>
     public Vec3 Surface(double theta, double s, double r)
     {

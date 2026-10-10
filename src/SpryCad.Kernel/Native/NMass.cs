@@ -234,7 +234,7 @@ public static class NMass
         return res;
     }
 
-    /// <summary>The surface point and its parameter derivatives (analytic where simple, central differences otherwise).</summary>
+    /// <summary>The surface point and its parameter derivatives (exact; central differences only where no exact form applies).</summary>
     static (Vec3 S, Vec3 Su, Vec3 Sv) Partials(NSurface s, double u, double v)
     {
         var F = s.F;
@@ -268,15 +268,18 @@ public static class NMass
         }
         if (s.Kind == SurfaceKind.Pipe)
         {
-            // around the spine exactly; along it by central differences (the frame is interpolated between samples)
+            // exactly; beyond the spine's ends (where it is held) along it by central differences
             var sp = s.Spine!;
+            if (sp.SurfacePartials(u, v, s.R, out var pp, out var pu, out var pv)) return (pp, pu, pv);
             var (_, n1, n2) = sp.Frame(v);
             double c = Math.Cos(u), sn = Math.Sin(u), hs = 1e-6 * Math.Max(1, Math.Abs(v));
             var pt = sp.Eval(v) + (n1 * c + n2 * sn) * s.R;
             var dsv = (sp.Surface(u, v + hs, s.R) - sp.Surface(u, v - hs, s.R)) / (2 * hs);
             return (pt, (n1 * -sn + n2 * c) * s.R, dsv);
         }
-        // B-splines, offsets: central differences (steps relative to the parameter)
+        // B-splines, screws, offsets of B-splines: exact
+        if (s.TryPartials(u, v, out var es, out var esu, out var esv)) return (es, esu, esv);
+        // otherwise central differences (steps relative to the parameter)
         double hu = 1e-6 * Math.Max(1, Math.Abs(u)), hv = 1e-6 * Math.Max(1, Math.Abs(v));
         var p = s.Eval(u, v);
         var du = (s.Eval(u + hu, v) - s.Eval(u - hu, v)) / (2 * hu);

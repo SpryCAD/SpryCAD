@@ -147,6 +147,48 @@ static class ExactTests
                     t.True(a.Knots.Zip(b.Knots).All(k => Same(k.First, k.Second)), "knots");
                 }
         });
+        t.Test("Exact partials of B-spline, offset, screw and pipe surfaces match their differences", () =>
+        {
+            var rnd = new Random(9);
+            var P = new Vec3[6, 5]; var W = new double[6, 5];
+            for (int i = 0; i < 6; i++) for (int j = 0; j < 5; j++) { P[i, j] = new Vec3(i * 2 + rnd.NextDouble(), j * 2 + rnd.NextDouble(), rnd.NextDouble() * 2); W[i, j] = 0.7 + rnd.NextDouble() * 0.6; }
+            var nurbs = new SpryCad.Kernel.Native.NurbsSurface(3, 2, P, W, new double[] { 0, 0, 0, 0, 0.4, 0.7, 1, 1, 1, 1 }, new double[] { 0, 0, 0, 0.5, 0.8, 1, 1, 1 });
+            var bs = SpryCad.Kernel.Native.NSurface.BSpline(nurbs);
+            var surfaces = new List<(string name, SpryCad.Kernel.Native.NSurface s)> { ("B-spline", bs), ("offset", SpryCad.Kernel.Native.NSurface.OffsetOf(bs, 0.7)) };
+            var screw = new SpryCad.Kernel.Native.ScrewSurface(SpryCad.Kernel.Native.ScrewMotion.About(Vec3.Zero, Vec3.UnitZ, 3), new SpryCad.Kernel.Native.NLine(new Vec3(4, 0, 0), new Vec3(1, 0, 1).Normalized), 0, 2, 0, 12);
+            surfaces.Add(("screw", SpryCad.Kernel.Native.NSurface.ScrewOf(screw)));
+            // a pipe's spine: a bent Hermite curve; the frame interpolated between its samples
+            var spine = new SpryCad.Kernel.Native.PipeSpine(
+                new List<Vec3> { new(0, 0, 0), new(10, 2, 1), new(18, 9, -2), new(22, 20, 3) },
+                new List<Vec3> { new Vec3(1, 0, 0), new Vec3(1, 0.5, 0).Normalized, new Vec3(0.4, 1, -0.1).Normalized, new Vec3(0, 1, 0.3).Normalized });
+            for (int k = 0; k < 300; k++)
+            {
+                double th = rnd.NextDouble() * 6.28, sp = spine.S0 + (0.01 + 0.98 * rnd.NextDouble()) * spine.Length;
+                t.True(spine.SurfacePartials(th, sp, 1.5, out var pt, out var dth, out var ds), "pipe: exact partials");
+                const double h = 1e-6;
+                var fth = (spine.Surface(th + h, sp, 1.5) - spine.Surface(th - h, sp, 1.5)) / (2 * h);
+                var fs = (spine.Surface(th, sp + h, 1.5) - spine.Surface(th, sp - h, 1.5)) / (2 * h);
+                t.True(Vec3.Distance(pt, spine.Surface(th, sp, 1.5)) < 1e-9, $"pipe: point at ({th}, {sp})");
+                // (the frame's slope jumps at its samples: a difference across one is off there)
+                t.True(Vec3.Distance(dth, fth) < 1e-6 * (1 + fth.Length), $"pipe: d/dθ at ({th}, {sp})");
+                if (Vec3.Distance(ds, fs) > 1e-5 * (1 + fs.Length))
+                {
+                    var fl = (spine.Surface(th, sp, 1.5) - spine.Surface(th, sp - h, 1.5)) / h; var fr = (spine.Surface(th, sp + h, 1.5) - spine.Surface(th, sp, 1.5)) / h;
+                    t.True(Vec3.Distance(ds, fl) < 1e-4 * (1 + fl.Length) || Vec3.Distance(ds, fr) < 1e-4 * (1 + fr.Length), $"pipe: d/ds at ({th}, {sp}): {ds} vs {fs}");
+                }
+            }
+            foreach (var (name, s) in surfaces)
+                for (int k = 0; k < 200; k++)
+                {
+                    double u = name == "screw" ? rnd.NextDouble() * 12 : 0.05 + 0.9 * rnd.NextDouble(), v = name == "screw" ? rnd.NextDouble() * 2 : 0.05 + 0.9 * rnd.NextDouble();
+                    t.True(s.TryPartials(u, v, out var S, out var Su, out var Sv), $"{name}: exact partials");
+                    const double h = 1e-6;
+                    var du = (s.Eval(u + h, v) - s.Eval(u - h, v)) / (2 * h);
+                    var dv = (s.Eval(u, v + h) - s.Eval(u, v - h)) / (2 * h);
+                    t.True(Vec3.Distance(S, s.Eval(u, v)) < 1e-9, $"{name}: point at ({u}, {v})");
+                    t.True(Vec3.Distance(Su, du) < 1e-6 * (1 + du.Length) && Vec3.Distance(Sv, dv) < 1e-6 * (1 + dv.Length), $"{name}: derivatives at ({u}, {v}): {Su} vs {du}, {Sv} vs {dv}");
+                }
+        });
         var dir = Path.Combine(Path.GetTempPath(), "sprycad-tests");
         Directory.CreateDirectory(dir);
         void Step(string name, Solid s)
