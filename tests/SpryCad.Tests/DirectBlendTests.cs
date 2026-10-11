@@ -224,6 +224,36 @@ static class DirectBlendTests
             }
         });
 
+        t.Test("Swept chamfer round a foot a hole breaks through at a corner: as the whole loop chamfered, then drilled", () =>
+        {
+            // the hole (8 across) through one rounded corner's foot leaves the loop open, both ends on the hole; the
+            // chamfer (6 legs) is wider than it. Its ends used to stop square, adding material in the hole (and the
+            // tool's own faces in the result); closed through the hole and cut by it, the result is the loop
+            // chamfered whole and drilled after
+            var doc = Demos.BlendCases.First(c => c.name == "casting foot, drafted, chamfered").build();
+            var full = new Regenerator().Rebuild(doc, doc.Features.Count).State.Bodies[0].Solid;
+            var c = new Vec3(40 + 20 * Math.Cos(Math.PI / 4), -(20 + 20 * Math.Sin(Math.PI / 4)), -50);
+            var drilled = KernelTests.Vex(Csg.Subtract(full, Builders.Cylinder(c, Vec3.UnitZ, 4, 200, "H")));
+            foreach (var direct in new[] { true, false })
+            {
+                var old = DirectBlend.Enabled;
+                DirectBlend.Enabled = direct;
+                try
+                {
+                    var d2 = Demos.BlendCases.First(x => x.name == "casting foot, drafted, chamfered, a hole through a corner").build();
+                    var foot = d2.Features.First(f => f.Name == "Foot");
+                    var r = new Regenerator().Rebuild(d2, d2.Features.Count);
+                    var nb = r.State.Bodies[0].Solid.Native;
+                    t.True(r.Status[foot.Id].Ok && nb != null && nb.Validate() == null, $"{(direct ? "direct" : "boolean")}: {r.Status[foot.Id].Error}");
+                    var stray = nb!.Faces.Select(f => f.Tag.Name).Where(n => n.StartsWith(foot.Id) && !n.EndsWith(".S.F")).Distinct().ToList();
+                    t.True(stray.Count == 0, $"{(direct ? "direct" : "boolean")}: the tool's own faces left ({string.Join(", ", stray)})");
+                    var v = KernelTests.Vex(r.State.Bodies[0].Solid);
+                    t.True(Math.Abs(v - drilled) < 0.5, $"{(direct ? "direct" : "boolean")}: {v:R}, chamfered then drilled {drilled:R}");
+                }
+                finally { DirectBlend.Enabled = old; }
+            }
+        });
+
         t.Test("Holes beside and through a swept chamfer's foot at a rounded corner: traced quickly, exact", () =>
         {
             // a hole through the plate grazing the chamfer's B-spline face near its edge: the trace on the B-spline misses

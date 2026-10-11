@@ -18,6 +18,7 @@ static partial class Demos
         ("casting foot, drafted, chamfered 6 at 30°", () => CastingFoot("2", chamfer: c => { c.Type = ChamferType.AngleDistance; c.Angle = "30"; })),
         ("boss top, drafted, chamfered", () => CastingFoot("2", chamfer: _ => { }, atTop: true)),
         ("casting foot, drafted, chamfered, hollow under", () => CastingFoot("2", chamfer: _ => { }, hollow: true)),
+        ("casting foot, drafted, chamfered, a hole through a corner", () => CastingFoot("2", chamfer: _ => { }, cornerHole: true)),
         ("plate, drafted hole across a slot, rim chamfered", () => SlotHole()),
         ("plate, drafted hole broken into by a round hole, rim chamfered", () => SlotHole(round: true)),
         ("box, three edges at a corner", BoxCorner),
@@ -36,7 +37,7 @@ static partial class Demos
     /// plate's top: one edge picked, the tangent edges following (a closed loop of lines and arcs). A casting's
     /// commonest blend.
     /// </summary>
-    static CadDocument CastingFoot(string draft, string? baseDraft = null, Action<ChamferFeature>? chamfer = null, bool atTop = false, bool hollow = false)
+    static CadDocument CastingFoot(string draft, string? baseDraft = null, Action<ChamferFeature>? chamfer = null, bool atTop = false, bool hollow = false, bool cornerHole = false)
     {
         var d = Doc(("BaseX", "100"), ("BaseY", "75"), ("BaseT", "20"), ("BossX", "60"), ("BossY", "40"), ("BossH", "60"), ("Draft", draft),
             ("Rc", "20"), ("Rf", "6"), ("BaseDraft", baseDraft ?? "0"), ("Rb", "15"));
@@ -85,6 +86,14 @@ static partial class Demos
             u.Rect("-70", "-55", "70", "-25");
             var us = d.AddFeature(new SketchFeature { Name = "Hollow", Plane = PlaneRef.Front, Sketch = u.S });
             d.AddFeature(new ExtrudeFeature { Name = "Hollow", SketchId = us.Id, IsCut = true, Depth = "BaseT - 1" });
+        }
+        if (cornerHole)
+        {
+            // a hole down through one rounded corner's foot: the foot's loop open, its ends on the hole's side
+            var u = new Sk(d);
+            u.Circle(u.P("40 + 20 * cos(45)", "-(20 + 20 * sin(45))"), "8");
+            var us = d.AddFeature(new SketchFeature { Name = "Corner hole", Plane = PlaneRef.Front, Sketch = u.S });
+            d.AddFeature(new ExtrudeFeature { Name = "Corner hole", SketchId = us.Id, IsCut = true, End = EndCondition.ThroughAllBoth });
         }
         // (top: the boss's top edge instead, convex, its side drafted in by BossH tan(Draft))
         var foot = atTop ? E($"{boss.Id}.End", F(0), new Vec3(0, -V("BossY - BossH * tan(Draft)"), V("BaseT + BossH")))
