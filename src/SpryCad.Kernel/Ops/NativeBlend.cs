@@ -352,18 +352,23 @@ public static class NativeBlend
         // corners where three fillets meet (a box's corner rounded all round): the ball's patch there, the edges'
         // tools shortened to it (the direct blend glues them into one)
         var corners = new List<DirectBlend.Tool>();
-        if (direct && fillet && !anyTrimmed)
+        var shortened = new Dictionary<NEdge, Solid>(ReferenceEqualityComparer.Instance);
+        // (built for the boolean too: the edges' tools there, glued with the corner pieces, give the same corners)
+        if (fillet && !anyTrimmed && !buildOnly)
         {
             var lines = entries.Where(x => x.group.Count == 1 && x.group[0].Curve is NLine && x.group[0].Uses.Count == 2
                 && x.group[0].Uses.All(u => u.Face.Surface.Kind == SurfaceKind.Plane)).ToList();
             if (lines.Count >= 3)
             {
                 List<(Solid piece, bool convex)> pieces;
-                Dictionary<NEdge, Solid> shortened;
                 using (Prof.Time("blend.corners"))
                     (shortened, pieces) = CornerBlend.Build(lines.Select(x => new CornerBlend.Line(x.group[0], x.convex, x.name)).ToList(), size, prefix);
                 for (int k = 0; k < entries.Count; k++)
                     if (entries[k].group.Count == 1 && shortened.TryGetValue(entries[k].group[0], out var sh)) entries[k] = entries[k] with { strip = sh };
+                // (by boolean the edges with no corner keep their own tools; with direct blends off, as before)
+                if (!direct)
+                    for (int k = 0; k < entries.Count; k++)
+                        if (!(entries[k].group.Count == 1 && shortened.ContainsKey(entries[k].group[0]))) entries[k] = entries[k] with { strip = null };
                 corners.AddRange(pieces.Select((c, j) => new DirectBlend.Tool(c.piece, c.convex, $"{prefix}.C{j}", size)));
             }
         }
@@ -383,6 +388,15 @@ public static class NativeBlend
                 var directDone = idx.Where((k, j) => !left.Contains(j)).ToHashSet();
                 byBoolean = byBoolean.Where(k => !directDone.Contains(k)).ToList();
             }
+        }
+        // the edges into corners left to the boolean (direct blends off, or not taken): their tools glued with the corner
+        // pieces they meet, as the direct blend glues them, so the corners come out the same either way
+        var cornered = byBoolean.Where(k => entries[k].group.Count == 1 && shortened.ContainsKey(entries[k].group[0])).ToList();
+        if (cornered.Count > 0 && corners.Count > 0
+            && GlueAll(cornered.Select(k => new DirectBlend.Tool(entries[k].strip!, entries[k].convex, entries[k].name, size)).Concat(corners).ToList()) is { } joined)
+        {
+            foreach (var g in joined) (g.Convex ? cutTools : addTools).Add(g.Strip);
+            byBoolean = byBoolean.Except(cornered).ToList();
         }
         foreach (var k in byBoolean) (entries[k].convex ? cutTools : addTools).AddRange(entries[k].tools);
         if (cutTools.Count == 0 && addTools.Count == 0) return result;
@@ -440,6 +454,26 @@ public static class NativeBlend
     }
 
     static (NFace a, NFace b) Faces(NEdge e) => (e.Uses[0].Face, e.Uses[1].Face);
+
+    /// <summary>The tools glued into one per group of them that touch (boxes overlapping); null if any group does not glue.</summary>
+    static List<DirectBlend.Tool>? GlueAll(List<DirectBlend.Tool> tools)
+    {
+        var boxes = tools.Select(t => t.Strip.Bounds).ToList();
+        var par = Enumerable.Range(0, tools.Count).ToArray();
+        int Find(int x) { while (par[x] != x) x = par[x] = par[par[x]]; return x; }
+        for (int i = 0; i < tools.Count; i++)
+            for (int j = i + 1; j < tools.Count; j++)
+                if (boxes[i].Overlaps(boxes[j], 1e-9 * Math.Max(1, Math.Max(boxes[i].Diagonal, boxes[j].Diagonal)))) par[Find(i)] = Find(j);
+        var res = new List<DirectBlend.Tool>();
+        foreach (var g in Enumerable.Range(0, tools.Count).GroupBy(Find))
+        {
+            var members = g.Select(k => tools[k]).ToList();
+            if (members.Count == 1) { res.Add(members[0]); continue; }
+            if (DirectBlend.Glue(members, out var why) is not { } one) { Debug?.Invoke($"corners by boolean not glued: {why}"); return null; }
+            res.Add(one);
+        }
+        return res;
+    }
 
     /// <summary>Whether two blends' edges meet at a vertex at an angle, on a face both run along (a corner they meet at,
     /// mitred).</summary>

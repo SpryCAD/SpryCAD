@@ -1681,9 +1681,19 @@ public sealed class NBoolean
         {
             if (e.Uses.Count != 2) continue;
             var f = e.Uses[0].Face; var g = e.Uses[1].Face;
-            if (ReferenceEquals(f, g) || f.Sense != g.Sense) continue;
-            if (!ReferenceEquals(f.Surface, g.Surface) && !f.Surface.CoincidentWith(g.Surface, _tol * 10)) continue;
-            if (f.Surface.Kind == SurfaceKind.Plane && Vec3.Dot(f.Surface.Plane!.Normal, g.Surface.Plane!.Normal) < 0) continue;
+            if (ReferenceEquals(f, g)) continue;
+            if (f.Surface.Kind == SurfaceKind.Plane && g.Surface.Kind == SurfaceKind.Plane)
+            {
+                // one plane facing the same way out, however each stores it (a tool's cap, flipped by the boolean, on
+                // the face it lies on: its normal reversed and its sense too)
+                var nf = f.Surface.Plane!.Normal * (f.Sense ? 1 : -1); var ng = g.Surface.Plane!.Normal * (g.Sense ? 1 : -1);
+                if (Vec3.Dot(nf, ng) < 1 - 1e-9 || Math.Abs(f.Surface.Plane.Distance(g.Surface.Plane.Project(f.Surface.Plane.Project(Vec3.Zero)))) > _tol * 10) continue;
+            }
+            else
+            {
+                if (f.Sense != g.Sense) continue;
+                if (!ReferenceEquals(f.Surface, g.Surface) && !f.Surface.CoincidentWith(g.Surface, _tol * 10)) continue;
+            }
             parent[Find(idx[f])] = Find(idx[g]);
         }
         var groups = Enumerable.Range(0, faces.Count).GroupBy(Find).Where(g => g.Count() > 1).ToList();
