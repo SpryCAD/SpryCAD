@@ -39,7 +39,7 @@ public interface IAssemblyHost
     /// its part) kept as near the cursor's ray (<c>origin</c>, <c>dir</c>) as they let it when given; one no mate
     /// moves is moved by <c>move</c>.
     /// </summary>
-    void Dragged(string component, (Vec3 local, Vec3 origin, Vec3 dir, Vec3 move)? pull = null);
+    void Dragged(string component, (Vec3 local, Vec3 origin, Vec3 dir, Vec3 move, Transform? turn)? pull = null);
     /// <summary>A drag of a component (its grabbed point following the cursor) starts: its solve set up for the moves.</summary>
     void DragStarted(string component);
     /// <summary>The drag is over (the mates solved exactly).</summary>
@@ -84,15 +84,17 @@ public sealed class AssemblyMode(IAssemblyHost host) : IViewportMode
 
     void MoveTo(ViewportControl vp, PointerInfo p)
     {
-        if (!_moved) { host.BeginAssemblyChange(); _moved = true; if (!_turn) host.DragStarted(_drag); }
+        if (!_moved) { host.BeginAssemblyChange(); _moved = true; host.DragStarted(_drag); }
         var t = host.WorldOf(_drag);
-        (Vec3, Vec3, Vec3, Vec3)? pull = null;
+        (Vec3, Vec3, Vec3, Vec3, Transform?) pull;
         if (_turn)
         {
             double dx = p.X - _last.X, dy = p.Y - _last.Y;
             var up = Camera.V(vp.Camera.Up); var right = Camera.V(vp.Camera.Right);
             var r = Transform.Rotation(_center, up, dx * 0.01) * Transform.Rotation(_center, right, dy * 0.01);
-            host.SetWorld(_drag, r * t);
+            // the grabbed point pulled to where the turn takes it (not turned first: as a drag, the mates move it from
+            // where they hold); one no mate moves is turned
+            pull = (t.RigidInverse().Point(_grab), r.Point(_grab), Vec3.Zero, Vec3.Zero, r);
         }
         else
         {
@@ -106,7 +108,7 @@ public sealed class AssemblyMode(IAssemblyHost host) : IViewportMode
             // the cursor, a gear on its axis turning with the cursor round it. (Not moved to the cursor first: off its
             // mates by a whole mouse move, what hangs on it could be solved back the other way, a piston past its crank.)
             // One no mate moves follows the cursor.
-            pull = (t.RigidInverse().Point(_grab), o, d, hit - _grab);
+            pull = (t.RigidInverse().Point(_grab), o, d, hit - _grab, null);
         }
         _last = new Point(p.X, p.Y);
         // the grabbed point goes where the solve leaves it
@@ -136,7 +138,7 @@ public sealed class AssemblyMode(IAssemblyHost host) : IViewportMode
         MovePending();
         if (_drag != null && _moved)
         {
-            if (!_turn) host.DragEnded();
+            host.DragEnded();
             host.EndAssemblyChange();
         }
         _drag = null;

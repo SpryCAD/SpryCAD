@@ -652,9 +652,10 @@ public sealed partial class AssemblyModel
             if (d.Flat != null) WriteBack(d.Flat, res);
         }
         else res = Solve(null, pull);
-        if (!res.Solved.Contains(pull.Component) && pull.Move != Vec3.Zero)
+        // (one a mate holds still, locked to the base say, stays)
+        if (!res.Solved.Contains(pull.Component) && !res.Held.Contains(pull.Component) && (pull.Move != Vec3.Zero || pull.Turn != null))
         {
-            SetWorld(pull.Component, Transform.Translation(pull.Move) * WorldOf(pull.Component));
+            SetWorld(pull.Component, (pull.Turn ?? Transform.Translation(pull.Move)) * WorldOf(pull.Component));
             if (d?.Flat?.Doc.Find(pull.Component) is { } fc) fc.Placement = Placement.From(WorldOf(pull.Component));
             res.Moved.Add(pull.Component);
         }
@@ -665,11 +666,57 @@ public sealed partial class AssemblyModel
             return LastSolve!;
         }
         LastSolve = res;
-        // (pattern copies follow their seeds: the drag's flattened copy of the assembly with them)
+        FollowPatterns(d);
+        return LastSolve;
+    }
+
+    /// <summary>Pattern copies follow their seeds; a drag's or motion's flattened copy of the assembly with them.</summary>
+    void FollowPatterns(DragState? d)
+    {
         if (ApplyPatterns() && d?.Flat is { } f)
             foreach (var o in f.Occs)
                 if (o.Rel == null) f.Doc.Find(o.Path)!.Placement = o.Component.Placement;
-        return LastSolve;
+    }
+
+    DragState? _motion;
+
+    /// <summary>The component a motion turns (<see cref="BeginMotion"/>), if one is going on.</summary>
+    public string? MotionHeld => _motion?.Component;
+
+    /// <summary>
+    /// A motion starts: <paramref name="held"/> is moved by the caller step by step (a motor turns it) and held where
+    /// it is put; what is mated to it moves (<see cref="SolveMotion"/>), on a solve set up once for every step; nothing
+    /// else may move components until <see cref="EndMotion"/>.
+    /// </summary>
+    public void BeginMotion(string held)
+    {
+        var f = Flatten();
+        _motion = new DragState(held, f, MateSolver.PrepareHeld(f?.Doc ?? Doc, Local, held, f?.Attached));
+    }
+
+    /// <summary>A step of the motion: the mates solved (to <see cref="DragTolerance"/>) with the held component where it is now.</summary>
+    public MateSolver.Result SolveMotion()
+    {
+        if (_motion is not { } d) return SolveMates();
+        if (d.Flat?.Doc.Find(d.Component) is { } fc) fc.Placement = Placement.From(WorldOf(d.Component));
+        var res = d.Session.Run(null, DragTolerance);
+        if (d.Flat != null) WriteBack(d.Flat, res);
+        LastSolve = res;
+        FollowPatterns(d);
+        return res;
+    }
+
+    /// <summary>The motion is over: the mates solved exactly, from where it left them.</summary>
+    public MateSolver.Result? EndMotion()
+    {
+        if (_motion is not { } d) return null;
+        if (d.Flat?.Doc.Find(d.Component) is { } fc) fc.Placement = Placement.From(WorldOf(d.Component));
+        _motion = null;
+        var res = d.Session.Run();
+        if (d.Flat != null) WriteBack(d.Flat, res);
+        LastSolve = res;
+        ApplyPatterns();
+        return res;
     }
 
     /// <summary>
@@ -689,6 +736,9 @@ public sealed partial class AssemblyModel
     /// </summary>
     public void BeginDrag(string component)
     {
+        // whether the mates hold as it starts (not solved since opened: checked, nothing moved), so a drag that would
+        // leave them broken is not taken
+        LastSolve ??= Solve(new HashSet<string>(), null);
         var f = Flatten();
         var body = f != null && f.Attached.TryGetValue(component, out var at) ? at.Body : component;
         _drag = new DragState(component, f, MateSolver.PrepareDrag(f?.Doc ?? Doc, Local, body, f?.Attached));
