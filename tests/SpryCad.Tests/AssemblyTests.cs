@@ -739,5 +739,69 @@ static class AssemblyTests
             r = ComponentResolver.Resolve(asm9, Path.Combine(dir9, "A.sasm"));
             t.True(r.Of(asm9.Components[0]).Status == PartStatus.Found, "by path");
         });
+
+        DragSessions(t);
+    }
+
+    /// <summary>
+    /// A sleeve turning on a fixed pin, dragged round by its rim (as the viewport does: one drag session, mouse move by
+    /// mouse move): a part locked to the sleeve goes round with it, one locked to the pin stays, one locked out of place
+    /// is pulled onto its lock; the same as solving each move afresh; exact on release.
+    /// </summary>
+    static void DragSessions(TestRunner t)
+    {
+        t.Test("Drag sessions: locked parts carried with what they are locked to, the same as solving each move afresh, exact on release", () =>
+        {
+            (AssemblyModel m, Component sleeve, Component flag, Component still, Component loose) Build()
+            {
+                var (m, pin, sleeve, dir) = PinAndSleeve("drag-session");
+                m.AddMate(MateType.Concentric, m.RefTo(sleeve.Id, FaceOf(m, sleeve, "side"))!, m.RefTo(pin.Id, FaceOf(m, pin, "side"))!);
+                m.AddMate(MateType.Coincident, m.RefTo(sleeve.Id, FaceOf(m, sleeve, "start"))!, m.RefTo(pin.Id, FaceOf(m, pin, "end"))!);
+                var fp = Path.Combine(dir, "Flag.sprt");
+                Cylinder(fp, 2, 5);
+                Component Locked(Component to, Vec3 at)
+                {
+                    var c = m.Insert(fp, Transform.Translation(at));
+                    m.AddMate(MateType.Lock, new MateRef { Component = c.Id, D = Vec3.UnitZ }, new MateRef { Component = to.Id, D = Vec3.UnitZ });
+                    return c;
+                }
+                var flag = Locked(sleeve, new Vec3(20, 0, 15));
+                var still = Locked(pin, new Vec3(-20, 0, 0));
+                var loose = Locked(sleeve, new Vec3(0, 20, 15));
+                // knocked off its lock: it holds no longer, and the solve puts it back
+                loose.Placement = Placement.From(Transform.Translation(new Vec3(3, 1, 2)) * loose.Placement.ToTransform());
+                return (m, sleeve, flag, still, loose);
+            }
+            Transform T(Component c) => c.Placement.ToTransform();
+            MateSolver.Pull Pull(Component sleeve, int i)
+            {
+                var a = 0.1 * (i + 1);
+                return new MateSolver.Pull(sleeve.Id, new Vec3(5, 0, 5), new Vec3(5 * Math.Cos(a), 5 * Math.Sin(a), 100), -Vec3.UnitZ);
+            }
+
+            var (m, sleeve, flag, still, loose) = Build();
+            var flagOn = T(sleeve).RigidInverse() * T(flag);
+            var stillAt = T(still);
+            m.BeginDrag(sleeve.Id);
+            for (int i = 0; i < 20; i++)
+            {
+                var res = m.SolveDrag(Pull(sleeve, i));
+                t.True(res.Satisfied, $"move {i}: the mates hold ({string.Join(", ", res.Failed())})");
+                t.True(res.Solved.Contains(flag.Id), $"move {i}: the part locked to the sleeve is solved with it");
+                var off = T(sleeve).RigidInverse() * T(flag);
+                t.True(Vec3.Distance(off.T, flagOn.T) < 1e-9 && Vec3.Distance(off.Vector(Vec3.UnitX), flagOn.Vector(Vec3.UnitX)) < 1e-9, $"move {i}: the locked part stays where it is on the sleeve");
+                t.True(Vec3.Distance(T(still).T, stillAt.T) < 1e-12, $"move {i}: the part locked to the pin stays");
+            }
+            var end = m.EndDrag()!;
+            t.True(end.Satisfied && end.Errors.Values.Max() < 1e-9, $"exact on release (worst {end.Errors.Values.Max():E1})");
+            var turned = Math.Atan2(T(sleeve).Vector(Vec3.UnitX).Y, T(sleeve).Vector(Vec3.UnitX).X);
+
+            // each move solved afresh
+            var (m2, sleeve2, _, _, _) = Build();
+            for (int i = 0; i < 20; i++) m2.SolveDrag(Pull(sleeve2, i));
+            m2.SolveMates();
+            var turned2 = Math.Atan2(T(sleeve2).Vector(Vec3.UnitX).Y, T(sleeve2).Vector(Vec3.UnitX).X);
+            t.True(Math.Abs(turned - 2.0) < 1e-6 && Math.Abs(turned - turned2) < 1e-6, $"turned {turned:0.######} with the session, {turned2:0.######} afresh (the cursor: 2)");
+        });
     }
 }
