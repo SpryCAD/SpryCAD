@@ -61,7 +61,8 @@ public sealed class AssemblyMode(IAssemblyHost host) : IViewportMode
     Point _last;
     bool _turn, _moved;
     // the latest move of a drag not yet solved for: moves that come while one is solved are not each solved, only the
-    // last (the solve for it runs once the input waiting has been taken), so the parts never trail the cursor
+    // last (the solve for it runs after the input already waiting, as input does: before layout and render), so the
+    // parts never trail the cursor
     (ViewportControl vp, PointerInfo p)? _pending;
 
     public Cursor? Cursor => null;
@@ -70,7 +71,7 @@ public sealed class AssemblyMode(IAssemblyHost host) : IViewportMode
     {
         if (host.PickingFaces) { var f = vp.PickInstance(p.X, p.Y); host.HoverFace(f?.id, f?.face); return; }
         if (_drag == null) { host.HoverComponent(vp.PickInstance(p.X, p.Y)?.id); return; }
-        if (_pending == null) Dispatcher.UIThread.Post(MovePending, DispatcherPriority.Background);
+        if (_pending == null) Dispatcher.UIThread.Post(MovePending, DispatcherPriority.Input);
         _pending = (vp, p);
     }
 
