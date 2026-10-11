@@ -116,8 +116,10 @@ profile; the profile's times are summed over threads). On the heavy samples (`sa
     either way, so coalescing to once per frame and caching the label layout wait for a sketch where it shows.
   - `PickVertex` allocates per edge per move with no cull.
   - Assembly hover ray-tests every triangle; cull by face boxes as `PickItem` does.
-- **Sketch lookups**: `Sketch.Point`, `Entity` and `P` are linear scans used per entity per frame. Selection is a
-  `List`.
+- **Sketch lookups**: done. `Sketch.Point`, `Entity` and `P` use an index by id past 16 items, valid while the list
+  is the same object at the same `List<T>` version (the lists are edited in place throughout), so a miss is as
+  quick as a hit. `sketchbench`'s new `frames` column (ten frames of the lookups drawing does): 10×10 grid 3.6 to
+  0.4 ms, 20×20 grid 70–90 to 1.3–2.2 ms; solving unchanged (results hash the same). Selection is still a `List`.
 - **Feature tree**: no longer rebuilt for a preview's result (it shows the document and the real result, which a
   preview leaves alone); icon paths parsed once; one rollback-bar cursor. Measured with `SPRYCAD_PROFILE_TREE=1`
   editing Fillet1 of spur-gear-nice with four previews: one rebuild (the cancel) instead of five; a rebuild of the
