@@ -1,5 +1,6 @@
 using Avalonia;
 using Avalonia.Input;
+using Avalonia.Threading;
 using SpryCad.Core.Assembly;
 using SpryCad.Kernel;
 
@@ -59,6 +60,9 @@ public sealed class AssemblyMode(IAssemblyHost host) : IViewportMode
     Vec3 _grab, _normal, _center;
     Point _last;
     bool _turn, _moved;
+    // the latest move of a drag not yet solved for: moves that come while one is solved are not each solved, only the
+    // last (the solve for it runs once the input waiting has been taken), so the parts never trail the cursor
+    (ViewportControl vp, PointerInfo p)? _pending;
 
     public Cursor? Cursor => null;
 
@@ -66,6 +70,19 @@ public sealed class AssemblyMode(IAssemblyHost host) : IViewportMode
     {
         if (host.PickingFaces) { var f = vp.PickInstance(p.X, p.Y); host.HoverFace(f?.id, f?.face); return; }
         if (_drag == null) { host.HoverComponent(vp.PickInstance(p.X, p.Y)?.id); return; }
+        if (_pending == null) Dispatcher.UIThread.Post(MovePending, DispatcherPriority.Background);
+        _pending = (vp, p);
+    }
+
+    void MovePending()
+    {
+        if (_pending is not { } m) return;
+        _pending = null;
+        if (_drag != null) MoveTo(m.vp, m.p);
+    }
+
+    void MoveTo(ViewportControl vp, PointerInfo p)
+    {
         if (!_moved) { host.BeginAssemblyChange(); _moved = true; if (!_turn) host.DragStarted(_drag); }
         var t = host.WorldOf(_drag);
         (Vec3, Vec3, Vec3, Vec3)? pull = null;
@@ -114,6 +131,8 @@ public sealed class AssemblyMode(IAssemblyHost host) : IViewportMode
 
     public void PointerUp(ViewportControl vp, PointerInfo p)
     {
+        // (the last move first)
+        MovePending();
         if (_drag != null && _moved)
         {
             if (!_turn) host.DragEnded();
