@@ -293,6 +293,26 @@ static class ImportTests
             t.Near(vn, va, 0.3);
         });
 
+        t.Test("Thin holes through an imported B-spline cylinder: small crossings in the middle of its face found", () =>
+        {
+            // a hole narrower than a few of the B-spline face's grid cells is traced on the hole's face (on the
+            // B-spline's grid it was only scraps, and r 0.05 came out with no hole at all)
+            var res = ReadModel("n-cyl.step", recognize: false);
+            var cyl = NTess.ToSolid(res.Solids.Single().Body);
+            var v0 = KernelTests.Vex(cyl);
+            foreach (var r in new[] { 0.5, 0.2, 0.05, 0.02, 0.01 })
+            {
+                Csg.ClearCache();
+                var cut = Csg.Subtract(cyl, Builders.Cylinder(new Vec3(-15, 0, 15), Vec3.UnitX, r, 30, "Hole"));
+                t.True(cut.Native != null && cut.Native.Validate() == null, $"r {r}: exact and valid ({Csg.LastFallbackReason})");
+                // a hole across the diameter: pi r^2 20. (Found, not missed: r 0.05 was. The crossings are traced to the
+                // boolean's own tolerance, a few per cent of the tiniest holes' size, so within 5 %)
+                var dv = v0 - KernelTests.Vex(cut);
+                var e = Math.PI * r * r * 20;
+                t.True(Math.Abs(dv - e) < 0.05 * e, $"r {r}: removed {dv:R}, about {e:R}");
+            }
+        });
+
         t.Test("Boolean through imported B-spline geometry", () =>
         {
             var res = ReadModel("n-cyl.step", recognize: false);
