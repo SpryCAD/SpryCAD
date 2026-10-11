@@ -80,7 +80,8 @@ profile; the profile's times are summed over threads). On the heavy samples (`sa
 11. **Small items**: `SplitFace` pruning, `AddSec`, STEP units and ordinal names, `Solid.Combine` done (see above).
     Left:
     - `NFace.ComputeBounds` builds a throwaway domain. Sharing the cached one changed results; see *Tried and rejected*.
-    - `NFace.Coedges` is a LINQ `SelectMany` used in hot loops.
+    - `NFace.Coedges` is a LINQ `SelectMany` used in hot loops: not worth changing. Its iterators do not show in
+      `FC_ALLOC=1` on spur-gear-nice (Vec3 arrays are a third of the 270 MB a rebuild allocates).
     - `SplitFace`'s duplicate-section check is O(s²) (small s in practice).
 
 ## Core and app: open items
@@ -93,8 +94,14 @@ profile; the profile's times are summed over threads). On the heavy samples (`sa
     a cluster with more equations than variables (a drag's pull and hold terms) is solved in its variables,
     (JᵀJ + cI) Δ = Jᵀ F (the same step mathematically; drags round differently, rebuilds of every sample are bit for
     bit). Ten drag steps: tooth-gap sketch 35 to 10 ms, 6×6 grid 5.7 s to 57 ms, 10×10 grid 135 s to 0.35 s.
+  - Done: `Analyze` and `WouldOverDefine` reduce each group of equations sharing variables on its own rows and
+    columns, keeping the places the rows would have in the whole matrix so pivot ties go the same way: rank and
+    free variables bit for bit as before (checked against the dense reduction on the samples, the grids and the
+    whole test suite). Analyze 10×10 grid 6–12 to 1.0 ms, 20×20 ~250 to 11 ms; the over-define check 12–20 to
+    3.0 ms and ~570 to 30 ms. (Most of the dense cost was walking down columns of a 3200×3200 matrix: skipping
+    zeros in the dense rows alone barely helped.)
   - Left: skipping converged clusters; equations with no variables; analytic derivatives (the Jacobian is central
-    differences); `Analyze` and `WouldOverDefine` reduce the whole dense Jacobian (6–20 ms on the 10×10 grid).
+    differences).
 - **Mate solver** (`Assembly/MateSolver.cs`): `matebench` on a stack of gears: 200 components solve in ~360 ms, a drag
   step ~60 ms (100: 64 and 28 ms); one connected piece, so splitting does not help it. Already sparse. Solve the connected pieces separately and skip those
   already within tolerance. `Settle` runs two full solves.
