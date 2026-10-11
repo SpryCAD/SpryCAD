@@ -103,25 +103,42 @@ static class SketchBench
         return (solve, analyze, drag, over);
     }
 
+    /// <summary>
+    /// Ten frames of the lookups drawing does: each entity's points, and what each relation refers to (an entity,
+    /// else a point).
+    /// </summary>
+    static double Frames(Sketch sk, int rounds) => Time(sk, rounds, s =>
+    {
+        double acc = 0;
+        for (int f = 0; f < 10; f++)
+        {
+            foreach (var e in s.Entities) foreach (var p in e.PointIds) acc += s.P(p).X;
+            foreach (var c in s.Constraints) foreach (var r in c.Refs) acc += s.Entity(r) != null ? 1 : s.Point(r) != null ? 2 : 0;
+        }
+        Mix(acc);
+    });
+
     public static int Run(string[] args)
     {
         var dir = args.Length > 0 ? args[0] : Path.Combine("..", "..", "samples");
         int rounds = args.Length > 1 && int.TryParse(args[1], out var r) ? r : 3;
-        Console.WriteLine($"{"sketch",-44} {"cons",5} {"solve",9} {"analyze",9} {"drag x10",9} {"overdef",9}  (ms, best of {rounds})");
-        double ts = 0, ta = 0, td = 0, to = 0;
+        Console.WriteLine($"{"sketch",-44} {"cons",5} {"solve",9} {"analyze",9} {"drag x10",9} {"overdef",9} {"frames",9}  (ms, best of {rounds})");
+        double ts = 0, ta = 0, td = 0, to = 0, tf = 0;
         foreach (var (name, sk) in SampleSketches(dir))
         {
             var (s, a, d, o) = Measure(sk, rounds);
-            ts += s; ta += a; td += d; to += o;
-            if (sk.Constraints.Count >= 20) Console.WriteLine($"{name,-44} {sk.Constraints.Count,5} {s,9:0.00} {a,9:0.00} {d,9:0.00} {o,9:0.00}");
+            var fr = Frames(sk, rounds);
+            ts += s; ta += a; td += d; to += o; tf += fr;
+            if (sk.Constraints.Count >= 20) Console.WriteLine($"{name,-44} {sk.Constraints.Count,5} {s,9:0.00} {a,9:0.00} {d,9:0.00} {o,9:0.00} {fr,9:0.00}");
         }
-        Console.WriteLine($"{"all sample sketches",-44} {"",5} {ts,9:0.00} {ta,9:0.00} {td,9:0.00} {to,9:0.00}");
+        Console.WriteLine($"{"all sample sketches",-44} {"",5} {ts,9:0.00} {ta,9:0.00} {td,9:0.00} {to,9:0.00} {tf,9:0.00}");
         var sizes = args.Length > 2 ? args[2].Split(',').Select(int.Parse).ToArray() : new[] { 3, 6, 10 };
         foreach (var k in sizes)
         {
             var sk = Grid(k);
             var (s, a, d, o) = Measure(sk, rounds);
-            Console.WriteLine($"{$"grid {k}x{k} rectangles",-44} {sk.Constraints.Count,5} {s,9:0.00} {a,9:0.00} {d,9:0.00} {o,9:0.00}");
+            var fr = Frames(sk, rounds);
+            Console.WriteLine($"{$"grid {k}x{k} rectangles",-44} {sk.Constraints.Count,5} {s,9:0.00} {a,9:0.00} {d,9:0.00} {o,9:0.00} {fr,9:0.00}");
         }
         Console.WriteLine($"results hash {_hash:X16}");
         return 0;

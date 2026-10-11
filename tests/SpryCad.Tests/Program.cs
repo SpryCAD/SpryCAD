@@ -182,6 +182,7 @@ static class Program
             DeterminismTests.Run(t);
             PatternUnionTests.Run(t);
             SketchOverlapTests.Run(t);
+            SketchLookupTests.Run(t);
             DirectBlendTests.Run(t);
             SweepTests.Run(t);
             SweepFeatureTests.Run(t);
