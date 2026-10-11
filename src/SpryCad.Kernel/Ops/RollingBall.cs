@@ -53,11 +53,30 @@ public static class RollingBall
     /// <summary>
     /// Builds the fillet tool of radius r for a chain of edges (connected end to end, all between the same two
     /// surfaces). onFaces(face, p) tells whether a contact point lies on the face it should (fit check).
+    /// runOn(vertex, outward direction, face, face), at an open chain's end: how far the tool runs on past it, along
+    /// the edge's curve and the faces' surfaces (0: it ends square there), to be cut back to the face the end runs
+    /// into at an angle. Contact points <paramref name="cutOff"/> says are cut off with it are not checked for fit.
     /// </summary>
-    public static Result Build(IReadOnlyList<NEdge> chain, double r, string name, Func<NFace, Vec3, bool> onFaces)
+    public static Result Build(IReadOnlyList<NEdge> chain, double r, string name, Func<NFace, Vec3, bool> onFaces,
+        Func<NVertex, Vec3, NFace, NFace, double>? runOn = null, Func<Vec3, bool>? cutOff = null)
     {
+        if (cutOff != null) { var of = onFaces; onFaces = (f, p) => cutOff(p) || of(f, p); }
         var pieces = Order(chain, out var closed);
         if (pieces == null) return Fail("the edges do not form a single chain.");
+        if (!closed && runOn != null)
+            foreach (var atStart in new[] { true, false })
+            {
+                int k = atStart ? 0 : pieces.Count - 1;
+                var pc = pieces[k];
+                if (pc.E.Curve is not (NLine or NCircle or NEllipse) || pc.E.Uses.Count != 2) continue;
+                var t = atStart ? pc.Ta : pc.Tb;
+                var v = Vec3.Distance(pc.E.V0.P, pc.E.Curve.Eval(t)) <= Vec3.Distance(pc.E.V1.P, pc.E.Curve.Eval(t)) ? pc.E.V0 : pc.E.V1;
+                var len = runOn(v, pc.Dir(t) * (atStart ? -1 : 1), pc.E.Uses[0].Face, pc.E.Uses[1].Face);
+                if (!(len > 0)) continue;
+                var dt = len / Math.Max(pc.E.Curve.Deriv(t).Length, 1e-12) * Math.Sign(pc.Tb - pc.Ta);
+                if (pc.E.Curve is NCircle or NEllipse) dt = Math.Sign(dt) * Math.Min(Math.Abs(dt), Math.PI / 4);
+                pieces[k] = atStart ? pc with { Ta = t - dt } : pc with { Tb = t + dt };
+            }
         if (closed && pieces.Count == 1)
         {
             // one closed edge: two pieces (faces must not wrap around)
@@ -266,7 +285,9 @@ public static class RollingBall
         int nj = closed ? n : n + 1;
         int Prev(int k) => closed ? (k + n - 1) % n : k - 1;     // piece before vertex k
         bool RawSwitch(int k) => (closed || k > 0 && k < n) && !SameB(Prev(k), k % n);
-        NVertex ChainVertex(int k) => k < n ? (pieces[k].Ta == pieces[k].E.T0 ? pieces[k].E.V0 : pieces[k].E.V1) : (pieces[n - 1].Tb == pieces[n - 1].E.T0 ? pieces[n - 1].E.V0 : pieces[n - 1].E.V1);
+        // (the edge's vertex nearest: an end run on past its vertex has a parameter of its own)
+        static NVertex Nearest(NEdge e, double t) => Math.Abs(t - e.T0) <= Math.Abs(t - e.T1) ? e.V0 : e.V1;
+        NVertex ChainVertex(int k) => k < n ? Nearest(pieces[k].E, pieces[k].Ta) : Nearest(pieces[n - 1].E, pieces[n - 1].Tb);
         var vertexIndex = new Dictionary<NVertex, int>(ReferenceEqualityComparer.Instance);
         for (int k = 0; k < nj; k++) vertexIndex.TryAdd(ChainVertex(k), k);
 
@@ -526,7 +547,7 @@ public static class RollingBall
         // ---- topology
         var VV = new NVertex[nj];
         // (an open chain's last vertex is ChainVertex(n), its far end: not k % n, the start)
-        for (int k = 0; k < nj; k++) VV[k] = new NVertex(ChainVertex(k).P);
+        for (int k = 0; k < nj; k++) VV[k] = new NVertex(!closed && k == 0 ? pieces[0].Start : !closed && k == n ? pieces[n - 1].End : ChainVertex(k).P);
         var AV = new NVertex[ne]; var BV = new NVertex[ne]; var arc = new NEdge[ne];
         for (int i = 0; i < ne; i++)
         {

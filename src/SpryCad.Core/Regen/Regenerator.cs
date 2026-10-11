@@ -958,7 +958,8 @@ public sealed class Regenerator
             foreach (var r in refs)
             {
                 (Body, Kernel.Native.NEdge)? hit; using (Prof.Time("blend.resolve")) hit = Resolver.ResolveNativeEdge(r, State);
-                if (hit == null) return false;
+                // (not on to the faceted blend, which cannot blend most exact edges: the edge is missing, said)
+                if (hit == null) throw new FeatureException($"Edge between '{r.A}' and '{r.B}' could not be found.");
                 var (b, e) = hit.Value;
                 if (!byBody.TryGetValue(b.Id, out var l)) byBody[b.Id] = l = new();
                 if (!l.Contains(e)) l.Add(e);
@@ -1480,6 +1481,7 @@ public sealed class Regenerator
             Csg.NoFallback = true;
             try
             {
+                string? why = null;
                 bool Union(IEnumerable<(Solid tool, bool cut)> ts)
                 {
                     var at = State;
@@ -1495,6 +1497,7 @@ public sealed class Regenerator
                     catch (Exception ex) when (ex is FeatureException or InvalidOperationException or Kernel.Native.NBooleanException)
                     {
                         State = at;
+                        why = ex.Message;
                         return false;
                     }
                 }
@@ -1513,8 +1516,8 @@ public sealed class Regenerator
                     Detail?.Invoke($"{Describe(seedId)}, instance {i + 2} of {count}");
                     if (trimmed ? OneByOne(tools) : Union(tools)) everything.AddRange(tools.Select(x => x.tool));
                     else status.Warnings.Add(trimmed
-                        ? $"Instance {i + 2} is not {kindName}: the blends that run into neighbouring geometry also run into each other where both are tangent to the same face; that corner cannot be blended yet."
-                        : $"Instance {i + 2} of {Describe(seedId)} is skipped: its blend cannot be applied.");
+                        ? $"Instance {i + 2} is not {kindName}: its blend, cut back where it runs into neighbouring geometry, cannot be joined to the body ({why})."
+                        : $"Instance {i + 2} of {Describe(seedId)} is skipped: its blend cannot be applied ({why}).");
                 }
             }
             finally { Csg.NoFallback = old; }
