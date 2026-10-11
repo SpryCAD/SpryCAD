@@ -38,6 +38,15 @@ public sealed record MateGeom(MateGeomKind Kind, Vec3 P, Vec3 D, double R = 0)
 
     /// <summary>Carried by a placement.</summary>
     public MateGeom Placed(in Transform t) => this with { P = t.Point(P), D = Kind == MateGeomKind.Point ? D : t.Vector(D).Normalized };
+
+    /// <summary>As a value (the solver's: placed many times a step, never kept).</summary>
+    internal Geom Value => new(Kind, P, D, R);
+}
+
+/// <summary>A <see cref="MateGeom"/> as a value: what the mates' residuals and their derivatives work on.</summary>
+internal readonly record struct Geom(MateGeomKind Kind, Vec3 P, Vec3 D, double R)
+{
+    public Geom Placed(in Transform t) => new(Kind, t.Point(P), Kind == MateGeomKind.Point ? D : t.Vector(D).Normalized, R);
 }
 
 /// <summary>
@@ -160,11 +169,11 @@ public sealed class Mate
     static Vec3 Across(Vec3 d) => d.AnyPerpendicular().Normalized;
 
     /// <summary>Gear: how far each component has turned about its axis since the mate was made (continuous).</summary>
-    (double a, double b) GearAngles(MateGeom a, MateGeom b, in Transform ta, in Transform tb) =>
+    (double a, double b) GearAngles(in Geom a, in Geom b, in Transform ta, in Transform tb) =>
         (AngleA + Wrap(AngleAbout(W0A, ta.Vector(UA), a.D) - AngleA), AngleB + Wrap(AngleAbout(W0B, tb.Vector(UB), b.D) - AngleB));
 
     /// <summary>Screw: B's turn relative to A about A's axis (continuous).</summary>
-    double ScrewAngle(MateGeom a, in Transform ta, in Transform tb) => AngleB + Wrap(AngleAbout(ta.Vector(UA), tb.Vector(UB), a.D) - AngleB);
+    double ScrewAngle(in Geom a, in Transform ta, in Transform tb) => AngleB + Wrap(AngleAbout(ta.Vector(UA), tb.Vector(UB), a.D) - AngleB);
 
     /// <summary>
     /// Records what a new mate holds to from how its references lie now (world geometry and the components'
@@ -194,7 +203,9 @@ public sealed class Mate
     }
 
     /// <summary>After a solve: the turns as they are now (so the next solve counts on from here).</summary>
-    public void Settle(MateGeom a, MateGeom b, in Transform ta, in Transform tb)
+    public void Settle(MateGeom a, MateGeom b, in Transform ta, in Transform tb) => Settle(a.Value, b.Value, ta, tb);
+
+    internal void Settle(Geom a, Geom b, in Transform ta, in Transform tb)
     {
         if (Type == MateType.Gear) (AngleA, AngleB) = GearAngles(a, b, ta, tb);
         else if (Type == MateType.Screw) AngleB = ScrewAngle(a, ta, tb);
@@ -205,7 +216,9 @@ public sealed class Mate
     /// vector differences (no ambiguity near a whole turn), positions in mm. <paramref name="ta"/>, <paramref name="tb"/>:
     /// the placements of A's and B's components (Lock, Gear and Screw measure the components themselves).
     /// </summary>
-    public void Residuals(MateGeom a, MateGeom b, in Transform ta, in Transform tb, List<double> r)
+    public void Residuals(MateGeom a, MateGeom b, in Transform ta, in Transform tb, List<double> r) => Residuals(a.Value, b.Value, ta, tb, r);
+
+    internal void Residuals(Geom a, Geom b, in Transform ta, in Transform tb, List<double> r)
     {
         void Vec(Vec3 v) { r.Add(v.X); r.Add(v.Y); r.Add(v.Z); }
         Vec3 Perp(Vec3 v, Vec3 axis) => v - axis * Vec3.Dot(v, axis);
@@ -358,6 +371,9 @@ public sealed class Mate
     /// degrees).
     /// </summary>
     public bool Directional(MateGeom a, MateGeom b, in Transform ta, in Transform tb, in Twist da, in Twist db, List<double> r)
+        => Directional(a.Value, b.Value, ta, tb, da, db, r);
+
+    internal bool Directional(Geom a, Geom b, in Transform ta, in Transform tb, in Twist da, in Twist db, List<double> r)
     {
         void Vec(Vec3 v) { r.Add(v.X); r.Add(v.Y); r.Add(v.Z); }
         // v - n (v.n), and its change

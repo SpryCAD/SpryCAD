@@ -232,9 +232,11 @@ public static class MateSolver
             if (pulling) m += km * ((1 - Math.Cos(th)) / th) + Vec3.Cross(k, km) * ((th - Math.Sin(th)) / th);
             return Transform.Translation(m) * Transform.Rotation(pivots[i], k, th) * place[i];
         }
+        // (the buffers a solve works in, made once: a trial's placements, two residual vectors, the gradient)
+        var trialPlaces = new Transform[nf];
         Transform[] Trial(double[] dx)
         {
-            var t = new Transform[nf];
+            var t = trialPlaces;
             for (int i = 0; i < nf; i++) t[i] = Moved(i, dx[6 * i], dx[6 * i + 1], dx[6 * i + 2], dx[6 * i + 3], dx[6 * i + 4], dx[6 * i + 5]);
             return t;
         }
@@ -254,13 +256,14 @@ public static class MateSolver
         var geoA = new MateGeom[K]; var geoB = new MateGeom[K];
         var offA = new Transform[K]; var offB = new Transform[K]; var fixA = new Transform[K]; var fixB = new Transform[K];
         for (int k = 0; k < mates.Count; k++) { geoA[k] = L(mates[k].A); geoB[k] = L(mates[k].B); }
+        var valA = geoA.Select(g => g?.Value ?? default).ToArray(); var valB = geoB.Select(g => g?.Value ?? default).ToArray();
         var buf = new List<double>();
         void MateRes(int k, in Transform ta, in Transform tb)
         {
             buf.Clear();
             if (k < mates.Count)
             {
-                mates[k].Residuals(geoA[k].Placed(ta), geoB[k].Placed(tb), ta, tb, buf);
+                mates[k].Residuals(valA[k].Placed(ta), valB[k].Placed(tb), ta, tb, buf);
                 return;
             }
             if (pull == null) { buf.Add(0); buf.Add(0); buf.Add(0); return; }
@@ -283,9 +286,14 @@ public static class MateSolver
         Transform SideA(int k, Transform[]? trial) => ca[k] < 0 ? fixA[k] : (trial ?? place)[ca[k]] * offA[k];
         Transform SideB(int k, Transform[]? trial) => cb[k] < 0 ? fixB[k] : (trial ?? place)[cb[k]] * offB[k];
         int rows = rowOf[K];
+        var r0 = Array.Empty<double>();
+        double[] resA = Array.Empty<double>(), resB = Array.Empty<double>();
+        // the residuals into whichever vector r0 is not
         double[] Res(Transform[]? trial)
         {
-            var r = new double[rows];
+            if (resA.Length != rows) { resA = new double[rows]; resB = new double[rows]; }
+            var r = ReferenceEquals(r0, resA) ? resB : resA;
+            Array.Clear(r);
             for (int k = 0; k < K; k++)
             {
                 MateRes(k, SideA(k, trial), SideB(k, trial));
@@ -310,7 +318,6 @@ public static class MateSolver
         static double Sq(double[] v) { double s = 0; foreach (var a in v) s += a * a; return s; }
 
         const double h = 1e-6, maxTurn = 0.2;
-        var r0 = Array.Empty<double>();
         // the damping: light where the steps are small and the mates nearly linear (a drag's pull from where they
         // hold, a solve starting nearly satisfied), lightened fast as steps succeed
         double Damping() => pulling ? 1e-6 : r0.Length > 0 && r0.Max(Math.Abs) < 1e-6 ? 1e-9 : 1e-3;
@@ -347,7 +354,7 @@ public static class MateSolver
                 return true;
             }
             var m = mates[k];
-            var ga = geoA[k].Placed(curA[k]); var gb = geoB[k].Placed(curB[k]);
+            var ga = valA[k].Placed(curA[k]); var gb = valB[k].Placed(curB[k]);
             var still = new Mate.Twist(Vec3.Zero, Vec3.Zero, Vec3.Zero);
             // (a mate between two references of one component: its rows against that component, both sides moving)
             bool one = ca[k] == cb[k];
@@ -399,6 +406,7 @@ public static class MateSolver
             ran = true;
             r0 = Res(null);
             lambda = Damping();
+            var g = new double[n];
             int it = 0, end = pulling ? 2 * maxIter : maxIter;
             for (int stage = 0; stage < end && n > 0 && rows > 0; stage++, it++)
             {
@@ -457,7 +465,7 @@ public static class MateSolver
                 }
                 // the normal equations JtJ dx = -Jt r, a 6x6 block at a time
                 sky.Clear();
-                var g = new double[n];
+                Array.Clear(g);
                 for (int k = 0; k < K; k++)
                 {
                     int nr = rowOf[k + 1] - rowOf[k], r = rowOf[k];
@@ -571,11 +579,12 @@ public static class MateSolver
         readonly int[] _first;    // row (in order) -> its first stored column
         readonly double[][] _row; // row -> columns first..row (the lower triangle)
         readonly double[][] _l;   // its factor, the same shape (made again for each damping tried)
+        readonly double[] _y, _x;  // a solve's vectors
 
         Skyline(int components, int[] pos, int[] firstComp)
         {
             _n = components * 6; _pos = pos;
-            _first = new int[_n]; _row = new double[_n][]; _l = new double[_n][];
+            _first = new int[_n]; _row = new double[_n][]; _l = new double[_n][]; _y = new double[_n]; _x = new double[_n];
             for (int i = 0; i < _n; i++)
             {
                 _first[i] = 6 * firstComp[i / 6];
@@ -669,8 +678,9 @@ public static class MateSolver
                     }
                 }
             }
-            // L y = g, then Lt x = y (in order), then back to the components' numbering
-            var y = new double[_n];
+            // L y = g, then Lt x = y (in order), then back to the components' numbering (into x, made once: the
+            // caller is done with it before the next solve)
+            var y = _y;
             for (int dof = 0; dof < _n; dof++) y[Index(dof)] = g[dof];
             for (int i = 0; i < _n; i++)
             {
@@ -684,7 +694,7 @@ public static class MateSolver
                 int fi = _first[i];
                 for (int k = fi; k < i; k++) y[k] -= L[i][k - fi] * y[i];
             }
-            var x = new double[_n];
+            var x = _x;
             for (int dof = 0; dof < _n; dof++) x[dof] = y[Index(dof)];
             return x;
         }
