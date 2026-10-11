@@ -352,6 +352,8 @@ public sealed class NSurface
     /// </summary>
     public static Vec3 ProjectToIntersection(NSurface a, NSurface b, Vec3 p, double tol = 1e-12)
     {
+        // (counted against free-form surfaces, where each step is a closest-point search: tests check they stay few)
+        if (Prof.Enabled && (a.Kind is SurfaceKind.BSpline or SurfaceKind.Offset || b.Kind is SurfaceKind.BSpline or SurfaceKind.Offset)) Prof.Count("project.freeform", 1);
         var q = p;
         for (int it = 0; it < 40; it++)
         {

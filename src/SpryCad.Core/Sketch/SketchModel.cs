@@ -225,8 +225,57 @@ public sealed class Sketch
 
     public int NewId() => NextId++;
 
-    public SkPoint? Point(int id) { foreach (var p in Points) if (p.Id == id) return p; return null; }
-    public SkEntity? Entity(int id) { foreach (var e in Entities) if (e.Id == id) return e; return null; }
+    public SkPoint? Point(int id)
+    {
+        var ps = Points;
+        if (ps.Count > IndexFrom)
+        {
+            var ix = _points;
+            if (ix == null || !ReferenceEquals(ix.List, ps) || ix.Version != ListVersion(ps)) _points = ix = new(ps, ListVersion(ps), IndexOf(ps, p => p.Id));
+            if (!ix.At.TryGetValue(id, out var k)) return null;
+            if (ps[k].Id == id) return ps[k];
+        }
+        foreach (var p in ps) if (p.Id == id) return p;
+        return null;
+    }
+
+    public SkEntity? Entity(int id)
+    {
+        var es = Entities;
+        if (es.Count > IndexFrom)
+        {
+            var ix = _entities;
+            if (ix == null || !ReferenceEquals(ix.List, es) || ix.Version != ListVersion(es)) _entities = ix = new(es, ListVersion(es), IndexOf(es, e => e.Id));
+            if (!ix.At.TryGetValue(id, out var k)) return null;
+            if (es[k].Id == id) return es[k];
+        }
+        foreach (var e in es) if (e.Id == id) return e;
+        return null;
+    }
+
+    // Point and Entity by id, for sketches past a few dozen items (drawing and the solver look up every entity's
+    // points and every relation's references): each id's first place in its list, valid while the list is the same
+    // object at the same version (List<T> counts every change made to it; the lists are edited in place throughout).
+    // Ids are given before an item joins its list (a hit is still checked, and falls back to the scan). Built whole
+    // and swapped in, so threads reading one sketch never see it half made.
+    sealed record Index<T>(List<T> List, int Version, Dictionary<int, int> At);
+    Index<SkPoint>? _points;
+    Index<SkEntity>? _entities;
+    const int IndexFrom = 16;
+
+    [System.Runtime.CompilerServices.UnsafeAccessor(System.Runtime.CompilerServices.UnsafeAccessorKind.Field, Name = "_version")]
+    static extern ref int VersionOf(List<SkPoint> list);
+    [System.Runtime.CompilerServices.UnsafeAccessor(System.Runtime.CompilerServices.UnsafeAccessorKind.Field, Name = "_version")]
+    static extern ref int VersionOf(List<SkEntity> list);
+    static int ListVersion(List<SkPoint> list) => VersionOf(list);
+    static int ListVersion(List<SkEntity> list) => VersionOf(list);
+
+    static Dictionary<int, int> IndexOf<T>(List<T> list, Func<T, int> id)
+    {
+        var d = new Dictionary<int, int>(list.Count);
+        for (int i = 0; i < list.Count; i++) d.TryAdd(id(list[i]), i);
+        return d;
+    }
     public SkConstraint? Constraint(int id) { foreach (var c in Constraints) if (c.Id == id) return c; return null; }
     public Vec2 P(int id) => Point(id)?.P ?? Vec2.Zero;
 

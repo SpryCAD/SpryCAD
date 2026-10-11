@@ -465,70 +465,93 @@ public sealed partial class AssemblyModel
     /// </summary>
     MateSolver.Result Solve(ISet<string>? onlyMove, MateSolver.Pull? pull)
     {
-        if (!Doc.Components.Any(c => c.IsAssembly && !c.Suppressed))
+        if (Flatten() is not { } f)
             return pull != null ? MateSolver.SolveDrag(Doc, Local, pull) : MateSolver.Solve(Doc, Local, onlyMove);
+        var res = pull != null ? MateSolver.SolveDrag(f.Doc, Local, f.PullOnBody(pull), f.Attached) : MateSolver.Solve(f.Doc, Local, onlyMove, 80, f.Attached);
+        WriteBack(f, res);
+        return res;
+    }
 
-        var flat = new AssemblyDocument();
-        var attached = new Dictionary<string, MateSolver.Attachment>();
-        var occs = new List<Occurrence>();
-        var world = new Dictionary<string, Transform>();
-        var subMates = new List<(Mate mate, Component top, string key)>();
+    /// <summary>
+    /// The assembly flattened for the solver: every component at every depth (named by its path), what carries what,
+    /// the flexible sub-assemblies' own mates on their components' paths.
+    /// </summary>
+    sealed class Flat
+    {
+        public AssemblyDocument Doc = new();
+        public Dictionary<string, MateSolver.Attachment> Attached = new();
+        public List<Occurrence> Occs = new();
+        public Dictionary<string, Transform> World = new();
+        public List<(Mate mate, Component top, string key)> SubMates = new();
+
+        /// <summary>A pull on a carried component pulls what carries it.</summary>
+        public MateSolver.Pull PullOnBody(MateSolver.Pull pull) =>
+            Attached.TryGetValue(pull.Component, out var at) ? pull with { Component = at.Body, Local = at.Offset.Point(pull.Local) } : pull;
+    }
+
+    /// <summary>The assembly flattened (null without sub-assemblies: the solver works on the assembly itself).</summary>
+    Flat? Flatten()
+    {
+        if (!Doc.Components.Any(c => c.IsAssembly && !c.Suppressed)) return null;
+        var f = new Flat();
         foreach (var o in Occurrences())
         {
-            occs.Add(o);
-            world[o.Path] = o.World;
-            flat.Components.Add(new Component { Id = o.Path, Fixed = o.Rel == null && o.Component.Fixed, Placement = Placement.From(o.World) });
+            f.Occs.Add(o);
+            f.World[o.Path] = o.World;
+            f.Doc.Components.Add(new Component { Id = o.Path, Fixed = o.Rel == null && o.Component.Fixed, Placement = Placement.From(o.World) });
             // placed by this assembly and floating: moves for itself; else carried by what holds it
             if (o.Rel != null && !(o.Driven && !o.Component.Fixed))
             {
                 var parent = ParentPath(o.Path)!;
-                var body = attached.TryGetValue(parent, out var pa) ? pa.Body : parent;
-                attached[o.Path] = new MateSolver.Attachment(body, world[body].RigidInverse() * o.World);
+                var body = f.Attached.TryGetValue(parent, out var pa) ? pa.Body : parent;
+                f.Attached[o.Path] = new MateSolver.Attachment(body, f.World[body].RigidInverse() * o.World);
             }
             // a flexible sub-assembly's own mates, on its components' paths (its origin planes: the sub-assembly's)
             if (o.Component is { IsAssembly: true, Flexible: true } && o.Driven && o.Owner.SubOf(o.Component)?.Model is { } sm)
                 foreach (var m in sm.Doc.Mates)
                 {
-                    var f = m.Clone();
+                    var c = m.Clone();
                     var key = (o.Rel == null ? "" : o.Rel + "/") + m.Id;
-                    f.Id = o.Path + "/" + m.Id;
-                    f.A.Component = f.A.Component == null ? o.Path : o.Path + "/" + f.A.Component;
-                    f.B.Component = f.B.Component == null ? o.Path : o.Path + "/" + f.B.Component;
-                    if (o.Top.Turns != null && o.Top.Turns.TryGetValue(key, out var tr) && tr.Length == 2) (f.AngleA, f.AngleB) = (tr[0], tr[1]);
-                    flat.Mates.Add(f);
-                    subMates.Add((f, o.Top, key));
+                    c.Id = o.Path + "/" + m.Id;
+                    c.A.Component = c.A.Component == null ? o.Path : o.Path + "/" + c.A.Component;
+                    c.B.Component = c.B.Component == null ? o.Path : o.Path + "/" + c.B.Component;
+                    if (o.Top.Turns != null && o.Top.Turns.TryGetValue(key, out var tr) && tr.Length == 2) (c.AngleA, c.AngleB) = (tr[0], tr[1]);
+                    f.Doc.Mates.Add(c);
+                    f.SubMates.Add((c, o.Top, key));
                 }
         }
         // the assembly's own mates first (themselves: their turns settle as always)
-        flat.Mates.InsertRange(0, Doc.Mates);
-        // a pull on a carried component pulls what carries it
-        if (pull != null && attached.TryGetValue(pull.Component, out var pat))
-            pull = pull with { Component = pat.Body, Local = world[pat.Body].RigidInverse().Point(world[pull.Component].Point(pull.Local)) };
+        f.Doc.Mates.InsertRange(0, Doc.Mates);
+        return f;
+    }
 
-        var res = pull != null ? MateSolver.SolveDrag(flat, Local, pull, attached) : MateSolver.Solve(flat, Local, onlyMove, 80, attached);
-
-        foreach (var fc in flat.Components) world[fc.Id] = fc.Placement.ToTransform();
-        foreach (var o in occs)
+    /// <summary>
+    /// A solve of the flattened assembly back into it: the assembly's components' placements, the flexible
+    /// sub-assemblies' poses and their gears' and screws' turns.
+    /// </summary>
+    void WriteBack(Flat f, MateSolver.Result res)
+    {
+        foreach (var fc in f.Doc.Components) f.World[fc.Id] = fc.Placement.ToTransform();
+        foreach (var o in f.Occs)
         {
             if (o.Rel == null)
             {
-                if (res.Moved.Contains(o.Path)) o.Component.Placement = flat.Find(o.Path)!.Placement;
+                if (res.Moved.Contains(o.Path)) o.Component.Placement = f.Doc.Find(o.Path)!.Placement;
                 continue;
             }
             // a flexible sub-assembly's component solved for: where it is now, relative to what holds it (which may
             // have moved without it)
             if (!res.Solved.Contains(o.Path)) continue;
-            var pose = world[ParentPath(o.Path)!].RigidInverse() * world[o.Path];
+            var pose = f.World[ParentPath(o.Path)!].RigidInverse() * f.World[o.Path];
             var was = PoseOf(o.Component, o.Top, o.Rel, true).ToTransform();
             if (Differs(was, pose)) (o.Top.Poses ??= new())[o.Rel] = Placement.From(pose);
         }
-        foreach (var (m, top, key) in subMates)
+        foreach (var (m, top, key) in f.SubMates)
         {
             if (m.Type is not (MateType.Gear or MateType.Screw)) continue;
             if (top.Turns != null && top.Turns.TryGetValue(key, out var t) && t.Length == 2 && t[0] == m.AngleA && t[1] == m.AngleB) continue;
             (top.Turns ??= new())[key] = new[] { m.AngleA, m.AngleB };
         }
-        return res;
     }
 
     static bool Differs(in Transform a, in Transform b) =>

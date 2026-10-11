@@ -6,7 +6,8 @@ namespace SpryCad.Tests;
 /// <summary>
 /// The mates' exact derivatives (<see cref="Mate.Directional"/>, the solver's Jacobian) against central differences of
 /// <see cref="Mate.Residuals"/>: every type with every pair of reference kinds it takes, its options (aligned, side,
-/// inside, offsets and limits on either side), at random placements, either side moved.
+/// inside, offsets and limits on either side), at random placements, either side moved, directions counted as radians and
+/// as lengths (the solver's scale).
 /// </summary>
 static class MateDerivativeTests
 {
@@ -49,12 +50,13 @@ static class MateDerivativeTests
                                 // an Angle's limits in degrees: usually outside 10..20
                                 if (type == MateType.Angle && m.Min is > -1e9) { m.Min = 10; m.Max = 20; }
                                 foreach (var sideA in new[] { true, false })
+                                foreach (var scale in new[] { 1.0, 37 })
                                 {
                                     var pivot = V(30);
                                     var tw = new Mate.Twist(V(1), V(1), pivot);
                                     var zero = new Mate.Twist(Vec3.Zero, Vec3.Zero, pivot);
                                     var exactRows = new List<double>();
-                                    if (!m.Directional(a, b, ta, tb, sideA ? tw : zero, sideA ? zero : tw, exactRows)) continue;
+                                    if (!m.Directional(a, b, ta, tb, sideA ? tw : zero, sideA ? zero : tw, exactRows, scale)) continue;
                                     // central differences along the same motion (a turn about the pivot, then a move)
                                     const double h = 1e-6;
                                     Transform Step(double s) => Transform.Translation(tw.M * s) * Transform.Rotation(pivot, tw.W.Normalized, tw.W.Length * s);
@@ -62,7 +64,7 @@ static class MateDerivativeTests
                                     {
                                         var (sa, sb) = sideA ? (Step(s) * ta, tb) : (ta, Step(s) * tb);
                                         var r = new List<double>();
-                                        m.Residuals(la.Placed(sa), lb.Placed(sb), sa, sb, r);
+                                        m.Residuals(la.Placed(sa), lb.Placed(sb), sa, sb, r, scale);
                                         return r;
                                     }
                                     var (rp, rm) = (At(h), At(-h));

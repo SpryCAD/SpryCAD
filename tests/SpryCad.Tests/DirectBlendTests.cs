@@ -261,7 +261,8 @@ static class DirectBlendTests
             // 20 s each, and past the patch's edge curves that are not there (1-3 s here)
             var doc = Demos.BlendCases.First(c => c.name == "casting foot, drafted, chamfered 6 x 3").build();
             var body = new Regenerator().Rebuild(doc, doc.Features.Count).State.Bodies[0].Solid;
-            var sw = System.Diagnostics.Stopwatch.StartNew();
+            var wasProf = Prof.Enabled;
+            Prof.Reset(); Prof.Enabled = true;
             foreach (var r in new[] { 26.0, 27, 28, 29, 30 })
             {
                 Csg.ClearCache();
@@ -271,7 +272,11 @@ static class DirectBlendTests
                 var dv = KernelTests.Vex(body) - KernelTests.Vex(cut);
                 t.True(Math.Abs(dv - Math.PI * 9 * 20) < 1e-6 * dv, $"r {r}: removed {dv:R}");
             }
-            t.True(sw.ElapsedMilliseconds < 2000, $"{sw.ElapsedMilliseconds} ms for five holes");
+            // (counted, not timed: points projected with the B-spline's closest-point search at every step, the slow path)
+            Prof.Enabled = wasProf;
+            var slow = Prof.Results().Where(x => x.name == "project.freeform").Sum(x => x.calls);
+            Console.WriteLine($"      {slow} projections by closest-point search");
+            t.True(slow < 500, $"{slow} projections by closest-point search for five holes");
             // through the chamfer: more than the plate's
             Csg.ClearCache();
             var through = Csg.Subtract(body, Builders.Cylinder(new Vec3(40 + 22 * 0.7071, -20 - 22 * 0.7071, -1), Vec3.UnitZ, 3, 40, "H"));
@@ -448,6 +453,23 @@ static class DirectBlendTests
                     }
                     finally { DirectBlend.Enabled = old; }
                 }
+        });
+
+        t.Test("Corners where three fillets meet: the same by boolean as directly (the ball's patch both ways)", () =>
+        {
+            // by boolean (direct blends off, a pattern's copies) the edges' tools used to overlap at the corner (a
+            // mitred corner, not the ball's): 32 mm³ apart on a box filleted all round
+            foreach (var name in new[] { "box, three edges at a corner", "box, all edges", "pocket, floor and corners", "casting foot, undrafted" })
+            {
+                var a = BlendAB.Build(() => Demos.BlendCases.First(c => c.name == name).build(), direct: true, reps: 1).feats;
+                var b = BlendAB.Build(() => Demos.BlendCases.First(c => c.name == name).build(), direct: false, reps: 1).feats;
+                for (int i = 0; i < a.Count; i++)
+                {
+                    t.True(a[i].error == null && b[i].error == null, $"{name}, {a[i].name}: {a[i].error ?? b[i].error}");
+                    t.True(Math.Abs(a[i].vol - b[i].vol) <= 1e-7 * Math.Max(1, b[i].vol), $"{name}, {a[i].name}: {a[i].vol:R} directly, {b[i].vol:R} by boolean");
+                    t.True(a[i].names.SetEquals(b[i].names), $"{name}, {a[i].name}: faces +[{string.Join(",", b[i].names.Except(a[i].names))}] -[{string.Join(",", a[i].names.Except(b[i].names))}]");
+                }
+            }
         });
 
         t.Test("Direct blend: where three fillets meet, a patch of the ball (convex and concave corners, exact volumes)", () =>

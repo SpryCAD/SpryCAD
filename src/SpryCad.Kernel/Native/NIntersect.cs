@@ -1294,8 +1294,9 @@ public static class NIntersect
         void Sub(Vec3 p, Vec3 q, int depth)
         {
             if (depth > 6) return;
+            // (a chain segment already within tolerance too: the trace grid is usually much finer than tol)
             var m = NSurface.ProjectToIntersection(a, b, (p + q) * 0.5);
-            if (Vec3.Distance(m, (p + q) * 0.5) < tol * 0.25 && depth > 0) return;
+            if (Vec3.Distance(m, (p + q) * 0.5) < tol * 0.25) return;
             if (Vec3.Distance(p, q) < tol) return;
             Sub(p, m, depth + 1);
             res.Add(m);

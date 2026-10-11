@@ -45,8 +45,13 @@ profile; the profile's times are summed over threads). On the heavy samples (`sa
 ## Kernel: open items, roughly by expected gain
 
 1. **`NIntersect.Trace` internals** (results must stay identical):
-   - `Densify` always splits at depth 0 and then projects twice at depth 1. That is about 3 projections per
-     segment; the extra points change results.
+   - Done: `Densify` no longer always splits a chain segment (it projected its midpoint and both halves'
+     whatever the error). The trace grid is usually much finer than the tolerance: on spur-gear-nice 553k chain
+     points per rebuild were doubled to 1.1M. Now a segment whose midpoint is within tol/4 stays whole: projections
+     1.33M to 0.84M, output points 666k to 423k; `trace.project` ~500 to ~245 ms summed, `sec.makeedge` ~56 to
+     ~23 ms, the rebuild ~534 to ~474 ms. Results within tolerance: exact mass properties unchanged on every sample
+     but hand-wheel (1.6e-7 relative, inertia; volume 1.3e-7) and spur-gear-nice (under 1e-9); every demo variant
+     builds. `DensifyOnParams` (B-spline traces) still always splits.
    - `ProjectToIntersection` starts every point from scratch (warm starts would change results).
    - Done: the block test's grid-node points are kept (blocks share their corners and edge middles) and reused by
      the grid values: `trace.grid` about 40% less (spur-gear-nice 58–68 to 33–38 ms, handwheel 76–93 to 52–58 ms
@@ -80,7 +85,8 @@ profile; the profile's times are summed over threads). On the heavy samples (`sa
 11. **Small items**: `SplitFace` pruning, `AddSec`, STEP units and ordinal names, `Solid.Combine` done (see above).
     Left:
     - `NFace.ComputeBounds` builds a throwaway domain. Sharing the cached one changed results; see *Tried and rejected*.
-    - `NFace.Coedges` is a LINQ `SelectMany` used in hot loops.
+    - `NFace.Coedges` is a LINQ `SelectMany` used in hot loops: not worth changing. Its iterators do not show in
+      `FC_ALLOC=1` on spur-gear-nice (Vec3 arrays are a third of the 270 MB a rebuild allocates).
     - `SplitFace`'s duplicate-section check is O(s²) (small s in practice).
 
 ## Core and app: open items
@@ -93,8 +99,14 @@ profile; the profile's times are summed over threads). On the heavy samples (`sa
     a cluster with more equations than variables (a drag's pull and hold terms) is solved in its variables,
     (JᵀJ + cI) Δ = Jᵀ F (the same step mathematically; drags round differently, rebuilds of every sample are bit for
     bit). Ten drag steps: tooth-gap sketch 35 to 10 ms, 6×6 grid 5.7 s to 57 ms, 10×10 grid 135 s to 0.35 s.
+  - Done: `Analyze` and `WouldOverDefine` reduce each group of equations sharing variables on its own rows and
+    columns, keeping the places the rows would have in the whole matrix so pivot ties go the same way: rank and
+    free variables bit for bit as before (checked against the dense reduction on the samples, the grids and the
+    whole test suite). Analyze 10×10 grid 6–12 to 1.0 ms, 20×20 ~250 to 11 ms; the over-define check 12–20 to
+    3.0 ms and ~570 to 30 ms. (Most of the dense cost was walking down columns of a 3200×3200 matrix: skipping
+    zeros in the dense rows alone barely helped.)
   - Left: skipping converged clusters; equations with no variables; analytic derivatives (the Jacobian is central
-    differences); `Analyze` and `WouldOverDefine` reduce the whole dense Jacobian (6–20 ms on the 10×10 grid).
+    differences).
 - **Mate solver** (`Assembly/MateSolver.cs`): `matebench` on a stack of gears: 200 components solve in ~360 ms, a drag
   step ~60 ms (100: 64 and 28 ms); one connected piece, so splitting does not help it. Already sparse. Solve the connected pieces separately and skip those
   already within tolerance. `Settle` runs two full solves.
@@ -106,8 +118,14 @@ profile; the profile's times are summed over threads). On the heavy samples (`sa
   - `DocumentSession`: done (no display meshes for a result a newer request has superseded).
   - Equations: done. One naming another still pending waits for it without being evaluated (no exception per pass);
     the pass limit that stopped a chain listed after the ones it uses (three or more) before its end is gone.
-  - `ResolveDir` from an edge tessellates the whole intermediate body; try `ResolveNativeEdge` first, as the other
-    resolvers do.
+  - `ResolveDir` from an edge: done. It finds the edge on the native B-rep first (`ResolveNativeEdge`), giving the
+    same direction as the facet lookup (a straight edge runs along the loop of the face whose name sorts first).
+    No sample uses an edge direction: `-- edgedir in.sprt out.sprt` makes one with each linear pattern's axis
+    replaced by an edge along it. Enclosure's patterns 7.7 to 2.7 ms and 13.5 to 3.4 ms; results identical
+    (geometry, display mesh and mass properties). On heat-sink a later feature's hash changes: the old lookup
+    tessellated the body, which left edge samples cached that the later feature then used (mass properties the
+    same to every digit). A planar face as a direction still tessellates: its origin is the centroid of the
+    facet nearest the hint, which the native face cannot reproduce.
 - **Viewport** (`ViewportControl`, `SketchEditor`):
   - Sketch overlay: relation, On Edge and anchor marks are kept by id and repositioned (no new controls, brushes or
     native cursors per update). Measured with `SPRYCAD_PROFILE_OVERLAY=1` (the log gets each 2 s's updates, average
@@ -116,8 +134,10 @@ profile; the profile's times are summed over threads). On the heavy samples (`sa
     either way, so coalescing to once per frame and caching the label layout wait for a sketch where it shows.
   - `PickVertex` allocates per edge per move with no cull.
   - Assembly hover ray-tests every triangle; cull by face boxes as `PickItem` does.
-- **Sketch lookups**: `Sketch.Point`, `Entity` and `P` are linear scans used per entity per frame. Selection is a
-  `List`.
+- **Sketch lookups**: done. `Sketch.Point`, `Entity` and `P` use an index by id past 16 items, valid while the list
+  is the same object at the same `List<T>` version (the lists are edited in place throughout), so a miss is as
+  quick as a hit. `sketchbench`'s new `frames` column (ten frames of the lookups drawing does): 10×10 grid 3.6 to
+  0.4 ms, 20×20 grid 70–90 to 1.3–2.2 ms; solving unchanged (results hash the same). Selection is still a `List`.
 - **Feature tree**: no longer rebuilt for a preview's result (it shows the document and the real result, which a
   preview leaves alone); icon paths parsed once; one rollback-bar cursor. Measured with `SPRYCAD_PROFILE_TREE=1`
   editing Fillet1 of spur-gear-nice with four previews: one rebuild (the cancel) instead of five; a rebuild of the
