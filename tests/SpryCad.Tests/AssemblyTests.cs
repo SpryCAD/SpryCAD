@@ -803,5 +803,33 @@ static class AssemblyTests
             var turned2 = Math.Atan2(T(sleeve2).Vector(Vec3.UnitX).Y, T(sleeve2).Vector(Vec3.UnitX).X);
             t.True(Math.Abs(turned - 2.0) < 1e-6 && Math.Abs(turned - turned2) < 1e-6, $"turned {turned:0.######} with the session, {turned2:0.######} afresh (the cursor: 2)");
         });
+
+        t.Test("Drag sessions: the linkage's slider dragged past both ends of its travel and back follows the cursor wherever it can reach, off its dead points too", () =>
+        {
+            var m = Demos.Assemblies.First(x => x.file == "linkage.sasm").build();
+            var slider = m.Doc.Components.First(c => c.Name.StartsWith("Slider"));
+            // its travel: where the kinematics put it as the crank goes round
+            double lo = double.MaxValue, hi = double.MinValue;
+            for (int i = 0; i < 3600; i++) { var x = Demos.LinkageJoints(2 * Math.PI * i / 3600).C.X; lo = Math.Min(lo, x); hi = Math.Max(hi, x); }
+            double At() => slider.Placement.ToTransform().T.X;
+            // the cursor along the rail: on past the far end, back past the near one, then into the middle
+            var path = new List<double>();
+            for (double x = At(); x < hi + 30; x += 4) path.Add(x);
+            for (double x = hi + 30; x > lo - 30; x -= 4) path.Add(x);
+            for (double x = lo - 30; x < (lo + hi) / 2; x += 4) path.Add(x);
+            m.BeginDrag(slider.Id);
+            double worst = 0; string where = "";
+            foreach (var x in path)
+            {
+                var res = m.SolveDrag(new MateSolver.Pull(slider.Id, Vec3.Zero, new Vec3(x, 0, 100), -Vec3.UnitZ));
+                t.True(res.Satisfied, $"cursor at {x:0.#}: the mates hold");
+                // within its reach it is under the cursor; beyond, at that end of its travel
+                var off = Math.Abs(At() - Math.Clamp(x, lo, hi));
+                if (off > worst) { worst = off; where = $"cursor at {x:0.#}, slider at {At():0.###} (travel {lo:0.###} to {hi:0.###})"; }
+            }
+            m.EndDrag();
+            // (a few mm behind where it leaves an end of its travel: there the crank turns a long way for a little of it)
+            t.True(worst < 3, $"the slider follows the cursor: worst {worst:0.###} mm off, {where}");
+        });
     }
 }
