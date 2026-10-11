@@ -30,6 +30,7 @@ static partial class Demos
         ("drafted round boss, top and foot filleted", DraftedBoss),
         ("wall beside a taller one", NarrowGap),
         ("rib against a wall, filleted and mirrored", MirroredRib),
+        ("ribs, filleted and patterned", () => PatternedRibs("16")),
     };
 
     /// <summary>
@@ -300,6 +301,32 @@ static partial class Demos
             },
         });
         d.AddFeature(new MirrorFeature { Name = "Rib, other end", Seeds = { rib.Id, fil.Id }, Plane = PlaneRef.Right });
+        return d;
+    }
+
+    /// <summary>
+    /// A freestanding rib on a plate, its two long feet filleted R3, patterned across the plate with the given spacing
+    /// (the rib 6 thick: under 12 the fillets of neighbouring ribs overlap in the gap).
+    /// </summary>
+    internal static CadDocument PatternedRibs(string spacing)
+    {
+        var d = Doc(("X", "50"), ("Y", "40"), ("RL", "30"), ("RT", "3"), ("RH", "20"), ("R", "3"), ("S", spacing));
+        var b = new Sk(d);
+        b.Rect("-X", "-Y", "X", "Y");
+        var bs = d.AddFeature(new SketchFeature { Name = "Plate", Plane = PlaneRef.Front, Sketch = b.S });
+        var plate = d.AddFeature(new ExtrudeFeature { Name = "Plate", SketchId = bs.Id, Depth = "10" });
+        var top = d.AddFeature(new PlaneFeature { Name = "Plate top", Base = PlaneRef.Front, Offset = "10" });
+        var r = new Sk(d);
+        var rl = r.Rect("-RL", "-RT", "RL", "RT");
+        var rs = d.AddFeature(new SketchFeature { Name = "Rib", Plane = new PlaneRef { Feature = top.Id }, Sketch = r.S });
+        var rib = d.AddFeature(new ExtrudeFeature { Name = "Rib", SketchId = rs.Id, Depth = "RH" });
+        double V(string e) => b.Eval(e);
+        var fil = d.AddFeature(new FilletFeature
+        {
+            Name = "Rib feet", Radius = "R", TangentPropagation = false,
+            Edges = { E($"{rib.Id}.S.L{rl[0]}", $"{plate.Id}.End", new Vec3(0, -V("RT"), 10)), E($"{rib.Id}.S.L{rl[2]}", $"{plate.Id}.End", new Vec3(0, V("RT"), 10)) },
+        });
+        d.AddFeature(new LinearPatternFeature { Name = "Ribs", Seeds = { rib.Id, fil.Id }, Direction = new DirRef { Axis = "Y" }, Spacing = "S", Count = "2" });
         return d;
     }
 
