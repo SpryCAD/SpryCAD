@@ -261,7 +261,8 @@ static class DirectBlendTests
             // 20 s each, and past the patch's edge curves that are not there (1-3 s here)
             var doc = Demos.BlendCases.First(c => c.name == "casting foot, drafted, chamfered 6 x 3").build();
             var body = new Regenerator().Rebuild(doc, doc.Features.Count).State.Bodies[0].Solid;
-            var sw = System.Diagnostics.Stopwatch.StartNew();
+            var wasProf = Prof.Enabled;
+            Prof.Reset(); Prof.Enabled = true;
             foreach (var r in new[] { 26.0, 27, 28, 29, 30 })
             {
                 Csg.ClearCache();
@@ -271,7 +272,11 @@ static class DirectBlendTests
                 var dv = KernelTests.Vex(body) - KernelTests.Vex(cut);
                 t.True(Math.Abs(dv - Math.PI * 9 * 20) < 1e-6 * dv, $"r {r}: removed {dv:R}");
             }
-            t.True(sw.ElapsedMilliseconds < 2000, $"{sw.ElapsedMilliseconds} ms for five holes");
+            // (counted, not timed: points projected with the B-spline's closest-point search at every step, the slow path)
+            Prof.Enabled = wasProf;
+            var slow = Prof.Results().Where(x => x.name == "project.freeform").Sum(x => x.calls);
+            Console.WriteLine($"      {slow} projections by closest-point search");
+            t.True(slow < 500, $"{slow} projections by closest-point search for five holes");
             // through the chamfer: more than the plate's
             Csg.ClearCache();
             var through = Csg.Subtract(body, Builders.Cylinder(new Vec3(40 + 22 * 0.7071, -20 - 22 * 0.7071, -1), Vec3.UnitZ, 3, 40, "H"));
