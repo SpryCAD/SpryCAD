@@ -160,10 +160,27 @@ public sealed class Regenerator
         if (off.Count == 0) return (false, null, null);
         // a sketch goes with the plane or face it is on; geometry it took from the model stays, dangling
         if (f is SketchFeature sk) json = JsonSerializer.Serialize(sk.Plane, Serialization.Compact);
+        // a pattern or mirror goes on without its suppressed seeds (it says so), suppressed only with all of them
+        if (SeedsOf(f) is { Count: > 0 } seeds)
+        {
+            if (seeds.All(off.ContainsKey)) return (true, off[seeds[0]], null);
+            var node = System.Text.Json.Nodes.JsonNode.Parse(json)!.AsObject();
+            foreach (var k in node.Select(kv => kv.Key).Where(k => k.Equals("Seeds", StringComparison.OrdinalIgnoreCase)).ToList()) node.Remove(k);
+            json = node.ToJsonString();
+        }
         foreach (var (id, name) in off)
             if (CadDocument.Refers(json, id)) return (true, name, null);
         return (false, null, null);
     }
+
+    /// <summary>The features a pattern or mirror copies; null for other features.</summary>
+    static List<string>? SeedsOf(Feature f) => f switch
+    {
+        LinearPatternFeature lp => lp.Seeds,
+        CircularPatternFeature cp => cp.Seeds,
+        MirrorFeature m => m.Seeds,
+        _ => null,
+    };
 
     /// <summary>
     /// Which features are not built, and why (null: by the user; "condition"; or the suppressed feature used),
@@ -1182,6 +1199,13 @@ public sealed class Regenerator
             var skipped = new HashSet<int>((skip ?? Enumerable.Empty<int>()).Select(n => n - 2));
             if (!seeds.Any()) throw new FeatureException("Select the features to pattern.");
             if (transforms.Count == 0) throw new FeatureException("The pattern has no instances.");
+            // suppressed seeds left out, said (the feature itself is suppressed when all of them are)
+            var offSeeds = seeds.Where(s => !State.Tools.ContainsKey(s) && Earlier.TryGetValue(s, out var ss) && ss.Suppressed).ToList();
+            if (offSeeds.Count > 0 && offSeeds.Count < seeds.Count())
+            {
+                status.Warnings.Add($"{string.Join(", ", offSeeds.Select(Describe))} {(offSeeds.Count == 1 ? "is" : "are")} suppressed, so left out of the {(f is MirrorFeature ? "mirror" : "pattern")}.");
+                seeds = seeds.Except(offSeeds).ToList();
+            }
             var everything = new List<Solid>(); bool? cutKind = null; bool mixed = false;
             foreach (var seedId in seeds)
             {
@@ -1215,6 +1239,7 @@ public sealed class Regenerator
                 var moved0 = new Solid[plain.Count];
                 Parallel.For(0, plain.Count, k => moved0[k] = tool.Tool.Transformed(transforms[plain[k]], $"{f.Id}.{plain[k] + 1}."));
                 for (int k = 0; k < plain.Count; k++) copies.Add((plain[k], moved0[k]));
+                if (tool.Blend is { } bsO && plain.Count > 0) WarnOverlap(tool.Tool, plain, moved0, bsO.Fillet);
                 // instances solved again: one solve per distinct configuration (instances whose edges are another's
                 // moved reuse its tools), solved in parallel, each on its own copy of the body (nothing shared is
                 // written), then applied below with the copies' one-at-a-time fallback
@@ -1268,7 +1293,10 @@ public sealed class Regenerator
                         var b = built[rep[k]];
                         if (b.tools == null)
                         {
-                            status.Warnings.Add($"Instance {i + 2} is not {(bs.Fillet ? "filleted" : "chamfered")}: {b.error}");
+                            // (its edges cut short by the seed's own blend: the instances are too close for the size)
+                            var into = toSolve[k].edges.Any(e => e.Uses.Any(u => u.Face.Tag.Name.StartsWith(seedId + ".", StringComparison.Ordinal)))
+                                ? $"it runs into the {(bs.Fillet ? "fillet" : "chamfer")} of instance 1 (use a smaller size)" : b.error;
+                            status.Warnings.Add($"Instance {i + 2} is not {(bs.Fillet ? "filleted" : "chamfered")}: {into}");
                             if (rep[k] == k) status.ProblemEdges.AddRange(b.problems);
                             continue;
                         }
@@ -1378,6 +1406,36 @@ public sealed class Regenerator
             bool same = MatchEdges(edges, bs.Edges.SelectMany(w => w).Select(p => t.Point(p)), bs.Length, tol);
             if (Environment.GetEnvironmentVariable("FC_PATDBG") != null) Console.WriteLine($"  instance {i + 2}: {edges.Count} edges (seed {bs.Edges.Count}) -> {(same ? "copy" : "solve")}");
             return (body, edges, same, tol);
+        }
+
+        /// <summary>
+        /// Warns when a copy of a blend's tool overlaps the seed's: copies are not solved against each other (a fillet
+        /// round a spoke's foot reaching round the hub past the next spoke's), so the pattern would quietly overlap
+        /// them. The seed against each copy covers every spacing of a regular pattern.
+        /// </summary>
+        void WarnOverlap(Solid seedTool, List<int> plain, Solid[] moved, bool fillet)
+        {
+            var box = seedTool.Bounds;
+            var v0 = Math.Abs(seedTool.Volume());
+            var old = Csg.NoFallback;
+            Csg.NoFallback = true;
+            try
+            {
+                for (int k = 0; k < plain.Count; k++)
+                {
+                    if (!box.Overlaps(moved[k].Bounds)) continue;
+                    try
+                    {
+                        var x = Csg.Intersect(seedTool, moved[k]);
+                        if (x.IsEmpty || Math.Abs(x.Volume()) <= 1e-6 * v0) continue;
+                    }
+                    catch (Exception ex) when (ex is InvalidOperationException or Kernel.Native.NBooleanException) { continue; }
+                    var what = fillet ? "fillet" : "chamfer";
+                    status.Warnings.Add($"The {what} of instance {plain[k] + 2} overlaps the seed's (the instances are too close for its size): use a smaller {what}.");
+                    return;
+                }
+            }
+            finally { Csg.NoFallback = old; }
         }
 
         /// <summary>Whether edges are the curves through the given points with the given total length (however split).</summary>

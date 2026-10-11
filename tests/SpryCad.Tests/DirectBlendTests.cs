@@ -501,6 +501,48 @@ static class DirectBlendTests
             t.True(Math.Abs(mirrored - beforeRib - 2 * (filleted - beforeRib)) < 1e-6 * mirrored, $"the copy adds {mirrored - filleted:R}, the rib and its fillets {filleted - beforeRib:R}");
         });
 
+        t.Test("Mirror with a seed suppressed: the others mirrored, said; with its seed failed: the seed's error", () =>
+        {
+            // the mirror used to be suppressed with its seed (it uses it), so the rib was silently not mirrored
+            var doc = Demos.BlendCases.First(c => c.name == "rib against a wall, filleted and mirrored").build();
+            var fil = doc.Features.First(f => f.Name == "Rib fillets");
+            var mirror = doc.Features.First(f => f.Name == "Rib, other end");
+            var reg = new Regenerator();
+            double Vol(ModelState st) => KernelTests.Vex(st.Bodies[0].Solid);
+            var beforeRib = Vol(reg.Rebuild(doc, doc.Features.FindIndex(f => f.Name == "Rib")).State);
+            var rib = Vol(reg.Rebuild(doc, doc.Features.IndexOf(fil)).State);
+            fil.Suppressed = true;
+            var res = reg.Rebuild(doc);
+            var st = res.Status[mirror.Id];
+            t.True(!st.Suppressed && st.Ok, $"built: suppressed {st.Suppressed} by {st.SuppressedBy}, {st.Error}");
+            t.True(st.Warnings.Any(w => w.Contains("Rib fillets") && w.Contains("suppressed")), string.Join("; ", st.Warnings));
+            t.True(Math.Abs(Vol(res.State) - beforeRib - 2 * (rib - beforeRib)) < 1e-6 * rib, $"the rib mirrored: {Vol(res.State) - rib:R} added, the rib {rib - beforeRib:R}");
+            // all its seeds suppressed: suppressed itself, as before
+            doc.Features.First(f => f.Name == "Rib").Suppressed = true;
+            t.True(reg.Rebuild(doc).Status[mirror.Id].Suppressed, "suppressed with all its seeds");
+            doc.Features.First(f => f.Name == "Rib").Suppressed = false;
+            // the seed failing: its error, not that it cannot be patterned
+            fil.Suppressed = false;
+            ((FilletFeature)fil).Radius = "NoSuchVariable";
+            var err = reg.Rebuild(doc).Status[mirror.Id].Error ?? "";
+            t.True(err.StartsWith("Rib fillets failed: ", StringComparison.Ordinal), err);
+        });
+
+        t.Test("Pattern of a filleted rib too close to the next: the overlapping fillets said", () =>
+        {
+            // the copies of the seed's tool are not solved against each other: R3 fillets either side of 6 thick ribs
+            // 10 apart overlap in the 4 gap (8 apart, the next rib's foot is on the seed's fillet: copied, the same); 16
+            // apart (the blend case) nothing is said
+            foreach (var (spacing, overlap) in new[] { ("10", true), ("16", false), ("8", true) })
+            {
+                var doc = Demos.PatternedRibs(spacing);
+                var p = doc.Features.First(f => f.Name == "Ribs");
+                var st = new Regenerator().Rebuild(doc).Status[p.Id];
+                t.True(st.Ok, st.Error ?? "");
+                t.True(st.Warnings.Any(w => w.Contains("overlaps the seed's")) == overlap, $"spacing {spacing}: [{string.Join("; ", st.Warnings)}]");
+            }
+        });
+
         t.Test("Direct blend: off (FC_BLEND=boolean) applies nothing directly", () =>
         {
             var before = DirectBlend.Counts;
