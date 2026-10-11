@@ -215,12 +215,17 @@ public sealed class Mate
     /// How far the placed references are from the relation: the residuals (zero when it holds). Directions as
     /// vector differences (no ambiguity near a whole turn), positions in mm. <paramref name="ta"/>, <paramref name="tb"/>:
     /// the placements of A's and B's components (Lock, Gear and Screw measure the components themselves).
+    /// <paramref name="scale"/>: a length the directions' residuals (radians) are multiplied by, so a turn costs about
+    /// what it moves things at that size (the solver's, in mm; 1: radians as they are).
     /// </summary>
-    public void Residuals(MateGeom a, MateGeom b, in Transform ta, in Transform tb, List<double> r) => Residuals(a.Value, b.Value, ta, tb, r);
+    public void Residuals(MateGeom a, MateGeom b, in Transform ta, in Transform tb, List<double> r, double scale = 1) => Residuals(a.Value, b.Value, ta, tb, r, scale);
 
-    internal void Residuals(Geom a, Geom b, in Transform ta, in Transform tb, List<double> r)
+    internal void Residuals(Geom a, Geom b, in Transform ta, in Transform tb, List<double> r, double L = 1)
     {
         void Vec(Vec3 v) { r.Add(v.X); r.Add(v.Y); r.Add(v.Z); }
+        // a direction's rows (radians) as lengths: L times them
+        void DVec(Vec3 v) => Vec(v * L);
+        void DAdd(double x) => r.Add(x * L);
         Vec3 Perp(Vec3 v, Vec3 axis) => v - axis * Vec3.Dot(v, axis);
         // a value held to a limit range (no limits: exactly the value)
         void Range(double v, double target)
@@ -242,13 +247,13 @@ public sealed class Mate
             {
                 // turning together at the ratio (opposite ways unless reversed): RatioA * dA + RatioB * dB = 0
                 var (da, db) = GearAngles(a, b, ta, tb);
-                r.Add((RatioA * da + (Reverse ? -1 : 1) * RatioB * db) / Math.Max(1e-9, Math.Max(RatioA, RatioB)));
+                DAdd((RatioA * da + (Reverse ? -1 : 1) * RatioB * db) / Math.Max(1e-9, Math.Max(RatioA, RatioB)));
                 return;
             }
             case MateType.Screw:
             {
                 // on one axis; along it as far as turned: (s - s0) = lead * (theta - theta0) / 2pi (left hand: the other way)
-                Vec(Vec3.Cross(a.D, b.D));
+                DVec(Vec3.Cross(a.D, b.D));
                 Vec(Perp(b.P - a.P, a.D));
                 var s = Vec3.Dot(b.P - a.P, a.D);
                 var th = ScrewAngle(a, ta, tb);
@@ -267,16 +272,16 @@ public sealed class Mate
             case MateType.Coincident when k == (MateGeomKind.Axis, MateGeomKind.Axis):
             case MateType.Concentric when k == (MateGeomKind.Axis, MateGeomKind.Axis):
                 // the same line (directions either way: concentric)
-                Vec(Vec3.Cross(a.D, b.D));
+                DVec(Vec3.Cross(a.D, b.D));
                 Vec(Perp(b.P - a.P, a.D));
                 break;
             case MateType.Coincident when k == (MateGeomKind.Plane, MateGeomKind.Plane):
-                Vec(b.D - a.D * sgn);
+                DVec(b.D - a.D * sgn);
                 r.Add(Vec3.Dot(b.P - a.P, a.D));
                 break;
             case MateType.Coincident when k == (MateGeomKind.Plane, MateGeomKind.Axis):
                 // the axis in the plane
-                r.Add(Vec3.Dot(b.D, a.D));
+                DAdd(Vec3.Dot(b.D, a.D));
                 r.Add(Vec3.Dot(b.P - a.P, a.D));
                 break;
             case MateType.Coincident when k == (MateGeomKind.Plane, MateGeomKind.Point):
@@ -290,20 +295,20 @@ public sealed class Mate
                 Vec(b.P - a.P);
                 break;
             case MateType.Parallel when k == (MateGeomKind.Plane, MateGeomKind.Axis):
-                r.Add(Vec3.Dot(b.D, a.D));
+                DAdd(Vec3.Dot(b.D, a.D));
                 break;
             case MateType.Parallel:
-                Vec(Vec3.Cross(a.D, b.D));
+                DVec(Vec3.Cross(a.D, b.D));
                 break;
             case MateType.Perpendicular when k == (MateGeomKind.Plane, MateGeomKind.Axis):
-                Vec(Vec3.Cross(a.D, b.D));
+                DVec(Vec3.Cross(a.D, b.D));
                 break;
             case MateType.Perpendicular:
-                r.Add(Vec3.Dot(a.D, b.D));
+                DAdd(Vec3.Dot(a.D, b.D));
                 break;
             case MateType.Tangent when k == (MateGeomKind.Plane, MateGeomKind.Axis):
                 // a cylinder lying on the plane: its axis parallel to it, a radius away on its side
-                r.Add(Vec3.Dot(b.D, a.D));
+                DAdd(Vec3.Dot(b.D, a.D));
                 r.Add(Vec3.Dot(b.P - a.P, a.D) - Side * b.R);
                 break;
             case MateType.Tangent when k == (MateGeomKind.Plane, MateGeomKind.Point):
@@ -311,7 +316,7 @@ public sealed class Mate
                 break;
             case MateType.Tangent when k == (MateGeomKind.Axis, MateGeomKind.Axis):
                 // two cylinders touching along a line: parallel, their axes the radii apart (summed, or differing inside)
-                Vec(Vec3.Cross(a.D, b.D));
+                DVec(Vec3.Cross(a.D, b.D));
                 r.Add(Perp(b.P - a.P, a.D).Length - (Inside ? Math.Abs(a.R - b.R) : a.R + b.R));
                 break;
             case MateType.Tangent when k == (MateGeomKind.Axis, MateGeomKind.Point):
@@ -321,18 +326,18 @@ public sealed class Mate
                 r.Add((b.P - a.P).Length - (Inside ? Math.Abs(a.R - b.R) : a.R + b.R));
                 break;
             case MateType.Distance when k == (MateGeomKind.Plane, MateGeomKind.Plane):
-                Vec(b.D - a.D * sgn);
+                DVec(b.D - a.D * sgn);
                 Range(Side * Vec3.Dot(b.P - a.P, a.D), Value);
                 break;
             case MateType.Distance when k == (MateGeomKind.Plane, MateGeomKind.Axis):
-                r.Add(Vec3.Dot(b.D, a.D));
+                DAdd(Vec3.Dot(b.D, a.D));
                 Range(Side * Vec3.Dot(b.P - a.P, a.D), Value);
                 break;
             case MateType.Distance when k == (MateGeomKind.Plane, MateGeomKind.Point):
                 Range(Side * Vec3.Dot(b.P - a.P, a.D), Value);
                 break;
             case MateType.Distance when k == (MateGeomKind.Axis, MateGeomKind.Axis):
-                Vec(Vec3.Cross(a.D, b.D));
+                DVec(Vec3.Cross(a.D, b.D));
                 Range(Perp(b.P - a.P, a.D).Length, Value);
                 break;
             case MateType.Distance when k == (MateGeomKind.Axis, MateGeomKind.Point):
@@ -346,8 +351,8 @@ public sealed class Mate
                 // the angle between the directions (planes' normals, axes), in degrees for the limits' sake
                 var c = Math.Clamp(Vec3.Dot(a.D, b.D), -1, 1);
                 var deg = Math.Acos(c) * 180 / Math.PI;
-                if (Min is { } lo && Max is { } hi) r.Add((Math.Max(0, lo - deg) + Math.Max(0, deg - hi)) * Math.PI / 180);
-                else r.Add((deg - Value) * Math.PI / 180);
+                if (Min is { } lo && Max is { } hi) DAdd((Math.Max(0, lo - deg) + Math.Max(0, deg - hi)) * Math.PI / 180);
+                else DAdd((deg - Value) * Math.PI / 180);
                 break;
             }
         }
@@ -370,12 +375,15 @@ public sealed class Mate
     /// Screw (turns counted from where they were), a length or an Angle where it is not differentiable (zero, 0 or 180
     /// degrees).
     /// </summary>
-    public bool Directional(MateGeom a, MateGeom b, in Transform ta, in Transform tb, in Twist da, in Twist db, List<double> r)
-        => Directional(a.Value, b.Value, ta, tb, da, db, r);
+    public bool Directional(MateGeom a, MateGeom b, in Transform ta, in Transform tb, in Twist da, in Twist db, List<double> r, double scale = 1)
+        => Directional(a.Value, b.Value, ta, tb, da, db, r, scale);
 
-    internal bool Directional(Geom a, Geom b, in Transform ta, in Transform tb, in Twist da, in Twist db, List<double> r)
+    internal bool Directional(Geom a, Geom b, in Transform ta, in Transform tb, in Twist da, in Twist db, List<double> r, double L = 1)
     {
         void Vec(Vec3 v) { r.Add(v.X); r.Add(v.Y); r.Add(v.Z); }
+        // as Residuals: a direction's rows times L
+        void DVec(Vec3 v) => Vec(v * L);
+        void DAdd(double x) => r.Add(x * L);
         // v - n (v.n), and its change
         static Vec3 Perp(Vec3 v, Vec3 n) => v - n * Vec3.Dot(v, n);
         static Vec3 DPerp(Vec3 v, Vec3 n, Vec3 dv, Vec3 dn) => dv - dn * Vec3.Dot(v, n) - n * (Vec3.Dot(dv, n) + Vec3.Dot(v, dn));
@@ -399,7 +407,7 @@ public sealed class Mate
                 // each side's turn about its own axis, from a direction fixed in the assembly
                 if (DAngleAbout(W0A, ta.Vector(UA), a.D, Vec3.Zero, da.Dir(ta.Vector(UA)), da.Dir(a.D)) is not { } dA
                     || DAngleAbout(W0B, tb.Vector(UB), b.D, Vec3.Zero, db.Dir(tb.Vector(UB)), db.Dir(b.D)) is not { } dB) return false;
-                r.Add((RatioA * dA + (Reverse ? -1 : 1) * RatioB * dB) / Math.Max(1e-9, Math.Max(RatioA, RatioB)));
+                DAdd((RatioA * dA + (Reverse ? -1 : 1) * RatioB * dB) / Math.Max(1e-9, Math.Max(RatioA, RatioB)));
                 return true;
             }
             case MateType.Screw:
@@ -408,7 +416,7 @@ public sealed class Mate
                 if (DAngleAbout(u, w, a.D, da.Dir(u), db.Dir(w), da.Dir(a.D)) is not { } dTh) return false;
                 var dDa0 = da.Dir(a.D); var dDb0 = db.Dir(b.D);
                 var v0 = b.P - a.P; var dv0 = db.Point(b.P) - da.Point(a.P);
-                Vec(Vec3.Cross(dDa0, b.D) + Vec3.Cross(a.D, dDb0));
+                DVec(Vec3.Cross(dDa0, b.D) + Vec3.Cross(a.D, dDb0));
                 Vec(DPerp(v0, a.D, dv0, dDa0));
                 r.Add(Vec3.Dot(dv0, a.D) + Vec3.Dot(v0, dDa0) - (Reverse ? -1 : 1) * Value * dTh / (2 * Math.PI));
                 return true;
@@ -439,15 +447,15 @@ public sealed class Mate
         {
             case MateType.Coincident when k == (MateGeomKind.Axis, MateGeomKind.Axis):
             case MateType.Concentric when k == (MateGeomKind.Axis, MateGeomKind.Axis):
-                Vec(DCross());
+                DVec(DCross());
                 Vec(DPerp(v, a.D, dv, dDa));
                 return true;
             case MateType.Coincident when k == (MateGeomKind.Plane, MateGeomKind.Plane):
-                Vec(dDb - dDa * sgn);
+                DVec(dDb - dDa * sgn);
                 r.Add(DOff());
                 return true;
             case MateType.Coincident when k == (MateGeomKind.Plane, MateGeomKind.Axis):
-                r.Add(DDot());
+                DAdd(DDot());
                 r.Add(DOff());
                 return true;
             case MateType.Coincident when k == (MateGeomKind.Plane, MateGeomKind.Point):
@@ -461,19 +469,19 @@ public sealed class Mate
                 Vec(dv);
                 return true;
             case MateType.Parallel when k == (MateGeomKind.Plane, MateGeomKind.Axis):
-                r.Add(DDot());
+                DAdd(DDot());
                 return true;
             case MateType.Parallel:
-                Vec(DCross());
+                DVec(DCross());
                 return true;
             case MateType.Perpendicular when k == (MateGeomKind.Plane, MateGeomKind.Axis):
-                Vec(DCross());
+                DVec(DCross());
                 return true;
             case MateType.Perpendicular:
-                r.Add(DDot());
+                DAdd(DDot());
                 return true;
             case MateType.Tangent when k == (MateGeomKind.Plane, MateGeomKind.Axis):
-                r.Add(DDot());
+                DAdd(DDot());
                 r.Add(DOff());
                 return true;
             case MateType.Tangent when k == (MateGeomKind.Plane, MateGeomKind.Point):
@@ -481,7 +489,7 @@ public sealed class Mate
                 return true;
             case MateType.Tangent when k == (MateGeomKind.Axis, MateGeomKind.Axis):
                 if (!DLen(Perp(v, a.D), DPerp(v, a.D, dv, dDa), out _, out dl)) return false;
-                Vec(DCross());
+                DVec(DCross());
                 r.Add(dl);
                 return true;
             case MateType.Tangent when k == (MateGeomKind.Axis, MateGeomKind.Point):
@@ -493,11 +501,11 @@ public sealed class Mate
                 r.Add(dl);
                 return true;
             case MateType.Distance when k == (MateGeomKind.Plane, MateGeomKind.Plane):
-                Vec(dDb - dDa * sgn);
+                DVec(dDb - dDa * sgn);
                 Range(Side * Off(), Side * DOff());
                 return true;
             case MateType.Distance when k == (MateGeomKind.Plane, MateGeomKind.Axis):
-                r.Add(DDot());
+                DAdd(DDot());
                 Range(Side * Off(), Side * DOff());
                 return true;
             case MateType.Distance when k == (MateGeomKind.Plane, MateGeomKind.Point):
@@ -505,7 +513,7 @@ public sealed class Mate
                 return true;
             case MateType.Distance when k == (MateGeomKind.Axis, MateGeomKind.Axis):
                 if (!DLen(Perp(v, a.D), DPerp(v, a.D, dv, dDa), out l, out dl)) return false;
-                Vec(DCross());
+                DVec(DCross());
                 Range(l, dl);
                 return true;
             case MateType.Distance when k == (MateGeomKind.Axis, MateGeomKind.Point):
@@ -523,8 +531,8 @@ public sealed class Mate
                 // in radians, as the residual: the arccosine's change (or the penalty's, outside the limits)
                 var dAngle = -DDot() / Math.Sqrt(1 - c * c);
                 var deg = Math.Acos(Math.Clamp(c, -1, 1)) * 180 / Math.PI;
-                if (Min is { } lo && Max is { } hi) r.Add(deg < lo ? -dAngle : deg > hi ? dAngle : 0);
-                else r.Add(dAngle);
+                if (Min is { } lo && Max is { } hi) DAdd(deg < lo ? -dAngle : deg > hi ? dAngle : 0);
+                else DAdd(dAngle);
                 return true;
             }
         }

@@ -257,13 +257,25 @@ public static class MateSolver
         var offA = new Transform[K]; var offB = new Transform[K]; var fixA = new Transform[K]; var fixB = new Transform[K];
         for (int k = 0; k < mates.Count; k++) { geoA[k] = L(mates[k].A); geoB[k] = L(mates[k].B); }
         var valA = geoA.Select(g => g?.Value ?? default).ToArray(); var valB = geoB.Select(g => g?.Value ?? default).ToArray();
+        // the length directions' residuals (radians) are counted in, as lengths: how far the components' references are
+        // from where they turn, on average. A turn then costs about what it moves things by; counted as radians, a
+        // crank tilted on its journal costs the journal's mate little, and a pull at the flywheel's rim, from where the
+        // cursor is out of reach, tilts it (millimetres at the rim) and strains its mates, which come back only slowly
+        double scale;
+        {
+            double sum = 0; int cnt = 0;
+            foreach (var m in mates)
+                foreach (var r in new[] { m.A, m.B })
+                    if (FreeOf(r) is var i and >= 0) { sum += (World(r, null).P - pivots[i]).Length; cnt++; }
+            scale = Math.Max(1, cnt > 0 ? sum / cnt : 1);
+        }
         var buf = new List<double>();
         void MateRes(int k, in Transform ta, in Transform tb)
         {
             buf.Clear();
             if (k < mates.Count)
             {
-                mates[k].Residuals(valA[k].Placed(ta), valB[k].Placed(tb), ta, tb, buf);
+                mates[k].Residuals(valA[k].Placed(ta), valB[k].Placed(tb), ta, tb, buf, scale);
                 return;
             }
             if (pull == null) { buf.Add(0); buf.Add(0); buf.Add(0); return; }
@@ -322,6 +334,47 @@ public static class MateSolver
         // hold, a solve starting nearly satisfied), lightened fast as steps succeed
         double Damping() => pulling ? 1e-6 : r0.Length > 0 && r0.Max(Math.Abs) < 1e-6 ? 1e-9 : 1e-3;
         double lambda = 0;
+        // pulled to a stop with the point still off the cursor's ray and not moved this move: maybe at a dead centre,
+        // where the point does not move at first as the mechanism does (a piston at the end of its stroke as the crank
+        // turns), so no step can tell which way helps. Every component nudged a little (either way turns a crank off
+        // its dead centre) and the pull goes on. Where a nudge did not bring the point nearer (the cursor beyond where
+        // it can go at all), not again there with the cursor that side
+        int escapes = 0;
+        const double StuckBy = 1e-2, EscapeTurn = 0.01;
+        (Vec3 at, double away, Vec3 toward)? nudgedFrom = null; // this move's first nudge
+        (Vec3 at, Vec3 toward)? noNudgeAt = null;                // where one did not help (for the rest of the drag)
+        var grabbedAt = Vec3.Zero; // (where the grabbed point was as the move began)
+        bool Escape()
+        {
+            if (!pulling || pull == null || escapes >= 3) return false;
+            var at = SideA(mates.Count, null).Point(pull.Local);
+            var off = at - pull.Origin;
+            var away = (off - pullDir * Vec3.Dot(off, pullDir)).Length;
+            if (away < 1e-3) return false;
+            // (stuck: hardly moved since the move began, for how far off it is; one that went as near as it can, along
+            // what it can reach, is not at a dead centre)
+            if (Vec3.Distance(at, grabbedAt) > StuckBy * away) return false;
+            // (nor where a nudge did not help before, with the cursor that side)
+            var toward = (pull.Origin - at - pullDir * Vec3.Dot(pull.Origin - at, pullDir)) / away;
+            if (noNudgeAt is { } nn && Vec3.Distance(at, nn.at) <= Math.Max(1e-3, StuckBy * away) && Vec3.Dot(toward, nn.toward) > 0.5) return false;
+            nudgedFrom ??= (at, away, toward);
+            escapes++;
+            // each component turned a little about its pivot, the same way each time (the mates pull them back together)
+            var rnd = new Random(escapes);
+            var dx = new double[n];
+            for (int i = 0; i < nf; i++)
+            {
+                var w = new Vec3(rnd.NextDouble() - 0.5, rnd.NextDouble() - 0.5, rnd.NextDouble() - 0.5).Normalized * EscapeTurn;
+                dx[6 * i] = w.X; dx[6 * i + 1] = w.Y; dx[6 * i + 2] = w.Z;
+            }
+            var nudged = Trial(dx);
+            for (int i = 0; i < nf; i++) placements[free[i].Id] = place[i] = nudged[i];
+            r0 = Res(null);
+            // (damped hardly at all: off a dead centre the point moves only as the turn squared, and the steps away from
+            // it are long ones)
+            lambda = 1e-10;
+            return true;
+        }
         // the Jacobian: for each mate, its rows against each of its (at most two) free components' six numbers
         var Ja = new double[K][]; var Jb = new double[K][];
         for (int k = 0; k < K; k++)
@@ -367,7 +420,7 @@ public static class MateSolver
                 {
                     var u = Unit(j, pivots[c]);
                     buf.Clear();
-                    if (!m.Directional(ga, gb, curA[k], curB[k], side == 0 || one ? u : still, side == 1 || one ? u : still, buf) || buf.Count != nr)
+                    if (!m.Directional(ga, gb, curA[k], curB[k], side == 0 || one ? u : still, side == 1 || one ? u : still, buf, scale) || buf.Count != nr)
                         return false;
                     for (int q = 0; q < nr; q++) J[q * 6 + j] = buf[q];
                 }
@@ -406,6 +459,8 @@ public static class MateSolver
             ran = true;
             r0 = Res(null);
             lambda = Damping();
+            escapes = 0; nudgedFrom = null;
+            grabbedAt = pull != null && pullComponent != null ? SideA(mates.Count, null).Point(pull.Local) : Vec3.Zero;
             var g = new double[n];
             int it = 0, end = pulling ? 2 * maxIter : maxIter;
             for (int stage = 0; stage < end && n > 0 && rows > 0; stage++, it++)
@@ -517,7 +572,12 @@ public static class MateSolver
                         for (int i = 0; i < nf; i++) placements[free[i].Id] = place[i] = trial[i];
                         // pulled, the residual stays (the cursor is where the mates do not let the point go): done when
                         // it stops getting smaller (by a millionth: the exact solve follows)
-                        if (pulling && f0 - Sq(r1) < 1e-6 * f0) { r0 = r1; stage = maxIter - 1; break; }
+                        if (pulling && f0 - Sq(r1) < 1e-6 * f0)
+                        {
+                            r0 = r1;
+                            if (Escape()) { stepped = true; break; }
+                            stage = maxIter - 1; break;
+                        }
                         r0 = r1;
                         lambda = Math.Max(lambda / 10, 1e-12);
                         stepped = true;
@@ -525,9 +585,15 @@ public static class MateSolver
                     else lambda *= 6;
                 }
                 if (!stepped && !pulling) break;
-                if (!stepped) stage = maxIter - 1;
+                if (!stepped && !Escape()) stage = maxIter - 1;
             }
             res.Iterations = it;
+            // a nudge that did not bring the point nearer: none there again
+            if (nudgedFrom is { } nf0 && pull != null)
+            {
+                var o = SideA(mates.Count, null).Point(pull.Local) - pull.Origin;
+                if ((o - pullDir * Vec3.Dot(o, pullDir)).Length > 0.99 * nf0.away) noNudgeAt = (nf0.at, nf0.toward);
+            }
 
             // the components moved, and what each mate is left with
             foreach (var c in free)
