@@ -832,7 +832,7 @@ static class AssemblyTests
             t.True(worst < 3, $"the slider follows the cursor: worst {worst:0.###} mm off, {where}");
         });
 
-        t.Test("Drag sessions: a turn by hand (Shift+drag) turns a sleeve on its pin as far as its mates let it; a part no mate holds turns freely", () =>
+        t.Test("Drag sessions: a turn by hand (Shift+drag) turns a sleeve on its pin as far as its mates let it; a part locked to a fixed one stays; one no mate holds turns freely", () =>
         {
             var (m, pin, sleeve, dir) = PinAndSleeve("turn-drag");
             m.AddMate(MateType.Concentric, m.RefTo(sleeve.Id, FaceOf(m, sleeve, "side"))!, m.RefTo(pin.Id, FaceOf(m, pin, "side"))!);
@@ -863,6 +863,19 @@ static class AssemblyTests
             t.True(Vec3.Cross(T(sleeve).Vector(Vec3.UnitZ), Vec3.UnitZ).Length < 1e-6, "still on the pin's axis");
             var end = m.EndDrag()!;
             t.True(end.Satisfied && end.Errors.Values.Max() < 1e-9, "exact on release");
+
+            // a part locked to the fixed pin: dragged or turned, its lock keeps it where it is (the solve holds it still;
+            // the hand does not move it as it does a part no mate holds)
+            var locked = m.Insert(Path.Combine(dir, "Pin.sprt"), Transform.Translation(new Vec3(-40, 0, 0)));
+            m.AddMate(MateType.Lock, new MateRef { Component = locked.Id, D = Vec3.UnitZ }, new MateRef { Component = pin.Id, D = Vec3.UnitZ });
+            var lockedAt = T(locked);
+            m.BeginDrag(locked.Id);
+            var lr = m.SolveDrag(new MateSolver.Pull(locked.Id, Vec3.Zero, new Vec3(-20, 15, 100), -Vec3.UnitZ, new Vec3(20, 15, 0)));
+            t.True(lr.Held.Contains(locked.Id), "the locked part is held still by its lock");
+            m.SolveDrag(new MateSolver.Pull(locked.Id, Vec3.Zero, new Vec3(-40, 0, 20), Vec3.Zero, default, Transform.Rotation(new Vec3(-40, 0, 5), Vec3.UnitY, 0.3)));
+            m.EndDrag();
+            t.True(Vec3.Distance(T(locked).T, lockedAt.T) < 1e-9 && Vec3.Distance(T(locked).Vector(Vec3.UnitZ), lockedAt.Vector(Vec3.UnitZ)) < 1e-9 && m.LastSolve!.Satisfied,
+                "dragged and turned, the locked part stays");
 
             // a part no mate holds: turned as the hand turns it
             var loose = m.Insert(Path.Combine(dir, "Pin.sprt"), Transform.Translation(new Vec3(60, 0, 0)));

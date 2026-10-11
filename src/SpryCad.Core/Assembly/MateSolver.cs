@@ -25,6 +25,11 @@ public static class MateSolver
         public HashSet<string> Moved { get; } = new();
         /// <summary>The components solved for (floating ones that take part in a mate), moved or not.</summary>
         public HashSet<string> Solved { get; } = new();
+        /// <summary>
+        /// Floating components that take part in a mate the solve held still (locked to a still one, or not among those
+        /// it was to move): the mates hold them where they are.
+        /// </summary>
+        public HashSet<string> Held { get; } = new();
         public bool Satisfied { get; set; }
         public int Iterations { get; set; }
         public IEnumerable<string> Failed(double tol = 1e-6) => Errors.Where(e => e.Value > tol).Select(e => e.Key);
@@ -147,6 +152,11 @@ public static class MateSolver
         var freeIdx = new Dictionary<string, int>();
         // a reference on a carried component moves its body
         string? BodyOf(string? id) => id != null && attached != null && attached.TryGetValue(id, out var at) ? at.Body : id;
+        // the components the mates are on (their bodies), as given: those not solved for are held where they are
+        var mated = new HashSet<string>();
+        foreach (var m in mates)
+            foreach (var r in new[] { m.A, m.B })
+                if (BodyOf(r.Component) is { } mb && byId.TryGetValue(mb, out var mc) && !mc.Fixed) mated.Add(mb);
         // components locked together (a Lock that holds as they are) move as one, carried by one of them (a still one
         // if any is: the group is still), the Lock between them left out: fewer to solve for
         var groupOf = new Dictionary<string, string>();
@@ -469,6 +479,7 @@ public static class MateSolver
             var res = new Result();
             foreach (var c in free) res.Solved.Add(c.Id);
             foreach (var b in groupOf.Keys) if (freeIdx.ContainsKey(Root(b))) res.Solved.Add(b);
+            foreach (var b in mated) if (!res.Solved.Contains(b)) res.Held.Add(b);
             // run again: from where the components are now (as the last run left them, or put back since)
             // the still ones as they are now, the first run too (a motor turns the component it holds); the free ones
             // after the first (which starts from the setup's, a face turned half round onto its mate among them)

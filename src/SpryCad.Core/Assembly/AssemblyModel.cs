@@ -652,7 +652,8 @@ public sealed partial class AssemblyModel
             if (d.Flat != null) WriteBack(d.Flat, res);
         }
         else res = Solve(null, pull);
-        if (!res.Solved.Contains(pull.Component) && (pull.Move != Vec3.Zero || pull.Turn != null))
+        // (one a mate holds still, locked to the base say, stays)
+        if (!res.Solved.Contains(pull.Component) && !res.Held.Contains(pull.Component) && (pull.Move != Vec3.Zero || pull.Turn != null))
         {
             SetWorld(pull.Component, (pull.Turn ?? Transform.Translation(pull.Move)) * WorldOf(pull.Component));
             if (d?.Flat?.Doc.Find(pull.Component) is { } fc) fc.Placement = Placement.From(WorldOf(pull.Component));
@@ -735,6 +736,9 @@ public sealed partial class AssemblyModel
     /// </summary>
     public void BeginDrag(string component)
     {
+        // whether the mates hold as it starts (not solved since opened: checked, nothing moved), so a drag that would
+        // leave them broken is not taken
+        LastSolve ??= Solve(new HashSet<string>(), null);
         var f = Flatten();
         var body = f != null && f.Attached.TryGetValue(component, out var at) ? at.Body : component;
         _drag = new DragState(component, f, MateSolver.PrepareDrag(f?.Doc ?? Doc, Local, body, f?.Attached));
