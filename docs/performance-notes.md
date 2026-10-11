@@ -45,8 +45,13 @@ profile; the profile's times are summed over threads). On the heavy samples (`sa
 ## Kernel: open items, roughly by expected gain
 
 1. **`NIntersect.Trace` internals** (results must stay identical):
-   - `Densify` always splits at depth 0 and then projects twice at depth 1. That is about 3 projections per
-     segment; the extra points change results.
+   - Done: `Densify` no longer always splits a chain segment (it projected its midpoint and both halves'
+     whatever the error). The trace grid is usually much finer than the tolerance: on spur-gear-nice 553k chain
+     points per rebuild were doubled to 1.1M. Now a segment whose midpoint is within tol/4 stays whole: projections
+     1.33M to 0.84M, output points 666k to 423k; `trace.project` ~500 to ~245 ms summed, `sec.makeedge` ~56 to
+     ~23 ms, the rebuild ~534 to ~474 ms. Results within tolerance: exact mass properties unchanged on every sample
+     but hand-wheel (1.6e-7 relative, inertia; volume 1.3e-7) and spur-gear-nice (under 1e-9); every demo variant
+     builds. `DensifyOnParams` (B-spline traces) still always splits.
    - `ProjectToIntersection` starts every point from scratch (warm starts would change results).
    - Done: the block test's grid-node points are kept (blocks share their corners and edge middles) and reused by
      the grid values: `trace.grid` about 40% less (spur-gear-nice 58–68 to 33–38 ms, handwheel 76–93 to 52–58 ms
