@@ -18,7 +18,8 @@ static partial class Demos
         ("casting foot, drafted, chamfered 6 at 30°", () => CastingFoot("2", chamfer: c => { c.Type = ChamferType.AngleDistance; c.Angle = "30"; })),
         ("boss top, drafted, chamfered", () => CastingFoot("2", chamfer: _ => { }, atTop: true)),
         ("casting foot, drafted, chamfered, hollow under", () => CastingFoot("2", chamfer: _ => { }, hollow: true)),
-        ("plate, drafted hole across a slot, rim chamfered", SlotHole),
+        ("plate, drafted hole across a slot, rim chamfered", () => SlotHole()),
+        ("plate, drafted hole broken into by a round hole, rim chamfered", () => SlotHole(round: true)),
         ("box, three edges at a corner", BoxCorner),
         ("plate, hole rims", PlateHoles),
         ("box, all edges", BoxAll),
@@ -298,7 +299,7 @@ static partial class Demos
     /// A plate with a drafted hole (a cone: no exact chamfer tool), a slot off its centre line cutting across the
     /// hole's rim: the rim's top edge, chamfered, is an open arc whose ends meet the slot's walls at an angle.
     /// </summary>
-    static CadDocument SlotHole()
+    static CadDocument SlotHole(bool round = false)
     {
         var d = Doc(("X", "50"), ("Y", "30"), ("T", "12"), ("D", "20"), ("Draft", "5"), ("C", "1.5"));
         var s = new Sk(d);
@@ -310,8 +311,10 @@ static partial class Demos
         var c = h.Circle(h.P("0", "0"), "D");
         var hs = d.AddFeature(new SketchFeature { Name = "Hole", Plane = new PlaneRef { Feature = top.Id }, Sketch = h.S });
         var hole = d.AddFeature(new ExtrudeFeature { Name = "Hole", SketchId = hs.Id, IsCut = true, Depth = "T", Reverse = true, Draft = "Draft" });
+        // (round: a hole breaking into the rim instead, its arc's ends on that hole's cylinder)
         var g = new Sk(d);
-        g.Rect("0", "2", "20", "8");
+        if (round) g.Circle(g.P("10", "5"), "6");
+        else g.Rect("0", "2", "20", "8");
         var gs = d.AddFeature(new SketchFeature { Name = "Slot", Plane = PlaneRef.Front, Sketch = g.S });
         d.AddFeature(new ExtrudeFeature { Name = "Slot", SketchId = gs.Id, IsCut = true, End = EndCondition.ThroughAllBoth });
         d.AddFeature(new ChamferFeature

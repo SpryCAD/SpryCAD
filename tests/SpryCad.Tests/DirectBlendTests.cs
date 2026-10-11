@@ -169,6 +169,61 @@ static class DirectBlendTests
             }
         });
 
+        t.Test("Shelled bracket's inside top edges: the side cut back at a counterbore goes with the sides it meets at the corners, applied directly", () =>
+        {
+            // the loop round the shell's inside (four lines, mitred at the corners, and an arc), one side cut back where
+            // a counterbore reaches it: cut back alone, its ends no longer matched its neighbours' and the whole loop
+            // went by boolean; glued with them first, the run is cut back as one and applied directly (the
+            // counterbore's own rim fillet, cut back at the same wall, then by boolean)
+            var dir = AppContext.BaseDirectory;
+            while (dir != null && !Directory.Exists(Path.Combine(dir, "samples"))) dir = Path.GetDirectoryName(dir);
+            var file = Path.Combine(dir!, "tests", "SpryCad.Tests", "models", "shelled-bracket-inner-fillet.sprt");
+            double Vol(bool direct, out int declined)
+            {
+                var old = DirectBlend.Enabled;
+                DirectBlend.Enabled = direct;
+                try
+                {
+                    var doc = CadDocument.Load(file);
+                    var f = doc.Features.First(x => x.Id == "F18");
+                    var r0 = new Regenerator().Rebuild(doc, doc.Features.IndexOf(f));
+                    var before = DirectBlend.Counts.declined;
+                    Csg.ClearCache();
+                    var r = new Regenerator().Rebuild(doc, doc.Features.IndexOf(f) + 1);
+                    declined = DirectBlend.Counts.declined - before;
+                    t.True(r.Status[f.Id].Ok, r.Status[f.Id].Error ?? "");
+                    t.True(r.State.Bodies[0].Solid.Native?.Validate() == null, "valid");
+                    return KernelTests.Vex(r.State.Bodies[0].Solid);
+                }
+                finally { DirectBlend.Enabled = old; }
+            }
+            var vd = Vol(true, out var declined); var vb = Vol(false, out _);
+            t.True(Math.Abs(vd - vb) < 1e-7 * vb, $"direct {vd:R}, boolean {vb:R}");
+            t.True(declined <= 1, $"{declined} tools by boolean");
+        });
+
+        t.Test("Rim chamfer ending on a round hole that breaks into it: cut back to the hole's side, not ending square", () =>
+        {
+            // the drafted hole's rim (the revolved tool), a smaller hole breaking into it: the rim's arc ends on that
+            // hole's cylinder at an angle. Square, its ends were left as faces of their own (a step at each end)
+            foreach (var direct in new[] { true, false })
+            {
+                var old = DirectBlend.Enabled;
+                DirectBlend.Enabled = direct;
+                try
+                {
+                    var doc = Demos.BlendCases.First(c => c.name == "plate, drafted hole broken into by a round hole, rim chamfered").build();
+                    var rim = doc.Features.First(f => f.Name == "Rim");
+                    var r = new Regenerator().Rebuild(doc, doc.Features.IndexOf(rim) + 1);
+                    var nb = r.State.Bodies[0].Solid.Native;
+                    t.True(r.Status[rim.Id].Ok && nb != null && nb.Validate() == null, $"{(direct ? "direct" : "boolean")}: {r.Status[rim.Id].Error}");
+                    var ends = nb!.Faces.Select(f => f.Tag.Name).Where(n => n.StartsWith(rim.Id) && (n.EndsWith(".Start") || n.EndsWith(".End"))).ToList();
+                    t.True(ends.Count == 0, $"{(direct ? "direct" : "boolean")}: its ends left as faces ({string.Join(", ", ends)})");
+                }
+                finally { DirectBlend.Enabled = old; }
+            }
+        });
+
         t.Test("Holes beside and through a swept chamfer's foot at a rounded corner: traced quickly, exact", () =>
         {
             // a hole through the plate grazing the chamfer's B-spline face near its edge: the trace on the B-spline misses

@@ -14,6 +14,20 @@ public sealed class NBoolean
     public static Action<string>? Trace;
     static readonly object _traceLock = new();
     static void T(string m) { if (Trace != null) lock (_traceLock) Trace?.Invoke(m); }
+
+    /// <summary>How narrow an analytic face is: a round one's diameter (its smaller one for a torus), else its box's
+    /// middle extent (a flat face's narrower side).</summary>
+    static double Width(NFace f)
+    {
+        switch (f.Surface.Kind)
+        {
+            case SurfaceKind.Cylinder: case SurfaceKind.Cone: case SurfaceKind.Sphere: return Math.Min(2 * f.Surface.R, f.Bounds().Diagonal);
+            case SurfaceKind.Torus: return 2 * f.Surface.R2;
+        }
+        var b = f.Bounds(); var d = b.Max - b.Min;
+        var e = new[] { d.X, d.Y, d.Z }.OrderBy(x => x).ToArray();
+        return e[1];
+    }
     bool RollsOn(NSurface blend, NSurface s) => blend.Spine is { } sp
         && (sp.SupportA is { } a && Same(a, s) || sp.SupportB is { } b && Same(b, s) || sp.Rolls.Any(r => Same(r, s)));
 
@@ -310,14 +324,19 @@ public sealed class NBoolean
                 // a B-spline's distance is a closest-point search: trace on the B-spline face, with the analytic
                 // surface's distance (exact and cheap)
                 bool onSpline = false;
-                if (fb.Surface.Kind == SurfaceKind.BSpline && fa.Surface.Kind is not (SurfaceKind.BSpline or SurfaceKind.Offset or SurfaceKind.Screw)) { (fa, fb) = (fb, fa); onSpline = true; }
+                // (not where the analytic face is narrower than a few of the B-spline's grid cells, a thin hole through it:
+                // there the B-spline's grid sees only scraps of the crossing, and the analytic face's own grid finds it)
+                if (fb.Surface.Kind == SurfaceKind.BSpline && fa.Surface.Kind is not (SurfaceKind.BSpline or SurfaceKind.Offset or SurfaceKind.Screw)
+                    && Width(fa) > 4 * fb.Bounds().Diagonal / 96) { (fa, fb) = (fb, fa); onSpline = true; }
+                else if (fa.Surface.Kind == SurfaceKind.BSpline && fb.Surface.Kind is not (SurfaceKind.BSpline or SurfaceKind.Offset or SurfaceKind.Screw or SurfaceKind.Pipe)
+                    && Width(fb) <= 4 * fa.Bounds().Diagonal / 96) (fa, fb) = (fb, fa);
                 var swt = System.Diagnostics.Stopwatch.StartNew();
                 List<NCurve> c; using (Prof.Time(Prof.Enabled ? $"tr.{fa.Surface.Kind}x{fb.Surface.Kind}" : "")) c = NIntersect.Trace(fa, fb.Surface, traceTol, traceDoms[fa]).Cast<NCurve>().ToList();
                 if (Prof.Enabled && c.Count == 0) Prof.Add($"tr.empty.{fa.Surface.Kind}x{fb.Surface.Kind}", 0);
                 // traced from the other side too (small faces)
                 // (from the analytic face only when it is much smaller: a curve on it may fall between the B-spline's grid
-                // points. The B-spline's distance is slow there, and past the patch's edge its sign flips with nothing
-                // crossing: on a face of its size the trace finds curves that are not there)
+                // points. A narrow one, a thin hole, was traced on its own face to begin with. Elsewhere the B-spline's
+                // distance is slow, and past the patch's edge its sign flips with nothing crossing)
                 if (c.Count == 0 && fa.Surface.Kind != SurfaceKind.Screw && (!onSpline || fb.Bounds().Diagonal < 0.25 * fa.Bounds().Diagonal)) c = NIntersect.Trace(fb, fa.Surface, traceTol, traceDoms[fb]).Cast<NCurve>().ToList();
                 pairCurves[i] = c;
                 if (Trace != null && Environment.GetEnvironmentVariable("FC_TRACE_SLOW") != null)

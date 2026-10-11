@@ -268,6 +268,22 @@ public static class NativeBlend
         // glued first and cut as one: cut apart, they meet face to face at their joints, where applying them one by
         // one fails
         var pending = Enumerable.Range(0, entries.Count).Where(k => entries[k].trimmed).ToList();
+        // (the blends meeting those at a corner, on the plane bisecting it, go with them: glued first and cut back as
+        // one, the whole run is applied directly; cut back alone, its end no longer matches theirs, and none of them is)
+        var along = new HashSet<int>();
+        if (pending.Count > 0)
+            for (bool more = true; more;)
+            {
+                more = false;
+                for (int j = 0; j < entries.Count; j++)
+                {
+                    if (pending.Contains(j) || entries[j].strip == null) continue;
+                    if (pending.Any(k => entries[k].strip != null && entries[k].convex == entries[j].convex && MeetAtCorner(entries[k].group, entries[j].group)))
+                    {
+                        pending.Add(j); along.Add(j); more = true;
+                    }
+                }
+            }
         if (pending.Count > 0)
         {
             using var _tr = Prof.Time("blend.trim");
@@ -278,7 +294,8 @@ public static class NativeBlend
             {
                 var chain = new HashSet<NEdge>(entries[k].group.SelectMany(e => TangentChain(e, edges, none)), ReferenceEqualityComparer.Instance);
                 foreach (var j in pending)
-                    if (j != k && entries[j].convex == entries[k].convex && entries[j].group.Any(chain.Contains)) par[Find(j)] = Find(k);
+                    if (j != k && entries[j].convex == entries[k].convex && (entries[j].group.Any(chain.Contains) || MeetAtCorner(entries[k].group, entries[j].group)))
+                        par[Find(j)] = Find(k);
             }
             var cut = new List<(List<Solid> tools, bool convex, Solid? strip, string name, List<NEdge> group, bool trimmed)>();
             List<NFace> FacesOf(IEnumerable<NEdge> es) => es.SelectMany(e => e.Uses.Select(u => u.Face)).Distinct(ReferenceEqualityComparer.Instance).Cast<NFace>().ToList();
@@ -295,6 +312,8 @@ public static class NativeBlend
                 foreach (var k in cluster)
                 {
                     var x = entries[k];
+                    // (one only along: not cut back, as it was)
+                    if (along.Contains(k)) { cut.Add(x); continue; }
                     var faces = FacesOf(x.group);
                     // the tool bounded by the faces where there is one: the boolean's reaches past the corner, and cut
                     // back here that reach can be left exposed (material added, or taken, beyond the blend)
@@ -422,6 +441,21 @@ public static class NativeBlend
 
     static (NFace a, NFace b) Faces(NEdge e) => (e.Uses[0].Face, e.Uses[1].Face);
 
+    /// <summary>Whether two blends' edges meet at a vertex at an angle, on a face both run along (a corner they meet at,
+    /// mitred).</summary>
+    static bool MeetAtCorner(List<NEdge> a, List<NEdge> b)
+    {
+        foreach (var x in a)
+            foreach (var y in b)
+            {
+                if (ReferenceEquals(x, y)) continue;
+                NVertex? v = ReferenceEquals(x.V0, y.V0) || ReferenceEquals(x.V0, y.V1) ? x.V0 : ReferenceEquals(x.V1, y.V0) || ReferenceEquals(x.V1, y.V1) ? x.V1 : null;
+                if (v == null) continue;
+                if (x.Uses.Any(u => y.Uses.Any(w => ReferenceEquals(u.Face, w.Face)))) return true;
+            }
+        return false;
+    }
+
     /// <summary>The selected edges connected to e end to end through edges between the same two surfaces.</summary>
     static List<NEdge> Chain(NEdge e, IReadOnlyList<NEdge> selected)
     {
@@ -509,8 +543,8 @@ public static class NativeBlend
         // that face on one side, into the material beyond it, and falls short on the other. The tool is cut back to
         // the face, and an extension past the end, also cut back to it, fills the other side
         var ext = 3 * Math.Max(size, Math.Max(tlA, tlB));
-        var p0 = EndPlane(cA.Start, -t, cA.Face, cB.Face, new[] { e }, selected);
-        var p1 = EndPlane(cA.End, t, cA.Face, cB.Face, new[] { e }, selected);
+        var p0 = EndCutAt(cA.Start, -t, cA.Face, cB.Face, new[] { e }, selected);
+        var p1 = EndCutAt(cA.End, t, cA.Face, cB.Face, new[] { e }, selected);
         // (contact points the ends' faces cut off are not the blend's)
         bool Cut(Vec3 x) => p0 != null && p0.Distance(x) < 0 || p1 != null && p1.Distance(x) < 0;
         bool fits = true;
@@ -524,11 +558,12 @@ public static class NativeBlend
         // past them and cut back
         Solid Between(ProfileLoop prof, bool extend)
         {
-            if ((p0 != null || p1 != null) && NBuild.ExtrudeBetween(new[] { new ProfileRegion(prof) }, lframe, p0, 0, p1, L, name) is { } nb)
+            if ((p0 != null || p1 != null) && p0?.Plane is not null == (p0 != null) && p1?.Plane is not null == (p1 != null)
+                && NBuild.ExtrudeBetween(new[] { new ProfileRegion(prof) }, lframe, p0?.Plane, 0, p1?.Plane, L, name) is { } nb)
                 return NTess.ToSolid(nb);
             var sol = Builders.Extrude(new[] { new ProfileRegion(prof) }, lframe, p0 != null && extend ? -ext : 0, p1 != null && extend ? L + ext : L, name);
-            if (p0 != null) sol = Trim(sol, p0);
-            if (p1 != null) sol = Trim(sol, p1);
+            if (p0 != null) sol = p0.Trim(sol);
+            if (p1 != null) sol = p1.Trim(sol);
             return sol;
         }
         var tools = new List<Solid> { Between(loop, true) };
@@ -622,7 +657,7 @@ public static class NativeBlend
         }
         // chain ends meeting a face at an angle (e.g. a keyway wall across a bore): extensions past the ends, each
         // cut back to its face
-        var extensions = new List<(double a0, double sweep, Plane plane, int arc)>();
+        var extensions = new List<(double a0, double sweep, EndCut plane, int arc)>();
         if (ranges.Sum(r => r.sweep) < 2 * Math.PI - 1e-6)
         {
             var delta = Math.Min(Math.Min(3 * Math.Max(size, tlc) / rE, Math.PI / 4), (2 * Math.PI - ranges.Sum(r => r.sweep)) / 2);
@@ -638,7 +673,7 @@ public static class NativeBlend
                     var v = atStart ? startV : endV;
                     if (arcs.Count(o => ReferenceEquals(o.V0, v) || ReferenceEquals(o.V1, v)) > 1) continue; // joint inside the chain
                     var dirOut = atStart ? -DirAt(a0) : DirAt(a0 + sweep);
-                    if (delta > 1e-9 && EndPlane(v, dirOut, cP.Face, cC.Face, arcs, selected) is { } pl)
+                    if (delta > 1e-9 && EndCutAt(v, dirOut, cP.Face, cC.Face, arcs, selected) is { } pl)
                         extensions.Add((atStart ? a0 - delta : a0 + sweep, delta, pl, i));
                 }
             }
@@ -659,7 +694,7 @@ public static class NativeBlend
         {
             var startDir = refDir * Math.Cos(xa) + yDir * Math.Sin(xa);
             var xf = new Frame(cs.Origin, startDir, ax, Vec3.Cross(startDir, ax));
-            var piece = Trim(Builders.Revolve(new[] { new ProfileRegion(prof) }, xf, Vec2.Zero, new Vec2(0, 1), xs, name), pl);
+            var piece = pl.Trim(Builders.Revolve(new[] { new ProfileRegion(prof) }, xf, Vec2.Zero, new Vec2(0, 1), xs, name));
             if (!piece.IsEmpty) tools.Add(piece);
         }
         if (ranges.Sum(r => r.sweep) > 2 * Math.PI - 1e-6)
@@ -677,7 +712,7 @@ public static class NativeBlend
         }
         // whether an end's plane cuts the profile revolved over (from, to): a long arc curves back across the plane of
         // the face its end meets (a slot's wall across a hole's rim), where the plane is no end of it
-        bool Reaches(Plane pl, double from, double to)
+        bool Reaches(EndCut pl, double from, double to)
         {
             for (int i = 0; i <= 16; i++)
             {
@@ -688,7 +723,7 @@ public static class NativeBlend
             return false;
         }
         // (the end lengths next to the ends cut back, and whether a plane reaches past them)
-        (double s, double e, bool split) Ends(List<(double a0, double sweep, Plane plane, int arc)> mine, double a0, double sweep)
+        (double s, double e, bool split) Ends(List<(double a0, double sweep, EndCut plane, int arc)> mine, double a0, double sweep)
         {
             double s = a0, e = a0 + sweep;
             foreach (var x in mine)
@@ -708,7 +743,7 @@ public static class NativeBlend
             {
                 var piece = Piece(prof, a0, sweep);
                 // cut back to the faces its ends meet at an angle (as the line tool's)
-                foreach (var x in mine) piece = Trim(piece, x.plane);
+                foreach (var x in mine) piece = x.plane.Trim(piece);
                 if (!piece.IsEmpty) tools.Add(piece);
                 continue;
             }
@@ -716,7 +751,7 @@ public static class NativeBlend
             foreach (var x in mine)
             {
                 var atStart = Math.Abs(x.a0 + x.sweep - a0) < 1e-9;
-                var end = Trim(atStart ? Piece(prof, a0, ms - a0) : Piece(prof, me, a0 + sweep - me), x.plane);
+                var end = x.plane.Trim(atStart ? Piece(prof, a0, ms - a0) : Piece(prof, me, a0 + sweep - me));
                 if (!end.IsEmpty) tools.Add(end);
             }
             tools.Add(Piece(prof, ms, me - ms));
@@ -739,11 +774,72 @@ public static class NativeBlend
                     else to = x.a0 + x.sweep;                                // after the end
                 }
                 strip = Piece(sprof, from, to - from);
-                foreach (var x in mine) strip = Trim(strip, x.plane);
+                foreach (var x in mine) strip = x.plane.Trim(strip);
                 if (strip.IsEmpty || strip.Native == null) strip = null;
             }
         }
         return (tools, convex, fits, strip);
+    }
+
+    /// <summary>
+    /// What a blend's end is cut back to where it meets a face at an angle: that face's plane, or the face itself where it
+    /// is round (a cylinder: a hole breaking into a rim). Distance is positive on the side kept (the blend's).
+    /// </summary>
+    internal sealed class EndCut
+    {
+        public Plane? Plane { get; }
+        readonly NFace? _face; readonly double _sign;
+        public EndCut(Plane pl) => Plane = pl;
+        public EndCut(NFace face, double sign) { _face = face; _sign = sign; }
+        public double Distance(Vec3 p) => Plane?.Distance(p) ?? _face!.Surface.F_(p) * _sign;
+        /// <summary>Unit normal towards the kept side.</summary>
+        public Vec3 NormalAt(Vec3 p) => Plane?.Normal ?? (_face!.Surface.Grad(p) * _sign).Normalized;
+        /// <summary>The part of the tool on the kept side.</summary>
+        public Solid Trim(Solid tool)
+        {
+            if (Plane != null) return NativeBlend.Trim(tool, Plane);
+            // the cylinder over the tool's span along its axis: the blend kept outside it (a hole) or inside it
+            var s = _face!.Surface; var ax = s.Axis;
+            double h0 = double.MaxValue, h1 = double.MinValue;
+            var box = tool.Bounds;
+            for (int c = 0; c < 8; c++)
+            {
+                var p = new Vec3((c & 1) == 0 ? box.Min.X : box.Max.X, (c & 2) == 0 ? box.Min.Y : box.Max.Y, (c & 4) == 0 ? box.Min.Z : box.Max.Z);
+                var h = Vec3.Dot(p - s.Origin, ax);
+                h0 = Math.Min(h0, h); h1 = Math.Max(h1, h);
+            }
+            var cyl = Builders.Cylinder(s.Origin + ax * (h0 - 1), ax, s.R, h1 - h0 + 2, "trim", s.F.XDir);
+            return _sign > 0 ? Csg.Subtract(tool, cyl) : Csg.Intersect(tool, cyl);
+        }
+    }
+
+    /// <summary>
+    /// <see cref="EndPlane"/>, else the round face (a cylinder) a blend's end vertex runs into at an angle, the only
+    /// face there other than the blended ones. Null when there is neither.
+    /// </summary>
+    internal static EndCut? EndCutAt(NVertex v, Vec3 dirOut, NFace fa, NFace fb, IEnumerable<NEdge> blended, IReadOnlyCollection<NEdge>? selected = null)
+    {
+        if (EndPlane(v, dirOut, fa, fb, blended, selected) is { } pl) return new EndCut(pl);
+        var others = new List<NFace>();
+        foreach (var face in new[] { fa, fb })
+            foreach (var c in face.Coedges)
+            {
+                var e = c.Edge;
+                if (!ReferenceEquals(e.V0, v) && !ReferenceEquals(e.V1, v) || blended.Contains(e) || IsSeam(e)) continue;
+                foreach (var u in e.Uses)
+                {
+                    var f = u.Face;
+                    if (ReferenceEquals(f, fa) || ReferenceEquals(f, fb) || f.Surface.CoincidentWith(fa.Surface, 1e-9) || f.Surface.CoincidentWith(fb.Surface, 1e-9)) continue;
+                    if (!others.Any(o => o.Surface.CoincidentWith(f.Surface, 1e-9))) others.Add(f);
+                }
+            }
+        if (others.Count != 1 || others[0].Surface.Kind != SurfaceKind.Cylinder) return null;
+        var fc = others[0];
+        var cos = Math.Abs(Vec3.Dot(fc.Surface.Normal(v.P), dirOut.Normalized));
+        if (cos > 0.9999 || cos < 0.05) return null;
+        // the side the edge is on, a little back from its end
+        var side = fc.Surface.F_(v.P - dirOut.Normalized * 1e-3);
+        return Math.Abs(side) < 1e-12 ? null : new EndCut(fc, Math.Sign(side));
     }
 
     /// <summary>

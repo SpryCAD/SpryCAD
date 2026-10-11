@@ -54,19 +54,26 @@ public static class SweptChamfer
             var p = order[0]; var m = 0.5 * (p.ta + p.tb);
             order = new List<(NEdge e, double ta, double tb)> { (p.e, p.ta, m), (p.e, m, p.tb) };
         }
-        // side A: a face of the first edge, carried on through the chain (the same surface, else the face beside the
-        // previous piece's A face across the joint)
+        // side A: a face of the first edge, carried on through the chain: the same surface, else the face going on from
+        // the previous piece's A face across the joint (its normal there the same: both faces of the next edge may
+        // touch the previous A face, a corner round touching the plate and the side alike)
         var pieces = new List<Piece>();
-        NFace? prevA = null;
+        NFace? prevA = null; Vec3 joint = default;
         foreach (var (e, ta, tb) in order)
         {
             var f0 = e.Uses[0].Face; var f1 = e.Uses[1].Face;
             NFace a;
             if (prevA == null) a = f0;
-            else if (Same(f0, prevA) || !Same(f1, prevA) && Adjacent(f0, prevA)) a = f0;
-            else a = f1;
+            else if (Same(f0, prevA)) a = f0;
+            else if (Same(f1, prevA)) a = f1;
+            else
+            {
+                var na = Outward(prevA, joint);
+                a = Vec3.Dot(Outward(f0, joint), na) >= Vec3.Dot(Outward(f1, joint), na) ? f0 : f1;
+            }
             pieces.Add(new Piece(e, ta, tb, a, ReferenceEquals(a, f0) ? f1 : f0));
             prevA = a;
+            joint = tb == e.T0 ? e.V0.P : tb == e.T1 ? e.V1.P : e.Curve.Eval(tb);
         }
         int n = pieces.Count;
         // the faces a leg's end may lie on: the chain's faces on that side
@@ -78,7 +85,7 @@ public static class SweptChamfer
         var tol = 1e-7 * scale;
         bool fits = true, strippable = true;
         // (the face's plane, the end's vertex, the reach of the extension around it)
-        var endPlanes = new List<(Plane pl, Vec3 at, double r)>();
+        var endPlanes = new List<(NativeBlend.EndCut pl, Vec3 at, double r)>();
         bool Cut(Vec3 x) => endPlanes.Any(e => e.pl.Distance(x) < 0 && Vec3.Distance(x, e.at) < e.r);
         bool? convex = null;
         string? error = null;
@@ -152,7 +159,7 @@ public static class SweptChamfer
         // past that face on one side and falls short on the other. The chain goes on a little along its curve (a
         // piece of its own, the faces' surfaces extended), and the tools are cut back to the face
         var virt = new HashSet<int>();
-        var ends = new List<(Plane pl, bool atStart, double back)>();
+        var ends = new List<(NativeBlend.EndCut pl, bool atStart, double back)>();
         if (!closed)
             foreach (var atStart in new[] { true, false })
             {
@@ -163,11 +170,12 @@ public static class SweptChamfer
                 var fr = Frame(k, atStart ? 0 : 1);
                 if (fr == null) return Fail(error!);
                 var dirOut = fr.Value.D * (atStart ? -1 : 1);
-                if (NativeBlend.EndPlane(v, dirOut, pc.A, pc.B, chain) is not { } pl) continue;
+                // (planes only: cut back to a round face, the B-spline tool's boolean with it is not reliable)
+                if (NativeBlend.EndCutAt(v, dirOut, pc.A, pc.B, chain) is not { Plane: not null } pl) continue;
                 var leg = Math.Max(fr.Value.d[0], fr.Value.d[1]);
                 endPlanes.Add((pl, v.P, 5 * leg));
                 // how far back along the edge the face reaches into the section (it leans by the angle between them)
-                var cos = Math.Abs(Vec3.Dot(pl.Normal, dirOut));
+                var cos = Math.Abs(Vec3.Dot(pl.NormalAt(v.P), dirOut));
                 var back = Math.Min(2 * leg * Math.Sqrt(Math.Max(0, 1 - cos * cos)) / cos, 6 * leg);
                 ends.Add((pl, atStart, back));
                 // far enough past the end for the face to cut the whole section off
@@ -353,9 +361,11 @@ public static class SweptChamfer
                     if (sc != null) for (int q = 0; q < 5; q++) near.Add(Pt(sc, q));
                 }
             }
-            tool = TrimNear(tool, pl, near);
+            // (a round face: cut back to it all round; the plane only near the end)
+            Solid Back(Solid x) => pl.Plane is { } plane ? TrimNear(x, plane, near) : pl.Trim(x);
+            tool = Back(tool);
             if (tool.IsEmpty) return Fail("the chamfer is cut away by the faces its ends meet.");
-            try { if (stripSolid != null) stripSolid = TrimNear(stripSolid, pl, near); }
+            try { if (stripSolid != null) stripSolid = Back(stripSolid); }
             catch (InvalidOperationException) { stripSolid = null; }
             if (stripSolid is { IsEmpty: true } or { Native: null }) stripSolid = null;
         }
@@ -678,7 +688,6 @@ public static class SweptChamfer
 
     static bool Same(NFace f, NFace g) => ReferenceEquals(f, g) || f.Surface.CoincidentWith(g.Surface, 1e-9) && f.Sense == g.Sense;
 
-    static bool Adjacent(NFace f, NFace g) => f.Coedges.Any(c => c.Edge.Uses.Any(u => ReferenceEquals(u.Face, g)));
 
     /// <summary>
     /// The point of surface s in the section plane at (chord) distance d from P, starting along u: exact on a plane,
