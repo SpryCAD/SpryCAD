@@ -450,6 +450,23 @@ static class DirectBlendTests
                 }
         });
 
+        t.Test("Corners where three fillets meet: the same by boolean as directly (the ball's patch both ways)", () =>
+        {
+            // by boolean (direct blends off, a pattern's copies) the edges' tools used to overlap at the corner (a
+            // mitred corner, not the ball's): 32 mm³ apart on a box filleted all round
+            foreach (var name in new[] { "box, three edges at a corner", "box, all edges", "pocket, floor and corners", "casting foot, undrafted" })
+            {
+                var a = BlendAB.Build(() => Demos.BlendCases.First(c => c.name == name).build(), direct: true, reps: 1).feats;
+                var b = BlendAB.Build(() => Demos.BlendCases.First(c => c.name == name).build(), direct: false, reps: 1).feats;
+                for (int i = 0; i < a.Count; i++)
+                {
+                    t.True(a[i].error == null && b[i].error == null, $"{name}, {a[i].name}: {a[i].error ?? b[i].error}");
+                    t.True(Math.Abs(a[i].vol - b[i].vol) <= 1e-7 * Math.Max(1, b[i].vol), $"{name}, {a[i].name}: {a[i].vol:R} directly, {b[i].vol:R} by boolean");
+                    t.True(a[i].names.SetEquals(b[i].names), $"{name}, {a[i].name}: faces +[{string.Join(",", b[i].names.Except(a[i].names))}] -[{string.Join(",", a[i].names.Except(b[i].names))}]");
+                }
+            }
+        });
+
         t.Test("Direct blend: where three fillets meet, a patch of the ball (convex and concave corners, exact volumes)", () =>
         {
             // a fillet's cross-section is the square r x r less the quarter disc; each runs to the cross-section r
