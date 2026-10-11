@@ -46,6 +46,7 @@ public static class SweptChamfer
     {
         static Result Fail(string m) => new(null, false, false, m);
         var order = Order(chain, out var closed);
+        int virtClose = -1;
         if (order == null) return Fail("the edges do not form a single chain.");
         if (order.Any(p => p.e.Uses.Count != 2)) return Fail("the edge is not between two faces.");
         if (closed && order.Count == 1)
@@ -155,10 +156,41 @@ public static class SweptChamfer
             return new Sec(P, D, X, F, Xc, on);
         }
 
+        // ---- both ends of an open chain on one round face, on one curve (a hole through a rounded corner's foot, the
+        // chamfer wider than it): the chain closed through the hole along that curve, and the hole cut out of the tool
+        // after (the whole loop chamfered, then drilled)
+        var roundCuts = new List<NativeBlend.EndCut>();
+        if (!closed && pieces.Count >= 1)
+        {
+            var q0 = pieces[0]; var q1 = pieces[^1];
+            var w0 = StartV(q0); var w1 = EndV(q1);
+            if (w0 != null && w1 != null && q1.E.Curve is NCircle or NEllipse && Frame(0, 0) is { } f0 && Frame(pieces.Count - 1, 1) is { } f1
+                && NativeBlend.EndCutAt(w0, -f0.D, q0.A, q0.B, chain) is { Plane: null } c0 && NativeBlend.EndCutAt(w1, f1.D, q1.A, q1.B, chain) is { Plane: null } c1
+                && c0.SameFace(c1))
+            {
+                // on from the last piece's end along its curve to the first piece's start (through the hole)
+                var cv = q1.E.Curve; double sg = Math.Sign(q1.Tb - q1.Ta);
+                var tt = cv.Param(w0.P, q1.Tb);
+                while (sg * (tt - q1.Tb) <= 1e-12) tt += sg * 2 * Math.PI;
+                while (sg * (tt - q1.Tb) > 2 * Math.PI) tt -= sg * 2 * Math.PI;
+                if (Vec3.Distance(cv.Eval(tt), w0.P) < 1e-6 * scale)
+                {
+                    pieces.Add(q1 with { Ta = q1.Tb, Tb = tt });
+                    virtClose = pieces.Count - 1;
+                    closed = true; n = pieces.Count;
+                    roundCuts.Add(c0);
+                }
+            }
+        }
+
         // ---- ends of an open chain meeting a face at an angle (a slot's wall across a rim): the tool's square end leans
         // past that face on one side and falls short on the other. The chain goes on a little along its curve (a
         // piece of its own, the faces' surfaces extended), and the tools are cut back to the face
         var virt = new HashSet<int>();
+        if (virtClose >= 0) virt.Add(virtClose);
+        // (a piece run on past its end in place: its part on the edge, in its parameter 0..1)
+        var real = new Dictionary<int, (double lo, double hi)>();
+        bool InReal(int k, double tau) => !virt.Contains(k) && (!real.TryGetValue(k, out var r) || tau >= r.lo - 1e-9 && tau <= r.hi + 1e-9);
         var ends = new List<(NativeBlend.EndCut pl, bool atStart, double back)>();
         if (!closed)
             foreach (var atStart in new[] { true, false })
@@ -170,8 +202,7 @@ public static class SweptChamfer
                 var fr = Frame(k, atStart ? 0 : 1);
                 if (fr == null) return Fail(error!);
                 var dirOut = fr.Value.D * (atStart ? -1 : 1);
-                // (planes only: cut back to a round face, the B-spline tool's boolean with it is not reliable)
-                if (NativeBlend.EndCutAt(v, dirOut, pc.A, pc.B, chain) is not { Plane: not null } pl) continue;
+                if (NativeBlend.EndCutAt(v, dirOut, pc.A, pc.B, chain) is not { } pl) continue;
                 var leg = Math.Max(fr.Value.d[0], fr.Value.d[1]);
                 endPlanes.Add((pl, v.P, 5 * leg));
                 // how far back along the edge the face reaches into the section (it leans by the angle between them)
@@ -182,7 +213,24 @@ public static class SweptChamfer
                 var t = atStart ? pc.Ta : pc.Tb;
                 var dt = 3 * Math.Max(fr.Value.d[0], fr.Value.d[1]) / Math.Max(pc.E.Curve.Deriv(t).Length, 1e-12) * Math.Sign(pc.Tb - pc.Ta);
                 if (pc.E.Curve is NCircle or NEllipse) dt = Math.Sign(dt) * Math.Min(Math.Abs(dt), Math.PI / 4);
-                if (atStart) { pieces.Insert(0, pc with { Ta = t - dt, Tb = t }); virt = virt.Select(x => x + 1).ToHashSet(); virt.Add(0); }
+                if (pl.Plane == null)
+                {
+                    // (not past half the way to the chain's other end: both ends on one hole, run on from either side,
+                    // would cross inside it, and a tool crossing itself fails every boolean)
+                    var other = atStart ? End(pieces[n - 1]) : Start(pieces[0]);
+                    var half = 0.5 * Vec3.Distance(v.P, other) / Math.Max(pc.E.Curve.Deriv(t).Length, 1e-12);
+                    dt = Math.Sign(dt) * Math.Min(Math.Abs(dt), half);
+                    // a round face: the piece itself runs on (no joint where the face crosses the tool: the boolean
+                    // with it across a joint between two of the tool's faces fails)
+                    var len = Math.Abs(pc.Tb - pc.Ta) + Math.Abs(dt);
+                    var f = Math.Abs(pc.Tb - pc.Ta) / len;
+                    pieces[k] = atStart ? pc with { Ta = t - dt } : pc with { Tb = t + dt };
+                    var (lo0, hi0) = real.TryGetValue(k, out var r0) ? r0 : (0.0, 1.0);
+                    // (in the new parameter: the old range scaled into it)
+                    real[k] = atStart ? (1 - f + lo0 * f, 1 - f + hi0 * f) : (lo0 * f, hi0 * f);
+                    continue;
+                }
+                if (atStart) { pieces.Insert(0, pc with { Ta = t - dt, Tb = t }); virt = virt.Select(x => x + 1).ToHashSet(); virt.Add(0); real = real.ToDictionary(x => x.Key + 1, x => x.Value); }
                 else { pieces.Add(pc with { Ta = t, Tb = t + dt }); virt.Add(pieces.Count - 1); }
                 n = pieces.Count;
             }
@@ -199,11 +247,12 @@ public static class SweptChamfer
                 var s = Section(k, (double)i / scan);
                 if (s == null) return Fail(error!);
                 labels[i] = s.F;
-                if (!s.On && !virt.Contains(k)) fits = false;
+                if (!s.On && InReal(k, (double)i / scan)) fits = false;
             }
             for (int side = 0; side < 2 && !virt.Contains(k); side++)
                 for (int i = 0; i < scan; i++)
                 {
+                    if (!InReal(k, (double)i / scan) || !InReal(k, (double)(i + 1) / scan)) continue;
                     NFace f0 = labels[i][side], f1 = labels[i + 1][side];
                     if (ReferenceEquals(f0, f1)) continue;
                     // the seam between them, and where the leg's end (on f0's surface, extended) crosses it
@@ -296,7 +345,7 @@ public static class SweptChamfer
             {
                 var s = Section(k, t0 + (t1 - t0) * u, faces[i]);
                 if (s == null) return null;
-                if (keep && !s.On && !virt.Contains(k)) fits = false;
+                if (keep && !s.On && InReal(k, t0 + (t1 - t0) * u)) fits = false;
                 return Pts(s);
             }
             BSplineCurve[]? sp = null;
@@ -336,6 +385,14 @@ public static class SweptChamfer
         {
             stripSolid = Assemble(name, brks, cur, closed, ni, Nx, convex.Value, strip: true, pieces, faces, footMid, out var serr);
             if (stripSolid == null) Debug?.Invoke($"swept chamfer {name}: no strip ({serr})");
+        }
+        foreach (var rc in roundCuts)
+        {
+            tool = rc.Trim(tool);
+            if (tool.IsEmpty) return Fail("the chamfer is cut away by the faces its ends meet.");
+            try { if (stripSolid != null) stripSolid = rc.Trim(stripSolid); }
+            catch (InvalidOperationException) { stripSolid = null; }
+            if (stripSolid is { IsEmpty: true } or { Native: null }) stripSolid = null;
         }
         // cut back to the faces the ends meet: what lies behind the face of the extension, and of the chain as far back
         // as the face leans into it (not further: a chain running round a hole comes back past the plane further on)

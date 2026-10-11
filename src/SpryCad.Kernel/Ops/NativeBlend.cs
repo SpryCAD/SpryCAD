@@ -792,6 +792,9 @@ public static class NativeBlend
         public EndCut(Plane pl) => Plane = pl;
         public EndCut(NFace face, double sign) { _face = face; _sign = sign; }
         public double Distance(Vec3 p) => Plane?.Distance(p) ?? _face!.Surface.F_(p) * _sign;
+        /// <summary>Whether two cuts are by the same round face (or coincident planes).</summary>
+        public bool SameFace(EndCut o) => Plane != null ? o.Plane != null && Math.Abs(Vec3.Dot(Plane.Normal, o.Plane.Normal) - 1) < 1e-9 && Math.Abs(Plane.Distance(o.Plane.Project(Vec3.Zero))) < 1e-9
+            : o._face != null && (ReferenceEquals(_face, o._face) || _face!.Surface.CoincidentWith(o._face.Surface, 1e-9)) && _sign == o._sign;
         /// <summary>Unit normal towards the kept side.</summary>
         public Vec3 NormalAt(Vec3 p) => Plane?.Normal ?? (_face!.Surface.Grad(p) * _sign).Normalized;
         /// <summary>The part of the tool on the kept side.</summary>
