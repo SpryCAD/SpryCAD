@@ -32,10 +32,11 @@ public static class MateSolver
 
     /// <summary>
     /// A component being dragged: its point <c>Local</c> (in its part) pulled toward the line from <c>Origin</c> along
-    /// <c>Dir</c> (the ray under the cursor). <c>Move</c>: how far the cursor moved it (in the view's plane), for a
-    /// component no mate moves (<see cref="AssemblyModel.SolveDrag"/>); the solve itself starts from where it is.
+    /// <c>Dir</c> (the ray under the cursor; no direction: to the point <c>Origin</c>, as a turn by hand pulls it).
+    /// <c>Move</c>, or <c>Turn</c> when given: what the cursor did to it, for a component no mate moves
+    /// (<see cref="AssemblyModel.SolveDrag"/>); the solve itself starts from where it is.
     /// </summary>
-    public sealed record Pull(string Component, Vec3 Local, Vec3 Origin, Vec3 Dir, Vec3 Move = default);
+    public sealed record Pull(string Component, Vec3 Local, Vec3 Origin, Vec3 Dir, Vec3 Move = default, Transform? Turn = null);
 
     /// <summary>
     /// A component carried by another (<c>Body</c>): placed at the body's placement times <c>Offset</c>, never solved
@@ -51,6 +52,18 @@ public static class MateSolver
     /// </summary>
     public static Result SolveDrag(AssemblyDocument doc, Func<MateRef, MateGeom> local, Pull pull, IReadOnlyDictionary<string, Attachment>? attached = null)
         => PrepareDrag(doc, local, pull.Component, attached).Run(pull);
+
+    /// <summary>
+    /// A motion's solve set up once, for every step of it (<see cref="Session.Run"/>, no pull): <paramref name="held"/>
+    /// is placed by the caller between runs (a motor turns it) and held there, what is mated to it through floating
+    /// components moves.
+    /// </summary>
+    public static Session PrepareHeld(AssemblyDocument doc, Func<MateRef, MateGeom> local, string held, IReadOnlyDictionary<string, Attachment>? attached = null)
+    {
+        var moving = Linked(doc, held, attached);
+        moving.Remove(held);
+        return Prepare(doc, local, moving, attached, null);
+    }
 
     /// <summary>
     /// A drag's solve set up once, for every mouse move of it (<see cref="Session.Run"/> with the pull): the dragged
@@ -450,12 +463,18 @@ public static class MateSolver
             if (drag != null && drag.Component != pulled) throw new ArgumentException("The pull is on a component the solve was not set up for.");
             // (none where nothing it pulls is solved for: a component locked to a still one)
             pull = drag == null || pullComponent == null ? null : pulled == pullComponent ? drag : drag with { Component = pullComponent, Local = pullOff.Point(drag.Local) };
-            pulling = pull != null; pullWeight = 1e-3; pullDir = pull?.Dir.Normalized ?? Vec3.Zero;
+            pulling = pull != null; pullWeight = 1e-3;
+            // (no direction: pulled to the point itself, as a turn by hand pulls it)
+            pullDir = pull != null && pull.Dir.Length > 0 ? pull.Dir.Normalized : Vec3.Zero;
             var res = new Result();
             foreach (var c in free) res.Solved.Add(c.Id);
             foreach (var b in groupOf.Keys) if (freeIdx.ContainsKey(Root(b))) res.Solved.Add(b);
             // run again: from where the components are now (as the last run left them, or put back since)
+            // the still ones as they are now, the first run too (a motor turns the component it holds); the free ones
+            // after the first (which starts from the setup's, a face turned half round onto its mate among them)
+            foreach (var c in doc.Components) if (!ran || !freeIdx.ContainsKey(c.Id)) placements[c.Id] = c.Placement.ToTransform();
             if (ran) for (int i = 0; i < nf; i++) placements[free[i].Id] = place[i] = free[i].Placement.ToTransform();
+            for (int k = 0; k < K; k++) { fixA[k] = PlacementOf(CompA(k), null); fixB[k] = PlacementOf(CompB(k), null); }
             ran = true;
             r0 = Res(null);
             lambda = Damping();

@@ -831,5 +831,77 @@ static class AssemblyTests
             // (a few mm behind where it leaves an end of its travel: there the crank turns a long way for a little of it)
             t.True(worst < 3, $"the slider follows the cursor: worst {worst:0.###} mm off, {where}");
         });
+
+        t.Test("Drag sessions: a turn by hand (Shift+drag) turns a sleeve on its pin as far as its mates let it; a part no mate holds turns freely", () =>
+        {
+            var (m, pin, sleeve, dir) = PinAndSleeve("turn-drag");
+            m.AddMate(MateType.Concentric, m.RefTo(sleeve.Id, FaceOf(m, sleeve, "side"))!, m.RefTo(pin.Id, FaceOf(m, pin, "side"))!);
+            m.AddMate(MateType.Coincident, m.RefTo(sleeve.Id, FaceOf(m, sleeve, "start"))!, m.RefTo(pin.Id, FaceOf(m, pin, "end"))!);
+            Transform T(Component c) => c.Placement.ToTransform();
+            double AboutZ() { var x = T(sleeve).Vector(Vec3.UnitX); return Math.Atan2(x.Y, x.X); }
+            var a0 = AboutZ();
+            var centre = new Vec3(0, 0, 15);
+            var grab = new Vec3(5, 0, 5); // on the sleeve's rim (in its part)
+            m.BeginDrag(sleeve.Id);
+            for (int i = 0; i < 20; i++)
+            {
+                var r = Transform.Rotation(centre, Vec3.UnitZ, 0.1);
+                var at = T(sleeve).Point(grab);
+                var res = m.SolveDrag(new MateSolver.Pull(sleeve.Id, grab, r.Point(at), Vec3.Zero, default, r));
+                t.True(res.Satisfied, $"turn {i}: the mates hold");
+            }
+            var turned = Math.IEEERemainder(AboutZ() - a0, 2 * Math.PI);
+            t.True(Math.Abs(turned - 2.0) < 1e-3, $"turned about the pin {turned:0.#####} (the hand: 2)");
+            // turned about a line across the pin: the mates do not let it tilt
+            for (int i = 0; i < 5; i++)
+            {
+                var r = Transform.Rotation(centre, Vec3.UnitX, 0.1);
+                var at = T(sleeve).Point(grab);
+                var res = m.SolveDrag(new MateSolver.Pull(sleeve.Id, grab, r.Point(at), Vec3.Zero, default, r));
+                t.True(res.Satisfied, $"tilt {i}: the mates hold");
+            }
+            t.True(Vec3.Cross(T(sleeve).Vector(Vec3.UnitZ), Vec3.UnitZ).Length < 1e-6, "still on the pin's axis");
+            var end = m.EndDrag()!;
+            t.True(end.Satisfied && end.Errors.Values.Max() < 1e-9, "exact on release");
+
+            // a part no mate holds: turned as the hand turns it
+            var loose = m.Insert(Path.Combine(dir, "Pin.sprt"), Transform.Translation(new Vec3(60, 0, 0)));
+            var turn = Transform.Rotation(new Vec3(60, 0, 5), Vec3.UnitY, 0.3);
+            var expect = turn * T(loose);
+            m.BeginDrag(loose.Id);
+            m.SolveDrag(new MateSolver.Pull(loose.Id, Vec3.Zero, Vec3.Zero, Vec3.Zero, default, turn));
+            m.EndDrag();
+            t.True(Vec3.Distance(T(loose).T, expect.T) < 1e-9 && Vec3.Distance(T(loose).Vector(Vec3.UnitZ), expect.Vector(Vec3.UnitZ)) < 1e-9, "turned freely");
+        });
+
+        t.Test("Motion sessions: the linkage run by a motor on its gear, set up once, follows the kinematics two turns round and ends exact", () =>
+        {
+            var m = Demos.Assemblies.First(x => x.file == "linkage.sasm").build();
+            Component C(string name) => m.Doc.Components.First(c => c.Name.StartsWith(name));
+            var (crank, slider, g2) = (C("Crank"), C("Slider"), m.Doc.Components.Last(c => c.Name.StartsWith("Gear")));
+            double CrankAngle() { var x = crank.Placement.ToTransform().Vector(Vec3.UnitX); return Math.Atan2(x.Y, x.X); }
+            var bore = m.Doc.Mates.First(x => x.Type == MateType.Gear).B;
+            var start = (CrankAngle(), slider.Placement.ToTransform().T.X);
+            m.BeginMotion(g2.Id);
+            double worst = 0, worstGear = 0;
+            int steps = 0;
+            for (double turned = 0; turned < 4 * Math.PI - 1e-9; turned += Math.PI / 30, steps++)
+            {
+                var ax = m.World(bore);
+                var was = CrankAngle();
+                m.SetWorld(g2.Id, Transform.Rotation(ax.P, ax.D, Math.PI / 30) * m.WorldOf(g2.Id));
+                var res = m.SolveMotion();
+                if (!res.Satisfied) { t.True(false, $"step {steps}: the mates hold ({string.Join(", ", res.Failed())})"); break; }
+                worst = Math.Max(worst, Math.Abs(slider.Placement.ToTransform().T.X - Demos.LinkageJoints(CrankAngle()).C.X));
+                // the gears 1:1: the crank turned back as far as the gear turned on, each step
+                worstGear = Math.Max(worstGear, Math.Abs(Math.IEEERemainder(CrankAngle() - was, 2 * Math.PI) + Math.PI / 30));
+            }
+            t.True(worstGear < 1e-6, $"each step the crank turned with the gear (off by {worstGear:0.######} rad)");
+            var end = m.EndMotion()!;
+            t.True(worst < 1e-4, $"{steps} steps: the slider where the kinematics put it throughout (off by {worst:0.######})");
+            t.True(end.Satisfied && end.Errors.Values.Max() < 1e-9, $"exact at the end ({end.Errors.Values.Max():E1})");
+            t.True(Math.Abs(Math.IEEERemainder(CrankAngle() - start.Item1, 2 * Math.PI)) < 1e-4 && Math.Abs(slider.Placement.ToTransform().T.X - start.Item2) < 1e-4,
+                "two turns: back where it started");
+        });
     }
 }

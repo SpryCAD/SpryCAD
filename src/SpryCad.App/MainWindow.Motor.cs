@@ -98,7 +98,7 @@ public partial class MainWindow
                 st.Last = DateTime.UtcNow;
                 st.Timer.Start();
             }
-            else st.Timer?.Stop();
+            else { st.Timer?.Stop(); a.Model.EndMotion(); }
             st.Update?.Invoke();
         }
 
@@ -114,16 +114,17 @@ public partial class MainWindow
             var step = Math.Clamp(st.Rpm * 2 * Math.PI / 60 * dt, -2.0, 2.0) * (st.Reverse ? -1 : 1);
             if (step == 0) return;
             var g = a.Model.World(ax);
-            // (what turns: the component, or the rigid sub-assembly it is part of)
+            // (what turns: the component, or the rigid sub-assembly it is part of; what moves with it solved on a solve
+            // set up once while it runs)
+            if (a.Model.MotionHeld != body) { a.Model.EndMotion(); a.Model.BeginMotion(body); }
             a.Model.SetWorld(body, Transform.Rotation(g.P, g.D, step) * a.Model.WorldOf(body));
-            var others = a.Model.MovableComponents().Where(x => x != body).ToHashSet();
-            var res = a.Model.SolveMates(others);
+            var res = a.Model.SolveMotion();
             st.Turned += step * 180 / Math.PI;
             if (!res.Satisfied)
             {
                 // the mates do not let it turn (it is held some other way, or the mechanism locks up): back a step
                 a.Model.SetWorld(body, Transform.Rotation(g.P, g.D, -step) * a.Model.WorldOf(body));
-                a.Model.SolveMates(others);
+                a.Model.SolveMotion();
                 st.Turned -= step * 180 / Math.PI;
                 Run(false);
                 Status($"The motor stopped: the mates do not let {a.Model.NameAt(body)} turn further ({string.Join(", ", res.Failed().Select(m => MateName(a.Model, m)))}).");
@@ -149,6 +150,7 @@ public partial class MainWindow
         void Close()
         {
             st.Timer?.Stop();
+            a.Model.EndMotion();
             _motor = null; _hoverFace = null;
             ShowPage(null); HideConfirmCorner();
             RefreshAssemblyScene();
@@ -165,6 +167,7 @@ public partial class MainWindow
         void Cancel()
         {
             st.Timer?.Stop();
+            a.Model.EndMotion();
             Restore();
             Close();
             a.AbandonChange();
@@ -195,6 +198,7 @@ public partial class MainWindow
         if (a.Model.RefTo(component, face) is not { Kind: MateGeomKind.Axis } r) { Status($"{name}: pick a round face (a bore or a shaft): the motor turns about its axis."); return; }
         if (a.Model.Movable(component) is not { } body) { Status($"{name} is fixed: pick a face of a floating component."); return; }
         st.Timer?.Stop();
+        a.Model.EndMotion();
         st.Axis = r;
         st.Update?.Invoke();
         Status($"Motor: {a.Model.NameAt(body)} turns about that axis. Play to run it.");
