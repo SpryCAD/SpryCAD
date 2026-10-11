@@ -771,26 +771,6 @@ public static class SketchSolver
         }
     }
 
-    static void Jacobian(System s, double[] x, double[][] J)
-    {
-        int n = x.Length;
-        for (int i = 0; i < s.Eqs.Count; i++)
-        {
-            var row = J[i] ??= new double[n];
-            Array.Clear(row);
-            var eq = s.Eqs[i];
-            foreach (var v in eq.Vars)
-            {
-                var old = x[v];
-                var h = 1e-7 * Math.Max(1, Math.Abs(old));
-                x[v] = old + h; var fp = eq.F(x);
-                x[v] = old - h; var fm = eq.F(x);
-                x[v] = old;
-                row[v] = (fp - fm) / (2 * h) * eq.Weight;
-            }
-        }
-    }
-
     static double Norm2(double[] F) { double s = 0; foreach (var f in F) s += f * f; return s; }
     static double MaxAbs(double[] F) { double s = 0; foreach (var f in F) s = Math.Max(s, Math.Abs(f)); return s; }
 
@@ -836,26 +816,9 @@ public static class SketchSolver
         var s = Build(sk, null, false);
         var x = s.X.ToArray();
         int m = s.Eqs.Count, n = x.Length;
-        var free = new bool[n];
-        int rank = 0;
-        if (n > 0)
-        {
-            var J = new double[Math.Max(m, 1)][];
-            if (m > 0) Jacobian(s, x, J);
-            var (R, pivots, rk) = Rref(J, m, n);
-            rank = rk;
-            var isPivot = new int[n]; Array.Fill(isPivot, -1);
-            for (int k = 0; k < pivots.Count; k++) isPivot[pivots[k]] = k;
-            for (int j = 0; j < n; j++)
-            {
-                if (isPivot[j] < 0) { free[j] = true; continue; }
-                var row = R[isPivot[j]];
-                for (int f = 0; f < n; f++)
-                    if (isPivot[f] < 0 && Math.Abs(row[f]) > 1e-7) { free[j] = true; break; }
-            }
-        }
+        var (rank, free) = Reduce(s, x, wantFree: true);
         var fp = new HashSet<int>(); var fr = new HashSet<int>();
-        foreach (var (pid, (ix, iy)) in s.PointVars) if (free[ix] || free[iy]) fp.Add(pid);
+        foreach (var (pid, (ix, iy)) in s.PointVars) if (free![ix] || free[iy]) fp.Add(pid);
         foreach (var (cid, ir) in s.RadiusVars) if (free[ir]) fr.Add(cid);
         var resid = m > 0 ? MaxAbs(Eval(s, x)) : 0;
         var status = resid > 1e-6 ? SketchStatus.OverDefined
@@ -863,31 +826,105 @@ public static class SketchSolver
         return new SolveResult { Converged = resid <= 1e-6, Residual = resid, Status = status, FreePoints = fp, FreeRadii = fr, Dof = n - rank };
     }
 
-    static (double[][] R, List<int> pivots, int rank) Rref(double[][] J, int m, int n)
+    /// <summary>
+    /// Rank of the Jacobian at x and, when asked, which variables it leaves free (a variable is free when it is no
+    /// pivot, or its pivot row reaches a variable that is none). Gauss-Jordan elimination with partial pivoting,
+    /// column by column, giving what elimination of the whole dense matrix gives, bit for bit, but on each group of
+    /// equations sharing variables alone: a column only has entries in its group's rows, and the rows keep the
+    /// places the whole matrix would give them (ties between equal pivots go to the earlier place).
+    /// </summary>
+    static (int rank, bool[]? free) Reduce(System s, double[] x, bool wantFree)
     {
-        var R = new double[m][];
-        for (int i = 0; i < m; i++) R[i] = (double[])J[i].Clone();
-        var pivots = new List<int>();
-        int row = 0;
-        for (int col = 0; col < n && row < m; col++)
-        {
-            int best = -1; double bestV = 1e-9;
-            for (int i = row; i < m; i++) if (Math.Abs(R[i][col]) > bestV) { bestV = Math.Abs(R[i][col]); best = i; }
-            if (best < 0) continue;
-            (R[row], R[best]) = (R[best], R[row]);
-            var pv = R[row][col];
-            for (int j = 0; j < n; j++) R[row][j] /= pv;
-            for (int i = 0; i < m; i++)
+        int m = s.Eqs.Count, n = x.Length;
+        // groups: the variables equations share, joined
+        var parent = new int[n];
+        for (int v = 0; v < n; v++) parent[v] = v;
+        int Find(int a) { while (parent[a] != a) { parent[a] = parent[parent[a]]; a = parent[a]; } return a; }
+        var used = new bool[n];
+        foreach (var eq in s.Eqs)
+            for (int k = 0; k < eq.Vars.Length; k++)
             {
-                if (i == row) continue;
-                var f = R[i][col];
-                if (f == 0) continue;
-                for (int j = 0; j < n; j++) R[i][j] -= f * R[row][j];
+                used[eq.Vars[k]] = true;
+                int a = Find(eq.Vars[0]), b = Find(eq.Vars[k]);
+                if (a != b) parent[b] = a;
             }
-            pivots.Add(col);
-            row++;
+        var groupOf = new int[n]; Array.Fill(groupOf, -1);
+        var groupRows = new List<List<int>>(); var groupCols = new List<int>();
+        var local = new int[n]; // a variable's column in its group
+        int Group(int v)
+        {
+            int r = Find(v);
+            if (groupOf[r] < 0) { groupOf[r] = groupRows.Count; groupRows.Add(new List<int>()); groupCols.Add(0); }
+            return groupOf[r];
         }
-        return (R, pivots, row);
+        var colGroup = new int[n]; Array.Fill(colGroup, -1);
+        for (int v = 0; v < n; v++)
+            if (used[v]) { int g = Group(v); colGroup[v] = g; local[v] = groupCols[g]++; }
+        // each equation's row over its group's columns, as Jacobian gives it
+        var rows = new double[m][];
+        for (int i = 0; i < m; i++)
+        {
+            var eq = s.Eqs[i];
+            if (eq.Vars.Length == 0) continue;
+            int g = colGroup[eq.Vars[0]];
+            groupRows[g].Add(i);
+            var row = rows[i] = new double[groupCols[g]];
+            foreach (var v in eq.Vars)
+            {
+                var old = x[v];
+                var h = 1e-7 * Math.Max(1, Math.Abs(old));
+                x[v] = old + h; var fp = eq.F(x);
+                x[v] = old - h; var fm = eq.F(x);
+                x[v] = old;
+                row[local[v]] = (fp - fm) / (2 * h) * eq.Weight;
+            }
+        }
+        // the elimination, with each row's place in the whole matrix
+        var rowAt = new int[m]; var place = new int[m];
+        for (int i = 0; i < m; i++) rowAt[i] = place[i] = i;
+        var pivotRow = new int[n]; Array.Fill(pivotRow, -1);
+        int rank = 0;
+        for (int col = 0; col < n && rank < m; col++)
+        {
+            int g = colGroup[col];
+            if (g < 0) continue;
+            int lc = local[col];
+            int best = -1; double bestV = 1e-9;
+            foreach (var i in groupRows[g])
+            {
+                if (place[i] < rank) continue;
+                var a = Math.Abs(rows[i][lc]);
+                if (a > bestV || (a == bestV && best >= 0 && place[i] < place[best])) { bestV = a; best = i; }
+            }
+            if (best < 0) continue;
+            int was = place[best], moved = rowAt[rank];
+            rowAt[rank] = best; place[best] = rank; rowAt[was] = moved; place[moved] = was;
+            var pr = rows[best];
+            var pv = pr[lc];
+            for (int j = 0; j < pr.Length; j++) pr[j] /= pv;
+            foreach (var i in groupRows[g])
+            {
+                if (i == best) continue;
+                var ri = rows[i];
+                var f = ri[lc];
+                if (f == 0) continue;
+                for (int j = 0; j < ri.Length; j++) ri[j] -= f * pr[j];
+            }
+            pivotRow[col] = best;
+            rank++;
+        }
+        if (!wantFree) return (rank, null);
+        var free = new bool[n];
+        var groupVars = new List<int>[groupRows.Count];
+        for (int v = 0; v < n; v++) if (colGroup[v] >= 0) (groupVars[colGroup[v]] ??= new()).Add(v);
+        for (int j = 0; j < n; j++)
+        {
+            if (pivotRow[j] < 0) { free[j] = true; continue; }
+            var row = rows[pivotRow[j]];
+            foreach (var f in groupVars[colGroup[j]])
+                if (pivotRow[f] < 0 && Math.Abs(row[local[f]]) > 1e-7) { free[j] = true; break; }
+        }
+        return (rank, free);
     }
 
     /// <summary>True when adding the constraint would be redundant or conflicting (over-define).</summary>
@@ -907,9 +944,7 @@ public static class SketchSolver
         var s = Build(sk, null, false);
         int m = s.Eqs.Count, n = s.X.Count;
         if (m == 0 || n == 0) return 0;
-        var J = new double[m][];
-        Jacobian(s, s.X.ToArray(), J);
-        return Rref(J, m, n).rank;
+        return Reduce(s, s.X.ToArray(), wantFree: false).rank;
     }
 
     // ---- measurement helpers used when creating dimensions -------------------------------------
