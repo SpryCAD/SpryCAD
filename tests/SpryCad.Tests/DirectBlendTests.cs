@@ -595,6 +595,35 @@ static class DirectBlendTests
             }
         });
 
+        t.Test("Fillet round a lug's foot on a drafted boss, one side on the corner round: built, exact, adding material", () =>
+        {
+            // the outer side, picked against the boss's flat side, lies on the round (found there); the underside's edge
+            // runs from the flat side onto the round (one rolling-ball tool), its ends mitred round the lug's corners
+            // (not square: the lug's corner edges are not square to the drafted side)
+            foreach (var direct in new[] { true, false })
+            {
+                var old = DirectBlend.Enabled;
+                DirectBlend.Enabled = direct;
+                try
+                {
+                    var doc = Demos.BlendCases.First(c => c.name == "drafted boss, a lug standing out onto its corner round").build();
+                    var foot = doc.Features.First(f => f.Name == "Lug foot");
+                    var reg = new Regenerator();
+                    var before = KernelTests.Vex(reg.Rebuild(doc, doc.Features.IndexOf(foot)).State.Bodies[0].Solid);
+                    var r = reg.Rebuild(doc);
+                    // (every edge: the side on the round was not found, and the faceted blend it fell back to left the
+                    // round's part out, with warnings)
+                    t.True(r.Status[foot.Id].Ok && r.Status[foot.Id].Warnings.Count == 0, $"{(direct ? "direct" : "boolean")}: {r.Status[foot.Id].Error} {string.Join("; ", r.Status[foot.Id].Warnings)}");
+                    var nb = r.State.Bodies[0].Solid.Native;
+                    t.True(nb != null && nb.Validate() == null, $"exact and valid: {nb?.Validate()}");
+                    // three fillets R5 along about 30 + 33 + 30 of edge, about 5.4 mm³ per mm, less where they meet
+                    var added = KernelTests.Vex(r.State.Bodies[0].Solid) - before;
+                    t.True(added > 400 && added < 520, $"{(direct ? "direct" : "boolean")}: added {added:R}");
+                }
+                finally { DirectBlend.Enabled = old; }
+            }
+        });
+
         t.Test("Direct blend: off (FC_BLEND=boolean) applies nothing directly", () =>
         {
             var before = DirectBlend.Counts;

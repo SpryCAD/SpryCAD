@@ -182,7 +182,40 @@ public static class Resolver
             }
             if (best != null) return (bb!, best);
         }
+        // 3) the face named B runs on tangentially into another (a round between it and the next face, a draft moving
+        // the edge onto that round): the edge between face A and that face, nearest the hint
+        {
+            Body? bb = null; Kernel.Native.NEdge? best = null; double bestD = double.MaxValue;
+            foreach (var b in bodies)
+                foreach (var e in b.Solid.Native!.Edges)
+                {
+                    if (e.Uses.Count != 2) continue;
+                    var fa = e.Uses[0].Face; var fb = e.Uses[1].Face;
+                    if (!(fa.Tag.Name == r.A && TangentTo(fb, r.B) || fb.Tag.Name == r.A && TangentTo(fa, r.B)
+                          || fa.Tag.Name == r.B && TangentTo(fb, r.A) || fb.Tag.Name == r.B && TangentTo(fa, r.A))) continue;
+                    var d = DistanceToPolyline(e.Samples(1e-3), r.Hint);
+                    if (d < bestD) { bestD = d; bb = b; best = e; }
+                }
+            if (best != null) return (bb!, best);
+        }
         return null;
+    }
+
+    /// <summary>Whether a face meets a face of the given name along an edge, tangentially (the two run on smoothly).</summary>
+    static bool TangentTo(Kernel.Native.NFace f, string name)
+    {
+        if (f.Tag.Name == name) return false;
+        foreach (var c in f.Coedges)
+        {
+            var e = c.Edge;
+            if (e.Uses.Count != 2) continue;
+            var other = ReferenceEquals(e.Uses[0].Face, f) ? e.Uses[1].Face : e.Uses[0].Face;
+            if (other.Tag.Name != name) continue;
+            var m = e.Curve.Eval(0.5 * (e.T0 + e.T1));
+            var n1 = f.Surface.Normal(m) * (f.Sense ? 1 : -1); var n2 = other.Surface.Normal(m) * (other.Sense ? 1 : -1);
+            if (Vec3.Dot(n1, n2) > 1 - 1e-6) return true;
+        }
+        return false;
     }
 
     static double DistanceToPolyline(List<Vec3> pts, Vec3 p)

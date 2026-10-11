@@ -31,6 +31,7 @@ static partial class Demos
         ("wall beside a taller one", NarrowGap),
         ("rib against a wall, filleted and mirrored", MirroredRib),
         ("ribs, filleted and patterned", () => PatternedRibs("16")),
+        ("drafted boss, a lug standing out onto its corner round", LugOnRound),
     };
 
     /// <summary>
@@ -301,6 +302,57 @@ static partial class Demos
             },
         });
         d.AddFeature(new MirrorFeature { Name = "Rib, other end", Seeds = { rib.Id, fil.Id }, Plane = PlaneRef.Right });
+        return d;
+    }
+
+    /// <summary>
+    /// A boss drafted 2° on a plate, its vertical corners rounded R20, and a lug standing out of its long side, flush
+    /// with its top, the lug's outer side landing on the corner round: the lug's foot filleted R5 (its sides and
+    /// underside, the underside's edge running from the flat side onto the round). As a casting's bearing pedestal.
+    /// </summary>
+    static CadDocument LugOnRound()
+    {
+        var d = Doc(("BossX", "60"), ("BossY", "40"), ("BossH", "60"), ("Draft", "2"), ("Rc", "20"), ("R", "5"));
+        var b = new Sk(d);
+        b.Rect("-80", "-60", "80", "60");
+        var bs = d.AddFeature(new SketchFeature { Name = "Base", Plane = PlaneRef.Front, Sketch = b.S });
+        d.AddFeature(new ExtrudeFeature { Name = "Base", SketchId = bs.Id, Depth = "20" });
+        var top = d.AddFeature(new PlaneFeature { Name = "Base top", Base = PlaneRef.Front, Offset = "20" });
+        var y = new Sk(d);
+        var yl = y.Rect("-BossX", "-BossY", "BossX", "BossY");
+        var ys = d.AddFeature(new SketchFeature { Name = "Boss", Plane = new PlaneRef { Feature = top.Id }, Sketch = y.S });
+        var boss = d.AddFeature(new ExtrudeFeature { Name = "Boss", SketchId = ys.Id, Depth = "BossH", Draft = "Draft" });
+        double V(string e) => y.Eval(e);
+        string F(int i) => $"{boss.Id}.S.L{yl[i]}";
+        double zm = V("20+BossH/2");
+        d.AddFeature(new FilletFeature
+        {
+            Name = "Boss corners", Radius = "Rc",
+            Edges =
+            {
+                E(F(0), F(1), new Vec3(V("BossX"), -V("BossY"), zm)), E(F(1), F(2), new Vec3(V("BossX"), V("BossY"), zm)),
+                E(F(2), F(3), new Vec3(-V("BossX"), V("BossY"), zm)), E(F(3), F(0), new Vec3(-V("BossX"), -V("BossY"), zm)),
+            },
+        });
+        // the lug: x 10..42 (past where the round starts, x 40), z 50 up to the top (80), from inside the boss out to
+        // y 55 (Top plane: sketch y = -z)
+        var lp = d.AddFeature(new PlaneFeature { Name = "Lug plane", Base = PlaneRef.Top, Offset = "30" });
+        var l = new Sk(d);
+        var ll = l.Rect("10", "-80", "42", "-50");
+        var ls = d.AddFeature(new SketchFeature { Name = "Lug", Plane = new PlaneRef { Feature = lp.Id }, Sketch = l.S });
+        var lug = d.AddFeature(new ExtrudeFeature { Name = "Lug", SketchId = ls.Id, Depth = "25" });
+        double SideY(double z) => V("BossY") - (z - 20) * Math.Tan(V("Draft") * Math.PI / 180);
+        // (each picked against the boss's flat side, as a user would see it; the outer one lies on the round)
+        d.AddFeature(new FilletFeature
+        {
+            Name = "Lug foot", Radius = "R",
+            Edges =
+            {
+                E($"{lug.Id}.S.L{ll[3]}", F(2), new Vec3(10, SideY(65), 65)),
+                E($"{lug.Id}.S.L{ll[2]}", F(2), new Vec3(25, SideY(50), 50)),
+                E($"{lug.Id}.S.L{ll[1]}", F(2), new Vec3(42, SideY(65), 65)),
+            },
+        });
         return d;
     }
 

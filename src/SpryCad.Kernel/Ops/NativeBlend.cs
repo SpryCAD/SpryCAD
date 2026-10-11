@@ -181,7 +181,7 @@ public static class NativeBlend
                     // a tangent chain that failed as one tool is not tried again from each of its other edges
                     if (tangent.Count > Chain(e, edges).Count && !tangent.Any(failedChains.Contains))
                     {
-                        var r2 = RollingBall.Build(tangent, size, name, OnFaces);
+                        var r2 = Ball(tangent, size, name, edges);
                         Debug?.Invoke($"tangent chain {name}: {tangent.Count} edges -> {r2.Error ?? (r2.Fits ? "fits" : "overflows")}");
                         if (r2.Error == null) { rb = r2; foreach (var o in tangent) if (!group.Contains(o)) { group.Add(o); done.Add(o); } }
                         else foreach (var o in tangent) failedChains.Add(o);
@@ -189,7 +189,7 @@ public static class NativeBlend
                     if (rb == null)
                     {
                         foreach (var o in Chain(e, edges)) if (!group.Contains(o)) { group.Add(o); done.Add(o); }
-                        rb = RollingBall.Build(group, size, name, OnFaces);
+                        rb = Ball(group, size, name, edges);
                     }
                     if (rb.Error != null) { Fail(rb.Error); continue; }
                     // the rolling-ball tool's sides lie on the faces it blends: a direct blend applies it as it is
@@ -253,7 +253,7 @@ public static class NativeBlend
                 if (mine.SelectMany(k => entries[k].group).Concat(mineF.SelectMany(k => fails[k].group)).Any(x => !set.Contains(x))) continue;
                 var name0 = mine.Count > 0 ? entries[mine[0]].name : $"{prefix}.{i++}";
                 RollingBall.Result rb;
-                try { using (Prof.Time("blend.tools")) rb = RollingBall.Build(chain, size, name0, OnFaces); }
+                try { using (Prof.Time("blend.tools")) rb = Ball(chain, size, name0, edges); }
                 catch (Exception ex) when (ex is not OperationCanceledException) { continue; }
                 Debug?.Invoke($"whole tangent chain {name0}: {chain.Count} edges -> {rb.Error ?? (rb.Fits ? "fits" : "overflows")}");
                 if (rb.Error != null || !rb.Fits) continue;
@@ -407,18 +407,22 @@ public static class NativeBlend
             // no slow facet fallback here: a failure is reported right away with the edges involved
             var old = Csg.NoFallback;
             Csg.NoFallback = true;
+            int appliedOk = 0;
             try
             {
                 using (Prof.Time("blend.apply"))
                 {
-                    foreach (var t in cutTools) result = Csg.Subtract(result, t);
-                    foreach (var t in addTools) result = Csg.Union(result, t);
+                    foreach (var t in cutTools) { result = Csg.Subtract(result, t); appliedOk++; }
+                    foreach (var t in addTools) { result = Csg.Union(result, t); appliedOk++; }
                 }
             }
-            catch (InvalidOperationException)
+            catch (Exception ex) when (ex is InvalidOperationException or NBooleanException)
             {
-                errors.Add($"the {(fillet ? "fillets" : "chamfers")} that run into neighbouring geometry also run into each other where both are " +
-                           "tangent to the same face; that corner cannot be blended yet. Remove one of these edges or use a smaller size.");
+                // (the boolean's own reason too: the first tool failing alone is no collision of blends)
+                var what = fillet ? "fillet" : "chamfer";
+                errors.Add(appliedOk == 0
+                    ? $"the {what}, cut back where it runs into neighbouring geometry, cannot be joined to the body ({ex.Message}). Try a smaller size."
+                    : $"the {what}s that run into neighbouring geometry also run into each other ({ex.Message}). Remove one of these edges or use a smaller size.");
                 problemEdges?.AddRange(trimmedEdges.Select(g => g.Samples(1e-3).ToArray()));
                 return body;
             }
@@ -454,6 +458,63 @@ public static class NativeBlend
     }
 
     static (NFace a, NFace b) Faces(NEdge e) => (e.Uses[0].Face, e.Uses[1].Face);
+
+    /// <summary>
+    /// The rolling-ball tool for a chain; where it runs past its faces and an open end meets a face at an angle (a
+    /// boss's foot running into a wall), or the next blended edge at a corner (mitred, as the line and arc tools'),
+    /// the tool run on past that end and cut back to that plane near it. Ended square there, it leans past on one
+    /// side and falls short on the other. As it was where cutting back fails.
+    /// </summary>
+    static RollingBall.Result Ball(List<NEdge> chain, double size, string name, IReadOnlyList<NEdge> selected)
+    {
+        var rb = RollingBall.Build(chain, size, name, OnFaces);
+        // (only a tool running past its faces: one that fits ends where it should)
+        if (rb.Error != null || rb.Tool?.Native == null || rb.Fits) return rb;
+        var cuts = new List<(Vec3 v, Plane pl)>();
+        var sel = selected as IReadOnlyCollection<NEdge> ?? selected.ToList();
+        var run = 3 * size;
+        var on = RollingBall.Build(chain, size, name, OnFaces, (v, dirOut, fa, fb) =>
+        {
+            if (EndPlane(v, dirOut, fa, fb, chain, sel) is not { } pl) return 0;
+            cuts.Add((v.P, pl));
+            return run;
+        }, p => cuts.Any(c => c.pl.Distance(p) < 1e-9 && Vec3.Distance(p, c.v) < run + 2 * size));
+        if (cuts.Count == 0 || on.Error != null || on.Tool?.Native == null) return rb;
+        var old = Csg.NoFallback;
+        Csg.NoFallback = true;
+        try
+        {
+            var t = on.Tool;
+            // (only near the end: the plane may cut the tool elsewhere too, as a wall's underside in the plane of a
+            // top the chain runs on along)
+            foreach (var (v, pl) in cuts) t = TrimNear(t, pl, v, run + 2 * size);
+            double v0 = rb.Tool.Volume(), v1 = t.Volume();
+            if (t.IsEmpty || t.Native == null || t.Native.Validate() != null || Math.Abs(v1 - v0) > 0.25 * Math.Abs(v0))
+            {
+                Debug?.Invoke($"rolling ball {name}: not cut back ({(t.Native == null ? "faceted" : t.Native.Validate() ?? $"volume {v1:g4} for {v0:g4}")})");
+                return rb;
+            }
+            Debug?.Invoke($"rolling ball {name}: {cuts.Count} end(s) cut back ({(rb.Fits ? "fits" : "overflows")} -> {(on.Fits ? "fits" : "overflows")})");
+            // (fitting but for what was cut off)
+            return rb with { Tool = t, Fits = on.Fits };
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or NBooleanException)
+        {
+            Debug?.Invoke($"rolling ball {name}: not cut back ({ex.Message})");
+            return rb;
+        }
+        finally { Csg.NoFallback = old; }
+    }
+
+    /// <summary>The tool less what lies on the negative side of the plane within reach of p (a box about p).</summary>
+    static Solid TrimNear(Solid tool, Plane pl, Vec3 p, double reach)
+    {
+        var n = pl.Normal; var origin = pl.Project(p);
+        var x = n.AnyPerpendicular(); var y = Vec3.Cross(n, x);
+        var rect = ProfileLoop.Polygon(new[] { new Vec2(-reach, -reach), new Vec2(reach, -reach), new Vec2(reach, reach), new Vec2(-reach, reach) }, "trim");
+        var slab = Builders.Extrude(new[] { new ProfileRegion(rect) }, new Frame(origin, x, y, n), -reach, 0, "trim");
+        return Csg.Subtract(tool, slab);
+    }
 
     /// <summary>The tools glued into one per group of them that touch (boxes overlapping); null if any group does not glue.</summary>
     static List<DirectBlend.Tool>? GlueAll(List<DirectBlend.Tool> tools)
@@ -902,6 +963,13 @@ public static class NativeBlend
                     var b = (ReferenceEquals(g.V0, v) ? g.Curve.Deriv(g.T0) : -g.Curve.Deriv(g.T1)).Normalized;
                     var n = a - b;
                     if (n.Length < 1e-6) continue;
+                    // the corner edge the two blends turn round (between the faces they do not share): the plane holds
+                    // it, so each ends on it. Square to both edges (a box on a face) that is the bisector's plane;
+                    // standing out of a drafted or round face, the bisector's leaves one blend's edge past the corner
+                    // (edges running on tangentially: square to them, as before)
+                    var shared = g.Uses.Any(u => ReferenceEquals(u.Face, fa)) ? fa : fb;
+                    if (CornerEdge(v, shared, new[] { fa, fb }.Concat(g.Uses.Select(w => w.Face)), blended, selected) is { } cd && (a + b).Length > 1e-3 && Vec3.Cross((a + b).Normalized, cd) is var m && m.Length > 1e-3)
+                        n = Vec3.Dot(m, a) < 0 ? -m : m;
                     count++;
                     miter = Plane.FromPointNormal(v.P, n.Normalized);
                 }
@@ -933,6 +1001,23 @@ public static class NativeBlend
                 }
             }
         return found;
+    }
+
+    /// <summary>
+    /// The direction (away from v) of the one edge at v on the given faces, not on the shared one and neither blended
+    /// nor selected: the corner two blends on the shared face turn round. Null when there is not exactly one.
+    /// </summary>
+    static Vec3? CornerEdge(NVertex v, NFace shared, IEnumerable<NFace> faces, IEnumerable<NEdge> blended, IReadOnlyCollection<NEdge> selected)
+    {
+        Vec3? found = null; int count = 0;
+        var seen = new HashSet<NEdge>(ReferenceEqualityComparer.Instance);
+        foreach (var u in faces.SelectMany(f => f.Coedges).Select(c => c.Edge).Where(x => ReferenceEquals(x.V0, v) || ReferenceEquals(x.V1, v)))
+        {
+            if (!seen.Add(u) || blended.Contains(u) || selected.Contains(u) || IsSeam(u) || u.Uses.Any(w => ReferenceEquals(w.Face, shared))) continue;
+            count++;
+            found = (ReferenceEquals(u.V0, v) ? u.Curve.Deriv(u.T0) : -u.Curve.Deriv(u.T1)).Normalized;
+        }
+        return count == 1 ? found : null;
     }
 
     /// <summary>The part of the tool on the positive side of the plane.</summary>
