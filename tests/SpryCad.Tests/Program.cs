@@ -249,6 +249,7 @@ static class Program
             WorkingCopyTests.Run(t);
             HistoryTests.Run(t);
             RevertTests.Run(t);
+            VisualDiffTests.Run(t);
             ImportTests.Run(t);
             NativeBoolTests.Run(t);
             NativeRevolveTests.Run(t);

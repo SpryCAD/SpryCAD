@@ -5,6 +5,7 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using SpryCad.App.Session;
 using SpryCad.App.UI;
+using SpryCad.Core.Model;
 using SpryCad.Core.Storage;
 
 namespace SpryCad.App;
@@ -38,6 +39,7 @@ public partial class MainWindow
 
         var open = new Button { Content = "Open Read-Only" };
         var compare = new Button { Content = "Compare with Previous..." };
+        var compare3d = new Button { Content = "Compare with Current in 3D..." };
         var revertTo = new Button { Content = "Revert to This..." };
         var tag = new Button { Content = "Tag..." };
         var rename = new Button { Content = "Rename Tag..." };
@@ -49,7 +51,7 @@ public partial class MainWindow
         void Sync()
         {
             var e = Selected();
-            open.IsEnabled = tag.IsEnabled = compare.IsEnabled = e != null;
+            open.IsEnabled = tag.IsEnabled = compare.IsEnabled = compare3d.IsEnabled = e != null;
             revertTo.IsEnabled = e != null && list.SelectedIndex > 0;
             rename.IsEnabled = untag.IsEnabled = e is { Tags.Count: > 0 };
             purge.IsEnabled = e != null && list.SelectedIndex < entries.Count - 1;
@@ -61,7 +63,7 @@ public partial class MainWindow
             Text = "Every save of the part, newest first. Tags, purging and compacting are saved to the file with the part's next save.",
             TextWrapping = TextWrapping.Wrap, Foreground = Palette.TextSecondary, Margin = new Thickness(0, 0, 0, 8),
         };
-        var side = new StackPanel { Spacing = 6, Margin = new Thickness(10, 0, 0, 0), Children = { open, compare, revertTo, new Separator(), tag, rename, untag, new Separator(), purge } };
+        var side = new StackPanel { Spacing = 6, Margin = new Thickness(10, 0, 0, 0), Children = { open, compare, compare3d, revertTo, new Separator(), tag, rename, untag, new Separator(), purge } };
         foreach (var b in side.Children.OfType<Button>()) b.HorizontalAlignment = HorizontalAlignment.Stretch;
         var bottom = new DockPanel { Margin = new Thickness(0, 10, 0, 0) };
         var right = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Children = { compact, clear, close } };
@@ -134,6 +136,14 @@ public partial class MainWindow
         compact.Click += (_, _) => _ = Do(() => { session.EditHistory(PartHistory.Compact); Fill(Selected()?.Revision.RevisionId); return Task.CompletedTask; });
         clear.Click += (_, _) => _ = Do(() => { session.EditHistory(PartHistory.ClearCache); Fill(Selected()?.Revision.RevisionId); return Task.CompletedTask; });
         compare.Click += (_, _) => { if (Selected() is { } e) CompareCommand(session, e, name, w); };
+        compare3d.Click += (_, _) => _ = Do(() =>
+        {
+            if (Selected() is not { } e) return Task.CompletedTask;
+            var then = session.LoadRevision(e.Revision.RevisionId);
+            var now = session.Doc.Clone();
+            VisualCompare(then, When(e), now, "now", PartDescribe.Changes(then, now), w);
+            return Task.CompletedTask;
+        });
         revertTo.Click += (_, _) => _ = Do(async () =>
         {
             if (Selected() is not { } e) return;
@@ -176,13 +186,24 @@ public partial class MainWindow
             TextWrapping = TextWrapping.Wrap, Foreground = Palette.TextSecondary, Margin = new Thickness(0, 0, 0, 8),
         };
         var revert = new Button { Content = "Revert Ticked Changes...", IsEnabled = changes.Count > 0 && e.Revision.ParentId != null };
+        var show3d = new Button { Content = "Show in 3D...", IsEnabled = changes.Count > 0 };
         var close = new Button { Content = "Close", IsCancel = true };
-        var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 10, 0, 0), Children = { revert, close } };
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 10, 0, 0), Children = { show3d, revert, close } };
         var dock = new DockPanel();
         DockPanel.SetDock(head, Dock.Top); DockPanel.SetDock(buttons, Dock.Bottom);
         dock.Children.Add(head); dock.Children.Add(buttons); dock.Children.Add(new ScrollViewer { Content = listPanel });
         var w = ToolWindow($"Changes: {name}, {When(e)}", dock, 620, 460);
         close.Click += (_, _) => w.Close();
+        show3d.Click += async (_, _) =>
+        {
+            try
+            {
+                var newer = session.LoadRevision(e.Revision.RevisionId);
+                var older = e.Revision.ParentId is { } p ? session.LoadRevision(p) : new CadDocument();
+                VisualCompare(older, e.Revision.ParentId != null ? "the revision before" : "nothing", newer, When(e), changes, w);
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or IOException or InvalidDataException) { await Dialogs.Message(w, "Compare", ex.Message); }
+        };
         revert.Click += async (_, _) =>
         {
             var picked = changes.Where((c, i) => boxes[i].IsChecked == true).Select(c => c.Change.ObjectId).ToHashSet();

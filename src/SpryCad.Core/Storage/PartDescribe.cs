@@ -59,16 +59,43 @@ public static class PartDescribe
     /// </summary>
     public static List<DescribedChange> Changes(PartDatabase db, Guid? from, Guid to)
     {
-        var a = from is { } f ? db.GetObjects(f) : new Dictionary<ObjectId, Hash>();
-        var b = db.GetObjects(to);
-        byte[]? Bytes(Dictionary<ObjectId, Hash> o, ObjectId id) => o.TryGetValue(id, out var h) ? db.Blobs.Get(h) : null;
+        Dictionary<ObjectId, byte[]> Load(Guid r) => db.GetObjects(r).ToDictionary(kv => kv.Key, kv => db.Blobs.Get(kv.Value));
+        return Changes(from is { } f ? Load(f) : new(), Load(to));
+    }
+
+    /// <summary>Every change from one state of a part to another (two documents: the part as it is now, unsaved), described.</summary>
+    public static List<DescribedChange> Changes(Model.CadDocument older, Model.CadDocument newer) => Changes(PartObjects.From(older), PartObjects.From(newer));
+
+    static List<DescribedChange> Changes(Dictionary<ObjectId, byte[]> a, Dictionary<ObjectId, byte[]> b)
+    {
+        byte[]? Bytes(Dictionary<ObjectId, byte[]> o, ObjectId id) => o.TryGetValue(id, out var x) ? x : null;
         var settings = PartObjects.Single(ObjectKind.Settings);
         var files = new Dictionary<ObjectId, string>();
         foreach (var o in new[] { a, b })
             if (Bytes(o, settings) is { } sb) foreach (var n in PartObjects.FileNamesOf(sb)) files.TryAdd(PartObjects.FileId(n), n);
-        var order = Bytes(b, PartObjects.Single(ObjectKind.FeatureOrder)) is { } ob ? PartObjects.OrderOf(ob) : new List<string>();
+        var orderId = PartObjects.Single(ObjectKind.FeatureOrder);
+        var order = Bytes(b, orderId) is { } ob ? PartObjects.OrderOf(ob) : new List<string>();
+        var changes = new List<ObjectChange>();
+        foreach (var (id, nb) in b)
+        {
+            if (id.Kind == ObjectKind.NameCounters) continue;
+            if (!a.TryGetValue(id, out var na)) { if (id.Kind != ObjectKind.FeatureOrder) changes.Add(new(id, ChangeKind.Added, null, Hash.Of(nb))); }
+            else if (!na.AsSpan().SequenceEqual(nb))
+            {
+                if (id.Kind != ObjectKind.FeatureOrder) changes.Add(new(id, ChangeKind.Modified, Hash.Of(na), Hash.Of(nb)));
+                else
+                {
+                    // (features added or removed change the order object too: only another order of those both have is a reorder)
+                    var x = PartObjects.OrderOf(na); var y = PartObjects.OrderOf(nb);
+                    var common = x.Intersect(y).ToHashSet();
+                    if (!x.Where(common.Contains).SequenceEqual(y.Where(common.Contains))) changes.Add(new(id, ChangeKind.Reordered, Hash.Of(na), Hash.Of(nb)));
+                }
+            }
+        }
+        foreach (var (id, na) in a)
+            if (!b.ContainsKey(id) && id.Kind != ObjectKind.NameCounters) changes.Add(new(id, ChangeKind.Removed, Hash.Of(na), null));
         var list = new List<DescribedChange>();
-        foreach (var c in PartHistory.Diff(db, from, to).Where(c => c.ObjectId.Kind != ObjectKind.NameCounters))
+        foreach (var c in changes)
         {
             var oldB = Bytes(a, c.ObjectId); var newB = Bytes(b, c.ObjectId);
             var name = c.ObjectId.Kind switch
