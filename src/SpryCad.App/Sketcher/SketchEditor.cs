@@ -45,6 +45,8 @@ public sealed partial class SketchEditor : IViewportMode
     public SolveResult Status { get; private set; } = new();
     public SketchTool Tool { get; private set; } = SketchTool.Select;
     public List<SkRef> Selected { get; } = new();
+    /// <summary>What the last click of the Select tool hit (null: empty space), for pages that toggle their picks.</summary>
+    public SkRef? LastClick { get; set; }
     public int PolygonSides { get; set; } = 6;
     public bool ShowRelations { get; set; } = true;
     public bool Modified { get; private set; }
@@ -460,6 +462,7 @@ public sealed partial class SketchEditor : IViewportMode
             case SketchTool.Select:
                 {
                     var h = HitTest(p.X, p.Y);
+                    LastClick = h;
                     if (p.ClickCount >= 2 && h is { Kind: SkRefKind.Constraint } hc && Sk.Constraint(hc.Id) is { IsDimension: true } dim)
                     {
                         _down = false;
@@ -1705,7 +1708,41 @@ public sealed partial class SketchEditor : IViewportMode
     void DrawDimension(DynamicGeometry? g, SkConstraint c, Rgba col, bool ends = false, List<(Vec2, Vec2)>? collect = null)
     {
         var f = Frame; var px = Px;
-        void L(Vec2 a, Vec2 b) { if (collect != null) collect.Add((a, b)); else g!.Line(f.ToWorld(a), f.ToWorld(b), col, top: true); }
+        // the value's box on screen, with a little room: drawn lines stop at its edge instead of running through the
+        // text (hit testing, collect, keeps them whole)
+        // (the box as the labels were last laid out, recentred on where the label is now)
+        Rect? gap = null;
+        if (collect == null && _labelBoxes.TryGetValue(c.Id, out var lb))
+            try
+            {
+                var at = Screen(LabelPos(c));
+                gap = new Rect(at.X - lb.Width / 2, at.Y - lb.Height / 2, lb.Width, lb.Height).Inflate(3);
+            }
+            catch { gap = null; /* entity deleted mid-operation: drawn whole (or not at all, below) */ }
+        void Draw(Vec2 a, Vec2 b) => g!.Line(f.ToWorld(a), f.ToWorld(b), col, top: true);
+        void L(Vec2 a, Vec2 b)
+        {
+            if (collect != null) { collect.Add((a, b)); return; }
+            if (gap is not { } r) { Draw(a, b); return; }
+            // the part of the line inside the box (Liang-Barsky in screen coordinates) left out
+            var sa = Screen(a); var sb = Screen(b);
+            double dx = sb.X - sa.X, dy = sb.Y - sa.Y, t0 = 0, t1 = 1;
+            bool Clip(double p, double q)
+            {
+                if (Math.Abs(p) < 1e-12) return q >= 0;
+                var t = q / p;
+                if (p < 0) { if (t > t1) return false; if (t > t0) t0 = t; }
+                else { if (t < t0) return false; if (t < t1) t1 = t; }
+                return true;
+            }
+            if (!(Clip(-dx, sa.X - r.Left) && Clip(dx, r.Right - sa.X) && Clip(-dy, sa.Y - r.Top) && Clip(dy, r.Bottom - sa.Y)) || t1 <= t0)
+            {
+                Draw(a, b); // misses the box
+                return;
+            }
+            if (t0 > 1e-6) Draw(a, a + (b - a) * t0);
+            if (t1 < 1 - 1e-6) Draw(a + (b - a) * t1, b);
+        }
         void End(Vec2 p) { if (ends && g != null) SketchDrawing.PointMark(g, f, p, col, px, 3.5); }
         void Arrow(Vec2 tip, Vec2 dir)
         {
