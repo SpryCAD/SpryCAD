@@ -251,7 +251,9 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         DrawPlanes(_dyn, hl);
         DrawSketches(_dyn, hl);
         if (ShowOrigin) DrawOrigin(_dyn);
+        long tm0 = RenderProfile ? Stopwatch.GetTimestamp() : 0;
         Mode?.Draw(this, _dyn);
+        if (RenderProfile) { var ms = Stopwatch.GetElapsedTime(tm0).TotalMilliseconds; _rnModeMs += ms; _rnModeMax = Math.Max(_rnModeMax, ms); }
         DrawPointAndSegmentHighlights(_dyn, hl);
         if (AxisPreview is { } ap) DrawAxisPreview(_dyn, ap.dir, ap.color);
         DrawMeasureLines(_dyn);
@@ -310,7 +312,7 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         App.Note($"picks: {_pkCalls} in {span:0.0} s ({_pkHits} hits, sum {_pkSum:X16}), {_pkMs / _pkCalls:0.000} ms average ({_pkMax:0.000} worst) ({(Instances.Count > 0 ? "components" : "model items")})");
         _pkCalls = _pkHits = 0; _pkMs = _pkMax = 0; _pkSince = now; _pkSum = 14695981039346656037;
     }
-    int _rnFrames; double _rnMs, _rnMax, _rnDynMs, _rnDynMax; long _rnFloats; long _rnSince = Stopwatch.GetTimestamp();
+    int _rnFrames; double _rnMs, _rnMax, _rnDynMs, _rnDynMax, _rnModeMs, _rnModeMax; long _rnFloats; long _rnSince = Stopwatch.GetTimestamp();
 
     void NoteRender(long t0, long tDyn0, long tDyn1)
     {
@@ -321,8 +323,9 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         var span = Stopwatch.GetElapsedTime(_rnSince, now).TotalSeconds;
         if (span < 2) return;
         App.Note($"render: {_rnFrames} frames in {span:0.0} s, {_rnMs / _rnFrames:0.00} ms average ({_rnMax:0.00} worst); " +
-                 $"overlay built in {_rnDynMs / _rnFrames:0.00} ms ({_rnDynMax:0.00} worst), {_rnFloats / _rnFrames / 7 / 1000.0:0.0}k vertices a frame");
-        _rnFrames = 0; _rnMs = _rnMax = _rnDynMs = _rnDynMax = 0; _rnFloats = 0; _rnSince = now;
+                 $"overlay built in {_rnDynMs / _rnFrames:0.00} ms ({_rnDynMax:0.00} worst), {_rnFloats / _rnFrames / 7 / 1000.0:0.0}k vertices a frame" +
+                 (Mode != null ? $"; {Mode.GetType().Name} drew in {_rnModeMs / _rnFrames:0.00} ms ({_rnModeMax:0.00} worst)" : ""));
+        _rnFrames = 0; _rnMs = _rnMax = _rnDynMs = _rnDynMax = _rnModeMs = _rnModeMax = 0; _rnFloats = 0; _rnSince = now;
     }
 
     /// <summary>The placed meshes: shaded (or depth only for hidden lines) in their colors, then their edges.</summary>

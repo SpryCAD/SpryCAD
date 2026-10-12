@@ -171,8 +171,17 @@ profile; the profile's times are summed over threads). On the heavy samples (`sa
   and the pixel size (zoom) stay, and appended as they are (orbiting and panning do not re-tessellate them); vertices
   are appended seven floats at once. A long cosmetic thread (19k vertices): overlay 0.6–0.8 to 0.08 ms a frame, the
   frame's CPU time ~1.1 to ~0.4 ms; socket-screw's 0.07 to 0.02 ms. Frames on the samples cost well under 1 ms of CPU
-  (they are capped by the display at 60 a second). Still rebuilt each frame: the sketch editor's own drawing (two
-  hash sets by LINQ, every entity and dimension), and everything is re-uploaded with `BufferData` five times a frame.
+  (they are capped by the display at 60 a second).
+  - The sketch editor's drawing: its point sets are reused and filled by loops (no LINQ per frame or per entity).
+    `-- gridpart <k> <out.sprt>` writes a part whose sketch is sketchbench's k×k grid; editing the 20×20 one
+    (1600 lines, 3200 relations) the editor draws in ~1.03 ms a frame from ~1.15 (`SPRYCAD_PROFILE_RENDER` now
+    also logs the mode's drawing).
+  - **Next**: editing that sketch runs at only ~15 frames a second in either build while a frame's GL work is
+    ~1.4 ms: something else on the UI thread takes ~60 ms a frame, most likely the overlay of 1600 dimension labels
+    (Avalonia controls laid out and composed). Profile the UI thread (dotnet-trace) there.
+  - Tried: uploading the overlay's five parts in one buffer (`BufferData` once, `BufferSubData` each) instead of a
+    `BufferData` per part: no gain (long-thread frames 0.34–0.40 ms before, 0.38–0.45 after); the driver handles the
+    orphaned small buffers well.
 - **Saving and startup**:
   - Autosave: done. It writes a copy of each part off the UI thread (one autosave at a time), and attachment hashes
     are kept per byte array. `-- savebench <step file> [MB]`: with a 20 MB imported model the UI waited 260–560 ms an

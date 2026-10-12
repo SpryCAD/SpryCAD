@@ -1427,9 +1427,13 @@ public sealed partial class SketchEditor : IViewportMode
         if (_hover is { Kind: SkRefKind.Entity } h && h.Id == e.Id) return ViewportControl.HoverColor;
         if (sel || _dimPicks.Contains(new SkRef(SkRefKind.Entity, e.Id))) return ViewportControl.SelectColor;
         if (Status.Status == SketchStatus.OverDefined) return Over;
-        bool free = e.PointIds.Any(Status.FreePoints.Contains) || (e is SkCircle c && Status.FreeRadii.Contains(c.Id));
+        bool free = e is SkCircle c && Status.FreeRadii.Contains(c.Id);
+        if (!free) foreach (var id in e.PointIds) if (Status.FreePoints.Contains(id)) { free = true; break; }
         return free ? Under : Full;
     }
+
+    // the points drawn with a mark of their own each frame (reused, drawing allocates nothing for them)
+    readonly HashSet<int> _shownPoints = new(), _ownMarks = new();
 
     public void Draw(ViewportControl vp, DynamicGeometry g)
     {
@@ -1461,9 +1465,12 @@ public sealed partial class SketchEditor : IViewportMode
         }
         // end points, and points only relations use (e.g. a center rectangle's center, where its diagonals meet):
         // shown, as they can be snapped to and dimensioned. Point entities have their own mark (above).
-        var shown = Sk.Entities.Where(e => e is not SkPointEntity).SelectMany(e => e.PointIds)
-            .Concat(Sk.Constraints.SelectMany(c => c.Refs)).ToHashSet();
-        var ownMark = Sk.Entities.OfType<SkPointEntity>().Select(e => e.P).ToHashSet();
+        var shown = _shownPoints; var ownMark = _ownMarks;
+        shown.Clear(); ownMark.Clear();
+        foreach (var e in Sk.Entities)
+            if (e is SkPointEntity spe) ownMark.Add(spe.P);
+            else foreach (var id in e.PointIds) shown.Add(id);
+        foreach (var c in Sk.Constraints) foreach (var id in c.Refs) shown.Add(id);
         foreach (var p in Sk.Points)
         {
             if (p.Id == o || !shown.Contains(p.Id) || ownMark.Contains(p.Id)) continue;
@@ -1475,8 +1482,9 @@ public sealed partial class SketchEditor : IViewportMode
         // dimensions
         // a selected or hovered dimension is drawn whole (lines, extension lines, arrows) in its label's color, so
         // it is plain where it leads
-        foreach (var c in Sk.Constraints.Where(c => c.IsDimension))
+        foreach (var c in Sk.Constraints)
         {
+            if (!c.IsDimension) continue;
             var sel = Selected.Contains(new SkRef(SkRefKind.Constraint, c.Id));
             var hov = _hover is { Kind: SkRefKind.Constraint } dh && dh.Id == c.Id;
             DrawDimension(g, c, sel ? DimSelectedColor : hov ? ViewportControl.HoverColor : c.Driven ? new Rgba(0.45f, 0.45f, 0.5f) : DimColor, ends: sel);

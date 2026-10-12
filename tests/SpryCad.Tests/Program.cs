@@ -69,6 +69,14 @@ static class Program
             return 0;
         }
         if (args.Length > 1 && args[0] == "unfold") return UnfoldTool.Run(args);
+        if (args.Length > 2 && args[0] == "gridpart")
+        {
+            // a part whose one sketch is sketchbench's k×k grid of rectangles (a large sketch to edit in the app)
+            var doc = new SpryCad.Core.Model.CadDocument();
+            doc.AddFeature(new SpryCad.Core.Model.SketchFeature { Plane = SpryCad.Core.Model.PlaneRef.Front, Sketch = SketchBench.Grid(int.Parse(args[1])) });
+            doc.Save(args[2], container: true);
+            return 0;
+        }
         if (args.Length > 1 && args[0] == "asmsolve")
         {
             // what solving each assembly's mates costs once it is open (best of ten, after a first solve)
