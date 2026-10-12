@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Runtime.InteropServices;
 using SpryCad.Kernel;
 using Silk.NET.OpenGL;
 
@@ -25,7 +26,26 @@ public sealed class DynamicGeometry
 
     static void V(List<float> l, Vec3 p, Rgba c)
     {
-        l.Add((float)p.X); l.Add((float)p.Y); l.Add((float)p.Z); l.Add(c.R); l.Add(c.G); l.Add(c.B); l.Add(c.A);
+        int n = l.Count;
+        CollectionsMarshal.SetCount(l, n + 7);
+        var s = CollectionsMarshal.AsSpan(l).Slice(n, 7);
+        s[0] = (float)p.X; s[1] = (float)p.Y; s[2] = (float)p.Z; s[3] = c.R; s[4] = c.G; s[5] = c.B; s[6] = c.A;
+    }
+
+    /// <summary>What was drawn between a <see cref="Mark"/> and now, kept to be drawn again as it is.</summary>
+    public sealed record Piece(float[] Lines, float[] Tris, float[] TopLines, float[] TopTris, float[] TransTris);
+
+    public (int, int, int, int, int) Mark() => (Lines.Count, Tris.Count, TopLines.Count, TopTris.Count, TransTris.Count);
+
+    public Piece Since((int l, int t, int tl, int tt, int tr) m)
+    {
+        static float[] Tail(List<float> list, int from) => CollectionsMarshal.AsSpan(list)[from..].ToArray();
+        return new Piece(Tail(Lines, m.l), Tail(Tris, m.t), Tail(TopLines, m.tl), Tail(TopTris, m.tt), Tail(TransTris, m.tr));
+    }
+
+    public void Add(Piece p)
+    {
+        Lines.AddRange(p.Lines); Tris.AddRange(p.Tris); TopLines.AddRange(p.TopLines); TopTris.AddRange(p.TopTris); TransTris.AddRange(p.TransTris);
     }
 
     public void Line(Vec3 a, Vec3 b, Rgba c, bool top = false) { var l = top ? TopLines : Lines; V(l, a, c); V(l, b, c); }
