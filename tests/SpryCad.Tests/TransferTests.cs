@@ -497,4 +497,74 @@ static class TransferTests
             t.True(!File.Exists(Path.Combine(dir, "none.sprt")), "Mark made a file");
         });
     }
+
+    /// <summary>Pinned components: a revision (or a tag) of the part shown, whatever the part becomes.</summary>
+    public static void RunPins(TestRunner t)
+    {
+        static double Depth(PartDisplay? pd) => double.Parse(((ExtrudeFeature)pd!.Part!.Features[1]).Depth, CultureInfo.InvariantCulture);
+
+        t.Test("Pinned component keeps showing its revision after the part gets new ones; the others follow the latest", () =>
+        {
+            var dir = NewDir("pin");
+            var (m, asmPath, partPath, part) = Linked(dir, revisions: 2);
+            var first = PartFile.History(partPath)[^1].RevisionId;
+            var c1 = m.Doc.Components[0]; var c2 = m.Doc.Components[1];
+            m.Pin(c1, first);
+            t.True(Depth(m.DisplayOf(c1)) == 10 && Depth(m.DisplayOf(c2)) == 11, $"pinned {Depth(m.DisplayOf(c1))}, latest {Depth(m.DisplayOf(c2))}");
+            t.True(m.DisplayOf(c1)!.Revision == first.ToString("D"), "the pinned display is that revision");
+            m.Save(asmPath);
+            // the part changes again; the assembly opened again
+            SetDepth(part, 20); part.Save(partPath);
+            var back = AssemblyModel.Open(AssemblyDocument.Load(asmPath), asmPath, new PartIndex());
+            t.True(Depth(back.DisplayOf(back.Doc.Components[0])) == 10, "still the pinned revision after the part changed");
+            t.True(Depth(back.DisplayOf(back.Doc.Components[1])) == 20, "the other follows the latest");
+            t.Eq(Problems(back), "");
+            // following the latest again
+            back.Pin(back.Doc.Components[0], null);
+            t.True(Depth(back.DisplayOf(back.Doc.Components[0])) == 20, "unpinned: the latest");
+        });
+
+        t.Test("Pinned by a tag: the revision the tag names when opened; a pin changes the assembly's revision", () =>
+        {
+            var dir = NewDir("pin-tag");
+            var (m, asmPath, partPath, part) = Linked(dir, revisions: 3);
+            var before = AsmHead(asmPath).RevisionId;
+            m.Pin(m.Doc.Components[0], PartFile.History(partPath)[^1].RevisionId, "v1");
+            t.True(Depth(m.DisplayOf(m.Doc.Components[0])) == 10, "v1 shown");
+            m.Save(asmPath);
+            t.True(AsmHead(asmPath).RevisionId != before, "pinning is a change of the assembly");
+            // the tag moved to the newest revision
+            using (var db = PartDatabase.Open(partPath, readOnly: false)) db.SetTag(Guid.Parse(part.Id!), "v1", db.GetHistory(Guid.Parse(part.Id!))[0].RevisionId);
+            var back = AssemblyModel.Open(AssemblyDocument.Load(asmPath), asmPath, new PartIndex());
+            t.True(Depth(back.DisplayOf(back.Doc.Components[0])) == 12, "follows the tag to the revision it names now");
+            // the tag removed: said, not shown wrong
+            using (var db = PartDatabase.Open(partPath, readOnly: false)) db.DeleteTag(Guid.Parse(part.Id!), "v1");
+            var gone = AssemblyModel.Open(AssemblyDocument.Load(asmPath), asmPath, new PartIndex());
+            var pd = gone.DisplayOf(gone.Doc.Components[0]);
+            t.True(pd?.Problem?.Contains("tag") == true, "a missing tag reported: " + pd?.Problem);
+        });
+
+        t.Test("A pinned embedded part shows its revision from the embedded history; a purged revision is reported", () =>
+        {
+            var dir = NewDir("pin-embedded");
+            var partPath = Path.Combine(dir, "P.sprt");
+            PartWithHistory(partPath, 3);
+            var m = AssemblyModel.New();
+            m.Insert(partPath, Transform.Identity, embed: true);
+            var c = m.Doc.Components[0];
+            var oldest = m.HistoryOf(c)[^1].Revision.RevisionId;
+            t.Eq(m.HistoryOf(c).Count, 3);
+            m.Pin(c, oldest);
+            t.True(Depth(m.DisplayOf(c)) == 10, "the embedded part's first revision shown");
+            // the pinned revision purged from the part's file (linked): reported
+            var dir2 = NewDir("pin-purged");
+            var (m2, asm2, part2, _) = Linked(dir2, revisions: 3);
+            var first = PartFile.History(part2)[^1].RevisionId;
+            m2.Pin(m2.Doc.Components[0], first);
+            m2.Save(asm2);
+            using (var db = PartDatabase.Open(part2, readOnly: false)) PartHistory.Purge(db, PartFile.History(part2)[0].RevisionId);
+            var back = AssemblyModel.Open(AssemblyDocument.Load(asm2), asm2, new PartIndex());
+            t.True(back.DisplayOf(back.Doc.Components[0])?.Problem?.Contains("no longer") == true, "purged revision reported: " + back.DisplayOf(back.Doc.Components[0])?.Problem);
+        });
+    }
 }

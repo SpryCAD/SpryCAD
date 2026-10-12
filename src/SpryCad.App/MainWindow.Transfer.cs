@@ -131,6 +131,64 @@ public partial class MainWindow
     }
 
     // ------------------------------------------------------------------------------------------
+    // pinned components: a revision (or tag) of the part, not its latest
+
+    async Task PinCommand(string path)
+    {
+        if (Asm is not { } a || path.Contains('/') || a.Model.Doc.Find(path) is not { } c || c.IsAssembly) return;
+        List<HistoryEntry> history;
+        try { history = await Task.Run(() => a.Model.HistoryOf(c)); }
+        catch (Exception ex) when (ex is IOException or InvalidDataException or Microsoft.Data.Sqlite.SqliteException) { await Dialogs.Message(this, "Pin to Revision", ex.Message); return; }
+        if (history.Count == 0) { await Dialogs.Message(this, "Pin to Revision", $"{c.Name.Split('<')[0]} has no saved history to pin to (not found, or saved by an older SpryCAD)."); return; }
+        var list = new ListBox { ItemsSource = history.Select((e, i) => Row(e, i == 0)).ToList(), SelectedIndex = 0 };
+        var pin = new Button { Content = "Pin", IsDefault = true };
+        var cancel = new Button { Content = "Cancel", IsCancel = true };
+        var head = new TextBlock
+        {
+            Text = $"Show {c.Name} as its part was at a revision, whatever the part becomes. (A tagged revision can follow its tag.)",
+            TextWrapping = Avalonia.Media.TextWrapping.Wrap, Margin = new Avalonia.Thickness(0, 0, 0, 8),
+        };
+        var buttons = new StackPanel { Orientation = Avalonia.Layout.Orientation.Horizontal, Spacing = 6, HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right, Margin = new Avalonia.Thickness(0, 8, 0, 0), Children = { pin, cancel } };
+        var dock = new DockPanel();
+        DockPanel.SetDock(head, Dock.Top); DockPanel.SetDock(buttons, Dock.Bottom);
+        dock.Children.Add(head); dock.Children.Add(buttons); dock.Children.Add(list);
+        var w = ToolWindow($"Pin {c.Name} to a Revision", dock, 560, 440);
+        HistoryEntry? chosen = null;
+        pin.Click += (_, _) => { if (list.SelectedIndex >= 0) chosen = history[list.SelectedIndex]; w.Close(); };
+        cancel.Click += (_, _) => w.Close();
+        list.DoubleTapped += (_, _) => { if (list.SelectedIndex >= 0) chosen = history[list.SelectedIndex]; w.Close(); };
+        await w.ShowDialog(this);
+        if (chosen is not { } e) return;
+        string? tag = null;
+        if (e.Tags.Count > 0 && await Dialogs.YesNo(this, "Pin to Revision",
+            $"The revision is tagged {e.Tags[0]}. Follow the tag (if it is moved to another revision, {c.Name} shows that one), or keep this revision whatever the tag does?",
+            "Follow the Tag", "This Revision")) tag = e.Tags[0];
+        a.BeginChange();
+        try
+        {
+            await Task.Run(() => a.Model.Pin(c, e.Revision.RevisionId, tag));
+            if (a.Model.HasMates) a.Model.SolveMates();
+            a.EndChange();
+            Status($"{c.Name} is pinned to {(tag ?? When(e))}: it keeps showing that revision as its part changes.");
+        }
+        catch (Exception ex) { App.Log(ex, "Pin component"); a.AbandonChange(); await Dialogs.Message(this, "Pin to Revision", ex.Message); }
+    }
+
+    void Unpin(string path)
+    {
+        if (Asm is not { } a || path.Contains('/') || a.Model.Doc.Find(path) is not { } c) return;
+        a.BeginChange();
+        try
+        {
+            a.Model.Pin(c, null);
+            if (a.Model.HasMates) a.Model.SolveMates();
+            a.EndChange();
+            Status($"{c.Name} follows its part's latest revision again.");
+        }
+        catch (Exception ex) { App.Log(ex, "Unpin component"); a.AbandonChange(); Status(ex.Message); }
+    }
+
+    // ------------------------------------------------------------------------------------------
     // a part made virtual somewhere, opened from its file
 
     Control? _supersededBanner;

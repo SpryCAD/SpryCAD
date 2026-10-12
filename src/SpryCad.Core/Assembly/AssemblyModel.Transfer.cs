@@ -155,6 +155,41 @@ public sealed partial class AssemblyModel
         Sync();
     }
 
+    // ------------------------------------------------------------------------------------------
+    // pinned components
+
+    /// <summary>
+    /// Pins a component to a revision of its part (or, with <paramref name="tag"/>, to whatever revision that tag names):
+    /// it shows that revision from now on, whatever the part becomes. Null revision and tag: back to the latest.
+    /// </summary>
+    public void Pin(Component c, Guid? revision, string? tag = null)
+    {
+        if (c.IsAssembly) throw new InvalidOperationException("Sub-assemblies are not pinned yet: only parts.");
+        c.Part.Pin = revision?.ToString("D");
+        c.Part.PinTag = tag;
+        c.Part.Revision = revision?.ToString("D") ?? c.Part.Revision;
+        LoadPart(ComponentResolver.Key(c.Part));
+    }
+
+    /// <summary>A component's part's saved revisions, newest first, with their tags (from its file or embedded copy).</summary>
+    public List<HistoryEntry> HistoryOf(Component c)
+    {
+        var key = ComponentResolver.Key(c.Part);
+        if (c.Part.Embedded is { } e && Doc.Files.TryGetValue(e, out var bytes))
+        {
+            if (!PartDatabase.Is(bytes)) return new();
+            var tmp = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "sprycad-" + Guid.NewGuid().ToString("N") + CadDocument.FileExtension);
+            try { File.WriteAllBytes(tmp, bytes); using var db = PartDatabase.Open(tmp); return PartHistory.Read(db); }
+            finally { try { File.Delete(tmp); } catch { /* best effort */ } }
+        }
+        if (Resolution.Parts.GetValueOrDefault(key) is { Status: PartStatus.Found or PartStatus.Moved, Path: { } file } && PartDatabase.IsFile(file))
+        {
+            using var db = PartDatabase.Open(file);
+            return PartHistory.Read(db);
+        }
+        return new();
+    }
+
     /// <summary>A part database's revision ids, head first (from its bytes).</summary>
     static List<Guid> History(byte[] bytes)
     {

@@ -247,6 +247,13 @@ public sealed class PartRef
     public string? AbsolutePath { get; set; }
     /// <summary>The part embedded in the assembly (an attachment, "parts/…") instead of a file: a virtual part.</summary>
     public string? Embedded { get; set; }
+    /// <summary>
+    /// Pinned: this revision of the part (its id) is shown, not its latest (the file format spec, section 8). Null: the
+    /// latest, updated as the part changes.
+    /// </summary>
+    public string? Pin { get; set; }
+    /// <summary>Pinned by a tag: the revision the tag names when the assembly is opened (<see cref="Pin"/> as last found).</summary>
+    public string? PinTag { get; set; }
     /// <summary>An assembly file (<see cref="AssemblyDocument.Id"/> its identity), not a part: a sub-assembly.</summary>
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
     public bool Assembly { get; set; }
