@@ -748,7 +748,7 @@ public static class NativeBlend
         if (DirectBlend.Glue(new List<DirectBlend.Tool> { new(tool, false, "tool", 0), new(pivot, false, "pivot", 0) }, out var why) is { } one) return one.Strip;
         // (not glued, the booleans joining them and the body are slow and fail often: the feature is built mitred,
         // no pivot built from here on in this run, which is thrown away)
-        Debug?.Invoke($"pivot not glued ({why}): the feature mitred; tool ends {string.Join(" | ", tool.Native!.Faces.Where(f => f.Surface.Kind == SurfaceKind.Plane && f.Loops.Count == 1 && !f.Tag.Name.EndsWith(".A") && !f.Tag.Name.EndsWith(".B")).Select(f => $"{f.Tag.Name}:{f.Loops[0].Coedges.Count}"))}; pivot ends {string.Join(" | ", pivot.Native!.Faces.Where(f => f.Tag.Name.Contains(".End")).Select(f => $"{f.Tag.Name}:{f.Loops[0].Coedges.Count}"))}");
+        Debug?.Invoke($"pivot not glued ({why}): the feature mitred");
         _pivotFailed = true;
         return tool;
     }
