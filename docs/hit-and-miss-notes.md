@@ -33,8 +33,13 @@ Commands (from the repository root):
    base's drafted corner fillets or the swept foot chamfer. The volume moved slightly too (3,644,484 to 3,644,687
    mm³). Repro: `verify-engine <dir> Casting`, then `featprof <dir>/Casting.sprt "Hold-down holes" 1`. Reported to
    the session that did the chamfer work.
-4. **Corner blends where tangent fillets meet** (the "run into each other" message): seen again on the cam gear's
-   boss. "Cam boss into the body" (`HmCasting`, suppressed): R5, one edge picked, the boss's cylinder (Ø36 along Z
+4. **The cam gear's boss into the body: the result has an open edge (OPEN).** On master 98dfc3b (#45, #46) the
+   message is now the boolean's reason: "the fillet cannot be joined to the body (result invalid: edge used 1 times
+   (NLine (-95.099, 0, 53.46)->(-90.1, 0, 53.46) on F31.Start))", R3 the same (the line then -93.1 to -90.1). F31
+   is the hopper: its underside (y = 0) overhangs the body's drafted side by about 4 mm, and the boss's back (x = -90)
+   lies under it, so the blend's run-out reaches that ledge and the boolean leaves the blend's edge along it unused.
+   Was (before #45): "Corner blends where tangent fillets meet" (the "run into each other" message), seen again on the
+   cam gear's boss. "Cam boss into the body" (`HmCasting`, suppressed): R5, one edge picked, the boss's cylinder (Ø36 along Z
    at x = -72.1, y = 0, from z = 40 out to 72) with the body's 2° drafted +Z side, tangent edges following. The boss
    pokes out through the body's side, above its top (y 0..18, past the "Wall tops" R4 round), and its back runs into
    the hopper's side and the barrel's end, so the loop round it crosses several faces and two fillets: "the fillets
@@ -49,8 +54,10 @@ Commands (from the repository root):
 6. **A mirror whose seed fillet failed still says "Only extrude, revolve, sweep, ... can be patterned"** (on "Bearing
    pedestal, back" when "Pedestal into the body" failed), not "<seed> failed: <its error>" as the fix in
    `blend-quick-fixes` gives elsewhere.
-7. **A plane into a drafted corner round: "unsupported edge geometry".** "Pedestal into the body" (`HmCasting`,
-   suppressed): R5 on the pedestal's two sides and underside where they stand out of the body's 2° drafted side. The
+7. ~~A plane into a drafted corner round: "unsupported edge geometry".~~ **FIXED (#45: edges found on a tangent
+   round)**: "Pedestal into the body" builds and mirrors with the pedestal, the body at its original length, and
+   "Wall tops" (sides included) still works beside it. Items 5 and 6 are untested since (nothing suppressed or failing
+   is mirrored now). Was: "Pedestal into the body" (`HmCasting`, suppressed): R5 on the pedestal's two sides and underside where they stand out of the body's 2° drafted side. The
    pedestal's back side (x = 32) lands where the body's R20 corner round begins near the top (it starts at x ≈ 31.9
    at y = 0, the draft moving it in), so that edge runs from the flat side onto the round: "Edge F12.S.L5 / F8.0.S.F:
    unsupported edge geometry", and the edge with the flat side alone "could not be found". With the body lengthened

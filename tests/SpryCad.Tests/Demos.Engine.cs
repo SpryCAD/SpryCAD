@@ -438,12 +438,11 @@ static partial class Demos
                 E($"{ped.Id}.S.L{pl[3]}", $"{ped.Id}.End", new Vec3(-V("BrgW/2"), -V("BrgDrop/2"), V("BrgOut"))),
             },
         });
-        // blended into the body's side where it stands out of it (suppressed: its back side meets the body's corner
-        // round; with the body lengthened to clear it, other fillets fail: docs/hit-and-miss-notes.md)
+        // blended into the body's side where it stands out of it (its back side runs onto the body's corner round)
         double SideZ0(double yAt) => V("BodyW/2") - (yAt + V("BaseY-BaseT")) * Math.Tan(V("BodyDraft") * Math.PI / 180);
         var pedJ = d.AddFeature(new FilletFeature
         {
-            Name = "Pedestal into the body", Radius = "JointR", Suppressed = true,
+            Name = "Pedestal into the body", Radius = "JointR",
             Edges =
             {
                 E($"{ped.Id}.S.L{pl[1]}", YF(0), new Vec3(V("BrgW/2"), -V("BrgDrop/2"), SideZ0(-V("BrgDrop/2")))),
@@ -451,7 +450,7 @@ static partial class Demos
                 E($"{ped.Id}.S.L{pl[0]}", YF(0), new Vec3(0, -V("BrgDrop"), SideZ0(-V("BrgDrop")))),
             },
         });
-        d.AddFeature(new MirrorFeature { Name = "Bearing pedestal, back", Seeds = { ped.Id, pedR.Id }, Plane = PlaneRef.Front });
+        d.AddFeature(new MirrorFeature { Name = "Bearing pedestal, back", Seeds = { ped.Id, pedR.Id, pedJ.Id }, Plane = PlaneRef.Front });
         // a rib under each pedestal, down the body's side (Right: sketch x = -z)
         var pr = new Sk(d);
         pr.Poly(pr.P("-RibIn", "-BrgDrop"), pr.P("-BrgOut", "-BrgDrop"), pr.P("-RibIn", "-PedRibY"));
