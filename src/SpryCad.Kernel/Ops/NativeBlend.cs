@@ -551,7 +551,7 @@ public static class NativeBlend
             // (built once for the corner, by the first of its two fillets: the other ends on the same plane)
             lock (_patches)
                 if (_patches.TryGetValue(_v, out var known))
-                    return known.Result is { } k ? ReferenceEquals(known.Own, _own) ? k : k with { EndOwn = k.EndNext, EndNext = k.EndOwn } : null;
+                    return known.Result is { } k ? ReferenceEquals(known.Own, _own) ? k : k.Swapped : null;
             var along = ReferenceEquals(_corner.V0, _v) ? _corner.Curve.Deriv(_corner.T0) : -_corner.Curve.Deriv(_corner.T1);
             CornerPatch.Result? p;
             using (Prof.Time("blend.corner.patch"))
@@ -658,7 +658,7 @@ public static class NativeBlend
                     var (fa, fb) = Faces(e);
                     if (EndPlane(v, dirOut, fa, fb, chain, sel) is not { } pl || RoundCorner(v, fa, fb, chain, sel, pl, size, name) is not { } rc || rc.Patch() is not { } patch) continue;
                     var carried = new List<NVertex>();
-                    var (cut, _) = Pivot(t, rc, patch, 5 * size, 0, carried);
+                    var (cut, _) = Pivot(t, rc, patch, 5 * size, 0, carried, runOn: false);
                     if (cut.IsEmpty || cut.Native == null || cut.Native.Validate() != null) { Debug?.Invoke($"rolling ball {name}: no pivot at {v.P} ({cut.Native?.Validate() ?? "faceted"})"); continue; }
                     t = cut;
                     Carry(carried);
@@ -676,9 +676,10 @@ public static class NativeBlend
     /// A fillet's tool ended where the ball starts to pivot round the corner (<see cref="CornerPatch"/>), the pivot's
     /// tool joined to it unless the other fillet's carries it.
     /// </summary>
-    static (Solid tool, double added) Pivot(Solid tool, RoundCornerCut c, CornerPatch.Result patch, double reach, double added, List<NVertex> carried)
+    static (Solid tool, double added) Pivot(Solid tool, RoundCornerCut c, CornerPatch.Result patch, double reach, double added, List<NVertex> carried, bool runOn = true)
     {
-        var t = TrimNear(tool, patch.EndOwn, c.V.P, reach);
+        // (a tool not run on that the corner takes on from v's joint: as it is)
+        var t = !runOn && patch.OwnAtJoint ? tool : TrimNear(tool, patch.EndOwn, c.V.P, reach);
         bool taken;
         lock (_pivoted) taken = _pivoted.TryGetValue(c.V, out _);
         if (taken) return (t, added);
@@ -875,6 +876,10 @@ public static class NativeBlend
             if (p1 != null) sol = p1.Trim(sol);
             return sol;
         }
+        // (ending square at a corner the pivot carries on from: bounded by the faces, its end the pivot's own; reaching
+        // past them its end lies along the other edge there, on a drafted face, and the union fails)
+        if (pivots.Any(x => x.patch.OwnAtJoint) && EdgeBlend.Profile2D(P(uA), P(uB), P(nA), P(nB), Vec2.Zero, dA, fillet, convex, dB, atCorner: true) is { } atJoint)
+            loop = atJoint;
         var tools = new List<Solid> { Between(loop, true) };
         tools.RemoveAll(x => x.IsEmpty);
         // the tool bounded by the faces (applied directly, or cut back where it runs past them), its ends at an angle on

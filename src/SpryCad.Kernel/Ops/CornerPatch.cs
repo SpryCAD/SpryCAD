@@ -22,7 +22,12 @@ internal static class CornerPatch
 
     /// <summary>The corner's tool and where each fillet ends (their tools are cut on these planes, keeping the side
     /// along their edge).</summary>
-    public sealed record Result(Solid Tool, Plane EndOwn, Plane EndNext);
+    /// <param name="OwnAtJoint">The own fillet ends square at v (its tool, not run on, needs no cut).</param>
+    public sealed record Result(Solid Tool, Plane EndOwn, Plane EndNext, bool OwnAtJoint = false, bool NextAtJoint = false)
+    {
+        /// <summary>As seen from the next fillet.</summary>
+        public Result Swapped => this with { EndOwn = EndNext, EndNext = EndOwn, OwnAtJoint = NextAtJoint, NextAtJoint = OwnAtJoint };
+    }
 
     static Vec3 Outward(NFace f, Vec3 p) => f.Surface.Normal(p) * (f.Sense ? 1 : -1);
 
@@ -32,7 +37,7 @@ internal static class CornerPatch
     /// (between S and N). Null when the ball does not pivot there (the fillets are not concave, the faces not planes,
     /// the ball reaching past the corner edge's end).
     /// </summary>
-    public static Result? Build(NVertex v, Vec3 along, double cornerLength, NEdge eOwn, NEdge eNext, NFace s, NFace o, NFace nf, double r, string name)
+    public static Result? Build(NVertex v, Vec3 along, double cornerLength, NEdge eOwn, NEdge eNext, NFace s, NFace o, NFace nf, double r, string name, bool swapped = false)
     {
         if (o.Surface.Kind != SurfaceKind.Plane || nf.Surface.Kind != SurfaceKind.Plane) return Fail("the corner's faces are not planes");
         var L = along.Normalized;
@@ -109,15 +114,47 @@ internal static class CornerPatch
             return null;
         }
         if (EdgeEnd(endOwn, nO, k0) is not { } q0 || EdgeEnd(endNext, nN, kn) is not { } qn) return Fail("an end does not reach its edge");
-        // an end past v (on a drafted face a fillet runs on a hair past the corner before its ball reaches the corner
-        // edge, its edge ending first: its sections there reach under what stands on S): not built (the fillets mitred)
+        // an end past v (on a drafted face a fillet's ball reaches the corner edge a hair past the corner, its edge
+        // ending first): that fillet ends square at v, as it would alone, and the corner carries it on (touching its
+        // face, above the corner edge, and S) until its ball reaches the corner edge, then pivots. Built so for the
+        // next fillet; for the own one, the other way round.
         var tolV = 1e-7 * Math.Max(1, r);
-        if (endOwn.Distance(v.P) > tolV || endNext.Distance(v.P) > tolV) return Fail("a fillet reaches the corner edge past the corner");
+        bool pastOwn = endOwn.Distance(v.P) > tolV, pastNext = endNext.Distance(v.P) > tolV;
+        if (pastOwn && pastNext) return Fail("both fillets reach the corner edge past the corner");
+        if (pastOwn)
+            return swapped ? Fail("internal: past the corner both ways")
+                : Build(v, along, cornerLength, eNext, eOwn, s, nf, o, r, name, true)?.Swapped;
+        PipeSpine? spOver = null; Plane? atJoint = null;
+        if (pastNext)
+        {
+            // the next fillet's ball rolling on from where it reaches the corner edge back to v's joint (the plane
+            // square to its path through v): centres r off N and S
+            NSurface nOff = NSurface.FromPlane(Plane.FromPointNormal(v.P + nN * r, nN)), sOff;
+            try { sOff = NShell.OffsetSurface(surf, r * sS); }
+            catch (InvalidOperationException) { return Fail("no offset of the face"); }
+            Vec3 Tan(Vec3 c) { var t = Vec3.Cross(nN, OutGrad(c)).Normalized; return Vec3.Dot(t, D[n]) < 0 ? -t : t; }
+            Vec3 At(double t) => NSurface.ProjectToIntersection(nOff, sOff, P[n] + D[n] * t);
+            double G(double t) { var c = At(t); return Vec3.Dot(Tan(c), v.P - c); }
+            double tPrev = 0, gPrev = G(0); double? tj = null;
+            for (int i = 1; i <= 64 && tj == null; i++)
+            {
+                var t = 2 * r * i / 64; var gt = G(t);
+                if (Math.Sign(gt) != Math.Sign(gPrev)) tj = Roots.Bisect(G, tPrev, t);
+                tPrev = t; gPrev = gt;
+            }
+            if (tj is not { } tJ) return Fail("no joint at v for the fillet past the corner");
+            const int m = 4;
+            var po = new Vec3[m + 1]; var to = new Vec3[m + 1];
+            for (int i = 0; i <= m; i++) { po[i] = i == 0 ? P[n] : At(tJ * i / m); to[i] = i == 0 ? D[n] : Tan(po[i]); }
+            try { spOver = new PipeSpine(po, to, nf.Surface, surf); }
+            catch (ArgumentException ex) { return Fail(ex.Message); }
+            atJoint = Plane.FromPointNormal(po[m], to[m]);
+        }
 
         // ---- topology
         // an end whose plane holds the corner edge (the fillet along an edge square to it: ending in the plane of the
         // other face) meets its edge at v and goes back along the corner edge, the corner having no face on that side
-        bool flat0 = Vec3.Distance(q0, v.P) < tolV, flatN = Vec3.Distance(qn, v.P) < tolV;
+        bool flat0 = Vec3.Distance(q0, v.P) < tolV, flatN = !pastNext && Vec3.Distance(qn, v.P) < tolV;
         // the corner edge from v: up to the lower of the ball's contacts, on to the higher (one, the fillets reaching it
         // at one height: a box's foot on a plane), the pipe beside it between them
         bool level = Math.Abs(zs[0] - zs[n]) < tolV, ownHigher = !level && zs[0] > zs[n];
@@ -140,8 +177,8 @@ internal static class CornerPatch
             if (Vec3.Distance(c.Eval(ta), from.P) > 1e-6 * Math.Max(1, r) || Vec3.Distance(c.Eval(tb), to.P) > 1e-6 * Math.Max(1, r)) return null;
             return ta < tb ? new NEdge(c, ta, tb, from, to) : new NEdge(c, tb, ta, to, from);
         }
-        NEdge? pOwn = flat0 ? null : Piece(eOwn, V, Q0), pNext = flatN ? null : Piece(eNext, V, QN);
-        if (pOwn == null && !flat0 || pNext == null && !flatN) return Fail("the fillets' ends are not on their edges");
+        NEdge? pOwn = flat0 ? null : Piece(eOwn, V, Q0), pNext = flatN || pastNext ? null : Piece(eNext, V, QN);
+        if (pOwn == null && !flat0 || pNext == null && !flatN && !pastNext) return Fail("the fillets' ends are not on their edges");
         var arc0 = Arc(P[0], D[0], S0, K0); var arcN = Arc(P[n], D[n], SN, KN);
         var contact = new NEdge(new NContact(sp, true), sp.S0, sp.S1, S0, SN);
         var planeOwn = NSurface.FromPlane(endOwn); var planeNext = NSurface.FromPlane(endNext);
@@ -163,19 +200,35 @@ internal static class CornerPatch
         void Face(NSurface surface, bool sense, string tag, List<(NEdge e, bool fwd)> loop, Vec3? outward) => faces.Add((surface, sense, tag, loop, outward));
         // the ends: outward along the fillets
         Face(planeOwn, true, "End0", new List<(NEdge, bool)> { (trace0, true), (arc0, true) }.Concat(Back(flat0, Q0, K0, line0)).ToList(), endOwn.Normal);
-        Face(planeNext, true, "End1", new List<(NEdge, bool)> { (traceN, true), (arcN, true) }.Concat(Back(flatN, QN, KN, lineN)).ToList(), endNext.Normal);
+        // (past the corner: the next fillet's end at v's joint, the pipe rolling on to it beside its face)
+        NEdge? overS = null, overN = null, arcV = null, traceV = null, lineV = null;
+        if (pastNext)
+        {
+            var cv = spOver!.P[^1]; var SV = new NVertex(surf.Project(cv)); var NV = new NVertex(cv - nN * r);
+            overS = new NEdge(new NContact(spOver, true), spOver.S0, spOver.S1, SN, SV);
+            overN = new NEdge(new NContact(spOver, false), spOver.S0, spOver.S1, KN, NV);
+            arcV = Arc(cv, atJoint!.Normal, SV, NV);
+            traceV = new NEdge(new NSection(surf, NSurface.FromPlane(atJoint), v.P, SV.P), 0, 1, V, SV);
+            lineV = Line(V, NV);
+            Face(NSurface.FromPlane(atJoint), true, "End1", new() { (traceV, true), (arcV, true), (lineV, false) }, atJoint.Normal);
+            Face(NSurface.Pipe(spOver, r), false, "Blend1", new() { (overS, true), (arcV, true), (overN, false), (arcN, false) }, null);
+        }
+        else Face(planeNext, true, "End1", new List<(NEdge, bool)> { (traceN, true), (arcN, true) }.Concat(Back(flatN, QN, KN, lineN)).ToList(), endNext.Normal);
         // the blend: outward towards the ball's centre
         var pipe = NSurface.Pipe(sp, r);
         Face(pipe, false, "Blend", new List<(NEdge, bool)> { (contact, true), (arcN, true) }.Concat(Across()).Append((arc0, false)).ToList(), null);
         // on S, O and N: outward into the material
         var sLoop = new List<(NEdge, bool)>();
         if (pOwn != null) sLoop.Add((pOwn, ReferenceEquals(pOwn.V0, V)));
-        sLoop.Add((trace0, true)); sLoop.Add((contact, true)); sLoop.Add((traceN, false));
+        sLoop.Add((trace0, true)); sLoop.Add((contact, true));
+        if (pastNext) { sLoop.Add((overS!, true)); sLoop.Add((traceV!, false)); }
+        else sLoop.Add((traceN, false));
         if (pNext != null) sLoop.Add((pNext, !ReferenceEquals(pNext.V0, V)));
         Face(surf, !s.Sense, "S", sLoop, null);
         // O and N: the edge up to the fillet's end, its line to the corner edge, down that to v
         if (!flat0) Face(o.Surface, !o.Sense, "O", new List<(NEdge, bool)> { (pOwn!, ReferenceEquals(pOwn!.V0, V)), (line0!, true) }.Concat(Down(K0)).ToList(), -nO);
-        if (!flatN) Face(nf.Surface, !nf.Sense, "N", new List<(NEdge, bool)> { (pNext!, ReferenceEquals(pNext!.V0, V)), (lineN!, true) }.Concat(Down(KN)).ToList(), -nN);
+        if (pastNext) Face(nf.Surface, !nf.Sense, "N", new List<(NEdge, bool)> { (lineV!, true), (overN!, false) }.Concat(Down(KN)).ToList(), -nN);
+        else if (!flatN) Face(nf.Surface, !nf.Sense, "N", new List<(NEdge, bool)> { (pNext!, ReferenceEquals(pNext!.V0, V)), (lineN!, true) }.Concat(Down(KN)).ToList(), -nN);
         static List<(NEdge e, bool fwd)> Reversed(List<(NEdge e, bool fwd)> l) => l.Select(x => (x.e, !x.fwd)).Reverse().ToList();
         // (the plane whose loop's normal is surest: the largest; the others from it)
         var done = new bool[faces.Count];
@@ -224,7 +277,7 @@ internal static class CornerPatch
         if (body.Validate() is { } err) return Fail("internal: " + err);
         var tool = NTess.ToSolid(body);
         NativeBlend.Debug?.Invoke($"corner at {v.P}: pivot {Phi * 180 / Math.PI:0.#}°, the corner edge from {Math.Min(zs[0], zs[n]):g4} to {Math.Max(zs[0], zs[n]):g4}, volume {tool.Volume():g4}");
-        return new Result(tool, endOwn, endNext);
+        return new Result(tool, endOwn, atJoint ?? endNext, false, pastNext);
 
         static Result? Fail(string why) { NativeBlend.Debug?.Invoke("corner patch: " + why); return null; }
     }
