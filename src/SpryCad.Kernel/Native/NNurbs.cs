@@ -263,9 +263,11 @@ public sealed class NurbsSurface
     }
 
     /// <summary>
-    /// <see cref="Closest"/> started from a nearby earlier answer (the same search a step before): Newton from it,
-    /// kept when it ends on a foot point and no grid cell beyond its own neighbours can hold anything nearer
-    /// (their bounding spheres); else the full search. The same inputs give the same answer.
+    /// <see cref="Closest"/> started from a nearby earlier answer (the same search a step before, or at the point
+    /// before along a curve): Newton from it, kept when it ends on a foot point and either p is well within the
+    /// surface's tightest radius of curvature of it (no other part of the surface can come between) or no grid cell
+    /// beyond two of its neighbours can hold anything nearer (their bounding spheres); else the full search. The
+    /// same inputs give the same answer.
     /// </summary>
     public (double u, double v, Vec3 c, double dist) ClosestFrom(Vec3 p, double uHint, double vHint)
     {
@@ -274,15 +276,16 @@ public sealed class NurbsSurface
         if (Stationary(p, u, v))
         {
             var c = Eval(u, v); var d = Vec3.Distance(c, p);
+            if (d < 0.25 * MinCurvatureRadius()) return (u, v, c, d);
             int ci = Math.Clamp((int)((u - U0) / (U1 - U0) * G), 0, G - 1), cj = Math.Clamp((int)((v - V0) / (V1 - V0) * G), 0, G - 1);
             bool sure = true;
             for (int i = 0; i < G && sure; i++)
                 for (int j = 0; j < G; j++)
                 {
-                    if (Math.Abs(i - ci) <= 1 && Math.Abs(j - cj) <= 1) continue;
+                    if (Math.Abs(i - ci) <= 2 && Math.Abs(j - cj) <= 2) continue;
                     // (closed directions wrap: the cells across the seam are neighbours too)
-                    if (ClosedU && Math.Abs(i - ci) >= G - 1 && Math.Abs(j - cj) <= 1) continue;
-                    if (ClosedV && Math.Abs(j - cj) >= G - 1 && Math.Abs(i - ci) <= 1) continue;
+                    if (ClosedU && Math.Abs(i - ci) >= G - 2 && Math.Abs(j - cj) <= 2) continue;
+                    if (ClosedV && Math.Abs(j - cj) >= G - 2 && Math.Abs(i - ci) <= 2) continue;
                     if (Vec3.Distance(p, _cellC[i, j]) - _cellR[i, j] < d) { sure = false; break; }
                 }
             if (sure) return (u, v, c, d);

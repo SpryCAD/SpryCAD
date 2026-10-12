@@ -1235,9 +1235,11 @@ public static class NIntersect
                 {
                     pts = new List<Vec3>(chain.Count);
                     var dirs = new List<Vec3>(chain.Count);
-                    foreach (var k in chain) { pts.Add(NSurface.ProjectToIntersection(sa, sb, dom.Eval(cpt[k]), out var d, stopStep: StopStep)); dirs.Add(d); }
+                    // (each projection's closest-point searches start where the one before, at the point before, ended)
+                    var hints = new NSurface.ProjHints();
+                    foreach (var k in chain) { pts.Add(NSurface.ProjectToIntersection(sa, sb, dom.Eval(cpt[k]), out var d, hints, stopStep: StopStep)); dirs.Add(d); }
                     if (closed) { pts.RemoveAt(pts.Count - 1); dirs.RemoveAt(dirs.Count - 1); }
-                    pts = Densify(pts, dirs, closed, sa, sb, tol);
+                    pts = Densify(pts, dirs, closed, sa, sb, tol, hints);
                 }
                 if (pts.Count >= 2) result.Add(new NPolyline(pts, closed));
             }
@@ -1308,7 +1310,7 @@ public static class NIntersect
     /// Inserts points of the intersection between the chain's until the chord error is below tol: each the projection
     /// of a segment's middle, started from the cubic through its ends along the curve's directions there.
     /// </summary>
-    static List<Vec3> Densify(List<Vec3> pts, List<Vec3> dirs, bool closed, NSurface a, NSurface b, double tol)
+    static List<Vec3> Densify(List<Vec3> pts, List<Vec3> dirs, bool closed, NSurface a, NSurface b, double tol, NSurface.ProjHints? hints = null)
     {
         var res = new List<Vec3>();
         int n = pts.Count;
@@ -1336,7 +1338,7 @@ public static class NIntersect
                 if (Vec3.Dot(up, uq) > 0.5) start = mid + (up - uq) * (L / 8);
             }
             // (a chain segment already within tolerance too: the trace grid is usually much finer than tol)
-            var m = NSurface.ProjectToIntersection(a, b, start, out var tm, stopStep: StopStep);
+            var m = NSurface.ProjectToIntersection(a, b, start, out var tm, hints, stopStep: StopStep);
             if (Vec3.Distance(m, mid) < tol * 0.25) return;
             if (Vec3.Distance(p, q) < tol) return;
             Sub(p, tp, m, tm, depth + 1);

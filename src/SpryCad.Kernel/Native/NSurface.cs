@@ -358,14 +358,23 @@ public sealed class NSurface
     /// Gauss-Newton step shorter than it ends the search without a last evaluation to confirm: what is left after
     /// it is of the order of the step squared times the curvature.
     /// </summary>
-    public static Vec3 ProjectToIntersection(NSurface a, NSurface b, Vec3 p, out Vec3 dir, double tol = 1e-12, double stopStep = 0)
+    /// <summary>Where the last projection's closest-point searches ended on each surface (B-splines): the next starts there.</summary>
+    public sealed class ProjHints { public double Ua = double.NaN, Va = double.NaN, Ub = double.NaN, Vb = double.NaN; }
+
+    public static Vec3 ProjectToIntersection(NSurface a, NSurface b, Vec3 p, out Vec3 dir, double tol = 1e-12, double stopStep = 0) => ProjectToIntersection(a, b, p, out dir, null, tol, stopStep);
+
+    /// <summary>
+    /// The projection along a curve: each B-spline's closest-point search starts where the projection before (at
+    /// the point before) ended.
+    /// </summary>
+    public static Vec3 ProjectToIntersection(NSurface a, NSurface b, Vec3 p, out Vec3 dir, ProjHints? hints, double tol = 1e-12, double stopStep = 0)
     {
         // (counted against free-form surfaces, where each step is a closest-point search: tests check they stay few)
         if (Prof.Enabled && (a.Kind is SurfaceKind.BSpline or SurfaceKind.Offset || b.Kind is SurfaceKind.BSpline or SurfaceKind.Offset)) Prof.Count("project.freeform", 1);
         var q = p;
         dir = Vec3.Zero;
         // a B-spline's closest-point search started from the step before's (q moves little between steps)
-        double ua = double.NaN, va = double.NaN, ub = double.NaN, vb = double.NaN;
+        double ua = hints?.Ua ?? double.NaN, va = hints?.Va ?? double.NaN, ub = hints?.Ub ?? double.NaN, vb = hints?.Vb ?? double.NaN;
         double FG(NSurface s, Vec3 x, out Vec3 g, ref double hu, ref double hv)
         {
             if (s.Kind != SurfaceKind.BSpline) { hu = double.NaN; return s.FGrad(x, out g); }
@@ -378,7 +387,7 @@ public sealed class NSurface
         {
             var fa = FG(a, q, out var na, ref ua, ref va); var fb = FG(b, q, out var nb, ref ub, ref vb);
             dir = Vec3.Cross(na, nb);
-            if (Math.Abs(fa) < tol && Math.Abs(fb) < tol) return q;
+            if (Math.Abs(fa) < tol && Math.Abs(fb) < tol) { Keep(); return q; }
             double g11 = Vec3.Dot(na, na), g12 = Vec3.Dot(na, nb), g22 = Vec3.Dot(nb, nb);
             var det = g11 * g22 - g12 * g12;
             Vec3 step;
@@ -390,13 +399,23 @@ public sealed class NSurface
             else
             {
                 // tangent: project onto each in turn
-                q = b.Project(a.Project(q));
+                q = Onto(b, Onto(a, q, ref ua, ref va), ref ub, ref vb);
                 continue;
             }
             q -= step;
             if (step.LengthSq < tol * tol || step.LengthSq < stopStep * stopStep) break;
         }
+        Keep();
         return q;
+        void Keep() { if (hints != null) { hints.Ua = ua; hints.Va = va; hints.Ub = ub; hints.Vb = vb; } }
+        // the nearest point of s (a B-spline's search started where the last one ended)
+        static Vec3 Onto(NSurface s, Vec3 x, ref double hu, ref double hv)
+        {
+            if (s.Kind != SurfaceKind.BSpline) return s.Project(x);
+            var c = s.Nurbs!.ClosestFrom(x, hu, hv);
+            hu = c.u; hv = c.v;
+            return c.c;
+        }
     }
 
     /// <summary>(∂u × ∂v) orientation vs. natural normal: +1 for every kind (by construction of the parameterization).</summary>
@@ -463,7 +482,9 @@ public sealed class NSurface
         if (Kind == SurfaceKind.Pipe) return Spine!.RayHits(o, d, R);
         if (Kind == SurfaceKind.Screw) return Screw!.RayHits(o, d);
         if (Kind == SurfaceKind.BSpline) return Nurbs!.RayHits(o, d, F_);
-        if (Kind == SurfaceKind.Offset) return RayHitsByDistance(o, d, Base!.Nurbs!.Box, Math.Abs(R));
+        // (an offset face can run on past its base's edge, where a shell's inner wall reaches up to an open face's
+        // offset: about the offset further still)
+        if (Kind == SurfaceKind.Offset) return RayHitsByDistance(o, d, Base!.Nurbs!.Box, 3 * Math.Abs(R));
         var res = new List<double>();
         var lo = F.ToLocal3(o);
         var ld = new Vec3(Vec3.Dot(d, F.XDir), Vec3.Dot(d, F.YDir), Vec3.Dot(d, F.Normal));

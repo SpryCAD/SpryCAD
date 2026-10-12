@@ -151,6 +151,47 @@ static class LoftProbe
         return 0;
     }
 
+    /// <summary>`loftshell [filter]`: each probe loft shelled 1.5 thick with its end face open (else its start).</summary>
+    public static int Shell(string? filter)
+    {
+        foreach (var (name, make) in Cases())
+        {
+            if (filter != null && !name.Contains(filter)) continue;
+            NBody b;
+            try { b = make(); } catch (Exception) { continue; }
+            var open = b.Faces.Any(f => f.Tag.Name.EndsWith(".End")) ? b.Faces.First(f => f.Tag.Name.EndsWith(".End")).Tag.Name
+                : b.Faces.Any(f => f.Tag.Name.EndsWith(".Start")) ? b.Faces.First(f => f.Tag.Name.EndsWith(".Start")).Tag.Name : null;
+            if (open == null) { Console.WriteLine($"--   {name}: no end face"); continue; }
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            if (Environment.GetEnvironmentVariable("SHELL_CORNERS") != null) NShell.Debug = m => { if (m.StartsWith("vertex") || m.StartsWith("edge")) Console.WriteLine("   " + m); };
+            try
+            {
+                var t = Math.Min(1.5, 0.02 * b.Bounds.Diagonal);
+                if (Environment.GetEnvironmentVariable("SHELL_DBG") != null)
+                {
+                    var inner = NShell.Offset(b, f => f.Tag.Name == open ? t : -t, "SH.I.");
+                    var iv = NMass.Of(inner)?.Volume;
+                    var ib = inner.Bounds; var bb = b.Bounds;
+                    Console.WriteLine($"   inner {inner.Validate() ?? "valid"} volume {iv:0.#}, box {ib.Min}..{ib.Max} vs {bb.Min}..{bb.Max}");
+                    foreach (var f in inner.Faces) Console.WriteLine($"     {f.Tag.Name} {f.Surface.Kind} sense {f.Sense} R {f.Surface.R}");
+                }
+                Prof.Reset(); Prof.Enabled = Environment.GetEnvironmentVariable("SHELL_DBG") != null;
+                if (Prof.Enabled) NBoolean.Trace = m => Console.WriteLine("   T " + (m.Length > 220 ? m[..220] : m));
+                var sh = NShell.Apply(b, new HashSet<string> { open }, t, "SH");
+                if (Prof.Enabled) { foreach (var (pn, ms, calls) in Prof.Results().Where(x => x.name.StartsWith("tr") || x.name.StartsWith("sec") || x.name.StartsWith("cls") || x.name.StartsWith("bool"))) Console.WriteLine($"     {pn}: {ms:0} ms ({calls})"); Prof.Enabled = false; }
+                if (Environment.GetEnvironmentVariable("SHELL_DBG") != null) foreach (var f in sh.Faces) Console.WriteLine($"   result {f.Tag.Name} {f.Surface.Kind} loops {f.Loops.Count} edges {f.Coedges.Count()} sense {f.Sense}");
+                var err = sh.Validate();
+                var v0 = NMass.Of(b)?.Volume ?? 0; var v1 = NMass.Of(sh)?.Volume ?? double.NaN;
+                if (Environment.GetEnvironmentVariable("SHELL_OPEN") != null) Topology.Debug = m => Console.WriteLine("   " + m);
+                var mesh = NTess.ToSolid(sh).Topology.OpenHalfEdges;
+                Topology.Debug = null;
+                Console.WriteLine($"{(err == null && mesh == 0 && v1 > 0 && v1 < v0 ? "ok  " : "BAD ")} {name}: {err ?? "valid"}, volume {v0:0.#} -> {v1:0.#}, open mesh edges {mesh}, {sw.ElapsedMilliseconds} ms");
+            }
+            catch (Exception ex) { Console.WriteLine($"FAIL {name}: {ex.GetType().Name}: {ex.Message} ({sw.ElapsedMilliseconds} ms)"); }
+        }
+        return 0;
+    }
+
     public static int Run(string? filter)
     {
         int bad = 0;
@@ -229,6 +270,33 @@ static class LoftMirrorBench
         sk.Add(new SpryCad.Core.Sketching.SkArc { Center = c.Id, Start = a.Id, End = b.Id });
         sk.Add(new SpryCad.Core.Sketching.SkLine { P1 = b.Id, P2 = a.Id });
         return sk;
+    }
+
+    /// <summary>`loftmirror file.sprt`: the model rebuilt, then its bodies meshed for display, each step timed.</summary>
+    public static int File(string path)
+    {
+        var doc = SpryCad.Core.Model.CadDocument.Load(path);
+        if (Environment.GetEnvironmentVariable("LOFT_WARM") != null)
+        {
+            var ws = System.Diagnostics.Stopwatch.StartNew();
+            SpryCad.Core.Regen.Warmup.Run();
+            Console.WriteLine($"warm-up {ws.Elapsed.TotalMilliseconds:0} ms");
+        }
+        for (int it = 0; it < 3; it++)
+        {
+            SpryCad.Kernel.Csg.ClearCache();
+            SpryCad.Kernel.Prof.Reset(); SpryCad.Kernel.Prof.Enabled = it == 2;
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            var r = new SpryCad.Core.Regen.Regenerator().Rebuild(doc);
+            var t1 = sw.Elapsed.TotalMilliseconds;
+            int tris = 0;
+            foreach (var b in r.State.Bodies) { var native = b.Solid.Native!; var sol = SpryCad.Kernel.Native.NTess.ToSolid(native.Clone()); tris += sol.Faces.Count; _ = sol.Topology; }
+            var t2 = sw.Elapsed.TotalMilliseconds - t1;
+            SpryCad.Kernel.Prof.Enabled = false;
+            Console.WriteLine($"rebuild {t1:0} ms, display mesh {t2:0} ms ({tris} triangles); " + string.Join(", ", doc.Features.Select(f => $"{f.Name} {r.Status[f.Id].Milliseconds:0}")));
+            if (it == 2) foreach (var (pn, ms, calls) in SpryCad.Kernel.Prof.Results().Where(x => x.ms > 5)) Console.WriteLine($"    {pn}: {ms:0} ms ({calls})");
+        }
+        return 0;
     }
 
     public static int Run()
