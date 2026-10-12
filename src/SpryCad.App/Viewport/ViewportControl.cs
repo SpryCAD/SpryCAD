@@ -366,17 +366,27 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
             if (Style == DisplayStyle.HiddenLinesVisible) _r.Gl.ColorMask(false, false, false, false);
             foreach (var i in Instances)
             {
-                _r.DrawMesh(_gpu[i.Mesh], i.Color, i.Model * vp, i.Model * view, Camera.Perspective);
+                // (an instance see-through by its color: its own faces solid now, the rest blended over after)
+                if (i.Color.A >= 1) _r.DrawMesh(_gpu[i.Mesh], i.Color, i.Model * vp, i.Model * view, Camera.Perspective);
                 if (i.Faces != null && Style != DisplayStyle.HiddenLinesVisible)
                     foreach (var (name, color) in i.Faces)
                         foreach (var fr in i.Mesh.Faces)
                             if (fr.Name == name) _r.DrawMesh(_gpu[i.Mesh], color, i.Model * vp, i.Model * view, Camera.Perspective, fr.IndexStart, fr.IndexCount);
             }
             if (Style == DisplayStyle.HiddenLinesVisible) _r.Gl.ColorMask(true, true, true, true);
+            if (Style != DisplayStyle.HiddenLinesVisible && Instances.Any(i => i.Color.A is > 0 and < 1))
+            {
+                _r.Blend(true);
+                foreach (var i in Instances)
+                    if (i.Color.A is > 0 and < 1) _r.DrawMesh(_gpu[i.Mesh], i.Color, i.Model * vp, i.Model * view, Camera.Perspective);
+                _r.Blend(false);
+            }
             _r.PolygonOffset(false);
         }
         if (Style != DisplayStyle.Shaded)
-            foreach (var i in Instances) _r.DrawEdges(_gpu[i.Mesh], EdgeColor, i.Model * vp);
+            foreach (var i in Instances)
+                if (i.Color.A >= 1) _r.DrawEdges(_gpu[i.Mesh], EdgeColor, i.Model * vp);
+                else if (i.Color.A > 0) { _r.Blend(true); _r.DrawEdges(_gpu[i.Mesh], EdgeColor.WithAlpha(i.Color.A), i.Model * vp); _r.Blend(false); }
     }
 
     /// <summary>A mesh box placed by a row-vector matrix: the box of its eight corners.</summary>
