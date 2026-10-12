@@ -123,9 +123,11 @@ profile; the profile's times are summed over threads). On the heavy samples (`sa
     zeros in the dense rows alone barely helped.)
   - Left: skipping converged clusters; equations with no variables; analytic derivatives (the Jacobian is central
     differences).
-- **Mate solver** (`Assembly/MateSolver.cs`): `matebench` on a stack of gears: 200 components solve in ~360 ms, a drag
-  step ~60 ms (100: 64 and 28 ms); one connected piece, so splitting does not help it. Already sparse. Solve the connected pieces separately and skip those
-  already within tolerance. `Settle` runs two full solves.
+- **Mate solver** (`Assembly/MateSolver.cs`): nothing left worth doing. Since the exact derivatives and one setup per
+  drag (#19, #38), `matebench`'s stack of 200 gears solves in ~16 ms and a drag step takes ~10 ms (from ~360 and
+  ~60); drags and motors already solve only the components linked to the moved one. `-- asmsolve <files>` times
+  each assembly's solve once open: every sample's mates solve in 0.08 ms or less (linkage, 11 components and 24
+  mates). Solving each connected piece separately would gain nothing measurable.
 - **Regenerator**:
   - Cancellation: done. The rebuild's token is ambient in the kernel (`Kernel.Cancellation`), checked between a
     boolean's stages and a blend's edge groups; the kernel's catch-alls let `OperationCanceledException` through, so a
