@@ -656,6 +656,50 @@ public static class Roots
         return 0.5 * (a + b);
     }
 
+    /// <summary>
+    /// Root of f in [a,b] given a sign change, as <see cref="Bisect"/> finds it (to 1e-15 relative) in far fewer
+    /// evaluations where f is smooth there: regula falsi with the Illinois step (the bracket kept; a stuck end's value
+    /// halved), a bisection step where that shrinks the bracket by less than half.
+    /// </summary>
+    public static double Bracketed(Func<double, double> f, double a, double b, int iters = 100)
+    {
+        double fa = f(a), fb = f(b);
+        if (fa == 0) return a;
+        if (fb == 0) return b;
+        int side = 0;
+        for (int i = 0; i < iters; i++)
+        {
+            var w = b - a;
+            var m = (fa * b - fb * a) / (fa - fb);
+            if (!(m > a && m < b)) m = 0.5 * (a + b);
+            var fm = f(m);
+            if (fm == 0) return m;
+            if (Math.Sign(fm) == Math.Sign(fa))
+            {
+                a = m; fa = fm;
+                if (side == -1) fb *= 0.5;
+                side = -1;
+            }
+            else
+            {
+                b = m; fb = fm;
+                if (side == 1) fa *= 0.5;
+                side = 1;
+            }
+            if (Math.Abs(b - a) < 1e-15 * Math.Max(1, Math.Abs(m))) return 0.5 * (a + b);
+            // (barely shrinking: a bisection step)
+            if (b - a > 0.5 * w)
+            {
+                var c = 0.5 * (a + b); var fc = f(c);
+                if (fc == 0) return c;
+                if (Math.Sign(fc) == Math.Sign(fa)) { a = c; fa = fc; } else { b = c; fb = fc; }
+                side = 0;
+                if (Math.Abs(b - a) < 1e-15 * Math.Max(1, Math.Abs(c))) return 0.5 * (a + b);
+            }
+        }
+        return 0.5 * (a + b);
+    }
+
     /// <summary>Minimum of |f| on [a,b] by golden section (for tangential touches).</summary>
     public static double MinAbs(Func<double, double> f, double a, double b)
     {
