@@ -33,6 +33,8 @@ static partial class Demos
         ("ribs, filleted and patterned", () => PatternedRibs("16")),
         ("drafted boss, a lug standing out onto its corner round", () => LugOnRound()),
         ("box on a barrel coming out through its end, the end's corners rounded, a boss across", BoxOnBarrel),
+        ("box, top edges rounded, a boss across its side and top filleted", () => BossOverRoundedEdge()),
+        ("box with a ledge over its side, a boss across the side and under the ledge filleted", () => BossOverRoundedEdge(ledge: true)),
         ("drafted boss with a lug, its top edge rounded round the lug", () => LugOnRound(topRound: true)),
     };
 
@@ -304,6 +306,44 @@ static partial class Demos
             },
         });
         d.AddFeature(new MirrorFeature { Name = "Rib, other end", Seeds = { rib.Id, fil.Id }, Plane = PlaneRef.Right });
+        return d;
+    }
+
+    /// <summary>
+    /// A box (100 x 60 x 40) its top edges rounded R4 all round, a boss (a cylinder along Y, R10, its axis in the top's
+    /// plane at x 0) from inside it out through its +Y side, the boss's foot filleted R3 (one edge, tangent edges
+    /// following): along the top, over the round, round the side and back (one rolling-ball tool, its two ends on the
+    /// top at the same height). As the hit and miss engine's cam boss. With <paramref name="ledge"/>, the box drafted 2°
+    /// and a block on the top over x &lt; -20 overhanging its side by about 4 (as the engine's hopper): the boss's back runs in under it, and the
+    /// fillet's end is cut back to the ledge's underside, in the plane of the top the fillet rolls on at its other end.
+    /// </summary>
+    static CadDocument BossOverRoundedEdge(bool ledge = false)
+    {
+        var d = Doc(("R", "3"));
+        var x = new Sk(d);
+        var xl = x.Rect("-50", "-30", "50", "30");
+        var xs = d.AddFeature(new SketchFeature { Name = "Box", Plane = PlaneRef.Front, Sketch = x.S });
+        // (with the ledge drafted 2°, as the engine's body: the fillet's square end then leans past the ledge's underside)
+        var box = d.AddFeature(new ExtrudeFeature { Name = "Box", SketchId = xs.Id, Depth = "40", Draft = ledge ? "2" : null });
+        string L(int i) => $"{box.Id}.S.L{xl[i]}";
+        if (ledge)
+        {
+            // (first: the top's edge round below then ends at it, as the engine's runs into its hopper)
+            var tp = d.AddFeature(new PlaneFeature { Name = "Top", Base = PlaneRef.Front, Offset = "40" });
+            var h = new Sk(d);
+            h.Rect("-50", "-30", "-20", "33");
+            var hs = d.AddFeature(new SketchFeature { Name = "Ledge", Plane = new PlaneRef { Feature = tp.Id }, Sketch = h.S });
+            d.AddFeature(new ExtrudeFeature { Name = "Ledge", SketchId = hs.Id, Depth = "20" });
+            d.AddFeature(new FilletFeature { Name = "Top edge", Radius = "4", TangentPropagation = false, Edges = { E(L(2), $"{box.Id}.End", new Vec3(20, 30 - 40 * Math.Tan(2 * Math.PI / 180), 40)) } });
+        }
+        else d.AddFeature(new FilletFeature { Name = "Top edges", Radius = "4", Edges = { E(L(2), $"{box.Id}.End", new Vec3(0, 30, 40)) } });
+        // the boss: on a plane square to Y at y 10, out to y 50 (Top: sketch x = x, sketch y = -z)
+        var bp = d.AddFeature(new PlaneFeature { Name = "Boss start", Base = PlaneRef.Top, Offset = "10" });
+        var c = new Sk(d);
+        var ci = c.Circle(c.P(ledge ? "-15" : "0", "-40"), "20");
+        var cs = d.AddFeature(new SketchFeature { Name = "Boss", Plane = new PlaneRef { Feature = bp.Id }, Sketch = c.S });
+        var boss = d.AddFeature(new ExtrudeFeature { Name = "Boss", SketchId = cs.Id, Depth = "40" });
+        d.AddFeature(new FilletFeature { Name = "Boss foot", Radius = "R", Edges = { E($"{boss.Id}.S.C{ci}", L(2), new Vec3(ledge ? -15 : 0, ledge ? 30 - 30 * Math.Tan(2 * Math.PI / 180) : 30, 30)) } });
         return d;
     }
 
