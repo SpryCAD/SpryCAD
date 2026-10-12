@@ -49,6 +49,15 @@ public static class NativeBlend
         }
         // (the ball pivoting round convex corners: where that leaves errors, the fillets mitred there instead, as before,
         // when that does better)
+        // (many corners: their tools, applied by boolean, are slow, and the more there are the likelier one fails: the
+        // feature mitred as before)
+        if (fillet && !_noPivots && PivotCorners(edges) > MaxPivots)
+        {
+            Debug?.Invoke($"more than {MaxPivots} corners to pivot round: mitred");
+            _noPivots = true;
+            try { return ApplyOne(body, edges, size, fillet, prefix, errors, overflow, problemEdges, applied, chamfer, buildOnly, trimmedOut); }
+            finally { _noPivots = false; }
+        }
         var errs1 = new List<string>(); var probs1 = problemEdges == null ? null : new List<Vec3[]>(); var app1 = applied == null ? null : new List<(Solid, bool)>();
         int used = _pivotsUsed;
         var failedBefore = _pivotFailed;
@@ -57,7 +66,9 @@ public static class NativeBlend
         bool pivotFailed;
         try { r1 = ApplyOne(body, edges, size, fillet, prefix, errs1, overflow, probs1, app1, chamfer, buildOnly, trimmedOut); }
         finally { pivotFailed = _pivotFailed; _pivotFailed = failedBefore; }
-        if ((errs1.Count > 0 || pivotFailed) && _pivotsUsed > used && !_noPivots)
+        // (a result no longer exact, a boolean having fallen back to facets, failed as much as one with errors)
+        bool inexact = !buildOnly && r1.Native == null && body.Native != null;
+        if ((errs1.Count > 0 || pivotFailed || inexact) && _pivotsUsed > used && !_noPivots)
         {
             var errs2 = new List<string>(); var probs2 = problemEdges == null ? null : new List<Vec3[]>(); var app2 = applied == null ? null : new List<(Solid, bool)>();
             _noPivots = true;
@@ -66,7 +77,7 @@ public static class NativeBlend
             finally { _noPivots = false; }
             Debug?.Invoke($"pivots: {errs1.Count} error(s) ({string.Join("; ", errs1)}); mitred: {errs2.Count}");
             // (a pivot not glued: that run is incomplete)
-            if (pivotFailed || errs2.Count < errs1.Count) (r1, errs1, probs1, app1) = (r2, errs2, probs2, app2);
+            if (pivotFailed || inexact && r2.Native != null || errs2.Count < errs1.Count) (r1, errs1, probs1, app1) = (r2, errs2, probs2, app2);
         }
         errors.AddRange(errs1);
         if (probs1 != null) problemEdges!.AddRange(probs1);
@@ -77,7 +88,28 @@ public static class NativeBlend
     // (per thread: pattern instances are built in parallel)
     [ThreadStatic] static int _pivotsUsed;
     [ThreadStatic] static bool _pivotFailed;
+    /// <summary>The most corners a blend feature pivots round (more: mitred, as before).</summary>
+    public static int MaxPivots = 4;
     [ThreadStatic] static bool _noPivots;
+
+    /// <summary>The corners the ball would pivot round (convex corner edges two selected edges turn round).</summary>
+    static int PivotCorners(IReadOnlyList<NEdge> edges)
+    {
+        var sel = edges as IReadOnlyCollection<NEdge> ?? edges.ToList();
+        var at = new HashSet<NVertex>(ReferenceEqualityComparer.Instance);
+        foreach (var e in edges)
+        {
+            if (e.Uses.Count != 2 || ReferenceEquals(e.V0, e.V1)) continue;
+            var (fa, fb) = Faces(e);
+            foreach (var v in new[] { e.V0, e.V1 })
+            {
+                if (at.Contains(v)) continue;
+                var dirOut = (ReferenceEquals(v, e.V1) ? e.Curve.Deriv(e.T1) : -e.Curve.Deriv(e.T0)).Normalized;
+                if (EndPlane(v, dirOut, fa, fb, new[] { e }, sel) is { } pl && RoundCorner(v, fa, fb, new[] { e }, sel, pl, 1, "") != null) at.Add(v);
+            }
+        }
+        return at.Count;
+    }
 
     /// <summary>Whether three or more of the edges, of one kind (convex or concave), meet at a vertex.</summary>
     static bool Corner3(IReadOnlyList<NEdge> edges)
