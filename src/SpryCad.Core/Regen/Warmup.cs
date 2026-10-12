@@ -6,7 +6,7 @@ namespace SpryCad.Core.Regen;
 
 /// <summary>
 /// Rebuilds a small throw-away part on a background thread at start-up so the JIT has compiled the
-/// modeling code paths (extrude, cut, fillet, hole, pattern, shell, tessellation, exact B-rep) before the
+/// modeling code paths (extrude, cut, fillet, hole, pattern, shell, loft, mirror, tessellation, exact B-rep) before the
 /// user's first rebuild. Failures are ignored: this only affects timing.
 /// </summary>
 public static class Warmup
@@ -47,7 +47,30 @@ public static class Warmup
             _ = b.Solid.Topology.Edges;   // picking topology
             ExactBrep.Build(b.Solid);     // STEP export path
         }
+        Loft();
         return r;
+    }
+
+    /// <summary>
+    /// A loft (a rectangle on Top to a circle on a plane across it, square to both) mirrored in the circle's plane:
+    /// skinning, B-spline faces against planes and against their mirror images, B-spline meshes. (A first mirror of
+    /// a loft otherwise pays seconds of compiling.)
+    /// </summary>
+    public static RegenResult Loft() => new Regenerator().Rebuild(LoftDoc());
+
+    public static CadDocument LoftDoc()
+    {
+        var doc = new CadDocument();
+        // (the rectangle 100 × 60 from the origin on Top; the circle on a plane beyond its end, so the mirror's
+        // copy only meets the loft at the circle, as a symmetric part's halves do)
+        var s1 = doc.AddFeature(new SketchFeature { Plane = PlaneRef.Top, Sketch = Rect(100, 60) });
+        var pl = doc.AddFeature(new PlaneFeature { Base = PlaneRef.Right, Offset = "130" });
+        var c = new Sketch();
+        c.Add(new SkCircle { Center = c.AddPoint(new Vec2(30, 25)).Id, R = 12 });
+        var s2 = doc.AddFeature(new SketchFeature { Plane = new PlaneRef { Feature = pl.Id }, Sketch = c });
+        var lf = doc.AddFeature(new LoftFeature { SectionSketchIds = { s2.Id, s1.Id }, StartTangency = LoftTangency.Normal, EndTangency = LoftTangency.Normal });
+        doc.AddFeature(new MirrorFeature { Seeds = { lf.Id }, Plane = new PlaneRef { Feature = pl.Id } });
+        return doc;
     }
 
     static Sketch Rect(double w, double h)

@@ -231,6 +231,33 @@ static class LoftMirrorBench
         return sk;
     }
 
+    /// <summary>`loftmirror file.sprt`: the model rebuilt, then its bodies meshed for display, each step timed.</summary>
+    public static int File(string path)
+    {
+        var doc = SpryCad.Core.Model.CadDocument.Load(path);
+        if (Environment.GetEnvironmentVariable("LOFT_WARM") != null)
+        {
+            var ws = System.Diagnostics.Stopwatch.StartNew();
+            SpryCad.Core.Regen.Warmup.Run();
+            Console.WriteLine($"warm-up {ws.Elapsed.TotalMilliseconds:0} ms");
+        }
+        for (int it = 0; it < 3; it++)
+        {
+            SpryCad.Kernel.Csg.ClearCache();
+            SpryCad.Kernel.Prof.Reset(); SpryCad.Kernel.Prof.Enabled = it == 2;
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            var r = new SpryCad.Core.Regen.Regenerator().Rebuild(doc);
+            var t1 = sw.Elapsed.TotalMilliseconds;
+            int tris = 0;
+            foreach (var b in r.State.Bodies) { var native = b.Solid.Native!; var sol = SpryCad.Kernel.Native.NTess.ToSolid(native.Clone()); tris += sol.Faces.Count; _ = sol.Topology; }
+            var t2 = sw.Elapsed.TotalMilliseconds - t1;
+            SpryCad.Kernel.Prof.Enabled = false;
+            Console.WriteLine($"rebuild {t1:0} ms, display mesh {t2:0} ms ({tris} triangles); " + string.Join(", ", doc.Features.Select(f => $"{f.Name} {r.Status[f.Id].Milliseconds:0}")));
+            if (it == 2) foreach (var (pn, ms, calls) in SpryCad.Kernel.Prof.Results().Where(x => x.ms > 5)) Console.WriteLine($"    {pn}: {ms:0} ms ({calls})");
+        }
+        return 0;
+    }
+
     public static int Run()
     {
         foreach (var rad in new[] { 12.0, 13.0, 11.0 })
