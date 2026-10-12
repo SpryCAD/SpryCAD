@@ -115,14 +115,14 @@ static partial class Demos
     }
 
     /// <summary>
-    /// The connecting rod, its big end on the origin and its small end Len along -X: a tapered I-section shank between
+    /// The connecting rod, its big end on the origin and its small end Len along -X: a lofted shank, oval and growing, between
     /// a round small end (bushed for the wrist pin) and a block big end split on the crank pin's centre (the cap is a
     /// part of its own), recessed on both faces, its bolt holes along X.
     /// </summary>
     static CadDocument HmConRod()
     {
         var d = Doc(("Len", $"{HmRod}"), ("Pin", $"{HmPin}"), ("Wp", $"{HmWp}"), ("BigW", "22"), ("SmallW", "20"), ("SmallD", "26"),
-            ("BlockH", "56"), ("BlockL", "16"), ("W1", "16"), ("W2", "22"), ("ShankT", "14"), ("Web", "6"),
+            ("BlockH", "56"), ("BlockL", "16"), ("W1", "16"), ("W2", "24"), ("T1", "11"), ("T2", "15"), ("Rs1", "5"), ("Rs2", "7"),
             ("BoltY", "20"), ("BoltD", "6.4"), ("Rf", "3"), ("Rr", "2"));
         // big end block (x -BlockL..0), centred on the axis
         var b = new Sk(d);
@@ -134,30 +134,26 @@ static partial class Demos
         var se = s.Circle(s.P("-Len", "0"), "SmallD");
         var ss = d.AddFeature(new SketchFeature { Name = "Small end", Plane = PlaneRef.Front, Sketch = s.S });
         var small = d.AddFeature(new ExtrudeFeature { Name = "Small end", SketchId = ss.Id, End = EndCondition.MidPlane, Depth = "SmallW" });
-        // the shank: tapering from W1 at the small end to W2 at the block
-        var t = new Sk(d);
-        var sh = t.Poly(t.P("-Len", "-W1/2"), t.P("-BlockL", "-W2/2"), t.P("-BlockL", "W2/2"), t.P("-Len", "W1/2"));
-        var ts = d.AddFeature(new SketchFeature { Name = "Shank", Plane = PlaneRef.Front, Sketch = t.S });
-        var shank = d.AddFeature(new ExtrudeFeature { Name = "Shank", SketchId = ts.Id, End = EndCondition.MidPlane, Depth = "ShankT" });
-        double V(string e) => t.Eval(e);
+        // the shank: lofted from a slim rounded section inside the small end to a deeper one inside the big end
+        // (Right planes: sketch x = -z, y = y), blended into both ends
+        var s0 = d.AddFeature(new PlaneFeature { Name = "Shank at the small end", Base = PlaneRef.Right, Offset = "-(Len-SmallD/2+4)" });
+        var t0 = new Sk(d);
+        var sl0 = HmRoundRect(t0, "T1/2", "W1/2", "Rs1");
+        var t0s = d.AddFeature(new SketchFeature { Name = "Small section", Plane = new PlaneRef { Feature = s0.Id }, Sketch = t0.S });
+        var s1 = d.AddFeature(new PlaneFeature { Name = "Shank at the big end", Base = PlaneRef.Right, Offset = "-BlockL" });
+        var t1 = new Sk(d);
+        HmRoundRect(t1, "T2/2", "W2/2", "Rs2");
+        var t1s = d.AddFeature(new SketchFeature { Name = "Big section", Plane = new PlaneRef { Feature = s1.Id }, Sketch = t1.S });
+        var shank = d.AddFeature(new LoftFeature { Name = "Shank", SectionSketchIds = { t0s.Id, t1s.Id } });
+        // blended into the small end all round (one edge picked, the rest follow tangent); the big end's joint is left
+        // sharp: blending it fails in the kernel (docs/hit-and-miss-notes.md)
+        double V(string e) => t0.Eval(e);
+        double sy = V("W1/2") + 0.03, sx = -V("Len") + Math.Sqrt(V("SmallD/2") * V("SmallD/2") - sy * sy);
         d.AddFeature(new FilletFeature
         {
-            Name = "Shank fillets", Radius = "Rf",
-            Edges =
-            {
-                E($"{shank.Id}.S.L{Ids.Name(sh[0])}", $"{small.Id}.S.C{Ids.Name(se)}", new Vec3(-V("Len-10"), -V("W1/2"), 0)),
-                E($"{shank.Id}.S.L{Ids.Name(sh[2])}", $"{small.Id}.S.C{Ids.Name(se)}", new Vec3(-V("Len-10"), V("W1/2"), 0)),
-                E($"{shank.Id}.S.L{Ids.Name(sh[0])}", $"{block.Id}.S.L{Ids.Name(bl[3])}", new Vec3(-V("BlockL"), -V("W2/2"), 0)),
-                E($"{shank.Id}.S.L{Ids.Name(sh[2])}", $"{block.Id}.S.L{Ids.Name(bl[3])}", new Vec3(-V("BlockL"), V("W2/2"), 0)),
-            },
+            Name = "Shank into the small end", Radius = "Rf",
+            Edges = { E($"{shank.Id}.S.L{Ids.Name(sl0[0])}", $"{small.Id}.S.C{Ids.Name(se)}", new Vec3(sx, -sy, 0)) },
         });
-        // the I-section: a recess in each face of the shank, Web left between them
-        var r = new Sk(d);
-        r.Poly(r.P("-(Len-SmallD/2-2)", "-(W1/2-3)"), r.P("-(BlockL+3)", "-(W2/2-3)"), r.P("-(BlockL+3)", "W2/2-3"), r.P("-(Len-SmallD/2-2)", "W1/2-3"));
-        var face = d.AddFeature(new PlaneFeature { Name = "Shank face", Base = PlaneRef.Front, Offset = "ShankT/2" });
-        var rs = d.AddFeature(new SketchFeature { Name = "Recess", Plane = new PlaneRef { Feature = face.Id }, Sketch = r.S });
-        var rec = d.AddFeature(new ExtrudeFeature { Name = "Recess", SketchId = rs.Id, IsCut = true, Reverse = true, Depth = "(ShankT-Web)/2" });
-        d.AddFeature(new MirrorFeature { Name = "Recess, back", Seeds = { rec.Id }, Plane = PlaneRef.Front });
         // bores: the crank pin's (half of it here), the wrist pin's
         var h = new Sk(d);
         h.Circle(Sketch.OriginId, "Pin");
@@ -956,6 +952,21 @@ static partial class Demos
     // fittings
 
     static readonly double[] HmBrass = { 0.85, 0.66, 0.28 }, HmBlack = { 0.13, 0.13, 0.14 }, HmSteel = { 0.80, 0.81, 0.83 }, HmRed = { 0.72, 0.08, 0.07 };
+
+    /// <summary>
+    /// A rectangle on the sketch's origin, its half sizes and corner radius given by parameter names (a, b), its corners
+    /// round: lines (bottom, right, top, left) and arcs drawn in that order, so lofted sections match corner for corner.
+    /// </summary>
+    static List<long> HmRoundRect(Sk s, string a, string b, string r)
+    {
+        string xi = $"{a}-{r}", yi = $"{b}-{r}";
+        long b0 = s.P($"-({xi})", $"-({b})"), b1 = s.P(xi, $"-({b})"), r0 = s.P(a, $"-({yi})"), r1 = s.P(a, yi);
+        long t0 = s.P(xi, b), t1 = s.P($"-({xi})", b), l0 = s.P($"-({a})", yi), l1 = s.P($"-({a})", $"-({yi})");
+        var lines = new List<long> { s.Line(b0, b1), s.Line(r0, r1), s.Line(t0, t1), s.Line(l0, l1) };
+        s.Arc(s.P(xi, $"-({yi})"), b1, r0); s.Arc(s.P(xi, yi), r1, t0);
+        s.Arc(s.P($"-({xi})", yi), t1, l0); s.Arc(s.P($"-({xi})", $"-({yi})"), l1, b0);
+        return lines;
+    }
 
     /// <summary>A revolved part about Y: the half section through the points (x the radius, y up), closed on the axis.</summary>
     static (CadDocument d, Feature rev, List<long> lines) HmTurned(string name, (string name, string expr)[] eqs, params (string r, string y)[] pts)

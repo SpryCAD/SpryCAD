@@ -86,6 +86,17 @@ Commands (from the repository root):
    its edges (found by the "Chamfers around filleted corners" session). Fix: add the two list names to that test.
    The casting built fresh is fine, and the demo file is regenerated, so the engine does not hit it. Fix in #68
    (open).
+4h. **A loft's rounded section cannot be blended into a flat face (OPEN, master bb044ae).** The connecting rod's
+   shank is now a loft (`HmConRod`): from a 16 x 11 rounded rectangle (R5 corners, so 1 mm flats on its narrow
+   sides) inside the small end to a 24 x 15 one (R7) on the big end block's face (x = -16). Blended into the small
+   end's round boss, R3, picked or by scope: fine (but 5.7 s for that one fillet). Into the block's flat face it
+   fails at R3: "the fillet, cut back where it runs into neighbouring geometry, cannot be joined to the body (result
+   invalid: edge used 1 times (NLine (-18.943, 4.944, 7.444)->(-16, 5, 7.5) on Shank.S.A...))", at (y 5, z 7.5) where
+   a corner arc's face meets the top flat's face (a tangent seam between two of the loft's faces), and the same with
+   the section 2 mm inside the block. At R2 both ends fail ("edge used 1 times (NEllipse (-117, 0, 5.576)->... on
+   Shank.S.L...)"). Repro: in `HmConRod`, replace "Shank into the small end" with
+   `new FilletFeature { Radius = "Rf", Features = { shank.Id } }`, `verify-engine - Connecting`. *Instead:* only the
+   small end blended, the big end's joint left sharp.
 4g. **Mate face order (not kernel, the demo's helper).** `HmAsm.Any` (a face for a Lock mate) took the display
    mesh's first face; since the display caches are laid out anew (#59) that can be a face a mate cannot hold (the
    crankshaft's first is a surface of revolution), and `RefTo` gives null. It now takes the first face that gives a
@@ -217,7 +228,9 @@ Commands (from the repository root):
 
 - **Loft. DONE (#50), used:** the casting's saddle is a loft from a section up the hopper's back (as high as the
   barrel's top) down to the body's top short of the bearing pedestals, arriving square to its end so its top curves
-  down and lands tangent on the body's top; the crank pit, cut later, leaves a cheek of it either side. (The muffler's
+  down and lands tangent on the body's top; the crank pit, cut later, leaves a cheek of it either side. The connecting
+  rod's shank is a loft too: rounded sections growing from the small end to the big end, as such rods are forged
+  (it was a tapered extrude with an I-section recess; one end's blend is open, 4h). (The muffler's
   bulb stays a revolve: it is round.) Was: casting transitions (hopper to barrel, body to bearing towers) and the muffler's bulb would be lofts.
   *Instead:* drafted extrudes, revolves. To add: a `LoftFeature` beside `SweepFeature` (`Features.cs`), regenerated
   like `DoSweep` (regions from each section sketch, the kernel tool, `Validate`, `ApplyTool`, `State.Tools` so it can
