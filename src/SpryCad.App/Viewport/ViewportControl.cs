@@ -281,14 +281,33 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         DrawTriad(w, h);
         _r.EndFrame(fb);
         if (RenderProfile) NoteRender(t0, tDyn0, tDyn1);
+        if (PickProfile) ProfilePick();
 
-        if (_animating || Spinning || RenderContinuous) RequestNextFrameRendering();
+        if (_animating || Spinning || RenderContinuous || PickProfile) RequestNextFrameRendering();
     }
 
     // SPRYCAD_PROFILE_RENDER: the CPU time of frames (the whole render call, and building its overlay geometry), and
-    // how much overlay it uploads, in the log every 2 s; "continuous" renders frame after frame to measure a still view
+    // how much overlay it uploads, in the log every 2 s; "continuous" renders frame after frame to measure a still view;
+    // "picks" also runs the hover pick the pointer would (a component, or the model's items with every filter) at a
+    // point sweeping across the view each frame, and logs its time
     static readonly bool RenderProfile = Environment.GetEnvironmentVariable("SPRYCAD_PROFILE_RENDER") != null;
     static readonly bool RenderContinuous = Environment.GetEnvironmentVariable("SPRYCAD_PROFILE_RENDER") == "continuous";
+    static readonly bool PickProfile = Environment.GetEnvironmentVariable("SPRYCAD_PROFILE_RENDER") == "picks";
+    int _pkCalls, _pkHits; double _pkMs, _pkMax; long _pkSince = Stopwatch.GetTimestamp();
+
+    void ProfilePick()
+    {
+        double x = Bounds.Width * (0.1 + 0.8 * (_pkCalls % 200) / 200.0), y = Bounds.Height * (0.3 + 0.4 * (_pkCalls % 7) / 7.0);
+        var t = Stopwatch.GetTimestamp();
+        bool hit = Instances.Count > 0 ? PickInstance(x, y) != null : Pick(x, y, SelFilter.Any) != null;
+        var now = Stopwatch.GetTimestamp();
+        var ms = Stopwatch.GetElapsedTime(t, now).TotalMilliseconds;
+        _pkCalls++; _pkHits += hit ? 1 : 0; _pkMs += ms; _pkMax = Math.Max(_pkMax, ms);
+        var span = Stopwatch.GetElapsedTime(_pkSince, now).TotalSeconds;
+        if (span < 2) return;
+        App.Note($"picks: {_pkCalls} in {span:0.0} s ({_pkHits} hits), {_pkMs / _pkCalls:0.000} ms average ({_pkMax:0.000} worst) ({(Instances.Count > 0 ? "components" : "model items")})");
+        _pkCalls = _pkHits = 0; _pkMs = _pkMax = 0; _pkSince = now;
+    }
     int _rnFrames; double _rnMs, _rnMax, _rnDynMs, _rnDynMax; long _rnFloats; long _rnSince = Stopwatch.GetTimestamp();
 
     void NoteRender(long t0, long tDyn0, long tDyn1)
