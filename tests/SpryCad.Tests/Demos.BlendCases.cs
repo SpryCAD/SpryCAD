@@ -38,6 +38,8 @@ static partial class Demos
         ("drafted boss with a lug, its top edge rounded round the lug", () => LugOnRound(topRound: true)),
         ("bearing pedestal out of a side onto its corner round, a sloping rib under it", () => PedestalOnRound()),
         ("bearing pedestal out of a drafted side onto its corner round, a sloping rib under it", () => PedestalOnRound(drafted: true)),
+        ("bearing pedestal out of a side drafted in towards the bottom onto its corner round, a sloping rib under it", () => PedestalOnRound(draftedIn: true)),
+        ("bearing pedestal out of a side onto its corner round, a sloping rib under it filleted all round", () => PedestalOnRound(ribAround: true)),
     };
 
     /// <summary>
@@ -452,7 +454,7 @@ static partial class Demos
     /// to the body's side, blended R3 into both. Drafted: the body's sides drafted 2° (in towards the top), as the
     /// engine casting's.
     /// </summary>
-    internal static CadDocument PedestalOnRound(bool drafted = false)
+    internal static CadDocument PedestalOnRound(bool drafted = false, bool draftedIn = false, bool ribAround = false)
     {
         var d = Doc(("R", "5"), ("Rr", "3"));
         var b = new Sk(d);
@@ -462,9 +464,9 @@ static partial class Demos
         var bottom = drafted ? d.AddFeature(new PlaneFeature { Name = "Body bottom", Base = PlaneRef.Top, Offset = "-130" }) : null;
         var bs = d.AddFeature(new SketchFeature { Name = "Body", Plane = bottom != null ? new PlaneRef { Feature = bottom.Id } : PlaneRef.Top, Sketch = b.S });
         var body = d.AddFeature(drafted ? new ExtrudeFeature { Name = "Body", SketchId = bs.Id, Depth = "130", Draft = "2" }
-            : new ExtrudeFeature { Name = "Body", SketchId = bs.Id, Depth = "130", Reverse = true });
+            : new ExtrudeFeature { Name = "Body", SketchId = bs.Id, Depth = "130", Reverse = true, Draft = draftedIn ? "2" : null });
         // (the side's z at height y)
-        double Z(double y) => 58 - (drafted ? (y + 130) * Math.Tan(2 * Math.PI / 180) : 0);
+        double Z(double y) => 58 - (drafted ? (y + 130) * Math.Tan(2 * Math.PI / 180) : 0) + (draftedIn ? y * Math.Tan(2 * Math.PI / 180) : 0);
         string B(int i) => $"{body.Id}.S.L{Ids.Name(bl[i])}";
         d.AddFeature(new FilletFeature { Name = "Body corner", Radius = "20", Edges = { E(B(0), B(1), new Vec3(40 + Z(-65) - 58, -65, Z(-65))) } });
         var pp = d.AddFeature(new PlaneFeature { Name = "Pedestal plane", Base = PlaneRef.Front, Offset = "30" });
@@ -481,7 +483,7 @@ static partial class Demos
         });
         // (Right plane: sketch x = -z)
         var r = new Sk(d);
-        r.Poly(r.P("-50", "-40"), r.P("-70", "-40"), r.P("-50", "-110"));
+        var rl = r.Poly(r.P("-50", "-40"), r.P("-70", "-40"), r.P("-50", "-110"));
         var rs = d.AddFeature(new SketchFeature { Name = "Rib", Plane = PlaneRef.Right, Sketch = r.S });
         var rib = d.AddFeature(new ExtrudeFeature { Name = "Rib", SketchId = rs.Id, End = EndCondition.MidPlane, Depth = "12" });
         d.AddFeature(new FilletFeature
@@ -493,6 +495,13 @@ static partial class Demos
                 E($"{rib.Id}.Start", P(0), new Vec3(-6, -40, 64)), E($"{rib.Id}.End", P(0), new Vec3(6, -40, 64)),
             },
         });
+        // (all round: its sloping back's foot too, where it meets the side; the slope z 70 - (-40 - y) 2/7)
+        if (ribAround)
+        {
+            var ribR = (FilletFeature)d.Features[^1];
+            double yb = -40 - (70 - Z(-82)) * 3.5;
+            ribR.Edges.Add(E($"{rib.Id}.S.L{Ids.Name(rl[1])}", B(0), new Vec3(0, yb, Z(yb))));
+        }
         return d;
     }
 
