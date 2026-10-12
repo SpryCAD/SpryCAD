@@ -85,11 +85,20 @@ public static class NIntersect
         const int probe = 16;
         bool allOn = true;
         var onTol = c is NSpline or NPolyline ? Math.Max(tol * 100, c is NSpline ns ? ns.FitTol * 2 : 0) : tol;
-        for (int i = 0; i <= probe && allOn; i++) if (Math.Abs(F(lo + (hi - lo) * i / probe)) > onTol) allOn = false;
+        // each value worked out once: the probe's points, the root search's first ones (every other probe point: the
+        // same parameters, as scaling by 2, 8 and 16 is exact) and the ends (the probe's last point is lo + (hi − lo),
+        // which need not be hi to the last bit: the hi end is its own)
+        Span<double> probed = stackalloc double[probe + 1];
+        probed.Fill(double.NaN);
+        double Probed(int i, Span<double> pv) => double.IsNaN(pv[i]) ? pv[i] = F(lo + (hi - lo) * i / probe) : pv[i];
+        for (int i = 0; i <= probe && allOn; i++) if (Math.Abs(Probed(i, probed)) > onTol) allOn = false;
         if (allOn) return new EdgeHits(res, true);
 
-        if (Math.Abs(F(e.T0)) < tol) res.Add(e.T0);
-        if (Math.Abs(F(e.T1)) < tol) res.Add(e.T1);
+        bool searched = false;
+        double fLo = Probed(0, probed), fHi = F(hi);
+        double fT0 = e.T0 == lo ? fLo : fHi, fT1 = e.T1 == lo ? fLo : fHi;
+        if (Math.Abs(fT0) < tol) res.Add(e.T0);
+        if (Math.Abs(fT1) < tol) res.Add(e.T1);
         var exact = AnalyticRoots(c, s, tol) ?? (s.Kind == SurfaceKind.Screw ? ScrewRoots(c, s.Screw!, lo, hi, tol) : null);
         if (exact != null)
         {
@@ -124,6 +133,7 @@ public static class NIntersect
         }
         else
         {
+            searched = true;
             double total = ArcBound(c, lo, hi);
             // leaves no shorter than this: two roots closer together are a tangential touch, which does not split
             // edges anyway, and an edge running alongside a surface would otherwise be subdivided into 1e5 pieces
@@ -149,21 +159,45 @@ public static class NIntersect
                     return;
                 }
                 var m = 0.5 * (ta + tb); var fm = F(m);
+                // an edge grazing the surface: the distance changes far slower than the arc length, and the bound
+                // above cannot rule out a root next to a crossing until the pieces are tiny (thousands of evaluations
+                // for one crossing at a shallow angle). The parabola through the three values: on one side, and
+                // clear of zero by more than the bend it shows (4 times its second difference), the piece holds no
+                // root unless the distance bends far more sharply between the samples than across them.
+                // a piece lying on the surface (ends and middle within tol of it, e.g. a fillet's boundary running along
+                // the B-spline it blends into): the sign there is rounding, and a run along the surface is at most one
+                // crossing, settled from either side of it (OneCrossingPerRun); where the edge leaves the surface, a
+                // piece with an end off it is still searched
+                if (depth >= 2 && Math.Abs(fa) < tol && Math.Abs(fm) < tol && Math.Abs(fb) < tol) return;
+                if (depth >= 2 && fa * fm > 0 && fm * fb > 0)
+                {
+                    double d2 = fa - 2 * fm + fb, lowest = Math.Min(Math.Min(Math.Abs(fa), Math.Abs(fm)), Math.Abs(fb));
+                    if (d2 != 0)
+                    {
+                        var x = (fa - fb) / (2 * d2);
+                        if (Math.Abs(x) < 1)
+                        {
+                            var ext = fm - (fb - fa) * (fb - fa) / (8 * d2);
+                            lowest = ext * fm <= 0 ? 0 : Math.Min(lowest, Math.Abs(ext));
+                        }
+                    }
+                    if (lowest > 4 * Math.Abs(d2) + tol) return;
+                }
                 Iso(ta, m, fa, fm, depth + 1);
                 Iso(m, tb, fm, fb, depth + 1);
             }
             // start from a few segments so the arc bound of curved edges stays tight
-            const int n = 8; double prevT = lo, prevF = F(lo);
+            const int n = 8; double prevT = lo, prevF = fLo;
             for (int i = 1; i <= n; i++)
             {
-                var t = lo + (hi - lo) * i / n; var f = F(t);
+                var t = lo + (hi - lo) * i / n; var f = Probed(i * (probe / n), probed);
                 Iso(prevT, t, prevF, f, 0);
                 prevT = t; prevF = f;
             }
         }
         res.Sort();
         // merge duplicates; an end point lying on the surface absorbs crossings right next to it (no micro edges)
-        bool startOn = Math.Abs(F(e.T0)) < tol, endOn = Math.Abs(F(e.T1)) < tol;
+        bool startOn = Math.Abs(fT0) < tol, endOn = Math.Abs(fT1) < tol;
         Vec3 p0 = e.V0.P, p1 = e.V1.P;
         var merged = new List<double>();
         foreach (var t in res)
@@ -172,6 +206,32 @@ public static class NIntersect
             bool isEnd = t == e.T0 || t == e.T1;
             if (!isEnd && ((startOn && Vec3.Distance(p, p0) < tol * 100) || (endOn && Vec3.Distance(p, p1) < tol * 100))) continue;
             if (merged.Count == 0 || Vec3.Distance(p, c.Eval(merged[^1])) > tol) merged.Add(t);
+        }
+        if (searched && merged.Count >= 2) merged = OneCrossingPerRun(merged);
+        // A stretch where the edge runs along the surface (within tol of it) crosses it at most once: the sign of the
+        // distance there is rounding, and the search found "crossings" all along it (126 in 14 mm of a line lying on
+        // a pipe), each a split of the edge. Crossings with the edge on the surface between them are one run: the run
+        // is a crossing (in its middle) if the edge is on opposite sides just before and after it, a touch if not; a
+        // run reaching an end of the edge keeps that end (its vertex is on the surface).
+        List<double> OneCrossingPerRun(List<double> ts)
+        {
+            var kept = new List<double>();
+            for (int i = 0; i < ts.Count;)
+            {
+                int j = i;
+                while (j + 1 < ts.Count && Math.Abs(F(0.5 * (ts[j] + ts[j + 1]))) < tol) j++;
+                if (j == i) { kept.Add(ts[i]); i++; continue; }
+                bool hasEnd = false;
+                for (int k = i; k <= j; k++) if (ts[k] == e.T0 || ts[k] == e.T1) { kept.Add(ts[k]); hasEnd = true; }
+                if (!hasEnd)
+                {
+                    // the sides just outside the run: halfway to the crossing before it (or the start), and after it
+                    double before = 0.5 * ((i > 0 ? ts[i - 1] : lo) + ts[i]), after = 0.5 * (ts[j] + (j + 1 < ts.Count ? ts[j + 1] : hi));
+                    if (F(before) * F(after) < 0) kept.Add(ts[(i + j) / 2]);
+                }
+                i = j + 1;
+            }
+            return kept;
         }
         return new EdgeHits(merged, false);
     }

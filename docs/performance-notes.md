@@ -76,6 +76,18 @@ profile; the profile's times are summed over threads). On the heavy samples (`sa
    mostly `Map` (the surface's `UV`) and `Project`; `ExactBoundaryDistance` is still linear in the coedges.
 4. **Vertex matching in `NBoolean`**: done (see above). In `bool.edge splits` what is left is mostly
    `split.crossings` (curve × curve on faces) and the edge/surface roots.
+   - Edge/surface roots (`NIntersect.EdgeSurface`), done. On the hit and miss engine's casting the evaluations (a
+     closest-point search each on a B-spline or pipe) were 1.1M a rebuild, most of them in a few dozen edges that run
+     along a surface for a stretch (a fillet's boundary on the B-spline it blends into, a circle on a pipe): the
+     distance there is rounding, nothing could be pruned, and the search went down to pieces 1e-5 of the edge
+     (55k evaluations for one circle), reporting the sign noise as crossings (126 in 14 mm of a line on a pipe).
+     Now a piece whose ends and middle are within tol of the surface is not searched further, a piece on one side
+     whose parabola (through its ends and middle) stays clear of zero by more than 4 times its bend is passed over,
+     crossings with the edge on the surface between them count as one (or none if the edge stays on one side), and
+     each value is worked out once (the probe's, the search's first ones, the ends). Casting: evaluations 1.1M to
+     0.21M, `split.roots` ~1.5 s to ~0.4 s summed, rebuild ~7.3 to ~2.8 s (master with #75's fallbacks) and its
+     geometry the same feature by feature before #75; every sample and demo variant bit for bit (full hashes,
+     display meshes as drawn). `FC_NO_EDITS=1` skips `bench`'s edit costs (minutes on a large part).
 5. **Edge sample cache**: done (see above).
 6. **B-spline interpolation**: done (see above).
 7. **NURBS core** (`NNurbs`): `PoleAt` reads two flags instead of LINQ over `Poles` (in every Newton step). Summing
