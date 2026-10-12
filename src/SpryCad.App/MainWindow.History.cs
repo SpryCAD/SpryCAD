@@ -3,6 +3,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Media;
+using SpryCad.App.Session;
 using SpryCad.App.UI;
 using SpryCad.Core.Storage;
 
@@ -36,6 +37,8 @@ public partial class MainWindow
         HistoryEntry? Selected() => list.SelectedIndex >= 0 && list.SelectedIndex < entries.Count ? entries[list.SelectedIndex] : null;
 
         var open = new Button { Content = "Open Read-Only" };
+        var compare = new Button { Content = "Compare with Previous..." };
+        var revertTo = new Button { Content = "Revert to This..." };
         var tag = new Button { Content = "Tag..." };
         var rename = new Button { Content = "Rename Tag..." };
         var untag = new Button { Content = "Remove Tag" };
@@ -46,7 +49,8 @@ public partial class MainWindow
         void Sync()
         {
             var e = Selected();
-            open.IsEnabled = tag.IsEnabled = e != null;
+            open.IsEnabled = tag.IsEnabled = compare.IsEnabled = e != null;
+            revertTo.IsEnabled = e != null && list.SelectedIndex > 0;
             rename.IsEnabled = untag.IsEnabled = e is { Tags.Count: > 0 };
             purge.IsEnabled = e != null && list.SelectedIndex < entries.Count - 1;
         }
@@ -57,7 +61,7 @@ public partial class MainWindow
             Text = "Every save of the part, newest first. Tags, purging and compacting are saved to the file with the part's next save.",
             TextWrapping = TextWrapping.Wrap, Foreground = Palette.TextSecondary, Margin = new Thickness(0, 0, 0, 8),
         };
-        var side = new StackPanel { Spacing = 6, Margin = new Thickness(10, 0, 0, 0), Children = { open, tag, rename, untag, new Separator(), purge } };
+        var side = new StackPanel { Spacing = 6, Margin = new Thickness(10, 0, 0, 0), Children = { open, compare, revertTo, new Separator(), tag, rename, untag, new Separator(), purge } };
         foreach (var b in side.Children.OfType<Button>()) b.HorizontalAlignment = HorizontalAlignment.Stretch;
         var bottom = new DockPanel { Margin = new Thickness(0, 10, 0, 0) };
         var right = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Children = { compact, clear, close } };
@@ -129,11 +133,86 @@ public partial class MainWindow
         });
         compact.Click += (_, _) => _ = Do(() => { session.EditHistory(PartHistory.Compact); Fill(Selected()?.Revision.RevisionId); return Task.CompletedTask; });
         clear.Click += (_, _) => _ = Do(() => { session.EditHistory(PartHistory.ClearCache); Fill(Selected()?.Revision.RevisionId); return Task.CompletedTask; });
+        compare.Click += (_, _) => { if (Selected() is { } e) CompareCommand(session, e, name, w); };
+        revertTo.Click += (_, _) => _ = Do(async () =>
+        {
+            if (Selected() is not { } e) return;
+            if (!await Dialogs.YesNo(w, "Revert to This Revision",
+                $"Make {name} as it was at {When(e)} again? Everything since is undone, as one change (Undo brings it back); saving records it as a new revision, so the history keeps what came between.",
+                "Revert", "Cancel")) return;
+            var doc = session.ReadHistory(db => PartRevert.RevertTo(db, e.Revision.RevisionId));
+            session.Revert(doc, $"Reverted to {(e.Tags.Count > 0 ? e.Tags[0] : When(e))}");
+            Status($"{name} reverted to {When(e)}: save to keep it.");
+        });
         close.Click += (_, _) => w.Close();
         list.DoubleTapped += (_, _) => _ = OpenSelected();
         Fill();
         Sync();
         w.Show(this);
+    }
+
+    /// <summary>
+    /// What a revision changed (from the one before), in words, each change ticked to be reverted: the changes picked
+    /// undone, keeping everything else, after the features they would break and the later changes they would lose are
+    /// confirmed.
+    /// </summary>
+    void CompareCommand(DocumentSession session, HistoryEntry e, string name, Window owner)
+    {
+        List<DescribedChange> changes;
+        try { changes = session.ReadHistory(db => PartDescribe.Changes(db, e.Revision.ParentId, e.Revision.RevisionId)); }
+        catch (Exception ex) when (ex is InvalidOperationException or IOException or InvalidDataException) { _ = Dialogs.Message(owner, "Compare", ex.Message); return; }
+        var boxes = changes.Select(c => new CheckBox
+        {
+            IsChecked = true, Margin = new Thickness(0, 2),
+            Content = new TextBlock { Text = c.Text, TextWrapping = TextWrapping.Wrap },
+        }).ToList();
+        var listPanel = new StackPanel { Spacing = 2 };
+        foreach (var b in boxes) listPanel.Children.Add(b);
+        if (changes.Count == 0) listPanel.Children.Add(new TextBlock { Text = "Nothing in the model changed in this revision.", Foreground = Palette.TextMuted });
+        var head = new TextBlock
+        {
+            Text = e.Revision.ParentId == null ? $"The first save of {name} ({When(e)}, {e.Revision.Author}): what it had." :
+                $"What {e.Revision.Author} changed in {name} at {When(e)}, from the revision before. Tick what to revert: the rest of the part stays as it is now.",
+            TextWrapping = TextWrapping.Wrap, Foreground = Palette.TextSecondary, Margin = new Thickness(0, 0, 0, 8),
+        };
+        var revert = new Button { Content = "Revert Ticked Changes...", IsEnabled = changes.Count > 0 && e.Revision.ParentId != null };
+        var close = new Button { Content = "Close", IsCancel = true };
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 10, 0, 0), Children = { revert, close } };
+        var dock = new DockPanel();
+        DockPanel.SetDock(head, Dock.Top); DockPanel.SetDock(buttons, Dock.Bottom);
+        dock.Children.Add(head); dock.Children.Add(buttons); dock.Children.Add(new ScrollViewer { Content = listPanel });
+        var w = ToolWindow($"Changes: {name}, {When(e)}", dock, 620, 460);
+        close.Click += (_, _) => w.Close();
+        revert.Click += async (_, _) =>
+        {
+            var picked = changes.Where((c, i) => boxes[i].IsChecked == true).Select(c => c.Change.ObjectId).ToHashSet();
+            if (picked.Count == 0) return;
+            var only = picked.Count == changes.Count ? null : picked;
+            try
+            {
+                var plan = session.ReadHistory(db => PartRevert.PlanSelective(db, session.Doc, e.Revision.RevisionId, only));
+                if (plan.Dependents.Count > 0)
+                {
+                    // what uses what the revert removes: reverted with it, left to fail to rebuild, or not done
+                    var r = await Dialogs.YesNoCancel(w, "Revert",
+                        $"{string.Join(", ", plan.Dependents)} use{(plan.Dependents.Count == 1 ? "s" : "")} what the revert removes. Revert {(plan.Dependents.Count == 1 ? "it" : "them")} too, or revert anyway (they will show rebuild errors)?",
+                        "Revert with Dependents", "Revert Anyway");
+                    if (r == null) return;
+                    if (r == true) plan = session.ReadHistory(db => PartRevert.PlanSelective(db, session.Doc, e.Revision.RevisionId, only, withDependents: true));
+                }
+                if (plan.ChangedSince.Count > 0 && !await Dialogs.YesNo(w, "Revert",
+                    $"{string.Join(", ", plan.ChangedSince)} {(plan.ChangedSince.Count == 1 ? "was" : "were")} changed again after this revision: reverting discards those later changes too. (Untick {(plan.ChangedSince.Count == 1 ? "it" : "them")} to keep them.)",
+                    "Revert", "Cancel")) return;
+                session.Revert(plan.Result, plan.Message);
+                Status($"{plan.Message}: save to keep it (Undo brings the part back).");
+                w.Close();
+            }
+            catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or IOException or InvalidDataException)
+            {
+                await Dialogs.Message(w, "Revert", ex.Message);
+            }
+        };
+        w.Show(owner);
     }
 
     static string When(HistoryEntry e) => e.Revision.CreatedUtc.ToLocalTime().ToString("g", CultureInfo.CurrentCulture);
