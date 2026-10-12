@@ -18,7 +18,7 @@ public static class PartFile
     /// Saves the part as a revision of its history in the file (no revision when nothing changed since the last).
     /// Sets the part's identity on its first save and its <see cref="CadDocument.Revision"/> to the head's id.
     /// </summary>
-    public static void Save(CadDocument doc, string path, string? author = null, string message = "")
+    public static void Save(CadDocument doc, string path, string? author = null, string message = "", RevisionKind kind = RevisionKind.Save)
     {
         doc.Id ??= CadDocument.NewGuid();
         var partId = Guid.Parse(doc.Id);
@@ -35,7 +35,7 @@ public static class PartFile
                 {
                     db.SetPart(partId, Path.GetFileNameWithoutExtension(path));
                     var objects = PartObjects.From(doc).ToDictionary(kv => kv.Key, kv => db.Blobs.Put(kv.Value));
-                    head = db.Commit(partId, objects, author ?? DefaultAuthor, message) ?? db.GetHead(partId)!;
+                    head = db.Commit(partId, objects, author ?? DefaultAuthor, message, kind) ?? db.GetHead(partId)!;
                     db.DropWorking(partId); // (saved: what autosave kept is in the head now)
                     WriteManifest(db, doc, partId);
                     db.SetThumbnail(doc.Thumbnail);

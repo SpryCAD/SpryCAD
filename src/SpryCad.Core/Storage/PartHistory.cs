@@ -45,7 +45,8 @@ public static class PartHistory
 
     /// <summary>
     /// The objects that differ from revision <paramref name="from"/> (null: nothing, the first revision) to
-    /// <paramref name="to"/>: added, removed and changed; a changed feature order is one "reordered" change.
+    /// <paramref name="to"/>: added, removed and changed; features in another order is one "reordered" change (only
+    /// when the features both have are in another order: adding or removing features is not a reorder).
     /// </summary>
     public static List<ObjectChange> Diff(PartDatabase db, Guid? from, Guid to)
     {
@@ -55,7 +56,11 @@ public static class PartHistory
         foreach (var (id, h) in b)
         {
             if (!a.TryGetValue(id, out var old)) { if (id.Kind != ObjectKind.FeatureOrder) changes.Add(new(id, ChangeKind.Added, null, h)); }
-            else if (old != h) changes.Add(new(id, id.Kind == ObjectKind.FeatureOrder ? ChangeKind.Reordered : ChangeKind.Modified, old, h));
+            else if (old != h)
+            {
+                if (id.Kind != ObjectKind.FeatureOrder) changes.Add(new(id, ChangeKind.Modified, old, h));
+                else if (Reordered(db, old, h)) changes.Add(new(id, ChangeKind.Reordered, old, h));
+            }
         }
         foreach (var (id, h) in a)
             if (!b.ContainsKey(id)) changes.Add(new(id, ChangeKind.Removed, h, null));
@@ -74,20 +79,15 @@ public static class PartHistory
             var name = FeatureName(db, (c.New ?? c.Old)!.Value) ?? c.ObjectId.ToString();
             (c.Kind == ChangeKind.Added ? added : c.Kind == ChangeKind.Removed ? removed : modified).Add(name);
         }
-        // (adding a feature also changes the order: not a reorder)
-        if (reordered && added.Count + removed.Count > 0) reordered = OrderChangedBeyond(db, from, to);
         return new ChangeSummary(added, modified, removed, reordered, other);
     }
 
-    /// <summary>Whether the features both revisions have are in another order (not just features added or removed).</summary>
-    static bool OrderChangedBeyond(PartDatabase db, Guid? from, Guid to)
+    /// <summary>Whether the features both orders list are in another order (not just features added or removed).</summary>
+    static bool Reordered(PartDatabase db, Hash a, Hash b)
     {
-        if (from is not { } f) return false;
-        List<string> Order(Guid rev) => db.GetObjects(rev).TryGetValue(PartObjects.Single(ObjectKind.FeatureOrder), out var h)
-            ? JsonDocument.Parse(db.Blobs.Get(h)).RootElement.GetProperty("data").EnumerateArray().Select(e => e.GetString()!).ToList() : new();
-        var a = Order(f); var b = Order(to);
-        var common = a.Intersect(b).ToHashSet();
-        return !a.Where(common.Contains).SequenceEqual(b.Where(common.Contains));
+        var x = PartObjects.OrderOf(db.Blobs.Get(a)); var y = PartObjects.OrderOf(db.Blobs.Get(b));
+        var common = x.Intersect(y).ToHashSet();
+        return !x.Where(common.Contains).SequenceEqual(y.Where(common.Contains));
     }
 
     static string? FeatureName(PartDatabase db, Hash h)

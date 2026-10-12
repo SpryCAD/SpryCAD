@@ -199,15 +199,14 @@ static class HistoryTests
             t.True(!d0.Any(c => c.ObjectId.Kind == ObjectKind.FeatureOrder), "the feature order reported as added");
             t.Eq(d0.Count(c => c.ObjectId.Kind == ObjectKind.Feature), 4);
 
-            // 0 → 2: fillet added, plate changed, name counters changed, order changed
+            // 0 → 2: fillet added, plate changed, name counters changed; the order only grew (not a reorder)
             var d02 = PartHistory.Diff(db, s.Revs[0], s.Revs[2]);
             t.True(d02.Any(c => c.Kind == ChangeKind.Added && c.ObjectId.Equals(filletId) && c.Old == null && c.New != null), "0→2 fillet added: " + Show(d02));
             t.True(d02.Any(c => c.Kind == ChangeKind.Modified && c.ObjectId.Equals(plateId) && c.Old != null && c.New != null && c.Old != c.New), "0→2 plate modified: " + Show(d02));
             t.True(d02.Any(c => c.Kind == ChangeKind.Modified && c.ObjectId.Equals(counters)), "0→2 name counters: " + Show(d02));
             t.True(!d02.Any(c => c.ObjectId.Equals(PartObjects.Single(ObjectKind.Settings))), "0→2 settings changed: " + Show(d02));
-            t.Eq(d02.Count(c => c.ObjectId.Equals(order)), 1);
-            t.True(d02.Single(c => c.ObjectId.Equals(order)).Kind == ChangeKind.Reordered, "0→2 order: " + Show(d02));
-            t.Eq(d02.Count, 4);
+            t.True(!d02.Any(c => c.ObjectId.Equals(order)), "0→2 a feature added reported as a reorder: " + Show(d02));
+            t.Eq(d02.Count, 3);
 
             // 1 → 4: the fillet removed, the plate changed, the order changed; name counters the same
             var d14 = PartHistory.Diff(db, s.Revs[1], s.Revs[4]);

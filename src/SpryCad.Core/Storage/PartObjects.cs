@@ -109,6 +109,34 @@ public static class PartObjects
 
     public static ObjectId Single(ObjectKind kind) { var b = new byte[IdSize]; b[0] = (byte)kind; return new ObjectId(b); }
 
+    // ---- for reverting (PartRevert): the parts of objects it reads and makes
+
+    /// <summary>The feature ids a feature order object lists, in order.</summary>
+    internal static List<string> OrderOf(byte[] envelope) => Open<List<string>>(envelope, ObjectKind.FeatureOrder);
+
+    internal static byte[] OrderObject(IEnumerable<string> ids) => Envelope(ObjectKind.FeatureOrder, Json(ids.ToList()));
+
+    /// <summary>The embedded files' names a settings object lists.</summary>
+    internal static List<string> FileNamesOf(byte[] settings) => Open<SettingsData>(settings, ObjectKind.Settings).Files ?? new();
+
+    /// <summary>The settings object with another list of embedded files.</summary>
+    internal static byte[] WithFiles(byte[] settings, IEnumerable<string> names)
+    {
+        var d = Open<SettingsData>(settings, ObjectKind.Settings);
+        var l = names.Order(StringComparer.Ordinal).ToList();
+        d.Files = l.Count > 0 ? l : null;
+        d.NameCounters = null;
+        return Envelope(ObjectKind.Settings, Json(d));
+    }
+
+    /// <summary>A feature object's feature id and name.</summary>
+    internal static (string id, string name) FeatureOf(byte[] envelope)
+    {
+        using var d = JsonDocument.Parse(envelope);
+        var data = d.RootElement.GetProperty("data");
+        return (data.GetProperty("id").GetString() ?? "", data.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "");
+    }
+
     static string Json<T>(T value) => JsonSerializer.Serialize(value, Serialization.Compact);
 
     /// <summary>The envelope around an object's JSON.</summary>
