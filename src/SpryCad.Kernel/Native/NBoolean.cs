@@ -312,6 +312,8 @@ public sealed class NBoolean
         foreach (var f in ActiveFaces(A).Concat(ActiveFaces(B)))
             if (f.Surface.Kind is SurfaceKind.BSpline or SurfaceKind.Offset)
                 foreach (var c in f.Coedges) _fittedEdges.Add(c.Edge);
+            // (a fillet's contact line is fitted too: marched along the rolling ball)
+            else foreach (var c in f.Coedges) if (c.Edge.Curve is NContact) _fittedEdges.Add(c.Edge);
         FindEdgeSplits(A, B, splits, onSurface);
         FindEdgeSplits(B, A, splits, onSurface);
         using (Prof.Time("split.crossings")) CrossOnSurfaceEdges(onSurface, splits);
@@ -757,6 +759,11 @@ public sealed class NBoolean
                     // other edge (a fresh vertex a few microns away would leave the two bodies' boundaries apart)
                     var r = _fittedEdges.Contains(e) || _fittedEdges.Contains(g) ? Noise : 0;
                     var end = new[] { e.V0, e.V1, g.V0, g.V1 }.Where(w => Vec3.Distance(w.P, p) < Math.Max(_onTol, r)).MinBy(w => Vec3.Distance(w.P, p));
+                    // a split either edge already has there (an edge/surface hit at the same point: the contact line
+                    // crossing a plane on the boundary it also crosses) is the same vertex: two would leave a
+                    // zero-length edge between them
+                    end ??= new[] { e, g }.SelectMany(x => splits.GetValueOrDefault(x) ?? new())
+                        .Where(x => !_grazing.Contains(x.v) && Vec3.Distance(x.v.P, p) < Math.Max(_onTol, r)).Select(x => x.v).MinBy(w => Vec3.Distance(w.P, p));
                     var v = end ?? Snap(p, r);
                     var targets = new List<(NEdge edge, double t)>();
                     foreach (var (edge, t) in new[] { (e, te0), (g, tg0) })
