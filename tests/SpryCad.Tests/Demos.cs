@@ -1113,13 +1113,13 @@ static partial class Demos
         }
 
         /// <summary>Point drawn at (x, y) whose position comes from relations (tangency, radii), no coordinate dimensions.</summary>
-        public int Q(string x, string y) => Free(Eval(x), Eval(y));
+        public long Q(string x, string y) => Free(Eval(x), Eval(y));
 
         /// <summary>A relation (its orientation taken from the sketch as drawn).</summary>
-        public void Rel(CType type, params int[] refs) => SketchSolver.CaptureSign(_s, _s.AddConstraint(type, refs));
+        public void Rel(CType type, params long[] refs) => SketchSolver.CaptureSign(_s, _s.AddConstraint(type, refs));
 
         /// <summary>A dimension by an expression (its orientation taken from the sketch as drawn).</summary>
-        public void Dim(CType type, string expr, params int[] refs)
+        public void Dim(CType type, string expr, params long[] refs)
         {
             var c = _s.AddConstraint(type, refs);
             c.Expr = expr; c.Value = Math.Abs(Eval(expr));

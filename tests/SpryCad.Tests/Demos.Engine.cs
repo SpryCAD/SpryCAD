@@ -65,8 +65,8 @@ static partial class Demos
             ("ca", "(Rw-Rp)/R"), ("sa", "sqrt(1-ca^2)"));
         var webPlane = d.AddFeature(new PlaneFeature { Name = "Web face", Base = PlaneRef.Front, Offset = "WebIn" });
         var w = new Sk(d);
-        int pc = w.P("R", "0");
-        int p1 = w.Q("Rw*ca", "Rw*sa"), p3 = w.Q("Rw*ca", "-Rw*sa"), p2 = w.Q("R+Rp*ca", "Rp*sa"), p4 = w.Q("R+Rp*ca", "-Rp*sa");
+        long pc = w.P("R", "0");
+        long p1 = w.Q("Rw*ca", "Rw*sa"), p3 = w.Q("Rw*ca", "-Rw*sa"), p2 = w.Q("R+Rp*ca", "Rp*sa"), p4 = w.Q("R+Rp*ca", "-Rp*sa");
         var big = w.Arc(Sketch.OriginId, p1, p3);
         var small = w.Arc(pc, p4, p2);
         var top = w.Line(p2, p1); var bot = w.Line(p3, p4);
@@ -84,7 +84,7 @@ static partial class Demos
         var fil = d.AddFeature(new FilletFeature
         {
             Name = "Journal fillet", Radius = "Rf",
-            Edges = { E($"{journal.Id}.S.C{jc}", $"{web.Id}.End", new Vec3(0, V("J/2"), V("WebIn+WebT"))) },
+            Edges = { E($"{journal.Id}.S.C{Ids.Name(jc)}", $"{web.Id}.End", new Vec3(0, V("J/2"), V("WebIn+WebT"))) },
         });
         d.AddFeature(new MirrorFeature { Name = "Web and journal, back", Seeds = { web.Id, journal.Id, fil.Id }, Plane = PlaneRef.Front });
         // the crank pin between the webs
@@ -97,8 +97,8 @@ static partial class Demos
             Name = "Pin fillets", Radius = "Rf",
             Edges =
             {
-                E($"{pin.Id}.S.C{pcirc}", $"{web.Id}.Start", new Vec3(V("R"), V("Pin/2"), V("WebIn"))),
-                E($"{pin.Id}.S.C{pcirc}", $"{web.Id}.Start", new Vec3(V("R"), V("Pin/2"), -V("WebIn"))),
+                E($"{pin.Id}.S.C{Ids.Name(pcirc)}", $"{web.Id}.Start", new Vec3(V("R"), V("Pin/2"), V("WebIn"))),
+                E($"{pin.Id}.S.C{Ids.Name(pcirc)}", $"{web.Id}.Start", new Vec3(V("R"), V("Pin/2"), -V("WebIn"))),
             },
         });
         // keyways (on top of the journal: Top plane at J/2, sketch y = -z): the gear's and flywheel's on +Z, the
@@ -145,10 +145,10 @@ static partial class Demos
             Name = "Shank fillets", Radius = "Rf",
             Edges =
             {
-                E($"{shank.Id}.S.L{sh[0]}", $"{small.Id}.S.C{se}", new Vec3(-V("Len-10"), -V("W1/2"), 0)),
-                E($"{shank.Id}.S.L{sh[2]}", $"{small.Id}.S.C{se}", new Vec3(-V("Len-10"), V("W1/2"), 0)),
-                E($"{shank.Id}.S.L{sh[0]}", $"{block.Id}.S.L{bl[3]}", new Vec3(-V("BlockL"), -V("W2/2"), 0)),
-                E($"{shank.Id}.S.L{sh[2]}", $"{block.Id}.S.L{bl[3]}", new Vec3(-V("BlockL"), V("W2/2"), 0)),
+                E($"{shank.Id}.S.L{Ids.Name(sh[0])}", $"{small.Id}.S.C{Ids.Name(se)}", new Vec3(-V("Len-10"), -V("W1/2"), 0)),
+                E($"{shank.Id}.S.L{Ids.Name(sh[2])}", $"{small.Id}.S.C{Ids.Name(se)}", new Vec3(-V("Len-10"), V("W1/2"), 0)),
+                E($"{shank.Id}.S.L{Ids.Name(sh[0])}", $"{block.Id}.S.L{Ids.Name(bl[3])}", new Vec3(-V("BlockL"), -V("W2/2"), 0)),
+                E($"{shank.Id}.S.L{Ids.Name(sh[2])}", $"{block.Id}.S.L{Ids.Name(bl[3])}", new Vec3(-V("BlockL"), V("W2/2"), 0)),
             },
         });
         // the I-section: a recess in each face of the shank, Web left between them
@@ -189,8 +189,8 @@ static partial class Demos
             Name = "Cap corners", Radius = "Rc",
             Edges =
             {
-                E($"{cap.Id}.S.L{L[0]}", $"{cap.Id}.S.L{L[1]}", new Vec3(V("CapL"), -V("BlockH/2"), 0)),
-                E($"{cap.Id}.S.L{L[1]}", $"{cap.Id}.S.L{L[2]}", new Vec3(V("CapL"), V("BlockH/2"), 0)),
+                E($"{cap.Id}.S.L{Ids.Name(L[0])}", $"{cap.Id}.S.L{Ids.Name(L[1])}", new Vec3(V("CapL"), -V("BlockH/2"), 0)),
+                E($"{cap.Id}.S.L{Ids.Name(L[1])}", $"{cap.Id}.S.L{Ids.Name(L[2])}", new Vec3(V("CapL"), V("BlockH/2"), 0)),
             },
         });
         var h = new Sk(d);
@@ -217,7 +217,7 @@ static partial class Demos
             ("Gw", "2"), ("Gd", "2.5"), ("G1", "4"), ("Gp", "5"), ("BossD", "22"), ("Wp", $"{HmWp}"), ("C", "0.8"), ("Slot", "32"), ("SlotW", "22"));
         // the half section on Front (x along the axis, y the radius), revolved about its edge on the axis
         var s = new Sk(d);
-        var pts = new List<int> { s.P("-Crown", "0"), s.P("-Crown", "D/2") };
+        var pts = new List<long> { s.P("-Crown", "0"), s.P("-Crown", "D/2") };
         for (int g = 0; g < 3; g++)
         {
             string x0 = $"-(Crown-G1-{g}*Gp)", x1 = $"-(Crown-G1-{g}*Gp-Gw)";
@@ -232,7 +232,7 @@ static partial class Demos
         d.AddFeature(new ChamferFeature
         {
             Name = "Crown edge", Distance = "C",
-            Edges = { E($"{rev.Id}.R.L{L[0]}", $"{rev.Id}.R.L{L[1]}", new Vec3(-V("Crown"), V("D/2"), 0)) },
+            Edges = { E($"{rev.Id}.R.L{Ids.Name(L[0])}", $"{rev.Id}.R.L{Ids.Name(L[1])}", new Vec3(-V("Crown"), V("D/2"), 0)) },
         });
         // the wrist pin's bosses, across inside the skirt, and the bore through them and the skirt
         var b = new Sk(d);
@@ -265,7 +265,7 @@ static partial class Demos
         d.AddFeature(new ChamferFeature
         {
             Name = "Ends", Distance = "C",
-            Edges = { E($"{pin.Id}.S.C{c}", $"{pin.Id}.Start", new Vec3(V("Wp/2"), 0, -V("L/2"))), E($"{pin.Id}.S.C{c}", $"{pin.Id}.End", new Vec3(V("Wp/2"), 0, V("L/2"))) },
+            Edges = { E($"{pin.Id}.S.C{Ids.Name(c)}", $"{pin.Id}.Start", new Vec3(V("Wp/2"), 0, -V("L/2"))), E($"{pin.Id}.S.C{Ids.Name(c)}", $"{pin.Id}.End", new Vec3(V("Wp/2"), 0, V("L/2"))) },
         });
         d.Color = new[] { 0.70, 0.71, 0.74 };
         HmMaterial(d, "Steel (plain carbon)");
@@ -284,8 +284,8 @@ static partial class Demos
             ("Rf", "5"), ("Rh", "4"), ("Rr", "3"), ("C", "1.5"), ("CapPCD", "38"));
         // the rim's section on Right (sketch x = -z, y = y), revolved about the axis (the sketch's x axis)
         var r = new Sk(d);
-        int a = r.P("-RimW/2", "D/2-RimT"), b = r.P("RimW/2", "D/2-RimT"), c = r.P("RimW/2", "D/2-Crown"), e = r.P("-RimW/2", "D/2-Crown");
-        int m = r.P("0", "D/2");
+        long a = r.P("-RimW/2", "D/2-RimT"), b = r.P("RimW/2", "D/2-RimT"), c = r.P("RimW/2", "D/2-Crown"), e = r.P("-RimW/2", "D/2-Crown");
+        long m = r.P("0", "D/2");
         var rl = new[] { r.Line(a, b), r.Line(b, c) };
         var crown = r.ArcThrough(c, m, e);
         var rl3 = r.Line(e, a);
@@ -304,20 +304,20 @@ static partial class Demos
         var sp = d.AddFeature(new PlaneFeature { Name = "Spoke plane", Base = PlaneRef.Right, Offset = "HubD/2-4" });
         var o = new Sk(d);
         // sketch x = -z (the thickness), y = y (the width)
-        int o1 = o.P("SpT/2", "-(SpW/2-SpT/2)"), o2 = o.P("SpT/2", "SpW/2-SpT/2"), o3 = o.P("-SpT/2", "SpW/2-SpT/2"), o4 = o.P("-SpT/2", "-(SpW/2-SpT/2)");
-        int oc1 = o.P("0", "SpW/2-SpT/2"), oc2 = o.P("0", "-(SpW/2-SpT/2)");
+        long o1 = o.P("SpT/2", "-(SpW/2-SpT/2)"), o2 = o.P("SpT/2", "SpW/2-SpT/2"), o3 = o.P("-SpT/2", "SpW/2-SpT/2"), o4 = o.P("-SpT/2", "-(SpW/2-SpT/2)");
+        long oc1 = o.P("0", "SpW/2-SpT/2"), oc2 = o.P("0", "-(SpW/2-SpT/2)");
         var side1 = o.Line(o1, o2); var end1 = o.Arc(oc1, o2, o3); var side2 = o.Line(o3, o4); var end2 = o.Arc(oc2, o4, o1);
         var os = d.AddFeature(new SketchFeature { Name = "Spoke section", Plane = new PlaneRef { Feature = sp.Id }, Sketch = o.S });
         var spoke = d.AddFeature(new ExtrudeFeature { Name = "Spoke", SketchId = os.Id, Depth = "D/2-RimT/2-HubD/2+4", Draft = "SpDraft" });
         var toRim = d.AddFeature(new FilletFeature
         {
             Name = "Spoke to rim", Radius = "Rf",
-            Edges = { E($"{rim.Id}.R.L{rl[0]}", $"{spoke.Id}.S.L{side1}", new Vec3(V("D/2-RimT"), 0, -V("SpT/2") + 0.4)) },
+            Edges = { E($"{rim.Id}.R.L{Ids.Name(rl[0])}", $"{spoke.Id}.S.L{Ids.Name(side1)}", new Vec3(V("D/2-RimT"), 0, -V("SpT/2") + 0.4)) },
         });
         var toHub = d.AddFeature(new FilletFeature
         {
             Name = "Spoke to hub", Radius = "Rh",
-            Edges = { E($"{hub.Id}.R.L{hl[2]}", $"{spoke.Id}.S.L{side1}", new Vec3(V("HubD/2"), 0, -V("SpT/2"))) },
+            Edges = { E($"{hub.Id}.R.L{Ids.Name(hl[2])}", $"{spoke.Id}.S.L{Ids.Name(side1)}", new Vec3(V("HubD/2"), 0, -V("SpT/2"))) },
         });
         d.AddFeature(new CircularPatternFeature { Name = "Spokes", Seeds = { spoke.Id, toRim.Id, toHub.Id }, Axis = new DirRef { Axis = "Z" }, Count = "NS" });
         // the rim's inner edges rounded, the hub's ends chamfered
@@ -326,8 +326,8 @@ static partial class Demos
             Name = "Rim inner edges", Radius = "Rr",
             Edges =
             {
-                E($"{rim.Id}.R.L{rl[0]}", $"{rim.Id}.R.L{rl[1]}", new Vec3(V("D/2-RimT"), 0, -V("RimW/2"))),
-                E($"{rim.Id}.R.L{rl[0]}", $"{rim.Id}.R.L{rl3}", new Vec3(V("D/2-RimT"), 0, V("RimW/2"))),
+                E($"{rim.Id}.R.L{Ids.Name(rl[0])}", $"{rim.Id}.R.L{Ids.Name(rl[1])}", new Vec3(V("D/2-RimT"), 0, -V("RimW/2"))),
+                E($"{rim.Id}.R.L{Ids.Name(rl[0])}", $"{rim.Id}.R.L{Ids.Name(rl3)}", new Vec3(V("D/2-RimT"), 0, V("RimW/2"))),
             },
         });
         d.AddFeature(new ChamferFeature
@@ -335,8 +335,8 @@ static partial class Demos
             Name = "Hub ends", Distance = "C",
             Edges =
             {
-                E($"{hub.Id}.R.L{hl[2]}", $"{hub.Id}.R.L{hl[1]}", new Vec3(V("HubD/2"), 0, -V("HubIn"))),
-                E($"{hub.Id}.R.L{hl[2]}", $"{hub.Id}.R.L{hl[3]}", new Vec3(V("HubD/2"), 0, V("HubOut"))),
+                E($"{hub.Id}.R.L{Ids.Name(hl[2])}", $"{hub.Id}.R.L{Ids.Name(hl[1])}", new Vec3(V("HubD/2"), 0, -V("HubIn"))),
+                E($"{hub.Id}.R.L{Ids.Name(hl[2])}", $"{hub.Id}.R.L{Ids.Name(hl[3])}", new Vec3(V("HubD/2"), 0, V("HubOut"))),
             },
         });
         // tapped holes for the hub cap's screws in the hub's outer face, clear of the keyway
@@ -379,7 +379,7 @@ static partial class Demos
             ("LinerD", "66"), ("Bore", $"{HmBore}"), ("Relief", "58"), ("ReliefL", "8"),
             ("PitX1", "60"), ("PitW", "2*BrgIn"), ("PitBot", "110"),
             ("CamX", $"{-HmCamX}"), ("CamD", "36"), ("Stud", "16"), ("GearZ", $"{HmGearZ}"), ("CamIn", "40"),
-            ("LugX", "172"), ("LugP", "24"), ("LugT", "10"), ("LugIn", "48"), ("PushZ", $"{HmPushZ}"), ("PushD", "8.4"),
+            ("LugX", "145"), ("LugP", "14"), ("LugT", "8"), ("LugIn", "48"), ("PushZ", $"{HmPushZ}"), ("PushD", "8.4"),
             ("OilX", "77"), ("Tap8", "6.8"));
         // the base plate (Top: sketch y = -z), drafted, its corners rounded
         var bb = d.AddFeature(new PlaneFeature { Name = "Base bottom", Base = PlaneRef.Top, Offset = "-BaseY" });
@@ -388,7 +388,7 @@ static partial class Demos
         var bs = d.AddFeature(new SketchFeature { Name = "Base", Plane = new PlaneRef { Feature = bb.Id }, Sketch = b.S });
         var basePlate = d.AddFeature(new ExtrudeFeature { Name = "Base", SketchId = bs.Id, Depth = "BaseT", Draft = "BaseDraft" });
         double V(string e) => b.Eval(e);
-        string BF(int i) => $"{basePlate.Id}.S.L{bl[i]}";
+        string BF(int i) => $"{basePlate.Id}.S.L{Ids.Name(bl[i])}";
         double by = -V("BaseY-BaseT/2");
         d.AddFeature(new FilletFeature
         {
@@ -405,7 +405,7 @@ static partial class Demos
         var yl = y.Rect("-BodyX0", "-BodyW/2", "BodyX1", "BodyW/2");
         var ys = d.AddFeature(new SketchFeature { Name = "Body", Plane = new PlaneRef { Feature = bt.Id }, Sketch = y.S });
         var body = d.AddFeature(new ExtrudeFeature { Name = "Body", SketchId = ys.Id, Depth = "BaseY-BaseT", Draft = "BodyDraft" });
-        string YF(int i) => $"{body.Id}.S.L{yl[i]}";
+        string YF(int i) => $"{body.Id}.S.L{Ids.Name(yl[i])}";
         double yy = -V("BaseY/2");
         d.AddFeature(new FilletFeature
         {
@@ -435,8 +435,8 @@ static partial class Demos
             Name = "Pedestal corners", Radius = "PedR",
             Edges =
             {
-                E($"{ped.Id}.S.L{pl[1]}", $"{ped.Id}.End", new Vec3(V("BrgW/2"), -V("BrgDrop/2"), V("BrgOut"))),
-                E($"{ped.Id}.S.L{pl[3]}", $"{ped.Id}.End", new Vec3(-V("BrgW/2"), -V("BrgDrop/2"), V("BrgOut"))),
+                E($"{ped.Id}.S.L{Ids.Name(pl[1])}", $"{ped.Id}.End", new Vec3(V("BrgW/2"), -V("BrgDrop/2"), V("BrgOut"))),
+                E($"{ped.Id}.S.L{Ids.Name(pl[3])}", $"{ped.Id}.End", new Vec3(-V("BrgW/2"), -V("BrgDrop/2"), V("BrgOut"))),
             },
         });
         // blended into the body's side where it stands out of it (its back side runs onto the body's corner round)
@@ -446,9 +446,9 @@ static partial class Demos
             Name = "Pedestal into the body", Radius = "JointR",
             Edges =
             {
-                E($"{ped.Id}.S.L{pl[1]}", YF(0), new Vec3(V("BrgW/2"), -V("BrgDrop/2"), SideZ0(-V("BrgDrop/2")))),
-                E($"{ped.Id}.S.L{pl[3]}", YF(0), new Vec3(-V("BrgW/2"), -V("BrgDrop/2"), SideZ0(-V("BrgDrop/2")))),
-                E($"{ped.Id}.S.L{pl[0]}", YF(0), new Vec3(0, -V("BrgDrop"), SideZ0(-V("BrgDrop")))),
+                E($"{ped.Id}.S.L{Ids.Name(pl[1])}", YF(0), new Vec3(V("BrgW/2"), -V("BrgDrop/2"), SideZ0(-V("BrgDrop/2")))),
+                E($"{ped.Id}.S.L{Ids.Name(pl[3])}", YF(0), new Vec3(-V("BrgW/2"), -V("BrgDrop/2"), SideZ0(-V("BrgDrop/2")))),
+                E($"{ped.Id}.S.L{Ids.Name(pl[0])}", YF(0), new Vec3(0, -V("BrgDrop"), SideZ0(-V("BrgDrop")))),
             },
         });
         d.AddFeature(new MirrorFeature { Name = "Bearing pedestal, back", Seeds = { ped.Id, pedR.Id, pedJ.Id }, Plane = PlaneRef.Front });
@@ -466,8 +466,8 @@ static partial class Demos
             Edges =
             {
                 E($"{pedRib.Id}.Start", YF(0), new Vec3(-rt, ry, SideZ(ry))), E($"{pedRib.Id}.End", YF(0), new Vec3(rt, ry, SideZ(ry))),
-                E($"{pedRib.Id}.Start", $"{ped.Id}.S.L{pl[0]}", new Vec3(-rt, -V("BrgDrop"), V("BrgOut") - 6)),
-                E($"{pedRib.Id}.End", $"{ped.Id}.S.L{pl[0]}", new Vec3(rt, -V("BrgDrop"), V("BrgOut") - 6)),
+                E($"{pedRib.Id}.Start", $"{ped.Id}.S.L{Ids.Name(pl[0])}", new Vec3(-rt, -V("BrgDrop"), V("BrgOut") - 6)),
+                E($"{pedRib.Id}.End", $"{ped.Id}.S.L{Ids.Name(pl[0])}", new Vec3(rt, -V("BrgDrop"), V("BrgOut") - 6)),
             },
         });
         d.AddFeature(new MirrorFeature { Name = "Pedestal rib, back", Seeds = { pedRib.Id, pedRibR.Id }, Plane = PlaneRef.Front });
@@ -494,7 +494,7 @@ static partial class Demos
         var hl = h.Rect("-HopX0", "-HopW/2", "-HopX1", "HopW/2");
         var hs = d.AddFeature(new SketchFeature { Name = "Hopper", Plane = PlaneRef.Top, Sketch = h.S });
         var hop = d.AddFeature(new ExtrudeFeature { Name = "Hopper", SketchId = hs.Id, Depth = "HopH", Draft = "HopDraft" });
-        string HF(int i) => $"{hop.Id}.S.L{hl[i]}";
+        string HF(int i) => $"{hop.Id}.S.L{Ids.Name(hl[i])}";
         double hy = V("HopH/2");
         d.AddFeature(new FilletFeature
         {
@@ -505,8 +505,7 @@ static partial class Demos
                 E(HF(2), HF(3), new Vec3(-V("HopX0"), hy, -V("HopW/2"))), E(HF(3), HF(0), new Vec3(-V("HopX0"), hy, V("HopW/2"))),
             },
         });
-        // the top's edge rounded all round (one edge picked, the rest follow tangent): suppressed until the kernel
-        // blends tangent neighbours (docs/hit-and-miss-notes.md)
+        // the top's edge rounded all round (one edge picked, the rest follow tangent)
         d.AddFeature(new FilletFeature
         {
             Name = "Hopper top edge", Radius = "HopTopR",
@@ -525,7 +524,7 @@ static partial class Demos
         var sbs = d.AddFeature(new SketchFeature { Name = "Saddle at the pedestals", Plane = new PlaneRef { Feature = s1.Id }, Sketch = sb.S });
         var saddle = d.AddFeature(new LoftFeature { Name = "Saddle", SectionSketchIds = { sas.Id, sbs.Id }, EndTangency = LoftTangency.Normal });
         // its faces: named after the first section's lines (bottom, right, top, left; sketch x = -z, so "right" is -Z)
-        string SF(int i) => $"{saddle.Id}.S.L{sl[i]}";
+        string SF(int i) => $"{saddle.Id}.S.L{Ids.Name(sl[i])}";
         var ht = d.AddFeature(new PlaneFeature { Name = "Under the hopper's top", Base = PlaneRef.Top, Offset = "HopH-HopWall" });
         var w = new Sk(d);
         w.Rect("-(HopX0-HopWall)", "-(HopW/2-HopWall)", "-(HopX1+HopWall)", "HopW/2-HopWall");
@@ -569,7 +568,7 @@ static partial class Demos
         d.AddFeature(new FilletFeature
         {
             Name = "Pit edges", Radius = "PitR",
-            Edges = { E($"{pit.Id}.S.L{kl[0]}", SF(2), new Vec3(-50, 10, pw)), E($"{pit.Id}.S.L{kl[2]}", SF(2), new Vec3(-50, 10, -pw)) },
+            Edges = { E($"{pit.Id}.S.L{Ids.Name(kl[0])}", SF(2), new Vec3(-50, 10, pw)), E($"{pit.Id}.S.L{Ids.Name(kl[2])}", SF(2), new Vec3(-50, 10, -pw)) },
         });
         // the main bearings' bore, the cap studs' tapped holes
         var j = new Sk(d);
@@ -602,7 +601,7 @@ static partial class Demos
         // the push rod's guide lugs on the +Z side (Right: sketch x = -z), a round end round the rod's hole
         var lp = d.AddFeature(new PlaneFeature { Name = "Lug plane", Base = PlaneRef.Right, Offset = "-LugX" });
         var g = new Sk(d);
-        int g0 = g.P("-LugIn", "-8"), g1 = g.P("-PushZ", "-8"), g2 = g.P("-PushZ", "8"), g3 = g.P("-LugIn", "8"), gc = g.P("-PushZ", "0");
+        long g0 = g.P("-LugIn", "-8"), g1 = g.P("-PushZ", "-8"), g2 = g.P("-PushZ", "8"), g3 = g.P("-LugIn", "8"), gc = g.P("-PushZ", "0");
         g.Line(g0, g1); g.Arc(gc, g2, g1); g.Line(g2, g3); g.Line(g3, g0);
         g.Circle(gc, "PushD");
         var gs = d.AddFeature(new SketchFeature { Name = "Push rod lug", Plane = new PlaneRef { Feature = lp.Id }, Sketch = g.S });
@@ -613,7 +612,7 @@ static partial class Demos
         var ob = new Sk(d);
         ob.Circle(ob.P("-OilX", "0"), "14");
         var obs = d.AddFeature(new SketchFeature { Name = "Oil boss", Plane = new PlaneRef { Feature = op.Id }, Sketch = ob.S });
-        d.AddFeature(new ExtrudeFeature { Name = "Oil boss", SketchId = obs.Id, Reverse = true, Depth = "12" });
+        var oilBoss = d.AddFeature(new ExtrudeFeature { Name = "Oil boss", SketchId = obs.Id, Reverse = true, Depth = "12" });
         var oh = new Sk(d);
         oh.Point(oh.P("-OilX", "0"));
         var ohs = d.AddFeature(new SketchFeature { Name = "Oil hole", Plane = new PlaneRef { Feature = op.Id }, Sketch = oh.S });
@@ -626,7 +625,7 @@ static partial class Demos
         d.AddFeature(new HoleFeature { Name = "Hold-down holes", SketchId = bhs.Id, Diameter = "11", ThroughAll = true });
         // the joints blended, as cast: the hopper into the barrel before and behind it, the head's flange into the
         // barrel, the cam gear's boss into the body's side
-        string barrelFace = $"{barrel.Id}.S.C{barrelC}";
+        string barrelFace = $"{barrel.Id}.S.C{Ids.Name(barrelC)}";
         double up = V("BarrelD/2"), lean = V("BarrelD/2*tan(HopDraft)");
         d.AddFeature(new FilletFeature
         {
@@ -638,12 +637,16 @@ static partial class Demos
             Name = "Flange into the barrel", Radius = "JointR",
             Edges = { E($"{flange.Id}.End", barrelFace, new Vec3(-V("HeadX-FlangeT"), 0, -up)) },
         });
-        // (suppressed: fails in the kernel, docs/hit-and-miss-notes.md)
         d.AddFeature(new FilletFeature
         {
             Name = "Cam boss into the body", Radius = "3",
-            Edges = { E($"{camBoss.Id}.S.C{camC}", YF(0), new Vec3(-V("CamX"), -V("CamD/2"), SideZ(-V("CamD/2")))) },
+            Edges = { E($"{camBoss.Id}.S.C{Ids.Name(camC)}", YF(0), new Vec3(-V("CamX"), -V("CamD/2"), SideZ(-V("CamD/2")))) },
         });
+        // the smaller joints by scope rather than edge by edge: every edge the base ribs (all four) make with the body
+        // and the base, the push rod's lugs with the body, the oil boss with the barrel
+        d.AddFeature(new FilletFeature { Name = "Base ribs blended", Radius = "RibR", Features = { baseRib.Id } });
+        d.AddFeature(new FilletFeature { Name = "Lugs into the body", Radius = "3", Features = { lug.Id } });
+        d.AddFeature(new FilletFeature { Name = "Oil boss into the barrel", Radius = "1.5", Features = { oilBoss.Id } });
         d.Color = new[] { 0.72, 0.08, 0.07 };
         HmMaterial(d, "Cast iron");
         return d;
@@ -658,8 +661,8 @@ static partial class Demos
         var d = Doc(("J", $"{HmJ}"), ("W", "64"), ("L", $"{HmBrgOut - HmBrgIn}"), ("T", "14"), ("Hump", "17"), ("Stud", "25"), ("StudD", "8.5"),
             ("CupD", "14"), ("CupH", "4"), ("Tap", "6.8"), ("C", "1"), ("R", "6"));
         var s = new Sk(d);
-        int a = s.P("-W/2", "0"), b = s.P("W/2", "0"), c = s.P("W/2", "T"), e = s.P("Hump", "T"), g = s.P("-Hump", "T", dimX: false), h = s.P("-W/2", "T");
-        int hc = s.P("0", "T");
+        long a = s.P("-W/2", "0"), b = s.P("W/2", "0"), c = s.P("W/2", "T"), e = s.P("Hump", "T"), g = s.P("-Hump", "T", dimX: false), h = s.P("-W/2", "T");
+        long hc = s.P("0", "T");
         s.Line(a, b); var right = s.Line(b, c); s.Line(c, e); s.Arc(hc, e, g); s.Line(g, h); var left = s.Line(h, a);
         var sk = d.AddFeature(new SketchFeature { Name = "Cap", Plane = PlaneRef.Front, Sketch = s.S });
         var cap = d.AddFeature(new ExtrudeFeature { Name = "Cap", SketchId = sk.Id, Depth = "L" });
@@ -670,8 +673,8 @@ static partial class Demos
             Name = "Outer corners", Radius = "R",
             Edges =
             {
-                E($"{cap.Id}.S.L{right}", $"{cap.Id}.End", new Vec3(V("W/2"), V("T/2"), V("L"))),
-                E($"{cap.Id}.S.L{left}", $"{cap.Id}.End", new Vec3(-V("W/2"), V("T/2"), V("L"))),
+                E($"{cap.Id}.S.L{Ids.Name(right)}", $"{cap.Id}.End", new Vec3(V("W/2"), V("T/2"), V("L"))),
+                E($"{cap.Id}.S.L{Ids.Name(left)}", $"{cap.Id}.End", new Vec3(-V("W/2"), V("T/2"), V("L"))),
             },
         });
         var j = new Sk(d);
@@ -721,7 +724,7 @@ static partial class Demos
         d.AddFeature(new ChamferFeature
         {
             Name = "Outer edge", Distance = "C",
-            Edges = { E($"{head.Id}.S.C{pc}", $"{head.Id}.End", new Vec3(-V("HeadX+T"), V("D/2"), 0)) },
+            Edges = { E($"{head.Id}.S.C{Ids.Name(pc)}", $"{head.Id}.End", new Vec3(-V("HeadX+T"), V("D/2"), 0)) },
         });
         // the exhaust boss on top and the intake boss on the -Z side, over the valves' pockets
         var et = d.AddFeature(new PlaneFeature { Name = "Exhaust boss top", Base = PlaneRef.Top, Offset = "BossOut" });
@@ -743,7 +746,7 @@ static partial class Demos
         // the rocker's cheeks either side of y = 0 (Top offset: sketch y = -z), its pivot bored through them
         var cp = d.AddFeature(new PlaneFeature { Name = "Cheek face", Base = PlaneRef.Top, Offset = "Gap" });
         var ck = new Sk(d);
-        int k0 = ck.P("-CheekX", "-CheekZ1"), k1 = ck.P("-(HeadX+T-1)", "-CheekZ1"), k2 = ck.P("-(HeadX+T-1)", "-CheekZ0"), k3 = ck.P("-CheekX", "-CheekZ0");
+        long k0 = ck.P("-CheekX", "-CheekZ1"), k1 = ck.P("-(HeadX+T-1)", "-CheekZ1"), k2 = ck.P("-(HeadX+T-1)", "-CheekZ0"), k3 = ck.P("-CheekX", "-CheekZ0");
         ck.Poly(k0, k1, k2, k3);
         var cks = d.AddFeature(new SketchFeature { Name = "Rocker cheek", Plane = new PlaneRef { Feature = cp.Id }, Sketch = ck.S });
         var cheek = d.AddFeature(new ExtrudeFeature { Name = "Rocker cheek", SketchId = cks.Id, Depth = "CheekT" });
@@ -851,7 +854,7 @@ static partial class Demos
         d.AddFeature(new ChamferFeature
         {
             Name = "Ends", Distance = "C",
-            Edges = { E($"{rod.Id}.S.C{c}", $"{rod.Id}.Start", new Vec3(0, V("D/2"), 0)), E($"{rod.Id}.S.C{c}", $"{rod.Id}.End", new Vec3(V("Len"), V("D/2"), 0)) },
+            Edges = { E($"{rod.Id}.S.C{Ids.Name(c)}", $"{rod.Id}.Start", new Vec3(0, V("D/2"), 0)), E($"{rod.Id}.S.C{Ids.Name(c)}", $"{rod.Id}.End", new Vec3(V("Len"), V("D/2"), 0)) },
         });
         d.Color = new[] { 0.80, 0.81, 0.83 };
         HmMaterial(d, "Steel (plain carbon)");
@@ -955,11 +958,11 @@ static partial class Demos
     static readonly double[] HmBrass = { 0.85, 0.66, 0.28 }, HmBlack = { 0.13, 0.13, 0.14 }, HmSteel = { 0.80, 0.81, 0.83 }, HmRed = { 0.72, 0.08, 0.07 };
 
     /// <summary>A revolved part about Y: the half section through the points (x the radius, y up), closed on the axis.</summary>
-    static (CadDocument d, Feature rev, List<int> lines) HmTurned(string name, (string name, string expr)[] eqs, params (string r, string y)[] pts)
+    static (CadDocument d, Feature rev, List<long> lines) HmTurned(string name, (string name, string expr)[] eqs, params (string r, string y)[] pts)
     {
         var d = Doc(eqs);
         var s = new Sk(d);
-        var ids = new List<int> { s.P("0", pts[0].y) };
+        var ids = new List<long> { s.P("0", pts[0].y) };
         ids.AddRange(pts.Select(p => s.P(p.r, p.y)));
         ids.Add(s.P("0", pts[^1].y));
         var L = s.Poly(ids.ToArray());
@@ -969,7 +972,7 @@ static partial class Demos
     }
 
     /// <summary>A revolved ring about Y: the closed section through the points (x the radius, y up), clear of the axis.</summary>
-    static (CadDocument d, Feature rev, List<int> lines) HmRing(string name, (string name, string expr)[] eqs, params (string r, string y)[] pts)
+    static (CadDocument d, Feature rev, List<long> lines) HmRing(string name, (string name, string expr)[] eqs, params (string r, string y)[] pts)
     {
         var d = Doc(eqs);
         var s = new Sk(d);
@@ -1000,7 +1003,7 @@ static partial class Demos
                 ("Neck", "16"), ("Big", "38"), ("Lo", "125"), ("Band", "6"), ("Top", "17"), ("Hi", "170"), ("H", "190"), ("Out", "16"), ("Rb", "10") },
             ("Spig", "-SpigL"), ("Spig", "0"), ("Fl", "0"), ("Fl", "FlT"), ("Pipe", "FlT"), ("Pipe", "PipeH"), ("Neck", "PipeH"), ("Neck", "PipeH+8"),
             ("Big", "Lo"), ("Big", "Lo+Band"), ("Top", "Hi"), ("Top", "H"));
-        string F(int i) => $"{rev.Id}.R.L{L[i]}";
+        string F(int i) => $"{rev.Id}.R.L{Ids.Name(L[i])}";
         // the double cone blended into its band and the neck (lines: 0 the axis to the spigot, 8 the lower cone, 9 the band, 10 the upper cone)
         d.AddFeature(new FilletFeature
         {
@@ -1075,7 +1078,7 @@ static partial class Demos
         var nvs = d.AddFeature(new SketchFeature { Name = "Needle bore", Plane = new PlaneRef { Feature = ep.Id }, Sketch = nv.S });
         d.AddFeature(new HoleFeature { Name = "Needle bore", SketchId = nvs.Id, Diameter = "Needle", ThroughAll = false, Depth = "L/2" });
         double V(string e) => s.Eval(e);
-        d.AddFeature(new ChamferFeature { Name = "Body end", Distance = "C", Edges = { E($"{body.Id}.S.C{bc}", $"{body.Id}.End", new Vec3(0, -V("Body/2"), V("L"))) } });
+        d.AddFeature(new ChamferFeature { Name = "Body end", Distance = "C", Edges = { E($"{body.Id}.S.C{Ids.Name(bc)}", $"{body.Id}.End", new Vec3(0, -V("Body/2"), V("L"))) } });
         d.Color = HmBrass;
         HmMaterial(d, "Brass");
         return d;
@@ -1124,7 +1127,7 @@ static partial class Demos
         // the path on the plane z = -Z (Front offset: sketch x = x, y = y): down, a bend, along +X, a bend down into the base
         var pp = d.AddFeature(new PlaneFeature { Name = "Path plane", Base = PlaneRef.Front, Offset = "-Z" });
         var w = new Sk(d);
-        int a = w.P("-X0", "-Y0"), b = w.P("-X0", "-(Y0+Drop)"), c = w.P("-(X0-R)", "-(Y0+Drop)"), e = w.P("-(X0-R)", "-(Y0+Drop+R)"),
+        long a = w.P("-X0", "-Y0"), b = w.P("-X0", "-(Y0+Drop)"), c = w.P("-(X0-R)", "-(Y0+Drop)"), e = w.P("-(X0-R)", "-(Y0+Drop+R)"),
             f = w.P("-(X0-R-Run)", "-(Y0+Drop+R)"), g = w.P("-(X0-R-Run)", "-(Y0+Drop+2*R)"), h = w.P("-(X0-2*R-Run)", "-(Y0+Drop+2*R)"), k = w.P("-(X0-2*R-Run)", "-Y1");
         w.Line(a, b); w.Arc(c, b, e); w.Line(e, f); w.Arc(g, h, f); w.Line(h, k);
         var ws = d.AddFeature(new SketchFeature { Name = "Route", Plane = new PlaneRef { Feature = pp.Id }, Sketch = w.S });
@@ -1170,7 +1173,7 @@ static partial class Demos
         var ss = d.AddFeature(new SketchFeature { Name = "Boot", Plane = PlaneRef.Right, Sketch = s.S });
         var boot = d.AddFeature(new ExtrudeFeature { Name = "Boot", SketchId = ss.Id, Reverse = true, Depth = "L" });
         double V(string e) => s.Eval(e);
-        d.AddFeature(new FilletFeature { Name = "End", Radius = "4", Edges = { E($"{boot.Id}.S.C{c}", $"{boot.Id}.End", new Vec3(-V("L"), V("D/2"), 0)) } });
+        d.AddFeature(new FilletFeature { Name = "End", Radius = "4", Edges = { E($"{boot.Id}.S.C{Ids.Name(c)}", $"{boot.Id}.End", new Vec3(-V("L"), V("D/2"), 0)) } });
         // open at the plug's end, over the insulator and terminal
         var o = new Sk(d);
         o.Point(Sketch.OriginId);
@@ -1182,7 +1185,7 @@ static partial class Demos
         l.Circle(Sketch.OriginId, "Lead");
         var ls = d.AddFeature(new SketchFeature { Name = "Lead section", Plane = new PlaneRef { Feature = lp.Id }, Sketch = l.S });
         var w = new Sk(d);
-        int a = w.P("-(L-2)", "0"), b = w.P("-(L+6)", "0"), cc = w.P("-(L+6)", "-R"), e = w.P("-(L+6+R)", "-R"), f = w.P("-(L+6+R)", "-(R+Run)");
+        long a = w.P("-(L-2)", "0"), b = w.P("-(L+6)", "0"), cc = w.P("-(L+6)", "-R"), e = w.P("-(L+6+R)", "-R"), f = w.P("-(L+6+R)", "-(R+Run)");
         w.Line(a, b); w.Arc(cc, b, e); w.Line(e, f);
         var ws = d.AddFeature(new SketchFeature { Name = "Lead route", Plane = PlaneRef.Front, Sketch = w.S });
         d.AddFeature(new SweepFeature { Name = "Lead", ProfileSketchId = ls.Id, PathSketchId = ws.Id });
@@ -1196,7 +1199,7 @@ static partial class Demos
     {
         var (d, rev, L) = HmTurned("Oil cup", new[] { ("Tap", "6.8"), ("TapL", "6"), ("Hex", "8"), ("HexH", "5"), ("Cup", "7"), ("CupH", "20"), ("Lid", "8.5"), ("LidH", "6") },
             ("Tap/2", "-TapL"), ("Tap/2", "0"), ("Hex", "0"), ("Hex", "HexH"), ("Cup", "HexH"), ("Cup", "HexH+CupH"), ("Lid", "HexH+CupH"), ("Lid", "HexH+CupH+LidH"));
-        d.AddFeature(new FilletFeature { Name = "Lid", Radius = "3", Edges = { E($"{rev.Id}.R.L{L[7]}", $"{rev.Id}.R.L{L[8]}", new Vec3(8.5, 31, 0)) } });
+        d.AddFeature(new FilletFeature { Name = "Lid", Radius = "3", Edges = { E($"{rev.Id}.R.L{Ids.Name(L[7])}", $"{rev.Id}.R.L{Ids.Name(L[8])}", new Vec3(8.5, 31, 0)) } });
         d.Color = HmBrass;
         HmMaterial(d, "Brass");
         return d;
@@ -1231,7 +1234,7 @@ static partial class Demos
         var ss = d.AddFeature(new SketchFeature { Name = "Cap", Plane = PlaneRef.Front, Sketch = s.S });
         var cap = d.AddFeature(new ExtrudeFeature { Name = "Cap", SketchId = ss.Id, Depth = "T" });
         double V(string e) => s.Eval(e);
-        d.AddFeature(new ChamferFeature { Name = "Edge", Distance = "C", Edges = { E($"{cap.Id}.S.C{oc}", $"{cap.Id}.End", new Vec3(V("D/2"), 0, V("T"))) } });
+        d.AddFeature(new ChamferFeature { Name = "Edge", Distance = "C", Edges = { E($"{cap.Id}.S.C{Ids.Name(oc)}", $"{cap.Id}.End", new Vec3(V("D/2"), 0, V("T"))) } });
         var tp = d.AddFeature(new PlaneFeature { Name = "Top", Base = PlaneRef.Front, Offset = "T" });
         var h = new Sk(d);
         h.Point(h.P("PCD/2*cos(45)", "PCD/2*sin(45)"));
@@ -1275,7 +1278,7 @@ static partial class Demos
         var rs = d.AddFeature(new SketchFeature { Name = "Arm", Plane = PlaneRef.Right, Sketch = r.S });
         d.AddFeature(new ExtrudeFeature { Name = "Arm", SketchId = rs.Id, Depth = "Arm" });
         var s = new Sk(d);
-        int a = s.P("Arm-Ball/2", "0", dimX: false), c = s.P("Arm", "0"), e = s.P("Arm+Ball/2", "0");
+        long a = s.P("Arm-Ball/2", "0", dimX: false), c = s.P("Arm", "0"), e = s.P("Arm+Ball/2", "0");
         s.Arc(c, e, a);
         var ax = s.Line(a, e);
         var ss = d.AddFeature(new SketchFeature { Name = "Ball", Plane = PlaneRef.Front, Sketch = s.S });

@@ -52,8 +52,12 @@ static partial class Demos
         public MateRef F(Component c, Func<FaceRange, bool> which) => HmFace(M, c.Id, which);
         /// <summary>A face of a component of a sub-assembly.</summary>
         public MateRef F(Component sub, Component inner, Func<FaceRange, bool> which) => HmFace(M, sub.Id + "/" + inner.Id, which);
-        public MateRef Any(Component c) => M.RefTo(c.Id, M.DisplayOf(c)!.Mesh.Faces[0].Name)!;
-        public MateRef Any(Component sub, Component inner) => M.RefTo(sub.Id + "/" + inner.Id, M.DisplayAt(sub.Id + "/" + inner.Id)!.Mesh.Faces[0].Name)!;
+        /// <summary>Some face of a component a mate can hold (for a lock): the first plane, cylinder, cone or sphere.</summary>
+        public MateRef Any(Component c) => AnyAt(c.Id);
+        public MateRef Any(Component sub, Component inner) => AnyAt(sub.Id + "/" + inner.Id);
+        MateRef AnyAt(string path) =>
+            M.DisplayAt(path)!.Mesh.Faces.Select(f => M.RefTo(path, f.Name)).FirstOrDefault(r => r != null)
+            ?? throw new InvalidOperationException($"{path}: no face a mate can hold");
         public MateRef Plane(string std) => M.RefTo(null, std)!;
         public Mate Mate(MateType type, MateRef a, MateRef b, double value = 0, Action<Mate>? setup = null) => M.AddMate(type, a, b, value, setup);
 

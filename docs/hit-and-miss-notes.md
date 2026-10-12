@@ -68,11 +68,24 @@ Commands (from the repository root):
    the crank pin (the cap holds the other half). Every other step bounds it fine, so it depends on the transform.
    Unhandled, it took the whole interference check down (`Interference.Find`); the demo's check now catches it and
    names the part. It did not happen before this rebase (the same check ran through all 72 steps on master 7913d0c).
+   Still open on master e58d3fb, now at step 18 (the rod placed at (-23.801, -18.263, 0)): "face
+   Fpqpp7x46qy25.S.C3dqjax78450 wraps around its surface" (the same bore, under its random id).
 4d. **Fillets on a loft's B-spline face are slow.** The casting rebuilds in about 10-13 s with the saddle (2.3 s
    before): "Pit edges" (R2, two edges where the crank pit's walls cut the saddle's top) 3.6 s, "Saddle edges" (R4,
    the cheeks' outer top edges) 2.8 s, the loft itself 1.5 s. And the pit edges at R4 fail: "the fillet, cut back
    where it runs into neighbouring geometry, cannot be joined to the body (classification failed)" (they run into the
    barrel's end and the pedestals); R2 works.
+4f. **An old part's loft loses its sections when it is opened (OPEN, master e58d3fb).** Opening a part saved before
+   the random ids (#52), its ids are rewritten (`LegacyIds`), but a loft's `SectionSketchIds` and `GuideSketchIds`
+   keep the old ones: `IsFeatureRef` takes properties named "...SketchId", not "...SketchIds". The casting saved by
+   ff33d37 then says "Saddle: The sketch for this feature is missing or failed", and every fillet on the saddle loses
+   its edges (found by the "Chamfers around filleted corners" session). Fix: add the two list names to that test.
+   The casting built fresh is fine, and the demo file is regenerated, so the engine does not hit it. Fix in #68
+   (open).
+4g. **Mate face order (not kernel, the demo's helper).** `HmAsm.Any` (a face for a Lock mate) took the display
+   mesh's first face; since the display caches are laid out anew (#59) that can be a face a mate cannot hold (the
+   crankshaft's first is a surface of revolution), and `RefTo` gives null. It now takes the first face that gives a
+   reference. Worth knowing for anyone scripting mates: face order in a display mesh is not stable.
 5. ~~A mirror with a suppressed seed silently mirrors nothing.~~ **FIXED (#37)**: it mirrors the rest and warns.
    Was: "Bearing pedestal, back" mirrored the pedestal, its
    corner rounds and "Pedestal into the body" (suppressed): no error, no warning, and the back pedestal was simply
@@ -93,7 +106,7 @@ Commands (from the repository root):
    behind the crank (its back at 65 instead of 40, clear of the round) the pedestal's blend built and mirrored, but
    then "Wall tops" failed ("run into each other") where its side segments meet the pedestal's blend: the corner case
    (4). The body is kept at 40 and the blend suppressed. Repro: unsuppress it and add it to the mirror's seeds.
-8. Not kernel: the open items under Messages, Modeling features (loft, whole-body blends), Assembly (cam and one-sided
+8. Not kernel: the open items under Messages, Assembly (cam and one-sided
    contact, governor, flexible springs, smart fasteners, tapped holes in interference, STEP structure, materials in
    Core, an embedded sub-assembly from a model) and Appearance (colour per face, transparency).
 
@@ -206,12 +219,14 @@ Commands (from the repository root):
   like `DoSweep` (regions from each section sketch, the kernel tool, `Validate`, `ApplyTool`, `State.Tools` so it can
   be patterned); the kernel skinning between sections next to `NSweep.Sweep`, with the sections' `ProfileLoop`s
   matched vertex for vertex or resampled.
-- **Fillet/blend of a whole cast body in one go** (all concave edges between two features): castings need dozens of
-  blends, picked edge by edge here (and several fail, above). To add (~150-250 lines, useful once the corner cases
-  above work): a scope on `FilletFeature` (features A and B, or a body, "all concave") beside `Edges`; in
-  `TryNativeBlend`, before `NativeBlend.Expand`, the body's edges whose two faces' tags start with the two feature
-  ids, kept when concave (the `LineTool`/`RollingBall` test); `BlendSpec` to carry the scope for patterns; chains that
-  fail left out with a warning instead of all or nothing; the page in `OpenBlendPage`.
+- **Fillet/blend of a whole cast body in one go. DONE (#64), used:** three of the casting's blends are scoped to a
+  feature instead of picked edge by edge: "Base ribs blended" (the rib seed, so all four ribs, pattern and mirror
+  copies included, into the body and the base, RibR), "Lugs into the body" (R3) and "Oil boss into the barrel"
+  (R1.5). What it took: the lugs moved off the body's R20 back corner round, where the blend could not be joined
+  ("edge used 1 times ... on Body corners"), and made thinner and closer (8 thick, 14 apart, at x -145 and -131)
+  to stay clear of the cam gear's teeth as well. The oil boss at R3 ran past the barrel's open end beside it ("the
+  fillet does not fit"); R1.5 fits. The scope's "left out with a warning" is handy while modeling: the warning names
+  the edges and why, and the rest is blended.
 
 ## Assembly
 
