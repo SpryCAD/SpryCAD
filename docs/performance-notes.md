@@ -51,8 +51,16 @@ profile; the profile's times are summed over threads). On the heavy samples (`sa
      1.33M to 0.84M, output points 666k to 423k; `trace.project` ~500 to ~245 ms summed, `sec.makeedge` ~56 to
      ~23 ms, the rebuild ~534 to ~474 ms. Results within tolerance: exact mass properties unchanged on every sample
      but hand-wheel (1.6e-7 relative, inertia; volume 1.3e-7) and spur-gear-nice (under 1e-9); every demo variant
-     builds. `DensifyOnParams` (B-spline traces) still always splits.
-   - `ProjectToIntersection` starts every point from scratch (warm starts would change results).
+     builds. `DensifyOnParams` (B-spline traces) still always splits: the same change there was tried and makes
+     no difference (no sample reaches it; the B-spline import, shell, fillet and swept-chamfer tests take the same
+     time within ±3%, their time being elsewhere).
+   - Done: warm starts. A trace's projections stop on a Gauss-Newton step under 1e-7 (what is left is of the order
+     of the step squared times the curvature) instead of evaluating once more to confirm, and `Densify` starts each
+     midpoint from the cubic through the segment's ends along the curve's directions (na × nb, returned by the
+     projection). On spur-gear-nice Gauss-Newton steps 3.96M to 2.11M (chain points 2.95 to 2.21 each, midpoints
+     2.64 to 1.01), the same points kept; `trace.project` ~208 to ~143 ms summed (medians of five alternating
+     runs). Exact mass properties within 2.1e-10 relative (hand-wheel), spur-gear-nice's unchanged; every demo
+     variant the same.
    - Done: the block test's grid-node points are kept (blocks share their corners and edge middles) and reused by
      the grid values: `trace.grid` about 40% less (spur-gear-nice 58–68 to 33–38 ms, handwheel 76–93 to 52–58 ms
      summed), bit for bit. What is left of tracing is the projection (~250 ms summed on spur-gear-nice) and the march.
