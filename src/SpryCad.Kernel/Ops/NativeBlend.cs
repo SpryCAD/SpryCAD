@@ -738,7 +738,7 @@ public static class NativeBlend
     static Solid JoinPivot(Solid tool, Solid pivot)
     {
         if (DirectBlend.Glue(new List<DirectBlend.Tool> { new(tool, false, "tool", 0), new(pivot, false, "pivot", 0) }, out var why) is { } one) return one.Strip;
-        Debug?.Invoke($"pivot not glued ({why}): by boolean");
+        Debug?.Invoke($"pivot not glued ({why}): by boolean; tool ends {string.Join(" | ", tool.Native!.Faces.Where(f => f.Surface.Kind == SurfaceKind.Plane && f.Loops.Count == 1).Select(f => $"{f.Tag.Name}:{f.Loops[0].Coedges.Count}"))}; pivot ends {string.Join(" | ", pivot.Native!.Faces.Where(f => f.Tag.Name.Contains(".End")).Select(f => $"{f.Tag.Name}:{f.Loops[0].Coedges.Count}@{f.Surface.Plane!.Normal}"))}");
         return Csg.Union(tool, pivot);
     }
 
