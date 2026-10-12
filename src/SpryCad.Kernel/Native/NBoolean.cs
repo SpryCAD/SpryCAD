@@ -370,6 +370,11 @@ public sealed class NBoolean
             foreach (var i in toTrace)
                 if (MirrorPlane(pairs[i].fa, pairs[i].fb) is { } mpl && !mirrors.Any(q => Same(q, mpl))) mirrors.Add(mpl);
             static bool Same(Plane a, Plane b) => Vec3.Dot(a.Normal, b.Normal) > 1 - 1e-12 && Math.Abs(a.D - b.D) < 1e-9 * Math.Max(1, Math.Abs(a.D));
+            // a face traced against a surface once: the pieces of a seam-split face (a thread's half turns of one
+            // cylinder) share their surface, and the trace runs over the whole other face, whichever piece it is
+            var memo = new System.Collections.Concurrent.ConcurrentDictionary<(NFace, NSurface), Lazy<List<NCurve>>>();
+            List<NCurve> Traced(NFace f, NSurface s)
+                => new(memo.GetOrAdd((f, s), k => new Lazy<List<NCurve>>(() => NIntersect.Trace(k.Item1, k.Item2, traceTol, traceDoms[k.Item1]).Cast<NCurve>().ToList())).Value);
             Parallel.ForEach(toTrace, i =>
             {
                 var (fa, fb, _) = pairs[i];
@@ -398,7 +403,7 @@ public sealed class NBoolean
                 if (mp == null && fa.Surface.Kind == SurfaceKind.BSpline && fb.Surface.Kind == SurfaceKind.BSpline)
                     foreach (var q in mirrors) if (Apart(fa, fb, q)) { mp = q; apart = true; break; }
                 var against = mp is { } mpp ? NSurface.FromPlane(mpp) : fb.Surface;
-                List<NCurve> c; using (Prof.Time(Prof.Enabled ? $"tr.{fa.Surface.Kind}x{against.Kind}" : "")) c = NIntersect.Trace(fa, against, traceTol, traceDoms[fa]).Cast<NCurve>().ToList();
+                List<NCurve> c; using (Prof.Time(Prof.Enabled ? $"tr.{fa.Surface.Kind}x{against.Kind}" : "")) c = mp == null ? Traced(fa, against) : NIntersect.Trace(fa, against, traceTol, traceDoms[fa]).Cast<NCurve>().ToList();
                 if (apart) c = OnSurface(c, fb.Surface, traceTol);
                 if (Prof.Enabled && c.Count == 0) Prof.Add($"tr.empty.{fa.Surface.Kind}x{fb.Surface.Kind}", 0);
                 // traced from the other side too (small faces)
@@ -411,7 +416,7 @@ public sealed class NBoolean
                     c = NIntersect.Trace(fb, NSurface.FromPlane(mq), traceTol, traceDoms[fb]).Cast<NCurve>().ToList();
                     if (apart) c = OnSurface(c, fa.Surface, traceTol);
                 }
-                else if (c.Count == 0 && fa.Surface.Kind != SurfaceKind.Screw && (!onSpline || fb.Bounds().Diagonal < 0.25 * fa.Bounds().Diagonal)) c = NIntersect.Trace(fb, fa.Surface, traceTol, traceDoms[fb]).Cast<NCurve>().ToList();
+                else if (c.Count == 0 && fa.Surface.Kind != SurfaceKind.Screw && (!onSpline || fb.Bounds().Diagonal < 0.25 * fa.Bounds().Diagonal)) c = Traced(fb, fa.Surface);
                 pairCurves[i] = c;
                 if (Trace != null && Environment.GetEnvironmentVariable("FC_TRACE_SLOW") != null)
                     T($"  trace {fa.Tag.Name}({fa.Surface.Kind}) x {fb.Tag.Name}({fb.Surface.Kind}): {c.Count} curves, {string.Join(" ", c.Select(x => x is NPolyline pl ? pl.Pts.Length + "pts" : x.GetType().Name))} in {swt.ElapsedMilliseconds} ms");

@@ -35,6 +35,12 @@ public sealed class NurbsSurface
     readonly double[] _gu, _gv;
     readonly Vec3[,] _cellC;
     readonly double[,] _cellR;
+    // blocks of B x B cells, with spheres round their cells' spheres: a search skips a whole block that cannot hold
+    // anything nearer (no cell's bound is below its block's)
+    const int B = 4;
+    readonly int Bu, Bv;
+    readonly Vec3[,] _blkC;
+    readonly double[,] _blkR;
     readonly double _scale;
     // whether the v = V0 / V1 rows are poles (read in every Newton step)
     readonly bool _poleV0, _poleV1;
@@ -78,6 +84,20 @@ public sealed class NurbsSurface
                 for (int a = 0; a <= 1; a++) for (int b = 0; b <= 1; b++) r = Math.Max(r, Vec3.Distance(c, _grid[i + a, j + b]));
                 // the patch bulges between grid points: pad by the cell size
                 _cellC[i, j] = c; _cellR[i, j] = r * 1.5 + 1e-12;
+            }
+        Bu = (Gu + B - 1) / B; Bv = (Gv + B - 1) / B;
+        _blkC = new Vec3[Bu, Bv]; _blkR = new double[Bu, Bv];
+        for (int bi = 0; bi < Bu; bi++)
+            for (int bj = 0; bj < Bv; bj++)
+            {
+                Vec3 c = default; int n = 0;
+                for (int i = bi * B; i < Math.Min(Gu, bi * B + B); i++)
+                    for (int j = bj * B; j < Math.Min(Gv, bj * B + B); j++) { c += _cellC[i, j]; n++; }
+                c /= n;
+                double r = 0;
+                for (int i = bi * B; i < Math.Min(Gu, bi * B + B); i++)
+                    for (int j = bj * B; j < Math.Min(Gv, bj * B + B); j++) r = Math.Max(r, Vec3.Distance(c, _cellC[i, j]) + _cellR[i, j]);
+                _blkC[bi, bj] = c; _blkR[bi, bj] = r * (1 + 1e-12) + 1e-12;
             }
         bool cu = true, cv = true;
         for (int j = 0; j < nv && cu; j++) if (Vec3.Distance(poles[0, j], poles[nu - 1, j]) > 1e-9 * _scale) cu = false;
@@ -295,14 +315,19 @@ public sealed class NurbsSurface
             if (d < 0.25 * MinCurvatureRadius()) return (u, v, c, d);
             int ci = Math.Clamp((int)((u - U0) / (U1 - U0) * Gu), 0, Gu - 1), cj = Math.Clamp((int)((v - V0) / (V1 - V0) * Gv), 0, Gv - 1);
             bool sure = true;
-            for (int i = 0; i < Gu && sure; i++)
-                for (int j = 0; j < Gv; j++)
+            for (int bi = 0; bi < Bu && sure; bi++)
+                for (int bj = 0; bj < Bv && sure; bj++)
                 {
-                    if (Math.Abs(i - ci) <= 2 && Math.Abs(j - cj) <= 2) continue;
-                    // (closed directions wrap: the cells across the seam are neighbours too)
-                    if (ClosedU && Math.Abs(i - ci) >= Gu - 2 && Math.Abs(j - cj) <= 2) continue;
-                    if (ClosedV && Math.Abs(j - cj) >= Gv - 2 && Math.Abs(i - ci) <= 2) continue;
-                    if (Vec3.Distance(p, _cellC[i, j]) - _cellR[i, j] < d) { sure = false; break; }
+                    if (Vec3.Distance(p, _blkC[bi, bj]) - _blkR[bi, bj] >= d) continue;
+                    for (int i = bi * B; i < Math.Min(Gu, bi * B + B) && sure; i++)
+                        for (int j = bj * B; j < Math.Min(Gv, bj * B + B); j++)
+                        {
+                            if (Math.Abs(i - ci) <= 2 && Math.Abs(j - cj) <= 2) continue;
+                            // (closed directions wrap: the cells across the seam are neighbours too)
+                            if (ClosedU && Math.Abs(i - ci) >= Gu - 2 && Math.Abs(j - cj) <= 2) continue;
+                            if (ClosedV && Math.Abs(j - cj) >= Gv - 2 && Math.Abs(i - ci) <= 2) continue;
+                            if (Vec3.Distance(p, _cellC[i, j]) - _cellR[i, j] < d) { sure = false; break; }
+                        }
                 }
             if (sure) return (u, v, c, d);
         }
@@ -328,22 +353,41 @@ public sealed class NurbsSurface
             var c = Eval(u, v); var d = Vec3.Distance(c, p);
             if (d < 1e-7 * _scale) return (u, v, c, d);
         }
-        // grid seed: nearest sample among cells that can be nearer than the best so far
-        double best = double.MaxValue; int bi = 0, bj = 0;
-        for (int i = 0; i < Gu; i++)
-            for (int j = 0; j < Gv; j++)
+        // grid seed: the nearest sample (the first in grid order of equally near ones), among cells that can be
+        // nearer than the best so far: the block nearest by its bound first, then the others it does not rule out
+        double best = double.MaxValue; int bi = int.MaxValue, bj = int.MaxValue;
+        void Cell(int i, int j)
+        {
+            var lb = Vec3.Distance(p, _cellC[i, j]) - _cellR[i, j];
+            if (lb > 0 && lb * lb > best) return;
+            for (int a = 0; a <= 1; a++)
+                for (int b = 0; b <= 1; b++)
+                {
+                    // a collapsed (pole) row is no seed: Newton cannot leave it (Su vanishes there)
+                    if ((j + b == 0 && PoleAt(V0)) || (j + b == Gv && PoleAt(V1))) continue;
+                    var d2 = (_grid[i + a, j + b] - p).LengthSq;
+                    if (d2 < best || d2 == best && (i + a < bi || i + a == bi && j + b < bj)) { best = d2; bi = i + a; bj = j + b; }
+                }
+        }
+        int ki = 0, kj = 0; double kb = double.MaxValue;
+        for (int i = 0; i < Bu; i++)
+            for (int j = 0; j < Bv; j++)
             {
-                var lb = Vec3.Distance(p, _cellC[i, j]) - _cellR[i, j];
-                if (lb > 0 && lb * lb > best) continue;
-                for (int a = 0; a <= 1; a++)
-                    for (int b = 0; b <= 1; b++)
-                    {
-                        // a collapsed (pole) row is no seed: Newton cannot leave it (Su vanishes there)
-                        if ((j + b == 0 && PoleAt(V0)) || (j + b == Gv && PoleAt(V1))) continue;
-                        var d2 = (_grid[i + a, j + b] - p).LengthSq;
-                        if (d2 < best) { best = d2; bi = i + a; bj = j + b; }
-                    }
+                var lb = Vec3.Distance(p, _blkC[i, j]) - _blkR[i, j];
+                if (lb < kb) { kb = lb; ki = i; kj = j; }
             }
+        for (int i = ki * B; i < Math.Min(Gu, ki * B + B); i++)
+            for (int j = kj * B; j < Math.Min(Gv, kj * B + B); j++) Cell(i, j);
+        for (int i = 0; i < Bu; i++)
+            for (int j = 0; j < Bv; j++)
+            {
+                if (i == ki && j == kj) continue;
+                var lb = Vec3.Distance(p, _blkC[i, j]) - _blkR[i, j];
+                if (lb > 0 && lb * lb > best) continue;
+                for (int ii = i * B; ii < Math.Min(Gu, i * B + B); ii++)
+                    for (int jj = j * B; jj < Math.Min(Gv, j * B + B); jj++) Cell(ii, jj);
+            }
+        if (bi == int.MaxValue) { bi = 0; bj = 0; }
         var (u0, v0) = Newton(p, _gu[bi], _gv[bj]);
         var c0 = Eval(u0, v0);
         // a second start from a neighbouring cell centre guards against a stall on a boundary

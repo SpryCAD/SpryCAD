@@ -13,6 +13,7 @@ static class BoolStep
     public static int Run(string dir, int copy)
     {
         var sw = Stopwatch.StartNew();
+        if (Environment.GetEnvironmentVariable("BOOLSTEP_NORECOG") != null) StepImport.RecognizeAnalytic = false;
         NBody Read(string f, string prefix) => StepImport.Read(File.ReadAllBytes(Path.Combine(dir, f)), prefix).Solids.Single().Body;
         var body = Read("body.step", "B."); var tool = Read("tool.step", "T.");
         Console.WriteLine($"read: {sw.ElapsedMilliseconds} ms; body {body.Faces.Count} faces ({string.Join(", ", body.Faces.GroupBy(f => f.Surface.Kind).Select(g => $"{g.Count()} {g.Key}"))}), tool {tool.Faces.Count} ({string.Join(", ", tool.Faces.GroupBy(f => f.Surface.Kind).Select(g => $"{g.Count()} {g.Key}"))})");

@@ -1597,7 +1597,9 @@ public sealed class Regenerator
         void WarnOverlap(Solid seedTool, List<int> plain, Solid[] moved, bool fillet)
         {
             var box = seedTool.Bounds;
-            var v0 = Math.Abs(seedTool.Volume());
+            // (exact, from the B-rep: the mesh's volume would tessellate solids nothing else displays)
+            static double Vol(Solid s) => s.Native is { } n && Kernel.Native.NMass.Of(n) is { } mp ? mp.Volume : s.Volume();
+            var v0 = Math.Abs(Vol(seedTool));
             var old = Csg.NoFallback;
             Csg.NoFallback = true;
             try
@@ -1608,7 +1610,7 @@ public sealed class Regenerator
                     try
                     {
                         var x = Csg.Intersect(seedTool, moved[k]);
-                        if (x.IsEmpty || Math.Abs(x.Volume()) <= 1e-6 * v0) continue;
+                        if (x.IsEmpty || Math.Abs(Vol(x)) <= 1e-6 * v0) continue;
                     }
                     catch (Exception ex) when (ex is InvalidOperationException or Kernel.Native.NBooleanException) { continue; }
                     var what = fillet ? "fillet" : "chamfer";
