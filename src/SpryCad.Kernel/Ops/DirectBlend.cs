@@ -119,7 +119,16 @@ public static class DirectBlend
                             var ea = a.Coedges.Select(c => c.Edge).FirstOrDefault(x =>
                                 (Vec3.Distance(x.V0.P, eb.V0.P) < tol && Vec3.Distance(x.V1.P, eb.V1.P) < tol || Vec3.Distance(x.V0.P, eb.V1.P) < tol && Vec3.Distance(x.V1.P, eb.V0.P) < tol)
                                 && Vec3.Distance(x.Mid, eb.Mid) < 10 * tol);
-                            if (ea == null) break;
+                            if (ea == null)
+                            {
+                                if (Environment.GetEnvironmentVariable("FC_GLUEDBG") != null)
+                                {
+                                    var near = a.Coedges.Select(c => c.Edge).Where(x => Vec3.Distance(x.V0.P, eb.V0.P) < 1e-3 || Vec3.Distance(x.V1.P, eb.V1.P) < 1e-3 || Vec3.Distance(x.V0.P, eb.V1.P) < 1e-3 || Vec3.Distance(x.V1.P, eb.V0.P) < 1e-3)
+                                        .Select(x => $"{x.Curve.GetType().Name} {x.V0.P}->{x.V1.P} mid {Vec3.Distance(x.Mid, eb.Mid):g3}");
+                                    Debug?.Invoke($"glue {a.Tag.Name}({a.Loops[0].Coedges.Count})/{b.Tag.Name}({b.Loops[0].Coedges.Count}): {eb.Curve.GetType().Name} {eb.V0.P}->{eb.V1.P} unmatched: {string.Join("; ", near)}");
+                                }
+                                break;
+                            }
                             pairs.Add((eb, ea, Vec3.Distance(ea.V0.P, eb.V0.P) >= tol));
                         }
                         if (pairs.Count != b.Loops[0].Coedges.Count) continue;
