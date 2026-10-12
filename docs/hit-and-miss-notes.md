@@ -103,7 +103,8 @@ Commands (from the repository root):
    the rolling ball cannot cross it. Fixed by #79 (first on `loft-warmup`, pushed
    after #65 was merged): with it both ends blend by scope at R3 (2.1 s) and R2, and the small
    end alone takes 1.1 s, not 5.7.
-4i. **The base ribs' scoped blend slow since #75 (OPEN, master eed9631).** "Base ribs blended" (R3 by scope on the
+4i. ~~The base ribs' scoped blend slow since #75.~~ **FIXED (#80)**: "Base ribs blended" 0.57 s, the casting 4.6 s.
+   Was: "Base ribs blended" (R3 by scope on the
    rib seed) went from about 1 s to 5.5-13 s: at one rib, which stands half on the body's corner round, the new
    corner pivots fail and the feature is built again mitred, so both builds are paid for (the "Chamfers around
    filleted corners" session, fixing it on `corner-pivot-2`). With #75 the pedestal rib is filleted all round as
