@@ -36,7 +36,8 @@ static partial class Demos
         ("box, top edges rounded, a boss across its side and top filleted", () => BossOverRoundedEdge()),
         ("box with a ledge over its side, a boss across the side and under the ledge filleted", () => BossOverRoundedEdge(ledge: true)),
         ("drafted boss with a lug, its top edge rounded round the lug", () => LugOnRound(topRound: true)),
-        ("bearing pedestal out of a side onto its corner round, a sloping rib under it", PedestalOnRound),
+        ("bearing pedestal out of a side onto its corner round, a sloping rib under it", () => PedestalOnRound()),
+        ("bearing pedestal out of a drafted side onto its corner round, a sloping rib under it", () => PedestalOnRound(drafted: true)),
     };
 
     /// <summary>
@@ -448,18 +449,24 @@ static partial class Demos
     /// An engine casting's bearing pedestal (the hit and miss engine's): a body (y 0 down to -130) its vertical corners
     /// rounded R20, a pedestal standing out of its side (z 58 out to 70), its +X side on the corner round, blended R5
     /// into the body along its sides and underside; a rib under it, its back sloping from the pedestal's front edge down
-    /// to the body's side, blended R3 into both.
+    /// to the body's side, blended R3 into both. Drafted: the body's sides drafted 2° (in towards the top), as the
+    /// engine casting's.
     /// </summary>
-    internal static CadDocument PedestalOnRound()
+    internal static CadDocument PedestalOnRound(bool drafted = false)
     {
         var d = Doc(("R", "5"), ("Rr", "3"));
         var b = new Sk(d);
         // (Top plane: sketch y = -z)
         var bl = b.Rect("-100", "-58", "40", "58");
-        var bs = d.AddFeature(new SketchFeature { Name = "Body", Plane = PlaneRef.Top, Sketch = b.S });
-        var body = d.AddFeature(new ExtrudeFeature { Name = "Body", SketchId = bs.Id, Depth = "130", Reverse = true });
+        // (drafted: up from its bottom, as the engine casting's body)
+        var bottom = drafted ? d.AddFeature(new PlaneFeature { Name = "Body bottom", Base = PlaneRef.Top, Offset = "-130" }) : null;
+        var bs = d.AddFeature(new SketchFeature { Name = "Body", Plane = bottom != null ? new PlaneRef { Feature = bottom.Id } : PlaneRef.Top, Sketch = b.S });
+        var body = d.AddFeature(drafted ? new ExtrudeFeature { Name = "Body", SketchId = bs.Id, Depth = "130", Draft = "2" }
+            : new ExtrudeFeature { Name = "Body", SketchId = bs.Id, Depth = "130", Reverse = true });
+        // (the side's z at height y)
+        double Z(double y) => 58 - (drafted ? (y + 130) * Math.Tan(2 * Math.PI / 180) : 0);
         string B(int i) => $"{body.Id}.S.L{Ids.Name(bl[i])}";
-        d.AddFeature(new FilletFeature { Name = "Body corner", Radius = "20", Edges = { E(B(0), B(1), new Vec3(40, -65, 58)) } });
+        d.AddFeature(new FilletFeature { Name = "Body corner", Radius = "20", Edges = { E(B(0), B(1), new Vec3(40 + Z(-65) - 58, -65, Z(-65))) } });
         var pp = d.AddFeature(new PlaneFeature { Name = "Pedestal plane", Base = PlaneRef.Front, Offset = "30" });
         var p = new Sk(d);
         var pl = p.Rect("-32", "-40", "32", "0");
@@ -470,7 +477,7 @@ static partial class Demos
         d.AddFeature(new FilletFeature
         {
             Name = "Pedestal foot", Radius = "R",
-            Edges = { E(P(1), B(0), new Vec3(32, -20, 54)), E(P(3), B(0), new Vec3(-32, -20, 58)), E(P(0), B(0), new Vec3(0, -40, 58)) },
+            Edges = { E(P(1), B(0), new Vec3(32, -20, Z(-20) - 4)), E(P(3), B(0), new Vec3(-32, -20, Z(-20))), E(P(0), B(0), new Vec3(0, -40, Z(-40))) },
         });
         // (Right plane: sketch x = -z)
         var r = new Sk(d);
@@ -482,7 +489,7 @@ static partial class Demos
             Name = "Rib fillets", Radius = "Rr",
             Edges =
             {
-                E($"{rib.Id}.Start", B(0), new Vec3(-6, -75, 58)), E($"{rib.Id}.End", B(0), new Vec3(6, -75, 58)),
+                E($"{rib.Id}.Start", B(0), new Vec3(-6, -75, Z(-75))), E($"{rib.Id}.End", B(0), new Vec3(6, -75, Z(-75))),
                 E($"{rib.Id}.Start", P(0), new Vec3(-6, -40, 64)), E($"{rib.Id}.End", P(0), new Vec3(6, -40, 64)),
             },
         });

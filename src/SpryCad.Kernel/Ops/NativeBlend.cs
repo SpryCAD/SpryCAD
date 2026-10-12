@@ -490,7 +490,9 @@ public static class NativeBlend
             // (only near the end: the plane may cut the tool elsewhere too, as a wall's underside in the plane of a
             // top the chain runs on along)
             foreach (var (v, pl) in cuts) t = TrimNear(t, pl, v, run + 2 * size);
-            foreach (var c in corners) t = c.Trim(t);
+            // (a run-on still running past its faces is cut back again, or given up for its whole tangent chain's:
+            // cut on the mitre plane, as cheaper)
+            foreach (var c in corners) t = on.Fits ? c.Trim(t) : c.TrimOnMiter(t);
             double v0 = rb.Tool.Volume(), v1 = t.Volume(), vOn = on.Tool.Volume();
             // (cut back at all: an intersection the boolean misses leaves the run-on whole, as if nothing were there)
             if (t.IsEmpty || t.Native == null || t.Native.Validate() != null || Math.Abs(v1 - v0) > 0.25 * Math.Abs(v0)
@@ -532,17 +534,22 @@ public static class NativeBlend
         /// <summary>Whether p lies beyond the next face, near the corner.</summary>
         public bool Beyond(Vec3 p) => _next.Distance(p) > -1e-9 && Vec3.Distance(p, _v.P) < Reach;
 
+        /// <summary>The tool less what lies past the mitre plane near the corner.</summary>
+        public Solid TrimOnMiter(Solid tool) => TrimNear(tool, _miter, _v.P, Reach);
+
         /// <summary>The tool less what lies beyond the next face and not under the other fillet; cut on the mitre plane
         /// near the corner where the other fillet cannot be built.</summary>
         public Solid Trim(Solid tool)
         {
-            var other = RollingBall.Build(TangentChain(_g, _selected, new HashSet<NEdge>(ReferenceEqualityComparer.Instance)), _size, _name, OnFaces,
-                (w, _, _, _) => ReferenceEquals(w, _v) ? 3 * _size : 0);
-            if (other.Error != null || other.Tool?.Native == null) return TrimNear(tool, _miter, _v.P, Reach);
+            RollingBall.Result other;
+            using (Prof.Time("blend.corner.other"))
+                other = RollingBall.Build(TangentChain(_g, _selected, new HashSet<NEdge>(ReferenceEqualityComparer.Instance)), _size, _name, OnFaces,
+                    (w, _, _, _) => ReferenceEquals(w, _v) ? 3 * _size : 0);
+            if (other.Error != null || other.Tool?.Native == null) return TrimOnMiter(tool);
             var n = _next.Normal; var x = n.AnyPerpendicular(); var y = Vec3.Cross(n, x);
             var rect = ProfileLoop.Polygon(new[] { new Vec2(-Reach, -Reach), new Vec2(Reach, -Reach), new Vec2(Reach, Reach), new Vec2(-Reach, Reach) }, "corner");
             var beyond = Builders.Extrude(new[] { new ProfileRegion(rect) }, new Frame(_next.Project(_v.P), x, y, n), 0, Reach, "corner");
-            return Csg.Subtract(tool, Csg.Subtract(beyond, other.Tool));
+            using (Prof.Time("blend.corner.cut")) return Csg.Subtract(tool, Csg.Subtract(beyond, other.Tool));
         }
     }
 
