@@ -374,7 +374,7 @@ static partial class Demos
             ("WallR", "4"), ("PitR", "2"), ("RibR", "3"), ("JointR", "5"), ("RibT", "12"), ("RibIn", "50"), ("PedRibY", "110"), ("BaseRibX", "150"), ("BaseRibP", "90"), ("BaseRibOut", "80"), ("BaseRibH", "45"),
             ("BrgIn", $"{HmBrgIn}"), ("BrgOut", $"{HmBrgOut}"), ("BrgW", "64"), ("BrgDrop", "40"), ("J", $"{HmJ}"), ("CapStud", "25"), ("PedR", "6"),
             ("HeadX", $"{-HmHeadX}"), ("BarrelD", "104"), ("BarrelEnd", "70"), ("FlangeD", "116"), ("FlangeT", "12"), ("StudPCD", "96"), ("NStud", "6"),
-            ("HopX0", "175"), ("HopX1", "85"), ("HopW", "116"), ("HopH", "82"), ("HopWall", "7"), ("HopDraft", "2"), ("HopR", "12"), ("HopTopR", "4"), ("Jacket", "20"), ("FillD", "44"),
+            ("HopX0", "175"), ("HopX1", "85"), ("HopW", "BodyW-2*(BaseY-BaseT)*tan(BodyDraft)"), ("HopH", "82"), ("HopWall", "7"), ("HopDraft", "2"), ("HopR", "12"), ("HopTopR", "4"), ("Jacket", "20"), ("FillD", "44"),
             ("SadW", "BodyW-2*(BaseY-BaseT)*tan(BodyDraft)"), ("SadH", "BarrelD/2"), ("SadDip", "6"), ("SadX1", "34"),
             ("LinerD", "66"), ("Bore", $"{HmBore}"), ("Relief", "58"), ("ReliefL", "8"),
             ("PitX1", "60"), ("PitW", "2*BrgIn"), ("PitBot", "110"),
@@ -641,7 +641,7 @@ static partial class Demos
         // (suppressed: fails in the kernel, docs/hit-and-miss-notes.md)
         d.AddFeature(new FilletFeature
         {
-            Name = "Cam boss into the body", Radius = "JointR", Suppressed = true,
+            Name = "Cam boss into the body", Radius = "3",
             Edges = { E($"{camBoss.Id}.S.C{camC}", YF(0), new Vec3(-V("CamX"), -V("CamD/2"), SideZ(-V("CamD/2")))) },
         });
         d.Color = new[] { 0.72, 0.08, 0.07 };
@@ -1381,7 +1381,7 @@ static partial class Demos
             var sw = System.Diagnostics.Stopwatch.StartNew();
             var r = new Regenerator().Rebuild(doc, i);
             var st = r.Status[doc.Features[i - 1].Id];
-            var bodies = string.Join(" ", r.State.Bodies.Select(b => $"{(b.Solid.Native != null ? "exact" : "FACETED")}{(b.Solid.Topology.OpenHalfEdges > 0 ? $" OPEN({b.Solid.Topology.OpenHalfEdges})" : "")}"));
+            var bodies = string.Join(" ", r.State.Bodies.Select(b => $"{KernelTests.Vex(b.Solid),10:0} {(b.Solid.Native != null ? "exact" : "FACETED")}{(b.Solid.Topology.OpenHalfEdges > 0 ? $" OPEN({b.Solid.Topology.OpenHalfEdges})" : "")}"));
             Console.WriteLine($"{sw.ElapsedMilliseconds,7} ms {bodies} {(st.Ok ? "" : st.Error)} {string.Join("; ", st.Warnings)}");
             if (r.State.Bodies.Any(b => b.Solid.Native == null || b.Solid.Topology.OpenHalfEdges > 0)) { Console.WriteLine("  (stopped: the body is no longer exact and closed)"); break; }
         }
@@ -1431,6 +1431,9 @@ static partial class Demos
             {
                 doc.Thumbnail = DocumentContainer.RenderThumbnail(doc, r);
                 File.WriteAllBytes(Path.Combine(dir, name + ".png"), Thumbnail.Render(r.State.Bodies.Select(bb => (bb.Mesh, doc.Color)), 700));
+                // and from the other side (the part turned half round about the vertical)
+                var back = HmRy(Math.PI);
+                File.WriteAllBytes(Path.Combine(dir, name + " (other side).png"), Thumbnail.Render(r.State.Bodies.Select(bb => (AssemblyModel.PlacedMesh(bb.Mesh, back), doc.Color)), 700));
                 doc.Save(Path.Combine(dir, name + ".sprt"), container: true);
             }
         }

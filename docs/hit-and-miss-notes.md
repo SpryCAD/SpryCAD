@@ -33,7 +33,9 @@ Commands (from the repository root):
    base's drafted corner fillets or the swept foot chamfer. The volume moved slightly too (3,644,484 to 3,644,687
    mm³). Repro: `verify-engine <dir> Casting`, then `featprof <dir>/Casting.sprt "Hold-down holes" 1`. Reported to
    the session that did the chamfer work.
-4. **The cam gear's boss into the body: the result has an open edge (OPEN).** On master 98dfc3b (#45, #46) the
+4. ~~The cam gear's boss into the body.~~ **FIXED (#53)**, at R3 now: with the saddle (which covers the boss's top
+   half) R5 says "the fillet does not fit: it runs past the faces it blends" (fair: there is little room between the
+   saddle's cheek and the hopper). Was: the result has an open edge. On master 98dfc3b (#45, #46) the
    message is now the boolean's reason: "the fillet cannot be joined to the body (result invalid: edge used 1 times
    (NLine (-95.099, 0, 53.46)->(-90.1, 0, 53.46) on F31.Start))", R3 the same (the line then -93.1 to -90.1). F31
    is the hopper: its underside (y = 0) overhangs the body's drafted side by about 4 mm, and the boss's back (x = -90)
@@ -46,7 +48,10 @@ Commands (from the repository root):
    that run into neighbouring geometry also run into each other where both are tangent to the same face; that corner
    cannot be blended yet". Repro: unsuppress it, `verify-engine - Casting`. The same R5 on the hopper's faces into
    the barrel (front and back) and on the head's flange into the barrel works.
-4b. **A boss through a drafted face that carries on another: the exact boolean fails (OPEN).** To remove the hopper's
+4b. ~~A boss through a drafted face that carries on another: the exact boolean fails.~~ **FIXED (#49)**: the hopper
+   is flush with the body now (no ledge), its corner rounds picked as before. **Still open:** where the hopper's
+   front-bottom corner rounds (R12) overlap the barrel, the union cuts a small notch into the barrel (visible in
+   `verify-engine <dir> Casting`'s "other side" picture, below the hopper's front corner). Was: to remove the hopper's
    4 mm ledge (and with it item 4's trouble), the hopper was made as wide at y = 0 as the body's top
    (`HopW = BodyW-2*(BaseY-BaseT)*tan(BodyDraft)`, 106.9), with the same 2° draft, so its sides carry straight on
    from the body's (they merge: the body's side face `F7.S.L5` then runs up to the hopper's top, and the hopper's
@@ -68,12 +73,17 @@ Commands (from the repository root):
    the cheeks' outer top edges) 2.8 s, the loft itself 1.5 s. And the pit edges at R4 fail: "the fillet, cut back
    where it runs into neighbouring geometry, cannot be joined to the body (classification failed)" (they run into the
    barrel's end and the pedestals); R2 works.
-5. **A mirror with a suppressed seed silently mirrors nothing.** "Bearing pedestal, back" mirrored the pedestal, its
+4e. **The casting's volume dropped 13,485 mm³ with no change to the part** (master b44e9e1 → f09e043, with #51, #53,
+   #55): 3,680,189 → 3,666,704, exact and valid both times. Not found yet which step (the per-step volumes on f09e043
+   look right where they can be checked); asked the session that follows the kernel.
+5. ~~A mirror with a suppressed seed silently mirrors nothing.~~ **FIXED (#37)**: it mirrors the rest and warns.
+   Was: "Bearing pedestal, back" mirrored the pedestal, its
    corner rounds and "Pedestal into the body" (suppressed): no error, no warning, and the back pedestal was simply
    missing (the casting 36,000 mm³ light), so later fillets ("Wall tops") failed with "run into each other" and
    pointed the wrong way. Expected: mirror the seeds that are built and warn about the suppressed one, or fail with
    "<seed> is suppressed". *Instead:* the suppressed fillet left out of the seeds.
-6. **A mirror whose seed fillet failed still says "Only extrude, revolve, sweep, ... can be patterned"** (on "Bearing
+6. ~~A mirror whose seed fillet failed still says "Only extrude, ... can be patterned".~~ **FIXED (#37)**: a failed
+   seed reports its own error. Was: (on "Bearing
    pedestal, back" when "Pedestal into the body" failed), not "<seed> failed: <its error>" as the fix in
    `blend-quick-fixes` gives elsewhere.
 7. ~~A plane into a drafted corner round: "unsupported edge geometry".~~ **FIXED (#45: edges found on a tangent
