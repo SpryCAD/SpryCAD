@@ -280,7 +280,7 @@ public sealed class PartDatabase : IDisposable
         foreach (var h in hashes) DeleteBlobIfUnused(h);
     }
 
-    void DeleteBlobIfUnused(byte[] hash)
+    internal void DeleteBlobIfUnused(byte[] hash)
     {
         using var cmd = Cmd("""
             DELETE FROM Blobs WHERE Hash = $h
@@ -388,10 +388,10 @@ public sealed class PartDatabase : IDisposable
     }
 
     /// <summary>The rows a query gives, each read by <paramref name="read"/>.</summary>
-    public List<T> Query<T>(string sql, Func<SqliteDataReader, T> read)
+    public List<T> Query<T>(string sql, Func<SqliteDataReader, T> read, params (string name, object value)[] ps)
     {
         var l = new List<T>();
-        using var cmd = Cmd(sql);
+        using var cmd = Cmd(sql, ps);
         using var r = cmd.ExecuteReader();
         while (r.Read()) l.Add(read(r));
         return l;

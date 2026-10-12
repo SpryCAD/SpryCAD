@@ -1,24 +1,20 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
-  <!-- A part is an SQLite database marked as SpryCAD's: application id "SPRY" (0x53505259, big-endian) at byte 68.
-       Assemblies, and parts saved before, are ZIP containers starting with an uncompressed "mimetype" entry, as ODF
-       and EPUB do: its text is at byte 38. Either way a file is known by its content too (renamed, or without its
-       extension), not only its name. -->
+  <!-- Parts and assemblies are SQLite databases marked as SpryCAD's (application id "SPRY", 0x53505259, at byte 68):
+       the same mark for both, so their extensions tell them apart. Files saved before are ZIP containers starting with
+       an uncompressed "mimetype" entry, as ODF and EPUB do, whose text at byte 38 names the kind: known by content too. -->
   <mime-type type="application/x-sprycad-part">
     <comment>SpryCAD part</comment>
     <sub-class-of type="application/vnd.sqlite3"/>
     <glob pattern="*.sprt"/>
     <magic priority="80">
-      <match type="string" offset="0" value="SQLite format 3">
-        <match type="big32" offset="68" value="0x53505259"/>
-      </match>
       <match type="string" offset="38" value="application/x-sprycad-part"/>
     </magic>
     <icon name="application-x-sprycad-part"/>
   </mime-type>
   <mime-type type="application/x-sprycad-assembly">
     <comment>SpryCAD assembly</comment>
-    <sub-class-of type="application/zip"/>
+    <sub-class-of type="application/vnd.sqlite3"/>
     <glob pattern="*.sasm"/>
     <magic priority="80">
       <match type="string" offset="38" value="application/x-sprycad-assembly"/>

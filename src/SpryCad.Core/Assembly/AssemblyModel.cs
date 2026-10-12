@@ -907,7 +907,7 @@ public sealed partial class AssemblyModel
             foreach (var (ck, name) in drop) { sd.Caches.Remove(ck); sd.Files.Remove(name); }
             if (DropEmbeddedMeshes(sd) | drop.Count > 0)
             {
-                doc.Files[e] = AssemblyContainer.ToBytes(sd, newRevision: false);
+                doc.Files[e] = AssemblyContainer.ToBytes(sd, doc.Files[e]);
                 changed = true;
             }
         }

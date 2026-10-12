@@ -60,6 +60,7 @@ public static class PartFile
         db.SetManifest("FormatVersion", CadDocument.CurrentFormatVersion.ToString(CultureInfo.InvariantCulture));
         db.SetManifest("AppVersion", typeof(PartFile).Assembly.GetName().Version?.ToString() ?? "");
         db.SetManifest("RootPartId", partId.ToString("D"));
+        db.SetManifest("RootKind", AssemblyFile.RootKindPart);
         db.SetManifest("Units", doc.Units.ToString());
         if (db.Manifest("CreatedUtc") == null) db.SetManifest("CreatedUtc", now);
         db.SetManifest("ModifiedUtc", now);
@@ -103,6 +104,7 @@ public static class PartFile
     {
         using var db = PartDatabase.Open(path);
         var partId = RootPart(db);
+        if (db.Manifest("RootKind") == AssemblyFile.RootKindAssembly) throw new InvalidDataException("Not a SpryCAD part (the file holds an assembly).");
         var head = (revision is { } r ? db.GetRevision(r) ?? throw new InvalidDataException("The file has no such revision.") : null)
             ?? (working ? db.GetWorking(partId) : null) ?? db.GetHead(partId) ?? throw new InvalidDataException("The file holds no saved part.");
         var objects = db.GetObjects(head.RevisionId).ToDictionary(kv => kv.Key, kv => db.Blobs.Get(kv.Value, verify: kv.Key.Kind == ObjectKind.File));

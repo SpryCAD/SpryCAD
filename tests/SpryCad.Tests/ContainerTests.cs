@@ -51,29 +51,27 @@ static class ContainerTests
             t.True(back.Clone().Files.ContainsKey("imports/bracket.step"), "clone lost the attachment");
         });
 
-        t.Test("Container: parts start with SQLite's header and SpryCAD's application id; assemblies with the media type, uncompressed, at a fixed byte", () =>
+        t.Test("Container: parts and assemblies start with SQLite's header and SpryCAD's application id; the manifest names which", () =>
         {
-            // what installer/linux/sprycad-mime.xml looks for: for parts the database header and "SPRY" at byte 68,
-            // for assemblies "mimetype" at byte 30, the type right after it
+            // what installer/linux/sprycad-mime.xml looks for: the database header and "SPRY" at byte 68 (the same for
+            // both: the extension tells them apart, the manifest's RootKind for SpryCAD)
             var doc = Demos.All.First(d => d.file == "l-bracket.sprt").build();
             doc.Thumbnail = new byte[] { 0x89, 0x50, 0x4E, 0x47, 1, 2, 3 };
             var part = Temp("mime.sprt");
             doc.Save(part);
-            var pb = File.ReadAllBytes(part);
-            t.Eq(System.Text.Encoding.ASCII.GetString(pb, 0, 16), "SQLite format 3\0");
-            t.Eq(System.Buffers.Binary.BinaryPrimitives.ReadInt32BigEndian(pb.AsSpan(68)), PartDatabase.ApplicationId);
-            t.Eq(System.Text.Encoding.ASCII.GetString(pb, 68, 4), "SPRY");
-            t.Eq(CadDocument.Load(part).ToJson(), doc.ToJson()); // and the part reads back as before
-
             var asmPath = Temp("mime.sasm");
             SpryCad.Core.Assembly.AssemblyContainer.Save(new SpryCad.Core.Assembly.AssemblyDocument(), asmPath);
-            var b = File.ReadAllBytes(asmPath);
-            t.Eq(BitConverter.ToUInt32(b, 0), 0x04034b50u);                 // a ZIP's first local header
-            t.Eq(BitConverter.ToUInt16(b, 8), (ushort)0);                  // stored, not deflated
-            t.Eq(BitConverter.ToUInt16(b, 26), (ushort)DocumentContainer.MimeEntry.Length);
-            t.Eq(BitConverter.ToUInt16(b, 28), (ushort)0);                 // no extra field to shift the text
-            t.Eq(System.Text.Encoding.ASCII.GetString(b, 30, 8), DocumentContainer.MimeEntry);
-            t.Eq(System.Text.Encoding.ASCII.GetString(b, DocumentContainer.MimeOffset, DocumentContainer.AssemblyMime.Length), DocumentContainer.AssemblyMime);
+            foreach (var (path, kind) in new[] { (part, AssemblyFile.RootKindPart), (asmPath, AssemblyFile.RootKindAssembly) })
+            {
+                var b = File.ReadAllBytes(path);
+                t.Eq(System.Text.Encoding.ASCII.GetString(b, 0, 16), "SQLite format 3\0");
+                t.Eq(System.Buffers.Binary.BinaryPrimitives.ReadInt32BigEndian(b.AsSpan(68)), PartDatabase.ApplicationId);
+                t.Eq(System.Text.Encoding.ASCII.GetString(b, 68, 4), "SPRY");
+                using var db = PartDatabase.Open(path);
+                t.Eq(db.Manifest("RootKind"), kind);
+            }
+            t.True(!AssemblyFile.IsAssembly(part) && AssemblyFile.IsAssembly(asmPath), "IsAssembly");
+            t.Eq(CadDocument.Load(part).ToJson(), doc.ToJson()); // and both read back
             SpryCad.Core.Assembly.AssemblyContainer.Load(asmPath);
         });
 

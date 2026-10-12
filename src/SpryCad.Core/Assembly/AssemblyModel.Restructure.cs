@@ -83,7 +83,7 @@ public sealed partial class AssemblyModel
         {
             m.RefreshCaches();
             try { sd.Thumbnail = m.RenderThumbnail() ?? sd.Thumbnail; } catch { }
-            Doc.Files[e] = AssemblyContainer.ToBytes(sd);
+            Doc.Files[e] = AssemblyContainer.ToBytes(sd, Doc.Files.GetValueOrDefault(e));
         }
         else m.Save(file!);
         var key = ComponentResolver.Key(s.Part);

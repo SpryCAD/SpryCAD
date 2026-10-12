@@ -93,10 +93,13 @@ static class AssemblyTests
             m.Save(path);
             var png = AssemblyDocument.Load(path).Thumbnail;
             t.True(png != null && png.Length > 1000 && png[0] == 0x89 && png[1] == (byte)'P' && png[2] == (byte)'N' && png[3] == (byte)'G', "a PNG preview");
-            using (var zip = System.IO.Compression.ZipFile.OpenRead(path))
+            // as the handler reads it: one query, plain SQLite
+            using (var c = new Microsoft.Data.Sqlite.SqliteConnection(new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder { DataSource = path, Mode = Microsoft.Data.Sqlite.SqliteOpenMode.ReadOnly, Pooling = false }.ToString()))
             {
-                var e = zip.GetEntry("thumbnail.png");
-                t.True(e != null && e.CompressedLength == e.Length, "stored uncompressed (the handler reads it straight out of the ZIP)");
+                c.Open();
+                using var cmd = c.CreateCommand();
+                cmd.CommandText = "SELECT Png FROM Thumbnail ORDER BY Size DESC LIMIT 1";
+                t.True(cmd.ExecuteScalar() is byte[] stored && stored.SequenceEqual(png!), "stored as a plain PNG (the handler reads it with one query)");
             }
             // the placed meshes: each component where it is (the second leaf turned half round: its box mirrored about x = 20)
             var leaf2 = m.Doc.Components[1];
@@ -620,17 +623,17 @@ static class AssemblyTests
             var q = new Vec3(1, 2, 3);
             t.True(Vec3.Distance(back.Find(c2.Id)!.Placement.ToTransform().Point(q), place.Point(q)) < 1e-9, "placement");
             t.True(back.Files["cache/B.mesh"].SequenceEqual(new byte[] { 1, 2, 3 }) && back.Caches.Count == 1, "embedded files and caches");
-            // a damaged container is refused
-            var bytes = File.ReadAllBytes(p);
+            // a damaged cache is refused (its blob no longer matches its hash)
             var damaged = Path.Combine(dir, "bad.sasm");
-            using (var z = new System.IO.Compression.ZipArchive(new MemoryStream(bytes)))
-            using (var fs = File.Create(damaged))
-            using (var w = new System.IO.Compression.ZipArchive(fs, System.IO.Compression.ZipArchiveMode.Create))
-                foreach (var e in z.Entries)
-                {
-                    using var src = e.Open(); using var dst = w.CreateEntry(e.FullName).Open();
-                    if (e.FullName.EndsWith("B.mesh")) dst.Write(new byte[] { 9, 9, 9 }); else src.CopyTo(dst);
-                }
+            File.Copy(p, damaged);
+            using (var c = new Microsoft.Data.Sqlite.SqliteConnection(new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder { DataSource = damaged, Pooling = false }.ToString()))
+            {
+                c.Open();
+                using var cmd = c.CreateCommand();
+                cmd.CommandText = "UPDATE Blobs SET Codec = 0, RawSize = 3, Data = X'090909' WHERE Hash = $h";
+                cmd.Parameters.AddWithValue("$h", SpryCad.Core.Storage.Hash.Of(new byte[] { 1, 2, 3 }).ToBytes());
+                t.Eq(cmd.ExecuteNonQuery(), 1);
+            }
             bool refused = false;
             try { AssemblyDocument.Load(damaged); } catch (InvalidDataException) { refused = true; }
             t.True(refused, "a damaged cache is refused");
