@@ -296,6 +296,25 @@ static class LoftTests
             }
         });
 
+        t.Test("Loft: rounded rectangle to rounded rectangle: one face per corner arc, tangent seams all along", () =>
+        {
+            // a connecting rod's shank: 16 × 11 with R5 corners to 24 × 15 with R7 (every join tangent: a start inside an
+            // arc split it in two, at different fractions on the two sections, the pieces 0.3° apart halfway)
+            var b = NLoft.Loft(new[] { Sec(0, new ProfileRegion(LoftProbe.RoundRect(16, 11, 5))), Sec(40, new ProfileRegion(LoftProbe.RoundRect(24, 15, 7))) }, null, null, "X");
+            Volume(t, b, "shank");
+            t.Eq(b.Faces.Count, 10); // four sides, four corners, two ends
+            foreach (var e in b.Edges.Where(e => e.Uses.All(u => !u.Face.Tag.Name.EndsWith("Start") && !u.Face.Tag.Name.EndsWith("End"))))
+            {
+                var f0 = e.Uses[0].Face; var f1 = e.Uses[1].Face;
+                for (int i = 1; i < 16; i++)
+                {
+                    var q = e.At(i / 16.0);
+                    var n0 = f0.Surface.Normal(f0.Surface.Project(q)); var n1 = f1.Surface.Normal(f1.Surface.Project(q));
+                    t.True(Math.Abs(Vec3.Dot(n0, n1)) > 1 - 1e-9, $"{f0.Tag.Name} | {f1.Tag.Name} tangent at {q}: {Math.Acos(Math.Min(1, Math.Abs(Vec3.Dot(n0, n1)))) * 180 / Math.PI:0.####}°");
+                }
+            }
+        });
+
         t.Test("Loft: a guide bows the side out through its point; the sections stay exact", () =>
         {
             // circles r 10 at z 0 and 40; a guide arc in XZ from (10,0,0) through (16,0,20) to (10,0,40)
