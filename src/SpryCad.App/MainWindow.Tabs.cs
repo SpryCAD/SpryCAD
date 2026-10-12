@@ -94,8 +94,9 @@ public partial class MainWindow
             if (_partRows.TryGetValue(t, out var row) && (!_previewsRunning || t.Thumb != null)) _ = LoadThumb(t, row.Image);
         };
         s.DocumentChanged += () => { UpdateTabHeader(t); if (s == Session) OnDocumentChanged(); };
-        s.BusyChanged += busy => { if (s == Session) { BusyText.IsVisible = busy; BusyText.Text = "Rebuilding…"; } };
-        s.Progress += p => { if (s == Session && s.Busy) BusyText.Text = p.Text; };
+        // (while it shows the display saved with it, opened just now, that is what it says)
+        s.BusyChanged += busy => { if (s == Session) { BusyText.IsVisible = busy; BusyText.Text = s.SavedDisplay != null ? "Shown as saved, rebuilding…" : "Rebuilding…"; } };
+        s.Progress += p => { if (s == Session && s.Busy) BusyText.Text = (s.SavedDisplay != null ? "Shown as saved. " : "") + p.Text; };
 
         t.Label = new TextBlock { VerticalAlignment = VerticalAlignment.Center, FontSize = UI.TypeScale.Body, Margin = new Thickness(0, 0, 6, 0) };
         var close = new Button

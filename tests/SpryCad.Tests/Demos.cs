@@ -379,6 +379,7 @@ static partial class Demos
             var doc = CadDocument.Load(path);
             var r = new Regenerator().Rebuild(doc);
             doc.Thumbnail = DocumentContainer.RenderThumbnail(doc, r) ?? doc.Thumbnail;
+            doc.Display = r.State.Bodies.Count > 0 ? SpryCad.Core.Assembly.MeshCache.Of(r, doc.Color) : null; // (shows at once when opened, as the app saves parts)
             doc.Save(path, container: true);
             Console.WriteLine($"{path}: container{(doc.Thumbnail != null ? " with preview" : ", NO PREVIEW (nothing solid)")}");
             if (doc.Thumbnail == null) bad++;
@@ -396,6 +397,7 @@ static partial class Demos
             var r = new Regenerator().Rebuild(doc);
             // a container with its preview, as the app saves parts (Explorer shows it as the thumbnail)
             doc.Thumbnail = DocumentContainer.RenderThumbnail(doc, r);
+            doc.Display = r.State.Bodies.Count > 0 ? SpryCad.Core.Assembly.MeshCache.Of(r, doc.Color) : null; // (shows at once when opened, as the app saves parts)
             doc.Save(Path.Combine(dir, file), container: true);
             Console.WriteLine($"{file}: {doc.Features.Count} features, {r.Milliseconds:0} ms");
             foreach (var f in doc.Features)

@@ -38,7 +38,7 @@ public partial class MainWindow
     void RebuildFlyoutTree()
     {
         if (_flyTree == null || Asm != null) return;
-        _flyTree.Rebuild(Session.Doc, Session.Title.TrimEnd(' ', '*'), Session.Result);
+        _flyTree.Rebuild(Session.Doc, TreeTitle(), Session.Result);
         _flyTree.Select(Tree.SelectedId);
     }
 }

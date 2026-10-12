@@ -199,12 +199,12 @@ public static class OptionsDialog
         f.Section("Saving parts");
         var container = f.Check("Always save parts as containers (with a preview image)", UserSettings.SaveContainer,
             "Otherwise parts are saved as plain JSON, unless they embed other files (e.g. an imported model). Either kind opens normally.");
-        var modes = new[] { KeepDisplay.SlowParts, KeepDisplay.Always, KeepDisplay.Never };
-        var keep = Combo(new[] { "Of slow parts", "Of every part", "Never" }, Array.IndexOf(modes, UserSettings.KeepDisplay));
+        var modes = new[] { KeepDisplay.Always, KeepDisplay.SlowParts, KeepDisplay.Never };
+        var keep = Combo(new[] { "Of every part", "Of slow parts", "Never" }, Array.IndexOf(modes, UserSettings.KeepDisplay));
         keep.MinWidth = 150;
         var secs = new TextBox { Text = Expr.Format(UserSettings.KeepDisplaySeconds), Width = 60 };
         var slower = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Children = { new TextBlock { Text = "slower than", VerticalAlignment = VerticalAlignment.Center }, secs, new TextBlock { Text = "s", VerticalAlignment = VerticalAlignment.Center } } };
-        void Sync() => slower.IsEnabled = keep.SelectedIndex == 0;
+        void Sync() => slower.IsEnabled = keep.SelectedIndex == 1;
         keep.SelectionChanged += (_, _) => Sync();
         Sync();
         f.Row("Keep the display", new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, Children = { keep, slower } },
