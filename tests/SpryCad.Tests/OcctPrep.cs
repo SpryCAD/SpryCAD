@@ -42,6 +42,9 @@ static class OcctPrep
             var nb = StepImport.Read(File.ReadAllBytes(Path.Combine(outDir, f)), "R.").Solids.Single().Body;
             Console.WriteLine($"{f} read back: volume {NMass.Of(nb)?.Volume ?? NTess.ToSolid(nb).Volume():R}, {nb.Faces.Count} faces, {nb.Validate() ?? "valid"}");
         }
+        if (Environment.GetEnvironmentVariable("FC_OCCT_FACES") != null)
+            foreach (var g in NTess.ToSolid(tool.Native!, 1e-4).Faces.GroupBy(x => x.Tag.Name))
+                Console.WriteLine($"  tool face {g.Key} ({tool.Native!.Faces.First(f => f.Tag.Name == g.Key).Surface.Kind}): area {g.Sum(x => x.Area()):0.0000}, volume share {g.Sum(x => x.Loops.Sum(l => Enumerable.Range(1, l.Length - 2).Sum(k => Vec3.Dot(l[0], Vec3.Cross(l[k], l[k + 1])) / 6))):0.0000}");
         Console.WriteLine($"exact volumes: body {NMass.Of(body.Native!)?.Volume:R}, tool {NMass.Of(tool.Native!)?.Volume:R}; STEP files {new FileInfo(Path.Combine(outDir, "body.step")).Length / 1024} + {new FileInfo(Path.Combine(outDir, "tool.step")).Length / 1024} KB");
 
         void Time(string label, Solid b0, Solid t0)
