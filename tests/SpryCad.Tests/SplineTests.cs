@@ -157,6 +157,78 @@ static class SplineTests
             t.Eq(r3.State.Bodies.Single().Solid.Native!.Validate(), null);
         });
 
+        t.Test("Sketch spline: tangent to a line at its start and to an arc at its end (the spline's ends follow them)", () =>
+        {
+            var sk = new Core.Sketching.Sketch();
+            var a = sk.AddPoint(new Vec2(0, 0)); var b = sk.AddPoint(new Vec2(10, 0));
+            var m = sk.AddPoint(new Vec2(20, 9)); var c = sk.AddPoint(new Vec2(30, 0));
+            var ac = sk.AddPoint(new Vec2(35, 0)); var ae = sk.AddPoint(new Vec2(35, 5));
+            var line = sk.Add(new Core.Sketching.SkLine { P1 = a.Id, P2 = b.Id });
+            var spl = sk.Add(new Core.Sketching.SkSpline { Points = new() { b.Id, m.Id, c.Id } });
+            // the arc about (35, 0) from (30, 0) round to (35, 5): it leaves (30, 0) going -y (counter-clockwise: clockwise in this view... start at angle π)
+            var arc = sk.Add(new Core.Sketching.SkArc { Center = ac.Id, Start = ae.Id, End = c.Id });
+            var free = sk.SplineCurve(spl)!;
+            free.Derivs(0, out _, out var f0, out _);
+            t.True(Math.Abs(f0.Y) > 0.1 * f0.Length, "free: not along the line");
+            sk.AddConstraint(Core.Sketching.CType.Tangent, line.Id, spl.Id);
+            sk.AddConstraint(Core.Sketching.CType.Tangent, arc.Id, spl.Id);
+            var tied = sk.SplineCurve(spl)!;
+            tied.Derivs(0, out var p0, out var d0, out _);
+            tied.Derivs(1, out var p1, out var d1, out _);
+            t.True(Vec3.Distance(p0, new Vec3(10, 0, 0)) < 1e-12 && Vec3.Distance(p1, new Vec3(30, 0, 0)) < 1e-12, "the ends stay");
+            t.True(Math.Abs(d0.Y) < 1e-9 * d0.Length && d0.X > 0, $"leaves the line along it: {d0}");
+            // at (30, 0) the arc's radius is along x: the spline arrives square to it, continuing into the arc (the arc
+            // arrives at its end (30, 0) counter-clockwise, i.e. going -y; the spline arrives there going +y)
+            t.True(Math.Abs(d1.X) < 1e-9 * d1.Length, $"arrives square to the arc's radius: {d1}");
+            t.True(d1.Y > 0, $"continuing smoothly into the arc: {d1}");
+            foreach (var q in new[] { b, m, c }) t.True(Enumerable.Range(0, 2001).Min(i => Vec3.Distance(tied.Eval(i / 2000.0), new Vec3(q.X, q.Y, 0))) < 1e-3, "through its points");
+            // the solver leaves it to the spline (nothing over defined, nothing moved)
+            var res = Core.Sketching.SketchSolver.Solve(sk);
+            t.True(res.Status != Core.Sketching.SketchStatus.OverDefined && res.Status != Core.Sketching.SketchStatus.Failed, $"solves: {res.Status}");
+            t.True(Vec2.Distance(sk.P(m.Id), new Vec2(20, 9)) < 1e-9, "nothing moved");
+        });
+
+        t.Test("Spline profile: lofted to a scaled copy (exact volume) and to a circle", () =>
+        {
+            // a ruled loft between the profile and a copy 1.5 times as big 20 above: every level a copy scaled by
+            // 1 + 0.5 z / 20, so the volume is A·h·(1 + (s − 1) + (s − 1)² / 3)
+            var top = new Frame(new Vec3(0, 0, 20), Vec3.UnitX, Vec3.UnitY, Vec3.UnitZ);
+            var big = Loop().Transformed(p => p * 1.5, false);
+            var loft = Kernel.Native.NLoft.Loft(new[] { new Kernel.Native.NLoft.Section(frame, new[] { new ProfileRegion(Loop()) }), new Kernel.Native.NLoft.Section(top, new[] { new ProfileRegion(big) }) }, null, null, "LF");
+            t.Eq(loft.Validate(), null);
+            var (area, _) = Shape(Loop());
+            var want = area * 20 * (1 + 0.5 + 0.25 / 3);
+            t.Near(Kernel.Native.NMass.Of(loft)!.Volume, want, want * 1e-6);
+            // a closed spline to a circle (no vertices to match: the spline's two halves meet the circle's)
+            var blob = SplineFit.Through(new[] { V(-6, -4), V(7, -5), V(9, 6), V(-5, 7) }, true)!;
+            var bl = new ProfileLoop(); bl.AddSpline(blob, 0, 1, "B");
+            var round = Kernel.Native.NLoft.Loft(new[] { new Kernel.Native.NLoft.Section(frame, new[] { new ProfileRegion(bl) }), new Kernel.Native.NLoft.Section(top, new[] { new ProfileRegion(ProfileLoop.Circle(Vec2.Zero, 5, "C")) }) }, null, null, "LC");
+            t.Eq(round.Validate(), null);
+            var v = Kernel.Native.NMass.Of(round)!.Volume;
+            var a0 = Math.Abs(bl.SignedArea()); var a1 = Math.PI * 25;
+            t.True(v > 20 * Math.Min(a0, a1) && v < 20 * Math.Max(a0, a1), $"between the end areas: {v}");
+        });
+
+        t.Test("Spline profile: swept along a line and an arc (Pappus round the arc)", () =>
+        {
+            // the profile in the x–y plane, swept up z 30, then round a quarter turn about a line parallel to y at x = -20
+            var p0 = new Vec3(0, 0, 0); var p1 = new Vec3(0, 0, 30);
+            var c = new Vec3(-20, 0, 30); var axis = Vec3.UnitY;
+            var end = c + Transform.Rotation(Vec3.Zero, axis, -Math.PI / 2).Vector(p1 - c);
+            // (turning about -y takes +z towards -x: the arc leaves along +z)
+            var path = new List<Kernel.Native.NSweep.Seg>
+            {
+                new(p0, p1),
+                new(p1, end, c, -axis, Math.PI / 2),
+            };
+            var body = Kernel.Native.NSweep.Sweep(new[] { new ProfileRegion(Loop()) }, frame, path, "SW");
+            t.Eq(body.Validate(), null);
+            var (area, mx) = Shape(Loop());
+            // straight part: area·30; the bend: a quarter turn of the profile about x = -20 (its moment about that line)
+            var want = area * 30 + Math.PI / 2 * (mx + 20 * area);
+            t.Near(Kernel.Native.NMass.Of(body)!.Volume, want, want * 1e-6);
+        });
+
         t.Test("Spline profile: a boolean with a box, and a STEP round trip", () =>
         {
             var body = Kernel.Native.NBuild.Extrude(new[] { new ProfileRegion(Loop()) }, frame, 0, 15, "E");

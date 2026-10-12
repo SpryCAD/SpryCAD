@@ -9,7 +9,9 @@ namespace SpryCad.Kernel;
 public static class SplineFit
 {
     /// <summary>The spline through the points (points repeated in a row count once); null for fewer than two distinct ones (three closed).</summary>
-    public static BSplineCurve? Through(IReadOnlyList<Vec3> points, bool closed)
+    /// <param name="startDir">Open splines: the direction it leaves the first point in (tangent to what it continues), or null.</param>
+    /// <param name="endDir">Open splines: the direction it arrives at the last point in, or null.</param>
+    public static BSplineCurve? Through(IReadOnlyList<Vec3> points, bool closed, Vec3? startDir = null, Vec3? endDir = null)
     {
         var pts = new List<Vec3>();
         foreach (var p in points)
@@ -21,7 +23,54 @@ public static class SplineFit
         for (int k = 1; k < pts.Count; k++) uk[k] = uk[k - 1] + Math.Sqrt(Vec3.Distance(pts[k], pts[k - 1]));
         for (int k = 1; k < pts.Count; k++) uk[k] /= uk[^1];
         uk[^1] = 1;
-        return BSplineCurve.Interpolate(pts, uk, 3);
+        var free = BSplineCurve.Interpolate(pts, uk, 3);
+        if (startDir == null && endDir == null) return free;
+        // an end tied to a direction: the derivative there along it, as long as the points' chords (an end left free
+        // keeps the derivative the free fit has there)
+        double len = 0;
+        for (int k = 1; k < pts.Count; k++) len += Vec3.Distance(pts[k], pts[k - 1]);
+        free.Derivs(0, out _, out var d0, out _); free.Derivs(1, out _, out var d1, out _);
+        if (startDir is { } sd && sd.Length > 1e-12) d0 = sd.Normalized * len;
+        if (endDir is { } ed && ed.Length > 1e-12) d1 = ed.Normalized * len;
+        return WithEnds(pts, uk, d0, d1);
+    }
+
+    /// <summary>
+    /// Cubic interpolation with the end derivatives given (Piegl &amp; Tiller 9.2.2): knots at the inner points'
+    /// parameters, so n + 3 poles: the outer two at each end set by the point and the derivative there, the others
+    /// solved so the curve passes through the inner points.
+    /// </summary>
+    static BSplineCurve WithEnds(List<Vec3> q, double[] uk, Vec3 d0, Vec3 d1)
+    {
+        const int p = 3;
+        int n = q.Count - 1;
+        var U = new double[n + 7];
+        for (int i = n + 3; i < U.Length; i++) U[i] = 1;
+        for (int k = 1; k <= n - 1; k++) U[k + 3] = uk[k];
+        var P = new Vec3[n + 3];
+        P[0] = q[0]; P[1] = q[0] + d0 * (U[4] / p);
+        P[n + 2] = q[n]; P[n + 1] = q[n] - d1 * ((1 - U[n + 2]) / p);
+        int m = n - 1; // inner poles P[2] .. P[n]
+        if (m > 0)
+        {
+            var A = new double[m, m]; var rhs = new Vec3[m];
+            for (int k = 1; k <= n - 1; k++)
+            {
+                int span = BSplineCurve.FindSpan(n + 2, p, uk[k], U);
+                var N = BSplineCurve.Basis(span, uk[k], p, U);
+                var r = q[k];
+                for (int i = 0; i <= p; i++)
+                {
+                    int j = span - p + i;
+                    if (j >= 2 && j <= n) A[k - 1, j - 2] += N[i];
+                    else r -= P[j] * N[i];
+                }
+                rhs[k - 1] = r;
+            }
+            var x = Solve(A, rhs);
+            for (int i = 0; i < m; i++) P[i + 2] = x[i];
+        }
+        return new BSplineCurve(p, P, U);
     }
 
     /// <summary>

@@ -47,32 +47,70 @@ public static class NLoft
     // ------------------------------------------------------------------------------------------
     // section geometry
 
-    /// <summary>A line or a circular arc (from A, about C, radius R, turning Angle from X towards Y).</summary>
+    /// <summary>
+    /// A line, a circular arc (from A, about C, radius R, turning Angle from X towards Y), or a piece of a spline (its
+    /// curve from parameter U0 at t = 0 to U1 at t = 1; U1 &lt; U0 where the loop runs against it).
+    /// </summary>
     sealed class Seg3
     {
         public Vec3 A, B, C, X, Y;
         public double R, Angle;
         public bool IsArc;
+        public BSplineCurve? Spl;
+        public double U0, U1;
         public string Name = "";
 
-        public double Length => IsArc ? R * Angle : Vec3.Distance(A, B);
+        double _len = -1;
+        public double Length
+        {
+            get
+            {
+                if (Spl == null) return IsArc ? R * Angle : Vec3.Distance(A, B);
+                if (_len < 0)
+                {
+                    double l = 0; var prev = A;
+                    for (int i = 1; i <= 256; i++) { var q = At(i / 256.0); l += Vec3.Distance(prev, q); prev = q; }
+                    _len = l;
+                }
+                return _len;
+            }
+        }
+
+        double U(double t) => U0 + (U1 - U0) * t;
 
         public Vec3 At(double t)
         {
             if (t == 0) return A;
             if (t == 1) return B;
+            if (Spl != null) return Spl.Eval(U(t));
             return IsArc ? C + (X * Math.Cos(Angle * t) + Y * Math.Sin(Angle * t)) * R : Vec3.Lerp(A, B, t);
         }
 
-        public Vec3 Tangent(double t) => IsArc ? X * -Math.Sin(Angle * t) + Y * Math.Cos(Angle * t) : (B - A).Normalized;
+        public Vec3 Tangent(double t)
+        {
+            if (Spl != null) { Spl.Derivs(U(t), out _, out var d, out _); return (U1 >= U0 ? d : -d).Normalized; }
+            return IsArc ? X * -Math.Sin(Angle * t) + Y * Math.Cos(Angle * t) : (B - A).Normalized;
+        }
 
-        public Seg3 Reversed() => IsArc
+        public Seg3 Reversed() => Spl != null
+            ? new Seg3 { A = B, B = A, Spl = Spl, U0 = U1, U1 = U0, Name = Name }
+            : IsArc
             ? new Seg3 { IsArc = true, A = B, B = A, C = C, R = R, Angle = Angle, Name = Name, X = X * Math.Cos(Angle) + Y * Math.Sin(Angle), Y = X * Math.Sin(Angle) - Y * Math.Cos(Angle) }
             : new Seg3 { A = B, B = A, Name = Name };
 
         /// <summary>The parameter (0..1) of the point nearest p.</summary>
         public double Closest(Vec3 p)
         {
+            if (Spl != null)
+            {
+                // seeded from the nearest of a few samples
+                int best = 0; double bd = double.MaxValue;
+                for (int i = 0; i <= 32; i++) { var d = Vec3.Distance(At(i / 32.0), p); if (d < bd) { bd = d; best = i; } }
+                double lo = Math.Min(U0, U1), hi = Math.Max(U0, U1);
+                var u = Spl.ClosestParam(p, lo, hi, U(best / 32.0));
+                if (double.IsNaN(u)) return best / 32.0;
+                return Math.Clamp((u - U0) / (U1 - U0), 0, 1);
+            }
             if (!IsArc)
             {
                 var d = B - A; var l2 = d.LengthSq;
@@ -90,7 +128,8 @@ public static class NLoft
         public HCurve Piece(double t0, double t1, Vec3 p0, Vec3 p1)
         {
             HCurve c;
-            if (!IsArc) c = HCurve.Line(p0, p1);
+            if (Spl != null) c = SplinePiece(Spl, U(t0), U(t1));
+            else if (!IsArc) c = HCurve.Line(p0, p1);
             else
             {
                 double a0 = Angle * t0;
@@ -102,9 +141,26 @@ public static class NLoft
             return c;
         }
 
-        /// <summary>The piece's model edge from va to vb, and whether it runs that way.</summary>
-        public (NEdge e, bool fwd) Edge(double t0, NVertex va, NVertex vb)
+        /// <summary>The spline from parameter ua to ub (backwards where ub &lt; ua) as a curve over 0..1.</summary>
+        static HCurve SplinePiece(BSplineCurve s, double ua, double ub)
         {
+            var c = new HCurve(s.Degree, s.Knots, s.Poles.Select(q => H.Of(q)).ToArray());
+            double lo = Math.Min(ua, ub), hi = Math.Max(ua, ub), eps = 1e-12 * (c.T1 - c.T0);
+            if (lo > c.T0 + eps) c = c.Split(lo).after;
+            if (hi < c.T1 - eps) c = c.Split(hi).before;
+            if (ub < ua) c = new HCurve(c.P, c.U.Select(u => c.T0 + c.T1 - u).Reverse().ToArray(), c.Q.Reverse().ToArray());
+            return c.Reparam(0, 1);
+        }
+
+        /// <summary>The piece's model edge from va to vb (its parameters t0 to t1), and whether it runs that way.</summary>
+        public (NEdge e, bool fwd) Edge(double t0, double t1, NVertex va, NVertex vb)
+        {
+            if (Spl != null)
+            {
+                double ua = U(t0), ub = U(t1);
+                var curve = new NSpline(Spl);
+                return ua <= ub ? (new NEdge(curve, ua, ub, va, vb), true) : (new NEdge(curve, ub, ua, vb, va), false);
+            }
             if (!IsArc) return (new NEdge(new NLine(va.P, vb.P - va.P), 0, Vec3.Distance(va.P, vb.P), va, vb), true);
             double a0 = Angle * t0;
             var x = X * Math.Cos(a0) + Y * Math.Sin(a0);
@@ -235,7 +291,9 @@ public static class NLoft
         if (segs.Count == 2 && segs[0].Arc is { } a0 && segs[1].Arc is { } a1 && segs[0].Name == segs[1].Name
             && Vec2.Distance(a0.Center, a1.Center) < 1e-9 && Math.Abs(a0.Radius - a1.Radius) < 1e-9)
             return new Loop3(new List<Seg3> { Arc(segs[0], true) });
-        return new Loop3(segs.Select(s => s.Arc == null ? new Seg3 { A = fr.ToWorld(s.A), B = fr.ToWorld(s.B), Name = s.Name } : Arc(s, false)).ToList());
+        return new Loop3(segs.Select(s => s.Spline is { } sp
+            ? new Seg3 { A = fr.ToWorld(s.A), B = fr.ToWorld(s.B), Name = s.Name, Spl = sp.Curve with { Poles = sp.Curve.Poles.Select(q => fr.ToWorld(q.X, q.Y, 0)).ToArray() }, U0 = sp.T0, U1 = sp.T1 }
+            : s.Arc == null ? new Seg3 { A = fr.ToWorld(s.A), B = fr.ToWorld(s.B), Name = s.Name } : Arc(s, false)).ToList());
     }
 
     // ------------------------------------------------------------------------------------------
@@ -1101,7 +1159,7 @@ public static class NLoft
                 if (l.FreeSeam) return (l.Segs[0], t0, t1 + (t1 <= t0 ? 1 : 0));
                 throw new InvalidOperationException("loft: a piece spans a vertex");
             }
-            static (NEdge e, bool fwd) Edge((Seg3 s, double t0, double t1) p, NVertex a, NVertex b) => p.s.Edge(p.t0, a, b);
+            static (NEdge e, bool fwd) Edge((Seg3 s, double t0, double t1) p, NVertex a, NVertex b) => p.s.Edge(p.t0, p.t1, a, b);
             // vertices and the edges along the sections at the ends
             int kf = ks[0] == 0 ? 0 : -1, kl = ks[^1] == N - 1 ? N - 1 : -1;
             var vf = new NVertex[m]; var vl = new NVertex[m];
@@ -1122,7 +1180,7 @@ public static class NLoft
             var bottom = new (NEdge e, bool fwd)[m]; var top = new (NEdge e, bool fwd)[m];
             for (int b = 0; b < m; b++)
             {
-                if (kf >= 0) { var (s, t0, _) = Piece(0, b); bottom[b] = s.Edge(t0, vf[b], vf[(b + 1) % m]); }
+                if (kf >= 0) bottom[b] = Edge(Piece(0, b), vf[b], vf[(b + 1) % m]);
                 if (kl >= 0) top[b] = closed ? bottom[b] : Edge(Piece(N - 1, b), vl[b], vl[(b + 1) % m]);
             }
             // the side edges: the guide, or the interpolation of the breakpoint's points

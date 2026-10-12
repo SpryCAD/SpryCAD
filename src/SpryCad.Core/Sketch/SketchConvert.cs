@@ -7,8 +7,9 @@ namespace SpryCad.Core.Sketching;
 
 /// <summary>
 /// Convert Entities: model edges projected into a sketch. Exact where the sketch has the curve: lines as lines,
-/// circles and arcs facing the sketch as circles and arcs. Any other curve (a spline, a tilted circle) as arcs and
-/// lines fitted to it, within <see cref="Tolerance"/>. Edges joined end to end share their points. Converted
+/// circles and arcs facing the sketch as circles and arcs. Any other curve (a spline, a tilted circle) as a spline
+/// through points on it, within <see cref="Tolerance"/> of it (arcs and lines fitted to it where no spline does,
+/// a curve with a cusp as seen from the sketch). Edges joined end to end share their points. Converted
 /// geometry stays on its edge (<see cref="SkConvertLink"/>): every rebuild places it again where the edge now is
 /// (<see cref="Update"/>), so the sketch follows the model.
 /// </summary>
@@ -17,13 +18,13 @@ public static class SketchConvert
     /// <summary>How far a fitted arc or line may stray from a curve with no exact sketch equivalent.</summary>
     public const double Tolerance = 1e-3;
 
-    public enum PieceKind { Line, Arc, Circle }
+    public enum PieceKind { Line, Arc, Circle, Spline }
 
     /// <summary>
     /// A piece of an edge as seen in the sketch. Line: A to B. Arc: about C, counter-clockwise from A to B.
-    /// Circle: about C, radius R.
+    /// Circle: about C, radius R. Spline: through the points Fit, A to B (closed: round, the first not repeated).
     /// </summary>
-    public readonly record struct Piece(PieceKind Kind, Vec2 A, Vec2 B, Vec2 C, double R);
+    public readonly record struct Piece(PieceKind Kind, Vec2 A, Vec2 B, Vec2 C, double R, IReadOnlyList<Vec2>? Fit = null, bool Closed = false);
 
     /// <summary>An edge as sketch pieces (none when it is seen end on).</summary>
     public static List<Piece> Pieces(Frame frame, NEdge e)
@@ -40,12 +41,65 @@ public static class SketchConvert
                 res.Add(e.Closed ? new Piece(PieceKind.Circle, default, default, L(c.C), c.R) : ArcPiece(L(c.C), a, b, L(e.Mid)));
                 return res;
         }
-        // anything else, as it looks from the sketch
+        // anything else, as it looks from the sketch: a spline through points on it, else arcs and lines
         var pts = e.Samples(Tolerance / 4).Select(L).ToList();
         if (pts.Count < 2) return res;
         pts[0] = a; pts[^1] = b;
+        if (SplineThrough(pts, e.Closed) is { } sp) { res.Add(sp); return res; }
         Fit(pts, 0, pts.Count - 1, res);
         return res;
+    }
+
+    /// <summary>
+    /// A spline through points spread evenly (by length) along the curve's dense samples, as few as keep it within
+    /// <see cref="Tolerance"/> of them (eight to start, doubled up to 256); null if none does, or the curve is seen
+    /// end on (no length).
+    /// </summary>
+    static Piece? SplineThrough(List<Vec2> pts, bool closed)
+    {
+        var cum = new double[pts.Count];
+        for (int i = 1; i < pts.Count; i++) cum[i] = cum[i - 1] + Vec2.Distance(pts[i], pts[i - 1]);
+        var len = cum[^1];
+        if (len < 1e-6) return null;
+        Vec2 At(double s)
+        {
+            int i = Array.BinarySearch(cum, s);
+            if (i >= 0) return pts[i];
+            i = ~i;
+            if (i <= 0) return pts[0];
+            if (i >= pts.Count) return pts[^1];
+            var f = (s - cum[i - 1]) / Math.Max(cum[i] - cum[i - 1], 1e-300);
+            return Vec2.Lerp(pts[i - 1], pts[i], f);
+        }
+        for (int n = 8; n <= 256; n *= 2)
+        {
+            var fit = new List<Vec2>();
+            int count = closed ? n : n + 1;
+            for (int k = 0; k < count; k++) fit.Add(At(len * k / n));
+            if (!closed) { fit[0] = pts[0]; fit[^1] = pts[^1]; }
+            var curve = SplineFit.Through(fit.Select(q => new Vec3(q.X, q.Y, 0)).ToList(), closed);
+            if (curve == null) continue;
+            // the spline as a fine polyline, every sample of the curve within the tolerance of it
+            int m = Math.Max(64, 16 * (curve.Poles.Length - curve.Degree));
+            var poly = Enumerable.Range(0, m + 1).Select(i => { var q = curve.Eval((double)i / m); return new Vec2(q.X, q.Y); }).ToList();
+            bool ok = true;
+            int seg = 0;
+            foreach (var p in pts)
+            {
+                // (both run the same way: the nearest segment is found near the last one)
+                double best = double.MaxValue; int bi = seg;
+                for (int j = Math.Max(0, seg - 4); j < poly.Count - 1; j++)
+                {
+                    var d = SegmentDistance(p, poly[j], poly[j + 1]);
+                    if (d < best) { best = d; bi = j; }
+                    else if (j > seg + 8 && d > best * 4) break;
+                }
+                seg = bi;
+                if (best > Tolerance) { ok = false; break; }
+            }
+            if (ok) return new Piece(PieceKind.Spline, fit[0], fit[^1], default, 0, fit, closed);
+        }
+        return null;
     }
 
 
@@ -193,8 +247,10 @@ public static class SketchConvert
                 x.Link = new SkConvertLink { Edge = r, Piece = x.Link.Piece, Of = x.Link.Of, Group = x.Link.Group };
             }
         }
+        // (a spline: through as many points, as it was)
         bool Fits(List<SkEntity> ents, List<Piece> pieces) =>
-            pieces.Count == ents[0].Link!.Of && ents.All(x => x.Link!.Piece < pieces.Count && KindOf(x) == pieces[x.Link.Piece].Kind);
+            pieces.Count == ents[0].Link!.Of && ents.All(x => x.Link!.Piece < pieces.Count && KindOf(x) == pieces[x.Link.Piece].Kind
+                && (x is not SkSpline s || s.Points.Count == pieces[x.Link.Piece].Fit!.Count && s.Closed == pieces[x.Link.Piece].Closed));
 
         // what goes, and the edges converted (again) in its place: after the others are placed, so their ends are
         // found where the neighbours now are
@@ -298,6 +354,7 @@ public static class SketchConvert
         SkLine => PieceKind.Line,
         SkArc => PieceKind.Arc,
         SkCircle => PieceKind.Circle,
+        SkSpline => PieceKind.Spline,
         _ => null,
     };
 
@@ -309,6 +366,7 @@ public static class SketchConvert
             case SkLine l: want(l.P1, x, p.A); want(l.P2, x, p.B); break;
             case SkArc a: want(a.Center, x, p.C); want(a.Start, x, p.A); want(a.End, x, p.B); break;
             case SkCircle c: want(c.Center, x, p.C); c.R = p.R; break;
+            case SkSpline s: for (int i = 0; i < s.Points.Count && i < p.Fit!.Count; i++) want(s.Points[i], x, p.Fit[i]); break;
         }
     }
 
@@ -370,6 +428,8 @@ public static class SketchConvert
         readonly HashSet<(long, long)> _lines = new();
         readonly HashSet<(long, long, long)> _arcs = new();
         readonly HashSet<(long, long)> _circles = new();
+        readonly HashSet<string> _splines = new();
+        static string SplineKey(IEnumerable<long> pts) => string.Join(",", pts);
 
         public Index(Sketch sk)
         {
@@ -389,6 +449,7 @@ public static class SketchConvert
                 case SkLine l: _lines.Add((Math.Min(l.P1, l.P2), Math.Max(l.P1, l.P2))); break;
                 case SkArc a: _arcs.Add((a.Center, a.Start, a.End)); break;
                 case SkCircle c: _circles.Add((c.Center, RKey(c.R))); break;
+                case SkSpline s: _splines.Add(SplineKey(s.Points)); break;
             }
         }
 
@@ -423,6 +484,13 @@ public static class SketchConvert
                         long c = Point(p.C), s = Point(p.A), e = Point(p.B);
                         if (_arcs.Contains((c, s, e))) return false;
                         made = Sketch.Add(new SkArc { Center = c, Start = s, End = e, Link = link });
+                        break;
+                    }
+                case PieceKind.Spline:
+                    {
+                        var ids = p.Fit!.Select(Point).ToList();
+                        if (_splines.Contains(SplineKey(ids))) return false;
+                        made = Sketch.Add(new SkSpline { Points = ids, Closed = p.Closed, Link = link });
                         break;
                     }
                 default:

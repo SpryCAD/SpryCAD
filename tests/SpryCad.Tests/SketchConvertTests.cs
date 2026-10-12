@@ -185,7 +185,7 @@ static class SketchConvertTests
             t.True(on.Entity(kept.Id) is SkLine { Link: not null, Dangling: false } && on.Entity(mine.Id) != null && !on.Entities.Any(e => e.Dangling), "back, the same geometry");
         });
 
-        t.Test("Convert Entities: a hole's rim as a circle; a tilted circle as fitted arcs within tolerance", () =>
+        t.Test("Convert Entities: a hole's rim as a circle; a tilted circle as a closed spline within tolerance", () =>
         {
             var into = new Sketch();
             var v = new NVertex(new Vec3(13, 4, 2));
@@ -195,25 +195,32 @@ static class SketchConvertTests
             t.Near(circle.R, 3, 1e-12);
             t.True(Vec2.Distance(into.Point(circle.Center)!.P, new Vec2(10, 4)) < 1e-12, "center");
 
-            // a circle tilted 40° to the sketch looks like an ellipse: arcs within the tolerance of it
+            // a circle tilted 40° to the sketch looks like an ellipse: a closed spline through points on it, within
+            // the tolerance of it all round
             var tilted = new Sketch();
             var axis = new Vec3(Math.Sin(40 * Math.PI / 180), 0, Math.Cos(40 * Math.PI / 180));
             var c = new NCircle(Vec3.Zero, axis, Vec3.UnitY, 20);
             var w = new NVertex(c.Eval(0));
             var e = new NEdge(c, 0, 2 * Math.PI, w, w);
             t.True(SketchConvert.Edge(tilted, Frame.Front, e), "tilted");
-            var fitted = tilted.Entities.OfType<SkArc>().ToList();
-            t.True(fitted.Count is > 0 and < 64 && tilted.Entities.All(x => x is SkArc or SkLine), $"{fitted.Count} arcs");
+            var spline = tilted.Entities.OfType<SkSpline>().Single();
+            t.True(spline.Closed && spline.Points.Count <= 64, $"{spline.Points.Count} points, closed {spline.Closed}");
+            var curve = tilted.SplineCurve(spline)!;
+            var poly = Enumerable.Range(0, 4001).Select(i => { var q = curve.Eval(i / 4000.0); return new Vec2(q.X, q.Y); }).ToList();
             for (int i = 0; i < 360; i++)
             {
                 var p = Frame.Front.ToLocal(c.Eval(i * Math.PI / 180));
-                var d = fitted.Min(a =>
+                var d = Enumerable.Range(0, poly.Count - 1).Min(k =>
                 {
-                    var cc = tilted.Point(a.Center)!.P;
-                    return Math.Abs(Vec2.Distance(p, cc) - Vec2.Distance(tilted.Point(a.Start)!.P, cc));
+                    var u = poly[k + 1] - poly[k]; var f = Math.Clamp(Vec2.Dot(p - poly[k], u) / u.LengthSq, 0, 1);
+                    return Vec2.Distance(poly[k] + u * f, p);
                 });
                 t.True(d <= SketchConvert.Tolerance * 1.5, $"within tolerance at {i}°: {d:g3}");
             }
+            // and it makes a profile: the ellipse's area (π a b, b = 20 cos 40°)
+            var regions = ProfileExtractor.Extract(tilted, out _);
+            t.Eq(regions.Count, 1);
+            t.Near(Math.Abs(regions[0].Outer.SignedArea()), Math.PI * 20 * 20 * Math.Cos(40 * Math.PI / 180), 1.0);
         });
     }
 }

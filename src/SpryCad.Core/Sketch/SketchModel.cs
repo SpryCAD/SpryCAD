@@ -310,8 +310,59 @@ public sealed class Sketch
 
     public double ArcRadius(SkArc a) => Vec2.Distance(P(a.Center), P(a.Start));
 
-    /// <summary>A spline's curve through its points now (in the sketch's x–y, z = 0; parameters 0 to 1); null when its points do not make one.</summary>
-    public BSplineCurve? SplineCurve(SkSpline s) => SplineFit.Through(s.Points.Select(id => { var p = P(id); return new Vec3(p.X, p.Y, 0); }).ToList(), s.Closed);
+    /// <summary>
+    /// A spline's curve through its points now (in the sketch's x–y, z = 0; parameters 0 to 1); null when its points do
+    /// not make one. An end tangent to a line or arc it meets there (a Tangent relation) leaves in that one's direction.
+    /// </summary>
+    public BSplineCurve? SplineCurve(SkSpline s)
+    {
+        Vec3? start = null, end = null;
+        if (!s.Closed && s.Points.Count >= 2)
+            foreach (var c in Constraints)
+                if (SplineTangent(c) is { } t && ReferenceEquals(t.spline, s))
+                {
+                    var d = new Vec3(t.away.X, t.away.Y, 0);
+                    if (t.atStart) start = d; else end = -d;
+                }
+        return SplineFit.Through(s.Points.Select(id => { var p = P(id); return new Vec3(p.X, p.Y, 0); }).ToList(), s.Closed, start, end);
+    }
+
+    /// <summary>
+    /// A Tangent relation between a spline and a line or arc meeting one of its ends: the spline, the point, whether it
+    /// is the spline's start, and the direction away from the other entity there (along it). Null for any other relation.
+    /// </summary>
+    public (SkSpline spline, SkEntity other, long point, bool atStart, Vec2 away)? SplineTangent(SkConstraint c)
+    {
+        if (c.Type != CType.Tangent || c.Refs.Length != 2) return null;
+        var e0 = Entity(c.Refs[0]); var e1 = Entity(c.Refs[1]);
+        var (sp, o) = e1 is SkSpline s1 ? (s1, e0) : e0 is SkSpline s0 ? (s0, e1) : (null, null);
+        if (sp == null || o == null || sp.Closed || sp.Points.Count < 2) return null;
+        foreach (var (pt, atStart) in new[] { (sp.Points[0], true), (sp.Points[^1], false) })
+        {
+            if (!o.PointIds.Contains(pt)) continue;
+            Vec2 away;
+            switch (o)
+            {
+                case SkLine l:
+                    {
+                        var other = l.P1 == pt ? l.P2 : l.P1;
+                        away = P(pt) - P(other);
+                        break;
+                    }
+                case SkArc a when pt == a.Start || pt == a.End:
+                    {
+                        // the arc runs counter-clockwise from its start: it leaves its start along t, arrives at its end along t
+                        var r = P(pt) - P(a.Center); var t = new Vec2(-r.Y, r.X);
+                        away = pt == a.Start ? -t : t;
+                        break;
+                    }
+                default: continue;
+            }
+            if (away.Length < 1e-12) return null;
+            return (sp, o, pt, atStart, away.Normalized);
+        }
+        return null;
+    }
     public double Radius(SkEntity e) => e switch { SkCircle c => c.R, SkArc a => ArcRadius(a), _ => 0 };
 
     public Sketch Clone() => new()

@@ -100,6 +100,8 @@ public static class SketchSolver
         foreach (var c in sk.Constraints)
         {
             if (c.Driven) continue;
+            // a spline tangent to what it meets: the spline's fit holds it (its end leaves in that direction), not an equation
+            if (c.Type == CType.Tangent && c.Refs.Any(id => sk.Entity(id) is SkSpline)) continue;
             try { AddConstraint(s, c); } catch { /* malformed constraint: ignore */ }
         }
         return s;
@@ -1033,6 +1035,7 @@ public static class SketchSolver
         (Vec2 a, Vec2 b) L(long id) { var l = (SkLine)sk.Entity(id)!; return (P(l.P1), P(l.P2)); }
         bool IsPt(long id) => sk.Point(id) != null;
         int Sg(double v) => v < 0 ? -1 : 1;
+        if (c.Type == CType.Tangent && c.Refs.Any(id => sk.Entity(id) is SkSpline)) return;
         switch (c.Type)
         {
             case CType.HDistance:
