@@ -69,6 +69,7 @@ static class LoftProbe
     public static IEnumerable<(string name, Func<NBody> make)> Cases()
     {
         yield return ("slot-circle-roundrect", () => NLoft.Loft(new[] { S(0, new ProfileRegion(Slot(30, 8))), S(20, Circle(10)), S(40, new ProfileRegion(RoundRect(36, 20, 4))) }, null, null, "X"));
+        yield return ("shank-roundrects", () => NLoft.Loft(new[] { S(0, new ProfileRegion(RoundRect(16, 11, 5))), S(40, new ProfileRegion(RoundRect(24, 15, 7))) }, null, null, "X"));
         yield return ("roundrect-triangle", () => NLoft.Loft(new[] { S(0, new ProfileRegion(RoundRect(30, 30, 5))), S(30, Ngon(3, 12)) }, null, null, "X"));
         yield return ("star-circle", () => NLoft.Loft(new[] { S(0, Star(5, 15, 7)), S(25, Circle(8)) }, null, null, "X"));
         yield return ("six-sections-tangent", () => NLoft.Loft(Enumerable.Range(0, 6).Select(i => S(i * 12, i % 2 == 0 ? Rect(20, 20) : Circle(9))).ToArray(), null, new NLoft.Options(NLoft.Tangency.Normal, 1, NLoft.Tangency.Normal, 0.5), "X"));
@@ -233,6 +234,23 @@ static class LoftProbe
                 var u = Csg.Union(sol, box);
                 var uv = u.Native != null ? NMass.Of(u.Native)?.Volume : null;
                 var tBool = sw.Elapsed.TotalMilliseconds - tLoft - tMesh;
+                if (Environment.GetEnvironmentVariable("LOFT_KINK") != null)
+                {
+                    // the largest angle between the normals of two faces along each edge they share (B-splines)
+                    foreach (var e in b.Edges.Where(e => e.Uses.Count == 2 && e.Uses.All(u => u.Face.Surface.Kind != SurfaceKind.Plane)))
+                    {
+                        var f0 = e.Uses[0].Face; var f1 = e.Uses[1].Face;
+                        if (f0.Tag.Name.EndsWith("Start") || f0.Tag.Name.EndsWith("End") || f1.Tag.Name.EndsWith("Start") || f1.Tag.Name.EndsWith("End")) continue;
+                        double worst = 0;
+                        for (int i = 1; i < 16; i++)
+                        {
+                            var q = e.At(i / 16.0);
+                            var n0 = f0.Surface.Normal(f0.Surface.Project(q)); var n1 = f1.Surface.Normal(f1.Surface.Project(q));
+                            worst = Math.Max(worst, Math.Acos(Math.Clamp(Math.Abs(Vec3.Dot(n0, n1)), 0, 1)) * 180 / Math.PI);
+                        }
+                        Console.WriteLine($"   {f0.Tag.Name} | {f1.Tag.Name}: {worst:0.####}°");
+                    }
+                }
                 var kinds = string.Join(",", b.Faces.GroupBy(f => f.Surface.Kind).Select(g => $"{g.Key}:{g.Count()}"));
                 var spans = b.Faces.Where(f => f.Surface.Nurbs != null).Select(f => f.Surface.Nurbs!).Select(n => $"{n.SpansU}x{n.SpansV}" + (Prof.Enabled || Environment.GetEnvironmentVariable("LOFT_PROF") != null ? $"(rho {n.DirectionalCurvatureRadius().u:0.##},{n.DirectionalCurvatureRadius().v:0.##})" : "")).Distinct();
                 kinds += " spans " + string.Join(" ", spans);
