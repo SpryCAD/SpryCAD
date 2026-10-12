@@ -160,13 +160,15 @@ public sealed class NDomain
     }
 
     /// <summary>
-    /// UV' coordinates of points along a curve (an edge's samples): on a screw surface each point is found from the
-    /// one before it (from the domain's middle, a long helical face's points are turns away: a full search each).
+    /// UV' coordinates of points along a curve (an edge's samples): on a screw surface, or an open B-spline patch,
+    /// each point is found from the one before it (from the domain's middle, a long helical face's points are turns
+    /// away: a full search each. On an open patch the hint only starts the search; a closed one unwraps by it).
     /// </summary>
     public Vec2[] MapAlong(IReadOnlyList<Vec3> pts)
     {
         var res = new Vec2[pts.Count];
-        if (Face.Surface.Kind != SurfaceKind.Screw)
+        var s = Face.Surface;
+        if (s.Kind != SurfaceKind.Screw && !(s.Kind == SurfaceKind.BSpline && !s.Nurbs!.ClosedU && !s.Nurbs.ClosedV))
         {
             for (int i = 0; i < res.Length; i++) res[i] = Map(pts[i]);
             return res;
@@ -375,7 +377,15 @@ public sealed class NDomain
         foreach (var (li, ri) in swapped)
         {
             var f3 = Fine3(li, ri).p3;
-            for (int k = 0; k + 1 < f3.Length; k++) best = Math.Min(best, SegDist(f3[k], f3[k + 1], p));
+            // (a long edge's fine points in chunks: one farther than near is passed over, as the coarse boxes above are.
+            // Only distances below near are read: one at or past it means the same as none)
+            foreach (var bx in Fine3Boxes(li, ri))
+            {
+                var e = Vec3.Max(Vec3.Max(bx.Min - p, p - bx.Max), Vec3.Zero);
+                var pad = 1e-9 * ((bx.Max - bx.Min).Length + bx.Min.Length + bx.Max.Length + p.Length);
+                if (e.Length - pad >= near) continue;
+                for (int k = bx.Start; k < bx.End; k++) best = Math.Min(best, SegDist(f3[k], f3[k + 1], p));
+            }
         }
         return (best, swapped);
 
@@ -405,7 +415,13 @@ public sealed class NDomain
             var (_, a, b) = _runs[li][ri];
             for (int k = a; k < b; k++) Seg(poly[k], poly[(k + 1) % n]);
             var fu = FineUv(li, ri);
-            for (int k = 0; k + 1 < fu.Length; k++) Seg(fu[k], fu[k + 1]);
+            // (in chunks: one wholly above or below the ray, or left of q, crosses it nowhere)
+            foreach (var bx in FineUvBoxes(li, ri))
+            {
+                if (q.Y >= bx.Max.Y || q.Y < bx.Min.Y) continue;
+                if (q.X > bx.Max.X + 1e-9 * (Math.Abs(bx.Max.X) + Math.Abs(bx.Min.X) + Math.Abs(q.X) + 1)) continue;
+                for (int k = bx.Start; k < bx.End; k++) Seg(fu[k], fu[k + 1]);
+            }
         }
         return inside;
     }
@@ -438,6 +454,24 @@ public sealed class NDomain
     /// A swapped coedge's fine points in this domain's UV: mapped from the run's first point onward, ending on the run's
     /// first point and the next run's exactly.
     /// </summary>
+    // the fine points' segments in chunks of Run, with their boxes (in 3D; in UV, z unused)
+    readonly System.Collections.Concurrent.ConcurrentDictionary<(int, int), Box3[]> _fine3Boxes = new(), _fineUvBoxes = new();
+    Box3[] Fine3Boxes(int li, int ri) => _fine3Boxes.GetOrAdd((li, ri), _ => Chunks(Fine3(li, ri).p3));
+    Box3[] FineUvBoxes(int li, int ri) => _fineUvBoxes.GetOrAdd((li, ri), _ => Chunks(FineUv(li, ri).Select(q => new Vec3(q.X, q.Y, 0)).ToArray()));
+    static Box3[] Chunks(Vec3[] pts)
+    {
+        int segs = Math.Max(0, pts.Length - 1);
+        var r = new Box3[(segs + Run - 1) / Run];
+        for (int k = 0; k < r.Length; k++)
+        {
+            int s = k * Run, e = Math.Min(segs, s + Run);
+            Vec3 lo = pts[s], hi = pts[s];
+            for (int i = s; i <= e; i++) { lo = Vec3.Min(lo, pts[i]); hi = Vec3.Max(hi, pts[i]); }
+            r[k] = new Box3(s, e, lo, hi);
+        }
+        return r;
+    }
+
     Vec2[] FineUv(int li, int ri) => _fineUv.GetOrAdd((li, ri), _ =>
     {
         var s = Face.Surface;

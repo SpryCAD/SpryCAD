@@ -342,6 +342,18 @@ public static class StepImport
             // the loops, which agree with the neighbouring faces through the shared edges, decide which side is
             // outside; some writers get a face's same_sense flag wrong (seen on rational fillet faces): such a face's
             // outer loop runs clockwise in its parameter plane, so its sense is flipped
+            // edges of the thread's flanks (B-splines in the file) as exact helices of their faces' motion
+            if (RecognizeAnalytic)
+            {
+                var done = new HashSet<NEdge>(ReferenceEqualityComparer.Instance);
+                foreach (var f in body.Faces)
+                    if (f.Surface.Kind == SurfaceKind.Screw)
+                        foreach (var c in f.Coedges)
+                            if (c.Edge.Curve is NSpline && done.Add(c.Edge) && NRecognize.Helix(c.Edge, f.Surface.Screw!.Motion, 1e-3) is { } h)
+                            {
+                                c.Edge.Curve = h.helix; c.Edge.T0 = h.t0; c.Edge.T1 = h.t1;
+                            }
+            }
             int flipped = 0;
             foreach (var f in body.Faces)
             {

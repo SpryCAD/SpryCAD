@@ -213,7 +213,11 @@ static class ImportTests
             t.True(faces.Count(f => f.Surface.Kind == SurfaceKind.Screw) >= 4, "screw faces");
             // on the round lead about each part's axis: one motion for the flanks of a thread
             foreach (var screws in bodies.Select(nb => nb.Faces.Where(f => f.Surface.Kind == SurfaceKind.Screw).ToList()).Where(l => l.Count > 0))
+            {
                 t.True(screws.All(f => f.Surface.Screw!.Motion.SameHelices(screws[0].Surface.Screw!.Motion)), "one motion");
+                // their long edges exact helices of it too
+                t.True(screws.SelectMany(f => f.Coedges).Any(c => c.Edge.Curve is NHelix h && h.Motion.SameHelices(screws[0].Surface.Screw!.Motion)), "helical edges");
+            }
             t.Near(bodies.Sum(nb => NTess.ToSolid(nb, 1e-3).Volume()), volume, volume * 1e-4);
         });
 

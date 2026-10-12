@@ -312,7 +312,19 @@ public sealed class NurbsSurface
         if (Stationary(p, u, v))
         {
             var c = Eval(u, v); var d = Vec3.Distance(c, p);
-            if (d < 0.25 * MinCurvatureRadius()) return (u, v, c, d);
+            if (Nearest(p, u, v, d)) return (u, v, c, d);
+        }
+        return Closest(p);
+    }
+
+    /// <summary>
+    /// Whether the foot point (u, v) at distance d is p's nearest: p well within the surface's tightest radius of
+    /// curvature of it, or no grid cell beyond two of its neighbours can hold anything nearer.
+    /// </summary>
+    bool Nearest(Vec3 p, double u, double v, double d)
+    {
+        {
+            if (d < 0.25 * MinCurvatureRadius()) return true;
             int ci = Math.Clamp((int)((u - U0) / (U1 - U0) * Gu), 0, Gu - 1), cj = Math.Clamp((int)((v - V0) / (V1 - V0) * Gv), 0, Gv - 1);
             bool sure = true;
             for (int bi = 0; bi < Bu && sure; bi++)
@@ -329,9 +341,28 @@ public sealed class NurbsSurface
                             if (Vec3.Distance(p, _cellC[i, j]) - _cellR[i, j] < d) { sure = false; break; }
                         }
                 }
-            if (sure) return (u, v, c, d);
+            return sure;
         }
-        return Closest(p);
+    }
+
+    /// <summary>
+    /// Whether (u, v) is the nearest point to p of the parameter box near it: the residual normal to the surface along
+    /// each free direction, and pointing out of the box along a direction held at its bound (a point just past the
+    /// patch's edge, whose nearest point is on the edge).
+    /// </summary>
+    bool Foot(Vec3 p, double u, double v)
+    {
+        var (s, su, sv, _, _, _) = Derivs(u, v);
+        var r = s - p;
+        double tol = 1e-9 * _scale;
+        bool Ok(double g, double len, double t, double lo, double hi)
+        {
+            var lim = tol * (len + 1e-300);
+            if (t <= lo) return g >= -lim;
+            if (t >= hi) return g <= lim;
+            return Math.Abs(g) <= lim;
+        }
+        return Ok(Vec3.Dot(r, su), su.Length, u, U0, U1) && Ok(Vec3.Dot(r, sv), sv.Length, v, V0, V1);
     }
 
     /// <summary>Whether (u, v) is a proper foot point of p: the residual is normal to the surface there.</summary>
@@ -352,6 +383,10 @@ public sealed class NurbsSurface
             var (u, v) = Newton(p, uHint, vHint);
             var c = Eval(u, v); var d = Vec3.Distance(c, p);
             if (d < 1e-7 * _scale) return (u, v, c, d);
+            // a point near the surface (a boundary edge's, fitted a few microns off it): the foot point found from
+            // the hint when it is surely the nearest (the full search would find the same). Open patches only: on a
+            // closed one the hint also picks the side of the seam
+            if (!ClosedU && !ClosedV && d < 1e-3 * _scale && Foot(p, u, v) && Nearest(p, u, v, d)) return (u, v, c, d);
         }
         // grid seed: the nearest sample (the first in grid order of equally near ones), among cells that can be
         // nearer than the best so far: the block nearest by its bound first, then the others it does not rule out

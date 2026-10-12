@@ -80,6 +80,17 @@ public static class NIntersect
         double lo = Math.Min(e.T0, e.T1), hi = Math.Max(e.T0, e.T1);
         var res = new List<double>();
 
+        // a helix about a coaxial cylinder, or on a screw of its own motion, keeps its distance all the way: on the
+        // surface everywhere or nowhere (one point tells; the probe below would search the screw seventeen times)
+        if (c is NHelix hx && Math.Abs(hx.Motion.K) > 1e-12
+            && (s.Kind == SurfaceKind.Cylinder && Vec3.Cross(s.Def.Axis.Normalized, hx.Motion.A).Length < 1e-12 && Vec3.Cross(s.Def.Origin - hx.Motion.O, hx.Motion.A).Length < tol
+                || s.Kind == SurfaceKind.Screw && s.Screw!.Motion.SameHelices(hx.Motion)))
+        {
+            // (on a screw, past its sweep the helix leaves it: the ends and middle all on it)
+            bool on = Math.Abs(F(0.5 * (lo + hi))) <= tol && (s.Kind == SurfaceKind.Cylinder || Math.Abs(F(lo)) <= tol && Math.Abs(F(hi)) <= tol);
+            return new EdgeHits(res, on);
+        }
+
         // edge lying on the surface (fitted curves only within their fit tolerance: a boolean fits traced
         // sections within 50 tol of the exact intersection)
         const int probe = 16;
@@ -358,6 +369,19 @@ public static class NIntersect
 
     static List<double>? AnalyticRoots(NCurve c, NSurface s, double tol)
     {
+        if (c is NHelix hx && Math.Abs(hx.Motion.K) > 1e-12)
+        {
+            var m = hx.Motion;
+            // a coaxial cylinder: the helix keeps its radius, on it all the way (the caller's probe) or beside it
+            if (s.Kind == SurfaceKind.Cylinder && Vec3.Cross(s.Def.Axis.Normalized, m.A).Length < 1e-12 && Vec3.Cross(s.Def.Origin - m.O, m.A).Length < tol)
+                return new List<double>();
+            // a plane square to the axis: the height rises K a radian
+            if (s.Kind == SurfaceKind.Plane && Vec3.Cross(s.Plane!.Normal, m.A).Length < 1e-12)
+            {
+                var sgn = Vec3.Dot(s.Plane.Normal, m.A) > 0 ? 1 : -1;
+                return new List<double> { (sgn * s.Plane.D - Vec3.Dot(m.A, hx.P0)) / m.K };
+            }
+        }
         if (c is NLine ln)
         {
             var l0 = s.F.ToLocal3(ln.P);
@@ -1083,6 +1107,35 @@ public static class NIntersect
     [ThreadStatic] static int[]? _posStamp;
     [ThreadStatic] static bool[]? _live;
 
+    /// <summary>
+    /// Whether the face's surface over the parameter box keeps clear of sb: the box split in halves (across its
+    /// longer side in space) until every piece's distance from sb at its centre exceeds its radius (as the grid's
+    /// blocks are ruled out). A piece within tol of sb, or too many pieces, and it is not known: false.
+    /// </summary>
+    static bool Clear(NDomain dom, NSurface sb, double u0, double u1, double v0, double v1, double tol)
+    {
+        const int budget = 600;
+        var stack = new Stack<(double u0, double u1, double v0, double v1)>();
+        stack.Push((u0, u1, v0, v1));
+        int evals = 0;
+        while (stack.Count > 0)
+        {
+            var (a0, a1, b0, b1) = stack.Pop();
+            double am = 0.5 * (a0 + a1), bm = 0.5 * (b0 + b1);
+            var c = dom.Eval(new Vec2(am, bm));
+            Vec3 E(double u, double v) => dom.Eval(new Vec2(u, v));
+            Vec3 pu0 = E(a0, bm), pu1 = E(a1, bm), pv0 = E(am, b0), pv1 = E(am, b1);
+            double r = 0;
+            foreach (var q in new[] { E(a0, b0), E(a1, b0), E(a0, b1), E(a1, b1), pu0, pu1, pv0, pv1 }) r = Math.Max(r, Vec3.Distance(c, q));
+            var f = Math.Abs(sb.F_(c));
+            if (!double.IsFinite(f) || f <= tol || ++evals > budget) return false;
+            if (f > r * 1.25 + 1e-9) continue;
+            if (Vec3.Distance(pu0, pu1) >= Vec3.Distance(pv0, pv1)) { stack.Push((a0, am, b0, b1)); stack.Push((am, a1, b0, b1)); }
+            else { stack.Push((a0, a1, b0, bm)); stack.Push((a0, a1, bm, b1)); }
+        }
+        return true;
+    }
+
     public static List<NPolyline> Trace(NFace fa, NSurface sb, double tol, NDomain? domain = null)
     {
         // (domain: fa's domain at max(tol, 1e-3), when the caller has it)
@@ -1091,6 +1144,11 @@ public static class NIntersect
         double du = dom.UMax - dom.UMin, dv = dom.VMax - dom.VMin;
         double mu = du * 0.02 + 1e-9, mv = dv * 0.02 + 1e-9;
         double u0 = dom.UMin - mu, u1 = dom.UMax + mu, v0 = dom.VMin - mv, v1 = dom.VMax + mv;
+        // a free-form surface's distance is a closest-point search, and the grid asks it at thousands of nodes: first
+        // a cheap proof that the face keeps clear of it (a thread's flank against the next start's), and nothing traced
+        if (sb.Kind is SurfaceKind.BSpline or SurfaceKind.Offset)
+            using (Prof.Time("trace.clear"))
+                if (Clear(dom, sb, u0, u1, v0, v1, tol)) return new();
         const int nu = 96, nv = 96, block = 8;
         Vec2 UV(int i, int j) => new(u0 + (u1 - u0) * i / nu, v0 + (v1 - v0) * j / nv);
         // fine grid values are computed on demand: only blocks that may contain the curve are visited (in this

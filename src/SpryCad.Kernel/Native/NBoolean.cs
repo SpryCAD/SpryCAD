@@ -1130,7 +1130,8 @@ public sealed class NBoolean
                 var mid = c.Eval(0.5 * (t0 + t1));
                 int ca, cb;
                 // a tight tolerance: only curves really on a face boundary are dropped, thin slivers next to one are kept
-                using (Prof.Time("sec.midclass")) { ca = domA.Classify(sa.Project(mid), _tol * 10); cb = domB.Classify(sb.Project(mid), _tol * 10); }
+                Vec3 qa, qb; using (Prof.Time("sec.midproj")) { qa = sa.Project(mid); qb = sb.Project(mid); }
+                using (Prof.Time("sec.midclass")) { ca = domA.Classify(qa, _tol * 10); cb = domB.Classify(qb, _tol * 10); }
                 if (dbgPair) T($"    interval {v0.P}->{v1.P} mid {mid} inA={ca} inB={cb}");
                 if (ca <= 0 || cb <= 0) continue;
                 NEdge ne;
@@ -1333,10 +1334,10 @@ public sealed class NBoolean
         if (secs.Count == 0) { yield return f; yield break; }
 
         var hes = new List<HalfEdge>();
-        HalfEdge Make(NEdge e, bool fwd)
+        HalfEdge Make(NEdge e, bool fwd, Vec2[]? mapped = null)
         {
-            var pts = e.FinestSamples(_sampleTol * 500);
-            var uv = dom.MapAlong(pts);
+            // (a section's two sides: its samples mapped once, the copy reversed)
+            var uv = mapped != null ? (Vec2[])mapped.Clone() : dom.MapAlong(e.FinestSamples(_sampleTol * 500));
             if (!fwd) Array.Reverse(uv);
             var h = new HalfEdge { Edge = e, Forward = fwd, From = fwd ? e.V0 : e.V1, To = fwd ? e.V1 : e.V0, Uv = uv };
             h.OutAngle = Dir(uv, true).Angle;
@@ -1344,7 +1345,7 @@ public sealed class NBoolean
             return h;
         }
         foreach (var c in f.Coedges) hes.Add(Make(c.Edge, c.Forward));
-        foreach (var e in secs) { hes.Add(Make(e, true)); hes.Add(Make(e, false)); }
+        foreach (var e in secs) { var h = Make(e, true); hes.Add(h); hes.Add(Make(e, false, h.Uv)); }
         var outgoing = hes.GroupBy(h => h.From, ReferenceEqualityComparer.Instance).ToDictionary(g => (NVertex)g.Key!, g => g.ToList(), ReferenceEqualityComparer.Instance);
 
         HalfEdge? Next(HalfEdge h)

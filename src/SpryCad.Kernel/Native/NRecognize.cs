@@ -213,6 +213,56 @@ public static class NRecognize
     }
 
     /// <summary>
+    /// The helix of the motion an edge is (a thread's flank's edge, written as a B-spline), or null: every point at one
+    /// radius and one height z − K·θ (one turn of it) within the fitting noise; the radius and height rounded within it,
+    /// as fitted cylinders are (so the flank's edge lies on the root cylinder it bounds). Its parameters at the edge's
+    /// ends, in the edge's direction.
+    /// </summary>
+    public static (NHelix helix, double t0, double t1)? Helix(NEdge e, ScrewMotion m, double fitted)
+    {
+        if (Math.Abs(m.K) < 1e-12) return null;
+        const int n = 64;
+        var lead = 2 * Math.PI * m.K;
+        double rlo = double.MaxValue, rhi = 0, zlo = double.MaxValue, zhi = double.MinValue, z0 = 0;
+        for (int i = 0; i <= n; i++)
+        {
+            var l = m.Local(e.At((double)i / n));
+            var r = Math.Sqrt(l.X * l.X + l.Y * l.Y);
+            var zeta = l.Z - m.K * Math.Atan2(l.Y, l.X);
+            if (i == 0) z0 = zeta; else zeta -= lead * Math.Round((zeta - z0) / lead);
+            rlo = Math.Min(rlo, r); rhi = Math.Max(rhi, r); zlo = Math.Min(zlo, zeta); zhi = Math.Max(zhi, zeta);
+        }
+        var tol = fitted * rhi;
+        if (!(rlo > tol) || rhi - rlo > 2 * tol || zhi - zlo > 2 * tol) return null;
+        static double Roundest(double lo, double hi)
+        {
+            for (int d = 0; d <= 9; d++)
+            {
+                var f = Math.Pow(10, d);
+                var x = Math.Ceiling(lo * f) / f;
+                if (x <= hi) return x;
+            }
+            return 0.5 * (lo + hi);
+        }
+        var rr = Roundest(rlo, rhi); var zz = Roundest(zlo, zhi);
+        var hx = new NHelix(m, m.O + m.X * rr + m.A * zz);
+        // the ends' parameters (the turn from their height), and the middle on the edge's middle
+        double T(Vec3 p) { var l = m.Local(p); var th = Math.Atan2(l.Y, l.X); return th + 2 * Math.PI * Math.Round(((l.Z - zz) / m.K - th) / (2 * Math.PI)); }
+        double t0 = T(e.V0.P), t1 = T(e.V1.P);
+        if (Math.Abs(t1 - t0) < 1e-9) return null;
+        // an edge's parameters rise: one running against the motion is a helix of the motion run backwards (the
+        // mirrored frame turns the other way and advances the other way: Move'(t) = Move(−t))
+        if (t1 < t0)
+        {
+            hx = new NHelix(new ScrewMotion(m.O, m.X, -m.Y, -m.A, m.K), hx.P0);
+            (t0, t1) = (-t0, -t1);
+        }
+        for (int i = 1; i < 8; i++)
+            if (Vec3.Distance(hx.Eval(t0 + (t1 - t0) * i / 8), e.At(i / 8.0)) > Math.Max(4 * tol, 0.02 * Vec3.Distance(e.V0.P, e.V1.P) / 8 + 4 * tol)) return null;
+        return (hx, t0, t1);
+    }
+
+    /// <summary>
     /// The points seen as (r, z − K·θ) in the motion's frame (one turn of ζ: nearest the first), fitted by a line
     /// (principal direction) or a circle: its kind, the largest distance of a point from it, a point of it (the line's
     /// centroid or the circle's centre), the circle's radius and the line's direction. <paramref name="circle"/>:
