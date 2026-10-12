@@ -317,6 +317,35 @@ static class SheetMetalTests
             t.True(NRecognize.Curve(wavy.Eval, tol) == null, "free-form curve");
         });
 
+        t.Test("Recognize: a fitted cylinder is the round one, the same for two copies", () =>
+        {
+            // a polynomial cubic through poles on a circle (as a writer fits a thread's root): the radius wobbles
+            // between the knots. Two copies, turned apart, give least-squares fits a little different; recognized
+            // as fitted, both are r = 8 about Z exactly
+            NurbsSurface Fitted(double turn)
+            {
+                const int n = 36; var R = 8.00001 / ((2 + Math.Cos(Math.PI * 2 / n)) / 3);
+                var poles = new Vec3[n + 3, 2];
+                for (int i = 0; i < n + 3; i++)
+                {
+                    var a = turn + 2 * Math.PI * i / n;
+                    for (int j = 0; j < 2; j++) poles[i, j] = new Vec3(R * Math.Cos(a), R * Math.Sin(a), 2.3 + 10 * j);
+                }
+                return new NurbsSurface(3, 1, poles, null, Enumerable.Range(0, n + 7).Select(k => (double)k).ToArray(), new double[] { 0, 0, 1, 1 });
+            }
+            foreach (var turn in new[] { 0.0, 0.123 })
+            {
+                var s = Fitted(turn);
+                var tol = 1e-7 * Math.Max(1, s.Box.Diagonal);
+                t.True(NRecognize.Surface(s, tol, out _) == null, "not an exact cylinder");
+                var cs = NRecognize.Surface(s, tol, out _, 1e-3);
+                t.True(cs?.Kind == SurfaceKind.Cylinder, "a fitted cylinder");
+                t.Eq(cs!.R, 8.0);
+                t.Eq(Math.Abs(cs.Axis.Z), 1.0);
+                t.Eq(cs.Origin.X, 0.0); t.Eq(cs.Origin.Y, 0.0);
+            }
+        });
+
         t.Test("Sheet metal: a plain block unfolds to its face", () =>
         {
             // every face has an opposite face but no bend joins them: the flat is the fixed face, as thick as the block

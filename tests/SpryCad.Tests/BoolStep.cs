@@ -16,6 +16,24 @@ static class BoolStep
         NBody Read(string f, string prefix) => StepImport.Read(File.ReadAllBytes(Path.Combine(dir, f)), prefix).Solids.Single().Body;
         var body = Read("body.step", "B."); var tool = Read("tool.step", "T.");
         Console.WriteLine($"read: {sw.ElapsedMilliseconds} ms; body {body.Faces.Count} faces ({string.Join(", ", body.Faces.GroupBy(f => f.Surface.Kind).Select(g => $"{g.Count()} {g.Key}"))}), tool {tool.Faces.Count} ({string.Join(", ", tool.Faces.GroupBy(f => f.Surface.Kind).Select(g => $"{g.Count()} {g.Key}"))})");
+        if (Environment.GetEnvironmentVariable("BOOLSTEP_RECOG") != null)
+            foreach (var f in body.Faces.Concat(tool.Faces).Where(f => f.Surface.Kind == SurfaceKind.Cylinder).GroupBy(f => f.Surface).Select(g => g.First()))
+                Console.WriteLine($"  {f.Tag.Name}: cylinder axis {f.Surface.Def.Axis.X:R} {f.Surface.Def.Axis.Y:R} {f.Surface.Def.Axis.Z:R} origin {f.Surface.Def.Origin.X:R} {f.Surface.Def.Origin.Y:R} {f.Surface.Def.Origin.Z:R} r {f.Surface.Def.Radius:R}");
+        if (Environment.GetEnvironmentVariable("BOOLSTEP_RECOG") != null)
+            foreach (var f in body.Faces.Concat(tool.Faces))
+                if (f.Surface.Nurbs is { } nb)
+                {
+                    double lo = double.MaxValue, hi = 0, nz = 0, nr = 1;
+                    for (int i = 0; i <= 400; i++) for (int j = 0; j <= 20; j++)
+                    {
+                        double u = nb.U0 + (nb.U1 - nb.U0) * i / 400, v = nb.V0 + (nb.V1 - nb.V0) * j / 20;
+                        var q = nb.Eval(u, v); var n = nb.Normal(u, v);
+                        var r = Math.Sqrt(q.X * q.X + q.Y * q.Y); lo = Math.Min(lo, r); hi = Math.Max(hi, r);
+                        nz = Math.Max(nz, Math.Abs(n.Z)); nr = Math.Min(nr, Math.Abs(n.X * q.X + n.Y * q.Y) / r);
+                    }
+                    Console.WriteLine($"  {f.Tag.Name}: {nb.P.GetLength(0)}x{nb.P.GetLength(1)}, r {lo:0.######}..{hi:0.######} (spread {hi - lo:g3}), max |n.z| {nz:g3}, min radial {nr:g6}");
+                }
+        Console.WriteLine($"volumes: body {NMass.Of(body)?.Volume:R} ({body.Validate() ?? "valid"}), tool {NMass.Of(tool)?.Volume:R} ({tool.Validate() ?? "valid"})");
         var m = File.ReadAllLines(Path.Combine(dir, "transforms.txt"))[copy].Split(' ').Select(x => double.Parse(x, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
         var t = new Transform(m[0], m[1], m[2], m[4], m[5], m[6], m[8], m[9], m[10], new Vec3(m[3], m[7], m[11]));
         sw.Restart();
@@ -50,7 +68,7 @@ static class BoolStep
             foreach (var (n, ms, calls) in Prof.Results().Take(20)) Console.WriteLine($"  {n,-30} {ms,9:0.0} ms x{calls}");
             return 0;
         }
-        NBoolean.Trace = s => { if (s.StartsWith("[") || s.StartsWith("  trace")) Console.WriteLine("  " + s); };
+        NBoolean.Trace = s => { if (Environment.GetEnvironmentVariable("BOOLSTEP_GREP") is { } g ? s.Contains(g) : s.StartsWith("[") || s.StartsWith("  trace") || s.StartsWith("sections") || s.StartsWith("pieces") || s.StartsWith("kept")) Console.WriteLine("  " + s); };
         Prof.Enabled = true;
         sw.Restart();
         var res = NBoolean.Run(body, moved, BoolOp.Subtract);

@@ -130,6 +130,25 @@ public sealed class NBoolean
         }
         public void Add(NVertex v) { _items.Add(v); Hash(_items.Count - 1); }
         public void AddRange(IEnumerable<NVertex> vs) { foreach (var v in vs) Add(v); }
+        /// <summary>The first vertex nearer p than r (more than the pool's radius): the cells within reach scanned.</summary>
+        public NVertex? Find(Vec3 p, double r)
+        {
+            if (r <= _r) return Find(p);
+            var (x, y, z) = K(p);
+            long n = (long)Math.Ceiling(r / _cell);
+            int best = int.MaxValue;
+            for (long dx = -n; dx <= n; dx++)
+                for (long dy = -n; dy <= n; dy++)
+                    for (long dz = -n; dz <= n; dz++)
+                        if (_grid.TryGetValue((x + dx, y + dy, z + dz), out var l))
+                            foreach (var i in l)
+                            {
+                                if (i >= best) break;
+                                if (Vec3.Distance(_items[i].P, p) < r) best = i;
+                            }
+            return best == int.MaxValue ? null : _items[best];
+        }
+
         /// <summary>The first vertex nearer p than the pool's radius.</summary>
         public NVertex? Find(Vec3 p)
         {
@@ -289,6 +308,10 @@ public sealed class NBoolean
         // 1-2. split edges where they meet the other body's faces
         var onSurface = new List<(NEdge e, NFace f)>();
         var splits = new Dictionary<NEdge, List<(double t, NVertex v)>>(ReferenceEqualityComparer.Instance);
+        _fittedEdges.Clear();
+        foreach (var f in ActiveFaces(A).Concat(ActiveFaces(B)))
+            if (f.Surface.Kind is SurfaceKind.BSpline or SurfaceKind.Offset)
+                foreach (var c in f.Coedges) _fittedEdges.Add(c.Edge);
         FindEdgeSplits(A, B, splits, onSurface);
         FindEdgeSplits(B, A, splits, onSurface);
         using (Prof.Time("split.crossings")) CrossOnSurfaceEdges(onSurface, splits);
@@ -562,9 +585,9 @@ public sealed class NBoolean
         foreach (var e in edgesB) { e.V0 = Final(e.V0); e.V1 = Final(e.V1); }
     }
 
-    NVertex Snap(Vec3 p)
+    NVertex Snap(Vec3 p, double r = 0)
     {
-        if (_pool.Find(p) is { } found) return found;
+        if ((r > 0 ? _pool.Find(p, r) : _pool.Find(p)) is { } found) return found;
         var nv = new NVertex(p);
         if (Trace != null && Environment.GetEnvironmentVariable("FC_TRACE_SNAP") is { } ts && p.ToString().Contains(ts))
             T($"  new vertex {p}#{Id(nv)}: nearest pool vertex at {_pool.Items.Min(v => Vec3.Distance(v.P, p)):g3}; " + string.Join(" / ", Environment.StackTrace.Split((char)10).Skip(2).Take(3).Select(x => x.Trim())));
@@ -658,7 +681,7 @@ public sealed class NBoolean
                         if (w == null || Vec3.Distance(y.P, p) < Vec3.Distance(w.P, p)) { w = y; tw = ty; }
                     }
                 }
-                var v = w ?? Snap(p);
+                var v = w ?? Snap(p, _fittedEdges.Contains(e) || f.Surface.Kind is SurfaceKind.BSpline or SurfaceKind.Offset ? Noise : 0);
                 var ts = w != null ? tw : t;
                 if (Vec3.Distance(v.P, e.V0.P) < _tol * 10 || Vec3.Distance(v.P, e.V1.P) < _tol * 10) continue;
                 if (!splits.TryGetValue(e, out var l)) splits[e] = l = new();
@@ -667,6 +690,12 @@ public sealed class NBoolean
             }
         }
     }
+
+    // edges of B-spline patches (and of their offsets): fitted geometry. Where one of them, or a patch, is involved,
+    // the same point found from two pairs lands up to the fitting noise apart (an edge of each body ending on the
+    // other's coincident cylinder a few microns apart): a split there is snapped to a vertex within Noise
+    readonly HashSet<NEdge> _fittedEdges = new(ReferenceEqualityComparer.Instance);
+    double Noise => _sampleTol * 50;
 
     // split vertices from grazing edge/surface hits
     readonly HashSet<NVertex> _grazing = new(ReferenceEqualityComparer.Instance);
@@ -721,8 +750,9 @@ public sealed class NBoolean
                     if (Near(p, e) && Near(p, g)) continue;
                     // a crossing at (or within the boundary tolerance of) an end of one edge: that end vertex splits the
                     // other edge (a fresh vertex a few microns away would leave the two bodies' boundaries apart)
-                    var end = new[] { e.V0, e.V1, g.V0, g.V1 }.Where(w => Vec3.Distance(w.P, p) < _onTol).MinBy(w => Vec3.Distance(w.P, p));
-                    var v = end ?? Snap(p);
+                    var r = _fittedEdges.Contains(e) || _fittedEdges.Contains(g) ? Noise : 0;
+                    var end = new[] { e.V0, e.V1, g.V0, g.V1 }.Where(w => Vec3.Distance(w.P, p) < Math.Max(_onTol, r)).MinBy(w => Vec3.Distance(w.P, p));
+                    var v = end ?? Snap(p, r);
                     var targets = new List<(NEdge edge, double t)>();
                     foreach (var (edge, t) in new[] { (e, te0), (g, tg0) })
                         if (!ReferenceEquals(edge.V0, v) && !ReferenceEquals(edge.V1, v)) targets.Add((edge, end == null ? t : ParamOn(edge, v.P, t)));

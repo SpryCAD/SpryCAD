@@ -554,7 +554,7 @@ public static class StepImport
                 // planes and cylinders written as B-splines are read as what they are
                 var nb = SplineSurface(s);
                 bool flip = false;
-                res = RecognizeAnalytic ? NRecognize.Surface(nb, 1e-7 * Math.Max(1, nb.Box.Diagonal), out flip) : null;
+                res = RecognizeAnalytic ? NRecognize.Surface(nb, 1e-7 * Math.Max(1, nb.Box.Diagonal), out flip, 1e-3) : null;
                 if (res != null && flip) _flipped.Add(s.Id);
                 res ??= NSurface.BSpline(nb);
             }

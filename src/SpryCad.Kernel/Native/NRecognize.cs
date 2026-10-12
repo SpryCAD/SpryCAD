@@ -11,7 +11,13 @@ public static class NRecognize
     const int N = 9; // samples per direction
 
     /// <summary>The analytic surface the B-spline is, or null. <paramref name="flip"/>: its natural normal is opposite.</summary>
-    public static NSurface? Surface(NurbsSurface s, double tol, out bool flip)
+    /// <param name="fitted">
+    /// The radius tolerance, relative to the radius, for a cylinder fitted by its writer (a thread's root swept along the
+    /// helix: every normal exactly perpendicular to the axis, the radius wobbling a few microns between the knots). Such a
+    /// strip and its copy a pitch along cross each other all over within the noise, which no boolean resolves; as the
+    /// cylinder it is, they coincide. 0: exact cylinders only.
+    /// </param>
+    public static NSurface? Surface(NurbsSurface s, double tol, out bool flip, double fitted = 0)
     {
         flip = false;
         double um = 0.5 * (s.U0 + s.U1), vm = 0.5 * (s.V0 + s.V1);
@@ -62,13 +68,15 @@ public static class NRecognize
         if (!(r2 > 0)) return null;
         var r = Math.Sqrt(r2);
         var center = o + x * cx + y * cy;
+        // (fitted: the radius within its share, the normals radial within the matching angle)
+        double rtol = Math.Max(tol, fitted * r), ntol = Math.Max(1e-7, fitted * 0.5);
         bool outward = true;
         for (int i = 0; i < pts.Count; i++)
         {
             var d = pts[i] - center; d -= axis * Vec3.Dot(d, axis);
-            if (Math.Abs(d.Length - r) > tol) return null;
+            if (Math.Abs(d.Length - r) > rtol) return null;
             var dot = Vec3.Dot(d.Normalized, nrm[i]);
-            if (Math.Abs(Math.Abs(dot) - 1) > 1e-7) return null;
+            if (Math.Abs(Math.Abs(dot) - 1) > ntol) return null;
             if (i == 0) outward = dot > 0;
             else if (dot > 0 != outward) return null;
         }
@@ -78,11 +86,63 @@ public static class NRecognize
             {
                 var p = s.Eval(s.U0 + (s.U1 - s.U0) * (i + 0.5) / (N - 1), s.V0 + (s.V1 - s.V0) * (j + 0.5) / (N - 1));
                 var d = p - center; d -= axis * Vec3.Dot(d, axis);
-                if (Math.Abs(d.Length - r) > tol) return null;
+                if (Math.Abs(d.Length - r) > rtol) return null;
             }
+        if (fitted > 0) Round(s, tol, ref axis, ref center, ref r);
         flip = !outward; // a cylinder's natural normal points away from the axis
         var refDir = (pts[0] - center) - axis * Vec3.Dot(pts[0] - center, axis);
         return new NSurface(new SurfaceDef { Kind = SurfaceKind.Cylinder, Origin = center, Axis = axis, RefDir = refDir, Radius = r, Segments = SurfaceDef.SegmentsFor(r) });
+    }
+
+    /// <summary>
+    /// A fitted cylinder's axis, centre and radius made the roundest values that keep the patch within the band its
+    /// radius wobbles in: least squares on the noise lands anywhere in it (two copies of one strip, fitted apart,
+    /// a few tenths of a micron different, which no boolean takes as coincident); the round values are the same for
+    /// both, and most likely what was drawn. An exact cylinder (band within tol) is left as found.
+    /// </summary>
+    static void Round(NurbsSurface s, double tol, ref Vec3 axis, ref Vec3 center, ref double r)
+    {
+        const int M = 64;
+        var pts = new List<Vec3>((M + 1) * (M + 1));
+        for (int i = 0; i <= M; i++)
+            for (int j = 0; j <= M; j++)
+                pts.Add(s.Eval(s.U0 + (s.U1 - s.U0) * i / M, s.V0 + (s.V1 - s.V0) * j / M));
+        (double lo, double hi) Band(Vec3 ax, Vec3 c)
+        {
+            double lo = double.MaxValue, hi = 0;
+            foreach (var p in pts)
+            {
+                var d = p - c; d -= ax * Vec3.Dot(d, ax);
+                var l = d.Length; lo = Math.Min(lo, l); hi = Math.Max(hi, l);
+            }
+            return (lo, hi);
+        }
+        var (lo0, hi0) = Band(axis, center);
+        if (hi0 - lo0 <= 2 * tol) return;
+        var width = hi0 - lo0 + 0.05 * (hi0 - lo0) + tol;
+        static Vec3 R(Vec3 v, int d) => new(Math.Round(v.X, d), Math.Round(v.Y, d), Math.Round(v.Z, d));
+        for (int d = 0; d <= 9; d++)
+        {
+            var ax = R(axis, d);
+            if (!(ax.LengthSq > 0.5)) continue;
+            ax = ax.Normalized;
+            var (lo, hi) = Band(ax, center);
+            if (hi - lo <= width) { axis = ax; break; }
+        }
+        for (int d = 0; d <= 9; d++)
+        {
+            var c = R(center, d);
+            var (lo, hi) = Band(axis, c);
+            if (hi - lo <= width) { center = c; break; }
+        }
+        var (blo, bhi) = Band(axis, center);
+        for (int d = 0; d <= 9; d++)
+        {
+            var f = Math.Pow(10, d);
+            var rr = Math.Ceiling(blo * f) / f;
+            if (rr <= bhi) { r = rr; return; }
+        }
+        r = 0.5 * (blo + bhi);
     }
 
     /// <summary>
