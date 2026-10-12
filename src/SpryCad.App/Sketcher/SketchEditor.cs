@@ -594,12 +594,9 @@ public sealed partial class SketchEditor : IViewportMode
         if (best != null) return best;
         if (includeDims && Overlay != null)
         {
-            foreach (var (c, ctl) in _labels)
-            {
-                var b = ctl.Bounds;
-                if (ctl.IsVisible && b.Inflate(2).Contains(new Point(sx, sy)))
+            foreach (var (c, b) in _labelBoxes)
+                if (b.Inflate(2).Contains(new Point(sx, sy)))
                     return new SkRef(SkRefKind.Constraint, c);
-            }
             // a dimension's own lines pick it too (geometry under the cursor wins, above)
             bestD = 5;
             foreach (var c in Sk.Constraints.Where(c => c.IsDimension))
@@ -1206,8 +1203,8 @@ public sealed partial class SketchEditor : IViewportMode
                 if (all) Selected.Add(new SkRef(SkRefKind.Entity, e.Id));
             }
             // dimensions whose label lies wholly inside the box
-            foreach (var (id, label) in _labels)
-                if (label.IsVisible && r.Contains(label.Bounds)) Selected.Add(new SkRef(SkRefKind.Constraint, id));
+            foreach (var (id, box) in _labelBoxes)
+                if (r.Contains(box)) Selected.Add(new SkRef(SkRefKind.Constraint, id));
             SelectionChanged?.Invoke();
         }
         _dragging = false; _dragOrigins = null; _dragCircle = -1; _dragLabel = null; _boxSel = null;
@@ -1778,11 +1775,11 @@ public sealed partial class SketchEditor : IViewportMode
     // overlay labels (dimension values and relation glyphs)
 
     public Canvas? Overlay { get; set; }
-    readonly Dictionary<long, Border> _labels = new();
-    // the overlay's marks, kept from one update to the next (an update repositions them; creating, styling and
-    // attaching new controls on every mouse move was most of its cost): relations by constraint id, On Edge marks by
-    // entity id, anchors by point id
-    readonly Dictionary<long, Border> _relGlyphs = new(), _linkGlyphs = new(), _anchorGlyphs = new();
+    // dimension values, relation, On Edge and anchor marks (one control drawing them all), and each dimension value's
+    // box on screen
+    SketchMarks? _marks;
+    readonly Dictionary<long, Rect> _labelBoxes = new();
+    Border? _sizeProbe;
     static readonly IBrush RelBack = new ImmutableSolidColorBrush(Color.FromArgb(230, 200, 240, 200));
     static readonly IBrush RelBackSelected = new ImmutableSolidColorBrush(Color.FromRgb(120, 170, 255));
     static readonly IBrush RelBorder = new ImmutableSolidColorBrush(Color.FromRgb(60, 140, 60));
@@ -1793,14 +1790,6 @@ public sealed partial class SketchEditor : IViewportMode
     static readonly IBrush DanglingBorder = new ImmutableSolidColorBrush(Color.FromRgb(158, 102, 26));
     static readonly IBrush DanglingFore = new ImmutableSolidColorBrush(Color.FromRgb(130, 80, 15));
     static readonly IBrush LabelBack = new ImmutableSolidColorBrush(Color.FromArgb(200, 255, 255, 255));
-    static Cursor? _handCursor;
-    static Cursor HandCursor => _handCursor ??= new Cursor(StandardCursorType.Hand);
-
-    /// <summary>Removes the marks whose ids were not seen in this update.</summary>
-    void Prune(Dictionary<long, Border> marks, HashSet<long> seen)
-    {
-        foreach (var id in marks.Keys.Where(k => !seen.Contains(k)).ToList()) { Overlay!.Children.Remove(marks[id]); marks.Remove(id); }
-    }
     Border? _previewLabel;
     Border? _snapLabel;
 
@@ -1839,28 +1828,39 @@ public sealed partial class SketchEditor : IViewportMode
     public void UpdateOverlay(ViewportControl vp)
     {
         if (Overlay == null) return;
-        var live = new HashSet<long>();
-        var dims = Sk.Constraints.Where(c => c.IsDimension).ToList();
-        foreach (var c in dims)
+        // dimension values and relation marks: drawn by one control over the view
+        if (_marks == null)
         {
-            live.Add(c.Id);
-            if (_labels.ContainsKey(c.Id)) continue;
-            var nb = MakeLabel();
-            _labels[c.Id] = nb;
-            Overlay.Children.Add(nb);
+            _marks = new SketchMarks();
+            _marks.RelationClicked += (cid, ctrl) =>
+            {
+                if (!ctrl) Selected.Clear();
+                var r = new SkRef(SkRefKind.Constraint, cid);
+                if (!Selected.Contains(r)) Selected.Add(r);
+                SelectionChanged?.Invoke();
+                UpdateOverlay(_vp);
+                _vp.Redraw();
+            };
+            Overlay.Children.Add(_marks);
         }
+        _marks.Width = vp.Bounds.Width; _marks.Height = vp.Bounds.Height;
+        var marks = new List<SketchMarks.Mark>();
+        var dims = Sk.Constraints.Where(c => c.IsDimension).ToList();
+        _sizeProbe ??= MakeLabel();
+        var sizes = new Dictionary<long, Size>();
+        Size SizeOf(SkConstraint c) => sizes.TryGetValue(c.Id, out var s) ? s : sizes[c.Id] = LabelSize(_sizeProbe, DimText(c));
         // labels the user did not place go where they are clear of each other and of the geometry
-        LayoutLabels(dims, c => LabelSize(_labels[c.Id], DimText(c)));
+        LayoutLabels(dims, SizeOf);
+        _labelBoxes.Clear();
         foreach (var c in dims)
         {
             var sel = Selected.Contains(new SkRef(SkRefKind.Constraint, c.Id));
             var hov = _hover is { Kind: SkRefKind.Constraint } h && h.Id == c.Id;
-            SetLabel(_labels[c.Id], DimText(c), c.Driven ? Brushes.Gray : sel ? Brushes.RoyalBlue : hov ? Brushes.DarkOrange : Brushes.Black,
-                LabelPos(c));
-        }
-        foreach (var id in _labels.Keys.Where(k => !live.Contains(k)).ToList())
-        {
-            Overlay.Children.Remove(_labels[id]); _labels.Remove(id);
+            var fore = c.Driven ? Brushes.Gray : sel ? Brushes.RoyalBlue : hov ? Brushes.DarkOrange : Brushes.Black;
+            var sz = SizeOf(c); var at = Screen(LabelPos(c));
+            var box = new Rect(at.X - sz.Width / 2, at.Y - sz.Height / 2, sz.Width, sz.Height);
+            _labelBoxes[c.Id] = box;
+            marks.Add(new(SketchMarks.Kind.Dimension, c.Id, box, _marks.Text(DimText(c), 12, FontWeight.SemiBold, fore), LabelBack, null, null));
         }
         if (_dimPreview != null)
         {
@@ -1870,98 +1870,63 @@ public sealed partial class SketchEditor : IViewportMode
         }
         else if (_previewLabel != null) _previewLabel.IsVisible = false;
 
-        // relation glyphs
-        var seenRel = new HashSet<long>(); var seenLink = new HashSet<long>(); var seenAnchor = new HashSet<long>();
+        // relation, On Edge and anchor marks: each where it goes, those of the selected or hovered geometry first; a
+        // mark mostly covered by one already placed is left out (it could be neither read nor clicked), so a crowded
+        // view shows what it can and zooming in shows the rest
         if (ShowRelations)
         {
+            var wanted = new List<(bool picked, SketchMarks.Mark mark)>();
             var perEntity = new Dictionary<long, int>();
-            foreach (var c in Sk.Constraints.Where(c => !c.IsDimension))
+            int hidden = 0;
+            // geometry smaller on screen than a twentieth of the view's shorter side: its marks could not be used and
+            // would cover it (a grid of small rectangles seen whole), unless it is selected or hovered
+            var minPx = 0.05 * Math.Min(vp.Bounds.Width, vp.Bounds.Height);
+            var geoPx = GeometrySizesPx();
+            bool TooSmall(double px) => px < minPx;
+            foreach (var c in Sk.Constraints)
             {
-                var pos = GlyphPos(c, perEntity);
-                if (pos == null) continue;
+                if (c.IsDimension || GlyphPos(c, perEntity) is not { } pos) continue;
                 var sel = Selected.Contains(new SkRef(SkRefKind.Constraint, c.Id));
-                if (!_relGlyphs.TryGetValue(c.Id, out var gb))
-                {
-                    gb = new Border
-                    {
-                        BorderBrush = RelBorder,
-                        BorderThickness = new Thickness(1),
-                        Padding = new Thickness(2, 0),
-                        CornerRadius = new CornerRadius(2),
-                        Child = new TextBlock { FontSize = 10, Foreground = Brushes.DarkGreen, FontWeight = FontWeight.Bold },
-                        IsHitTestVisible = true,
-                        Cursor = HandCursor,
-                    };
-                    var cid = c.Id;
-                    gb.PointerPressed += (_, e) =>
-                    {
-                        if (!e.KeyModifiers.HasFlag(KeyModifiers.Control)) Selected.Clear();
-                        var r = new SkRef(SkRefKind.Constraint, cid);
-                        if (!Selected.Contains(r)) Selected.Add(r);
-                        SelectionChanged?.Invoke();
-                        UpdateOverlay(_vp);
-                        _vp.Redraw();
-                        e.Handled = true;
-                    };
-                    _relGlyphs[c.Id] = gb;
-                    Overlay.Children.Add(gb);
-                }
-                // (a relation's type does not change under its id, but set it as the mark is reused)
-                ((TextBlock)gb.Child!).Text = Glyph(c.Type);
-                ToolTip.SetTip(gb, RelationName(c.Type));
-                gb.Background = sel ? RelBackSelected : RelBack;
-                var s = Screen(pos.Value);
-                Canvas.SetLeft(gb, s.X + 6); Canvas.SetTop(gb, s.Y + 4);
-                seenRel.Add(c.Id);
+                var picked = sel || RefsPicked(c);
+                if (!picked && TooSmall(c.Refs.Length == 0 ? double.PositiveInfinity : c.Refs.Max(r => geoPx.GetValueOrDefault(r, double.PositiveInfinity)))) { hidden++; continue; }
+                // its glyph in a bordered box (1 px border, 2 px either side of the text) below right of its spot
+                var text = _marks.Text(Glyph(c.Type), 10, FontWeight.Bold, Brushes.DarkGreen);
+                var s = Screen(pos);
+                wanted.Add((picked, new(SketchMarks.Kind.Relation, c.Id, new Rect(s.X + 6, s.Y + 4, text.Width + 6, text.Height + 2),
+                    text, sel ? RelBackSelected : RelBack, RelBorder, RelationName(c.Type))));
             }
-            // converted geometry: one On Edge mark on each entity, not an anchor on each of its points
-            foreach (var e in Sk.Entities.Where(e => e.Link != null))
+            // converted geometry: one On Edge mark on each entity, not an anchor on each of its points; dangling (its
+            // model edge gone) in SolidWorks' dangling brown
+            foreach (var e in Sk.Entities)
             {
-                if (MidOf(e) is not { } at) continue;
-                if (!_linkGlyphs.TryGetValue(e.Id, out var gb))
-                {
-                    gb = new Border
-                    {
-                        BorderThickness = new Thickness(1),
-                        Padding = new Thickness(2, 0), CornerRadius = new CornerRadius(2),
-                        Child = new TextBlock { Text = "⛓", FontSize = 9 },
-                        IsHitTestVisible = false,
-                    };
-                    _linkGlyphs[e.Id] = gb;
-                    Overlay.Children.Add(gb);
-                }
-                // dangling (its model edge gone): SolidWorks' dangling brown
-                gb.Background = e.Dangling ? DanglingBack : LinkBack;
-                gb.BorderBrush = e.Dangling ? DanglingBorder : LinkBorder;
-                ((TextBlock)gb.Child!).Foreground = e.Dangling ? DanglingFore : LinkFore;
-                ToolTip.SetTip(gb, e.Dangling ? "Dangling: its model edge is no longer in the model" : "On Edge: converted from the model, follows it");
+                if (e.Link == null || MidOf(e) is not { } at) continue;
+                var picked = Picked(SkRefKind.Entity, e.Id);
+                if (!picked && TooSmall(geoPx.GetValueOrDefault(e.Id, double.PositiveInfinity))) { hidden++; continue; }
+                var text = _marks.Text("⛓", 9, FontWeight.Normal, e.Dangling ? DanglingFore : LinkFore);
                 var s = Screen(at);
-                Canvas.SetLeft(gb, s.X + 4); Canvas.SetTop(gb, s.Y + 2);
-                seenLink.Add(e.Id);
+                wanted.Add((picked, new(SketchMarks.Kind.Mark, e.Id, new Rect(s.X + 4, s.Y + 2, text.Width + 6, text.Height + 2),
+                    text, e.Dangling ? DanglingBack : LinkBack, e.Dangling ? DanglingBorder : LinkBorder, null)));
             }
             // fixed points
             var refPoints = Sk.Entities.Where(e => e.IsReference || e.Link != null).SelectMany(e => e.PointIds).ToHashSet();
-            foreach (var p in Sk.Points.Where(p => p.Fixed && p.Id != Sketch.OriginId && !refPoints.Contains(p.Id)))
+            foreach (var p in Sk.Points)
             {
-                if (!_anchorGlyphs.TryGetValue(p.Id, out var gb))
-                {
-                    gb = new Border
-                    {
-                        Background = RelBack,
-                        BorderBrush = RelBorder, BorderThickness = new Thickness(1),
-                        Padding = new Thickness(2, 0), CornerRadius = new CornerRadius(2),
-                        Child = new TextBlock { Text = "⚓", FontSize = 9, Foreground = Brushes.DarkGreen },
-                        IsHitTestVisible = false,
-                    };
-                    _anchorGlyphs[p.Id] = gb;
-                    Overlay.Children.Add(gb);
-                }
+                if (!p.Fixed || p.Id == Sketch.OriginId || refPoints.Contains(p.Id)) continue;
+                var text = _marks.Text("⚓", 9, FontWeight.Normal, Brushes.DarkGreen);
                 var s = Screen(p.P);
-                Canvas.SetLeft(gb, s.X + 6); Canvas.SetTop(gb, s.Y - 16);
-                seenAnchor.Add(p.Id);
+                wanted.Add((Picked(SkRefKind.Point, p.Id), new(SketchMarks.Kind.Mark, p.Id, new Rect(s.X + 6, s.Y - 16, text.Width + 6, text.Height + 2),
+                    text, RelBack, RelBorder, null)));
+            }
+            var placed = new SpacedBoxes(32);
+            foreach (var (_, m) in wanted.Where(w => w.picked).Concat(wanted.Where(w => !w.picked)))
+                if (placed.TryAdd(m.Box)) marks.Add(m); else hidden++;
+            if ((hidden > 0) != RelationsThinned)
+            {
+                RelationsThinned = hidden > 0;
+                if (RelationsThinned) Message?.Invoke("Some relation marks are not shown here (on small or crowded geometry): zoom in, or select geometry to see its relations.");
             }
         }
-        Prune(_relGlyphs, seenRel); Prune(_linkGlyphs, seenLink); Prune(_anchorGlyphs, seenAnchor);
+        _marks.Set(marks);
     }
 
     /// <summary>The middle of a line or arc, the top of a circle (where an entity's mark goes).</summary>
@@ -1979,6 +1944,48 @@ public sealed partial class SketchEditor : IViewportMode
                 }
         }
         return null;
+    }
+
+    /// <summary>Whether some relation marks are left out, covered by others at this zoom.</summary>
+    public bool RelationsThinned { get; private set; }
+
+    /// <summary>Whether an entity or point is selected or hovered.</summary>
+    bool Picked(SkRefKind kind, long id) => Selected.Contains(new SkRef(kind, id)) || _hover is { } h && h.Kind == kind && h.Id == id;
+
+    /// <summary>
+    /// How large each entity is on screen (pixels: a line's length, a circle's diameter, an arc's length), and each
+    /// point the largest entity it ends or centers (a point of none is left out: no limit).
+    /// </summary>
+    Dictionary<long, double> GeometrySizesPx()
+    {
+        var px = Px;
+        var sizes = new Dictionary<long, double>();
+        foreach (var e in Sk.Entities)
+        {
+            double size;
+            switch (e)
+            {
+                case SkLine l: size = (Sk.P(l.P2) - Sk.P(l.P1)).Length / px; break;
+                case SkCircle c: size = 2 * c.R / px; break;
+                case SkArc a:
+                    {
+                        var c = Sk.P(a.Center); var r = (Sk.P(a.Start) - c).Length;
+                        var sweep = (Sk.P(a.End) - c).Angle - (Sk.P(a.Start) - c).Angle; while (sweep <= 0) sweep += 2 * Math.PI;
+                        size = r * sweep / px; break;
+                    }
+                default: continue;
+            }
+            sizes[e.Id] = size;
+            foreach (var p in e.PointIds) sizes[p] = Math.Max(sizes.GetValueOrDefault(p), size);
+        }
+        return sizes;
+    }
+
+    /// <summary>Whether a relation refers to a selected or hovered entity or point.</summary>
+    bool RefsPicked(SkConstraint c)
+    {
+        foreach (var r in c.Refs) if (Picked(SkRefKind.Entity, r) || Picked(SkRefKind.Point, r)) return true;
+        return false;
     }
 
     Vec2? GlyphPos(SkConstraint c, Dictionary<long, int> perEntity)
@@ -2053,14 +2060,10 @@ public sealed partial class SketchEditor : IViewportMode
     {
         if (Overlay == null) return;
         CloseModifyBox(false);
-        foreach (var b in _labels.Values) Overlay.Children.Remove(b);
-        foreach (var marks in new[] { _relGlyphs, _linkGlyphs, _anchorGlyphs })
-        {
-            foreach (var g in marks.Values) Overlay.Children.Remove(g);
-            marks.Clear();
-        }
+        if (_marks != null) { Overlay.Children.Remove(_marks); _marks = null; }
+        _labelBoxes.Clear();
         if (_previewLabel != null) Overlay.Children.Remove(_previewLabel);
         if (_snapLabel != null) Overlay.Children.Remove(_snapLabel);
-        _labels.Clear(); _previewLabel = null; _snapLabel = null;
+        _previewLabel = null; _snapLabel = null;
     }
 }

@@ -176,9 +176,18 @@ profile; the profile's times are summed over threads). On the heavy samples (`sa
     `-- gridpart <k> <out.sprt>` writes a part whose sketch is sketchbench's k×k grid; editing the 20×20 one
     (1600 lines, 3200 relations) the editor draws in ~1.03 ms a frame from ~1.15 (`SPRYCAD_PROFILE_RENDER` now
     also logs the mode's drawing).
-  - **Next**: editing that sketch runs at only ~15 frames a second in either build while a frame's GL work is
-    ~1.4 ms: something else on the UI thread takes ~60 ms a frame, most likely the overlay of 1600 dimension labels
-    (Avalonia controls laid out and composed). Profile the UI thread (dotnet-trace) there.
+  - Sketch editor labels: editing that sketch ran at ~12 frames a second with its frame's GL work ~1.4 ms. The
+    dimension values and relation marks were an Avalonia control each (~3200), all redrawn with every frame of the
+    view below (~20 µs a label a frame): hidden, 60 frames a second; relation marks alone hidden, ~25. Done:
+    relation and On Edge marks on geometry smaller on screen than a twentieth of the view's shorter side are left
+    out (they could not be used, and covered it); the rest, and anchor marks, are placed those of the selected or
+    hovered geometry first, and a mark mostly covered by one already placed (over a third of it) is left out;
+    zooming in shows them (selected or hovered geometry always keeps its marks); and the dimension values and all
+    those marks are drawn by one control (`SketchMarks`: relation marks take clicks, the hand cursor and their
+    tooltips by position; dimension values are picked by their boxes). 20×20 grid 12 to ~35 frames a second;
+    10×10 grid 32–42 to 60 (its marks left out when zoomed out; zoomed in, every segment's mark shown, 60). What is
+    left on the largest is drawing 800 text labels every frame: a cached image of the marks while the view is
+    still would remove it.
   - Tried: uploading the overlay's five parts in one buffer (`BufferData` once, `BufferSubData` each) instead of a
     `BufferData` per part: no gain (long-thread frames 0.34–0.40 ms before, 0.38–0.45 after); the driver handles the
     orphaned small buffers well.
