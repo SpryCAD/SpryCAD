@@ -651,6 +651,17 @@ static class DirectBlendTests
             }
         });
 
+        t.Test("Rounded corners where a barrel comes out through the face: a later boss joined across stays exact", () =>
+        {
+            // the round's strip on the box's end runs through where the barrel comes out of it; taken in directly, the
+            // end's boundary crossed itself and the boss's union failed on it (faceted)
+            var doc = Demos.BlendCases.First(c => c.name == "box on a barrel coming out through its end, the end's corners rounded, a boss across").build();
+            var r = new Regenerator().Rebuild(doc);
+            foreach (var f in doc.Features) t.True(r.Status[f.Id].Ok && r.Status[f.Id].Warnings.Count == 0, $"{f.Name}: {r.Status[f.Id].Error} {string.Join("; ", r.Status[f.Id].Warnings)}");
+            var nb = r.State.Bodies[0].Solid.Native;
+            t.True(nb != null && nb.Validate() == null, $"exact and valid: {nb?.Validate()}");
+        });
+
         t.Test("Direct blend: off (FC_BLEND=boolean) applies nothing directly", () =>
         {
             var before = DirectBlend.Counts;

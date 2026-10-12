@@ -32,6 +32,7 @@ static partial class Demos
         ("rib against a wall, filleted and mirrored", MirroredRib),
         ("ribs, filleted and patterned", () => PatternedRibs("16")),
         ("drafted boss, a lug standing out onto its corner round", () => LugOnRound()),
+        ("box on a barrel coming out through its end, the end's corners rounded, a boss across", BoxOnBarrel),
         ("drafted boss with a lug, its top edge rounded round the lug", () => LugOnRound(topRound: true)),
     };
 
@@ -303,6 +304,41 @@ static partial class Demos
             },
         });
         d.AddFeature(new MirrorFeature { Name = "Rib, other end", Seeds = { rib.Id, fil.Id }, Plane = PlaneRef.Right });
+        return d;
+    }
+
+    /// <summary>
+    /// A box standing on a barrel (a cylinder along X, R20, its axis in the box's bottom) that comes out through the
+    /// box's end (x 0) just inside its sides (z ±21), the end's vertical corners rounded R6, then a boss (a cylinder
+    /// along Z, R9, its axis 5 inside the end) joined across where the barrel, the end and the round meet. As a
+    /// hopper made flush with a casting's sides, its cam boss: the round's strip on the end runs through where the
+    /// barrel comes out, which the direct blend took in, leaving the end's boundary crossing itself (valid by
+    /// topology) and the boss's union failing on it.
+    /// </summary>
+    static CadDocument BoxOnBarrel()
+    {
+        var d = Doc(("R", "6"));
+        var bp = d.AddFeature(new PlaneFeature { Name = "Barrel start", Base = PlaneRef.Right, Offset = "-60" });
+        var b = new Sk(d);
+        b.Circle(Sketch.OriginId, "40");
+        var bs = d.AddFeature(new SketchFeature { Name = "Barrel", Plane = new PlaneRef { Feature = bp.Id }, Sketch = b.S });
+        d.AddFeature(new ExtrudeFeature { Name = "Barrel", SketchId = bs.Id, Depth = "80" });
+        // the box: x -50..0, z -21..21, y 0..40 (Top plane: sketch y = -z)
+        var x = new Sk(d);
+        var xl = x.Rect("-50", "-21", "0", "21");
+        var xs = d.AddFeature(new SketchFeature { Name = "Box", Plane = PlaneRef.Top, Sketch = x.S });
+        var box = d.AddFeature(new ExtrudeFeature { Name = "Box", SketchId = xs.Id, Depth = "40" });
+        string L(int i) => $"{box.Id}.S.L{xl[i]}";
+        d.AddFeature(new FilletFeature
+        {
+            Name = "End corners", Radius = "R",
+            Edges = { E(L(1), L(0), new Vec3(0, 30, 21)), E(L(1), L(2), new Vec3(0, 30, -21)) },
+        });
+        var fp = d.AddFeature(new PlaneFeature { Name = "Boss start", Base = PlaneRef.Front, Offset = "10" });
+        var c = new Sk(d);
+        c.Circle(c.P("-5", "0"), "18");
+        var cs = d.AddFeature(new SketchFeature { Name = "Boss", Plane = new PlaneRef { Feature = fp.Id }, Sketch = c.S });
+        d.AddFeature(new ExtrudeFeature { Name = "Boss", SketchId = cs.Id, Depth = "25" });
         return d;
     }
 
