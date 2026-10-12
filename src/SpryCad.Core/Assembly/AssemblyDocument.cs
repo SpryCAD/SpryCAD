@@ -56,6 +56,13 @@ public sealed partial class AssemblyDocument
     [System.Text.Json.Serialization.JsonIgnore] public Dictionary<string, byte[]> Files { get; set; } = new(StringComparer.Ordinal);
     [System.Text.Json.Serialization.JsonIgnore] public byte[]? Thumbnail { get; set; }
 
+    /// <summary>
+    /// What the next save records the revision as (a part made external or virtual), with its message; cleared by the
+    /// save. Null: an ordinary save.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore] public string? SaveMessage { get; set; }
+    [System.Text.Json.Serialization.JsonIgnore] public Storage.RevisionKind SaveKind { get; set; }
+
     public Component? Find(string id) => Components.FirstOrDefault(c => c.Id == id);
 
     /// <summary>

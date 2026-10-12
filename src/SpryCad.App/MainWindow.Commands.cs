@@ -911,6 +911,7 @@ public partial class MainWindow
             if (!IsAutosave(path) && !IsEmbeddedCopy(path)) RecentFiles.Add(path);
             Status("Opened " + path);
             _tab.FitAfterLoad = Session.RequestedRevision;
+            UpdateSupersededBanner();
             // someone else has it open: read-only (saving makes a copy elsewhere), unless the user says otherwise
             if (Session.ForeignLock is { } l)
             {

@@ -113,6 +113,9 @@ public sealed class DocumentSession
     /// <summary>Someone else's lock on the file when it was opened (null: none): opened read-only unless the user says otherwise.</summary>
     public LockInfo? ForeignLock => _wc?.ForeignLock;
 
+    /// <summary>The part's file was made virtual in an assembly (null: not): opened read-only, with a banner saying so.</summary>
+    public SupersededBy? Superseded { get; set; }
+
     /// <summary>Opened while someone else has it open: Save saves a copy elsewhere (Save As).</summary>
     public bool ReadOnly
     {
@@ -238,7 +241,8 @@ public sealed class DocumentSession
         catch { wc.Close(); throw; }
         _wc?.Close();
         _wc = wc;
-        ReadOnly = false;
+        Superseded = Supersede.Read(path);
+        _readOnly = Superseded != null;
         Doc = d; FilePath = path; Dirty = false;
         // a display saved with it: shown until the rebuild is done
         _saved = null;

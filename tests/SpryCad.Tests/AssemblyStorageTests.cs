@@ -310,7 +310,7 @@ static class AssemblyStorageTests
             NewMate(asm);
             Enrich(asm);
             asm.MateCounters["Lock"] = 7;
-            var embedded = new Dictionary<string, string> { ["parts/Embedded.sprt"] = part.Id! };
+            var embedded = new Dictionary<string, (string id, string revision)> { ["parts/Embedded.sprt"] = (part.Id!, part.Revision!) };
             var before = AssemblyObjects.From(asm, embedded);
             var kinds = before.Keys.Select(k => k.Kind).ToHashSet();
             foreach (var k in Enum.GetValues<ObjectKind>().Where(k => (int)k >= 20)) t.True(kinds.Contains(k), $"no {k} object tested");
@@ -318,8 +318,8 @@ static class AssemblyStorageTests
             var path = Path.Combine(dir, "a.sasm");
             asm.Save(path);
             var back = AssemblyDocument.Load(path);
-            var ids = back.Files.Where(f => IsDocumentName(f.Key)).ToDictionary(f => f.Key, f => DocumentContainer.Load(f.Value, f.Key).Id!);
-            t.True(ids.Count == 1 && ids["parts/Embedded.sprt"] == part.Id, "the embedded part keeps its identity");
+            var ids = back.Files.Where(f => IsDocumentName(f.Key)).ToDictionary(f => f.Key, f => { var d = DocumentContainer.Load(f.Value, f.Key); return (d.Id!, d.Revision!); });
+            t.True(ids.Count == 1 && ids["parts/Embedded.sprt"] == (part.Id!, part.Revision!), "the embedded part keeps its identity and revision");
             var after = AssemblyObjects.From(back, ids);
             t.True(before.Keys.Order().SequenceEqual(after.Keys.Order()), "the same objects");
             foreach (var (id, bytes) in before)
@@ -381,7 +381,7 @@ static class AssemblyStorageTests
             var asmRev = back.Revision;
             back.Save(path);
             t.Eq(RevisionRows(path, part.Id!), 4L);
-            t.Eq(back.Revision, asmRev); // (the assembly itself did not change: the component's revision seen is state)
+            t.True(back.Revision != asmRev, "an embedded part changed is a change of the assembly (a new revision)");
             var again = AssemblyDocument.Load(path);
             var file2 = ToFile(dir, again.Files["parts/Bracket.sprt"], ".sprt");
             var h2 = PartFile.History(file2);
