@@ -109,6 +109,7 @@ public static class NIntersect
         for (int i = 0; i <= probe && allOn; i++) if (Math.Abs(Probed(i, probed)) > onTol) allOn = false;
         if (allOn) return new EdgeHits(res, true);
 
+        bool searched = false;
         double fLo = Probed(0, probed), fHi = F(hi);
         double fT0 = e.T0 == lo ? fLo : fHi, fT1 = e.T1 == lo ? fLo : fHi;
         if (Math.Abs(fT0) < tol) res.Add(e.T0);
@@ -147,6 +148,7 @@ public static class NIntersect
         }
         else
         {
+            searched = true;
             double total = ArcBound(c, lo, hi);
             // leaves no shorter than this: two roots closer together are a tangential touch, which does not split
             // edges anyway, and an edge running alongside a surface would otherwise be subdivided into 1e5 pieces
@@ -195,6 +197,32 @@ public static class NIntersect
             bool isEnd = t == e.T0 || t == e.T1;
             if (!isEnd && ((startOn && Vec3.Distance(p, p0) < tol * 100) || (endOn && Vec3.Distance(p, p1) < tol * 100))) continue;
             if (merged.Count == 0 || Vec3.Distance(p, c.Eval(merged[^1])) > tol) merged.Add(t);
+        }
+        if (searched && merged.Count >= 2 && Environment.GetEnvironmentVariable("TMP_NORUNS") == null) merged = OneCrossingPerRun(merged);
+        // A stretch where the edge runs along the surface (within tol of it) crosses it at most once: the sign of the
+        // distance there is rounding, and the search found "crossings" all along it (126 in 14 mm of a line lying on
+        // a pipe), each a split of the edge. Crossings with the edge on the surface between them are one run: the run
+        // is a crossing (in its middle) if the edge is on opposite sides just before and after it, a touch if not; a
+        // run reaching an end of the edge keeps that end (its vertex is on the surface).
+        List<double> OneCrossingPerRun(List<double> ts)
+        {
+            var kept = new List<double>();
+            for (int i = 0; i < ts.Count;)
+            {
+                int j = i;
+                while (j + 1 < ts.Count && Math.Abs(F(0.5 * (ts[j] + ts[j + 1]))) < tol) j++;
+                if (j == i) { kept.Add(ts[i]); i++; continue; }
+                bool hasEnd = false;
+                for (int k = i; k <= j; k++) if (ts[k] == e.T0 || ts[k] == e.T1) { kept.Add(ts[k]); hasEnd = true; }
+                if (!hasEnd)
+                {
+                    // the sides just outside the run: halfway to the crossing before it (or the start), and after it
+                    double before = 0.5 * ((i > 0 ? ts[i - 1] : lo) + ts[i]), after = 0.5 * (ts[j] + (j + 1 < ts.Count ? ts[j + 1] : hi));
+                    if (F(before) * F(after) < 0) kept.Add(ts[(i + j) / 2]);
+                }
+                i = j + 1;
+            }
+            return kept;
         }
         if (count && s.Kind is SurfaceKind.BSpline or SurfaceKind.Pipe)
         {
