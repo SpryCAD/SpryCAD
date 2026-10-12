@@ -197,6 +197,55 @@ static class LoftTests
             t.True(err != null && err.Contains("does not cross"), "explained: " + err);
         });
 
+        t.Test("Loft: options together (closed with a guide, closed along a centerline, a centerline with a guide, with tangency)", () =>
+        {
+            const double R = 40;
+            NLoft.Section Ring(double a, ProfileRegion r)
+            {
+                var x = new Vec3(Math.Cos(a), 0, Math.Sin(a));
+                return new NLoft.Section(new Frame(x * R, x, Vec3.UnitY, Vec3.Cross(x, Vec3.UnitY)), new[] { r });
+            }
+            // a circle of radius rr in XZ about the origin, as two half turns (a closed chain), running with the sections
+            List<NSweep.Seg> Round(double rr) => new()
+            {
+                new(new Vec3(rr, 0, 0), new Vec3(-rr, 0, 0), Vec3.Zero, new Vec3(0, -1, 0), Math.PI),
+                new(new Vec3(-rr, 0, 0), new Vec3(rr, 0, 0), Vec3.Zero, new Vec3(0, -1, 0), Math.PI),
+            };
+            var torus = 2 * Math.PI * Math.PI * R * 36;
+            var secs = Enumerable.Range(0, 6).Select(i => Ring(i * Math.PI / 3, Circle(6))).ToArray();
+            // closed, a closed guide round the outside
+            var g = NLoft.Loft(secs, new[] { Round(R + 6) }, new NLoft.Options(Closed: true), "G");
+            var vg = Volume(t, g, "closed with a guide");
+            t.True(Math.Abs(vg - torus) < 0.01 * torus, $"close to the torus: {vg} vs {torus}");
+            // closed along a closed centerline: the torus to the tolerance
+            var c = NLoft.Loft(secs, null, new NLoft.Options(Closed: true) { Centerline = Round(R) }, "C");
+            var vc = Volume(t, c, "closed along a centerline");
+            t.True(Math.Abs(vc - torus) < 1e-6 * torus, $"the torus: {vc} vs {torus}");
+            // a quarter bend along its centerline with a guide round the outside, and with square ends
+            Frame Tilt(double a)
+            {
+                var o = new Vec3(40 - 40 * Math.Cos(a), 0, 40 * Math.Sin(a));
+                var x = new Vec3(Math.Cos(a), 0, -Math.Sin(a));
+                return new Frame(o, x, Vec3.UnitY, Vec3.Cross(x, Vec3.UnitY));
+            }
+            var arc = new NSweep.Seg(Vec3.Zero, new Vec3(40, 0, 40), new Vec3(40, 0, 0), new Vec3(0, 1, 0), Math.PI / 2);
+            var outer = new NSweep.Seg(new Vec3(-6, 0, 0), new Vec3(40, 0, 46), new Vec3(40, 0, 0), new Vec3(0, 1, 0), Math.PI / 2);
+            var two = new[] { new NLoft.Section(Tilt(0), new[] { Circle(6) }), new NLoft.Section(Tilt(Math.PI / 2), new[] { Circle(6) }) };
+            var quarter = Math.PI * 36 * 40 * Math.PI / 2;
+            var cg = NLoft.Loft(two, new[] { new List<NSweep.Seg> { outer } }, new NLoft.Options { Centerline = new[] { arc } }, "CG");
+            var vcg = Volume(t, cg, "centerline and guide");
+            t.True(Math.Abs(vcg - quarter) < 1e-5 * quarter, $"the torus's quarter: {vcg} vs {quarter}");
+            var ct = NLoft.Loft(two, null, new NLoft.Options(NLoft.Tangency.Normal, 1, NLoft.Tangency.Normal, 1) { Centerline = new[] { arc } }, "CT");
+            Volume(t, ct, "centerline and tangency");
+            var side = ct.Faces.First(f => f.Surface.Kind == SurfaceKind.BSpline).Surface.Nurbs!;
+            var dv = side.Derivs(0.5 * (side.U0 + side.U1), side.V0).sv;
+            t.True(Math.Abs(dv.Normalized.Z) > 1 - 1e-9, $"leaves square to the first section: {dv}");
+            // an open guide on a closed loft is explained
+            string? err = null;
+            try { NLoft.Loft(secs, new[] { new List<NSweep.Seg> { outer } }, new NLoft.Options(Closed: true), "X"); } catch (ArgumentException ex) { err = ex.Message; }
+            t.True(err != null && err.Contains("must be closed"), "explained: " + err);
+        });
+
         t.Test("Loft: a loft forced to twist through itself is refused", () =>
         {
             // a straight guide from one corner of the lower square to the opposite corner of the upper one: a half turn

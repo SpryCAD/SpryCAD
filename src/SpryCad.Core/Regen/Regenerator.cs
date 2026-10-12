@@ -861,7 +861,7 @@ public sealed class Regenerator
                 sections.Add(new(sk.Frame, Array.Empty<ProfileRegion>(), sk.Frame.ToWorld(sk.Sketch.P(pts[0].P))));
             }
             var guides = new List<IReadOnlyList<Kernel.Native.NSweep.Seg>>();
-            foreach (var id in l.GuideSketchIds) guides.AddRange(SweepPath.Guides(GetSketch(id)));
+            foreach (var id in l.GuideSketchIds) guides.AddRange(SweepPath.Guides(GetSketch(id), l.Closed));
             var opt = new Kernel.Native.NLoft.Options(
                 l.StartTangency == LoftTangency.Normal ? Kernel.Native.NLoft.Tangency.Normal : Kernel.Native.NLoft.Tangency.None,
                 l.StartTangency == LoftTangency.Normal ? Positive(l.StartLength, "Start tangent length") : 1,
@@ -869,7 +869,7 @@ public sealed class Regenerator
                 l.EndTangency == LoftTangency.Normal ? Positive(l.EndLength, "End tangent length") : 1, l.Closed);
             if (centerline != null)
             {
-                var chains = SweepPath.Guides(GetSketch(centerline));
+                var chains = SweepPath.Guides(GetSketch(centerline), l.Closed);
                 if (chains.Count != 1) throw new FeatureException("The centerline sketch must hold one chain of lines and arcs.");
                 opt = opt with { Centerline = chains[0] };
             }

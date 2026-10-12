@@ -101,8 +101,54 @@ static class LoftProbe
         yield return ("fan-out", () => NLoft.Loft(new[] { S(0, Circle(2)), S(10, Rect(80, 40)) }, null, null, "X"));
         yield return ("offset-sections", () => NLoft.Loft(new[] { S(0, Circle(8)), new NLoft.Section(new Frame(new Vec3(25, 10, 20), Vec3.UnitX, Vec3.UnitY, Vec3.UnitZ), new[] { Rect(12, 12) }) }, null, null, "X"));
         yield return ("many-sections-12", () => NLoft.Loft(Enumerable.Range(0, 12).Select(i => S(i * 5, Circle(8 + 3 * Math.Sin(i * 0.8)))).ToArray(), null, null, "X"));
+        yield return ("centerline-s", () =>
+        {
+            Frame Tilt(double a) { var o = new Vec3(40 - 40 * Math.Cos(a), 0, 40 * Math.Sin(a)); var x = new Vec3(Math.Cos(a), 0, -Math.Sin(a)); return new Frame(o, x, Vec3.UnitY, Vec3.Cross(x, Vec3.UnitY)); }
+            var arc = new NSweep.Seg(Vec3.Zero, new Vec3(40, 0, 40), new Vec3(40, 0, 0), new Vec3(0, 1, 0), Math.PI / 2);
+            var arc2 = new NSweep.Seg(new Vec3(40, 0, 40), new Vec3(80, 0, 80), new Vec3(40, 0, 80), new Vec3(0, -1, 0), Math.PI / 2);
+            return NLoft.Loft(new[] { new NLoft.Section(Tilt(0), new[] { Rect(10, 10) }), new NLoft.Section(Tilt(Math.PI / 2), new[] { Circle(6) }),
+                new NLoft.Section(new Frame(new Vec3(80, 0, 80), Vec3.UnitX, Vec3.UnitY, Vec3.UnitZ), new[] { Rect(10, 10) }) }, null, new NLoft.Options { Centerline = new[] { arc, arc2 } }, "S");
+        });
+        yield return ("centerline-s-sketch", () =>
+        {
+            // the feature test's S: square 10 at the origin on Top, up a quarter right (r 10), a quarter back up, straight to y 40
+            var top = new Frame(Vec3.Zero, Vec3.UnitX, -Vec3.UnitZ, Vec3.UnitY);
+            var top40 = new Frame(new Vec3(0, 40, 0), Vec3.UnitX, -Vec3.UnitZ, Vec3.UnitY);
+            var cl = new List<NSweep.Seg> {
+                new(Vec3.Zero, new Vec3(10, 10, 0), new Vec3(10, 0, 0), new Vec3(0, 0, -1), Math.PI / 2),
+                new(new Vec3(10, 10, 0), new Vec3(20, 20, 0), new Vec3(10, 20, 0), new Vec3(0, 0, 1), Math.PI / 2),
+                new(new Vec3(20, 20, 0), new Vec3(20, 40, 0)) };
+            return NLoft.Loft(new[] { new NLoft.Section(top, new[] { Rect(10, 10) }), new NLoft.Section(top40 with { Origin = new Vec3(20, 40, 0) }, new[] { Rect(10, 10) }) }, null, new NLoft.Options { Centerline = cl }, "S");
+        });
+        yield return ("torus-sweep-reference", () =>
+        {
+            var path = new List<NSweep.Seg> { new(new Vec3(40, 0, 0), new Vec3(40, 0, 0), Vec3.Zero, new Vec3(0, -1, 0), 2 * Math.PI) };
+            return NSweep.Sweep(new[] { Circle(6) }, new Frame(new Vec3(40, 0, 0), Vec3.UnitX, Vec3.UnitY, new Vec3(0, 0, 1)), path, "T");
+        });
+        yield return ("closed-ring-guide", () =>
+        {
+            NLoft.Section Ring(double a, ProfileRegion r) { var x = new Vec3(Math.Cos(a), 0, Math.Sin(a)); return new NLoft.Section(new Frame(x * 40, x, Vec3.UnitY, Vec3.Cross(x, Vec3.UnitY)), new[] { r }); }
+            var round = new List<NSweep.Seg> { new(new Vec3(46, 0, 0), new Vec3(-46, 0, 0), Vec3.Zero, new Vec3(0, -1, 0), Math.PI), new(new Vec3(-46, 0, 0), new Vec3(46, 0, 0), Vec3.Zero, new Vec3(0, -1, 0), Math.PI) };
+            return NLoft.Loft(Enumerable.Range(0, 6).Select(i => Ring(i * Math.PI / 3, Circle(6))).ToArray(), new[] { round }, new NLoft.Options(Closed: true), "R");
+        });
         yield return ("arc-guides-on-slot", () => NLoft.Loft(new[] { S(0, new ProfileRegion(Slot(20, 6))), S(30, new ProfileRegion(Slot(20, 6))) },
             new[] { Arc3(new Vec3(16, 0, 0), new Vec3(22, 0, 15), new Vec3(16, 0, 30)) }, null, "X"));
+    }
+
+    /// <summary>The STEP test models imported as B-splines (no analytic recognition), meshed: triangles and time.</summary>
+    public static int Step()
+    {
+        StepImport.RecognizeAnalytic = false;
+        foreach (var f in Directory.GetFiles("tests/SpryCad.Tests/models/step", "*.step"))
+        {
+            var r = StepImport.Read(File.ReadAllBytes(f), "S.");
+            foreach (var x in r.Solids) _ = NTess.Facets(x.Body.Clone()).Count; // warm
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            int tris = 0;
+            for (int i = 0; i < 5; i++) foreach (var x in r.Solids) tris = NTess.Facets(x.Body.Clone()).Count;
+            Console.WriteLine($"{Path.GetFileName(f)}: {tris} triangles, {sw.Elapsed.TotalMilliseconds / 5:0.0} ms");
+        }
+        return 0;
     }
 
     public static int Run(string? filter)
@@ -111,6 +157,8 @@ static class LoftProbe
         foreach (var (name, make) in Cases())
         {
             if (filter != null && !name.Contains(filter)) continue;
+            // warm (the first run of each path pays for compiling it)
+            try { var w = make(); _ = NTess.ToSolid(w).Topology; } catch (Exception) { }
             var sw = System.Diagnostics.Stopwatch.StartNew();
             string res;
             try
@@ -119,8 +167,10 @@ static class LoftProbe
                 var tLoft = sw.Elapsed.TotalMilliseconds;
                 var err = b.Validate();
                 var mp = NMass.Of(b);
+                Prof.Enabled = Environment.GetEnvironmentVariable("LOFT_PROF") != null; Prof.Reset();
                 var sol = NTess.ToSolid(b);
                 var open = sol.Topology.OpenHalfEdges;
+                if (Prof.Enabled) { foreach (var (pn, ms, calls) in Prof.Results()) Console.WriteLine($"    {pn}: {ms:0.0} ms ({calls})"); Prof.Enabled = false; }
                 var tMesh = sw.Elapsed.TotalMilliseconds - tLoft;
                 // a box through the middle
                 var bx = b.Bounds;
@@ -130,9 +180,12 @@ static class LoftProbe
                 var uv = u.Native != null ? NMass.Of(u.Native)?.Volume : null;
                 var tBool = sw.Elapsed.TotalMilliseconds - tLoft - tMesh;
                 var kinds = string.Join(",", b.Faces.GroupBy(f => f.Surface.Kind).Select(g => $"{g.Key}:{g.Count()}"));
+                var spans = b.Faces.Where(f => f.Surface.Nurbs != null).Select(f => f.Surface.Nurbs!).Select(n => $"{n.SpansU}x{n.SpansV}" + (Prof.Enabled || Environment.GetEnvironmentVariable("LOFT_PROF") != null ? $"(rho {n.DirectionalCurvatureRadius().u:0.##},{n.DirectionalCurvatureRadius().v:0.##})" : "")).Distinct();
+                kinds += " spans " + string.Join(" ", spans);
                 bool ok = err == null && mp != null && mp.Volume > 0 && open == 0 && u.Native != null && uv > mp.Volume;
                 if (!ok) bad++;
-                res = $"{(ok ? "ok  " : "BAD ")} {name}: {(err ?? "valid")}, vol {mp?.Volume:0.###}, open {open}, union {(u.Native != null ? $"native {uv:0.###}" : "FACETED")} | faces {kinds} | loft {tLoft:0} ms, mesh {tMesh:0}, bool {tBool:0}";
+                var fine = Environment.GetEnvironmentVariable("LOFT_FINE") != null ? NTess.ToSolid(b, 2e-5).Volume() : 0;
+                res = $"{(ok ? "ok  " : "BAD ")} {name}: {(err ?? "valid")}, vol {mp?.Volume:0.####} (mesh {fine:0.####}), open {open}, union {(u.Native != null ? $"native {uv:0.###}" : "FACETED")} | faces {kinds} | loft {tLoft:0} ms, mesh {tMesh:0}, bool {tBool:0}";
             }
             catch (Exception ex)
             {

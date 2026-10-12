@@ -252,6 +252,10 @@ internal sealed class Interpolation
             double s = 0;
             for (int i = j; i <= j + p - 1; i++) s += a[i];
             U[j + p] = s / p;
+            // an average that is one of the parameters (equal steps) is that parameter exactly: else it lands a
+            // rounding error beside the knots other curves have there, and the union of the two leaves a span of
+            // nothing, whose derivatives blow up
+            foreach (var tk in t) if (Math.Abs(U[j + p] - tk) < 1e-12 * Math.Max(1, Math.Abs(tk))) U[j + p] = tk;
         }
         // rows: the points in order, the start derivative after the first, the end derivative before the last
         int n = m + 1;

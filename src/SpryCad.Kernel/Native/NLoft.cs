@@ -179,6 +179,25 @@ public static class NLoft
 
     static double Frac(double f) { f -= Math.Floor(f); return f >= 1 ? 0 : f; }
 
+    /// <summary>On a closed path (length L), arc lengths taken on round from the first: s0 ≤ s &lt; s0 + L.</summary>
+    static double[] Round(double[] s, double L, bool closed)
+    {
+        if (!closed) return s;
+        var r = (double[])s.Clone();
+        for (int k = 1; k < r.Length; k++) r[k] = s[0] + (s[k] - s[0] - Math.Floor((s[k] - s[0]) / L) * L);
+        return r;
+    }
+
+    static bool Increasing(double[] s) { for (int k = 1; k < s.Length; k++) if (!(s[k] > s[k - 1])) return false; return true; }
+
+    /// <summary>Equal end derivatives for a closed run of values at parameters t (the last value the first again): the slopes either side of the seam averaged (Bessel).</summary>
+    static H Bessel(IReadOnlyList<H> vals, IReadOnlyList<double> t)
+    {
+        int n = vals.Count;
+        double hp = t[n - 1] - t[n - 2], hn = t[1] - t[0];
+        return ((vals[1] - vals[0]) * (hp / hn) + (vals[0] - vals[n - 2]) * (hn / hp)) * (1 / (hp + hn));
+    }
+
     /// <summary>A profile loop (in the frame) as exact 3D lines and arcs; a whole circle as one closed arc.</summary>
     static Loop3 LoopOf(ProfileLoop loop, Frame fr)
     {
@@ -222,9 +241,12 @@ public static class NLoft
             L = _cum[^1];
         }
 
+        /// <summary>The chain closes on itself: arc lengths past its end run on round it.</summary>
+        public bool Closed => Segs.Count > 1 && Vec3.Distance(Segs[^1].B, Segs[0].A) < 1e-9 * Math.Max(1, L);
+
         (int i, double t) Locate(double s)
         {
-            s = Math.Clamp(s, 0, L);
+            s = Closed ? s - Math.Floor(s / L) * L : Math.Clamp(s, 0, L);
             int i = Segs.Count - 1;
             for (int k = 1; k < Segs.Count; k++) if (s < _cum[k]) { i = k - 1; break; }
             var len = Segs[i].Length;
@@ -248,13 +270,15 @@ public static class NLoft
         public Vec3 At(double s) { var (i, t) = Locate(s); return SegAt(Segs[i], t); }
         public Vec3 Tangent(double s) { var (i, t) = Locate(s); return SegTangent(Segs[i], t); }
 
-        /// <summary>Whether consecutive pieces meet tangentially.</summary>
+        /// <summary>Whether consecutive pieces meet tangentially (and, closed, the last the first).</summary>
         public bool Smooth()
         {
             for (int i = 1; i < Segs.Count; i++)
                 if (Vec3.Dot(SegTangent(Segs[i - 1], 1), SegTangent(Segs[i], 0)) < 1 - 1e-6) return false;
-            return true;
+            return !Closed || SmoothAtClose();
         }
+
+        public bool SmoothAtClose() => Vec3.Dot(SegTangent(Segs[^1], 1), SegTangent(Segs[0], 0)) >= 1 - 1e-6;
 
         public GuidePath Reversed()
         {
@@ -338,9 +362,11 @@ public static class NLoft
             return new SpineFrame(g.Center.Value + Rot(r, a, phi), Rot(f.E1, a, phi), Rot(f.E2, a, phi), Rot(f.E3, a, phi));
         }
 
+        public bool Closed => _path.Closed;
+
         public SpineFrame FrameAt(double s)
         {
-            s = Math.Clamp(s, 0, L);
+            s = Closed ? s - Math.Floor(s / L) * L : Math.Clamp(s, 0, L);
             double c = 0;
             for (int i = 0; i < Segs.Count; i++)
             {
@@ -351,8 +377,23 @@ public static class NLoft
             return _start[0];
         }
 
+        /// <summary>The frames' turning rate at s (per unit length): the arc's axis over its radius, nothing on a line.</summary>
+        public Vec3 Omega(double s)
+        {
+            s = Closed ? s - Math.Floor(s / L) * L : Math.Clamp(s, 0, L);
+            double c = 0;
+            for (int i = 0; i < Segs.Count; i++)
+            {
+                var g = Segs[i];
+                if (s <= c + g.Length || i == Segs.Count - 1)
+                    return g.IsArc ? g.Axis!.Value * (1 / (g.A - g.Center!.Value).Length) : Vec3.Zero;
+                c += g.Length;
+            }
+            return Vec3.Zero;
+        }
+
         public Vec3 At(double s) => _path.At(s);
-        public bool Smooth() => _path.Smooth();
+        public bool Smooth() => _path.Smooth() && (!Closed || _path.SmoothAtClose());
         public List<double> Crossings(Plane pl, double tol) => _path.Crossings(pl, tol);
         public Spine Reversed() => new(_path.Reversed().Segs);
     }
@@ -373,7 +414,7 @@ public static class NLoft
     /// (v_k, s_k), each piece between sections fitted through the section points with the end derivatives of the
     /// guide, refined until within tol.
     /// </summary>
-    static HCurve FitGuide(GuideInfo g, double[] v, double tol)
+    static HCurve FitGuide(GuideInfo g, double[] v, double tol, bool closed)
     {
         int n = v.Length;
         var s = g.S;
@@ -383,6 +424,8 @@ public static class NLoft
         var m = new double[n];
         m[0] = delta[0]; m[n - 1] = delta[n - 2];
         for (int k = 1; k < n - 1; k++) m[k] = 0.5 * (delta[k - 1] + delta[k]);
+        // closed: one slope at the seam, so the guide runs on smoothly
+        if (closed) m[0] = m[n - 1] = 0.5 * (delta[0] + delta[n - 2]);
         for (int k = 0; k < n - 1; k++)
         {
             double a = m[k] / delta[k], b = m[k + 1] / delta[k], r = a * a + b * b;
@@ -601,13 +644,6 @@ public static class NLoft
             if (N < 3) throw new ArgumentException("a closed loft needs three sections at least");
             if (sections.Any(x => x.Point != null)) throw new ArgumentException("a closed loft cannot have a point section");
             if (opt.Start != Tangency.None || opt.End != Tangency.None) throw new ArgumentException("a closed loft has no ends to set a tangency at");
-            if (guides.Count > 0) throw new ArgumentException("guide curves cannot be used on a closed loft yet");
-        }
-        if (opt.Centerline != null)
-        {
-            if (closed) throw new ArgumentException("a closed loft cannot follow a centerline");
-            if (guides.Count > 0) throw new ArgumentException("a loft follows guide curves or a centerline, not both");
-            if (opt.Start != Tangency.None || opt.End != Tangency.None) throw new ArgumentException("a loft along a centerline leaves its ends along the centerline (no tangency)");
         }
         for (int k = 1; k < N - 1; k++) if (sections[k].Point != null) throw new ArgumentException("only the first and the last section can be a point");
         var ks = Enumerable.Range(0, N).Where(k => sections[k].Point == null).ToList();
@@ -707,6 +743,7 @@ public static class NLoft
             var path = new GuidePath(guides[gi].ToList());
             if (path.Segs.Count == 0 || path.L < 1e-9 * scale) throw new ArgumentException($"guide curve {gi + 1} is empty");
             if (!path.Smooth()) throw new ArgumentException($"guide curve {gi + 1} has a sharp corner (guides must be tangent chains of lines and arcs)");
+            if (path.Closed != closed) throw new ArgumentException(closed ? $"guide curve {gi + 1} must be closed, like the loft" : $"guide curve {gi + 1} is closed: close the loft too, or open the guide");
             double DistTo(int k, Vec3 p) => sections[k].Point is { } pt ? Vec3.Distance(p, pt) : groups.Min(g => g.Loops[k]!.Closest(p).d);
             double[] Cross(GuidePath gp)
             {
@@ -728,8 +765,8 @@ public static class NLoft
                 }
                 return s;
             }
-            var S = Cross(path);
-            if (S[^1] < S[0]) { path = path.Reversed(); S = Cross(path); }
+            var S = Round(Cross(path), path.L, closed);
+            if (!Increasing(S)) { path = path.Reversed(); S = Round(Cross(path), path.L, closed); }
             for (int k = 1; k < N; k++)
                 if (!(S[k] > S[k - 1] + 1e-9 * scale)) throw new ArgumentException($"guide curve {gi + 1} must run through the sections in order");
             var info = new GuideInfo { Path = path, S = S, Pts = new Vec3[N], Loc = new (int, double)[N] };
@@ -771,6 +808,7 @@ public static class NLoft
             sections.Add(sections[0]);
             T[] More<T>(T[] a) => a.Append(a[0]).ToArray();
             centre = More(centre); normal = More(normal); flip = More(flip);
+            foreach (var gd in allGuides) { gd.S = gd.S.Append(gd.S[0] + gd.Path.L).ToArray(); gd.Pts = More(gd.Pts); gd.Loc = More(gd.Loc); }
             foreach (var g in groups)
             {
                 g.Loops = More(g.Loops); g.Tau = More(g.Tau);
@@ -819,16 +857,26 @@ public static class NLoft
                 }
                 return r;
             }
-            sk = Cross(spine);
-            if (sk[^1] < sk[0]) { spine = spine.Reversed(); sk = Cross(spine); }
+            if (spine.Closed != closed) throw new ArgumentException(closed ? "the centerline of a closed loft must be closed" : "the centerline is closed: close the loft too");
+            // (a closed loft's last section is its first again: once round)
+            double[] Stations(Spine sp)
+            {
+                if (!closed) return Cross(sp);
+                var r = Round(Cross(sp).Take(N - 1).ToArray(), sp.L, true);
+                return r.Append(r[0] + sp.L).ToArray();
+            }
+            sk = Stations(spine);
+            if (!Increasing(sk)) { spine = spine.Reversed(); sk = Stations(spine); }
             for (int k = 1; k < N; k++)
                 if (!(sk[k] > sk[k - 1] + 1e-9 * scale)) throw new ArgumentException("the centerline must cross the sections in order");
             for (int k = 0; k < N; k++) vk[k] = (sk[k] - sk[0]) / (sk[N - 1] - sk[0]);
+            if (!closed) for (int k = 0; k < N; k++) if (sections[k].Point is { } pt && Vec3.Distance(spine.At(sk[k]), pt) > tolOn)
+                throw new ArgumentException($"the centerline must pass through the point of section {k + 1}");
         }
         vk[0] = 0; vk[N - 1] = 1;
         for (int k = 1; k < N; k++)
             if (!(vk[k] > vk[k - 1] + 1e-9)) throw new ArgumentException($"sections {k} and {k + 1} are at the same place");
-        foreach (var g in allGuides) g.Fit = FitGuide(g, vk, tolFit);
+        foreach (var g in allGuides) g.Fit = FitGuide(g, vk, tolFit, closed);
 
         var interp = new Interpolation(vk, 3, closed || opt.Start != Tangency.None, closed || opt.End != Tangency.None);
         var D0 = normal[0] * (opt.StartLength * loftLength);
@@ -839,8 +887,7 @@ public static class NLoft
         (H d0, H d1) Ends(IReadOnlyList<H> vals)
         {
             if (!closed) return (new H(D0 * vals[0].W, 0), new H(D1 * vals[^1].W, 0));
-            double hp = vk[N - 1] - vk[N - 2], hn = vk[1] - vk[0];
-            var d = ((vals[1] - vals[0]) * (hp / hn) + (vals[0] - vals[N - 2]) * (hn / hp)) * (1 / (hp + hn));
+            var d = Bessel(vals, vk);
             return (d, d);
         }
         // a column of values (one per section) as a curve across the sections: interpolated, or along a centerline
@@ -850,39 +897,81 @@ public static class NLoft
         {
             var frames = Enumerable.Range(0, N).Select(k => spine.FrameAt(sk![k])).ToArray();
             double S(double v) => sk![0] + v * (sk[N - 1] - sk[0]);
+            double Lc = sk![N - 1] - sk[0];
+            // a world derivative D at section k, for a value h there, in the section's frame: what the value's own
+            // motion must add to the frame's (dS/dv = (C' + ω × (p - C)) Lc + F q')
+            H LocalD(int k, H h, Vec3 D)
+            {
+                var f = frames[k];
+                var w = D - (f.E3 + Vec3.Cross(spine.Omega(sk[k]), h.P - f.O)) * Lc;
+                return new H(new Vec3(Vec3.Dot(w, f.E1), Vec3.Dot(w, f.E2), Vec3.Dot(w, f.E3)) * h.W, 0);
+            }
             // the exact blend at v of a column: its values in their sections' frames, interpolated, carried to v's frame
             Func<double, H> Exact(IReadOnlyList<H> vals)
             {
-                var local = interp.Curve(vals.Select((h, k) => frames[k].ToLocal(h)).ToList());
+                var lv = vals.Select((h, k) => frames[k].ToLocal(h)).ToList();
+                H l0 = default, l1 = default;
+                if (closed) l0 = l1 = Bessel(lv, vk);
+                else
+                {
+                    if (opt.Start != Tangency.None) l0 = LocalD(0, vals[0], D0);
+                    if (opt.End != Tangency.None) l1 = LocalD(N - 1, vals[^1], D1);
+                }
+                var local = interp.Curve(lv, l0, l1);
                 return v => spine.FrameAt(S(v)).ToWorld(local.EvalH(v));
             }
-            // stations: each span cut into as many pieces as it takes to follow the centerline within the tolerance
-            // (judged on the loops' points)
+            // pieces between breaks: the sections and the centerline's joints (where its curvature jumps, so the blend
+            // is only once differentiable there); each piece interpolated through stations with the blend's slopes at
+            // its ends (taken inside it), its stations doubled until it follows the blend within the tolerance
+            // (judged on the loops' points); the pieces joined at the breaks
+            var breaks = new SortedSet<double>(vk);
+            double cum = 0;
+            for (int i = 0; i < spine.Segs.Count; i++)
+            {
+                cum += spine.Segs[i].Length;
+                var sj = closed ? sk[0] + (cum - sk[0] - Math.Floor((cum - sk[0]) / spine.L) * spine.L) : cum;
+                var vj = (sj - sk[0]) / Lc;
+                if (vj > 1e-9 && vj < 1 - 1e-9) breaks.Add(vj);
+            }
+            var bv = breaks.ToArray();
             var probes = new List<IReadOnlyList<H>>();
             foreach (var g in groups)
                 for (int q = 0; q < 16; q++)
                     probes.Add(Enumerable.Range(0, N).Select(k => H.Of(sections[k].Point ?? g.Loops[k]!.At(g.Tau[k] + q / 16.0))).ToList());
             var exacts = probes.Select(Exact).ToList();
-            double[] stations = vk;
-            Interpolation through = interp;
-            for (int cuts = 2; ; cuts *= 2)
+            // the blend's derivative in v at a, taken on the side towards b
+            static H Slope(Func<double, H> f, double a, double b)
             {
-                stations = Enumerable.Range(0, N - 1).SelectMany(k => Enumerable.Range(0, cuts).Select(i => vk[k] + (vk[k + 1] - vk[k]) * i / cuts)).Append(1.0).ToArray();
-                through = new Interpolation(stations, 3, false, false);
-                double err = 0;
-                foreach (var ex in exacts)
-                {
-                    var c = through.Curve(stations.Select(ex).ToList());
-                    for (int j = 0; j + 1 < stations.Length; j++)
-                    {
-                        var v = 0.5 * (stations[j] + stations[j + 1]);
-                        err = Math.Max(err, Vec3.Distance(c.Eval(v), ex(v).P));
-                    }
-                }
-                if (err < tolFit || cuts >= 64) break;
+                var e = 1e-4 * (b - a);
+                return (f(a) * -3 + f(a + e) * 4 - f(a + 2 * e)) * (1 / (2 * e));
             }
-            var st = stations; var th = through;
-            column = vals => { var ex = Exact(vals); var c = th.Curve(st.Select(ex).ToList()); return c; };
+            // (at a tangent end the derivative set: exact)
+            HCurve Piece(Func<double, H> f, double a, double b, Interpolation it, double[] st)
+                => it.Curve(st.Select(f).ToList(),
+                    a == 0 && !closed && opt.Start != Tangency.None ? new H(D0 * f(0).W, 0) : Slope(f, a, b),
+                    b == 1 && !closed && opt.End != Tangency.None ? new H(D1 * f(1).W, 0) : Slope(f, b, a));
+            var pieces = new List<(double a, double b, double[] st, Interpolation it)>();
+            for (int j = 0; j + 1 < bv.Length; j++)
+            {
+                double a = bv[j], b = bv[j + 1];
+                for (int cuts = 1; ; cuts *= 2)
+                {
+                    var st = Enumerable.Range(0, cuts + 1).Select(i => i == cuts ? b : a + (b - a) * i / cuts).ToArray();
+                    var it = new Interpolation(st, 3, true, true);
+                    double err = 0;
+                    foreach (var ex in exacts)
+                    {
+                        var c = Piece(ex, a, b, it, st);
+                        for (int i = 0; i < cuts; i++)
+                        {
+                            var v = a + (b - a) * (i + 0.5) / cuts;
+                            err = Math.Max(err, Vec3.Distance(c.Eval(v), ex(v).P));
+                        }
+                    }
+                    if (err < tolFit || cuts >= 64) { pieces.Add((a, b, st, it)); break; }
+                }
+            }
+            column = vals => { var ex = Exact(vals); return HCurve.Concat(pieces.Select(pc => Piece(ex, pc.a, pc.b, pc.it, pc.st)).ToList()); };
         }
 
         // ---- topology
