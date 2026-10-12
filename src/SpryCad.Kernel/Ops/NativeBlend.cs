@@ -549,7 +549,20 @@ public static class NativeBlend
             var n = _next.Normal; var x = n.AnyPerpendicular(); var y = Vec3.Cross(n, x);
             var rect = ProfileLoop.Polygon(new[] { new Vec2(-Reach, -Reach), new Vec2(Reach, -Reach), new Vec2(Reach, Reach), new Vec2(-Reach, Reach) }, "corner");
             var beyond = Builders.Extrude(new[] { new ProfileRegion(rect) }, new Frame(_next.Project(_v.P), x, y, n), 0, Reach, "corner");
-            using (Prof.Time("blend.corner.cut")) return Csg.Subtract(tool, Csg.Subtract(beyond, other.Tool));
+            // (a boolean that fails or leaves the tool invalid: on the mitre plane, as without the other fillet; the
+            // cut back at the chain's other end, if any, kept)
+            using (Prof.Time("blend.corner.cut"))
+                try
+                {
+                    var cut = Csg.Subtract(tool, Csg.Subtract(beyond, other.Tool));
+                    if (!cut.IsEmpty && cut.Native != null && cut.Native.Validate() == null) return cut;
+                    Debug?.Invoke($"round corner at {_v.P}: cut to the other fillet {(cut.Native == null ? "faceted" : cut.Native.Validate() ?? "empty")}, on the mitre plane instead");
+                }
+                catch (Exception ex) when (ex is InvalidOperationException or NBooleanException)
+                {
+                    Debug?.Invoke($"round corner at {_v.P}: cut to the other fillet failed ({ex.Message}), on the mitre plane instead");
+                }
+            return TrimOnMiter(tool);
         }
     }
 

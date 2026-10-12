@@ -38,6 +38,7 @@ static partial class Demos
         ("drafted boss with a lug, its top edge rounded round the lug", () => LugOnRound(topRound: true)),
         ("bearing pedestal out of a side onto its corner round, a sloping rib under it", () => PedestalOnRound()),
         ("bearing pedestal out of a drafted side onto its corner round, a sloping rib under it", () => PedestalOnRound(drafted: true)),
+        ("bearing pedestal out of a side drafted in towards the bottom onto its corner round, a sloping rib under it", () => PedestalOnRound(draftedIn: true)),
     };
 
     /// <summary>
@@ -452,7 +453,7 @@ static partial class Demos
     /// to the body's side, blended R3 into both. Drafted: the body's sides drafted 2° (in towards the top), as the
     /// engine casting's.
     /// </summary>
-    internal static CadDocument PedestalOnRound(bool drafted = false)
+    internal static CadDocument PedestalOnRound(bool drafted = false, bool draftedIn = false)
     {
         var d = Doc(("R", "5"), ("Rr", "3"));
         var b = new Sk(d);
@@ -462,9 +463,9 @@ static partial class Demos
         var bottom = drafted ? d.AddFeature(new PlaneFeature { Name = "Body bottom", Base = PlaneRef.Top, Offset = "-130" }) : null;
         var bs = d.AddFeature(new SketchFeature { Name = "Body", Plane = bottom != null ? new PlaneRef { Feature = bottom.Id } : PlaneRef.Top, Sketch = b.S });
         var body = d.AddFeature(drafted ? new ExtrudeFeature { Name = "Body", SketchId = bs.Id, Depth = "130", Draft = "2" }
-            : new ExtrudeFeature { Name = "Body", SketchId = bs.Id, Depth = "130", Reverse = true });
+            : new ExtrudeFeature { Name = "Body", SketchId = bs.Id, Depth = "130", Reverse = true, Draft = draftedIn ? "2" : null });
         // (the side's z at height y)
-        double Z(double y) => 58 - (drafted ? (y + 130) * Math.Tan(2 * Math.PI / 180) : 0);
+        double Z(double y) => 58 - (drafted ? (y + 130) * Math.Tan(2 * Math.PI / 180) : 0) + (draftedIn ? y * Math.Tan(2 * Math.PI / 180) : 0);
         string B(int i) => $"{body.Id}.S.L{Ids.Name(bl[i])}";
         d.AddFeature(new FilletFeature { Name = "Body corner", Radius = "20", Edges = { E(B(0), B(1), new Vec3(40 + Z(-65) - 58, -65, Z(-65))) } });
         var pp = d.AddFeature(new PlaneFeature { Name = "Pedestal plane", Base = PlaneRef.Front, Offset = "30" });
