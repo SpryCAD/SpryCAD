@@ -491,12 +491,20 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
 
     void DrawSketches(DynamicGeometry g, Highlights hl)
     {
+        // each sketch's geometry kept while its result, color and the pixel size (zoom) stay: orbiting and panning
+        // draw it again without tessellating its curves (a result is not changed once made)
+        var px = Camera.PixelSize;
         foreach (var s in Sketches)
         {
             var key = new SelItem { Kind = SelKind.Sketch, FeatureId = s.FeatureId }.Key;
             var c = hl.Of(key) ?? new Rgba(0.15f, 0.2f, 0.45f);
-            SketchDrawing.DrawStatic(g, s.Result, c, Camera.PixelSize);
+            if (_sketchPieces.TryGetValue(s.Result, out var kept) && kept.color == c && kept.px == px) { g.Add(kept.piece); continue; }
+            var m = g.Mark();
+            SketchDrawing.DrawStatic(g, s.Result, c, px);
+            _sketchPieces[s.Result] = (c, px, g.Since(m));
         }
+        if (_sketchPieces.Count > Sketches.Count)
+            foreach (var r in _sketchPieces.Keys.Where(r => !Sketches.Any(s => ReferenceEquals(s.Result, r))).ToList()) _sketchPieces.Remove(r);
     }
 
     /// <summary>Selected/hovered vertices (a small cross) and sketch lines/arcs (re-drawn in the highlight colour).</summary>
@@ -608,9 +616,21 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
     }
     IReadOnlyList<Core.Regen.CosmeticThread> _cosmetic = Array.Empty<Core.Regen.CosmeticThread>();
 
+    readonly Dictionary<SketchResult, (Rgba color, double px, DynamicGeometry.Piece piece)> _sketchPieces = new(ReferenceEqualityComparer.Instance);
+    (IReadOnlyList<Core.Regen.CosmeticThread> threads, double px, DynamicGeometry.Piece piece)? _threadPiece;
+
     void DrawCosmeticThreads(DynamicGeometry g)
     {
+        // kept while the threads and the pixel size (zoom) stay: orbiting and panning draw the helices again as they are
         var px = Camera.PixelSize;
+        if (_threadPiece is { } kept && ReferenceEquals(kept.threads, _cosmetic) && kept.px == px) { g.Add(kept.piece); return; }
+        var m = g.Mark();
+        DrawCosmeticThreads(g, px);
+        _threadPiece = (_cosmetic, px, g.Since(m));
+    }
+
+    void DrawCosmeticThreads(DynamicGeometry g, double px)
+    {
         var c = new Rgba(0.30f, 0.36f, 0.48f);
         foreach (var th in _cosmetic)
         {
