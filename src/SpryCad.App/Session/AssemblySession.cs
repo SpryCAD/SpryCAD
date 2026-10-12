@@ -49,9 +49,10 @@ public sealed class AssemblySession
     public bool Building { get; private set; }
 
     /// <summary>
-    /// Builds the displays waiting to be built, one part at a time off the UI thread, each shown as it is done; then the
-    /// mates solved again (a part that changed moves its components). <paramref name="progress"/> is told what is
-    /// being built ("Socket screw (M8), 3 of 7") and null when done. Call on the UI thread.
+    /// Builds the displays waiting to be built, several parts at once off the UI thread (<see cref="PartWork"/>), each
+    /// shown as it is done; then the mates solved again (a part that changed moves its components).
+    /// <paramref name="progress"/> is told how far it has got ("Building parts, 3 of 7 done…") and null when done. Call
+    /// on the UI thread.
     /// </summary>
     public async Task BuildPending(Action<string?>? progress = null)
     {
@@ -62,15 +63,28 @@ public sealed class AssemblySession
             bool any = false;
             for (var jobs = Model.PendingJobs(); jobs.Count > 0; jobs = Model.PendingJobs())
             {
-                for (int i = 0; i < jobs.Count; i++)
+                var built = new System.Collections.Concurrent.ConcurrentQueue<(AssemblyModel.PendingJob job, PartDisplay? display, string? problem)>();
+                var run = Task.Run(() => PartWork.Each(jobs, j => j.Placeholder.Part!, job =>
                 {
-                    var job = jobs[i];
-                    progress?.Invoke($"Building {job.Name}, {i + 1} of {jobs.Count}…");
-                    PartDisplay? built = null; string? problem = null;
-                    try { built = await Task.Run(job.Build); }
-                    catch (Exception ex) { App.Log(ex, "Build component part " + job.Name); problem = ex.Message; }
-                    if (Model.Install(job, built, problem)) { any = true; Shown(); }
+                    try { built.Enqueue((job, job.Build(), null)); }
+                    catch (Exception ex) { App.Log(ex, "Build component part " + job.Name); built.Enqueue((job, null, ex.Message)); }
+                }));
+                // each shown as it comes (here, on the UI thread)
+                int done = 0;
+                progress?.Invoke($"Building parts, 0 of {jobs.Count} done…");
+                while (true)
+                {
+                    var finished = run.IsCompleted;
+                    while (built.TryDequeue(out var b))
+                    {
+                        done++;
+                        progress?.Invoke($"Building parts, {done} of {jobs.Count} done…");
+                        if (Model.Install(b.job, b.display, b.problem)) { any = true; Shown(); }
+                    }
+                    if (finished) break;
+                    await Task.WhenAny(run, Task.Delay(50));
                 }
+                await run;
             }
             if (any && Model.HasMates) { Model.SolveMates(); Shown(); }
         }

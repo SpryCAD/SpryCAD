@@ -101,7 +101,8 @@ public partial class MainWindow : IAssemblyHost
             {
                 var live = keys.Except(missing).ToList();
                 // each part's solids, built from its document (threads modeled, as part exports do)
-                var solids = live.ToDictionary(k => k, k => new Core.Regen.Regenerator { ThreadOverride = Core.Regen.ThreadDisplay.Modeled }.Rebuild(k.Doc!).State.Bodies.Select(b => (b.Id, b.Solid)).ToList());
+                var solids = new System.Collections.Concurrent.ConcurrentDictionary<PartDisplay, List<(string Id, Solid Solid)>>();
+                PartWork.Each(live, k => k.Doc!, k => solids[k] = new Core.Regen.Regenerator { ThreadOverride = Core.Regen.ThreadDisplay.Modeled }.Rebuild(k.Doc!).State.Bodies.Select(b => (b.Id, b.Solid)).ToList());
                 var comps = placed.Where(x => x.pd.Doc != null).ToList();
                 using var fs = File.Create(path);
                 if (kind == "step")

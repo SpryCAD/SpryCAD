@@ -18,6 +18,28 @@ static class AssemblyToolTests
 
     public static void Run(TestRunner t)
     {
+        t.Test("PartWork: every item done, those sharing a key (a part document) one after another, the others in parallel", () =>
+        {
+            var keys = Enumerable.Range(0, 6).Select(_ => new object()).ToList();
+            var items = Enumerable.Range(0, 48).Select(i => (key: keys[i % keys.Count], id: i)).ToList();
+            var busy = new int[keys.Count];
+            int overlapSameKey = 0, running = 0, mostAtOnce = 0, done = 0;
+            PartWork.Each(items, x => x.key, x =>
+            {
+                var k = keys.IndexOf(x.key);
+                if (Interlocked.Increment(ref busy[k]) > 1) Interlocked.Increment(ref overlapSameKey);
+                var now = Interlocked.Increment(ref running);
+                lock (keys) mostAtOnce = Math.Max(mostAtOnce, now);
+                Thread.Sleep(5);
+                Interlocked.Decrement(ref running);
+                Interlocked.Decrement(ref busy[k]);
+                Interlocked.Increment(ref done);
+            });
+            t.True(done == items.Count, $"all done ({done} of {items.Count})");
+            t.True(overlapSameKey == 0, $"no two items of one key at once ({overlapSameKey})");
+            t.True(Environment.ProcessorCount < 3 || mostAtOnce > 1, $"several keys at once (at most {mostAtOnce} running)");
+        });
+
         t.Test("Assembly tools: embedded sub-assemblies; a linked one gone missing shows from the assembly's copy", () =>
         {
             var dir = NewDir("tools-embed");
