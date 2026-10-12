@@ -49,6 +49,10 @@ public sealed class NDomain
                     // faces are patches within ±π of their anchor: wrap against it (continuous unwrapping
                     // fails at poles, where θ legitimately jumps)
                     var q = double.IsNaN(anchorU) ? s.UV(p[i], hint, vhint) : s.UV(p[i], anchorU, double.IsNaN(anchorV) ? vhint : anchorV);
+                    // (half a turn from the anchor, a half-round face's far edge with its anchor on the near one, a point
+                    // comes out on either side by rounding: the side of the point before it)
+                    if (!double.IsNaN(anchorU) && !double.IsNaN(hint) && Math.Abs(Math.Abs(q.X - anchorU) - Math.PI) < 1e-6 && Math.Abs(q.X - hint) > Math.PI)
+                        q = new Vec2(q.X - Math.Sign(q.X - hint) * 2 * Math.PI, q.Y);
                     cuv[i] = new Vec2(q.X, q.Y * VSign);
                     if (!double.IsNaN(q.X)) hint = q.X;
                     vhint = q.Y;

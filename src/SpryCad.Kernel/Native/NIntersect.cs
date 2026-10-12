@@ -1091,7 +1091,10 @@ public static class NIntersect
             int key = (i * (nv + 1) + j) * 2 + dir;
             if (cross[key] >> 1 == stamp) return (cross[key] & 1) != 0;
             double a = G(i, j), b = dir == 0 ? G(i + 1, j) : G(i, j + 1);
-            if (a * b > 0) { cross[key] = stamp * 2; return false; }
+            // (by the signs: two zeros, stored as 1e-300, multiply to 0, which read as a crossing at 0/0; and not where a
+            // value is not a finite number, a surface evaluated past its patch in the grid's margin: a crossing there
+            // would be NaN, and every point projected from it the slow way)
+            if ((a < 0) == (b < 0) || !double.IsFinite(a) || !double.IsFinite(b)) { cross[key] = stamp * 2; return false; }
             var t = a / (a - b);
             var pa = UV(i, j); var pb = dir == 0 ? UV(i + 1, j) : UV(i, j + 1);
             cpt[key] = Vec2.Lerp(pa, pb, t);

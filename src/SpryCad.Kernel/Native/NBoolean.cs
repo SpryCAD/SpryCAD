@@ -1567,7 +1567,19 @@ public sealed class NBoolean
         if (!fb.Overlaps(otherBox, _onTol)) { if (dbg) T($"    {f.Tag.Name} box {fb.Min}-{fb.Max} outside other {otherBox.Min}-{otherBox.Max}"); return State.Out; }
         var p = Dom(f).InteriorPoint();
         if (dbg) T($"    {f.Tag.Name} interior point {p} box {fb.Min}-{fb.Max}");
-        return ClassifyPoint(f, p, other, otherBox);
+        try { return ClassifyPoint(f, p, other, otherBox); }
+        catch (NBooleanException)
+        {
+            // the face's point on an edge of the other body (every ray starts there): other points inside the face,
+            // the farthest from its boundary first
+            var dom = Dom(f);
+            foreach (var q in dom.InteriorSamples(31).Where(q => dom.Classify(q, _onTol * 4) > 0).OrderByDescending(dom.BoundaryDistance).Take(8))
+            {
+                try { return ClassifyPoint(f, q, other, otherBox); }
+                catch (NBooleanException) { }
+            }
+            throw;
+        }
     }
 
     State ClassifyPoint(NFace f, Vec3 p, List<NFace> other, Box3 otherBox)
