@@ -1433,7 +1433,7 @@ public sealed partial class SketchEditor : IViewportMode
     }
 
     // the points drawn with a mark of their own each frame (reused, drawing allocates nothing for them)
-    readonly HashSet<int> _shownPoints = new(), _ownMarks = new();
+    readonly HashSet<long> _shownPoints = new(), _ownMarks = new();
 
     public void Draw(ViewportControl vp, DynamicGeometry g)
     {
