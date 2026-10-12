@@ -16,7 +16,10 @@ public static class NShell
         var inner = Offset(body, f => openFaces.Contains(f.Tag.Name) ? thickness : -thickness, prefix + ".I.");
         var err = inner.Validate();
         if (err != null) throw new InvalidOperationException("shell: " + err);
-        return NBoolean.Run(body, inner, BoolOp.Subtract);
+        // the inner body runs a wall's thickness inside the outer one and breaks out only through the open faces:
+        // only an open face and an inner face, or an outer face and an open face's (outward) offset, can meet
+        var openInner = openFaces.Select(n => prefix + ".I." + n).ToHashSet();
+        return NBoolean.Run(body, inner, BoolOp.Subtract, (a, b) => openFaces.Contains(a) || openInner.Contains(b));
     }
 
     /// <summary>Offsets each face along its outward normal by dist(face) and rebuilds the topology.</summary>
@@ -53,8 +56,18 @@ public static class NShell
                     if (!l.Contains(surf[f])) l.Add(surf[f]);
                 }
         var vmap = new Dictionary<NVertex, NVertex>(ReferenceEqualityComparer.Instance);
-        foreach (var (v, ss) in vFaces)
+        foreach (var (v, all) in vFaces)
         {
+            // surfaces tangent at the corner (within a degree) count once: there their offsets share the corner's
+            // offset point, and solving both, as they curve apart beside it, only dithers
+            var ss = new List<NSurface>();
+            var normals = new List<Vec3>();
+            foreach (var s in all)
+            {
+                var n = s.Grad(v.P);
+                if (n.Length > 1e-300 && normals.Any(m => Math.Abs(Vec3.Dot(m, n.Normalized)) > Math.Cos(Math.PI / 180))) continue;
+                ss.Add(s); normals.Add(n.Length > 1e-300 ? n.Normalized : n);
+            }
             var p = Solve(ss, v.P, tol, out var res);
             Debug?.Invoke($"vertex {v.P} -> {p} res {res:g2} on {string.Join(",", ss.Select(x => x.Kind))}");
             if (res > 1e-6 * scale) throw new InvalidOperationException(what + ": a corner has no solution");
@@ -120,26 +133,69 @@ public static class NShell
 
     static NEdge OffsetEdge(NEdge e, NSurface sa, NSurface sb, NVertex v0, NVertex v1, double tol, double scale, string what)
     {
-        // points of the offset edge (projected from samples of the original)
-        const int n = 12;
-        var pts = new List<Vec3> { v0.P };
         var ss = new[] { sa, sb };
-        for (int i = 1; i < n; i++)
+        // how far a point is off the two surfaces
+        double Off2(Vec3 q) => Math.Max(Math.Abs(sa.F_(q)), Math.Abs(sb.F_(q)));
+        // the faces nearly tangent along the edge (within 2°, at its middle): their offsets cross at so small an angle
+        // that solving for the crossing is ill-conditioned; each point goes along the mean of the two normals by the
+        // mean offset instead, off both surfaces by about the offset times the angle squared over 8
+        var qm = e.Mid;
+        var ga = sa.Grad(qm); var gb = sb.Grad(qm);
+        bool nearTangent = ga.Length > 1e-300 && gb.Length > 1e-300 && Math.Abs(Vec3.Dot(ga.Normalized, gb.Normalized)) > Math.Cos(2 * Math.PI / 180);
+        Vec3 Bisect(Vec3 q)
         {
-            double s = (double)i / n;
-            var guess = e.At(s) + (v0.P - e.V0.P) * (1 - s) + (v1.P - e.V1.P) * s;
-            var p = Solve(ss, guess, tol, out var r);
-            if (r > 1e-6 * scale) throw new InvalidOperationException(what + ": an edge has no solution");
-            pts.Add(p);
+            var na = sa.Grad(q).Normalized; var nb = sb.Grad(q).Normalized;
+            if (Vec3.Dot(na, nb) < 0) nb = -nb;
+            var n = (na + nb).Normalized;
+            // F = 0 on each offset: step back along n by their mean (F grows along the gradient)
+            var f = 0.5 * (sa.F_(q) * Math.Sign(Vec3.Dot(sa.Grad(q), n)) + sb.F_(q) * Math.Sign(Vec3.Dot(sb.Grad(q), n)));
+            return q - n * f;
         }
-        pts.Add(v1.P);
+        // (the offset edge between its new ends: where that curve passes through them, the ends having moved along
+        // the edge too, onto the offsets of the faces at its ends)
+        double sFrom = 0, sTo = 1;
+        if (nearTangent)
+        {
+            double Nearest(Vec3 target, double lo, double hi)
+            {
+                for (int it = 0; it < 60; it++)
+                {
+                    double m1 = lo + (hi - lo) * 0.382, m2 = lo + (hi - lo) * 0.618;
+                    if (Vec3.Distance(Bisect(e.At(m1)), target) < Vec3.Distance(Bisect(e.At(m2)), target)) hi = m2; else lo = m1;
+                }
+                return 0.5 * (lo + hi);
+            }
+            sFrom = Nearest(v0.P, 0, 0.5); sTo = Nearest(v1.P, 0.5, 1);
+        }
+        // points of the offset edge (projected from samples of the original), n pieces
+        List<Vec3> Points(int n)
+        {
+            var pts = new List<Vec3> { v0.P };
+            for (int i = 1; i < n; i++)
+            {
+                double s = (double)i / n;
+                if (nearTangent) { pts.Add(Bisect(e.At(sFrom + (sTo - sFrom) * s))); continue; }
+                var guess = e.At(s) + (v0.P - e.V0.P) * (1 - s) + (v1.P - e.V1.P) * s;
+                var p = Solve(ss, guess, tol, out var r);
+                if (r > 1e-6 * scale)
+                {
+                    Debug?.Invoke($"edge {e.Curve.GetType().Name} {e.V0.P}->{e.V1.P} at {s:0.###}: {guess} -> {p} res {r:g2}, angle {Math.Acos(Math.Clamp(Math.Abs(Vec3.Dot(sa.Grad(guess).Normalized, sb.Grad(guess).Normalized)), 0, 1)) * 180 / Math.PI:0.####}° F {sa.F_(guess):g3} {sb.F_(guess):g3}");
+                    throw new InvalidOperationException(what + ": an edge has no solution");
+                }
+                pts.Add(p);
+            }
+            pts.Add(v1.P);
+            return pts;
+        }
+        var pts = Points(12);
         // a transversal (non-tangent) intersection is followed continuously from vertex to vertex instead: solving
         // each sample on its own can jump between branches (e.g. the near and far side of a tube cut by a plane)
-        if (e.Curve is not NLine && Vec3.Cross(sa.Grad(v0.P), sb.Grad(v0.P)).Length > 1e-3)
+        bool marched = false;
+        if (!nearTangent && e.Curve is not NLine && Vec3.Cross(sa.Grad(v0.P), sb.Grad(v0.P)).Length > 1e-3)
         {
             var dir0 = e.Curve.Deriv(e.T0).Normalized;
             var length = Math.Max(e.Length, Vec3.Distance(v0.P, v1.P));
-            if (March(sa, sb, v0.P, v1.P, dir0, length, scale) is { } marched) pts = marched;
+            if (March(sa, sb, v0.P, v1.P, dir0, length, scale) is { } m) { pts = m; marched = true; }
         }
         if (sa.Kind == SurfaceKind.Pipe || sb.Kind == SurfaceKind.Pipe)
             Debug?.Invoke($"edge {e.Curve.GetType().Name} {sa.Kind}/{sb.Kind}: " + string.Join(" ", pts.Select(p => p.ToString())));
@@ -170,8 +226,36 @@ public static class NShell
             var edge = Trim(cv, pts, v0, v1);
             if (edge != null) return edge;
         }
+        // a free-form intersection (offsets of B-splines): a spline through the points, refined until it stays on both
+        // surfaces between them too. A loose one leaves the edge off the surfaces by more than a boolean allows, and
+        // where such an edge crosses another face (an open face of a shell) the crossing is not on the surfaces: the
+        // boolean drops that section and the shell quietly removes nothing.
         var bs = BSplineCurve.Interpolate(pts, 3);
-        return new NEdge(new NSpline(bs), 0, 1, v0, v1);
+        // how far the spline strays off the surfaces between its points (no better asked than its points are)
+        double Off(BSplineCurve c)
+        {
+            double worst = 0;
+            int m = Math.Max(16, 2 * (pts.Count - 1));
+            for (int i = 0; i < m; i++) worst = Math.Max(worst, Off2(c.Eval((i + 0.5) / m)));
+            return worst;
+        }
+        double Floor() => 2 * pts.Max(Off2);
+        var off = Off(bs);
+        for (int n = Math.Max(24, 2 * (pts.Count - 1)); off > Math.Max(fitTol, Floor()) && n <= 1536; n *= 2)
+        {
+            List<Vec3> dense;
+            if (marched)
+            {
+                // between the marched points: each midpoint projected (the march stays on the right branch)
+                dense = new List<Vec3> { pts[0] };
+                for (int i = 1; i < pts.Count; i++) { dense.Add(Solve(ss, 0.5 * (pts[i - 1] + pts[i]), tol, out _)); dense.Add(pts[i]); }
+            }
+            else dense = Points(n);
+            pts = dense;
+            bs = BSplineCurve.Interpolate(pts, 3);
+            off = Off(bs);
+        }
+        return new NEdge(new NSpline(bs) { FitTol = off }, 0, 1, v0, v1);
     }
 
     /// <summary>
@@ -253,6 +337,7 @@ public static class NShell
         {
             var rows = new List<Vec3>(); var rhs = new List<double>(); var basis = new List<Vec3>();
             residual = 0;
+            double minSin = 1; // the least angle (its sine) between a row and the ones before it
             // largest residuals first so the dominant constraints are kept
             foreach (var s in ss.OrderByDescending(s => Math.Abs(s.F_(p))))
             {
@@ -261,7 +346,11 @@ public static class NShell
                 var g = s.Grad(p);
                 var o = g;
                 foreach (var b in basis) o -= b * Vec3.Dot(o, b);
-                if (o.Length < 1e-6 * Math.Max(g.Length, 1e-300) || basis.Count == 3) continue;
+                // (nearly tangent surfaces, within a few hundredths of a degree, as one: lofted faces that meet smoothly
+                // at a profile are tangent there but only nearly so between, and two nearly parallel rows make the
+                // step blow up; what that leaves over is about the thickness times the angle squared)
+                if (o.Length < 1e-3 * Math.Max(g.Length, 1e-300) || basis.Count == 3) continue;
+                if (basis.Count > 0) minSin = Math.Min(minSin, o.Length / g.Length);
                 basis.Add(o.Normalized);
                 rows.Add(g); rhs.Add(f);
             }
@@ -276,6 +365,11 @@ public static class NShell
             var y = SolveSmall(m, k);
             var step = Vec3.Zero;
             for (int i = 0; i < k; i++) step += rows[i] * y[i];
+            // damped: no further than a few times what is still off over the angle between the surfaces (a point off
+            // two surfaces meeting at a small angle moves that much further to reach both); without a bound, two
+            // nearly parallel surfaces, one counted and the other not quite tangent after a step, throw it far away
+            var cap = 4 * residual / Math.Max(minSin, 0.01) + tol;
+            if (step.Length > cap) step *= cap / step.Length;
             p -= step;
             if (step.Length < tol * 1e-6) break;
         }

@@ -258,6 +258,44 @@ static class LoftTests
             Volume(t, ok, "quarter turn");
         });
 
+        t.Test("Loft: shelled with the end open (square to circle, three circles, a slot, guides at the corners)", () =>
+        {
+            // a guide arc in the plane through the z axis at angle a, from radius r0 at z 0 through rm at z h/2 to r0 at z h
+            List<NSweep.Seg> Bow(double ax, double ay, double r0, double rm, double h)
+            {
+                var dir = new Vec3(ax, ay, 0);
+                Vec3 P(double r, double z) => dir * r + new Vec3(0, 0, z);
+                Vec3 a = P(r0, 0), m = P(rm, h / 2), e = P(r0, h);
+                var ab = m - a; var ac = e - a; var n = Vec3.Cross(ab, ac).Normalized;
+                var num = Vec3.Cross(n, ab) * ac.LengthSq - Vec3.Cross(n, ac) * ab.LengthSq;
+                var c = a + num * (1 / (2 * Vec3.Dot(Vec3.Cross(ab, ac), n)));
+                var r = a - c; var axis = Vec3.Cross(r, m - c).Normalized;
+                return new List<NSweep.Seg> { new(a, e, c, axis, Math.Acos(Math.Clamp(Vec3.Dot(r.Normalized, (e - c).Normalized), -1, 1))) };
+            }
+            var slot = new ProfileLoop();
+            slot.Verts.Add(new ProfileVertex(new Vec2(-15, -8), "Tb"));
+            slot.AddArc(new Vec2(15, 0), 8, -Math.PI / 2, Math.PI / 2, true, "Ta");
+            slot.Verts.Add(new ProfileVertex(new Vec2(15, 8), "Tt"));
+            slot.AddArc(new Vec2(-15, 0), 8, Math.PI / 2, 1.5 * Math.PI, true, "Tc");
+            var cases = new (string what, NBody body)[]
+            {
+                ("square to circle", NLoft.Loft(new[] { Sec(0, Rect(20, 20)), Sec(25, Circle(8)) }, null, null, "X")),
+                ("three circles", NLoft.Loft(new[] { Sec(0, Circle(10)), Sec(20, Circle(6)), Sec(40, Circle(9)) }, null, null, "X")),
+                ("slot to circle", NLoft.Loft(new[] { Sec(0, new ProfileRegion(slot)), Sec(30, Circle(10)) }, null, null, "X")),
+                ("guides at the corners", NLoft.Loft(new[] { Sec(0, Rect(20, 20)), Sec(30, Rect(20, 20)) },
+                    new[] { (1, 1), (-1, 1), (-1, -1), (1, -1) }.Select(q => Bow(q.Item1 / Math.Sqrt(2), q.Item2 / Math.Sqrt(2), 10 * Math.Sqrt(2), 13 * Math.Sqrt(2), 30)).ToArray(), null, "X")),
+            };
+            foreach (var (what, b) in cases)
+            {
+                var v0 = Volume(t, b, what);
+                var sh = NShell.Apply(b, new HashSet<string> { "X.End" }, 1, "SH");
+                var v1 = Volume(t, sh, what + " shelled");
+                // a wall 1 thick: roughly the side area plus the closed end's, less a little
+                t.True(v1 < 0.6 * v0 && v1 > 0.05 * v0, $"{what}: shelled {v0:0} -> {v1:0}");
+                t.True(sh.Faces.Count > b.Faces.Count, $"{what}: inner faces added");
+            }
+        });
+
         t.Test("Loft: a guide bows the side out through its point; the sections stay exact", () =>
         {
             // circles r 10 at z 0 and 40; a guide arc in XZ from (10,0,0) through (16,0,20) to (10,0,40)

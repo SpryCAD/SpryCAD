@@ -190,6 +190,7 @@ static class Program
             return 0;
         }
         if (args.Length > 0 && args[0] == "loftstep") return LoftProbe.Step();
+        if (args.Length > 0 && args[0] == "loftshell") return LoftProbe.Shell(args.Length > 1 ? args[1] : null);
         if (args.Length > 0 && args[0] == "loftprobe") return LoftProbe.Run(args.Length > 1 ? args[1] : null);
         if (args.Length > 1 && args[0] == "bench")
         {

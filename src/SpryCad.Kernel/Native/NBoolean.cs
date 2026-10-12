@@ -213,6 +213,8 @@ public sealed class NBoolean
         return res;
     }
 
+    Func<string, string, bool>? _mayMeet;
+
     NBoolean(double scale)
     {
         _tol = 1e-7 * Math.Max(10, scale);
@@ -223,7 +225,14 @@ public sealed class NBoolean
 
     enum State { Out, In, OnSame, OnOpposite }
 
-    public static NBody Run(NBody a, NBody b, BoolOp op)
+    public static NBody Run(NBody a, NBody b, BoolOp op) => Run(a, b, op, null);
+
+    /// <summary>
+    /// The boolean, told which faces can meet at all (by their names; a face of a and a face of b): a shell's inner
+    /// body runs beside the outer one at the wall's thickness and meets it only at the open faces, and tracing a
+    /// face against its own offset (two surfaces that never cross, a wall apart) takes minutes.
+    /// </summary>
+    public static NBody Run(NBody a, NBody b, BoolOp op, Func<string, string, bool>? mayMeet)
     {
         var ba = a.Bounds; var bb = b.Bounds;
         // tolerances follow the region where the operands meet: a long through-all tool must not
@@ -232,7 +241,7 @@ public sealed class NBoolean
         var hi = new Vec3(Math.Min(ba.Max.X, bb.Max.X), Math.Min(ba.Max.Y, bb.Max.Y), Math.Min(ba.Max.Z, bb.Max.Z));
         var scale = (hi - lo).Length;
         if (!(scale > 0) || hi.X < lo.X || hi.Y < lo.Y || hi.Z < lo.Z) scale = Math.Min(ba.Diagonal, bb.Diagonal);
-        var nb = new NBoolean(scale);
+        var nb = new NBoolean(scale) { _mayMeet = mayMeet };
         NBody ca, cb; using (Prof.Time("bool.clone")) { ca = a.Clone(); cb = b.Clone(); }
         return nb.Execute(ca, cb, op);
     }
@@ -309,7 +318,7 @@ public sealed class NBoolean
         var pairs = new List<(NFace fa, NFace fb, bool coincident)>();
         foreach (var fa in ActiveFaces(A))
             foreach (var fb in ActiveFaces(B))
-                if (faceBoxA[fa].Overlaps(faceBoxB[fb], _onTol))
+                if (faceBoxA[fa].Overlaps(faceBoxB[fb], _onTol) && (_mayMeet == null || _mayMeet(fa.Tag.Name, fb.Tag.Name)))
                     pairs.Add((fa, fb, fa.Surface.CoincidentWith(fb.Surface, _tol * 10)));
         var pairCurves = new List<NCurve>[pairs.Count];
         var toTrace = new List<int>();
@@ -349,9 +358,11 @@ public sealed class NBoolean
                 bool onSpline = false;
                 // (not where the analytic face is narrower than a few of the B-spline's grid cells, a thin hole through it:
                 // there the B-spline's grid sees only scraps of the crossing, and the analytic face's own grid finds it)
-                if (fb.Surface.Kind == SurfaceKind.BSpline && fa.Surface.Kind is not (SurfaceKind.BSpline or SurfaceKind.Offset or SurfaceKind.Screw)
+                // (an offset of a B-spline too: its distance is the B-spline's search, which past a narrow face's edges
+                // runs onto its extension and draws curves that are not there)
+                if (fb.Surface.Kind is SurfaceKind.BSpline or SurfaceKind.Offset && fa.Surface.Kind is not (SurfaceKind.BSpline or SurfaceKind.Offset or SurfaceKind.Screw)
                     && Width(fa) > 4 * fb.Bounds().Diagonal / 96) { (fa, fb) = (fb, fa); onSpline = true; }
-                else if (fa.Surface.Kind == SurfaceKind.BSpline && fb.Surface.Kind is not (SurfaceKind.BSpline or SurfaceKind.Offset or SurfaceKind.Screw or SurfaceKind.Pipe)
+                else if (fa.Surface.Kind is SurfaceKind.BSpline or SurfaceKind.Offset && fb.Surface.Kind is not (SurfaceKind.BSpline or SurfaceKind.Offset or SurfaceKind.Screw or SurfaceKind.Pipe)
                     && Width(fb) <= 4 * fa.Bounds().Diagonal / 96) (fa, fb) = (fb, fa);
                 var swt = System.Diagnostics.Stopwatch.StartNew();
                 // a B-spline face against its own mirror image (a mirror or a pattern's mirrored copy, meeting its seed),
@@ -1030,10 +1041,13 @@ public sealed class NBoolean
     {
         var res = new List<NEdge>();
         var sa = fa.Surface; var sb = fb.Surface;
-        // breakpoints: vertices of either face lying on both surfaces
-        var bps = fa.Coedges.Concat(fb.Coedges).SelectMany(c => new[] { c.Start, c.End })
-            .Distinct(ReferenceEqualityComparer.Instance).Cast<NVertex>()
-            .Where(v => Math.Abs(sa.F_(v.P)) < _onTol && Math.Abs(sb.F_(v.P)) < _onTol).ToList();
+        // breakpoints: vertices of either face lying on both surfaces (as closely as a fitted edge through them is
+        // known to lie on its surfaces: a shell's edge between nearly tangent offsets is off them by its fit)
+        var vtol = new Dictionary<NVertex, double>(ReferenceEqualityComparer.Instance);
+        foreach (var c in fa.Coedges.Concat(fb.Coedges))
+            foreach (var v in new[] { c.Start, c.End })
+                vtol[v] = Math.Max(vtol.GetValueOrDefault(v, _onTol), c.Edge.Curve is NSpline sp ? 2 * sp.FitTol : 0);
+        var bps = vtol.Keys.Where(v => Math.Abs(sa.F_(v.P)) < vtol[v] && Math.Abs(sb.F_(v.P)) < vtol[v]).ToList();
         NDomain domA, domB;
         using (Prof.Time("sec.domains")) { domA = Dom(fa); domB = Dom(fb); }
         var dbgPair = Trace != null && Environment.GetEnvironmentVariable("FC_TRACE_PAIR") is { } tp && (fa.Tag.Name + "|" + fb.Tag.Name).Contains(tp);

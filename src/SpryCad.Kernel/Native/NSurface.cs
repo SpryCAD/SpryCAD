@@ -482,7 +482,9 @@ public sealed class NSurface
         if (Kind == SurfaceKind.Pipe) return Spine!.RayHits(o, d, R);
         if (Kind == SurfaceKind.Screw) return Screw!.RayHits(o, d);
         if (Kind == SurfaceKind.BSpline) return Nurbs!.RayHits(o, d, F_);
-        if (Kind == SurfaceKind.Offset) return RayHitsByDistance(o, d, Base!.Nurbs!.Box, Math.Abs(R));
+        // (an offset face can run on past its base's edge, where a shell's inner wall reaches up to an open face's
+        // offset: about the offset further still)
+        if (Kind == SurfaceKind.Offset) return RayHitsByDistance(o, d, Base!.Nurbs!.Box, 3 * Math.Abs(R));
         var res = new List<double>();
         var lo = F.ToLocal3(o);
         var ld = new Vec3(Vec3.Dot(d, F.XDir), Vec3.Dot(d, F.YDir), Vec3.Dot(d, F.Normal));

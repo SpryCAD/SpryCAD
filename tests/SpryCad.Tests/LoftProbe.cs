@@ -151,6 +151,47 @@ static class LoftProbe
         return 0;
     }
 
+    /// <summary>`loftshell [filter]`: each probe loft shelled 1.5 thick with its end face open (else its start).</summary>
+    public static int Shell(string? filter)
+    {
+        foreach (var (name, make) in Cases())
+        {
+            if (filter != null && !name.Contains(filter)) continue;
+            NBody b;
+            try { b = make(); } catch (Exception) { continue; }
+            var open = b.Faces.Any(f => f.Tag.Name.EndsWith(".End")) ? b.Faces.First(f => f.Tag.Name.EndsWith(".End")).Tag.Name
+                : b.Faces.Any(f => f.Tag.Name.EndsWith(".Start")) ? b.Faces.First(f => f.Tag.Name.EndsWith(".Start")).Tag.Name : null;
+            if (open == null) { Console.WriteLine($"--   {name}: no end face"); continue; }
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            if (Environment.GetEnvironmentVariable("SHELL_CORNERS") != null) NShell.Debug = m => { if (m.StartsWith("vertex") || m.StartsWith("edge")) Console.WriteLine("   " + m); };
+            try
+            {
+                var t = Math.Min(1.5, 0.02 * b.Bounds.Diagonal);
+                if (Environment.GetEnvironmentVariable("SHELL_DBG") != null)
+                {
+                    var inner = NShell.Offset(b, f => f.Tag.Name == open ? t : -t, "SH.I.");
+                    var iv = NMass.Of(inner)?.Volume;
+                    var ib = inner.Bounds; var bb = b.Bounds;
+                    Console.WriteLine($"   inner {inner.Validate() ?? "valid"} volume {iv:0.#}, box {ib.Min}..{ib.Max} vs {bb.Min}..{bb.Max}");
+                    foreach (var f in inner.Faces) Console.WriteLine($"     {f.Tag.Name} {f.Surface.Kind} sense {f.Sense} R {f.Surface.R}");
+                }
+                Prof.Reset(); Prof.Enabled = Environment.GetEnvironmentVariable("SHELL_DBG") != null;
+                if (Prof.Enabled) NBoolean.Trace = m => Console.WriteLine("   T " + (m.Length > 220 ? m[..220] : m));
+                var sh = NShell.Apply(b, new HashSet<string> { open }, t, "SH");
+                if (Prof.Enabled) { foreach (var (pn, ms, calls) in Prof.Results().Where(x => x.name.StartsWith("tr") || x.name.StartsWith("sec") || x.name.StartsWith("cls") || x.name.StartsWith("bool"))) Console.WriteLine($"     {pn}: {ms:0} ms ({calls})"); Prof.Enabled = false; }
+                if (Environment.GetEnvironmentVariable("SHELL_DBG") != null) foreach (var f in sh.Faces) Console.WriteLine($"   result {f.Tag.Name} {f.Surface.Kind} loops {f.Loops.Count} edges {f.Coedges.Count()} sense {f.Sense}");
+                var err = sh.Validate();
+                var v0 = NMass.Of(b)?.Volume ?? 0; var v1 = NMass.Of(sh)?.Volume ?? double.NaN;
+                if (Environment.GetEnvironmentVariable("SHELL_OPEN") != null) Topology.Debug = m => Console.WriteLine("   " + m);
+                var mesh = NTess.ToSolid(sh).Topology.OpenHalfEdges;
+                Topology.Debug = null;
+                Console.WriteLine($"{(err == null && mesh == 0 && v1 > 0 && v1 < v0 ? "ok  " : "BAD ")} {name}: {err ?? "valid"}, volume {v0:0.#} -> {v1:0.#}, open mesh edges {mesh}, {sw.ElapsedMilliseconds} ms");
+            }
+            catch (Exception ex) { Console.WriteLine($"FAIL {name}: {ex.GetType().Name}: {ex.Message} ({sw.ElapsedMilliseconds} ms)"); }
+        }
+        return 0;
+    }
+
     public static int Run(string? filter)
     {
         int bad = 0;
