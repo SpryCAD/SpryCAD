@@ -1,7 +1,10 @@
 namespace SpryCad.Kernel;
 
-/// <summary>Contiguous triangle range of one named (UI) face.</summary>
-public sealed record FaceRange(string Name, int IndexStart, int IndexCount, SurfaceDef Surface, Plane FirstPlane, Box3 Bounds);
+/// <summary>
+/// Contiguous triangle range of one named (UI) face. <paramref name="GeometryHash"/>: its exact geometry
+/// (<see cref="Native.NHash.Faces"/>; 0: not known), so two builds tell a changed face from one kept as it was.
+/// </summary>
+public sealed record FaceRange(string Name, int IndexStart, int IndexCount, SurfaceDef Surface, Plane FirstPlane, Box3 Bounds, ulong GeometryHash = 0);
 
 /// <summary>Contiguous line range of one model edge.</summary>
 public sealed record EdgeRange(int EdgeIndex, int VertexStart, int VertexCount);
@@ -248,11 +251,12 @@ public sealed class DisplayMesh
         int nv = 0, ni = 0, faceId = 0;
         var slotFace = new int[pts.Count]; var slotVert = new int[pts.Count];
         var more = new Dictionary<(int p, float x, float y, float z), int>();
+        var faceHashes = solid.Native != null ? Native.NHash.Faces(solid.Native) : null;
         string? curName = null; int curStart = 0; SurfaceDef? curSurf = null; Plane? curPlane = null; var curBox = Box3.Empty;
         void Flush()
         {
             if (curName != null && ni > curStart)
-                m.Faces.Add(new FaceRange(curName, curStart, ni - curStart, curSurf!, curPlane!, curBox));
+                m.Faces.Add(new FaceRange(curName, curStart, ni - curStart, curSurf!, curPlane!, curBox, faceHashes?.GetValueOrDefault(curName) ?? 0));
         }
         int Vertex(int pi, Vec3 p, Vec3 n)
         {
