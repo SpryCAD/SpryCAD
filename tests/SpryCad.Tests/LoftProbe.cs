@@ -175,10 +175,23 @@ static class LoftProbe
                     Console.WriteLine($"   inner {inner.Validate() ?? "valid"} volume {iv:0.#}, box {ib.Min}..{ib.Max} vs {bb.Min}..{bb.Max}");
                     foreach (var f in inner.Faces) Console.WriteLine($"     {f.Tag.Name} {f.Surface.Kind} sense {f.Sense} R {f.Surface.R}");
                 }
+                if (Environment.GetEnvironmentVariable("SHELL_TIME") != null)
+                {
+                    var w = System.Diagnostics.Stopwatch.StartNew();
+                    Prof.Reset(); Prof.Enabled = true;
+                    var inner = NShell.Offset(b, f => f.Tag.Name == open ? t : -t, "SH.I.");
+                    Prof.Enabled = false;
+                    foreach (var (pn, ms, calls) in Prof.Results().Where(x => x.name.StartsWith("shell"))) Console.WriteLine($"     {pn}: {ms:0} ms ({calls})");
+                    var tInner = w.Elapsed.TotalMilliseconds;
+                    var r = NBoolean.Run(b, inner, BoolOp.Subtract, (x, y) => x == open || y == "SH.I." + open);
+                    var tBool = w.Elapsed.TotalMilliseconds - tInner;
+                    _ = NTess.ToSolid(r).Topology;
+                    Console.WriteLine($"   inner {tInner:0} ms, boolean {tBool:0} ms, mesh {w.Elapsed.TotalMilliseconds - tInner - tBool:0} ms");
+                }
                 Prof.Reset(); Prof.Enabled = Environment.GetEnvironmentVariable("SHELL_DBG") != null;
                 if (Prof.Enabled) NBoolean.Trace = m => Console.WriteLine("   T " + (m.Length > 220 ? m[..220] : m));
                 var sh = NShell.Apply(b, new HashSet<string> { open }, t, "SH");
-                if (Prof.Enabled) { foreach (var (pn, ms, calls) in Prof.Results().Where(x => x.name.StartsWith("tr") || x.name.StartsWith("sec") || x.name.StartsWith("cls") || x.name.StartsWith("bool"))) Console.WriteLine($"     {pn}: {ms:0} ms ({calls})"); Prof.Enabled = false; }
+                if (Prof.Enabled) { foreach (var (pn, ms, calls) in Prof.Results().Where(x => x.ms >= 20)) Console.WriteLine($"     {pn}: {ms:0} ms ({calls})"); Prof.Enabled = false; }
                 if (Environment.GetEnvironmentVariable("SHELL_DBG") != null) foreach (var f in sh.Faces) Console.WriteLine($"   result {f.Tag.Name} {f.Surface.Kind} loops {f.Loops.Count} edges {f.Coedges.Count()} sense {f.Sense}");
                 var err = sh.Validate();
                 var v0 = NMass.Of(b)?.Volume ?? 0; var v1 = NMass.Of(sh)?.Volume ?? double.NaN;
