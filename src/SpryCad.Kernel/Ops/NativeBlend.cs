@@ -910,9 +910,10 @@ public static class NativeBlend
             if (p1 != null) sol = p1.Trim(sol);
             return sol;
         }
-        // (ending square at a corner the pivot carries on from: bounded by the faces, its end the pivot's own; reaching
-        // past them its end lies along the other edge there, on a drafted face, and the union fails)
-        if (pivots.Any(x => x.patch.OwnAtJoint) && EdgeBlend.Profile2D(P(uA), P(uB), P(nA), P(nB), Vec2.Zero, dA, fillet, convex, dB, atCorner: true) is { } atJoint)
+        // (ending where the ball pivots round a corner: bounded by the faces, its end the pivot's own section; reaching
+        // past them, its end stands beside the pivot's in slivers (along the other edge, on a drafted face) and the union
+        // fails)
+        if (pivots.Count > 0 && EdgeBlend.Profile2D(P(uA), P(uB), P(nA), P(nB), Vec2.Zero, dA, fillet, convex, dB, atCorner: true) is { } atJoint)
             loop = atJoint;
         var tools = new List<Solid> { Between(loop, true) };
         tools.RemoveAll(x => x.IsEmpty);
