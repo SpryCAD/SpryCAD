@@ -74,7 +74,9 @@ public static class NIntersect
     public static EdgeHits EdgeSurface(NEdge e, NSurface s, double tol)
     {
         var c = e.Curve;
-        double F(double t) => s.F_(c.Eval(t));
+        var count = Prof.Enabled;
+        // (counted while profiling: the evaluations are the cost, a closest-point search each on a pipe or B-spline)
+        double F(double t) { if (count) Prof.Count("edgesurface.eval", 1); return s.F_(c.Eval(t)); }
         double lo = Math.Min(e.T0, e.T1), hi = Math.Max(e.T0, e.T1);
         var res = new List<double>();
 
@@ -139,7 +141,7 @@ public static class NIntersect
                     // signed distance also jumps (from one turn to the next) where nothing is crossed
                     if (fa * fb < 0)
                     {
-                        var r = Roots.Bisect(F, ta, tb);
+                        var r = Roots.Bracketed(F, ta, tb);
                         if (s.Kind != SurfaceKind.Screw || Math.Abs(F(r)) < tol * 1e3) res.Add(r);
                     }
                     if (fa == 0 && ta == zeroT && zeroSign * fb < 0) res.Add(ta);
