@@ -150,8 +150,15 @@ profile; the profile's times are summed over threads). On the heavy samples (`sa
     and worst time): on the gear's tooth-gap sketch (36 relations, mostly dimensions) hovering and zooming cost
     0.74–0.94 ms an update before and 0.32–0.41 ms after; entering the sketch 143 to 86 ms worst. Under a millisecond
     either way, so coalescing to once per frame and caching the label layout wait for a sketch where it shows.
-  - `PickVertex` allocates per edge per move with no cull.
-  - Assembly hover ray-tests every triangle; cull by face boxes as `PickItem` does.
+  - Measuring: `SPRYCAD_PROFILE_RENDER=1` logs every 2 s the CPU time of frames and of building their overlay
+    geometry (planes, sketches, threads, editor marks...) and its size; `=continuous` renders frame after frame (a
+    still view measured without touching the mouse); `=picks` also runs the hover pick at a point sweeping the view
+    each frame, logging its time and a sum of what it hit every 240 picks (two builds picking alike log the same).
+  - `PickVertex`: no array per edge per move (start and end tried in turn). A pick's time is mostly its face pick.
+  - Assembly hover: done. `PickInstance` tests only the triangles of faces whose boxes the ray meets (the boxes padded
+    for the positions' rounding to float; a mesh whose faces do not cover its triangles is scanned whole). The same
+    hits (sums equal to the full scan's); average pick lead-screw 0.26 to 0.20 ms, linkage 0.24 to ~0.1 ms, gears
+    0.77 to 0.42 ms (more on meshes with more triangles).
 - **Sketch lookups**: done. `Sketch.Point`, `Entity` and `P` use an index by id past 16 items, valid while the list
   is the same object at the same `List<T>` version (the lists are edited in place throughout), so a miss is as
   quick as a hit. `sketchbench`'s new `frames` column (ten frames of the lookups drawing does): 10×10 grid 3.6 to
@@ -160,7 +167,30 @@ profile; the profile's times are summed over threads). On the heavy samples (`sa
   preview leaves alone); icon paths parsed once; one rollback-bar cursor. Measured with `SPRYCAD_PROFILE_TREE=1`
   editing Fillet1 of spur-gear-nice with four previews: one rebuild (the cancel) instead of five; a rebuild of the
   18-feature tree costs 3–11 ms either way. Still rebuilt in full on each document change and real result.
-- **Dynamic geometry**: cosmetic thread helices and sketches are rebuilt and re-uploaded every frame.
+- **Dynamic geometry**: done for threads and shown sketches. Their overlay vertices are kept while their inputs
+  and the pixel size (zoom) stay, and appended as they are (orbiting and panning do not re-tessellate them); vertices
+  are appended seven floats at once. A long cosmetic thread (19k vertices): overlay 0.6–0.8 to 0.08 ms a frame, the
+  frame's CPU time ~1.1 to ~0.4 ms; socket-screw's 0.07 to 0.02 ms. Frames on the samples cost well under 1 ms of CPU
+  (they are capped by the display at 60 a second).
+  - The sketch editor's drawing: its point sets are reused and filled by loops (no LINQ per frame or per entity).
+    `-- gridpart <k> <out.sprt>` writes a part whose sketch is sketchbench's k×k grid; editing the 20×20 one
+    (1600 lines, 3200 relations) the editor draws in ~1.03 ms a frame from ~1.15 (`SPRYCAD_PROFILE_RENDER` now
+    also logs the mode's drawing).
+  - Sketch editor labels: editing that sketch ran at ~12 frames a second with its frame's GL work ~1.4 ms. The
+    dimension values and relation marks were an Avalonia control each (~3200), all redrawn with every frame of the
+    view below (~20 µs a label a frame): hidden, 60 frames a second; relation marks alone hidden, ~25. Done:
+    relation and On Edge marks on geometry smaller on screen than a twentieth of the view's shorter side are left
+    out (they could not be used, and covered it); the rest, and anchor marks, are placed those of the selected or
+    hovered geometry first, and a mark mostly covered by one already placed (over a third of it) is left out;
+    zooming in shows them (selected or hovered geometry always keeps its marks); and the dimension values and all
+    those marks are drawn by one control (`SketchMarks`: relation marks take clicks, the hand cursor and their
+    tooltips by position; dimension values are picked by their boxes). 20×20 grid 12 to ~35 frames a second;
+    10×10 grid 32–42 to 60 (its marks left out when zoomed out; zoomed in, every segment's mark shown, 60). What is
+    left on the largest is drawing 800 text labels every frame: a cached image of the marks while the view is
+    still would remove it.
+  - Tried: uploading the overlay's five parts in one buffer (`BufferData` once, `BufferSubData` each) instead of a
+    `BufferData` per part: no gain (long-thread frames 0.34–0.40 ms before, 0.38–0.45 after); the driver handles the
+    orphaned small buffers well.
 - **Saving and startup**:
   - Autosave: done. It writes a copy of each part off the UI thread (one autosave at a time), and attachment hashes
     are kept per byte array. `-- savebench <step file> [MB]`: with a 20 MB imported model the UI waited 260–560 ms an

@@ -16,7 +16,8 @@ public enum UnitSystem { MMGS, IPS }
 public sealed class CadDocument
 {
     public const string FileExtension = ".sprt";
-    public const int CurrentFormatVersion = 1;
+    /// <summary>2: random ids (<see cref="Ids"/>); 1: counted ids, renewed on opening (<see cref="LegacyIds"/>).</summary>
+    public const int CurrentFormatVersion = 2;
 
     public string Format { get; set; } = "SpryCAD";
     public int FormatVersion { get; set; } = CurrentFormatVersion;
@@ -36,7 +37,6 @@ public sealed class CadDocument
     public List<Feature> Features { get; set; } = new();
     /// <summary>Number of active features (rollback bar position); null = all.</summary>
     public int? RollbackIndex { get; set; }
-    public int NextFeatureId { get; set; } = 1;
     public Dictionary<string, int> NameCounters { get; set; } = new();
     /// <summary>Part appearance (RGB 0-1).</summary>
     public double[] Color { get; set; } = { 0.74, 0.76, 0.80 };
@@ -104,7 +104,7 @@ public sealed class CadDocument
     public Feature? Find(string id) => Features.FirstOrDefault(f => f.Id == id);
     public int IndexOf(string id) => Features.FindIndex(f => f.Id == id);
 
-    public string NewId() => "F" + NextFeatureId++;
+    public string NewId() => Ids.NewFeatureId();
 
     /// <summary>SolidWorks style auto names: Sketch1, Boss-Extrude1, Fillet1...</summary>
     public string NewName(string kind)
@@ -157,8 +157,8 @@ public sealed class CadDocument
     public static string JsonOf(Feature f) => JsonSerializer.Serialize(f, typeof(Feature), Serialization.Compact);
 
     /// <summary>
-    /// Whether a feature's serialized definition refers to feature <paramref name="id"/>: "F7" as a whole value
-    /// (sketchId, seeds) or "F7.…" as a face/edge name prefix ("F17" does not match).
+    /// Whether a feature's serialized definition refers to feature <paramref name="id"/>: the id as a whole value
+    /// (sketchId, seeds) or as a face/edge name prefix ("&lt;id&gt;.End").
     /// </summary>
     public static bool Refers(string featureJson, string id) => featureJson.Contains($"\"{id}\"") || featureJson.Contains($"\"{id}.");
 
@@ -176,6 +176,7 @@ public sealed class CadDocument
         // (parts made before the product was renamed say FeatherCAD; saved again they say SpryCAD)
         if (d.Format == "FeatherCAD") d.Format = "SpryCAD";
         if (d.Format != "SpryCAD") throw new InvalidDataException("Not a SpryCAD document");
+        if (d.FormatVersion <= LegacyIds.LastVersion) LegacyIds.Upgrade(d, json);
         return d;
     }
 

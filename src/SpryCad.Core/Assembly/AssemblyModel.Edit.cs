@@ -100,10 +100,13 @@ public sealed partial class AssemblyModel
             if (r.Component.Contains('/') && Find(top) is { } t && t.Owner.SubOf(t.Component)?.Model == null) return null;
             return "its component is gone";
         }
-        if (o.Component.IsAssembly) return AssemblyModel.OriginPlanes.Contains(r.Face) ? null : $"face {r.Face} is gone";
+        if (o.Component.IsAssembly) return AssemblyModel.OriginPlanes.Contains(r.Face) ? null : $"face {FaceName(r)} is gone";
         if (o.Display is not { Source: PartSource.File or PartSource.Embedded } pd || pd.Building) return null;
-        return pd.Mesh.Faces.Any(f => f.Name == r.Face) ? null : $"face {r.Face} is gone";
+        return pd.Mesh.Faces.Any(f => f.Name == r.Face) ? null : $"face {FaceName(r)} is gone";
     }
+
+    /// <summary>The face a reference names, as the user reads it (<see cref="DisplayNames.Face"/>, when its part is open).</summary>
+    public string FaceName(MateRef r) => r.Component != null && Find(r.Component)?.Display?.Part is { } doc ? DisplayNames.Face(doc, r.Face) : r.Face;
 
     /// <summary>The mates with a reference gone (<see cref="Broken"/>), and why.</summary>
     public List<(Mate mate, string why)> BrokenMates()

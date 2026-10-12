@@ -14,11 +14,11 @@ static class SketchFuzz
 {
     sealed record Scenario(string Name, Func<Sketch> Build);
 
-    static int P(Sketch sk, double x, double y) => sk.AddPoint(new Vec2(x, y)).Id;
-    static SkLine L(Sketch sk, int a, int b, bool construction = false) => sk.Add(new SkLine { P1 = a, P2 = b, Construction = construction });
+    static long P(Sketch sk, double x, double y) => sk.AddPoint(new Vec2(x, y)).Id;
+    static SkLine L(Sketch sk, long a, long b, bool construction = false) => sk.Add(new SkLine { P1 = a, P2 = b, Construction = construction });
     static void Tan(Sketch sk, SkEntity a, SkEntity b) => SketchSolver.CaptureSign(sk, sk.AddConstraint(CType.Tangent, a.Id, b.Id));
 
-    static SkConstraint Dim(Sketch sk, CType type, double value, params int[] refs)
+    static SkConstraint Dim(Sketch sk, CType type, double value, params long[] refs)
     {
         var c = sk.AddConstraint(type, refs);
         c.Value = value; c.Expr = value.ToString(System.Globalization.CultureInfo.InvariantCulture);
@@ -26,10 +26,10 @@ static class SketchFuzz
         return c;
     }
 
-    static Sketch Rect(double x0, double y0, double x1, double y1, out SkLine[] sides, out int[] corners, int first = -1)
+    static Sketch Rect(double x0, double y0, double x1, double y1, out SkLine[] sides, out long[] corners, long first = -1)
     {
         var sk = new Sketch();
-        int a = first >= 0 ? first : P(sk, x0, y0), b = P(sk, x1, y0), c = P(sk, x1, y1), d = P(sk, x0, y1);
+        long a = first >= 0 ? first : P(sk, x0, y0), b = P(sk, x1, y0), c = P(sk, x1, y1), d = P(sk, x0, y1);
         var l1 = L(sk, a, b); var l2 = L(sk, b, c); var l3 = L(sk, c, d); var l4 = L(sk, d, a);
         sk.AddConstraint(CType.Horizontal, l1.Id); sk.AddConstraint(CType.Horizontal, l3.Id);
         sk.AddConstraint(CType.Vertical, l2.Id); sk.AddConstraint(CType.Vertical, l4.Id);
@@ -41,11 +41,11 @@ static class SketchFuzz
     {
         var sk = new Sketch();
         var u = (b - a).Normalized; var n = u.Perp;
-        int ca = fromOrigin ? Sketch.OriginId : P(sk, a.X, a.Y), cb = P(sk, b.X, b.Y);
+        long ca = fromOrigin ? Sketch.OriginId : P(sk, a.X, a.Y), cb = P(sk, b.X, b.Y);
         var axis = L(sk, ca, cb, true);
         if (horizontal) sk.AddConstraint(CType.Horizontal, axis.Id);
         var A = fromOrigin ? Vec2.Zero : a;
-        int p1 = P(sk, (A + n * r).X, (A + n * r).Y), p2 = P(sk, (b + n * r).X, (b + n * r).Y), p3 = P(sk, (b - n * r).X, (b - n * r).Y), p4 = P(sk, (A - n * r).X, (A - n * r).Y);
+        long p1 = P(sk, (A + n * r).X, (A + n * r).Y), p2 = P(sk, (b + n * r).X, (b + n * r).Y), p3 = P(sk, (b - n * r).X, (b - n * r).Y), p4 = P(sk, (A - n * r).X, (A - n * r).Y);
         var top = L(sk, p1, p2); var bot = L(sk, p3, p4);
         var arcB = sk.Add(new SkArc { Center = cb, Start = p3, End = p2 });
         var arcA = sk.Add(new SkArc { Center = ca, Start = p1, End = p4 });
@@ -73,7 +73,7 @@ static class SketchFuzz
         yield return new("center rectangle", () =>
         {
             var sk = new Sketch();
-            int c = P(sk, 40, 30), a = P(sk, 10, 10), b = P(sk, 70, 10), cc = P(sk, 70, 50), d = P(sk, 10, 50);
+            long c = P(sk, 40, 30), a = P(sk, 10, 10), b = P(sk, 70, 10), cc = P(sk, 70, 50), d = P(sk, 10, 50);
             var l1 = L(sk, a, b); var l2 = L(sk, b, cc); var l3 = L(sk, cc, d); var l4 = L(sk, d, a);
             sk.AddConstraint(CType.Horizontal, l1.Id); sk.AddConstraint(CType.Horizontal, l3.Id);
             sk.AddConstraint(CType.Vertical, l2.Id); sk.AddConstraint(CType.Vertical, l4.Id);
@@ -87,7 +87,7 @@ static class SketchFuzz
         {
             // two lines meeting at a corner, rounded: the arc tangent to both at its ends
             var sk = new Sketch();
-            int a = P(sk, 0, 60), t1 = P(sk, 0, 10), t2 = P(sk, 10, 0), b = P(sk, 70, 0), c = P(sk, 10, 10);
+            long a = P(sk, 0, 60), t1 = P(sk, 0, 10), t2 = P(sk, 10, 0), b = P(sk, 70, 0), c = P(sk, 10, 10);
             var l1 = L(sk, a, t1); var l2 = L(sk, t2, b);
             var arc = sk.Add(new SkArc { Center = c, Start = t1, End = t2 });
             sk.AddConstraint(CType.Vertical, l1.Id); sk.AddConstraint(CType.Horizontal, l2.Id);
@@ -97,7 +97,7 @@ static class SketchFuzz
         yield return new("line and tangent arc", () =>
         {
             var sk = new Sketch();
-            int a = P(sk, 0, 0), b = P(sk, 50, 0), c = P(sk, 50, 20), e = P(sk, 70, 20);
+            long a = P(sk, 0, 0), b = P(sk, 50, 0), c = P(sk, 50, 20), e = P(sk, 70, 20);
             var l = L(sk, a, b);
             var arc = sk.Add(new SkArc { Center = c, Start = b, End = e });
             Tan(sk, l, arc);
@@ -106,7 +106,7 @@ static class SketchFuzz
         yield return new("line tangent to a circle", () =>
         {
             var sk = new Sketch();
-            int c = P(sk, 40, 20), a = P(sk, 0, 0), b = P(sk, 80, 0);
+            long c = P(sk, 40, 20), a = P(sk, 0, 0), b = P(sk, 80, 0);
             var ci = sk.Add(new SkCircle { Center = c, R = 20 });
             var l = L(sk, a, b);
             Tan(sk, l, ci);
@@ -115,7 +115,7 @@ static class SketchFuzz
         yield return new("two tangent circles", () =>
         {
             var sk = new Sketch();
-            int c1 = P(sk, 0, 0), c2 = P(sk, 50, 0);
+            long c1 = P(sk, 0, 0), c2 = P(sk, 50, 0);
             var a = sk.Add(new SkCircle { Center = c1, R = 20 }); var b = sk.Add(new SkCircle { Center = c2, R = 30 });
             Tan(sk, a, b);
             return sk;
@@ -124,7 +124,7 @@ static class SketchFuzz
         {
             // the Polygon tool: corners on a construction circle, sides equal
             var sk = new Sketch();
-            int c = P(sk, 0, 0);
+            long c = P(sk, 0, 0);
             var circle = sk.Add(new SkCircle { Center = c, R = 30, Construction = true });
             var pts = Enumerable.Range(0, 6).Select(i => P(sk, 30 * Math.Cos(i * Math.PI / 3), 30 * Math.Sin(i * Math.PI / 3))).ToArray();
             var sides = Enumerable.Range(0, 6).Select(i => L(sk, pts[i], pts[(i + 1) % 6])).ToArray();
@@ -135,7 +135,7 @@ static class SketchFuzz
         yield return new("triangle with an angle", () =>
         {
             var sk = new Sketch();
-            int a = P(sk, 0, 0), b = P(sk, 60, 0), c = P(sk, 20, 40);
+            long a = P(sk, 0, 0), b = P(sk, 60, 0), c = P(sk, 20, 40);
             var l1 = L(sk, a, b); var l2 = L(sk, b, c); var l3 = L(sk, c, a);
             sk.AddConstraint(CType.Horizontal, l1.Id);
             Dim(sk, CType.Angle, SketchSolver.Measure(sk, new SkConstraint { Type = CType.Angle, Refs = new[] { l1.Id, l3.Id } }), l1.Id, l3.Id);
@@ -144,14 +144,14 @@ static class SketchFuzz
         yield return new("center arc", () =>
         {
             var sk = new Sketch();
-            int c = P(sk, 0, 0), s = P(sk, 30, 0), e = P(sk, 0, 30);
+            long c = P(sk, 0, 0), s = P(sk, 30, 0), e = P(sk, 0, 30);
             sk.Add(new SkArc { Center = c, Start = s, End = e });
             return sk;
         });
         yield return new("arc with a radius", () =>
         {
             var sk = new Sketch();
-            int c = P(sk, 0, 0), s = P(sk, 30, 0), e = P(sk, -21.2, 21.2);
+            long c = P(sk, 0, 0), s = P(sk, 30, 0), e = P(sk, -21.2, 21.2);
             var arc = sk.Add(new SkArc { Center = c, Start = s, End = e });
             Dim(sk, CType.Radius, 30, arc.Id);
             return sk;
@@ -186,7 +186,7 @@ static class SketchFuzz
     }
 
     /// <summary>Each line's length, circle's and arc's radius, and arc's sweep, by entity.</summary>
-    static Dictionary<int, (double size, double sweep)> Sizes(Sketch sk) => sk.Entities.ToDictionary(e => e.Id, e => e switch
+    static Dictionary<long, (double size, double sweep)> Sizes(Sketch sk) => sk.Entities.ToDictionary(e => e.Id, e => e switch
     {
         SkLine l => (Vec2.Distance(sk.P(l.P1), sk.P(l.P2)), 1.0),
         SkCircle c => (c.R, 1.0),
@@ -198,7 +198,7 @@ static class SketchFuzz
     /// Whether the sketch is pressed against a limit of its shape: a line or radius down to a twentieth of what it was,
     /// or an arc nearly closed or nearly gone. A drag held there is right to stop.
     /// </summary>
-    static bool NearLimit(Sketch sk, Dictionary<int, (double size, double sweep)> start)
+    static bool NearLimit(Sketch sk, Dictionary<long, (double size, double sweep)> start)
     {
         foreach (var (id, now) in Sizes(sk))
         {
@@ -215,15 +215,17 @@ static class SketchFuzz
         var rng = new Random(seed);
         foreach (var sc in Scenarios())
         {
-            var probe = sc.Build();
+            // one sketch, copied for each drag (built again it would have other ids)
+            var drawn = sc.Build();
+            var probe = drawn.Clone();
             SketchSolver.Solve(probe);
             // what is dragged: every free point, then every line (both its ends with the pointer)
-            var targets = new List<(string name, int[] pts)>();
+            var targets = new List<(string name, long[] pts)>();
             foreach (var p in probe.Points) targets.Add(($"point {p.Id}", new[] { p.Id }));
             foreach (var l in probe.Entities.OfType<SkLine>()) targets.Add(($"line {l.Id}", new[] { l.P1, l.P2 }));
             foreach (var (name, pts) in targets)
             {
-                var sk = sc.Build();
+                var sk = drawn.Clone();
                 var first = SketchSolver.Solve(sk);
                 if (!first.Converged) { found.Add(new(sc.Name, "", "unsolved as drawn", $"residual {first.Residual:g3}")); break; }
                 bool fullyDefined = first.Status == SketchStatus.FullyDefined;

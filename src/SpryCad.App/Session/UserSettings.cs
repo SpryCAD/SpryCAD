@@ -43,8 +43,8 @@ public static class UserSettings
     /// parts with embedded files. On by default.
     /// </summary>
     public static bool SaveContainer { get; set; } = true;
-    /// <summary>When saved parts keep their display (in containers only).</summary>
-    public static KeepDisplay KeepDisplay { get; set; } = KeepDisplay.SlowParts;
+    /// <summary>When saved parts keep their display (in containers only). Every part by default: it shows at once when opened.</summary>
+    public static KeepDisplay KeepDisplay { get; set; } = KeepDisplay.Always;
     /// <summary>How long a part takes to rebuild for it to keep its display (<see cref="KeepDisplay.SlowParts"/>).</summary>
     public static double KeepDisplaySeconds { get; set; } = 1;
     /// <summary>Saved assemblies keep their parts' meshes (open without rebuilding them). On by default.</summary>
@@ -71,11 +71,18 @@ public static class UserSettings
     /// <summary>The update channel picked in Options ("stable" or "dev"); null: the one the installed build came from.</summary>
     public static string? UpdateChannel { get; set; }
 
+    /// <summary>
+    /// The settings file's layout. 2: keep every part's display by default. A file before it holds the old default
+    /// (slow parts only), saved like any choice: taken as the default, now every part.
+    /// </summary>
+    const int Version = 2;
+
     public static void Load()
     {
         try
         {
             if (!File.Exists(StorePath)) return;
+            int version = 1;
             foreach (var line in File.ReadAllLines(StorePath))
             {
                 var i = line.IndexOf('=');
@@ -97,7 +104,9 @@ public static class UserSettings
                 else if (k == nameof(CheckForUpdates)) CheckForUpdates = v == "1";
                 else if (k == nameof(SkippedUpdate)) SkippedUpdate = v.Length > 0 ? v : null;
                 else if (k == nameof(UpdateChannel)) UpdateChannel = v.Length > 0 ? v : null;
+                else if (k == nameof(Version) && int.TryParse(v, out var sv)) version = sv;
             }
+            if (version < 2 && KeepDisplay == KeepDisplay.SlowParts) KeepDisplay = KeepDisplay.Always;
         }
         catch { /* defaults */ }
     }
@@ -109,6 +118,7 @@ public static class UserSettings
             Directory.CreateDirectory(Path.GetDirectoryName(StorePath)!);
             var lines = new List<string>
             {
+                $"{nameof(Version)}={Version}",
                 $"{nameof(ReverseWheel)}={(ReverseWheel ? 1 : 0)}",
                 $"{nameof(Perspective)}={(Perspective ? 1 : 0)}",
                 $"{nameof(SaveContainer)}={(SaveContainer ? 1 : 0)}",

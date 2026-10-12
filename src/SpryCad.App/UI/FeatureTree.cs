@@ -28,6 +28,9 @@ public sealed class FeatureTree : UserControl
     public event Action<string>? EditRequested;
     public event Action<string, Point, Control>? ContextRequested;
     public event Action<string>? HoverChanged;
+
+    /// <summary>Color by Feature: a swatch of each feature's color on its row (the legend), by id; null: none.</summary>
+    public IReadOnlyDictionary<string, Color>? Swatches { get; set; }
     public event Action<int?>? RollbackRequested;
     /// <summary>Dragged feature id, target feature id (or "__rollback" for the bar), drop after the target.</summary>
     public event Action<string, string, bool>? MoveRequested;
@@ -322,6 +325,13 @@ public sealed class FeatureTree : UserControl
             ? TreeRow.Expander(_expanded.Contains(id), () => ToggleExpanded(id))
             : TreeRow.Spacer());
         sp.Children.Add(Icons.Make(icon, 16));
+        if (Swatches != null && Swatches.TryGetValue(id, out var swatch))
+            sp.Children.Add(new Border
+            {
+                Width = 10, Height = 10, CornerRadius = new CornerRadius(2), Background = new SolidColorBrush(swatch),
+                BorderBrush = Palette.TextMuted, BorderThickness = new Thickness(0.5), VerticalAlignment = VerticalAlignment.Center,
+                Opacity = suppressed ? 0.4 : 1,
+            });
         var tb = new TextBlock { Text = text, VerticalAlignment = VerticalAlignment.Center, FontSize = TypeScale.Body, TextTrimming = TextTrimming.CharacterEllipsis };
         sp.Shrink.Add(tb);
         if (isHeader) tb.FontWeight = FontWeight.SemiBold;

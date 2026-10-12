@@ -43,8 +43,8 @@ static partial class Demos
     {
         var d = Doc(("Len", $"{len}"), ("W", "16"), ("T", $"{LkT}"), ("Hole", $"{LkHoleD}"));
         var s = new Sk(d);
-        int end = s.P("Len", "0");
-        int a = s.P("0", "-W/2"), b = s.P("Len", "-W/2"), c = s.P("Len", "W/2"), e = s.P("0", "W/2");
+        long end = s.P("Len", "0");
+        long a = s.P("0", "-W/2"), b = s.P("Len", "-W/2"), c = s.P("Len", "W/2"), e = s.P("0", "W/2");
         s.Line(a, b); s.Arc(end, b, c); s.Line(c, e); s.Arc(Sketch.OriginId, e, a);
         s.Circle(Sketch.OriginId, "Hole"); s.Circle(end, "Hole");
         var sk = d.AddFeature(new SketchFeature { Name = "Link", Plane = PlaneRef.Front, Sketch = s.S });

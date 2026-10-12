@@ -17,7 +17,8 @@ namespace SpryCad.Core.Assembly;
 public sealed partial class AssemblyDocument
 {
     public const string FileExtension = ".sasm";
-    public const int CurrentFormatVersion = 1;
+    /// <summary>2: its parts' random ids in mate references; 1: their old counted ids, renewed on opening (<see cref="RenewLegacyIds"/>).</summary>
+    public const int CurrentFormatVersion = 2;
 
     public string Format { get; set; } = "SpryCAD-Assembly";
     public int FormatVersion { get; set; } = CurrentFormatVersion;
@@ -106,7 +107,53 @@ public sealed partial class AssemblyDocument
         if (d.Format == "FeatherCAD-Assembly") d.Format = "SpryCAD-Assembly"; // made before the rename
         if (d.Format != "SpryCAD-Assembly") throw new InvalidDataException("Not a SpryCAD assembly");
         foreach (var m in d.Mates) Mate.Normalize(m);
+        if (d.FormatVersion <= Model.LegacyIds.LastVersion)
+        {
+            // the parts placed directly are known here; those in sub-assemblies once they are open (AssemblyModel.Open)
+            d.LegacyIds = true;
+            d.FormatVersion = CurrentFormatVersion;
+            foreach (var c in d.Components) if (!c.IsAssembly && c.Part.PartId is { } id) c.Part.Revision = Model.LegacyIds.Revision(id, c.Part.Revision);
+            d.RenewLegacyIds(path => !path.Contains('/') && d.Find(path) is { IsAssembly: false, Part.PartId: { } id } ? id : null);
+        }
         return d;
+    }
+
+    /// <summary>Read from a file made before random ids (format version 1): its mates name part faces by their old ids.</summary>
+    [System.Text.Json.Serialization.JsonIgnore] public bool LegacyIds { get; private set; }
+
+    /// <summary>
+    /// The display caches of its parts, from a file made before random ids: their faces renamed and their keys given
+    /// the parts' renewed revisions, as the parts themselves are when opened (<see cref="Model.LegacyIds"/>). A part
+    /// not found still shows from its cache, and its mates still find their faces on it.
+    /// </summary>
+    public void RenewLegacyCaches()
+    {
+        var parts = Components.Where(c => !c.IsAssembly && c.Part.PartId != null).Select(c => c.Part.PartId!).ToHashSet();
+        foreach (var (key, file) in Caches.ToList())
+        {
+            // "<part id>/<revision>" or "<part id>/<revision>|<configuration>"
+            int slash = key.IndexOf('/'), bar = key.IndexOf('|');
+            if (slash < 0 || key[..slash] is not { } partId || !parts.Contains(partId)) continue;
+            var revision = bar < 0 ? key[(slash + 1)..] : key[(slash + 1)..bar];
+            if (revision == "none") continue; // (a part with no revision keeps none)
+            Caches.Remove(key);
+            Caches[CacheKey(partId, Model.LegacyIds.Revision(partId, revision), bar < 0 ? "" : key[(bar + 1)..])] = file;
+            if (Files.TryGetValue(file, out var data))
+            {
+                try { Files[file] = MeshCache.Renamed(data, n => Model.LegacyIds.Name(partId, n)); }
+                catch (Exception ex) when (ex is InvalidDataException or EndOfStreamException) { } // (not a cache it can read: left, rebuilt when used)
+            }
+        }
+    }
+
+    /// <summary>
+    /// Renames the part faces mate and pattern references name, as their parts were re-id'd (<see cref="Model.LegacyIds"/>):
+    /// each by the identity of its component's part, given by <paramref name="partIdOf"/> (null: not known).
+    /// </summary>
+    public void RenewLegacyIds(Func<string, string?> partIdOf)
+    {
+        var refs = Mates.SelectMany(m => new[] { m.A, m.B }).Concat(Patterns?.Select(p => p.Reference) ?? Enumerable.Empty<MateRef>());
+        foreach (var r in refs) if (r.Component != null && partIdOf(r.Component) is { } id) r.Face = Model.LegacyIds.Name(id, r.Face);
     }
 
     public AssemblyDocument Clone()

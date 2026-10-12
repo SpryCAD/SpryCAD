@@ -64,6 +64,11 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
     /// <summary>Placed meshes (an assembly's components), drawn in the display style with their own colors.</summary>
     public IReadOnlyList<MeshInstance> Instances { get; set; } = Array.Empty<MeshInstance>();
     public Rgba PartColor = new(0.74f, 0.76f, 0.80f);
+    /// <summary>
+    /// Color by Feature: each feature's color, by id (see <see cref="Core.Model.FeatureColors"/>); the part's faces are
+    /// shaded in the colors of the features that made them (others in the part color). Null: off.
+    /// </summary>
+    public IReadOnlyDictionary<string, Rgba>? ColorByFeature { get; set; }
     public DisplayStyle Style = DisplayStyle.ShadedWithEdges;
     public bool ShowPlanes = true;
     public bool ShowOrigin = true;
@@ -143,6 +148,7 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
     protected override void OnOpenGlRender(GlInterface gl, int fb)
     {
         if (_r == null) return;
+        long t0 = RenderProfile ? Stopwatch.GetTimestamp() : 0, tDyn0 = 0, tDyn1 = 0;
         var w = (int)Math.Max(1, Bounds.Width * Scaling); var h = (int)Math.Max(1, Bounds.Height * Scaling);
         Camera.Width = (float)Bounds.Width; Camera.Height = (float)Bounds.Height;
         StepAnimation();
@@ -177,7 +183,7 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
             foreach (var b in Bodies)
             {
                 var g = _gpu[b.Mesh];
-                _r.DrawMesh(g, PartColor.WithAlpha(GhostAlpha), vp, view, Camera.Perspective);
+                DrawBody(g, GhostAlpha, vp, view);
                 foreach (var (fr, color) in hl.Faces(b.Id, b.Mesh))
                     _r.DrawMesh(g, color.WithAlpha(GhostAlpha), vp, view, Camera.Perspective, fr.IndexStart, fr.IndexCount);
             }
@@ -198,7 +204,7 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
                     _r.Gl.ColorMask(true, true, true, true);
                     continue;
                 }
-                _r.DrawMesh(g, PartColor, vp, view, Camera.Perspective);
+                DrawBody(g, 1, vp, view);
                 foreach (var (fr, color) in hl.Faces(b.Id, b.Mesh))
                     _r.DrawMesh(g, color, vp, view, Camera.Perspective, fr.IndexStart, fr.IndexCount);
             }
@@ -245,11 +251,14 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         }
 
         // dynamic geometry
+        if (RenderProfile) tDyn0 = Stopwatch.GetTimestamp();
         _dyn.Clear();
         DrawPlanes(_dyn, hl);
         DrawSketches(_dyn, hl);
         if (ShowOrigin) DrawOrigin(_dyn);
+        long tm0 = RenderProfile ? Stopwatch.GetTimestamp() : 0;
         Mode?.Draw(this, _dyn);
+        if (RenderProfile) { var ms = Stopwatch.GetElapsedTime(tm0).TotalMilliseconds; _rnModeMs += ms; _rnModeMax = Math.Max(_rnModeMax, ms); }
         DrawPointAndSegmentHighlights(_dyn, hl);
         if (AxisPreview is { } ap) DrawAxisPreview(_dyn, ap.dir, ap.color);
         DrawMeasureLines(_dyn);
@@ -263,6 +272,7 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         // edges a feature failed on (e.g. a fillet that does not fit), drawn on top in red
         foreach (var pl in ProblemEdges)
             for (int i = 0; i + 1 < pl.Length; i++) _dyn.Line(pl[i], pl[i + 1], new Rgba(0.9f, 0.1f, 0.1f), top: true);
+        if (RenderProfile) tDyn1 = Stopwatch.GetTimestamp();
 
         _r.SetupDepth(true, true);
         _r.DrawDynamic(_dyn.Tris, PrimitiveType.Triangles, vp);
@@ -277,8 +287,73 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
 
         DrawTriad(w, h);
         _r.EndFrame(fb);
+        if (RenderProfile) NoteRender(t0, tDyn0, tDyn1);
+        if (PickProfile) ProfilePick();
 
-        if (_animating || Spinning) RequestNextFrameRendering();
+        if (_animating || Spinning || RenderContinuous || PickProfile) RequestNextFrameRendering();
+    }
+
+    // SPRYCAD_PROFILE_RENDER: the CPU time of frames (the whole render call, and building its overlay geometry), and
+    // how much overlay it uploads, in the log every 2 s; "continuous" renders frame after frame to measure a still view;
+    // "picks" also runs the hover pick the pointer would (a component, or the model's items with every filter) at a
+    // point sweeping across the view each frame, and logs its time
+    static readonly bool RenderProfile = Environment.GetEnvironmentVariable("SPRYCAD_PROFILE_RENDER") != null;
+    static readonly bool RenderContinuous = Environment.GetEnvironmentVariable("SPRYCAD_PROFILE_RENDER") == "continuous";
+    static readonly bool PickProfile = Environment.GetEnvironmentVariable("SPRYCAD_PROFILE_RENDER") == "picks";
+    int _pkCalls, _pkHits; double _pkMs, _pkMax; long _pkSince = Stopwatch.GetTimestamp(); ulong _pkSum = 14695981039346656037;
+
+    void ProfilePick()
+    {
+        double x = Bounds.Width * (0.1 + 0.8 * (_pkCalls % 240) / 240.0), y = Bounds.Height * (0.3 + 0.4 * (_pkCalls % 7) / 7.0);
+        var t = Stopwatch.GetTimestamp();
+        string? what = Instances.Count > 0 ? PickInstance(x, y) is { } pi ? $"{pi.id} {pi.face} {pi.t:R}" : null : Pick(x, y, SelFilter.Any)?.Key;
+        var now = Stopwatch.GetTimestamp();
+        var ms = Stopwatch.GetElapsedTime(t, now).TotalMilliseconds;
+        _pkCalls++; _pkMs += ms; _pkMax = Math.Max(_pkMax, ms);
+        // what was hit, summed up: two builds picking the same things at the same points log the same sum
+        if (what != null) { _pkHits++; foreach (var ch in what) _pkSum = (_pkSum ^ ch) * 1099511628211; }
+        if (_pkCalls < 240) return;
+        var span = Stopwatch.GetElapsedTime(_pkSince, now).TotalSeconds;
+        App.Note($"picks: {_pkCalls} in {span:0.0} s ({_pkHits} hits, sum {_pkSum:X16}), {_pkMs / _pkCalls:0.000} ms average ({_pkMax:0.000} worst) ({(Instances.Count > 0 ? "components" : "model items")})");
+        _pkCalls = _pkHits = 0; _pkMs = _pkMax = 0; _pkSince = now; _pkSum = 14695981039346656037;
+    }
+    int _rnFrames; double _rnMs, _rnMax, _rnDynMs, _rnDynMax, _rnModeMs, _rnModeMax; long _rnFloats; long _rnSince = Stopwatch.GetTimestamp();
+
+    void NoteRender(long t0, long tDyn0, long tDyn1)
+    {
+        var now = Stopwatch.GetTimestamp();
+        double ms = Stopwatch.GetElapsedTime(t0, now).TotalMilliseconds, dyn = Stopwatch.GetElapsedTime(tDyn0, tDyn1).TotalMilliseconds;
+        _rnFrames++; _rnMs += ms; _rnMax = Math.Max(_rnMax, ms); _rnDynMs += dyn; _rnDynMax = Math.Max(_rnDynMax, dyn);
+        _rnFloats += _dyn.Lines.Count + _dyn.Tris.Count + _dyn.TopLines.Count + _dyn.TopTris.Count + _dyn.TransTris.Count;
+        var span = Stopwatch.GetElapsedTime(_rnSince, now).TotalSeconds;
+        if (span < 2) return;
+        App.Note($"render: {_rnFrames} frames in {span:0.0} s, {_rnMs / _rnFrames:0.00} ms average ({_rnMax:0.00} worst); " +
+                 $"overlay built in {_rnDynMs / _rnFrames:0.00} ms ({_rnDynMax:0.00} worst), {_rnFloats / _rnFrames / 7 / 1000.0:0.0}k vertices a frame" +
+                 (Mode != null ? $"; {Mode.GetType().Name} drew in {_rnModeMs / _rnFrames:0.00} ms ({_rnModeMax:0.00} worst)" : ""));
+        _rnFrames = 0; _rnMs = _rnMax = _rnDynMs = _rnDynMax = _rnModeMs = _rnModeMax = 0; _rnFloats = 0; _rnSince = now;
+    }
+
+    /// <summary>A body shaded in the part color, or (Color by Feature) each run of one feature's faces in its color.</summary>
+    void DrawBody(GpuMesh g, float alpha, Matrix4x4 vp, Matrix4x4 view)
+    {
+        if (ColorByFeature is not { } colors) { _r!.DrawMesh(g, PartColor.WithAlpha(alpha), vp, view, Camera.Perspective); return; }
+        foreach (var (start, count, feature) in _runs.GetValue(g.Source, Core.Model.FeatureColors.Runs))
+        {
+            var c = feature != null && colors.TryGetValue(feature, out var fc) ? fc : PartColor;
+            _r!.DrawMesh(g, c.WithAlpha(alpha), vp, view, Camera.Perspective, start, count);
+        }
+    }
+
+    static readonly System.Runtime.CompilerServices.ConditionalWeakTable<DisplayMesh, List<(int start, int count, string? feature)>> _runs = new();
+
+    /// <summary>A face's color by its feature (Color by Feature), else the part color.</summary>
+    Rgba FaceColor(string faceName) =>
+        ColorByFeature is { } colors && Core.Model.FeatureColors.FeatureOf(faceName) is { } id && colors.TryGetValue(id, out var c) ? c : PartColor;
+
+    static Rgba Vivid(Rgba c)
+    {
+        var v = Core.Model.FeatureColors.Vivid(new double[] { c.R, c.G, c.B });
+        return new Rgba((float)v[0], (float)v[1], (float)v[2], c.A);
     }
 
     /// <summary>The placed meshes: shaded (or depth only for hidden lines) in their colors, then their edges.</summary>
@@ -335,7 +410,17 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
             var m = inst.Mesh;
             if (!RayHitsBox(o, d, m.Bounds)) continue;
             var lo = new Vec3(o.X, o.Y, o.Z); var ld = new Vec3(d.X, d.Y, d.Z);
-            for (int k = 0; k + 2 < m.Indices.Length; k += 3)
+            // only the faces whose boxes the ray meets (in order: the same nearest triangle as testing them all; the
+            // boxes are of the exact points, padded for their positions' rounding to float)
+            if (FacesCoverAll(m))
+                foreach (var fr in m.Faces)
+                {
+                    if (!RayHitsBox(o, d, fr.Bounds, FloatPad(fr.Bounds))) continue;
+                    for (int k = fr.IndexStart; k + 2 < fr.IndexStart + fr.IndexCount; k += 3) Test(k);
+                }
+            else
+                for (int k = 0; k + 2 < m.Indices.Length; k += 3) Test(k);
+            void Test(int k)
             {
                 var t = RayTriangle(lo, ld, P(m, m.Indices[k]), P(m, m.Indices[k + 1]), P(m, m.Indices[k + 2]));
                 if (t > 0 && (best == null || t < best.Value.t)) { best = (inst.Id, t, ro + rd * t, null); bestMesh = m; bestTri = k; }
@@ -347,7 +432,20 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         return best;
     }
 
-    static bool RayHitsBox(Vector3 o, Vector3 d, Box3 b)
+    // whether the faces' ranges run through every triangle in order, each one after the last (as DisplayMesh makes them)
+    static readonly System.Runtime.CompilerServices.ConditionalWeakTable<DisplayMesh, object> _covered = new();
+    static bool FacesCoverAll(DisplayMesh m) => (bool)_covered.GetValue(m, mesh =>
+    {
+        int at = 0;
+        foreach (var fr in mesh.Faces) { if (fr.IndexStart != at || fr.IndexCount % 3 != 0) return false; at += fr.IndexCount; }
+        return at == mesh.Indices.Length;
+    });
+
+    // more than a float's rounding of the box's coordinates (a face's box may be flat on one axis)
+    static double FloatPad(Box3 b) => 1e-6 * (1 + Math.Max(Math.Max(Math.Abs(b.Min.X), Math.Abs(b.Max.X)),
+        Math.Max(Math.Max(Math.Abs(b.Min.Y), Math.Abs(b.Max.Y)), Math.Max(Math.Abs(b.Min.Z), Math.Abs(b.Max.Z)))));
+
+    static bool RayHitsBox(Vector3 o, Vector3 d, Box3 b, double extraPad = 0)
     {
         if (b.IsEmpty) return false;
         double t0 = double.MinValue, t1 = double.MaxValue;
@@ -355,7 +453,7 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         {
             double oa = a == 0 ? o.X : a == 1 ? o.Y : o.Z, da = a == 0 ? d.X : a == 1 ? d.Y : d.Z;
             double lo = a == 0 ? b.Min.X : a == 1 ? b.Min.Y : b.Min.Z, hi = a == 0 ? b.Max.X : a == 1 ? b.Max.Y : b.Max.Z;
-            var pad = 1e-6 * (1 + Math.Abs(hi - lo));
+            var pad = 1e-6 * (1 + Math.Abs(hi - lo)) + extraPad;
             if (Math.Abs(da) < 1e-12) { if (oa < lo - pad || oa > hi + pad) return false; continue; }
             double ta = (lo - pad - oa) / da, tb = (hi + pad - oa) / da;
             if (ta > tb) (ta, tb) = (tb, ta);
@@ -396,6 +494,8 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
     sealed class Highlights
     {
         public readonly List<(SelItem item, Rgba color)> Items = new();
+        /// <summary>Each face's own color for an item's color (Color by Feature: faces differ in color), else null.</summary>
+        public Func<SelItem, Rgba, FaceRange, Rgba>? Tint;
 
         public IEnumerable<(FaceRange, Rgba)> Faces(string bodyId, DisplayMesh m)
         {
@@ -403,15 +503,15 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
             {
                 if (it.Kind == SelKind.Face && it.BodyId == bodyId)
                 {
-                    foreach (var fr in m.Faces) if (fr.Name == it.Name) yield return (fr, c);
+                    foreach (var fr in m.Faces) if (fr.Name == it.Name) yield return (fr, Tint?.Invoke(it, c, fr) ?? c);
                 }
                 else if (it.Kind == SelKind.Feature && it.FeatureId != null)
                 {
                     var prefix = it.FeatureId + ".";
-                    foreach (var fr in m.Faces) if (fr.Name.StartsWith(prefix, StringComparison.Ordinal) || fr.Name.Contains("." + prefix, StringComparison.Ordinal)) yield return (fr, c);
+                    foreach (var fr in m.Faces) if (fr.Name.StartsWith(prefix, StringComparison.Ordinal) || fr.Name.Contains("." + prefix, StringComparison.Ordinal)) yield return (fr, Tint?.Invoke(it, c, fr) ?? c);
                 }
                 else if (it.Kind == SelKind.Body && it.BodyId == bodyId)
-                    foreach (var fr in m.Faces) yield return (fr, c);
+                    foreach (var fr in m.Faces) yield return (fr, Tint?.Invoke(it, c, fr) ?? c);
             }
         }
 
@@ -436,6 +536,18 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         foreach (var e in Emphasis) h.Items.Add((e, SelectColor.WithAlpha(1)));
         if (Selection != null) foreach (var s in Selection.Items) h.Items.Add((s, SelectColor));
         if (Hover != null) h.Items.Add((Hover, HoverColor));
+        if (ColorByFeature != null)
+        {
+            // each face from its own color: what is hovered, and features (as picked in the tree), in their feature's
+            // color made stronger; selected faces and bodies tinted with the selection color as usual
+            var hover = Hover;
+            h.Tint = (it, c, fr) =>
+            {
+                var own = FaceColor(fr.Name);
+                return it == hover || it.Kind == SelKind.Feature ? Vivid(own) : Mix(own, c, 0.55f);
+            };
+            return h;
+        }
         // faces are drawn tinted rather than solid
         for (int i = 0; i < h.Items.Count; i++)
         {
@@ -468,12 +580,20 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
 
     void DrawSketches(DynamicGeometry g, Highlights hl)
     {
+        // each sketch's geometry kept while its result, color and the pixel size (zoom) stay: orbiting and panning
+        // draw it again without tessellating its curves (a result is not changed once made)
+        var px = Camera.PixelSize;
         foreach (var s in Sketches)
         {
             var key = new SelItem { Kind = SelKind.Sketch, FeatureId = s.FeatureId }.Key;
             var c = hl.Of(key) ?? new Rgba(0.15f, 0.2f, 0.45f);
-            SketchDrawing.DrawStatic(g, s.Result, c, Camera.PixelSize);
+            if (_sketchPieces.TryGetValue(s.Result, out var kept) && kept.color == c && kept.px == px) { g.Add(kept.piece); continue; }
+            var m = g.Mark();
+            SketchDrawing.DrawStatic(g, s.Result, c, px);
+            _sketchPieces[s.Result] = (c, px, g.Since(m));
         }
+        if (_sketchPieces.Count > Sketches.Count)
+            foreach (var r in _sketchPieces.Keys.Where(r => !Sketches.Any(s => ReferenceEquals(s.Result, r))).ToList()) _sketchPieces.Remove(r);
     }
 
     /// <summary>Selected/hovered vertices (a small cross) and sketch lines/arcs (re-drawn in the highlight colour).</summary>
@@ -585,9 +705,21 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
     }
     IReadOnlyList<Core.Regen.CosmeticThread> _cosmetic = Array.Empty<Core.Regen.CosmeticThread>();
 
+    readonly Dictionary<SketchResult, (Rgba color, double px, DynamicGeometry.Piece piece)> _sketchPieces = new(ReferenceEqualityComparer.Instance);
+    (IReadOnlyList<Core.Regen.CosmeticThread> threads, double px, DynamicGeometry.Piece piece)? _threadPiece;
+
     void DrawCosmeticThreads(DynamicGeometry g)
     {
+        // kept while the threads and the pixel size (zoom) stay: orbiting and panning draw the helices again as they are
         var px = Camera.PixelSize;
+        if (_threadPiece is { } kept && ReferenceEquals(kept.threads, _cosmetic) && kept.px == px) { g.Add(kept.piece); return; }
+        var m = g.Mark();
+        DrawCosmeticThreads(g, px);
+        _threadPiece = (_cosmetic, px, g.Since(m));
+    }
+
+    void DrawCosmeticThreads(DynamicGeometry g, double px)
+    {
         var c = new Rgba(0.30f, 0.36f, 0.48f);
         foreach (var th in _cosmetic)
         {
@@ -1451,15 +1583,20 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         (Body, TopoEdge, Vec3)? best = null; double bestPx = radiusPx;
         foreach (var b in Bodies)
             foreach (var e in b.Solid.Topology.Edges)
-                foreach (var p in e.Closed ? new[] { e.Start } : new[] { e.Start, e.End })
-                {
-                    var s = Camera.Project(p);
-                    var d = Math.Sqrt((s.X - x) * (s.X - x) + (s.Y - y) * (s.Y - y));
-                    if (d >= bestPx) continue;
-                    if (Vec3.Dot(p - ro, rd) > faceDepth + Camera.PixelSize * 3 + 1e-4) continue;
-                    bestPx = d; best = (b, e, p);
-                }
+            {
+                Try(b, e, e.Start);
+                if (!e.Closed) Try(b, e, e.End);
+            }
         return best;
+
+        void Try(Body b, TopoEdge e, Vec3 p)
+        {
+            var s = Camera.Project(p);
+            var d = Math.Sqrt((s.X - x) * (s.X - x) + (s.Y - y) * (s.Y - y));
+            if (d >= bestPx) return;
+            if (Vec3.Dot(p - ro, rd) > faceDepth + Camera.PixelSize * 3 + 1e-4) return;
+            bestPx = d; best = (b, e, p);
+        }
     }
 
     /// <summary>Face under the cursor (any filter), used e.g. for sketch-on-face inference.</summary>

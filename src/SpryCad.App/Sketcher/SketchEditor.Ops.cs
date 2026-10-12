@@ -12,13 +12,13 @@ public sealed partial class SketchEditor
     public double FilletRadius { get; set; } = 5;
 
     // a line clicked with the Fillet tool, waiting for the second one
-    int _filletFirstLine = -1;
+    long _filletFirstLine = -1;
 
     /// <summary>A click with the Fillet tool: a corner (two lines meeting there), or two lines one after the other.</summary>
     void FilletAt(PointerInfo p)
     {
         var h = HitTest(p.X, p.Y, includeDims: false);
-        int corner = -1;
+        long corner = -1;
         if (h is { Kind: SkRefKind.Point } hp) corner = hp.Id;
         else if (h is { Kind: SkRefKind.Entity } he && Sk.Entity(he.Id) is SkLine line)
         {
@@ -37,7 +37,7 @@ public sealed partial class SketchEditor
         FilletCorners(new[] { corner });
     }
 
-    static int SharedPoint(SkLine a, SkLine b) => a.P1 == b.P1 || a.P1 == b.P2 ? a.P1 : a.P2 == b.P1 || a.P2 == b.P2 ? a.P2 : -1;
+    static long SharedPoint(SkLine a, SkLine b) => a.P1 == b.P1 || a.P1 == b.P2 ? a.P1 : a.P2 == b.P1 || a.P2 == b.P2 ? a.P2 : -1;
 
     /// <summary>The Sketch Fillet tool: corners (or pairs of lines) already selected are filleted first.</summary>
     public void StartFillet()
@@ -56,7 +56,7 @@ public sealed partial class SketchEditor
         if (corners.Count > 0) FilletCorners(corners.Distinct().ToList());
     }
 
-    void FilletCorners(IList<int> corners)
+    void FilletCorners(IList<long> corners)
     {
         var undo = _undo.Count;
         Snapshot();

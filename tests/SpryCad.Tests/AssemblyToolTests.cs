@@ -135,7 +135,12 @@ static class AssemblyToolTests
             // replaced by a bigger cylinder of the same make: the mates on it hold
             var (m2, pin, sleeve, d2) = (AssemblyModel.New(), (Component?)null, (Component?)null, NewDir("tools-replace"));
             string pp = Path.Combine(d2, "Pin.sprt"), sp = Path.Combine(d2, "Sleeve.sprt"), bp = Path.Combine(d2, "Big.sprt");
-            Cylinder(pp, 5, 10); Cylinder(sp, 5, 10); Cylinder(bp, 8, 10);
+            Cylinder(pp, 5, 10); Cylinder(sp, 5, 10);
+            // the bigger one the sleeve saved as a copy (Save As: the same features, so the same face names) and widened
+            var big = CadDocument.Load(sp);
+            big.ForkIdentity();
+            big.Features.OfType<SketchFeature>().Single().Sketch.Entities.OfType<SpryCad.Core.Sketching.SkCircle>().Single().R = 8;
+            big.Save(bp);
             pin = m2.Insert(pp, Transform.Identity);
             sleeve = m2.Insert(sp, Transform.Translation(new Vec3(30, 0, 0)));
             m2.AddMate(MateType.Concentric, m2.RefTo(sleeve.Id, FaceAt(m2, sleeve.Id, "side"))!, m2.RefTo(pin.Id, FaceAt(m2, pin.Id, "side"))!);

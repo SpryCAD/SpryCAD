@@ -431,13 +431,20 @@ public partial class MainWindow
         foreach (var id in f.GuideSketchIds) guideBox.Items.Add(new SelItem { Kind = SelKind.Sketch, FeatureId = id });
         guideBox.Refresh();
         guideBox.Changed += () => f.GuideSketchIds = guideBox.Items.Select(i => i.FeatureId).ToList();
+        var csec = page.Section("Centerline");
+        var clBox = page.Selection(csec, "Centerline", SelFilter.Sketch, "Optional: a sketch of tangent lines and arcs through every profile's plane; the loft follows it", 1);
+        if (!string.IsNullOrEmpty(f.CenterlineSketchId)) clBox.Items.Add(new SelItem { Kind = SelKind.Sketch, FeatureId = f.CenterlineSketchId });
+        clBox.Refresh();
+        clBox.Changed += () => f.CenterlineSketchId = clBox.Items.FirstOrDefault()?.FeatureId;
         var opts = page.Section("Start/End Constraints");
         var tangency = new List<(LoftTangency, string)> { (LoftTangency.None, "None"), (LoftTangency.Normal, "Normal to profile") };
         page.Combo(opts, "Start", tangency, () => f.StartTangency, v => f.StartTangency = v);
         page.Number(opts, "Start tangent length", () => f.StartLength, v => f.StartLength = v);
         page.Combo(opts, "End", tangency, () => f.EndTangency, v => f.EndTangency = v);
         page.Number(opts, "End tangent length", () => f.EndLength, v => f.EndLength = v);
-        if (!f.IsCut) page.Check(page.Section("Options"), "Merge result", () => f.Merge, v => f.Merge = v);
+        var osec = page.Section("Options");
+        page.Check(osec, "Close loft (back to the first profile)", () => f.Closed, v => f.Closed = v);
+        if (!f.IsCut) page.Check(osec, "Merge result", () => f.Merge, v => f.Merge = v);
         page.Activate(f.SectionSketchIds.Count < 2 ? profBox : null);
         BeginEdit(f, isNew, page, overlay: false,
             hint: f.SectionSketchIds.Count < 2 ? "Select the profile sketches in order (two at least), then any guide curves." : null);
@@ -597,6 +604,21 @@ public partial class MainWindow
             }
             edges.Clear(); edges.AddRange(list);
         };
+        if (f is FilletFeature fs)
+        {
+            // besides the edges picked, edges found: every one of a kind on the body, or between features (a casting's
+            // blends in one feature)
+            var sc = page.Section("Scope");
+            page.Check(sc, "Whole body", () => fs.WholeBody, v => fs.WholeBody = v);
+            var fbox = page.Selection(sc, "Between features", SelFilter.Feature, "Select features in the tree or click their faces");
+            foreach (var id in fs.Features) fbox.Items.Add(new SelItem { Kind = SelKind.Feature, FeatureId = id });
+            fbox.Changed += () => { fs.Features.Clear(); fs.Features.AddRange(fbox.Items.Select(i => i.FeatureId!).Distinct()); };
+            page.Combo(sc, "Edges", new List<(BlendScopeKind, string)>
+            {
+                (BlendScopeKind.Concave, "Concave (filled in)"), (BlendScopeKind.Convex, "Convex (rounded off)"), (BlendScopeKind.All, "Both"),
+            }, () => fs.ScopeKind, v => fs.ScopeKind = v);
+            page.Info(sc, "Whole body: every edge of that kind. Between features: one feature, its edges with the rest of the body; several, the edges between them (their pattern and mirror copies too). Edges that cannot be blended are left out with a warning.");
+        }
         var p = page.Section(fillet ? "Fillet Parameters" : "Chamfer Parameters");
         if (fillet) page.Number(p, "Radius", () => ((FilletFeature)f).Radius, v => ((FilletFeature)f).Radius = v, "fillet");
         else
@@ -626,7 +648,8 @@ public partial class MainWindow
         // SolidWorks "overflow": where the blend runs into neighbouring geometry it is trimmed by it (keep edge)
         if (fillet) page.Check(p, "Overflow: trim at neighbouring faces", () => ((FilletFeature)f).Overflow, v => ((FilletFeature)f).Overflow = v);
         else page.Check(p, "Overflow: trim at neighbouring faces", () => ((ChamferFeature)f).Overflow, v => ((ChamferFeature)f).Overflow = v);
-        BeginEdit(f, isNew, page, overlay: true, hint: edges.Count == 0 ? "Select edges in the graphics area." : null);
+        var scoped = f is FilletFeature { WholeBody: true } or FilletFeature { Features.Count: > 0 };
+        BeginEdit(f, isNew, page, overlay: true, hint: edges.Count == 0 && !scoped ? "Select edges in the graphics area, or set a scope." : null);
     }
 
     // ------------------------------------------------------------------------------------------

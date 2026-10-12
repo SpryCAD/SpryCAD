@@ -22,8 +22,10 @@ static class DirectBlendTests
             var before = DirectBlend.Counts;
             foreach (var (name, load) in models)
             {
-                var a = BlendAB.Build(load, direct: true, reps: 1).feats;
-                var b = BlendAB.Build(load, direct: false, reps: 1).feats;
+                // one part both ways (built again by code it would have other ids, so other face names)
+                var part = load();
+                var a = BlendAB.Build(() => part.Clone(), direct: true, reps: 1).feats;
+                var b = BlendAB.Build(() => part.Clone(), direct: false, reps: 1).feats;
                 for (int i = 0; i < a.Count; i++)
                 {
                     var (fa, fb) = (a[i], b[i]);
@@ -185,7 +187,7 @@ static class DirectBlendTests
                 try
                 {
                     var doc = CadDocument.Load(file);
-                    var f = doc.Features.First(x => x.Id == "F18");
+                    var f = doc.Features.First(x => x.Id == LegacyIds.Feature(doc.Id!, "F18")); // saved before random ids
                     var r0 = new Regenerator().Rebuild(doc, doc.Features.IndexOf(f));
                     var before = DirectBlend.Counts.declined;
                     Csg.ClearCache();
@@ -392,7 +394,7 @@ static class DirectBlendTests
                 t.True(r1.State.Bodies[0].Solid.Native?.Validate() == null, "valid");
                 return KernelTests.Vex(r1.State.Bodies[0].Solid) - KernelTests.Vex(r0.State.Bodies[0].Solid);
             }
-            var sockId = "F4";
+            var sockId = CadDocument.Load(path).Features.First(f => f.Name == "Socket" && f is ExtrudeFeature).Id; // the same every load
             bool Vert(Kernel.Native.NEdge e) => e.Uses.All(u => u.Face.Tag.Name.StartsWith(sockId + ".S"));
             bool Floor(Kernel.Native.NEdge e) => e.Uses.Any(u => u.Face.Tag.Name == sockId + ".End");
             bool Rim(Kernel.Native.NEdge e) => !Vert(e) && !Floor(e);
@@ -461,8 +463,9 @@ static class DirectBlendTests
             // mitred corner, not the ball's): 32 mm³ apart on a box filleted all round
             foreach (var name in new[] { "box, three edges at a corner", "box, all edges", "pocket, floor and corners", "casting foot, undrafted" })
             {
-                var a = BlendAB.Build(() => Demos.BlendCases.First(c => c.name == name).build(), direct: true, reps: 1).feats;
-                var b = BlendAB.Build(() => Demos.BlendCases.First(c => c.name == name).build(), direct: false, reps: 1).feats;
+                var part = Demos.BlendCases.First(c => c.name == name).build(); // one part both ways (the same face names)
+                var a = BlendAB.Build(() => part.Clone(), direct: true, reps: 1).feats;
+                var b = BlendAB.Build(() => part.Clone(), direct: false, reps: 1).feats;
                 for (int i = 0; i < a.Count; i++)
                 {
                     t.True(a[i].error == null && b[i].error == null, $"{name}, {a[i].name}: {a[i].error ?? b[i].error}");
@@ -506,10 +509,12 @@ static class DirectBlendTests
             // level with it (concave there): one edge picked on the block's own top rounds that edge only
             foreach (var direct in new[] { true, false })
             {
-                var f = BlendAB.Build(() => Demos.BlendCases.First(c => c.name == "drafted block, top edge under an overhang").build(), direct, reps: 1).feats.First(x => x.name == "Top edge");
+                var doc = Demos.BlendCases.First(c => c.name == "drafted block, top edge under an overhang").build();
+                var f = BlendAB.Build(() => doc, direct, reps: 1).feats.First(x => x.name == "Top edge");
+                var filletId = doc.Features.First(x => x.Name == "Top edge").Id;
                 t.True(f.error == null && f.valid == null, $"{f.error} {f.valid}");
                 var blends = f.names.Where(n => n.EndsWith(".S.F", StringComparison.Ordinal) || n.EndsWith(".Blend", StringComparison.Ordinal)).ToList();
-                t.True(blends.Count == 1 && blends[0].StartsWith("F6.0.", StringComparison.Ordinal), $"{(direct ? "direct" : "boolean")}: blend faces {string.Join(", ", blends)}");
+                t.True(blends.Count == 1 && blends[0].StartsWith(filletId + ".0.", StringComparison.Ordinal), $"{(direct ? "direct" : "boolean")}: blend faces {string.Join(", ", blends)}");
             }
         });
 
@@ -677,6 +682,64 @@ static class DirectBlendTests
             t.True(nb != null && nb.Validate() == null, $"exact and valid: {nb?.Validate()}");
             var added = KernelTests.Vex(r.State.Bodies[0].Solid) - before;
             t.True(added > 50 && added < 400, $"added {added:R}");
+        });
+
+        t.Test("Fillet by scope: between a feature and the rest, or every concave edge of the body, as the edges picked", () =>
+        {
+            // the casting foot's R6 round the boss's foot, picked as one edge (its tangent edges following), the same as
+            // the boss's concave edges with the rest of the body, and as every concave edge of the body
+            double Vol(Action<CadDocument, FilletFeature> scope)
+            {
+                var doc = Demos.BlendCases.First(c => c.name == "casting foot, drafted").build();
+                var foot = (FilletFeature)doc.Features.First(f => f.Name == "Foot");
+                scope(doc, foot);
+                var r = new Regenerator().Rebuild(doc);
+                t.True(r.Status[foot.Id].Ok && r.Status[foot.Id].Warnings.Count == 0, $"{r.Status[foot.Id].Error} {string.Join("; ", r.Status[foot.Id].Warnings)}");
+                t.True(r.State.Bodies[0].Solid.Native?.Validate() == null, "exact and valid");
+                return KernelTests.Vex(r.State.Bodies[0].Solid);
+            }
+            var picked = Vol((_, _) => { });
+            var between = Vol((d, f) => { f.Edges.Clear(); f.Features.Add(d.Features.First(x => x.Name == "Boss" && x is ExtrudeFeature).Id); });
+            var body = Vol((_, f) => { f.Edges.Clear(); f.WholeBody = true; });
+            t.True(Math.Abs(between - picked) < 1e-6 * picked, $"between the boss and the rest {between:R}, picked {picked:R}");
+            t.True(Math.Abs(body - picked) < 1e-6 * picked, $"every concave edge {body:R}, picked {picked:R}");
+        });
+
+        t.Test("Fillet by scope: every convex edge of a box as all its edges picked; edges that cannot be blended left out", () =>
+        {
+            var doc = Demos.BlendCases.First(c => c.name == "box, all edges").build();
+            var all = (FilletFeature)doc.Features.Last(f => f is FilletFeature);
+            var picked = KernelTests.Vex(new Regenerator().Rebuild(doc).State.Bodies[0].Solid);
+            all.Edges.Clear(); all.WholeBody = true; all.ScopeKind = BlendScopeKind.Convex;
+            var r = new Regenerator().Rebuild(doc);
+            t.True(r.Status[all.Id].Ok && r.Status[all.Id].Warnings.Count == 0, $"{r.Status[all.Id].Error} {string.Join("; ", r.Status[all.Id].Warnings)}");
+            var scoped = KernelTests.Vex(r.State.Bodies[0].Solid);
+            t.True(Math.Abs(scoped - picked) < 1e-6 * picked, $"every convex edge {scoped:R}, picked {picked:R}");
+            // the casting foot's every convex edge R25: the boss's top edges, running round its R20 corners, cannot take
+            // it (left out, said); the plate's can
+            var cast = Demos.BlendCases.First(c => c.name == "casting foot, drafted").build();
+            var foot = (FilletFeature)cast.Features.First(f => f.Name == "Foot");
+            var before = KernelTests.Vex(new Regenerator().Rebuild(cast, cast.Features.IndexOf(foot)).State.Bodies[0].Solid);
+            foot.Edges.Clear(); foot.WholeBody = true; foot.ScopeKind = BlendScopeKind.Convex; foot.Radius = "25";
+            var rc = new Regenerator().Rebuild(cast);
+            var st = rc.Status[foot.Id];
+            t.True(st.Ok, st.Error ?? "");
+            t.True(st.Warnings.Count == 1 && st.Warnings[0].StartsWith("8 edges left out: ", StringComparison.Ordinal), $"warned: [{string.Join("; ", st.Warnings)}]");
+            t.True(rc.State.Bodies[0].Solid.Native?.Validate() == null, "exact and valid");
+            t.True(KernelTests.Vex(rc.State.Bodies[0].Solid) < before - 100, "something rounded off");
+        });
+
+        t.Test("Fillet by scope: nothing to fillet said; saved and loaded", () =>
+        {
+            var doc = Demos.BlendCases.First(c => c.name == "box, all edges").build();
+            var all = (FilletFeature)doc.Features.Last(f => f is FilletFeature);
+            all.Edges.Clear(); all.WholeBody = true; all.ScopeKind = BlendScopeKind.Concave;
+            var err = new Regenerator().Rebuild(doc).Status[all.Id].Error ?? "";
+            t.True(err.Contains("no concave edges"), err);
+            all.Features.Add("F2"); all.ScopeKind = BlendScopeKind.Convex;
+            var back = CadDocument.FromJson(doc.ToJson());
+            var f2 = (FilletFeature)back.Find(all.Id)!;
+            t.True(f2.WholeBody && f2.ScopeKind == BlendScopeKind.Convex && f2.Features.SequenceEqual(new[] { "F2" }), "scope saved");
         });
 
         t.Test("Direct blend: off (FC_BLEND=boolean) applies nothing directly", () =>

@@ -120,7 +120,7 @@ public sealed class RevolveFeature : Feature
     public string SketchId { get; set; } = "";
     public bool IsCut { get; set; }
     /// <summary>Sketch line used as axis (0 = first centerline).</summary>
-    public int AxisEntity { get; set; }
+    public long AxisEntity { get; set; }
     /// <summary>
     /// An axis from the model instead (a cylindrical or conical face, a straight or circular edge, X / Y / Z): it must
     /// lie in the sketch's plane. Null: the sketch line <see cref="AxisEntity"/>.
@@ -155,6 +155,10 @@ public sealed class LoftFeature : Feature
     public override string Kind => IsCut ? "Cut-Loft" : "Loft";
     public List<string> SectionSketchIds { get; set; } = new();
     public List<string> GuideSketchIds { get; set; } = new();
+    /// <summary>A sketch of one tangent chain of lines and arcs through every profile's plane: the loft follows it (blank: none).</summary>
+    public string? CenterlineSketchId { get; set; }
+    /// <summary>Runs on from the last profile back to the first (a ring; no end faces).</summary>
+    public bool Closed { get; set; }
     /// <summary>Square to the first profile's plane (its tangent's length <see cref="StartLength"/> times the loft's length).</summary>
     public LoftTangency StartTangency { get; set; }
     public string StartLength { get; set; } = "1";
@@ -162,7 +166,7 @@ public sealed class LoftFeature : Feature
     public string EndLength { get; set; } = "1";
     public bool IsCut { get; set; }
     public bool Merge { get; set; } = true;
-    public override IEnumerable<string> Consumes => SectionSketchIds.Concat(GuideSketchIds);
+    public override IEnumerable<string> Consumes => SectionSketchIds.Concat(GuideSketchIds).Concat(string.IsNullOrEmpty(CenterlineSketchId) ? Array.Empty<string>() : new[] { CenterlineSketchId });
 }
 
 /// <summary>
@@ -174,7 +178,7 @@ public sealed class HelicalSweepFeature : Feature
     public override string Kind => IsCut ? "Cut-Helical" : "Helical";
     public string SketchId { get; set; } = "";
     /// <summary>Sketch line used as axis (0 = first centerline).</summary>
-    public int AxisEntity { get; set; }
+    public long AxisEntity { get; set; }
     /// <summary>An axis from the model instead of the sketch: a cylindrical face, a straight or circular edge, or X / Y / Z.</summary>
     public DirRef? Axis { get; set; }
     public string Pitch { get; set; } = "5";
@@ -241,7 +245,22 @@ public sealed class FilletFeature : Feature
     public bool TangentPropagation { get; set; } = true;
     /// <summary>A fillet running into neighbouring geometry is trimmed by it ("keep edge" overflow) instead of failing.</summary>
     public bool Overflow { get; set; } = true;
+    /// <summary>
+    /// Also every edge of the body of the kind <see cref="ScopeKind"/> (a casting's blends in one feature); with
+    /// <see cref="Features"/> as well, the edges between those features' faces only.
+    /// </summary>
+    public bool WholeBody { get; set; }
+    /// <summary>
+    /// Also the edges of the kind <see cref="ScopeKind"/> between these features' faces (their copies by patterns and
+    /// mirrors included): one feature, between it and the rest of the body; several, between any two of them.
+    /// </summary>
+    public List<string> Features { get; set; } = new();
+    /// <summary>Which edges <see cref="WholeBody"/> and <see cref="Features"/> take.</summary>
+    public BlendScopeKind ScopeKind { get; set; } = BlendScopeKind.Concave;
 }
+
+/// <summary>The edges a fillet's scope takes: concave (material added), convex (rounded off) or both.</summary>
+public enum BlendScopeKind { Concave, Convex, All }
 
 /// <summary>Equal distances on both faces, a distance and an angle, or two distances (SolidWorks' chamfer types).</summary>
 public enum ChamferType { Distance, AngleDistance, DistanceDistance }
@@ -377,7 +396,7 @@ public sealed class CurveRef
 {
     public EdgeRef? Edge { get; set; }
     public string? Sketch { get; set; }
-    public int SketchEntity { get; set; }
+    public long SketchEntity { get; set; }
     public CurveRef Clone() => new() { Edge = Edge?.Clone(), Sketch = Sketch, SketchEntity = SketchEntity };
 }
 
@@ -391,7 +410,7 @@ public sealed class PointRef
     /// <summary>The center of a circular edge (a circle or an arc of one): a hole's, a boss's.</summary>
     public EdgeRef? Center { get; set; }
     public string? Sketch { get; set; }
-    public int SketchPoint { get; set; }
+    public long SketchPoint { get; set; }
     public PointRef Clone() => new() { Vertex = Vertex?.Clone(), Center = Center?.Clone(), Sketch = Sketch, SketchPoint = SketchPoint };
 }
 

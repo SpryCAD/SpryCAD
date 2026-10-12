@@ -9,7 +9,7 @@ public static class SketchOps
     /// The two solid lines meeting at a point (a corner that can be filleted): construction lines and model
     /// references there do not count. Null, with why, otherwise.
     /// </summary>
-    public static (SkLine a, SkLine b)? CornerAt(Sketch sk, int point, out string? why)
+    public static (SkLine a, SkLine b)? CornerAt(Sketch sk, long point, out string? why)
     {
         why = null;
         var solid = sk.EntitiesUsing(point).Where(e => !e.Construction && !e.IsReference && e is not SkPointEntity).ToList();
@@ -24,7 +24,7 @@ public static class SketchOps
     /// trimmed copy of each, kept on it, from its far end (or the tangent point of a fillet there already) to this
     /// fillet's tangent point, and a tangent arc with a radius dimension. Returns null, or why it cannot be filleted.
     /// </summary>
-    public static string? Fillet(Sketch sk, int corner, double r)
+    public static string? Fillet(Sketch sk, long corner, double r)
     {
         if (CornerAt(sk, corner, out var why) is not var (xa, xb)) return why;
         if (!(r > 0)) return "Sketch Fillet: the radius must be more than 0.";
@@ -34,7 +34,7 @@ public static class SketchOps
             : sk.Fillets?.FirstOrDefault(f => f.TrimB == x.Id) is { } fb ? (SkLine)sk.Entity(fb.LineB)!
             : x;
         bool IsTrim(SkLine x) => sk.Fillets?.Any(f => f.TrimA == x.Id || f.TrimB == x.Id) == true;
-        int FarEnd(SkLine l) => l.P1 == corner ? l.P2 : l.P1;
+        long FarEnd(SkLine l) => l.P1 == corner ? l.P2 : l.P1;
         var c = sk.P(corner);
         var pa = sk.P(FarEnd(xa)); var pb = sk.P(FarEnd(xb));
         var da = pa - c; var db = pb - c;
@@ -86,11 +86,11 @@ public static class SketchOps
     /// The chain through the given entities (lines and arcs end to end, as SolidWorks' "select chain"): grown along
     /// shared end points while exactly two chain entities meet there. Construction lines are left out.
     /// </summary>
-    public static List<int> Chain(Sketch sk, IEnumerable<int> start)
+    public static List<long> Chain(Sketch sk, IEnumerable<long> start)
     {
-        var set = new HashSet<int>(start.Where(id => sk.Entity(id) is SkLine or SkArc));
+        var set = new HashSet<long>(start.Where(id => sk.Entity(id) is SkLine or SkArc));
         bool Joinable(SkEntity e) => e is SkLine or SkArc && !e.Construction;
-        IEnumerable<int> Ends(SkEntity e) => e switch { SkLine l => new[] { l.P1, l.P2 }, SkArc a => new[] { a.Start, a.End }, _ => Array.Empty<int>() };
+        IEnumerable<long> Ends(SkEntity e) => e switch { SkLine l => new[] { l.P1, l.P2 }, SkArc a => new[] { a.Start, a.End }, _ => Array.Empty<long>() };
         for (bool grew = true; grew;)
         {
             grew = false;
@@ -111,14 +111,14 @@ public static class SketchOps
     /// the originals. A closed chain goes outward, an open one to the left of its direction from its first entity;
     /// <paramref name="reverse"/> takes the other side. Returns the Offset constraint, or why it cannot be done.
     /// </summary>
-    public static (SkConstraint? offset, string? error) Offset(Sketch sk, IEnumerable<int> entityIds, double d, bool reverse = false)
+    public static (SkConstraint? offset, string? error) Offset(Sketch sk, IEnumerable<long> entityIds, double d, bool reverse = false)
     {
         if (!(d > 0)) return (null, "Offset: the distance must be more than 0.");
         var ents = entityIds.Distinct().Select(sk.Entity).OfType<SkEntity>().Where(e => e is SkLine or SkArc or SkCircle).ToList();
         if (ents.Count == 0) return (null, "Offset: select lines, arcs or circles.");
         var circles = ents.OfType<SkCircle>().ToList();
         var curves = ents.Where(e => e is not SkCircle).ToList();
-        IEnumerable<int> Ends(SkEntity e) => e switch { SkLine l => new[] { l.P1, l.P2 }, SkArc a => new[] { a.Start, a.End }, _ => Array.Empty<int>() };
+        IEnumerable<long> Ends(SkEntity e) => e switch { SkLine l => new[] { l.P1, l.P2 }, SkArc a => new[] { a.Start, a.End }, _ => Array.Empty<long>() };
         // order the chain: start at an end (a point only one of them uses), else anywhere (closed)
         var use = curves.SelectMany(Ends).GroupBy(p => p).ToDictionary(g => g.Key, g => g.Count());
         if (use.Values.Any(n => n > 2)) return (null, "Offset: the selection branches; select a single chain of lines and arcs.");
@@ -172,8 +172,8 @@ public static class SketchOps
         };
 
         // copy points: each original end point once, placed near where it will settle (the solver finishes it)
-        var copyOf = new Dictionary<int, int>();
-        int CopyPoint(int p)
+        var copyOf = new Dictionary<long, long>();
+        long CopyPoint(long p)
         {
             if (copyOf.TryGetValue(p, out var q)) return q;
             var pos = sk.P(p);
@@ -187,7 +187,7 @@ public static class SketchOps
             else at = pos + normals[0] * d;
             return copyOf[p] = sk.AddPoint(at).Id;
         }
-        var refs = new List<int>(); var sides = new List<int>();
+        var refs = new List<long>(); var sides = new List<int>();
         foreach (var (e, fwd) in order)
         {
             SkEntity copy = e switch
@@ -219,7 +219,7 @@ public static class SketchOps
         for (int i = 0; i < offset.Sides.Length; i++) offset.Sides[i] = -offset.Sides[i];
         // move the copies across (each copy point once, mirrored through its original), so the solver starts near
         // the answer
-        var flip = new Dictionary<int, int>();
+        var flip = new Dictionary<long, long>();
         for (int k = 0; k + 1 < offset.Refs.Length; k += 2)
         {
             var o = sk.Entity(offset.Refs[k]); var q = sk.Entity(offset.Refs[k + 1]);
@@ -254,9 +254,9 @@ public static class SketchOps
     /// Points on the mirror line are shared rather than copied (kept on it), so a half profile closes. Returns
     /// the new entities' ids.
     /// </summary>
-    public static List<int> Mirror(Sketch sk, IEnumerable<int> entityIds, int axisLine)
+    public static List<long> Mirror(Sketch sk, IEnumerable<long> entityIds, long axisLine)
     {
-        var made = new List<int>();
+        var made = new List<long>();
         if (sk.Entity(axisLine) is not SkLine axis) return made;
         var a = sk.P(axis.P1); var b = sk.P(axis.P2);
         var d = b - a;
@@ -264,8 +264,8 @@ public static class SketchOps
         var u = d / d.Length;
         Vec2 Reflect(Vec2 p) { var v = p - a; var along = u * Vec2.Dot(v, u); return a + along * 2 - v; }
         var scale = Math.Max(d.Length, 1);
-        var map = new Dictionary<int, int>();
-        int MapPoint(int id)
+        var map = new Dictionary<long, long>();
+        long MapPoint(long id)
         {
             if (map.TryGetValue(id, out var m)) return m;
             var p = sk.P(id);

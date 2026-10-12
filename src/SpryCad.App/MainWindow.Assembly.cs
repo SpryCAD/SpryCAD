@@ -706,7 +706,7 @@ public partial class MainWindow : IAssemblyHost
         _asmTree.SelectMateRow(id);
         if (SelectedMate() is { } m)
         {
-            string Of(MateRef r) => r.Component == null ? r.Face + " Plane" : $"{a.Model.NameAt(r.Component)} ({(r.End != null ? "center of " : "")}{r.Face})";
+            string Of(MateRef r) => r.Component == null ? r.Face + " Plane" : $"{a.Model.NameAt(r.Component)} ({(r.End != null ? "center of " : "")}{a.Model.FaceName(r)})";
             Status($"{m.Name}: {Of(m.A)} and {Of(m.B)}{(m.Suppressed ? ", suppressed" : "")} (double-click to edit)");
         }
     }

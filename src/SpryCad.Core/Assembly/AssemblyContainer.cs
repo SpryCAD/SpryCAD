@@ -85,6 +85,7 @@ public static class AssemblyContainer
             if (data.LongLength != a.Size || DocumentContainer.Hash(data) != a.Sha256)
                 throw new InvalidDataException($"The embedded file \"{a.Name}\" in {Path.GetFileName(path)} is damaged (checksum mismatch).");
         }
+        if (asm.LegacyIds) asm.RenewLegacyCaches();
         return asm;
     }
 

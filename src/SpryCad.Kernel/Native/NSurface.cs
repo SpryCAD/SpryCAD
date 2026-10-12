@@ -364,9 +364,19 @@ public sealed class NSurface
         if (Prof.Enabled && (a.Kind is SurfaceKind.BSpline or SurfaceKind.Offset || b.Kind is SurfaceKind.BSpline or SurfaceKind.Offset)) Prof.Count("project.freeform", 1);
         var q = p;
         dir = Vec3.Zero;
+        // a B-spline's closest-point search started from the step before's (q moves little between steps)
+        double ua = double.NaN, va = double.NaN, ub = double.NaN, vb = double.NaN;
+        double FG(NSurface s, Vec3 x, out Vec3 g, ref double hu, ref double hv)
+        {
+            if (s.Kind != SurfaceKind.BSpline) { hu = double.NaN; return s.FGrad(x, out g); }
+            var c = s.Nurbs!.ClosestFrom(x, hu, hv);
+            hu = c.u; hv = c.v;
+            g = s.Nurbs.Normal(c.u, c.v);
+            return Vec3.Dot(x - c.c, g) >= 0 ? c.dist : -c.dist;
+        }
         for (int it = 0; it < 40; it++)
         {
-            var fa = a.FGrad(q, out var na); var fb = b.FGrad(q, out var nb);
+            var fa = FG(a, q, out var na, ref ua, ref va); var fb = FG(b, q, out var nb, ref ub, ref vb);
             dir = Vec3.Cross(na, nb);
             if (Math.Abs(fa) < tol && Math.Abs(fb) < tol) return q;
             double g11 = Vec3.Dot(na, na), g12 = Vec3.Dot(na, nb), g22 = Vec3.Dot(nb, nb);
@@ -564,6 +574,9 @@ public sealed class NSurface
     {
         if (Kind == SurfaceKind.Plane) return FromPlane(Plane!.Transformed(t));
         var d = Def.Transformed(t);
+        // an offset of a B-spline lies along its base's natural normal, which a mirror turns round (the base keeps its
+        // parameters): the same side again is the other offset
+        if (t.Determinant < 0 && Kind == SurfaceKind.Offset && Base!.Kind is SurfaceKind.BSpline) d = d with { Radius = -d.Radius };
         if (Math.Abs(t.Determinant - 1) > 1e-9 && Math.Abs(t.Determinant + 1) > 1e-9)
         {
             var s = Math.Cbrt(Math.Abs(t.Determinant));
@@ -639,6 +652,50 @@ public static class Roots
             var fm = f(m);
             if (fm == 0 || Math.Abs(b - a) < 1e-15 * Math.Max(1, Math.Abs(m))) return m;
             if (Math.Sign(fm) == Math.Sign(fa)) { a = m; fa = fm; } else { b = m; fb = fm; }
+        }
+        return 0.5 * (a + b);
+    }
+
+    /// <summary>
+    /// Root of f in [a,b] given a sign change, as <see cref="Bisect"/> finds it (to 1e-15 relative) in far fewer
+    /// evaluations where f is smooth there: regula falsi with the Illinois step (the bracket kept; a stuck end's value
+    /// halved), a bisection step where that shrinks the bracket by less than half.
+    /// </summary>
+    public static double Bracketed(Func<double, double> f, double a, double b, int iters = 100)
+    {
+        double fa = f(a), fb = f(b);
+        if (fa == 0) return a;
+        if (fb == 0) return b;
+        int side = 0;
+        for (int i = 0; i < iters; i++)
+        {
+            var w = b - a;
+            var m = (fa * b - fb * a) / (fa - fb);
+            if (!(m > a && m < b)) m = 0.5 * (a + b);
+            var fm = f(m);
+            if (fm == 0) return m;
+            if (Math.Sign(fm) == Math.Sign(fa))
+            {
+                a = m; fa = fm;
+                if (side == -1) fb *= 0.5;
+                side = -1;
+            }
+            else
+            {
+                b = m; fb = fm;
+                if (side == 1) fa *= 0.5;
+                side = 1;
+            }
+            if (Math.Abs(b - a) < 1e-15 * Math.Max(1, Math.Abs(m))) return 0.5 * (a + b);
+            // (barely shrinking: a bisection step)
+            if (b - a > 0.5 * w)
+            {
+                var c = 0.5 * (a + b); var fc = f(c);
+                if (fc == 0) return c;
+                if (Math.Sign(fc) == Math.Sign(fa)) { a = c; fa = fc; } else { b = c; fb = fc; }
+                side = 0;
+                if (Math.Abs(b - a) < 1e-15 * Math.Max(1, Math.Abs(c))) return 0.5 * (a + b);
+            }
         }
         return 0.5 * (a + b);
     }

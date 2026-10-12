@@ -262,6 +262,34 @@ public sealed class NurbsSurface
         return ClosestCore(p, uHint, vHint);
     }
 
+    /// <summary>
+    /// <see cref="Closest"/> started from a nearby earlier answer (the same search a step before): Newton from it,
+    /// kept when it ends on a foot point and no grid cell beyond its own neighbours can hold anything nearer
+    /// (their bounding spheres); else the full search. The same inputs give the same answer.
+    /// </summary>
+    public (double u, double v, Vec3 c, double dist) ClosestFrom(Vec3 p, double uHint, double vHint)
+    {
+        if (double.IsNaN(uHint) || double.IsNaN(vHint)) return Closest(p);
+        var (u, v) = Newton(p, uHint, vHint);
+        if (Stationary(p, u, v))
+        {
+            var c = Eval(u, v); var d = Vec3.Distance(c, p);
+            int ci = Math.Clamp((int)((u - U0) / (U1 - U0) * G), 0, G - 1), cj = Math.Clamp((int)((v - V0) / (V1 - V0) * G), 0, G - 1);
+            bool sure = true;
+            for (int i = 0; i < G && sure; i++)
+                for (int j = 0; j < G; j++)
+                {
+                    if (Math.Abs(i - ci) <= 1 && Math.Abs(j - cj) <= 1) continue;
+                    // (closed directions wrap: the cells across the seam are neighbours too)
+                    if (ClosedU && Math.Abs(i - ci) >= G - 1 && Math.Abs(j - cj) <= 1) continue;
+                    if (ClosedV && Math.Abs(j - cj) >= G - 1 && Math.Abs(i - ci) <= 1) continue;
+                    if (Vec3.Distance(p, _cellC[i, j]) - _cellR[i, j] < d) { sure = false; break; }
+                }
+            if (sure) return (u, v, c, d);
+        }
+        return Closest(p);
+    }
+
     /// <summary>Whether (u, v) is a proper foot point of p: the residual is normal to the surface there.</summary>
     bool Stationary(Vec3 p, double u, double v)
     {
@@ -468,6 +496,42 @@ public sealed class NurbsSurface
         return rho;
     }
     System.Runtime.CompilerServices.StrongBox<double>? _minRho; // one reference: safe to publish across threads
+
+    /// <summary>
+    /// The smallest radii of curvature along u and along v (normal curvature of the parameter lines, sampled; rough),
+    /// for tessellation spacing in each direction: a surface curved one way only is flat the other.
+    /// </summary>
+    public (double u, double v) DirectionalCurvatureRadius()
+    {
+        if (_dirRho is { } cached) return cached;
+        const int n = 12;
+        var samples = new List<(Vec3 su, Vec3 sv, Vec3 suu, Vec3 svv)>();
+        double msu = 0, msv = 0;
+        for (int i = 0; i <= n; i++)
+            for (int j = 0; j <= n; j++)
+            {
+                var (_, su, sv, suu, _, svv) = Derivs(U0 + (U1 - U0) * i / n, V0 + (V1 - V0) * j / n);
+                samples.Add((su, sv, suu, svv));
+                msu = Math.Max(msu, su.Length); msv = Math.Max(msv, sv.Length);
+            }
+        double ku = 0, kv = 0;
+        foreach (var (su, sv, suu, svv) in samples)
+        {
+            // degenerate samples (poles, collapsed edges): no meaningful curvature
+            if (su.Length < 1e-2 * msu || sv.Length < 1e-2 * msv) continue;
+            var nn = Vec3.Cross(su, sv);
+            if (nn.Length < 1e-12) continue;
+            nn = nn.Normalized;
+            ku = Math.Max(ku, Math.Abs(Vec3.Dot(suu, nn)) / su.LengthSq);
+            kv = Math.Max(kv, Math.Abs(Vec3.Dot(svv, nn)) / sv.LengthSq);
+        }
+        // never finer than a thousandth of the patch (the mesh refines locally where it needs to anyway)
+        var floor = 1e-3 * _scale;
+        var r = (Math.Max(ku > 1e-12 ? 1 / ku : double.PositiveInfinity, floor), Math.Max(kv > 1e-12 ? 1 / kv : double.PositiveInfinity, floor));
+        _dirRho = r;
+        return r;
+    }
+    (double, double)? _dirRho; // (a struct: written once, the same value by any thread that races)
 
     /// <summary>Average lengths of Su and Sv (parameter to distance scale).</summary>
     public (double su, double sv) MetricScale()

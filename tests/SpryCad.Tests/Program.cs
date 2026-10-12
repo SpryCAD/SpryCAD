@@ -69,6 +69,14 @@ static class Program
             return 0;
         }
         if (args.Length > 1 && args[0] == "unfold") return UnfoldTool.Run(args);
+        if (args.Length > 2 && args[0] == "gridpart")
+        {
+            // a part whose one sketch is sketchbench's k×k grid of rectangles (a large sketch to edit in the app)
+            var doc = new SpryCad.Core.Model.CadDocument();
+            doc.AddFeature(new SpryCad.Core.Model.SketchFeature { Plane = SpryCad.Core.Model.PlaneRef.Front, Sketch = SketchBench.Grid(int.Parse(args[1])) });
+            doc.Save(args[2], container: true);
+            return 0;
+        }
         if (args.Length > 1 && args[0] == "asmsolve")
         {
             // what solving each assembly's mates costs once it is open (best of ten, after a first solve)
@@ -173,6 +181,9 @@ static class Program
         if (args.Length > 2 && args[0] == "featprof") { Bench.FeatureProfile(args[1], args[2], args.Length > 3 ? int.Parse(args[3]) : 3); return 0; }
         if (args.Length > 1 && args[0] == "localbench") return LocalBench.Run(args[1], args.Length > 2 ? int.Parse(args[2]) : 5);
         if (args.Length > 0 && args[0] == "loftbench") return LoftBench.Run();
+        if (args.Length > 0 && args[0] == "loftmirror") return LoftMirrorBench.Run();
+        if (args.Length > 0 && args[0] == "loftstep") return LoftProbe.Step();
+        if (args.Length > 0 && args[0] == "loftprobe") return LoftProbe.Run(args.Length > 1 ? args[1] : null);
         if (args.Length > 1 && args[0] == "bench")
         {
             Bench.Run(args[1], args.Length > 2 ? int.Parse(args[2]) : 5);
@@ -202,6 +213,8 @@ static class Program
             SketchOverlapTests.Run(t);
             SketchLookupTests.Run(t);
             MeshQuantTests.Run(t);
+            IdTests.Run(t);
+            FeatureColorTests.Run(t);
             DirectBlendTests.Run(t);
             SweepTests.Run(t);
             SweepFeatureTests.Run(t);

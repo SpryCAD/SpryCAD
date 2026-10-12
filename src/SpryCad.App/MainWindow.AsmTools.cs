@@ -562,7 +562,7 @@ public partial class MainWindow
         st.Update = () =>
         {
             var r = p.Reference;
-            refLbl.Text = r.Component == null ? $"{r.Face} Plane{(kind == PatternKind.Mirror ? "" : " (its normal)")}" : $"{a.Model.NameAt(r.Component)}: {(r.Kind == MateGeomKind.Axis ? "axis of" : "")} {r.Face}";
+            refLbl.Text = r.Component == null ? $"{r.Face} Plane{(kind == PatternKind.Mirror ? "" : " (its normal)")}" : $"{a.Model.NameAt(r.Component)}: {(r.Kind == MateGeomKind.Axis ? "axis of" : "")} {a.Model.FaceName(r)}";
             RefreshAssemblyScene();
         };
         void Close()

@@ -202,6 +202,17 @@ internal sealed class HCurve
         return new HCurve(p, knots.ToArray(), poles.ToArray());
     }
 
+    /// <summary>The curve cut at t (inside its range) into the piece before and the piece after.</summary>
+    public (HCurve before, HCurve after) Split(double t)
+    {
+        int mult = U.Count(u => u == t);
+        var c = Refine(Enumerable.Repeat(t, Math.Max(0, P - mult)).ToList());
+        int s = Array.IndexOf(c.U, t);
+        var ua = c.U.Take(s).Concat(Enumerable.Repeat(t, c.P + 1)).ToArray();
+        var ub = Enumerable.Repeat(t, c.P + 1).Concat(c.U.Skip(s + c.P)).ToArray();
+        return (new HCurve(c.P, ua, c.Q.Take(s).ToArray()), new HCurve(c.P, ub, c.Q.Skip(s - 1).ToArray()));
+    }
+
     /// <summary>The non-rational curve (all weights 1) as a B-spline of Cartesian poles.</summary>
     public BSplineCurve ToBSpline() => new(P, Q.Select(q => q.P).ToArray(), U);
 }
@@ -241,6 +252,10 @@ internal sealed class Interpolation
             double s = 0;
             for (int i = j; i <= j + p - 1; i++) s += a[i];
             U[j + p] = s / p;
+            // an average that is one of the parameters (equal steps) is that parameter exactly: else it lands a
+            // rounding error beside the knots other curves have there, and the union of the two leaves a span of
+            // nothing, whose derivatives blow up
+            foreach (var tk in t) if (Math.Abs(U[j + p] - tk) < 1e-12 * Math.Max(1, Math.Abs(tk))) U[j + p] = tk;
         }
         // rows: the points in order, the start derivative after the first, the end derivative before the last
         int n = m + 1;
