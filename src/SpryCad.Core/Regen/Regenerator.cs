@@ -31,6 +31,19 @@ public sealed class Regenerator
     public ThreadDisplay ThreadOverride { get; set; }
 
     /// <summary>
+    /// Takes another regenerator's results: what the two build alike is then not built again (an export's, with
+    /// the threads modeled, shares everything before the first thread with the display's).
+    /// </summary>
+    public void SeedFrom(Regenerator other)
+    {
+        List<CacheEntry> entries;
+        lock (other._cache) entries = other._cache.Values.ToList();
+        lock (_cache)
+            foreach (var e in entries)
+                if (!_cache.ContainsKey(e.Key)) _cache[e.Key] = new CacheEntry(e.Key, e.State, e.Status) { Used = ++_uses };
+    }
+
+    /// <summary>
     /// Rebuilds the document (features already built with the same inputs come from the cache).
     /// <paramref name="progress"/> is told which feature is being built (and, within patterns, which instance);
     /// <paramref name="cancel"/> stops the rebuild between features and pattern instances with

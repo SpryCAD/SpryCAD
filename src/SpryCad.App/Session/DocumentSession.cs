@@ -29,6 +29,16 @@ public sealed class DocumentSession
     readonly List<string> _undo = new();
     readonly List<string> _redo = new();
     readonly Regenerator _regen = new();
+    // exports model the threads: a regenerator of their own, kept (an export after another, or after a small edit,
+    // builds little), seeded from the display's (everything before the first thread is built already)
+    readonly Regenerator _exportRegen = new() { ThreadOverride = ThreadDisplay.Modeled };
+
+    /// <summary>The document (a snapshot of it) rebuilt with every thread modeled, as exports write it.</summary>
+    public RegenResult RebuildForExport(CadDocument snapshot)
+    {
+        _exportRegen.SeedFrom(_regen);
+        return _exportRegen.Rebuild(snapshot);
+    }
     readonly object _lock = new();
     // separate slots: a live-preview request must never replace a pending real rebuild
     CadDocument? _pendingReal, _pendingPreview;
@@ -85,6 +95,7 @@ public sealed class DocumentSession
         lock (_lock) if (_running || _pendingReal != null || Result == null) return false;
         Result = null; PreviewResult = null;
         _regen.Invalidate();
+        _exportRegen.Invalidate();
         return true;
     }
 
@@ -152,6 +163,7 @@ public sealed class DocumentSession
         Doc = NewDocument(); FilePath = null; Dirty = false;
         _undo.Clear(); _redo.Clear();
         _regen.Invalidate();
+        _exportRegen.Invalidate();
         DocumentChanged?.Invoke();
         RequestRebuild();
     }
@@ -172,6 +184,7 @@ public sealed class DocumentSession
         PartsIndexStore.Record(d, path);
         _undo.Clear(); _redo.Clear();
         _regen.Invalidate();
+        _exportRegen.Invalidate();
         DocumentChanged?.Invoke();
         RequestRebuild();
     }
@@ -350,6 +363,7 @@ public sealed class DocumentSession
     public void ForceRebuild()
     {
         _regen.Invalidate();
+        _exportRegen.Invalidate();
         RequestRebuild();
     }
 

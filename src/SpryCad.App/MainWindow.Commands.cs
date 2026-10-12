@@ -1017,10 +1017,11 @@ public partial class MainWindow
             // cosmetic threads are modeled for export: the part rebuilt so (a copy, off the UI thread)
             var hasCosmetic = r.State.Cosmetics.Count > 0;
             var snapshot = hasCosmetic ? Session.Doc.Clone() : null;
+            var session = Session;
             // written off the UI thread: the exact B-rep / tessellation of big parts takes a moment
             await Task.Run(() =>
             {
-                if (snapshot != null) bodies = new Regenerator { ThreadOverride = ThreadDisplay.Modeled }.Rebuild(snapshot).State.Bodies.ToList();
+                if (snapshot != null) bodies = session.RebuildForExport(snapshot).State.Bodies.ToList();
                 using var fs = File.Create(path);
                 if (kind == "step") StepWriter.Write(fs, bodies.Select(b => (b.Id, b.Solid)), baseName, scale);
                 else StlWriter.Write(fs, bodies.Select(b => b.Solid), scale);

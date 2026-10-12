@@ -11,6 +11,22 @@ static class StepTime
     public static int Run(string file, int runs)
     {
         var doc = CadDocument.Load(file);
+        if (Environment.GetEnvironmentVariable("STEP_COSMETIC") != null)
+        {
+            // a part shown with cosmetic threads, exported (threads modeled): rebuilt cold as before, seeded from the
+            // display's results, and once more (nothing changed)
+            var display = new Regenerator { ThreadOverride = ThreadDisplay.Cosmetic };
+            display.Rebuild(doc);
+            double Ms(Func<RegenResult> f, out double vol) { var w = Stopwatch.StartNew(); var res = f(); var t = w.Elapsed.TotalMilliseconds; vol = res.State.Bodies.Sum(b => SpryCad.Kernel.Native.NMass.Of(b.Solid.Native!)?.Volume ?? 0); return t; }
+            Csg.ClearCache();
+            var cold = Ms(() => new Regenerator { ThreadOverride = ThreadDisplay.Modeled }.Rebuild(doc.Clone()), out var v0);
+            Csg.ClearCache();
+            var export = new Regenerator { ThreadOverride = ThreadDisplay.Modeled };
+            var seeded = Ms(() => { export.SeedFrom(display); return export.Rebuild(doc.Clone()); }, out var v1);
+            var again = Ms(() => { export.SeedFrom(display); return export.Rebuild(doc.Clone()); }, out var v2);
+            Console.WriteLine($"{Path.GetFileName(file)} export rebuild: cold {cold:0} ms, seeded {seeded:0} ms, again {again:0} ms; volumes {(v0 == v1 && v1 == v2 ? "identical" : $"DIFFER {v0:R} {v1:R} {v2:R}")}");
+            return 0;
+        }
         var r = new Regenerator().Rebuild(doc);
         var bodies = r.State.Bodies.Select(b => (b.Id, b.Solid)).ToList();
         var times = new List<double>(); long bytes = 0;
