@@ -46,6 +46,16 @@ Commands (from the repository root):
    that run into neighbouring geometry also run into each other where both are tangent to the same face; that corner
    cannot be blended yet". Repro: unsuppress it, `verify-engine - Casting`. The same R5 on the hopper's faces into
    the barrel (front and back) and on the head's flange into the barrel works.
+4b. **A boss through a drafted face that carries on another: the exact boolean fails (OPEN).** To remove the hopper's
+   4 mm ledge (and with it item 4's trouble), the hopper was made as wide at y = 0 as the body's top
+   (`HopW = BodyW-2*(BaseY-BaseT)*tan(BodyDraft)`, 106.9), with the same 2° draft, so its sides carry straight on
+   from the body's (they merge: the body's side face `F7.S.L5` then runs up to the hopper's top, and the hopper's
+   corner rounds must be picked between it and the hopper's front and back). Then the cam gear's boss, a plain
+   extrude (Ø36 along Z at x = -72.1, y = 0, z 40 to 72), fails exactly: "The result is no longer exact (an exact
+   boolean failed: face split: open cycle on F31.S.L6 near (-85.423, 12.104, 50.572))". F31.S.L6 is the hopper's
+   drafted back face, which the boss's back now cuts through just where it meets the merged side face. The casting
+   goes faceted and rebuilds in 230 s. Repro: set `HopW` to that expression, repoint "Hopper corners" to `YF(0)`/`YF(2)`
+   with `HF(1)`/`HF(3)`, `verify-engine - Casting`. *Instead:* the hopper 116 wide again (the ledge kept).
 5. **A mirror with a suppressed seed silently mirrors nothing.** "Bearing pedestal, back" mirrored the pedestal, its
    corner rounds and "Pedestal into the body" (suppressed): no error, no warning, and the back pedestal was simply
    missing (the casting 36,000 mm³ light), so later fillets ("Wall tops") failed with "run into each other" and
