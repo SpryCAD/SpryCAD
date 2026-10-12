@@ -2,6 +2,7 @@ using Avalonia.Threading;
 using SpryCad.Core.Assembly;
 using SpryCad.Core.Model;
 using SpryCad.Core.Regen;
+using SpryCad.Core.Storage;
 
 namespace SpryCad.App.Session;
 
@@ -52,7 +53,7 @@ public sealed class DocumentSession
     /// <summary>The name of a part not saved yet ("Part1", "Part2", ...: one per tab).</summary>
     public string UntitledName { get; set; } = "Part1";
 
-    public string Title => (FilePath != null ? Path.GetFileNameWithoutExtension(FilePath) : UntitledName) + (Dirty ? " *" : "");
+    public string Title => (FilePath != null ? Path.GetFileNameWithoutExtension(FilePath) : UntitledName) + (ReadOnly ? " (read-only)" : "") + (Dirty ? " *" : "");
 
     /// <summary>
     /// A file not read yet: parts opened in a batch get their tabs at once and are read when first shown (or when
@@ -93,8 +94,61 @@ public sealed class DocumentSession
         if (Result == null && !IsPending && !Busy) RequestRebuild();
     }
 
+    // ------------------------------------------------------------------------------------------
+    // the local working copy the part is edited in (Core.Storage.WorkingCopy): autosave writes it, saving swaps it in
+
+    WorkingCopy? _wc;
+
+    /// <summary>Someone else's lock on the file when it was opened (null: none): opened read-only unless the user says otherwise.</summary>
+    public LockInfo? ForeignLock => _wc?.ForeignLock;
+
+    /// <summary>Opened while someone else has it open: Save saves a copy elsewhere (Save As).</summary>
+    public bool ReadOnly
+    {
+        get => _readOnly;
+        set { if (_readOnly == value) return; _readOnly = value; DocumentChanged?.Invoke(); }
+    }
+    bool _readOnly;
+
+    /// <summary>Autosave (off the UI thread, on a copy of the document): its working revision, in the local copy.</summary>
+    public void SaveWorking(CadDocument copy) => (_wc ??= WorkingCopy.New()).SaveWorking(copy, UserSettings.AuthorName);
+
+    /// <summary>Renews the lock on the file while it is open (see <see cref="WorkingCopy.RefreshLock"/>).</summary>
+    public void RefreshLock() => _wc?.RefreshLock();
+
+    /// <summary>Done with the part (its tab closed, the app closing): the lock released and the local copy removed.</summary>
+    public void Close()
+    {
+        _wc?.Close();
+        _wc = null;
+    }
+
+    /// <summary>Opens a part left with unsaved work (the app closed without saving it), as last autosaved: unsaved still.</summary>
+    public void Recover(Recoverable r)
+    {
+        _wc?.Close();
+        _wc = WorkingCopy.Adopt(r);
+        var d = _wc.Load(working: true);
+        Doc = d; FilePath = r.Source; ReadOnly = false;
+        _saved = null;
+        _undo.Clear(); _redo.Clear();
+        _regen.Invalidate();
+        SetDirty();
+        RequestRebuild();
+    }
+
+    void SetDirty()
+    {
+        Dirty = true;
+        // (the first edit: the file is marked as being edited here)
+        if (!ReadOnly) _wc?.TakeLock();
+    }
+
     public void New()
     {
+        _wc?.Close();
+        _wc = WorkingCopy.New();
+        ReadOnly = false;
         Doc = NewDocument(); FilePath = null; Dirty = false;
         _undo.Clear(); _redo.Clear();
         _regen.Invalidate();
@@ -104,7 +158,13 @@ public sealed class DocumentSession
 
     public void Load(string path)
     {
-        var d = CadDocument.Load(path);
+        var wc = WorkingCopy.Open(path);
+        CadDocument d;
+        try { d = wc.Load(); }
+        catch { wc.Close(); throw; }
+        _wc?.Close();
+        _wc = wc;
+        ReadOnly = false;
         Doc = d; FilePath = path; Dirty = false;
         // a display saved with it: shown until the rebuild is done
         _saved = null;
@@ -127,11 +187,15 @@ public sealed class DocumentSession
     /// <summary>Marks the document as having unsaved changes (e.g. recovered from an autosave).</summary>
     public void MarkDirty()
     {
-        Dirty = true;
+        SetDirty();
         DocumentChanged?.Invoke();
     }
 
-    public void Save(string path)
+    /// <summary>
+    /// Saves the part to <paramref name="path"/> (its file, or another: Save As). A <see cref="SaveConflictException"/>
+    /// when someone else saved its file since it was opened, unless <paramref name="overwrite"/>.
+    /// </summary>
+    public void Save(string path, bool overwrite = false)
     {
         // embedded files no feature refers to any more (e.g. an import that was undone) are not saved
         var json = string.Concat(Doc.Features.Select(CadDocument.JsonOf));
@@ -143,12 +207,16 @@ public sealed class DocumentSession
         // saved as another file: that file is a copy, with its own identity (the original keeps its own; a failed
         // save keeps the document as it was)
         var (id, rev, from) = (Doc.Id, Doc.Revision, Doc.DerivedFrom);
-        if (FilePath != null && !PartIndex.SamePath(FilePath, path)) Doc.ForkIdentity();
-        try { Doc.Save(path, UserSettings.AuthorName); }
+        bool same = FilePath != null && PartIndex.SamePath(FilePath, path);
+        if (FilePath != null && !same) Doc.ForkIdentity();
+        foreach (var name in Doc.Files.Keys) DocumentContainer.CheckName(name);
+        _wc ??= WorkingCopy.New();
+        try { _wc.Save(Doc, UserSettings.AuthorName, same ? null : path, overwrite); }
         catch { (Doc.Id, Doc.Revision, Doc.DerivedFrom) = (id, rev, from); throw; }
         finally { Doc.Display = null; }
         PartsIndexStore.Record(Doc, path);
-        FilePath = path; Dirty = false;
+        FilePath = path; Dirty = false; ReadOnly = false;
+        if (!same) _wc.TakeLock();
         DocumentChanged?.Invoke();
     }
 
@@ -194,7 +262,7 @@ public sealed class DocumentSession
     /// <summary>Call after mutating the document.</summary>
     public void EndChange()
     {
-        Dirty = true;
+        SetDirty();
         DocumentChanged?.Invoke();
         RequestRebuild();
     }
@@ -218,7 +286,7 @@ public sealed class DocumentSession
         _redo.Add(Doc.ToJson(indented: false));
         Restore(_undo[^1]);
         _undo.RemoveAt(_undo.Count - 1);
-        Dirty = true;
+        SetDirty();
         DocumentChanged?.Invoke();
         RequestRebuild();
     }
@@ -229,7 +297,7 @@ public sealed class DocumentSession
         _undo.Add(Doc.ToJson(indented: false));
         Restore(_redo[^1]);
         _redo.RemoveAt(_redo.Count - 1);
-        Dirty = true;
+        SetDirty();
         DocumentChanged?.Invoke();
         RequestRebuild();
     }
