@@ -684,6 +684,64 @@ static class DirectBlendTests
             t.True(added > 50 && added < 400, $"added {added:R}");
         });
 
+        t.Test("Fillet by scope: between a feature and the rest, or every concave edge of the body, as the edges picked", () =>
+        {
+            // the casting foot's R6 round the boss's foot, picked as one edge (its tangent edges following), the same as
+            // the boss's concave edges with the rest of the body, and as every concave edge of the body
+            double Vol(Action<CadDocument, FilletFeature> scope)
+            {
+                var doc = Demos.BlendCases.First(c => c.name == "casting foot, drafted").build();
+                var foot = (FilletFeature)doc.Features.First(f => f.Name == "Foot");
+                scope(doc, foot);
+                var r = new Regenerator().Rebuild(doc);
+                t.True(r.Status[foot.Id].Ok && r.Status[foot.Id].Warnings.Count == 0, $"{r.Status[foot.Id].Error} {string.Join("; ", r.Status[foot.Id].Warnings)}");
+                t.True(r.State.Bodies[0].Solid.Native?.Validate() == null, "exact and valid");
+                return KernelTests.Vex(r.State.Bodies[0].Solid);
+            }
+            var picked = Vol((_, _) => { });
+            var between = Vol((d, f) => { f.Edges.Clear(); f.Features.Add(d.Features.First(x => x.Name == "Boss" && x is ExtrudeFeature).Id); });
+            var body = Vol((_, f) => { f.Edges.Clear(); f.WholeBody = true; });
+            t.True(Math.Abs(between - picked) < 1e-6 * picked, $"between the boss and the rest {between:R}, picked {picked:R}");
+            t.True(Math.Abs(body - picked) < 1e-6 * picked, $"every concave edge {body:R}, picked {picked:R}");
+        });
+
+        t.Test("Fillet by scope: every convex edge of a box as all its edges picked; edges that cannot be blended left out", () =>
+        {
+            var doc = Demos.BlendCases.First(c => c.name == "box, all edges").build();
+            var all = (FilletFeature)doc.Features.Last(f => f is FilletFeature);
+            var picked = KernelTests.Vex(new Regenerator().Rebuild(doc).State.Bodies[0].Solid);
+            all.Edges.Clear(); all.WholeBody = true; all.ScopeKind = BlendScopeKind.Convex;
+            var r = new Regenerator().Rebuild(doc);
+            t.True(r.Status[all.Id].Ok && r.Status[all.Id].Warnings.Count == 0, $"{r.Status[all.Id].Error} {string.Join("; ", r.Status[all.Id].Warnings)}");
+            var scoped = KernelTests.Vex(r.State.Bodies[0].Solid);
+            t.True(Math.Abs(scoped - picked) < 1e-6 * picked, $"every convex edge {scoped:R}, picked {picked:R}");
+            // the casting foot's every convex edge R25: the boss's top edges, running round its R20 corners, cannot take
+            // it (left out, said); the plate's can
+            var cast = Demos.BlendCases.First(c => c.name == "casting foot, drafted").build();
+            var foot = (FilletFeature)cast.Features.First(f => f.Name == "Foot");
+            var before = KernelTests.Vex(new Regenerator().Rebuild(cast, cast.Features.IndexOf(foot)).State.Bodies[0].Solid);
+            foot.Edges.Clear(); foot.WholeBody = true; foot.ScopeKind = BlendScopeKind.Convex; foot.Radius = "25";
+            var rc = new Regenerator().Rebuild(cast);
+            var st = rc.Status[foot.Id];
+            t.True(st.Ok, st.Error ?? "");
+            t.True(st.Warnings.Count == 1 && st.Warnings[0].StartsWith("8 edges left out: ", StringComparison.Ordinal), $"warned: [{string.Join("; ", st.Warnings)}]");
+            t.True(rc.State.Bodies[0].Solid.Native?.Validate() == null, "exact and valid");
+            t.True(KernelTests.Vex(rc.State.Bodies[0].Solid) < before - 100, "something rounded off");
+        });
+
+        t.Test("Fillet by scope: nothing to fillet said; saved and loaded", () =>
+        {
+            var doc = Demos.BlendCases.First(c => c.name == "box, all edges").build();
+            var all = (FilletFeature)doc.Features.Last(f => f is FilletFeature);
+            all.Edges.Clear(); all.WholeBody = true; all.ScopeKind = BlendScopeKind.Concave;
+            var err = new Regenerator().Rebuild(doc).Status[all.Id].Error ?? "";
+            t.True(err.Contains("no concave edges"), err);
+            all.Features.Add("F2"); all.ScopeKind = BlendScopeKind.Convex;
+            var back = CadDocument.FromJson(doc.ToJson());
+            var f2 = (FilletFeature)back.Find(all.Id)!;
+            t.True(f2.WholeBody && f2.ScopeKind == BlendScopeKind.Convex && f2.Features.SequenceEqual(new[] { "F2" }), "scope saved");
+        });
+
         t.Test("Direct blend: off (FC_BLEND=boolean) applies nothing directly", () =>
         {
             var before = DirectBlend.Counts;

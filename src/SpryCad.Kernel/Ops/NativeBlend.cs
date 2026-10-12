@@ -1259,6 +1259,12 @@ public static class NativeBlend
         return Vec3.Dot(uB.Normalized, nA) < 0;
     }
 
+    /// <summary>
+    /// Whether the edge is convex (the material's angle between its faces under 180°) at its middle; null where the
+    /// faces are tangent or it is not between two faces.
+    /// </summary>
+    public static bool? IsConvex(NEdge e) => Convex(e, e.Curve.Eval(0.5 * (e.T0 + e.T1)));
+
     /// <summary>A seam: both sides are the same named face on the same surface (an artifact of face splitting).</summary>
     public static bool IsSeam(NEdge e)
         => e.Uses.Count == 2 && e.Uses[0].Face.Tag.Name == e.Uses[1].Face.Tag.Name

@@ -604,6 +604,21 @@ public partial class MainWindow
             }
             edges.Clear(); edges.AddRange(list);
         };
+        if (f is FilletFeature fs)
+        {
+            // besides the edges picked, edges found: every one of a kind on the body, or between features (a casting's
+            // blends in one feature)
+            var sc = page.Section("Scope");
+            page.Check(sc, "Whole body", () => fs.WholeBody, v => fs.WholeBody = v);
+            var fbox = page.Selection(sc, "Between features", SelFilter.Feature, "Select features in the tree or click their faces");
+            foreach (var id in fs.Features) fbox.Items.Add(new SelItem { Kind = SelKind.Feature, FeatureId = id });
+            fbox.Changed += () => { fs.Features.Clear(); fs.Features.AddRange(fbox.Items.Select(i => i.FeatureId!).Distinct()); };
+            page.Combo(sc, "Edges", new List<(BlendScopeKind, string)>
+            {
+                (BlendScopeKind.Concave, "Concave (filled in)"), (BlendScopeKind.Convex, "Convex (rounded off)"), (BlendScopeKind.All, "Both"),
+            }, () => fs.ScopeKind, v => fs.ScopeKind = v);
+            page.Info(sc, "Whole body: every edge of that kind. Between features: one feature, its edges with the rest of the body; several, the edges between them (their pattern and mirror copies too). Edges that cannot be blended are left out with a warning.");
+        }
         var p = page.Section(fillet ? "Fillet Parameters" : "Chamfer Parameters");
         if (fillet) page.Number(p, "Radius", () => ((FilletFeature)f).Radius, v => ((FilletFeature)f).Radius = v, "fillet");
         else
@@ -633,7 +648,8 @@ public partial class MainWindow
         // SolidWorks "overflow": where the blend runs into neighbouring geometry it is trimmed by it (keep edge)
         if (fillet) page.Check(p, "Overflow: trim at neighbouring faces", () => ((FilletFeature)f).Overflow, v => ((FilletFeature)f).Overflow = v);
         else page.Check(p, "Overflow: trim at neighbouring faces", () => ((ChamferFeature)f).Overflow, v => ((ChamferFeature)f).Overflow = v);
-        BeginEdit(f, isNew, page, overlay: true, hint: edges.Count == 0 ? "Select edges in the graphics area." : null);
+        var scoped = f is FilletFeature { WholeBody: true } or FilletFeature { Features.Count: > 0 };
+        BeginEdit(f, isNew, page, overlay: true, hint: edges.Count == 0 && !scoped ? "Select edges in the graphics area, or set a scope." : null);
     }
 
     // ------------------------------------------------------------------------------------------
