@@ -7,7 +7,13 @@ namespace SpryCad.Kernel;
 public static class Thumbnail
 {
     /// <summary>PNG of the meshes seen from the isometric direction (+X, +Y, +Z towards the viewer; Y up).</summary>
-    public static byte[] Render(IEnumerable<(DisplayMesh mesh, double[] color)> parts, int size = 256)
+    public static byte[] Render(IEnumerable<(DisplayMesh mesh, double[] color)> parts, int size = 256) => Render(parts, size, null);
+
+    /// <summary>
+    /// As <see cref="Render(IEnumerable{ValueTuple{DisplayMesh, double[]}}, int)"/>, each face in the color
+    /// <paramref name="faceColor"/> gives for its name (null: its mesh's color): e.g. what a revision changed.
+    /// </summary>
+    public static byte[] Render(IEnumerable<(DisplayMesh mesh, double[] color)> parts, int size, Func<string, double[]?>? faceColor)
     {
         var list = parts.Where(p => p.mesh.Indices.Length > 0).ToList();
         const int ss = 2; // supersampling
@@ -47,9 +53,16 @@ public static class Thumbnail
                 sy[i] = (float)(n / 2.0 - (Vec3.Dot(p, up) - cy) * scale);
                 sz[i] = (float)Vec3.Dot(p, toEye);
             }
-            float r0 = (float)color[0], g0 = (float)color[1], b0 = (float)color[2];
+            // each triangle's color: its face's, else the mesh's
+            var colorOf = new double[]?[idx.Length / 3];
+            if (faceColor != null)
+                foreach (var f in m.Faces)
+                    if (faceColor(f.Name) is { } fc)
+                        for (int t = f.IndexStart / 3; t < (f.IndexStart + f.IndexCount) / 3 && t < colorOf.Length; t++) colorOf[t] = fc;
             for (int t = 0; t + 2 < idx.Length; t += 3)
             {
+                var tc = colorOf[t / 3] ?? color;
+                float r0 = (float)tc[0], g0 = (float)tc[1], b0 = (float)tc[2];
                 int a = idx[t], b = idx[t + 1], c = idx[t + 2];
                 float ax = sx[a], ay = sy[a], bx = sx[b], by = sy[b], qx = sx[c], qy = sy[c];
                 var area = (bx - ax) * (qy - ay) - (by - ay) * (qx - ax);

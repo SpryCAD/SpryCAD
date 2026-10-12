@@ -146,6 +146,8 @@ public static class Icons
         ["popout"] = ("M11 4H4v16h16v-7", "M14 3h7v7 M21 3l-9 9"),
         // task pane: open parts (sheets stacked), the pin (upright: pinned open; leaning: slides away), collapse
         ["parts"] = ("M8 3h12v14H8z", "M5 6v15h12"),
+        // revisions: a clock turned back (the arrow round it), its hands in the accent
+        ["revisions"] = ("M3.5 12a8.5 8.5 0 1 0 2.5-6 M3 3v5h5", "M12 7.5V12l3 2"),
         ["pinned"] = ("M9 3h6 M10 3v6l-3 4h10l-3-4V3 M12 13v8", null),
         ["unpinned"] = ("M15 3l6 6 M16 4l-4 4-5 0 9 9 0-5 4-4 M8 16l-5 5", null),
         ["collapse"] = ("M6 6l6 6-6 6 M12 6l6 6-6 6", null),

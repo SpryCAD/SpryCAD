@@ -405,14 +405,15 @@ static class HistoryTests
             PartFile.Save(doc, path, "a");
             var loaded = PartFile.Load(path);
             t.True(loaded.Display != null && loaded.Display.SequenceEqual(doc.Display), "the display saved");
-            t.Eq(Count(path, "Cache"), 1L);
+            t.Eq(Scalar(path, "SELECT COUNT(*) FROM Cache WHERE Kind = 0"), 1L);
             var displayHash = Hash.Of(doc.Display);
             t.Eq(BlobExists(path, displayHash), 1L);
             var blobs = Count(path, "Blobs");
             var json = Json(loaded);
 
             using (var db = PartDatabase.Open(path, readOnly: false)) PartHistory.ClearCache(db);
-            t.Eq(Count(path, "Cache"), 0L);
+            t.Eq(Scalar(path, "SELECT COUNT(*) FROM Cache WHERE Kind = 0"), 0L);
+            t.True(Scalar(path, "SELECT COUNT(*) FROM Cache") > 0, "the revision's preview cleared"); // (kept: it could not be made again)
             t.Eq(BlobExists(path, displayHash), 0L);
             t.Eq(Count(path, "Blobs"), blobs - 1);
             t.Eq(MissingBlobs(path), 0L);
@@ -448,7 +449,7 @@ static class HistoryTests
             Sensible(u1);
             t.True(u1.EmbeddedFileBytes >= data.Length / 2, "embedded file bytes " + u1.EmbeddedFileBytes);
             t.True(u1.DisplayBytes > 0, "no display bytes");
-            t.Eq(u1.DisplayBytes, Scalar(path, "SELECT length(b.Data) FROM Blobs b JOIN Cache c ON c.Hash = b.Hash"));
+            t.Eq(u1.DisplayBytes, Scalar(path, "SELECT SUM(length(b.Data)) FROM Blobs b JOIN Cache c ON c.Hash = b.Hash")); // (the display, the revision's preview)
             t.Eq(u1.HistoryBytes, 0L);
             t.True(doc.Thumbnail == null || u1.ThumbnailBytes == doc.Thumbnail.Length, "thumbnail bytes");
             t.Eq(u1.Revisions, 1);

@@ -86,17 +86,7 @@ public partial class MainWindow
         async Task<string?> TagOf(HistoryEntry e, string verb) =>
             e.Tags.Count == 1 ? e.Tags[0] : await Dialogs.Input(w, verb, $"Which tag ({string.Join(", ", e.Tags)}):", e.Tags[0]);
 
-        async Task OpenSelected() => await Do(async () =>
-        {
-            if (Selected() is not { } e) return;
-            var doc = session.LoadRevision(e.Revision.RevisionId);
-            if (await NewTab() is null) return;
-            var label = e.Tags.Count > 0 ? e.Tags[0] : e.Revision.CreatedUtc.ToLocalTime().ToString("g", CultureInfo.CurrentCulture);
-            Session.OpenRevision(doc, $"{name} ({label})");
-            _tab.FitAfterLoad = Session.RequestedRevision;
-            UpdateTabHeader(_tab);
-            Status($"Opened {name} as it was at {label}, read-only: Save As keeps it as a part of its own.");
-        });
+        async Task OpenSelected() => await Do(async () => { if (Selected() is { } e) await OpenRevisionTab(session, e, name); });
         open.Click += (_, _) => _ = OpenSelected();
         tag.Click += (_, _) => _ = Do(async () =>
         {
@@ -150,15 +140,33 @@ public partial class MainWindow
             if (!await Dialogs.YesNo(w, "Revert to This Revision",
                 $"Make {name} as it was at {When(e)} again? Everything since is undone, as one change (Undo brings it back); saving records it as a new revision, so the history keeps what came between.",
                 "Revert", "Cancel")) return;
-            var doc = session.ReadHistory(db => PartRevert.RevertTo(db, e.Revision.RevisionId));
-            session.Revert(doc, $"Reverted to {(e.Tags.Count > 0 ? e.Tags[0] : When(e))}");
-            Status($"{name} reverted to {When(e)}: save to keep it.");
+            RevertToRevision(session, e, name);
         });
         close.Click += (_, _) => w.Close();
         list.DoubleTapped += (_, _) => _ = OpenSelected();
         Fill();
         Sync();
         w.Show(this);
+    }
+
+    /// <summary>An old revision of the part opened in a tab of its own, read-only.</summary>
+    async Task OpenRevisionTab(DocumentSession session, HistoryEntry e, string name)
+    {
+        var doc = session.LoadRevision(e.Revision.RevisionId);
+        if (await NewTab() is null) return;
+        var label = e.Tags.Count > 0 ? e.Tags[0] : When(e);
+        Session.OpenRevision(doc, $"{name} ({label})");
+        _tab.FitAfterLoad = Session.RequestedRevision;
+        UpdateTabHeader(_tab);
+        Status($"Opened {name} as it was at {label}, read-only: Save As keeps it as a part of its own.");
+    }
+
+    /// <summary>The part made as it was in a revision again: one change, which Undo takes back; saved as a new revision.</summary>
+    void RevertToRevision(DocumentSession session, HistoryEntry e, string name)
+    {
+        var doc = session.ReadHistory(db => PartRevert.RevertTo(db, e.Revision.RevisionId));
+        session.Revert(doc, $"Reverted to {(e.Tags.Count > 0 ? e.Tags[0] : When(e))}", e.Revision.RevisionId);
+        Status($"{name} reverted to {(e.Tags.Count > 0 ? $"{e.Tags[0]} ({When(e)})" : When(e))}: save to keep it, Undo (Ctrl+Z) to go back.");
     }
 
     /// <summary>
@@ -258,7 +266,7 @@ public partial class MainWindow
     }
 
     /// <summary>What a revision changed, in a line: "Added Fillet3 · Changed Boss-Extrude1 · Removed Cut1 · Reordered".</summary>
-    static string Describe(HistoryEntry e)
+    internal static string Describe(HistoryEntry e)
     {
         var c = e.Changes;
         if (e.Revision.ParentId == null) return c.Added.Count == 0 ? "First save" : $"First save: {Names(c.Added)}";

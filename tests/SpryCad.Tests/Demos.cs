@@ -408,6 +408,7 @@ static partial class Demos
                 Console.WriteLine($"  body: native={b.Solid.Native != null} open={b.Solid.Topology.OpenHalfEdges} faces: " +
                     string.Join(" ", b.Solid.Native?.Faces.Select(f => f.Tag.Name).Distinct() ?? Array.Empty<string>()));
         }
+        if (!RevisionHistory(Path.Combine(dir, "revision-history.sprt"))) broken.Add("revision-history.sprt");
         foreach (var (file, build) in Assemblies)
         {
             var m = build();
@@ -421,6 +422,48 @@ static partial class Demos
         if (broken.Count == 0) return 0;
         Console.Error.WriteLine($"Broken demos (a feature failed to rebuild): {string.Join(", ", broken)}");
         return 1;
+    }
+
+    /// <summary>
+    /// A part with a history to look through (the Revisions pane): the enclosure as it was built up, one save at a
+    /// time (the box, shelled, bosses, holes, vents), then its corners rounded more; two of them tagged. Each revision
+    /// with its preview, what it changed shown. False when a feature failed.
+    /// </summary>
+    static bool RevisionHistory(string path)
+    {
+        if (File.Exists(path)) File.Delete(path);
+        var full = Enclosure();
+        int Through(string name) => full.Features.FindIndex(f => f.Name == name) + 1;
+        var steps = new (int count, string message, string? tag)[]
+        {
+            (Through("Corner rounds"), "Box with rounded corners", null),
+            (Through("Rim round"), "Shelled, rim rounded", null),
+            (Through("Boss pattern"), "Screw bosses", null),
+            (Through("Screw holes"), "Screw holes in the bosses", "Rev A"),
+            (full.Features.Count, "Vents in both side walls", null),
+            (-1, "Corners rounded more", "Rev B"),
+        };
+        bool ok = true;
+        var doc = Enclosure();
+        foreach (var (count, message, tag) in steps)
+        {
+            doc.Features = count >= 0 ? full.Clone().Features.Take(count).ToList() : doc.Features;
+            if (count < 0) { var rounds = doc.Features.OfType<FilletFeature>().First(f => f.Name == "Corner rounds"); rounds.Radius = "Rc*1.6"; }
+            var r = new Regenerator().Rebuild(doc);
+            ok &= doc.Features.All(f => r.Status[f.Id].Ok);
+            doc.Thumbnail = DocumentContainer.RenderThumbnail(doc, r);
+            doc.PreviewMesh = SpryCad.Core.Assembly.AssemblyModel.Merge(r.State.Bodies.Select(b => b.Mesh));
+            doc.Display = count < 0 ? SpryCad.Core.Assembly.MeshCache.Of(r, doc.Color) : null;
+            SpryCad.Core.Storage.PartFile.Save(doc, path, "SpryCAD demo", message);
+            doc.PreviewMesh = null; doc.Display = null;
+            if (tag != null)
+            {
+                using var db = SpryCad.Core.Storage.PartDatabase.Open(path, readOnly: false);
+                SpryCad.Core.Storage.PartHistory.Tag(db, Guid.Parse(doc.Revision!), tag);
+            }
+            Console.WriteLine($"revision-history.sprt: {message} ({doc.Features.Count} features)");
+        }
+        return ok;
     }
 
     // ------------------------------------------------------------------------------------------
