@@ -475,7 +475,11 @@ public static class RollingBall
                     fPrev = f;
                 }
             }
-            return double.IsNaN(best) ? cum[Math.Min(k, n)] : best;
+            // (crossing at the vertex itself, between two pieces, the samples' signs can miss it: then a far crossing, at
+            // the chain's other end where it comes back to the same height, is all there is; the vertex is nearer)
+            var vk = k < n ? pieces[k].Start : pieces[n - 1].End;
+            if (double.IsNaN(best) || bestD > Vec3.Distance(vk, S) + 1e-9 * scale) return cum[Math.Min(k, n)];
+            return best;
         }
 
         // switches first (they set the face the ball rolls on after them)

@@ -488,8 +488,10 @@ public static class NativeBlend
             // (only near the end: the plane may cut the tool elsewhere too, as a wall's underside in the plane of a
             // top the chain runs on along)
             foreach (var (v, pl) in cuts) t = TrimNear(t, pl, v, run + 2 * size);
-            double v0 = rb.Tool.Volume(), v1 = t.Volume();
-            if (t.IsEmpty || t.Native == null || t.Native.Validate() != null || Math.Abs(v1 - v0) > 0.25 * Math.Abs(v0))
+            double v0 = rb.Tool.Volume(), v1 = t.Volume(), vOn = on.Tool.Volume();
+            // (cut back at all: an intersection the boolean misses leaves the run-on whole, as if nothing were there)
+            if (t.IsEmpty || t.Native == null || t.Native.Validate() != null || Math.Abs(v1 - v0) > 0.25 * Math.Abs(v0)
+                || Math.Abs(vOn - v1) < 1e-3 * Math.Abs(vOn - v0))
             {
                 Debug?.Invoke($"rolling ball {name}: not cut back ({(t.Native == null ? "faceted" : t.Native.Validate() ?? $"volume {v1:g4} for {v0:g4}")})");
                 return rb;

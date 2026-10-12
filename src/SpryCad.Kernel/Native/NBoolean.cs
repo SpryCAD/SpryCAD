@@ -28,8 +28,26 @@ public sealed class NBoolean
         var e = new[] { d.X, d.Y, d.Z }.OrderBy(x => x).ToArray();
         return e[1];
     }
-    bool RollsOn(NSurface blend, NSurface s) => blend.Spine is { } sp
-        && (sp.SupportA is { } a && Same(a, s) || sp.SupportB is { } b && Same(b, s) || sp.Rolls.Any(r => Same(r, s)));
+    bool RollsOn(NFace blendFace, NSurface s) => blendFace.Surface.Spine is { } sp
+        && (sp.SupportA is { } a && Same(a, s) || sp.SupportB is { } b && Same(b, s) || sp.Rolls.Any(r => Same(r, s)) && !Crosses(blendFace, s));
+
+    /// <summary>
+    /// Whether a face's boundary has points on both sides of a surface (by more than the tolerance). A composite
+    /// blend's piece touches the other pieces' surfaces only where it switches onto them and lies on their open side
+    /// elsewhere, unless it reaches past (a tool run on past its end, to be cut back): then it crosses them.
+    /// </summary>
+    bool Crosses(NFace f, NSurface s)
+    {
+        bool pos = false, neg = false;
+        foreach (var c in f.Coedges)
+            foreach (var p in c.Edge.Samples(_sampleTol * 50))
+            {
+                var d = s.F_(p);
+                if (d > _tol * 100) pos = true; else if (d < -_tol * 100) neg = true;
+                if (pos && neg) return true;
+            }
+        return false;
+    }
 
     // the same surface, or a piece of the same fillet (a blend rolling over a fillet rolls on that fillet merged into
     // one pipe, the body has its pieces)
@@ -301,7 +319,7 @@ public sealed class NBoolean
                 if (pairs[i].coincident) continue;
                 // a blend and the surface its ball rolls on touch along the contact curve, which is an edge of the
                 // blend face (imprinted as an edge lying on the other face): tracing that tangency is slow and noisy
-                if (RollsOn(pairs[i].fa.Surface, pairs[i].fb.Surface) || RollsOn(pairs[i].fb.Surface, pairs[i].fa.Surface)
+                if (RollsOn(pairs[i].fa, pairs[i].fb.Surface) || RollsOn(pairs[i].fb, pairs[i].fa.Surface)
                     || Continues(pairs[i].fa.Surface, pairs[i].fb.Surface) || PipesApart(pairs[i].fa.Surface, pairs[i].fb.Surface)) { pairCurves[i] = new(); continue; }
                 var an = NIntersect.Analytic(pairs[i].fa.Surface, pairs[i].fb.Surface, _tol * 10, _sampleTol * 50 * 0.25);
                 if (an != null) pairCurves[i] = an; else toTrace.Add(i);

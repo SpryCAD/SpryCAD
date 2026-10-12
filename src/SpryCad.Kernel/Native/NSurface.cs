@@ -350,14 +350,24 @@ public sealed class NSurface
     /// Nearest point of A ∩ B to p by minimum-norm Gauss-Newton on (F_a, F_b) = 0; near-tangent pairs fall back
     /// to alternating projection steps.
     /// </summary>
-    public static Vec3 ProjectToIntersection(NSurface a, NSurface b, Vec3 p, double tol = 1e-12)
+    public static Vec3 ProjectToIntersection(NSurface a, NSurface b, Vec3 p, double tol = 1e-12) => ProjectToIntersection(a, b, p, out _, tol);
+
+    /// <summary>
+    /// <see cref="ProjectToIntersection(NSurface, NSurface, Vec3, double)"/>, with the curve's direction (na × nb at
+    /// the last step, unnormalized; zero where the surfaces are tangent). With <paramref name="stopStep"/>, a
+    /// Gauss-Newton step shorter than it ends the search without a last evaluation to confirm: what is left after
+    /// it is of the order of the step squared times the curvature.
+    /// </summary>
+    public static Vec3 ProjectToIntersection(NSurface a, NSurface b, Vec3 p, out Vec3 dir, double tol = 1e-12, double stopStep = 0)
     {
         // (counted against free-form surfaces, where each step is a closest-point search: tests check they stay few)
         if (Prof.Enabled && (a.Kind is SurfaceKind.BSpline or SurfaceKind.Offset || b.Kind is SurfaceKind.BSpline or SurfaceKind.Offset)) Prof.Count("project.freeform", 1);
         var q = p;
+        dir = Vec3.Zero;
         for (int it = 0; it < 40; it++)
         {
             var fa = a.FGrad(q, out var na); var fb = b.FGrad(q, out var nb);
+            dir = Vec3.Cross(na, nb);
             if (Math.Abs(fa) < tol && Math.Abs(fb) < tol) return q;
             double g11 = Vec3.Dot(na, na), g12 = Vec3.Dot(na, nb), g22 = Vec3.Dot(nb, nb);
             var det = g11 * g22 - g12 * g12;
@@ -374,7 +384,7 @@ public sealed class NSurface
                 continue;
             }
             q -= step;
-            if (step.LengthSq < tol * tol) break;
+            if (step.LengthSq < tol * tol || step.LengthSq < stopStep * stopStep) break;
         }
         return q;
     }
