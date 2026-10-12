@@ -390,7 +390,10 @@ public sealed class Regenerator
                 case HelicalSweepFeature hs: DoHelical(hs); break;
                 case LoftFeature lf: DoLoft(lf); break;
                 case ThreadFeature th: DoThread(th); break;
-                case FilletFeature fi: DoBlend(fi.Edges, Positive(fi.Radius, "Radius"), true, fi.TangentPropagation, fi.Overflow); break;
+                case FilletFeature fi:
+                    DoBlend(fi.Edges, Positive(fi.Radius, "Radius"), true, fi.TangentPropagation, fi.Overflow,
+                        scope: fi.WholeBody || fi.Features.Count > 0 ? (fi.Features.Count > 0 ? fi.Features : null, fi.ScopeKind) : null);
+                    break;
                 case ChamferFeature ch: { var cs = ChamferSizeOf(ch); DoBlend(ch.Edges, cs.D1, false, ch.TangentPropagation, ch.Overflow, cs); break; }
                 case HoleFeature h: DoHole(h); break;
                 case ShellFeature sh: DoShell(sh); break;
@@ -949,10 +952,12 @@ public sealed class Regenerator
             }
         }
 
-        void DoBlend(List<EdgeRef> refs, double size, bool fillet, bool propagate, bool overflow = true, ChamferSize? chamfer = null)
+        void DoBlend(List<EdgeRef> refs, double size, bool fillet, bool propagate, bool overflow = true, ChamferSize? chamfer = null,
+            (List<string>? features, BlendScopeKind kind)? scope = null)
         {
-            if (refs.Count == 0) throw new FeatureException("No edges selected.");
-            if (TryNativeBlend(refs, size, fillet, propagate, overflow, chamfer)) return;
+            if (refs.Count == 0 && scope == null) throw new FeatureException("No edges selected.");
+            if (TryNativeBlend(refs, size, fillet, propagate, overflow, chamfer, scope)) return;
+            if (scope != null) throw new FeatureException("A fillet of a whole body or between features needs an exact body.");
             var byBody = new Dictionary<string, List<TopoEdge>>();
             foreach (var r in refs)
             {
@@ -988,7 +993,8 @@ public sealed class Regenerator
         /// Fillet/chamfer on native bodies: edges resolved and tangent-chained on the exact B-rep, tools built
         /// from exact geometry. False (state untouched) when a body is not native or an edge is not found.
         /// </summary>
-        bool TryNativeBlend(List<EdgeRef> refs, double size, bool fillet, bool propagate, bool overflow, ChamferSize? chamfer)
+        bool TryNativeBlend(List<EdgeRef> refs, double size, bool fillet, bool propagate, bool overflow, ChamferSize? chamfer,
+            (List<string>? features, BlendScopeKind kind)? scope = null)
         {
             if (!Csg.UseNative || State.Bodies.Any(b => b.Solid.Native == null)) return false;
             var byBody = new Dictionary<string, List<Kernel.Native.NEdge>>();
@@ -1001,6 +1007,19 @@ public sealed class Regenerator
                 if (!byBody.TryGetValue(b.Id, out var l)) byBody[b.Id] = l = new();
                 if (!l.Contains(e)) l.Add(e);
             }
+            // the scope's edges (a whole body, or between features), on every body
+            if (scope is { } sc)
+            {
+                foreach (var b in State.Bodies)
+                    foreach (var e in ScopeEdges(b.Solid.Native!, sc.features, sc.kind))
+                    {
+                        if (!byBody.TryGetValue(b.Id, out var l)) byBody[b.Id] = l = new();
+                        if (!l.Contains(e)) l.Add(e);
+                    }
+                if (byBody.Count == 0)
+                    throw new FeatureException(sc.features == null ? $"The body has no {KindName(sc.kind)}edges to fillet."
+                        : $"There are no {KindName(sc.kind)}edges between {string.Join(" and ", sc.features.Select(Describe))}" + (sc.features.Count == 1 ? " and the rest of the body." : "."));
+            }
             var bodies = new List<Body>();
             var errors = new List<string>();
             var applied = new List<(Solid tool, bool cut)>();
@@ -1012,12 +1031,14 @@ public sealed class Regenerator
                 List<Kernel.Native.NEdge> edges; using (Prof.Time("blend.expand")) edges = NativeBlend.Expand(b.Solid.Native!, seeds, propagate);
                 using (Prof.Time("blend.snapshot")) { blended.AddRange(edges.Select(EdgePoints)); blendedLength += edges.Sum(TrueLength); }
                 using var _bt = Prof.Time("blend.total");
-                var r = NativeBlend.Apply(b.Solid, edges, size, fillet, f.Id, errors, overflow, status.ProblemEdges, applied, chamfer, trimmedOut: oneAtATime);
+                var r = scope != null
+                    ? ApplyScoped(b.Solid, edges, size, fillet, overflow, chamfer, applied, oneAtATime)
+                    : NativeBlend.Apply(b.Solid, edges, size, fillet, f.Id, errors, overflow, status.ProblemEdges, applied, chamfer, trimmedOut: oneAtATime);
                 bodies.Add(new Body { Id = b.Id, Solid = r });
             }
             // a blend on one body with tools of one kind can be patterned/mirrored like a cut or boss (its copies
-            // blend the copies of the geometry it was made on)
-            if (errors.Count == 0 && byBody.Count == 1 && applied.Count > 0 && applied.All(t => t.cut == applied[0].cut))
+            // blend the copies of the geometry it was made on); not one by scope (its edges are found, not named)
+            if (scope == null && errors.Count == 0 && byBody.Count == 1 && applied.Count > 0 && applied.All(t => t.cut == applied[0].cut))
             {
                 var tools = applied.Select(t => t.tool).ToList();
                 // (joined on first use, by a pattern's worker threads too: exact or failed, never faceted)
@@ -1041,6 +1062,100 @@ public sealed class Regenerator
                     : $"{errors.Count} edges cannot be {(fillet ? "filleted" : "chamfered")}: " + BlendErrors(errors));
             State = State.With(bodies);
             return true;
+        }
+
+        static string KindName(BlendScopeKind k) => k switch { BlendScopeKind.Concave => "concave ", BlendScopeKind.Convex => "convex ", _ => "" };
+
+        /// <summary>
+        /// A scoped blend: all its edges at once; where that fails, each group of edges that meet (the tangent chains
+        /// and corners blended together) tried alone, the ones that fail left out with a warning, the rest at once;
+        /// where that still fails, the groups added one by one, each kept only where the blend with it works. Many
+        /// edges are found, not picked: a few that cannot be blended do not stop the rest.
+        /// </summary>
+        Solid ApplyScoped(Solid body, List<Kernel.Native.NEdge> edges, double size, bool fillet, bool overflow, ChamferSize? chamfer,
+            List<(Solid tool, bool cut)> applied, System.Runtime.CompilerServices.StrongBox<bool> oneAtATime)
+        {
+            (Solid r, List<string> errs, List<(Solid, bool)> tools, bool trimmed) Run(List<Kernel.Native.NEdge> es)
+            {
+                var errs = new List<string>(); var tools = new List<(Solid, bool)>(); var tr = new System.Runtime.CompilerServices.StrongBox<bool>();
+                Solid r;
+                try { r = NativeBlend.Apply(body, es, size, fillet, f.Id, errs, overflow, null, tools, chamfer, trimmedOut: tr); }
+                catch (Exception ex) when (ex is InvalidOperationException or Kernel.Native.NBooleanException) { errs.Add(ex.Message); r = body; }
+                return (r, errs, tools, tr.Value);
+            }
+            Solid Keep((Solid r, List<string> errs, List<(Solid, bool)> tools, bool trimmed) x)
+            {
+                applied.AddRange(x.tools); oneAtATime.Value |= x.trimmed;
+                return x.r;
+            }
+            var all = Run(edges);
+            if (all.errs.Count == 0) return Keep(all);
+            // groups: edges meeting at a vertex (blended together: chains, corners)
+            var groups = new List<List<Kernel.Native.NEdge>>();
+            foreach (var e in edges)
+            {
+                var touching = groups.Where(g => g.Any(o => ReferenceEquals(o.V0, e.V0) || ReferenceEquals(o.V0, e.V1) || ReferenceEquals(o.V1, e.V0) || ReferenceEquals(o.V1, e.V1))).ToList();
+                var into = touching.FirstOrDefault() ?? new List<Kernel.Native.NEdge>();
+                if (touching.Count == 0) groups.Add(into);
+                foreach (var g in touching.Skip(1)) { into.AddRange(g); groups.Remove(g); }
+                into.Add(e);
+            }
+            void Leave(List<Kernel.Native.NEdge> g, string why)
+            {
+                status.Warnings.Add($"{g.Count} edge{(g.Count == 1 ? "" : "s")} left out: {why}");
+                status.ProblemEdges.AddRange(g.Select(EdgePoints));
+            }
+            var ok = new List<List<Kernel.Native.NEdge>>();
+            foreach (var g in groups)
+            {
+                var one = Run(g);
+                if (one.errs.Count == 0) ok.Add(g); else Leave(g, one.errs[0]);
+            }
+            if (ok.Count == 0) throw new FeatureException($"None of the {(fillet ? "fillet" : "chamfer")}'s edges can be blended: {all.errs[0]}");
+            var rest = Run(ok.SelectMany(g => g).ToList());
+            if (rest.errs.Count == 0) return Keep(rest);
+            // together they still fail: one group at a time, kept where the blend with it works
+            var kept = new List<Kernel.Native.NEdge>();
+            (Solid r, List<string> errs, List<(Solid, bool)> tools, bool trimmed)? best = null;
+            foreach (var g in ok)
+            {
+                var with = Run(kept.Concat(g).ToList());
+                if (with.errs.Count == 0) { kept.AddRange(g); best = with; }
+                else Leave(g, with.errs[0]);
+            }
+            return best is { } bst ? Keep(bst) : body;
+        }
+
+        /// <summary>
+        /// The body's edges a scoped blend takes: of the kind asked for and (with features) between faces of those
+        /// features, a face belonging to a feature when its name is that feature's or a copy's of it (a pattern's or
+        /// mirror's prefix before it). One feature: between it and the rest; several: between two of them.
+        /// </summary>
+        static List<Kernel.Native.NEdge> ScopeEdges(Kernel.Native.NBody nb, List<string>? features, BlendScopeKind kind)
+        {
+            nb.Link();
+            HashSet<string> Of(Kernel.Native.NFace face)
+            {
+                var set = new HashSet<string>();
+                if (features != null) foreach (var part in face.Tag.Name.Split('.')) if (features.Contains(part)) set.Add(part);
+                return set;
+            }
+            var res = new List<Kernel.Native.NEdge>();
+            foreach (var e in nb.Edges)
+            {
+                if (e.Uses.Count != 2 || NativeBlend.IsSeam(e)) continue;
+                if (features != null)
+                {
+                    var a = Of(e.Uses[0].Face); var b = Of(e.Uses[1].Face);
+                    bool between = features.Count == 1 ? (a.Count > 0) != (b.Count > 0)
+                        : a.Count > 0 && b.Count > 0 && !a.SetEquals(b) && a.Any(x => b.Any(y => x != y));
+                    if (!between) continue;
+                }
+                if (NativeBlend.IsConvex(e) is not { } cv) continue;
+                if (kind == BlendScopeKind.Concave && cv || kind == BlendScopeKind.Convex && !cv) continue;
+                res.Add(e);
+            }
+            return res;
         }
 
         /// <summary>Edges connected to the seeds through smooth (tangent) vertices.</summary>
