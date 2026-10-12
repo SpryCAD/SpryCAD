@@ -113,6 +113,47 @@ public sealed class DocumentSession
     /// <summary>Autosave (off the UI thread, on a copy of the document): its working revision, in the local copy.</summary>
     public void SaveWorking(CadDocument copy) => (_wc ??= WorkingCopy.New()).SaveWorking(copy, UserSettings.AuthorName);
 
+    /// <summary>The part's saved revisions, newest first (null: never saved, so no history yet).</summary>
+    public List<HistoryEntry>? History() => _wc is { Exists: true } wc && FilePath != null ? wc.Read(PartHistory.Read) : null;
+
+    /// <summary>How the part's file size is spent (as it will be saved).</summary>
+    public FileUsage? Usage() => _wc is { Exists: true } wc ? wc.Read(db => PartHistory.Usage(db, wc.Path)) : null;
+
+    /// <summary>Changes the part's history (tags, purging, compacting): unsaved until the part is saved, like any edit.</summary>
+    public void EditHistory(Action<PartDatabase> edit)
+    {
+        if (_wc is not { Exists: true } wc) throw new InvalidOperationException("The part has no history yet: save it first.");
+        wc.Edit(edit);
+        SetDirty();
+        DocumentChanged?.Invoke();
+    }
+
+    /// <summary>Reads the part's history (as last saved, with the changes to it made since).</summary>
+    public T ReadHistory<T>(Func<PartDatabase, T> read) =>
+        _wc is { Exists: true } wc ? wc.Read(read) : throw new InvalidOperationException("The part has no history yet: save it first.");
+
+    /// <summary>The part as it was in one of its revisions.</summary>
+    public CadDocument LoadRevision(Guid revisionId) => _wc?.LoadRevision(revisionId) ?? throw new InvalidOperationException("The part has no history yet.");
+
+    /// <summary>
+    /// Shows an old revision of a part (from <see cref="LoadRevision"/>), read-only: a copy of its own (its own identity),
+    /// so saving it (as a new file) never gets mixed up with the part it came from.
+    /// </summary>
+    public void OpenRevision(CadDocument doc, string name)
+    {
+        _wc?.Close();
+        _wc = WorkingCopy.New();
+        doc.ForkIdentity();
+        Doc = doc; FilePath = null; UntitledName = name; Dirty = false;
+        _readOnly = true;
+        _saved = null;
+        if (doc.Display != null) { try { _saved = MeshCache.Read(doc.Display); } catch { } doc.Display = null; }
+        _undo.Clear(); _redo.Clear();
+        _regen.Invalidate();
+        DocumentChanged?.Invoke();
+        RequestRebuild();
+    }
+
     /// <summary>Renews the lock on the file while it is open (see <see cref="WorkingCopy.RefreshLock"/>).</summary>
     public void RefreshLock() => _wc?.RefreshLock();
 

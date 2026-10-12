@@ -217,6 +217,7 @@ static class Program
             ContainerTests.Run(t);
             StorageTests.Run(t);
             WorkingCopyTests.Run(t);
+            HistoryTests.Run(t);
             ImportTests.Run(t);
             NativeBoolTests.Run(t);
             NativeRevolveTests.Run(t);

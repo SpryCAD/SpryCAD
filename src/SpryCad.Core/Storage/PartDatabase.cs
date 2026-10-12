@@ -380,6 +380,23 @@ public sealed class PartDatabase : IDisposable
 
     // ------------------------------------------------------------------------------------------
 
+    /// <summary>Runs a statement (maintenance: <see cref="PartHistory"/>).</summary>
+    public void Execute(string sql, params (string name, object value)[] ps)
+    {
+        using var cmd = Cmd(sql, ps);
+        cmd.ExecuteNonQuery();
+    }
+
+    /// <summary>The rows a query gives, each read by <paramref name="read"/>.</summary>
+    public List<T> Query<T>(string sql, Func<SqliteDataReader, T> read)
+    {
+        var l = new List<T>();
+        using var cmd = Cmd(sql);
+        using var r = cmd.ExecuteReader();
+        while (r.Read()) l.Add(read(r));
+        return l;
+    }
+
     public void Begin() => Exec(_db, "BEGIN IMMEDIATE");
     public void CommitTransaction() => Exec(_db, "COMMIT");
     public void Rollback() { try { Exec(_db, "ROLLBACK"); } catch (SqliteException) { } }
