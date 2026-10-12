@@ -96,7 +96,11 @@ Commands (from the repository root):
    the section 2 mm inside the block. At R2 both ends fail ("edge used 1 times (NEllipse (-117, 0, 5.576)->... on
    Shank.S.L...)"). Repro: in `HmConRod`, replace "Shank into the small end" with
    `new FilletFeature { Radius = "Rf", Features = { shank.Id } }`, `verify-engine - Connecting`. *Instead:* only the
-   small end blended, the big end's joint left sharp.
+   small end blended, the big end's joint left sharp. Cause (the documentation review session): the loft split each
+   corner arc into two patches at different fractions on the two sections, so their seam kinked (up to 0.37°) and
+   the rolling ball cannot cross it. Fixed on `loft-warmup` (456a724, "a loop with vertices starts at one"), pushed
+   after #65 was merged, so not on master yet: with it both ends blend by scope at R3 (2.1 s) and R2, and the small
+   end alone takes 1.1 s, not 5.7.
 4i. **The base ribs' scoped blend slow since #75 (OPEN, master eed9631).** "Base ribs blended" (R3 by scope on the
    rib seed) went from about 1 s to 5.5-13 s: at one rib, which stands half on the body's corner round, the new
    corner pivots fail and the feature is built again mitred, so both builds are paid for (the "Chamfers around
