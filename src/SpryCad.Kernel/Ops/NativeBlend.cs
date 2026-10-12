@@ -722,7 +722,7 @@ public static class NativeBlend
         try
         {
             Solid u;
-            using (Prof.Time("blend.pivot.join")) u = Csg.Union(t, patch.Tool);
+            using (Prof.Time("blend.pivot.join")) u = JoinPivot(t, patch.Tool);
             if (!u.IsEmpty && u.Native != null && u.Native.Validate() == null)
             {
                 carried.Add(c.V);
@@ -732,6 +732,14 @@ public static class NativeBlend
         }
         catch (Exception ex) when (ex is InvalidOperationException or NBooleanException) { Debug?.Invoke($"pivot at {c.V.P}: not joined to this tool ({ex.Message})"); }
         return (t, added);
+    }
+
+    /// <summary>A fillet's tool and a pivot's joined: glued where their ends match (as built), else by boolean.</summary>
+    static Solid JoinPivot(Solid tool, Solid pivot)
+    {
+        if (DirectBlend.Glue(new List<DirectBlend.Tool> { new(tool, false, "tool", 0), new(pivot, false, "pivot", 0) }, out var why) is { } one) return one.Strip;
+        Debug?.Invoke($"pivot not glued ({why}): by boolean");
+        return Csg.Union(tool, pivot);
     }
 
     /// <summary>The corners whose pivot a tool now kept carries.</summary>
@@ -915,8 +923,9 @@ public static class NativeBlend
         // (ending where the ball pivots round a corner: bounded by the faces, its end the pivot's own section; reaching
         // past them, its end stands beside the pivot's in slivers (along the other edge, on a drafted face) and the union
         // fails)
+        ProfileLoop? sl0 = null;
         if (pivots.Count > 0 && EdgeBlend.Profile2D(P(uA), P(uB), P(nA), P(nB), Vec2.Zero, dA, fillet, convex, dB, atCorner: true) is { } atJoint)
-            loop = atJoint;
+            loop = sl0 = atJoint;
         var tools = new List<Solid> { Between(loop, true) };
         tools.RemoveAll(x => x.IsEmpty);
         // the tool bounded by the faces (applied directly, or cut back where it runs past them), its ends at an angle on
@@ -933,9 +942,13 @@ public static class NativeBlend
             bool taken;
             taken = _pivoted?.Contains(c.V) == true;
             if (taken) continue;
-            tools.Add(patch.Tool);
+            // (the tool bounded by the faces at a pivot: the strip itself, joined to the pivot as one)
+            if (tools.Count == 1 && strip != null && ReferenceEquals(loop, sl0))
+                try { using (Prof.Time("blend.pivot.strip")) tools[0] = JoinPivot(tools[0], patch.Tool); }
+                catch (Exception ex) when (ex is InvalidOperationException or NBooleanException) { tools.Add(patch.Tool); }
+            else tools.Add(patch.Tool);
             if (strip != null)
-                try { using (Prof.Time("blend.pivot.strip")) strip = Csg.Union(strip, patch.Tool); if (strip.Native == null || strip.Native.Validate() != null) strip = null; }
+                try { using (Prof.Time("blend.pivot.strip")) strip = JoinPivot(strip, patch.Tool); if (strip.Native == null || strip.Native.Validate() != null) strip = null; }
                 catch (Exception ex) when (ex is InvalidOperationException or NBooleanException) { strip = null; }
             Carry(new List<NVertex> { c.V });
         }
