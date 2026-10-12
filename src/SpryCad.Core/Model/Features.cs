@@ -245,7 +245,22 @@ public sealed class FilletFeature : Feature
     public bool TangentPropagation { get; set; } = true;
     /// <summary>A fillet running into neighbouring geometry is trimmed by it ("keep edge" overflow) instead of failing.</summary>
     public bool Overflow { get; set; } = true;
+    /// <summary>
+    /// Also every edge of the body of the kind <see cref="ScopeKind"/> (a casting's blends in one feature); with
+    /// <see cref="Features"/> as well, the edges between those features' faces only.
+    /// </summary>
+    public bool WholeBody { get; set; }
+    /// <summary>
+    /// Also the edges of the kind <see cref="ScopeKind"/> between these features' faces (their copies by patterns and
+    /// mirrors included): one feature, between it and the rest of the body; several, between any two of them.
+    /// </summary>
+    public List<string> Features { get; set; } = new();
+    /// <summary>Which edges <see cref="WholeBody"/> and <see cref="Features"/> take.</summary>
+    public BlendScopeKind ScopeKind { get; set; } = BlendScopeKind.Concave;
 }
+
+/// <summary>The edges a fillet's scope takes: concave (material added), convex (rounded off) or both.</summary>
+public enum BlendScopeKind { Concave, Convex, All }
 
 /// <summary>Equal distances on both faces, a distance and an angle, or two distances (SolidWorks' chamfer types).</summary>
 public enum ChamferType { Distance, AngleDistance, DistanceDistance }

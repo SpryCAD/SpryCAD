@@ -1021,6 +1021,7 @@ public static class NIntersect
     [ThreadStatic] static Vec2[]? _crossPt;
     [ThreadStatic] static Vec3[]? _pos;
     [ThreadStatic] static int[]? _posStamp;
+    [ThreadStatic] static bool[]? _live;
 
     public static List<NPolyline> Trace(NFace fa, NSurface sb, double tol, NDomain? domain = null)
     {
@@ -1064,23 +1065,24 @@ public static class NIntersect
             return g[k] = v == 0 ? 1e-300 : v;
         }
         var pg = Prof.Time("trace.grid");
-        // a block can hold a zero only if |F(centre)| ≤ its 3D radius (F_ grows no faster than distance)
+        // a square of cells can hold a zero only if |F(centre)| ≤ its 3D radius (F_ grows no faster than distance)
+        bool CanHoldZero(int i0, int j0, int size)
+        {
+            int i1 = i0 + size, j1 = j0 + size, im = i0 + size / 2, jm = j0 + size / 2;
+            var c = dom.Eval(Vec2.Lerp(UV(i0, j0), UV(i1, j1), 0.5));
+            double r = 0;
+            for (int q = 0; q < 8; q++)
+            {
+                var (ii, jj) = q switch { 0 => (i0, j0), 1 => (i1, j0), 2 => (i0, j1), 3 => (i1, j1), 4 => (im, j0), 5 => (im, j1), 6 => (i0, jm), _ => (i1, jm) };
+                r = Math.Max(r, Vec3.Distance(c, At(ii, jj)));
+            }
+            return Math.Abs(sb.F_(c)) <= r * 1.25 + 1e-9;
+        }
         int nb = nu / block;
         Span<bool> active = stackalloc bool[nb * nb];
         for (int bi = 0; bi < nb; bi++)
             for (int bj = 0; bj < nb; bj++)
-            {
-                int i0 = bi * block, j0 = bj * block, i1 = i0 + block, j1 = j0 + block;
-                var c = dom.Eval(Vec2.Lerp(UV(i0, j0), UV(i1, j1), 0.5));
-                double r = 0;
-                int im = (i0 + i1) / 2, jm = (j0 + j1) / 2;
-                for (int q = 0; q < 8; q++)
-                {
-                    var (ii, jj) = q switch { 0 => (i0, j0), 1 => (i1, j0), 2 => (i0, j1), 3 => (i1, j1), 4 => (im, j0), 5 => (im, j1), 6 => (i0, jm), _ => (i1, jm) };
-                    r = Math.Max(r, Vec3.Distance(c, At(ii, jj)));
-                }
-                active[bi * nb + bj] = Math.Abs(sb.F_(c)) <= r * 1.25 + 1e-9;
-            }
+                active[bi * nb + bj] = CanHoldZero(bi * block, bj * block, block);
         pg.Dispose();
         var pm = Prof.Time("trace.march");
         // marching squares: crossing points on cell edges, numbered (i, j, dir 0=u,1=v) → (i·(nv+1) + j)·2 + dir so
@@ -1109,13 +1111,29 @@ public static class NIntersect
         }
         void AddSeg(int a, int b) { int s = segA.Count; segA.Add(a); segB.Add(b); Link(a, s); Link(b, s); }
         Span<int> keys = stackalloc int[4];
+        // within an active block, the same test on its quarters and theirs, down to 2 × 2 cells: cells in a part that
+        // cannot hold a zero are skipped (no crossing on their edges; the rest are visited in the same order, so the
+        // segments and their order are the same). About a third of the grid values a trace computed before.
+        const int fine = 2, nf = block / fine;
+        var live = _live ??= new bool[nf * nf];
+        void Mark(int i0, int j0, int size, int bi0, int bj0)
+        {
+            if (!CanHoldZero(i0, j0, size)) return;
+            if (size == fine) { live[(i0 - bi0) / fine * nf + (j0 - bj0) / fine] = true; return; }
+            int h = size / 2;
+            Mark(i0, j0, h, bi0, bj0); Mark(i0 + h, j0, h, bi0, bj0); Mark(i0, j0 + h, h, bi0, bj0); Mark(i0 + h, j0 + h, h, bi0, bj0);
+        }
         for (int bi = 0; bi < nb; bi++)
             for (int bj = 0; bj < nb; bj++)
             {
                 if (!active[bi * nb + bj]) continue;
+                int bi0 = bi * block, bj0 = bj * block, hb = block / 2;
+                Array.Clear(live);
+                Mark(bi0, bj0, hb, bi0, bj0); Mark(bi0 + hb, bj0, hb, bi0, bj0); Mark(bi0, bj0 + hb, hb, bi0, bj0); Mark(bi0 + hb, bj0 + hb, hb, bi0, bj0);
                 for (int i = bi * block; i < (bi + 1) * block; i++)
                     for (int j = bj * block; j < (bj + 1) * block; j++)
                     {
+                        if (!live[(i - bi0) / fine * nf + (j - bj0) / fine]) continue;
                         int n = 0;
                         if (Cross(i, j, 0)) keys[n++] = Key(i, j, 0);
                         if (Cross(i + 1, j, 1)) keys[n++] = Key(i + 1, j, 1);
