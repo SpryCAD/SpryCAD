@@ -36,6 +36,7 @@ static partial class Demos
         ("box, top edges rounded, a boss across its side and top filleted", () => BossOverRoundedEdge()),
         ("box with a ledge over its side, a boss across the side and under the ledge filleted", () => BossOverRoundedEdge(ledge: true)),
         ("drafted boss with a lug, its top edge rounded round the lug", () => LugOnRound(topRound: true)),
+        ("bearing pedestal out of a side onto its corner round, a sloping rib under it", PedestalOnRound),
     };
 
     /// <summary>
@@ -440,6 +441,51 @@ static partial class Demos
         });
         if (topRound)
             d.AddFeature(new FilletFeature { Name = "Top edge", Radius = "Rt", Edges = { E(F(2), $"{boss.Id}.End", new Vec3(-30, SideY(80), 80)) } });
+        return d;
+    }
+
+    /// <summary>
+    /// An engine casting's bearing pedestal (the hit and miss engine's): a body (y 0 down to -130) its vertical corners
+    /// rounded R20, a pedestal standing out of its side (z 58 out to 70), its +X side on the corner round, blended R5
+    /// into the body along its sides and underside; a rib under it, its back sloping from the pedestal's front edge down
+    /// to the body's side, blended R3 into both.
+    /// </summary>
+    internal static CadDocument PedestalOnRound()
+    {
+        var d = Doc(("R", "5"), ("Rr", "3"));
+        var b = new Sk(d);
+        // (Top plane: sketch y = -z)
+        var bl = b.Rect("-100", "-58", "40", "58");
+        var bs = d.AddFeature(new SketchFeature { Name = "Body", Plane = PlaneRef.Top, Sketch = b.S });
+        var body = d.AddFeature(new ExtrudeFeature { Name = "Body", SketchId = bs.Id, Depth = "130", Reverse = true });
+        string B(int i) => $"{body.Id}.S.L{Ids.Name(bl[i])}";
+        d.AddFeature(new FilletFeature { Name = "Body corner", Radius = "20", Edges = { E(B(0), B(1), new Vec3(40, -65, 58)) } });
+        var pp = d.AddFeature(new PlaneFeature { Name = "Pedestal plane", Base = PlaneRef.Front, Offset = "30" });
+        var p = new Sk(d);
+        var pl = p.Rect("-32", "-40", "32", "0");
+        var ps = d.AddFeature(new SketchFeature { Name = "Pedestal", Plane = new PlaneRef { Feature = pp.Id }, Sketch = p.S });
+        var ped = d.AddFeature(new ExtrudeFeature { Name = "Pedestal", SketchId = ps.Id, Depth = "40" });
+        string P(int i) => $"{ped.Id}.S.L{Ids.Name(pl[i])}";
+        // (the +X side meets the round at z 38 + 16)
+        d.AddFeature(new FilletFeature
+        {
+            Name = "Pedestal foot", Radius = "R",
+            Edges = { E(P(1), B(0), new Vec3(32, -20, 54)), E(P(3), B(0), new Vec3(-32, -20, 58)), E(P(0), B(0), new Vec3(0, -40, 58)) },
+        });
+        // (Right plane: sketch x = -z)
+        var r = new Sk(d);
+        r.Poly(r.P("-50", "-40"), r.P("-70", "-40"), r.P("-50", "-110"));
+        var rs = d.AddFeature(new SketchFeature { Name = "Rib", Plane = PlaneRef.Right, Sketch = r.S });
+        var rib = d.AddFeature(new ExtrudeFeature { Name = "Rib", SketchId = rs.Id, End = EndCondition.MidPlane, Depth = "12" });
+        d.AddFeature(new FilletFeature
+        {
+            Name = "Rib fillets", Radius = "Rr",
+            Edges =
+            {
+                E($"{rib.Id}.Start", B(0), new Vec3(-6, -75, 58)), E($"{rib.Id}.End", B(0), new Vec3(6, -75, 58)),
+                E($"{rib.Id}.Start", P(0), new Vec3(-6, -40, 64)), E($"{rib.Id}.End", P(0), new Vec3(6, -40, 64)),
+            },
+        });
         return d;
     }
 
