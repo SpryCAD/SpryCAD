@@ -77,6 +77,34 @@ static class Program
             doc.Save(args[2]);
             return 0;
         }
+        if (args.Length > 4 && args[0] == "editrebuild")
+        {
+            // -- editrebuild <file> <feature name> <property> <value>[,value...]: each value set and rebuilt, with
+            // whether an exact boolean fell back to facets and why
+            var doc = SpryCad.Core.Model.CadDocument.Load(args[1]);
+            var f = doc.Features.First(x => x.Name == args[2] && x.GetType().GetProperty(args[3]) != null);
+            var prop = f.GetType().GetProperty(args[3])!;
+            var orig = prop.GetValue(f);
+            Console.WriteLine($"{f.Name}.{prop.Name} = {orig}");
+            // up to the edited feature only (FC_EDIT_ALL=1: the whole part); FC_EDIT_TRACE=<file>: the boolean trace
+            int? upTo = Environment.GetEnvironmentVariable("FC_EDIT_ALL") != null ? null : doc.Features.IndexOf(f) + 1;
+            var traceFile = Environment.GetEnvironmentVariable("FC_EDIT_TRACE");
+            foreach (var v in args[4].Split(','))
+            {
+                prop.SetValue(f, v);
+                SpryCad.Kernel.Csg.NativeFallback = 0;
+                var log = new List<string>();
+                if (traceFile != null) SpryCad.Kernel.Native.NBoolean.Trace = m => { lock (log) log.Add(m); };
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                var r = new SpryCad.Core.Regen.Regenerator().Rebuild(doc, upTo);
+                SpryCad.Kernel.Native.NBoolean.Trace = null;
+                if (traceFile != null) File.WriteAllLines(traceFile + "." + v + ".txt", log);
+                var bad = doc.Features.Where(x => r.Status.ContainsKey(x.Id) && (!r.Status[x.Id].Ok || r.Status[x.Id].Warnings.Count > 0)).Select(x => $"{x.Name}: {r.Status[x.Id].Error ?? string.Join("; ", r.Status[x.Id].Warnings)}").ToList();
+                Console.WriteLine($"  {v,-10} {sw.ElapsedMilliseconds,7} ms  fallbacks {SpryCad.Kernel.Csg.NativeFallback} {(SpryCad.Kernel.Csg.NativeFallback > 0 ? $"({SpryCad.Kernel.Csg.LastFallbackReason})" : "")}");
+                foreach (var b in bad.Take(4)) Console.WriteLine($"      {b}");
+            }
+            return 0;
+        }
         if (args.Length > 1 && args[0] == "asmsolve")
         {
             // what solving each assembly's mates costs once it is open (best of ten, after a first solve)
@@ -168,6 +196,7 @@ static class Program
         if (args.Length > 0 && args[0] == "blendab") return BlendAB.Run(args.Length > 1 ? args[1] : null);
         if (args.Length > 3 && args[0] == "occtprep") return OcctPrep.Run(args[1], args[2], args[3], args.Length > 4 ? int.Parse(args[4]) : 7);
         if (args.Length > 1 && args[0] == "steptime") return StepTime.Run(args[1], args.Length > 2 ? int.Parse(args[2]) : 5);
+        if (args.Length > 1 && args[0] == "boolstep") return BoolStep.Run(args[1], args.Length > 2 ? int.Parse(args[2]) : 0);
         if (args.Length > 0 && args[0] == "matebench") return MateBench.Run(args[1..]);
         if (args.Length > 1 && args[0] == "meshsize") return MeshSizeBench.Run(args[1..]);
         if (args.Length > 0 && args[0] == "sketchfuzz") return SketchFuzz.Cli(args[1..]);
@@ -218,6 +247,9 @@ static class Program
             ContainerTests.Run(t);
             StorageTests.Run(t);
             WorkingCopyTests.Run(t);
+            HistoryTests.Run(t);
+            RevertTests.Run(t);
+            VisualDiffTests.Run(t);
             ImportTests.Run(t);
             NativeBoolTests.Run(t);
             NativeRevolveTests.Run(t);
@@ -228,6 +260,7 @@ static class Program
             PatternUnionTests.Run(t);
             SketchOverlapTests.Run(t);
             SketchLookupTests.Run(t);
+            HoleBreakoutTests.Run(t);
             MeshQuantTests.Run(t);
             IdTests.Run(t);
             FeatureColorTests.Run(t);

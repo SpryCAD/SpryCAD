@@ -124,6 +124,68 @@ public sealed class DocumentSession
     /// <summary>Autosave (off the UI thread, on a copy of the document): its working revision, in the local copy.</summary>
     public void SaveWorking(CadDocument copy) => (_wc ??= WorkingCopy.New()).SaveWorking(copy, UserSettings.AuthorName);
 
+    /// <summary>The part's saved revisions, newest first (null: never saved, so no history yet).</summary>
+    public List<HistoryEntry>? History() => _wc is { Exists: true } wc && FilePath != null ? wc.Read(PartHistory.Read) : null;
+
+    /// <summary>How the part's file size is spent (as it will be saved).</summary>
+    public FileUsage? Usage() => _wc is { Exists: true } wc ? wc.Read(db => PartHistory.Usage(db, wc.Path)) : null;
+
+    /// <summary>Changes the part's history (tags, purging, compacting): unsaved until the part is saved, like any edit.</summary>
+    public void EditHistory(Action<PartDatabase> edit)
+    {
+        if (_wc is not { Exists: true } wc) throw new InvalidOperationException("The part has no history yet: save it first.");
+        wc.Edit(edit);
+        SetDirty();
+        DocumentChanged?.Invoke();
+    }
+
+    /// <summary>Reads the part's history (as last saved, with the changes to it made since).</summary>
+    public T ReadHistory<T>(Func<PartDatabase, T> read) =>
+        _wc is { Exists: true } wc ? wc.Read(read) : throw new InvalidOperationException("The part has no history yet: save it first.");
+
+    /// <summary>
+    /// Makes <paramref name="doc"/> the part's state (a revert: <see cref="PartRevert"/>), as one change that can be undone.
+    /// The next save records it as a revert revision with <paramref name="message"/> (while the change is not undone).
+    /// </summary>
+    public void Revert(CadDocument doc, string message)
+    {
+        BeginChange();
+        // the part's identity and what is not the model stay as they are
+        doc.Id = Doc.Id; doc.Revision = Doc.Revision; doc.DerivedFrom = Doc.DerivedFrom;
+        doc.SketchVisibility = Doc.SketchVisibility; doc.RollbackIndex = null;
+        doc.Thumbnail = Doc.Thumbnail;
+        // the embedded files it had stay too (undo snapshots do not hold files; saving drops the ones no feature uses)
+        foreach (var (k, v) in Doc.Files) doc.Files.TryAdd(k, v);
+        Doc = doc;
+        _revert = (message, _undo.Count);
+        EndChange();
+    }
+
+    // the revert the next save records (its message), while the change it made (undo depth) is not undone
+    (string message, int depth)? _revert;
+
+    /// <summary>The part as it was in one of its revisions.</summary>
+    public CadDocument LoadRevision(Guid revisionId) => _wc?.LoadRevision(revisionId) ?? throw new InvalidOperationException("The part has no history yet.");
+
+    /// <summary>
+    /// Shows an old revision of a part (from <see cref="LoadRevision"/>), read-only: a copy of its own (its own identity),
+    /// so saving it (as a new file) never gets mixed up with the part it came from.
+    /// </summary>
+    public void OpenRevision(CadDocument doc, string name)
+    {
+        _wc?.Close();
+        _wc = WorkingCopy.New();
+        doc.ForkIdentity();
+        Doc = doc; FilePath = null; UntitledName = name; Dirty = false;
+        _readOnly = true;
+        _saved = null;
+        if (doc.Display != null) { try { _saved = MeshCache.Read(doc.Display); } catch { } doc.Display = null; }
+        _undo.Clear(); _redo.Clear();
+        _regen.Invalidate();
+        DocumentChanged?.Invoke();
+        RequestRebuild();
+    }
+
     /// <summary>Renews the lock on the file while it is open (see <see cref="WorkingCopy.RefreshLock"/>).</summary>
     public void RefreshLock() => _wc?.RefreshLock();
 
@@ -224,11 +286,13 @@ public sealed class DocumentSession
         if (FilePath != null && !same) Doc.ForkIdentity();
         foreach (var name in Doc.Files.Keys) DocumentContainer.CheckName(name);
         _wc ??= WorkingCopy.New();
-        try { _wc.Save(Doc, UserSettings.AuthorName, same ? null : path, overwrite); }
+        var revert = _revert is { } rv && _undo.Count >= rv.depth ? rv.message : null;
+        try { _wc.Save(Doc, UserSettings.AuthorName, same ? null : path, overwrite, revert ?? "", revert != null ? RevisionKind.Revert : RevisionKind.Save); }
         catch { (Doc.Id, Doc.Revision, Doc.DerivedFrom) = (id, rev, from); throw; }
         finally { Doc.Display = null; }
         PartsIndexStore.Record(Doc, path);
         FilePath = path; Dirty = false; ReadOnly = false;
+        _revert = null;
         if (!same) _wc.TakeLock();
         DocumentChanged?.Invoke();
     }

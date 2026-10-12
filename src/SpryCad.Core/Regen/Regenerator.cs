@@ -1227,7 +1227,10 @@ public sealed class Regenerator
             if (pts.Count == 0) throw new FeatureException("Place at least one hole position point.");
             var d = Positive(h.Diameter, "Diameter"); var r = d / 2;
             double depth = h.ThroughAll ? BigDepth(sk.Frame) : Positive(h.Depth, "Depth");
-            const double lift = 1e-3; // start slightly above the face
+            // the tool starts on the sketch plane, as an extruded cut does: a start just above it (it was 1e-3) lay within the
+            // boolean's tolerance of the face, so where the hole met other faces near it some points welded to the tool's edge and
+            // some did not (a hole breaking out through a fillet: its wall left uncut, the result invalid)
+            const double lift = 0;
             var prof = new ProfileLoop();
             void V(double x, double y, string n) => prof.Verts.Add(new ProfileVertex(new Vec2(x, y), n));
             double topR = r;

@@ -17,10 +17,15 @@ public enum ObjectKind : byte
     Variables = 3,
     /// <summary>Color, material and density (exactly one).</summary>
     Material = 4,
-    /// <summary>Units, sheet metal settings, name counters and the embedded files' names (exactly one).</summary>
+    /// <summary>Units, sheet metal settings and the embedded files' names (exactly one).</summary>
     Settings = 5,
     /// <summary>One per embedded file: its bytes as they are (no envelope).</summary>
     File = 6,
+    /// <summary>
+    /// The counters new features are named by ("Fillet3"; exactly one): apart from the settings, as every added feature
+    /// changes them and the history does not list that as a change of its own.
+    /// </summary>
+    NameCounters = 7,
 }
 
 /// <summary>
@@ -53,9 +58,9 @@ public static class PartObjects
         objects.Add(Single(ObjectKind.Settings), Envelope(ObjectKind.Settings, Json(new SettingsData
         {
             Units = doc.Units, SheetMetal = doc.SheetMetal,
-            NameCounters = new SortedDictionary<string, int>(doc.NameCounters, StringComparer.Ordinal),
             Files = files.Count > 0 ? files : null,
         })));
+        objects.Add(Single(ObjectKind.NameCounters), Envelope(ObjectKind.NameCounters, Json(new SortedDictionary<string, int>(doc.NameCounters, StringComparer.Ordinal))));
         foreach (var name in files) objects.Add(FileId(name), doc.Files[name]);
         return objects;
     }
@@ -77,7 +82,9 @@ public static class PartObjects
         doc.Color = m.Color ?? doc.Color; doc.Material = m.Material; doc.Density = m.Density;
         var s = Data<SettingsData>(ObjectKind.Settings);
         doc.Units = s.Units; doc.SheetMetal = s.SheetMetal;
-        doc.NameCounters = new Dictionary<string, int>(s.NameCounters ?? new());
+        // (in the settings in files saved before they had an object of their own)
+        doc.NameCounters = new Dictionary<string, int>(objects.TryGetValue(Single(ObjectKind.NameCounters), out var nc)
+            ? Open<SortedDictionary<string, int>>(nc, ObjectKind.NameCounters) : s.NameCounters ?? new());
         foreach (var name in s.Files ?? new())
             doc.Files[name] = objects.TryGetValue(FileId(name), out var fb) ? fb : throw new InvalidDataException($"The file is damaged: the embedded file \"{name}\" is missing.");
         return doc;
@@ -101,6 +108,34 @@ public static class PartObjects
     }
 
     public static ObjectId Single(ObjectKind kind) { var b = new byte[IdSize]; b[0] = (byte)kind; return new ObjectId(b); }
+
+    // ---- for reverting (PartRevert): the parts of objects it reads and makes
+
+    /// <summary>The feature ids a feature order object lists, in order.</summary>
+    internal static List<string> OrderOf(byte[] envelope) => Open<List<string>>(envelope, ObjectKind.FeatureOrder);
+
+    internal static byte[] OrderObject(IEnumerable<string> ids) => Envelope(ObjectKind.FeatureOrder, Json(ids.ToList()));
+
+    /// <summary>The embedded files' names a settings object lists.</summary>
+    internal static List<string> FileNamesOf(byte[] settings) => Open<SettingsData>(settings, ObjectKind.Settings).Files ?? new();
+
+    /// <summary>The settings object with another list of embedded files.</summary>
+    internal static byte[] WithFiles(byte[] settings, IEnumerable<string> names)
+    {
+        var d = Open<SettingsData>(settings, ObjectKind.Settings);
+        var l = names.Order(StringComparer.Ordinal).ToList();
+        d.Files = l.Count > 0 ? l : null;
+        d.NameCounters = null;
+        return Envelope(ObjectKind.Settings, Json(d));
+    }
+
+    /// <summary>A feature object's feature id and name.</summary>
+    internal static (string id, string name) FeatureOf(byte[] envelope)
+    {
+        using var d = JsonDocument.Parse(envelope);
+        var data = d.RootElement.GetProperty("data");
+        return (data.GetProperty("id").GetString() ?? "", data.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "");
+    }
 
     static string Json<T>(T value) => JsonSerializer.Serialize(value, Serialization.Compact);
 
@@ -133,6 +168,7 @@ public static class PartObjects
     {
         public UnitSystem Units { get; set; }
         public SheetMetalSettings? SheetMetal { get; set; }
+        /// <summary>Only in files saved before <see cref="ObjectKind.NameCounters"/> (read, never written).</summary>
         public SortedDictionary<string, int>? NameCounters { get; set; }
         public List<string>? Files { get; set; }
     }

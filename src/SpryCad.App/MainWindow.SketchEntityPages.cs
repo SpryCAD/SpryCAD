@@ -202,9 +202,11 @@ public partial class MainWindow
         var boxed = page.Boxes.SelectMany(b => b.Items).Select(RefOf).ToHashSet();
         var sel = ed.Selected.Where(r => r.Kind is SkRefKind.Entity or SkRefKind.Point).ToList();
         var added = sel.Where(r => !boxed.Contains(r)).ToList();
+        // the item just clicked (the sketch keeps a selected item selected on a plain click, so it says nothing changed)
+        var clicked = ed.LastClick; ed.LastClick = null;
         if (added.Count > 0) foreach (var r in added) page.HandlePick(ItemOf(r));
-        else if (sel.Count == 1) RemoveFromBoxes(page, sel[0]);
-        else if (sel.Count > 1) foreach (var r in boxed.Except(sel)) RemoveFromBoxes(page, r);
+        else if (clicked is { } c && boxed.Contains(c)) RemoveFromBoxes(page, c);
+        else if (sel.Count > 0) foreach (var r in boxed.Except(sel)) RemoveFromBoxes(page, r);
         SyncEntitySelection();
     }
 

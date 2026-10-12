@@ -26,12 +26,15 @@ public sealed class NurbsSurface
     /// <summary>Points where a whole boundary row of poles collapses (sphere-like poles), with their v.</summary>
     public List<(Vec3 p, double v)> Poles { get; } = new();
 
-    // closest-point seeds: a grid of surface points, in cells with bounding spheres
-    const int G = 24;
-    readonly Vec3[,] _grid = new Vec3[G + 1, G + 1];
-    readonly double[] _gu = new double[G + 1], _gv = new double[G + 1];
-    readonly Vec3[,] _cellC = new Vec3[G, G];
-    readonly double[,] _cellR = new double[G, G];
+    // closest-point seeds: a grid of surface points, in cells with bounding spheres. Shaped as the patch: 24 x 24
+    // cells for a square one; a long thin one (a thread's flank, many turns long) gets more cells, along its length,
+    // so a cell spans little of it (the warm start's check, that no other cell can hold a nearer point, then holds
+    // between a thread's turns)
+    readonly int Gu, Gv;
+    readonly Vec3[,] _grid;
+    readonly double[] _gu, _gv;
+    readonly Vec3[,] _cellC;
+    readonly double[,] _cellR;
     readonly double _scale;
     // whether the v = V0 / V1 rows are poles (read in every Newton step)
     readonly bool _poleV0, _poleV1;
@@ -51,11 +54,24 @@ public sealed class NurbsSurface
         foreach (var p in poles) box.Add(p);
         Box = box;
         _scale = Math.Max(box.Diagonal, 1e-9);
-        for (int i = 0; i <= G; i++) { _gu[i] = U0 + (U1 - U0) * i / G; _gv[i] = V0 + (V1 - V0) * i / G; }
-        for (int i = 0; i <= G; i++)
-            for (int j = 0; j <= G; j++) _grid[i, j] = Eval(_gu[i], _gv[j]);
-        for (int i = 0; i < G; i++)
-            for (int j = 0; j < G; j++)
+        // the patch's length along u and v (the control net's rows and columns, the longest of each)
+        double lu = 0, lv = 0;
+        for (int j = 0; j < nv; j++) { double l = 0; for (int i = 1; i < nu; i++) l += Vec3.Distance(poles[i, j], poles[i - 1, j]); lu = Math.Max(lu, l); }
+        for (int i = 0; i < nu; i++) { double l = 0; for (int j = 1; j < nv; j++) l += Vec3.Distance(poles[i, j], poles[i, j - 1]); lv = Math.Max(lv, l); }
+        var ratio = Math.Max(lu, 1e-12) / Math.Max(lv, 1e-12);
+        var aspect = Math.Max(ratio, 1 / ratio);
+        int cells = aspect <= 4 ? 576 : (int)Math.Min(2048, 576 * Math.Sqrt(aspect / 4));
+        Gu = Math.Clamp((int)Math.Round(Math.Sqrt(cells * ratio)), 2, 2048);
+        Gv = Math.Clamp((int)Math.Round((double)cells / Gu), 2, 2048);
+        if (aspect <= 4) Gu = Gv = 24;
+        _grid = new Vec3[Gu + 1, Gv + 1]; _gu = new double[Gu + 1]; _gv = new double[Gv + 1];
+        _cellC = new Vec3[Gu, Gv]; _cellR = new double[Gu, Gv];
+        for (int i = 0; i <= Gu; i++) _gu[i] = U0 + (U1 - U0) * i / Gu;
+        for (int j = 0; j <= Gv; j++) _gv[j] = V0 + (V1 - V0) * j / Gv;
+        for (int i = 0; i <= Gu; i++)
+            for (int j = 0; j <= Gv; j++) _grid[i, j] = Eval(_gu[i], _gv[j]);
+        for (int i = 0; i < Gu; i++)
+            for (int j = 0; j < Gv; j++)
             {
                 var c = (_grid[i, j] + _grid[i + 1, j] + _grid[i, j + 1] + _grid[i + 1, j + 1]) / 4;
                 double r = 0;
@@ -277,15 +293,15 @@ public sealed class NurbsSurface
         {
             var c = Eval(u, v); var d = Vec3.Distance(c, p);
             if (d < 0.25 * MinCurvatureRadius()) return (u, v, c, d);
-            int ci = Math.Clamp((int)((u - U0) / (U1 - U0) * G), 0, G - 1), cj = Math.Clamp((int)((v - V0) / (V1 - V0) * G), 0, G - 1);
+            int ci = Math.Clamp((int)((u - U0) / (U1 - U0) * Gu), 0, Gu - 1), cj = Math.Clamp((int)((v - V0) / (V1 - V0) * Gv), 0, Gv - 1);
             bool sure = true;
-            for (int i = 0; i < G && sure; i++)
-                for (int j = 0; j < G; j++)
+            for (int i = 0; i < Gu && sure; i++)
+                for (int j = 0; j < Gv; j++)
                 {
                     if (Math.Abs(i - ci) <= 2 && Math.Abs(j - cj) <= 2) continue;
                     // (closed directions wrap: the cells across the seam are neighbours too)
-                    if (ClosedU && Math.Abs(i - ci) >= G - 2 && Math.Abs(j - cj) <= 2) continue;
-                    if (ClosedV && Math.Abs(j - cj) >= G - 2 && Math.Abs(i - ci) <= 2) continue;
+                    if (ClosedU && Math.Abs(i - ci) >= Gu - 2 && Math.Abs(j - cj) <= 2) continue;
+                    if (ClosedV && Math.Abs(j - cj) >= Gv - 2 && Math.Abs(i - ci) <= 2) continue;
                     if (Vec3.Distance(p, _cellC[i, j]) - _cellR[i, j] < d) { sure = false; break; }
                 }
             if (sure) return (u, v, c, d);
@@ -314,8 +330,8 @@ public sealed class NurbsSurface
         }
         // grid seed: nearest sample among cells that can be nearer than the best so far
         double best = double.MaxValue; int bi = 0, bj = 0;
-        for (int i = 0; i < G; i++)
-            for (int j = 0; j < G; j++)
+        for (int i = 0; i < Gu; i++)
+            for (int j = 0; j < Gv; j++)
             {
                 var lb = Vec3.Distance(p, _cellC[i, j]) - _cellR[i, j];
                 if (lb > 0 && lb * lb > best) continue;
@@ -323,7 +339,7 @@ public sealed class NurbsSurface
                     for (int b = 0; b <= 1; b++)
                     {
                         // a collapsed (pole) row is no seed: Newton cannot leave it (Su vanishes there)
-                        if ((j + b == 0 && PoleAt(V0)) || (j + b == G && PoleAt(V1))) continue;
+                        if ((j + b == 0 && PoleAt(V0)) || (j + b == Gv && PoleAt(V1))) continue;
                         var d2 = (_grid[i + a, j + b] - p).LengthSq;
                         if (d2 < best) { best = d2; bi = i + a; bj = j + b; }
                     }
@@ -336,7 +352,7 @@ public sealed class NurbsSurface
         if (res.Item4 > 1e-9 * _scale && !Stationary(p, u0, v0))
             foreach (var (du, dv) in new[] { (0.5, 0.5), (-0.5, 0.5), (0.5, -0.5), (-0.5, -0.5) })
             {
-                var (u1, v1) = Newton(p, Math.Clamp(_gu[bi] + du * (U1 - U0) / G, U0, U1), Math.Clamp(_gv[bj] + dv * (V1 - V0) / G, V0, V1));
+                var (u1, v1) = Newton(p, Math.Clamp(_gu[bi] + du * (U1 - U0) / Gu, U0, U1), Math.Clamp(_gv[bj] + dv * (V1 - V0) / Gv, V0, V1));
                 var c1 = Eval(u1, v1); var d1 = Vec3.Distance(c1, p);
                 if (d1 < res.Item4 - 1e-12 * _scale) res = (u1, v1, c1, d1);
             }

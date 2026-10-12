@@ -1060,9 +1060,19 @@ public static class NIntersect
             int k = i * (nv + 1) + j;
             if (have[k] == stamp) return g[k];
             // (a node the block test placed is reused; the rest of the fine grid is not stored)
-            var v = sb.F_(posHave[k] == stamp ? pos[k] : dom.Eval(UV(i, j)));
+            var v = Height(posHave[k] == stamp ? pos[k] : dom.Eval(UV(i, j)));
             have[k] = stamp;
             return g[k] = v == 0 ? 1e-300 : v;
+        }
+        // the other surface's height at a point, whose sign changes where the curve crosses: the signed distance, but
+        // for a bounded patch (a B-spline) the offset from its nearest point along the normal there. Past the patch's
+        // edge the nearest point is on the edge and the offset runs along the surface, its sign meaningless (two
+        // strips of one cylinder would show sign changes a whole gap high); its height above the patch there does not.
+        double Height(Vec3 p)
+        {
+            if (sb.Kind != SurfaceKind.BSpline) return sb.F_(p);
+            var c = sb.Nurbs!.Closest(p);
+            return Vec3.Dot(p - c.c, sb.Nurbs.Normal(c.u, c.v));
         }
         var pg = Prof.Time("trace.grid");
         // a square of cells can hold a zero only if |F(centre)| ≤ its 3D radius (F_ grows no faster than distance)
@@ -1085,9 +1095,22 @@ public static class NIntersect
                 active[bi * nb + bj] = CanHoldZero(bi * block, bj * block, block);
         pg.Dispose();
         var pm = Prof.Time("trace.march");
+        bool jumps = sb.Kind is SurfaceKind.BSpline or SurfaceKind.Offset;
+        bool fitted = jumps || sa.Kind is SurfaceKind.BSpline or SurfaceKind.Offset;
         // marching squares: crossing points on cell edges, numbered (i, j, dir 0=u,1=v) → (i·(nv+1) + j)·2 + dir so
         // neighbours share them; this thread's arrays, valid where stamped with this trace's number. A crossing
         // lies on the edges of at most two cells, each giving it one segment, so its degree is at most 2.
+        // the other surface within tol of this face at the nodes beside an edge of the grid (the rows either side of it)
+        bool Flat(int i, int j, int dir)
+        {
+            for (int s = -1; s <= 1; s += 2)
+            {
+                int i0 = dir == 0 ? i : i + s, j0 = dir == 0 ? j + s : j, i1 = dir == 0 ? i + 1 : i + s, j1 = dir == 0 ? j + s : j + 1;
+                if (i0 < 0 || j0 < 0 || i1 > nu || j1 > nv || i0 > nu || j0 > nv || i1 < 0 || j1 < 0) return false;
+                if (Math.Abs(G(i0, j0)) >= tol || Math.Abs(G(i1, j1)) >= tol) return false;
+            }
+            return true;
+        }
         bool Cross(int i, int j, int dir)
         {
             int key = (i * (nv + 1) + j) * 2 + dir;
@@ -1097,6 +1120,14 @@ public static class NIntersect
             // value is not a finite number, a surface evaluated past its patch in the grid's margin: a crossing there
             // would be NaN, and every point projected from it the slow way)
             if ((a < 0) == (b < 0) || !double.IsFinite(a) || !double.IsFinite(b)) { cross[key] = stamp * 2; return false; }
+            // a free-form surface's signed distance changes no faster than the point moves, except where its nearest
+            // point jumps to another part of it (a thread's next turn, which faces the other way): a sign change too
+            // big for the step between the nodes is such a jump, not a crossing
+            if (jumps && Math.Abs(a) + Math.Abs(b) > 1.5 * Vec3.Distance(At(i, j), dir == 0 ? At(i + 1, j) : At(i, j + 1))) { cross[key] = stamp * 2; return false; }
+            // free-form surfaces within the tolerance of each other all round, at these nodes and the rows either side,
+            // lie on each other there (fitted patches of one cylinder, say): a sign change is their fitting noise, not
+            // a crossing. (Where they only touch, e.g. along a tangent edge, they part away from the curve.)
+            if (fitted && Math.Max(Math.Abs(a), Math.Abs(b)) < tol && Flat(i, j, dir)) { cross[key] = stamp * 2; return false; }
             var t = a / (a - b);
             var pa = UV(i, j); var pb = dir == 0 ? UV(i + 1, j) : UV(i, j + 1);
             cpt[key] = Vec2.Lerp(pa, pb, t);
@@ -1146,7 +1177,7 @@ public static class NIntersect
                         else if (n == 4)
                         {
                             // saddle: decide by the centre value
-                            var c = sb.F_(dom.Eval(Vec2.Lerp(UV(i, j), UV(i + 1, j + 1), 0.5)));
+                            var c = Height(dom.Eval(Vec2.Lerp(UV(i, j), UV(i + 1, j + 1), 0.5)));
                             if (c * G(i, j) > 0) { AddSeg(keys[0], keys[1]); AddSeg(keys[2], keys[3]); }
                             else { AddSeg(keys[0], keys[3]); AddSeg(keys[1], keys[2]); }
                         }
@@ -1319,12 +1350,12 @@ public static class NIntersect
         {
             var p = pts[i]; var q = pts[(i + 1) % n];
             res.Add(p);
-            Sub(p, dirs[i], q, dirs[(i + 1) % n], 0);
+            Sub(p, dirs[i], q, dirs[(i + 1) % n], 0, double.MaxValue);
         }
         if (!closed) res.Add(pts[^1]);
         return res;
 
-        void Sub(Vec3 p, Vec3 tp, Vec3 q, Vec3 tq, int depth)
+        void Sub(Vec3 p, Vec3 tp, Vec3 q, Vec3 tq, int depth, double parentDev)
         {
             if (depth > 6) return;
             var mid = (p + q) * 0.5;
@@ -1339,11 +1370,15 @@ public static class NIntersect
             }
             // (a chain segment already within tolerance too: the trace grid is usually much finer than tol)
             var m = NSurface.ProjectToIntersection(a, b, start, out var tm, hints, stopStep: StopStep);
-            if (Vec3.Distance(m, mid) < tol * 0.25) return;
+            var dev = Vec3.Distance(m, mid);
+            if (dev < tol * 0.25) return;
             if (Vec3.Distance(p, q) < tol) return;
-            Sub(p, tp, m, tm, depth + 1);
+            // within the tolerance, and halving the segment hardly lessened it: not the curve's bend (which falls
+            // fourfold) but the surfaces' own noise (fitted patches a few microns off): no finer
+            if (dev < tol && dev > 0.5 * parentDev) return;
+            Sub(p, tp, m, tm, depth + 1, dev);
             res.Add(m);
-            Sub(m, tm, q, tq, depth + 1);
+            Sub(m, tm, q, tq, depth + 1, dev);
         }
     }
 }

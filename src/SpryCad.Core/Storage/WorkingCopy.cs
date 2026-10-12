@@ -86,6 +86,24 @@ public sealed class WorkingCopy : IDisposable
     /// <summary>The part as last saved, or (<paramref name="working"/>) as last autosaved.</summary>
     public CadDocument Load(bool working = false) { lock (_gate) return PartFile.Load(Path, working); }
 
+    /// <summary>The part as it was in one of its revisions (the history).</summary>
+    public CadDocument LoadRevision(Guid revisionId) { lock (_gate) return PartFile.Load(Path, revision: revisionId); }
+
+    /// <summary>Whether the copy has been written (a new part has none until it is autosaved or saved).</summary>
+    public bool Exists => File.Exists(Path);
+
+    /// <summary>Reads the copy's database (its history: <see cref="PartHistory"/>), one operation at a time with autosave.</summary>
+    public T Read<T>(Func<PartDatabase, T> read)
+    {
+        lock (_gate) { using var db = PartDatabase.Open(Path); return read(db); }
+    }
+
+    /// <summary>Changes the copy's database (tags, maintenance: <see cref="PartHistory"/>); saved to the part's file by the next save.</summary>
+    public void Edit(Action<PartDatabase> edit)
+    {
+        lock (_gate) { if (_closed) return; using var db = PartDatabase.Open(Path, readOnly: false); edit(db); }
+    }
+
     /// <summary>Autosave: the part as the copy's working revision.</summary>
     public void SaveWorking(CadDocument doc, string? author = null)
     {
@@ -96,17 +114,17 @@ public sealed class WorkingCopy : IDisposable
     /// Saves the part (a revision in the copy) to its file, or to <paramref name="target"/> (Save As: the copy is then of
     /// that file). Refused when the file was saved by someone else since it was opened, unless <paramref name="overwrite"/>.
     /// </summary>
-    public void Save(CadDocument doc, string? author = null, string? target = null, bool overwrite = false)
+    public void Save(CadDocument doc, string? author = null, string? target = null, bool overwrite = false, string message = "", RevisionKind kind = RevisionKind.Save)
     {
-        lock (_gate) SaveLocked(doc, author, target, overwrite);
+        lock (_gate) SaveLocked(doc, author, target, overwrite, message, kind);
     }
 
-    void SaveLocked(CadDocument doc, string? author, string? target, bool overwrite)
+    void SaveLocked(CadDocument doc, string? author, string? target, bool overwrite, string message, RevisionKind kind)
     {
         target = target != null ? System.IO.Path.GetFullPath(target) : Source ?? throw new InvalidOperationException("The part has no file yet: save it as one.");
         bool same = Source != null && PartIndex.SamePath(Source, target);
         if (same && !overwrite && File.Exists(target) && Fingerprint(target) != _fingerprint) throw new SaveConflictException(target);
-        PartFile.Save(doc, Path, author);
+        PartFile.Save(doc, Path, author, message, kind);
         var tmp = target + ".saving";
         try
         {

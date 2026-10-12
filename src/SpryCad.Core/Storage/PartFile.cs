@@ -18,7 +18,7 @@ public static class PartFile
     /// Saves the part as a revision of its history in the file (no revision when nothing changed since the last).
     /// Sets the part's identity on its first save and its <see cref="CadDocument.Revision"/> to the head's id.
     /// </summary>
-    public static void Save(CadDocument doc, string path, string? author = null, string message = "")
+    public static void Save(CadDocument doc, string path, string? author = null, string message = "", RevisionKind kind = RevisionKind.Save)
     {
         doc.Id ??= CadDocument.NewGuid();
         var partId = Guid.Parse(doc.Id);
@@ -35,7 +35,7 @@ public static class PartFile
                 {
                     db.SetPart(partId, Path.GetFileNameWithoutExtension(path));
                     var objects = PartObjects.From(doc).ToDictionary(kv => kv.Key, kv => db.Blobs.Put(kv.Value));
-                    head = db.Commit(partId, objects, author ?? DefaultAuthor, message) ?? db.GetHead(partId)!;
+                    head = db.Commit(partId, objects, author ?? DefaultAuthor, message, kind) ?? db.GetHead(partId)!;
                     db.DropWorking(partId); // (saved: what autosave kept is in the head now)
                     WriteManifest(db, doc, partId);
                     db.SetThumbnail(doc.Thumbnail);
@@ -95,12 +95,16 @@ public static class PartFile
     /// <summary>The name revisions are made by when none is given: the user's (set by the app from its options).</summary>
     public static string DefaultAuthor { get; set; } = Environment.UserName;
 
-    /// <summary>The part at the head of the file's history; with <paramref name="working"/>, its working revision if it has one (autosave).</summary>
-    public static CadDocument Load(string path, bool working = false)
+    /// <summary>
+    /// The part at the head of the file's history; with <paramref name="working"/>, its working revision if it has one
+    /// (autosave); with <paramref name="revision"/>, as it was in that revision.
+    /// </summary>
+    public static CadDocument Load(string path, bool working = false, Guid? revision = null)
     {
         using var db = PartDatabase.Open(path);
         var partId = RootPart(db);
-        var head = (working ? db.GetWorking(partId) : null) ?? db.GetHead(partId) ?? throw new InvalidDataException("The file holds no saved part.");
+        var head = (revision is { } r ? db.GetRevision(r) ?? throw new InvalidDataException("The file has no such revision.") : null)
+            ?? (working ? db.GetWorking(partId) : null) ?? db.GetHead(partId) ?? throw new InvalidDataException("The file holds no saved part.");
         var objects = db.GetObjects(head.RevisionId).ToDictionary(kv => kv.Key, kv => db.Blobs.Get(kv.Value, verify: kv.Key.Kind == ObjectKind.File));
         var doc = PartObjects.ToDocument(objects);
         doc.Id = partId.ToString("D");

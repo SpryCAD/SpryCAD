@@ -124,6 +124,7 @@ public partial class MainWindow
             Item("Export S_TL...", () => _ = Export("stl"), null, "export-stl"),
             Item("Export Flat Pattern _DXF...", () => _ = ExportDxf(), null, "export-dxf"),
             "-",
+            Item("_History...", HistoryCommand),
             Item("Recover Autosave", () => OfferRecovery(atStart: false)),
             "-",
             Item("E_xit", Close)));
