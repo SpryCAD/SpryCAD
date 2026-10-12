@@ -57,17 +57,6 @@ public static class NativeBlend
         bool pivotFailed;
         try { r1 = ApplyOne(body, edges, size, fillet, prefix, errs1, overflow, probs1, app1, chamfer, buildOnly, trimmedOut); }
         finally { pivotFailed = _pivotFailed; _pivotFailed = failedBefore; }
-        // (applied directly, a pivot's tool can fail where by boolean it does not: so, before mitring)
-        if (!pivotFailed && errs1.Count > 0 && _pivotsUsed > used && !_noPivots && !_noDirect && DirectBlend.Enabled && !buildOnly)
-        {
-            var errsB = new List<string>(); var probsB = problemEdges == null ? null : new List<Vec3[]>(); var appB = applied == null ? null : new List<(Solid, bool)>();
-            _noDirect = true; _pivotFailed = false;
-            Solid rB; bool failedB;
-            try { rB = ApplyOne(body, edges, size, fillet, prefix, errsB, overflow, probsB, appB, chamfer, buildOnly, trimmedOut); }
-            finally { _noDirect = false; failedB = _pivotFailed; _pivotFailed = failedBefore; }
-            Debug?.Invoke($"pivots direct: {errs1.Count} error(s); by boolean: {errsB.Count}{(failedB ? ", not glued" : "")}");
-            if (!failedB && errsB.Count < errs1.Count) (r1, errs1, probs1, app1) = (rB, errsB, probsB, appB);
-        }
         if ((errs1.Count > 0 || pivotFailed) && _pivotsUsed > used && !_noPivots)
         {
             var errs2 = new List<string>(); var probs2 = problemEdges == null ? null : new List<Vec3[]>(); var app2 = applied == null ? null : new List<(Solid, bool)>();
@@ -89,7 +78,6 @@ public static class NativeBlend
     [ThreadStatic] static int _pivotsUsed;
     [ThreadStatic] static bool _pivotFailed;
     [ThreadStatic] static bool _noPivots;
-    [ThreadStatic] static bool _noDirect;
 
     /// <summary>Whether three or more of the edges, of one kind (convex or concave), meet at a vertex.</summary>
     static bool Corner3(IReadOnlyList<NEdge> edges)
@@ -209,7 +197,7 @@ public static class NativeBlend
         var entries = new List<(List<Solid> tools, bool convex, Solid? strip, string name, List<NEdge> group, bool trimmed)>();
         // failures, reported once the chains below have had their second try
         var fails = new List<(List<NEdge> group, string msg)>();
-        bool direct = DirectBlend.Enabled && !buildOnly && !_noDirect;
+        bool direct = DirectBlend.Enabled && !buildOnly;
         int i = 0;
         foreach (var e in edges)
         {
@@ -249,7 +237,7 @@ public static class NativeBlend
                     }
                     if (rb.Error != null) { Fail(rb.Error); continue; }
                     // the rolling-ball tool's sides lie on the faces it blends: a direct blend applies it as it is
-                    (tools, convex, fits, strip) = (new List<Solid> { rb.Tool! }, rb.Convex, rb.Fits, rb.Tool);
+                    (tools, convex, fits, strip) = (new List<Solid> { rb.Tool! }, rb.Convex, rb.Fits, Pivoted(rb.Tool!) ? null : rb.Tool);
                 }
                 if (tools == null && !fillet)
                 {
@@ -315,7 +303,7 @@ public static class NativeBlend
                 if (rb.Error != null || !rb.Fits) continue;
                 foreach (var k in mine.OrderByDescending(k => k)) entries.RemoveAt(k);
                 foreach (var k in mineF.OrderByDescending(k => k)) fails.RemoveAt(k);
-                entries.Add((new List<Solid> { rb.Tool! }, rb.Convex, rb.Tool, name0, chain, false));
+                entries.Add((new List<Solid> { rb.Tool! }, rb.Convex, Pivoted(rb.Tool!) ? null : rb.Tool, name0, chain, false));
                 bad.ExceptWith(chain);
             }
         }
@@ -764,6 +752,9 @@ public static class NativeBlend
         return tool;
     }
 
+    /// <summary>Whether a tool carries a pivot's (applied by boolean: see <see cref="LineTool"/>).</summary>
+    static bool Pivoted(Solid tool) => tool.Native?.Faces.Any(f => f.Tag.Name.Contains(".C.", StringComparison.Ordinal)) == true;
+
     /// <summary>The corners whose pivot a tool now kept carries.</summary>
     static void Carry(List<NVertex> carried)
     {
@@ -964,14 +955,13 @@ public static class NativeBlend
             bool taken;
             taken = _pivoted?.Contains(c.V) == true;
             if (taken) continue;
-            // (the tool bounded by the faces at a pivot: the strip itself, joined to the pivot as one)
-            if (tools.Count == 1 && strip != null && ReferenceEquals(loop, sl0))
+            // (the tool bounded by the faces at a pivot, joined to the pivot as one; by boolean: applied directly, a
+            // pivot's tool can fail where by boolean it does not, and the two ways must agree)
+            if (tools.Count == 1 && ReferenceEquals(loop, sl0))
                 try { using (Prof.Time("blend.pivot.strip")) tools[0] = JoinPivot(tools[0], patch.Tool); }
                 catch (Exception ex) when (ex is InvalidOperationException or NBooleanException) { tools.Add(patch.Tool); }
             else tools.Add(patch.Tool);
-            if (strip != null)
-                try { using (Prof.Time("blend.pivot.strip")) strip = JoinPivot(strip, patch.Tool); if (strip.Native == null || strip.Native.Validate() != null) strip = null; }
-                catch (Exception ex) when (ex is InvalidOperationException or NBooleanException) { strip = null; }
+            strip = null;
             Carry(new List<NVertex> { c.V });
         }
         return (tools, convex, fits, strip);
