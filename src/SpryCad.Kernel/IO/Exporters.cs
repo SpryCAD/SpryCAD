@@ -55,8 +55,12 @@ public static class StepWriter
     static string R(double v)
     {
         if (Math.Abs(v) < 1e-12) v = 0;
-        var s = v.ToString("0.0##########", CultureInfo.InvariantCulture);
-        return s;
+        // as "0.0##########" (at least one decimal, at most eleven), by the standard fixed format and the zeros trimmed:
+        // several times faster (a big part writes hundreds of thousands of numbers)
+        Span<char> buf = stackalloc char[96];
+        if (!v.TryFormat(buf, out int n, "F11", CultureInfo.InvariantCulture)) return v.ToString("0.0##########", CultureInfo.InvariantCulture);
+        while (n > 2 && buf[n - 1] == '0' && buf[n - 2] != '.') n--;
+        return new string(buf[..n]);
     }
 
     static string Pt(Vec3 p) => $"CARTESIAN_POINT('',({R(p.X)},{R(p.Y)},{R(p.Z)}))";
@@ -255,10 +259,11 @@ public static class StepWriter
 
         _edges.Dispose();
         var facesByLump = new Dictionary<int, List<int>>();
-        // blend (pipe) surfaces are fitted up front, in parallel (each face is independent)
-        var pipes = b.Faces.Where(f => f.Loops.Count > 0 && f.Surface.Kind == SurfaceKind.Pipe).ToList();
+        // blend (pipe) and screw surfaces are fitted up front, in parallel (each face is independent); screw faces that
+        // are cylinders are written exactly
+        var pipes = b.Faces.Where(f => f.Loops.Count > 0 && (f.Surface.Kind == SurfaceKind.Pipe || f.Surface.Kind == SurfaceKind.Screw && ScrewCylinder(f) == null)).ToList();
         var fits = new BSplineSurface[pipes.Count];
-        using (Prof.Time("step.pipefits")) Parallel.For(0, pipes.Count, i => fits[i] = PipeFit(pipes[i], b));
+        using (Prof.Time("step.fits")) Parallel.For(0, pipes.Count, i => fits[i] = pipes[i].Surface.Kind == SurfaceKind.Pipe ? PipeFit(pipes[i], b) : ScrewFit(pipes[i], b));
         var fitOf = new Dictionary<ExactFace, BSplineSurface>(ReferenceEqualityComparer.Instance);
         for (int i = 0; i < pipes.Count; i++) fitOf[pipes[i]] = fits[i];
         foreach (var f in b.Faces)
