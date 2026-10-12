@@ -24,7 +24,7 @@ public sealed partial class AssemblyDocument
     public int FormatVersion { get; set; } = CurrentFormatVersion;
     /// <summary>The assembly's identity (a GUID, given on its first save), as for parts.</summary>
     public string? Id { get; set; }
-    /// <summary>A new GUID on every save.</summary>
+    /// <summary>The head revision's id (<see cref="Storage.AssemblyFile"/>): a new one when a save changed the assembly.</summary>
     public string? Revision { get; set; }
     public string? DerivedFrom { get; set; }
     public UnitSystem Units { get; set; } = UnitSystem.MMGS;

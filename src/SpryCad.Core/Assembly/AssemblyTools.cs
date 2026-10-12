@@ -362,7 +362,7 @@ public static class PackAndGo
                 {
                     var sd = AssemblyContainer.Load(bytes, r.Embedded);
                     Rewrite(sd, fromDir, toDir, byFrom, byId);
-                    doc.Files[r.Embedded] = AssemblyContainer.ToBytes(sd);
+                    doc.Files[r.Embedded] = AssemblyContainer.ToBytes(sd, doc.Files[r.Embedded]);
                     foreach (var o in doc.Components.Where(x => x.Part.Embedded == r.Embedded)) o.Part.Revision = sd.Revision;
                 }
                 continue;

@@ -38,8 +38,16 @@ public static class UserSettings
 
     public static bool ReverseWheel { get; set; }
     public static bool Perspective { get; set; }
-    /// <summary>The name saved revisions are made by (their history shows it): the user's sign-in name until set.</summary>
-    public static string AuthorName { get; set; } = Environment.UserName;
+    /// <summary>
+    /// The name saved revisions are made by (their history shows it): the user's sign-in name until set. Also the name
+    /// files saved without one are given (assemblies, embedded documents: <see cref="Core.Storage.PartFile.DefaultAuthor"/>).
+    /// </summary>
+    public static string AuthorName
+    {
+        get => _author;
+        set { _author = value; Core.Storage.PartFile.DefaultAuthor = value; }
+    }
+    static string _author = Environment.UserName;
     /// <summary>When saved parts keep their display. Every part by default: it shows at once when opened.</summary>
     public static KeepDisplay KeepDisplay { get; set; } = KeepDisplay.Always;
     /// <summary>How long a part takes to rebuild for it to keep its display (<see cref="KeepDisplay.SlowParts"/>).</summary>

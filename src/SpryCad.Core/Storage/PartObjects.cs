@@ -26,6 +26,24 @@ public enum ObjectKind : byte
     /// changes them and the history does not list that as a change of its own.
     /// </summary>
     NameCounters = 7,
+
+    // an assembly's (AssemblyObjects)
+    /// <summary>Units and the documents (parts, sub-assemblies) embedded in it by name (exactly one).</summary>
+    AssemblySettings = 20,
+    /// <summary>The counters new components, mates and patterns are numbered and named by (exactly one; not listed in history).</summary>
+    AssemblyCounters = 21,
+    /// <summary>One per component.</summary>
+    Component = 22,
+    /// <summary>One per mate.</summary>
+    Mate = 23,
+    /// <summary>One per component pattern.</summary>
+    ComponentPattern = 24,
+    /// <summary>The order of the components, mates and patterns (exactly one).</summary>
+    AssemblyOrder = 25,
+    /// <summary>The configurations (exactly one).</summary>
+    AssemblyConfigurations = 26,
+    /// <summary>The exploded views (exactly one).</summary>
+    Explodes = 27,
 }
 
 /// <summary>
@@ -90,10 +108,13 @@ public static class PartObjects
         return doc;
     }
 
-    public static ObjectId FeatureId(string id)
+    public static ObjectId FeatureId(string id) => IdOf(ObjectKind.Feature, id);
+
+    /// <summary>An object's id by its kind and its own id: as ASCII when it fits, else the first bytes of its hash.</summary>
+    public static ObjectId IdOf(ObjectKind kind, string id)
     {
         var b = new byte[IdSize];
-        b[0] = (byte)ObjectKind.Feature;
+        b[0] = (byte)kind;
         if (id.Length <= IdSize - 1 && id.All(c => c < 128)) Encoding.ASCII.GetBytes(id, b.AsSpan(1));
         else SHA256.HashData(Encoding.UTF8.GetBytes(id)).AsSpan(0, IdSize - 1).CopyTo(b.AsSpan(1));
         return new ObjectId(b);
@@ -137,12 +158,12 @@ public static class PartObjects
         return (data.GetProperty("id").GetString() ?? "", data.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "");
     }
 
-    static string Json<T>(T value) => JsonSerializer.Serialize(value, Serialization.Compact);
+    internal static string Json<T>(T value) => JsonSerializer.Serialize(value, Serialization.Compact);
 
     /// <summary>The envelope around an object's JSON.</summary>
-    static byte[] Envelope(ObjectKind kind, string data) => Encoding.UTF8.GetBytes($"{{\"kind\":{(int)kind},\"v\":{SchemaVersion},\"data\":{data}}}");
+    internal static byte[] Envelope(ObjectKind kind, string data) => Encoding.UTF8.GetBytes($"{{\"kind\":{(int)kind},\"v\":{SchemaVersion},\"data\":{data}}}");
 
-    static T Open<T>(byte[] bytes, ObjectKind kind)
+    internal static T Open<T>(byte[] bytes, ObjectKind kind)
     {
         using var d = JsonDocument.Parse(bytes);
         var root = d.RootElement;

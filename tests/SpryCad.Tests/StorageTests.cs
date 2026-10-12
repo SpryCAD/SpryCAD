@@ -142,7 +142,8 @@ static class StorageTests
                 t.Eq(back.Revision, rev);
                 t.Eq(PartFile.History(path).Count, 1);
             }
-            foreach (var k in Enum.GetValues<ObjectKind>()) t.True(kinds.Contains(k), $"no {k} object tested");
+            // (a part's kinds: an assembly's, 20 and up, are AssemblyStorageTests')
+            foreach (var k in Enum.GetValues<ObjectKind>().Where(k => (int)k < 20)) t.True(kinds.Contains(k), $"no {k} object tested");
 
             // the rich part as a whole, with what the manifest keeps
             var rich = Rich();

@@ -5,7 +5,9 @@ using SpryCad.Core.Model;
 namespace SpryCad.Core.Assembly;
 
 /// <summary>
-/// Reads and writes .sasm files: always a ZIP container
+/// Reads and writes .sasm files. An assembly is saved as a database (<see cref="Storage.AssemblyFile"/>: its history,
+/// the parts and sub-assemblies embedded in it with theirs, its display caches and preview). Assemblies saved before
+/// are still read: ZIP containers
 /// <code>
 ///   mimetype                "application/x-sprycad-assembly", the first entry, uncompressed (DocumentContainer.MimeEntry)
 ///   assembly.json           the assembly (components, references, mates)
@@ -13,60 +15,44 @@ namespace SpryCad.Core.Assembly;
 ///   attachments/cache/…     display caches of the parts' revisions (<see cref="MeshCache"/>)
 ///   thumbnail.png           preview image (optional)
 /// </code>
-/// Attachments are listed with size and SHA-256 in assembly.json and checked on load, as in part containers.
+/// whose attachments are listed with size and SHA-256 in assembly.json and checked on load.
 /// </summary>
 public static class AssemblyContainer
 {
     public const string ModelEntry = "assembly.json";
 
-    public static void Save(AssemblyDocument asm, string path)
-    {
-        var tmp = path + ".saving";
-        try
-        {
-            using (var fs = File.Create(tmp)) Write(asm, fs);
-            File.Move(tmp, path, overwrite: true);
-        }
-        catch
-        {
-            try { File.Delete(tmp); } catch { /* best effort */ }
-            throw;
-        }
-    }
+    /// <summary>Saves the assembly (a revision of its history: <see cref="Storage.AssemblyFile.Save"/>).</summary>
+    public static void Save(AssemblyDocument asm, string path, string? author = null) => Storage.AssemblyFile.Save(asm, path, author);
 
     /// <summary>
-    /// The assembly as the bytes of its file (an assembly embedded in another): its identity given if it has none, a
-    /// new revision (unless <paramref name="newRevision"/> is false: only its caches changed, not what it is).
+    /// The assembly as the bytes of its file (an assembly embedded in another): saved as a database (its identity given if
+    /// it has none, a new revision when it changed). <paramref name="previous"/>: the bytes it had, so its history goes on
+    /// (and it keeps its revision when nothing changed).
     /// </summary>
-    public static byte[] ToBytes(AssemblyDocument asm, bool newRevision = true)
+    public static byte[] ToBytes(AssemblyDocument asm, byte[]? previous = null)
     {
-        using var ms = new MemoryStream();
-        Write(asm, ms, newRevision);
-        return ms.ToArray();
+        var tmp = Path.Combine(Path.GetTempPath(), "sprycad-" + Guid.NewGuid().ToString("N") + AssemblyDocument.FileExtension);
+        try
+        {
+            if (previous != null && Storage.PartDatabase.Is(previous)) File.WriteAllBytes(tmp, previous);
+            Storage.AssemblyFile.Save(asm, tmp);
+            return File.ReadAllBytes(tmp);
+        }
+        finally { try { File.Delete(tmp); } catch { /* best effort */ } }
     }
 
-    static void Write(AssemblyDocument asm, Stream stream, bool newRevision = true)
-    {
-        foreach (var name in asm.Files.Keys) DocumentContainer.CheckName(name);
-        asm.Id ??= CadDocument.NewGuid();
-        if (newRevision || asm.Revision == null) asm.Revision = CadDocument.NewGuid();
-        asm.Attachments = asm.Files.Count == 0 ? null
-            : asm.Files.OrderBy(f => f.Key, StringComparer.Ordinal)
-                .Select(f => new AttachmentInfo { Name = f.Key, Size = f.Value.LongLength, Sha256 = DocumentContainer.Hash(f.Value) }).ToList();
-        var json = asm.ToJson();
-        using var zip = new ZipArchive(stream, ZipArchiveMode.Create, leaveOpen: true);
-        DocumentContainer.WriteMime(zip, DocumentContainer.AssemblyMime);
-        Write(zip, ModelEntry, Encoding.UTF8.GetBytes(json), CompressionLevel.Optimal);
-        foreach (var a in asm.Attachments ?? new())
-            Write(zip, DocumentContainer.AttachmentFolder + a.Name, asm.Files[a.Name], CompressionLevel.Optimal);
-        if (asm.Thumbnail != null) Write(zip, DocumentContainer.ThumbnailEntry, asm.Thumbnail, CompressionLevel.NoCompression);
-    }
-
-    public static AssemblyDocument Load(string path) => Load(File.ReadAllBytes(path), Path.GetFileName(path));
+    public static AssemblyDocument Load(string path) =>
+        Storage.PartDatabase.IsFile(path) ? Storage.AssemblyFile.Load(path) : Load(File.ReadAllBytes(path), Path.GetFileName(path));
 
     /// <summary>An assembly from the bytes of its file (<paramref name="name"/>: what to call it in messages).</summary>
     public static AssemblyDocument Load(byte[] bytes, string name)
     {
+        if (Storage.PartDatabase.Is(bytes))
+        {
+            var tmp = Path.Combine(Path.GetTempPath(), "sprycad-" + Guid.NewGuid().ToString("N") + AssemblyDocument.FileExtension);
+            try { File.WriteAllBytes(tmp, bytes); return Storage.AssemblyFile.Load(tmp); }
+            finally { try { File.Delete(tmp); } catch { /* best effort */ } }
+        }
         var path = name;
         using var zip = new ZipArchive(new MemoryStream(bytes), ZipArchiveMode.Read);
         var model = zip.GetEntry(ModelEntry) ?? throw new InvalidDataException("Not a SpryCAD assembly (no assembly.json in the container).");
@@ -87,13 +73,6 @@ public static class AssemblyContainer
         }
         if (asm.LegacyIds) asm.RenewLegacyCaches();
         return asm;
-    }
-
-    static void Write(ZipArchive zip, string name, byte[] data, CompressionLevel level)
-    {
-        var e = zip.CreateEntry(name, level);
-        using var s = e.Open();
-        s.Write(data);
     }
 
     static byte[] Read(ZipArchiveEntry e)
