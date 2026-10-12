@@ -148,7 +148,7 @@ public static class RollingBall
             if (m == null) return Fail("could not follow the rolling ball along the edge (the faces turn too sharply for this radius).");
             var (P, D, i0, i1) = m.Value;
             var sp = new PipeSpine(P, D, SA, SB);
-            if (sp.MinCurvatureRadius < r * 1.02) return Fail("the radius is too large: the fillet would fold over itself.");
+            if (Folds(sp, r, SA.Project, SB.Project)) return Fail("the radius is too large: the fillet would fold over itself.");
             spines[k] = sp; range[k] = (sp.S[i0], sp.S[i1]);
         }
 
@@ -224,6 +224,40 @@ public static class RollingBall
         return new Result(NTess.ToSolid(body), convex, fits, null);
 
         static Result Fail(string m) => new(null, false, false, m);
+    }
+
+    /// <summary>
+    /// Whether the blend face folds over itself. Where the spine bends tighter than the ball's radius the pipe folds,
+    /// but only on the side towards the bend's centre: the blend is the arc between the ball's two contacts, which
+    /// round a convex corner (an edge's round running round a rounded corner) faces away from it.
+    /// </summary>
+    static bool Folds(PipeSpine sp, double r, Func<Vec3, Vec3> contactA, Func<Vec3, Vec3> contactB)
+    {
+        if (!(sp.MinCurvatureRadius < r * 1.02)) return false;
+        int n = Math.Max(64, (sp.P.Length - 1) * 8);
+        for (int i = 0; i <= n; i++)
+        {
+            var s = sp.S0 + (sp.S1 - sp.S0) * i / n;
+            var d1 = sp.Deriv(s); var d2 = sp.Deriv2(s);
+            var l2 = Vec3.Dot(d1, d1);
+            if (!(l2 > 1e-300)) continue;
+            var T = d1 / Math.Sqrt(l2);
+            var kv = (d2 - T * Vec3.Dot(T, d2)) / l2;
+            var k = kv.Length;
+            if (k * r < 0.98) continue;
+            var N = kv / k;
+            var c = sp.Eval(s);
+            var ua = (contactA(c) - c).Normalized; var ub = (contactB(c) - c).Normalized;
+            // (the shorter arc between the contacts: a fillet's)
+            var ang = Math.Acos(Math.Clamp(Vec3.Dot(ua, ub), -1, 1));
+            for (int j = 0; j <= 8; j++)
+            {
+                var t = j / 8.0;
+                var u = ang < 1e-9 ? ua : (ua * Math.Sin((1 - t) * ang) + ub * Math.Sin(t * ang)) / Math.Sin(ang);
+                if (k * r * Vec3.Dot(u, N) > 0.98) return true;
+            }
+        }
+        return false;
     }
 
     /// <summary>
@@ -540,7 +574,7 @@ public static class RollingBall
             }
             var (P, D, i0, i1) = m.Value;
             var sp = new PipeSpine(P, D, SA, Sup(support[i])) { Rolls = rolls };
-            if (sp.MinCurvatureRadius < r * 1.02) { if (Debug != null) { var fam = walked.Concat(faB).Distinct().Where(f => Side(f, support[i])).ToList(); for (int q = 0; q <= 10; q++) { var c = sp.Eval(sp.S0 + (sp.S1 - sp.S0) * q / 10); var pb = Sup(support[i]).Project(c); Debug($"    foot {q}: {pb} on fillet faces {fam.Any(f => onFaces(f, pb))}, A {faA.Any(f => onFaces(f, SA.Project(c)))}"); } } Debug?.Invoke($"fold on segment {i}/{nseg} ({support[i].Tag.Name}:{support[i].Surface.Kind}) {ev[i].S} -> {ev[(i + 1) % ne].S}: min curvature radius {sp.MinCurvatureRadius:g3}, {P.Count} nodes"); return Fail("the radius is too large: the fillet would fold over itself."); }
+            if (Folds(sp, r, SA.Project, Sup(support[i]).Project)) { if (Debug != null) { var fam = walked.Concat(faB).Distinct().Where(f => Side(f, support[i])).ToList(); for (int q = 0; q <= 10; q++) { var c = sp.Eval(sp.S0 + (sp.S1 - sp.S0) * q / 10); var pb = Sup(support[i]).Project(c); Debug($"    foot {q}: {pb} on fillet faces {fam.Any(f => onFaces(f, pb))}, A {faA.Any(f => onFaces(f, SA.Project(c)))}"); } } Debug?.Invoke($"fold on segment {i}/{nseg} ({support[i].Tag.Name}:{support[i].Surface.Kind}) {ev[i].S} -> {ev[(i + 1) % ne].S}: min curvature radius {sp.MinCurvatureRadius:g3}, {P.Count} nodes"); return Fail("the radius is too large: the fillet would fold over itself."); }
             spines[i] = sp; range[i] = (sp.S[i0], sp.S[i1]);
         }
 

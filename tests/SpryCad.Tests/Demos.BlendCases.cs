@@ -31,7 +31,8 @@ static partial class Demos
         ("wall beside a taller one", NarrowGap),
         ("rib against a wall, filleted and mirrored", MirroredRib),
         ("ribs, filleted and patterned", () => PatternedRibs("16")),
-        ("drafted boss, a lug standing out onto its corner round", LugOnRound),
+        ("drafted boss, a lug standing out onto its corner round", () => LugOnRound()),
+        ("drafted boss with a lug, its top edge rounded round the lug", () => LugOnRound(topRound: true)),
     };
 
     /// <summary>
@@ -309,10 +310,12 @@ static partial class Demos
     /// A boss drafted 2° on a plate, its vertical corners rounded R20, and a lug standing out of its long side, flush
     /// with its top, the lug's outer side landing on the corner round: the lug's foot filleted R5 (its sides and
     /// underside, the underside's edge running from the flat side onto the round). As a casting's bearing pedestal.
+    /// With <paramref name="topRound"/>, the lug's outer corners rounded R6 first and, last, the boss's top edge
+    /// rounded R4 along its side, on round the lug's foot fillets, sides and rounded corners (one tangent chain).
     /// </summary>
-    static CadDocument LugOnRound()
+    static CadDocument LugOnRound(bool topRound = false)
     {
-        var d = Doc(("BossX", "60"), ("BossY", "40"), ("BossH", "60"), ("Draft", "2"), ("Rc", "20"), ("R", "5"));
+        var d = Doc(("BossX", "60"), ("BossY", "40"), ("BossH", "60"), ("Draft", "2"), ("Rc", "20"), ("R", "5"), ("Rl", "6"), ("Rt", "4"));
         var b = new Sk(d);
         b.Rect("-80", "-60", "80", "60");
         var bs = d.AddFeature(new SketchFeature { Name = "Base", Plane = PlaneRef.Front, Sketch = b.S });
@@ -342,6 +345,12 @@ static partial class Demos
         var ls = d.AddFeature(new SketchFeature { Name = "Lug", Plane = new PlaneRef { Feature = lp.Id }, Sketch = l.S });
         var lug = d.AddFeature(new ExtrudeFeature { Name = "Lug", SketchId = ls.Id, Depth = "25" });
         double SideY(double z) => V("BossY") - (z - 20) * Math.Tan(V("Draft") * Math.PI / 180);
+        if (topRound)
+            d.AddFeature(new FilletFeature
+            {
+                Name = "Lug corners", Radius = "Rl",
+                Edges = { E($"{lug.Id}.S.L{ll[3]}", $"{lug.Id}.End", new Vec3(10, 55, 65)), E($"{lug.Id}.S.L{ll[1]}", $"{lug.Id}.End", new Vec3(42, 55, 65)) },
+            });
         // (each picked against the boss's flat side, as a user would see it; the outer one lies on the round)
         d.AddFeature(new FilletFeature
         {
@@ -353,6 +362,8 @@ static partial class Demos
                 E($"{lug.Id}.S.L{ll[1]}", F(2), new Vec3(42, SideY(65), 65)),
             },
         });
+        if (topRound)
+            d.AddFeature(new FilletFeature { Name = "Top edge", Radius = "Rt", Edges = { E(F(2), $"{boss.Id}.End", new Vec3(-30, SideY(80), 80)) } });
         return d;
     }
 

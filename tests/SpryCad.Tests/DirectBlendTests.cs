@@ -624,6 +624,33 @@ static class DirectBlendTests
             }
         });
 
+        t.Test("Round along a boss's top edge, on round a lug's foot fillets and rounded corners: one tool, exact", () =>
+        {
+            // R4 rolling round the lug's R6 corners: the ball's centre bends at radius 2, tighter than the ball, but
+            // the round faces away from the bend (the pipe folds only on its inner side): it was refused as folding
+            foreach (var direct in new[] { true, false })
+            {
+                var old = DirectBlend.Enabled;
+                DirectBlend.Enabled = direct;
+                try
+                {
+                    var doc = Demos.BlendCases.First(c => c.name == "drafted boss with a lug, its top edge rounded round the lug").build();
+                    var top = doc.Features.First(f => f.Name == "Top edge");
+                    var reg = new Regenerator();
+                    var before = KernelTests.Vex(reg.Rebuild(doc, doc.Features.IndexOf(top)).State.Bodies[0].Solid);
+                    var r = reg.Rebuild(doc);
+                    t.True(r.Status[top.Id].Ok && r.Status[top.Id].Warnings.Count == 0, $"{(direct ? "direct" : "boolean")}: {r.Status[top.Id].Error} {string.Join("; ", r.Status[top.Id].Warnings)}");
+                    var nb = r.State.Bodies[0].Solid.Native;
+                    t.True(nb != null && nb.Validate() == null, $"exact and valid: {nb?.Validate()}");
+                    // a convex round takes material away: R4's corner, 3.43 mm², all round the top (about 350) and the
+                    // lug (50 more), less round the corners
+                    var removed = before - KernelTests.Vex(r.State.Bodies[0].Solid);
+                    t.True(removed > 1000 && removed < 1400, $"{(direct ? "direct" : "boolean")}: removed {removed:R}");
+                }
+                finally { DirectBlend.Enabled = old; }
+            }
+        });
+
         t.Test("Direct blend: off (FC_BLEND=boolean) applies nothing directly", () =>
         {
             var before = DirectBlend.Counts;
