@@ -110,6 +110,25 @@ Commands (from the repository root):
    filleted corners" session, fixing it on `corner-pivot-2`). With #75 the pedestal rib is filleted all round as
    well: its sloping back into the body's side is one more edge of "Pedestal rib fillets" (its foot found by
    bisection), the rib's lower corners rounded off.
+4j. **Breaking every outside edge of the casting in one fillet leaves most of them out (OPEN, master a7fedc9).**
+   Tried as the casting's last feature: `new FilletFeature { Radius = "1", WholeBody = true, ScopeKind =
+   BlendScopeKind.Convex }` (cast parts have no sharp edges; one feature for all of them is what the scope is for).
+   It builds (exact, 6.2 s) but leaves out about 190 edges in 30 groups, with a warning each, so `verify-engine`
+   fails. By kind:
+   - **Edges that are not edges** (should not be in the scope at all, ~60): seams between tangent faces of earlier
+     blends ("Edge Pedestal into the body.1.C.Blend / Pedestal into the body.2.Blend: the faces are tangent along the
+     edge: there is nothing to fillet", 18 each side; "Hopper into the barrel.0.Blend / .End0" and "/ .End1": "the
+     fillet does not fit"; the lugs' blend faces "Lugs into the body.3.S.F / .3.End", ".5.Start / .5.S.F" ...: "the
+     ball does not fit at an end of the edge"). A convex scope should skip edges whose faces meet tangent.
+   - **The biggest group, 43 edges, fails as one**: "cannot be joined to the body (result invalid: edge used 1 times
+     (NEllipse (35.453, 0, 34)->(32.696, 0, 43.617) on Body.End))", the main bearing bore's edge on the body's top
+     beside a pedestal. One bad edge takes 42 good ones with it; trying each group's edges alone would keep those.
+   - **Edges running into another blend's end** (each rib's sloped top at its foot, the base's corner by the foot
+     chamfer, the crank pit's R4 ends, the bore at the barrel's end): "edge used 1 times", "run into each other".
+   - **The hold-down holes' top edges**: "Edge Base.End / Hold-down holes.0.R.Hole: the fillet does not fit: it runs
+     past the faces it blends" at R1 (an 11 mm hole through a 20 mm plate, no reason not to fit).
+   Repro: add that fillet after "Oil boss into the barrel" in `HmCasting`, `verify-engine - Casting`. *Instead:*
+   not added; the casting keeps its picked and per-feature blends.
 4g. **Mate face order (not kernel, the demo's helper).** `HmAsm.Any` (a face for a Lock mate) took the display
    mesh's first face; since the display caches are laid out anew (#59) that can be a face a mate cannot hold (the
    crankshaft's first is a surface of revolution), and `RefTo` gives null. It now takes the first face that gives a
