@@ -319,6 +319,38 @@ static class CoreTests
             t.Eq(copy.Sketch.Entities.OfType<SkLine>().Count(e => e.External?.Axis == "H"), 1);
         });
 
+        t.Test("Fillet along a round boss ending on a slanted face", () =>
+        {
+            // a block with a slanted end (Front: x 0..40 at the bottom, 0..30 at the top y 10), a bar along X (radius 4,
+            // its axis on the top face) running out through the slant; the concave edges where the bar meets the top
+            // end on the slant at 45°
+            var doc = new CadDocument();
+            var sk = new Sketch();
+            var pts = new[] { new Vec2(0, 0), new Vec2(40, 0), new Vec2(30, 10), new Vec2(0, 10) }.Select(p => sk.AddPoint(p).Id).ToArray();
+            for (int i = 0; i < 4; i++) sk.Add(new SkLine { P1 = pts[i], P2 = pts[(i + 1) % 4] });
+            var s1 = doc.AddFeature(new SketchFeature { Plane = PlaneRef.Front, Sketch = sk });
+            var block = doc.AddFeature(new ExtrudeFeature { SketchId = s1.Id, Depth = "20" });
+            var right = Resolver.StdPlane("Right");
+            var bs = new Sketch(); var bc = bs.AddPoint(right.ToLocal(new Vec3(0, 10, 10))); var circ = bs.Add(new SkCircle { Center = bc.Id, R = 4 });
+            var s2 = doc.AddFeature(new SketchFeature { Plane = PlaneRef.Right, Sketch = bs });
+            var bar = doc.AddFeature(new ExtrudeFeature { SketchId = s2.Id, Depth = "36", Reverse = right.Normal.X < 0 });
+            string round = bar.Id + ".S." + ProfileExtractor.FaceName(circ), top = block.Id + ".S." + ProfileExtractor.FaceName(sk.Entities[2]);
+            var fi = doc.AddFeature(new FilletFeature
+            {
+                Radius = "1",
+                Edges = { new EdgeRef { A = round, B = top, Hint = new Vec3(15, 10, 14) }, new EdgeRef { A = round, B = top, Hint = new Vec3(15, 10, 6) } },
+            });
+            var r = new Regenerator().Rebuild(doc);
+            foreach (var f in doc.Features) t.True(r.Status[f.Id].Ok, $"{f.Name}: {r.Status[f.Id].Error}");
+            var b = r.State.Bodies.Single();
+            t.Eq(b.Solid.Native!.Validate(), null);
+            t.Eq(b.Solid.Topology.OpenHalfEdges, 0);
+            // (two concave R1 fillets about 30 long: less than (1 - π/4) per unit length each, as the bar curves away)
+            var before = new Regenerator().Rebuild(doc, doc.Features.IndexOf(fi)).State.Bodies.Single();
+            var added = KernelTests.Vex(b.Solid) - KernelTests.Vex(before.Solid);
+            t.True(added > 5 && added < 2 * 30 * (1 - Math.PI / 4), $"added {added}");
+        });
+
         t.Test("Loft from a model face to a sketch", () =>
         {
             var doc = new CadDocument();

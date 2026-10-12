@@ -554,15 +554,19 @@ public static class NativeBlend
         Vec3? EndAt(NVertex v) => pivots.Where(x => ReferenceEquals(x.v, v)).Select(x => (Vec3?)x.p.QOwn).FirstOrDefault();
         var rb = RollingBall.Build(chain, size, name, OnFaces, endAt: pivots.Count > 0 ? EndAt : null);
         if (rb.Error != null || rb.Tool?.Native == null) return rb;
-        // (only a tool running past its faces: one that fits ends where it should)
-        if (rb.Fits) return JoinPivots(rb, rb.Tool, rb.Fits, pivots, chain);
+        // (a tool running past its faces, or one that fits but ends on a face at an angle: its square end leans past
+        // that face on one side and leaves a sliver on the other, as the tube's rim fillet on the plenum's end face.
+        // As the line tools, run on and cut back to the face; a fitting tool with square ends is left as it is)
+        bool skew = rb.Fits && ChainEnds(chain).Any(x => !pivots.Any(p => ReferenceEquals(p.v, x.v))
+            && EndPlane(x.v, x.dirOut, x.fa, x.fb, chain, sel, out _, nearSquare: true) != null);
+        if (rb.Fits && !skew) return JoinPivots(rb, rb.Tool, rb.Fits, pivots, chain);
         var cuts = new List<(Vec3 v, Plane pl)>();
         var corners = new List<RoundCornerCut>();
         var run = 3 * size;
         var on = RollingBall.Build(chain, size, name, OnFaces, (v, dirOut, fa, fb) =>
         {
             if (pivots.Any(x => ReferenceEquals(x.v, v))) return 0;
-            if (EndPlane(v, dirOut, fa, fb, chain, sel) is not { } pl) return 0;
+            if (EndPlane(v, dirOut, fa, fb, chain, sel, out _, nearSquare: skew) is not { } pl) return 0;
             if (RoundCorner(v, fa, fb, chain, sel, pl, size, name) is { } rc) corners.Add(rc);
             else cuts.Add((v.P, pl));
             return run;
@@ -1259,7 +1263,8 @@ public static class NativeBlend
 
     /// <summary><see cref="EndPlane(NVertex, Vec3, NFace, NFace, IEnumerable{NEdge}, IReadOnlyCollection{NEdge}?)"/>,
     /// with the other faces' planes there (oriented the same way).</summary>
-    internal static Plane? EndPlane(NVertex v, Vec3 dirOut, NFace fa, NFace fb, IEnumerable<NEdge> blended, IReadOnlyCollection<NEdge>? selected, out List<Plane>? others)
+    internal static Plane? EndPlane(NVertex v, Vec3 dirOut, NFace fa, NFace fb, IEnumerable<NEdge> blended, IReadOnlyCollection<NEdge>? selected, out List<Plane>? others,
+        bool nearSquare = false)
     {
         others = null;
         var inside = v.P - dirOut.Normalized * 1e-3;
@@ -1311,7 +1316,9 @@ public static class NativeBlend
                     if (cos < 0.05) return null; // a face along the edge
                     var pl = Plane.FromPointNormal(v.P, n);
                     if (pl.Distance(inside) < 0) pl = Plane.FromPointNormal(v.P, -n);
-                    if (!planes.Any(q => Math.Abs(Vec3.Dot(q.pl.Normal, pl.Normal) - 1) < 1e-9)) planes.Add((pl, cos > 0.9999));
+                    // (nearSquare: only a face exactly square to the edge counts as square; one a fraction of a degree
+                    // off it leaves a sliver between it and the tool's end)
+                    if (!planes.Any(q => Math.Abs(Vec3.Dot(q.pl.Normal, pl.Normal) - 1) < 1e-9)) planes.Add((pl, cos > (nearSquare ? 1 - 1e-10 : 0.9999)));
                 }
             }
         if (planes.Count > 1)
