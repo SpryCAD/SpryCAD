@@ -12,7 +12,7 @@ namespace SpryCad.Tests;
 /// before the pattern (body.step), the seed's tool (tool.step) and the instances' motions (transforms.txt: twelve
 /// numbers a line, the rows of the 3x4 matrix), then times SpryCAD doing the same: the tool moved to every instance,
 /// the copies fused, cut from (or added to) the body, the boolean cache cleared each run. Prints the result's exact
-/// volume and face count.
+/// volume and face count; with FC_OCCT_STEP=1 also on the geometry read back from the STEP files (as the other kernel gets it).
 /// </summary>
 static class OcctPrep
 {
@@ -38,20 +38,30 @@ static class OcctPrep
         File.WriteAllText(Path.Combine(outDir, "op.txt"), info.IsCut ? "cut" : "fuse");
         Console.WriteLine($"{name}: {transforms.Count} copies of a {tool.Native!.Faces.Count}-face tool, {(info.IsCut ? "cut from" : "added to")} a {body.Native!.Faces.Count}-face body");
 
-        var times = new List<double>();
-        Solid? result = null;
-        for (int run = 0; run <= runs; run++)
+        void Time(string label, Solid b0, Solid t0)
         {
-            Csg.ClearCache();
-            var sw = Stopwatch.StartNew();
-            var copies = transforms.Select((t, i) => tool.Transformed(t, $"P.{i + 1}.")).ToList();
-            var all = Csg.UnionAll(copies);
-            result = info.IsCut ? Csg.Subtract(body, all) : Csg.Union(body, all);
-            if (run > 0) times.Add(sw.Elapsed.TotalMilliseconds);
+            var times = new List<double>();
+            Solid? result = null;
+            for (int run = 0; run <= runs; run++)
+            {
+                Csg.ClearCache();
+                var sw = Stopwatch.StartNew();
+                var copies = transforms.Select((t, i) => t0.Transformed(t, $"P.{i + 1}.")).ToList();
+                var all = Csg.UnionAll(copies);
+                result = info.IsCut ? Csg.Subtract(b0, all) : Csg.Union(b0, all);
+                if (run > 0) times.Add(sw.Elapsed.TotalMilliseconds);
+            }
+            times.Sort();
+            var mp = NMass.Of(result!.Native!);
+            var vol = mp?.Volume ?? result.Volume();
+            Console.WriteLine($"{label}: median {times[times.Count / 2]:0.0} ms (min {times[0]:0.0}) over {runs} runs; volume {vol:R}{(mp == null ? " (mesh)" : "")}, {result.Native!.Faces.Count} faces");
         }
-        times.Sort();
-        var mp = NMass.Of(result!.Native!);
-        Console.WriteLine($"SpryCAD: median {times[times.Count / 2]:0.0} ms (min {times[0]:0.0}) over {runs} runs; volume {mp?.Volume:R}, {result.Native!.Faces.Count} faces");
+        Time("SpryCAD", body, tool);
+        // on the geometry the STEP files hold (what another kernel reads: e.g. thread faces as B-splines), when asked
+        // (FC_OCCT_STEP=1): B-spline threads are far slower than the exact screw surfaces
+        if (Environment.GetEnvironmentVariable("FC_OCCT_STEP") == null) return 0;
+        Solid Read(string f, string prefix) => NTess.ToSolid(StepImport.Read(File.ReadAllBytes(Path.Combine(outDir, f)), prefix).Solids.Single().Body);
+        Time("SpryCAD, on the STEP geometry", Read("body.step", "B."), Read("tool.step", "T."));
         return 0;
     }
 }
