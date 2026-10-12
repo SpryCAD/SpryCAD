@@ -118,7 +118,7 @@ public sealed partial class SketchEditor : IViewportMode
             SketchTool.Spline => "Spline: click the points it passes through; click the first again to close it. Double-click, Enter or Esc ends it.",
             SketchTool.Polygon => $"Polygon ({PolygonSides} sides): click the center, then a vertex.",
             SketchTool.Slot => "Straight Slot: click the first center, the second center, then the width.",
-            SketchTool.SmartDimension => "Smart Dimension: select one or two entities, then click to place the dimension.",
+            SketchTool.SmartDimension => "Smart Dimension: select one or two entities (the origin's red axis stubs too: an angle to the axis), then click to place the dimension.",
             SketchTool.Trim => "Trim: click the part of an entity to delete (between intersections).",
             SketchTool.Fillet => $"Sketch Fillet (R {Expr.Format(FilletRadius)}): click corners where two lines or arcs meet, or the two of them. Deleting a fillet's arc restores the corner.",
             _ => "Select sketch entities. Drag to move; double-click a dimension to edit it.",
@@ -1369,11 +1369,34 @@ public sealed partial class SketchEditor : IViewportMode
             h = CreateModelReference(p.X, p.Y);
             Resolve();
         }
+        // the sketch's axes (the origin's red stubs): a fixed reference line along it, for an angle to the axis
+        if (h == null && _dimPicks.Count < 2 && AxisCandidate(p.X, p.Y) is { } axis)
+        {
+            Snapshot();
+            h = new SkRef(SkRefKind.Entity, SketchReferences.Axis(Sk, axis, Px * 25).Id);
+            Resolve();
+        }
         if (h == null) return;
         if (h.Value.Kind == SkRefKind.Constraint) return;
         _dimPicks.Add(h.Value);
         UpdateDimPreview();
         _vp.Redraw();
+    }
+
+    /// <summary>"H" or "V" when the cursor is on the origin's horizontal or vertical axis stub (as drawn).</summary>
+    string? AxisCandidate(double x, double y)
+    {
+        var o = Screen(Sk.P(Sketch.OriginId));
+        foreach (var (axis, d) in new[] { ("H", new Vec2(Px * 25, 0)), ("V", new Vec2(0, Px * 25)) })
+        {
+            var e = Screen(Sk.P(Sketch.OriginId) + d);
+            double dx = e.X - o.X, dy = e.Y - o.Y, l2 = dx * dx + dy * dy;
+            if (l2 < 1) continue;
+            var t = Math.Clamp(((x - o.X) * dx + (y - o.Y) * dy) / l2, 0, 1);
+            double qx = o.X + t * dx - x, qy = o.Y + t * dy - y;
+            if (t > 0.2 && qx * qx + qy * qy < 7 * 7) return axis;
+        }
+        return null;
     }
 
     /// <summary>Model vertex or edge under the cursor (vertices win).</summary>

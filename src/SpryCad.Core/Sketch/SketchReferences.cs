@@ -56,12 +56,24 @@ public static class SketchReferences
         return sk.Add(new SkLine { P1 = pa.Id, P2 = pb.Id, External = ext });
     }
 
+    /// <summary>
+    /// Creates (or reuses) a reference line along the sketch's horizontal ("H") or vertical ("V") axis, from the origin
+    /// for <paramref name="length"/>: fixed, to dimension angles to the axis without drawing and defining a line for it.
+    /// </summary>
+    public static SkLine Axis(Sketch sk, string axis, double length)
+    {
+        if (sk.Entities.OfType<SkLine>().FirstOrDefault(e => e.External?.Axis == axis) is { } existing) return existing;
+        var pa = sk.AddPoint(Vec2.Zero, fix: true);
+        var pb = sk.AddPoint(axis == "H" ? new Vec2(length, 0) : new Vec2(0, length), fix: true);
+        return (SkLine)sk.Add(new SkLine { P1 = pa.Id, P2 = pb.Id, External = new SkExternal { Axis = axis } });
+    }
+
     /// <summary>Re-projects all reference entities from the model. Missing references produce warnings.</summary>
     public static void Update(Sketch sk, Frame frame, ModelState state, List<string> warnings)
     {
         foreach (var e in sk.Entities)
         {
-            if (e.External is not { } ext) continue;
+            if (e.External is not { } ext || ext.Axis != null) continue;
             TopoEdge te;
             try { (_, te) = Resolver.ResolveEdge(ext.Edge, state); }
             catch (FeatureException) { warnings.Add("A dimension references a model edge that no longer exists."); continue; }

@@ -944,8 +944,9 @@ public sealed class Regenerator
 
         void DoLoft(LoftFeature l)
         {
-            if (l.SectionSketchIds.Count < 2) throw new FeatureException("Select two profile sketches at least.");
-            if (l.SectionSketchIds.Distinct().Count() < l.SectionSketchIds.Count) throw new FeatureException("A profile sketch is selected twice.");
+            if (l.SectionSketchIds.Count < 2) throw new FeatureException("Select two profiles at least (sketches or planar faces).");
+            var named = l.SectionSketchIds.Where(id => id != "").ToList();
+            if (named.Distinct().Count() < named.Count) throw new FeatureException("A profile sketch is selected twice.");
             if (l.GuideSketchIds.Intersect(l.SectionSketchIds).Any()) throw new FeatureException("A sketch cannot be both a profile and a guide.");
             var centerline = string.IsNullOrEmpty(l.CenterlineSketchId) ? null : l.CenterlineSketchId;
             if (centerline != null && (l.SectionSketchIds.Contains(centerline) || l.GuideSketchIds.Contains(centerline)))
@@ -953,6 +954,7 @@ public sealed class Regenerator
             var sections = new List<Kernel.Native.NLoft.Section>();
             for (int i = 0; i < l.SectionSketchIds.Count; i++)
             {
+                if (l.SectionSketchIds[i] == "") { sections.Add(FaceSection(l.SectionFaces.ElementAtOrDefault(i), i)); continue; }
                 var sk = GetSketch(l.SectionSketchIds[i]);
                 if (sk.Regions.Count > 0) { sections.Add(new(sk.Frame, sk.Regions)); continue; }
                 // no closed profile: a single point (the loft's first or last section)
@@ -984,6 +986,22 @@ public sealed class Regenerator
             catch (ArgumentException ex) { throw new FeatureException(char.ToUpper(ex.Message[0]) + ex.Message[1..] + "."); }
             ApplyTool(tool, l.IsCut, l.Merge);
             State.Tools[f.Id] = new ToolInfo(tool, l.IsCut, l.Merge);
+        }
+
+        /// <summary>A planar model face as a loft profile: its edges converted (as Convert Entities) on its plane.</summary>
+        Kernel.Native.NLoft.Section FaceSection(FaceRef? fr, int i)
+        {
+            if (fr == null || Resolver.NativeFace(fr, State) is not { } hit) throw new FeatureException($"Profile {i + 1}: the face could not be found.");
+            if (hit.face.Surface.Kind != SurfaceKind.Plane) throw new FeatureException($"Profile {i + 1}: a face as a profile must be planar.");
+            var pl = hit.face.Sense ? hit.face.Surface.Plane! : hit.face.Surface.Plane!.Flipped();
+            var box = hit.face.Bounds();
+            var x = pl.Normal.AnyPerpendicular();
+            var frame = new Frame(pl.Project((box.Min + box.Max) / 2), x, Vec3.Cross(pl.Normal, x), pl.Normal);
+            var sk = new Sketch();
+            SketchConvert.Face(sk, frame, hit.body.Solid.Native!, hit.body.Id, hit.face.Tag.Name);
+            var regions = ProfileExtractor.Extract(sk, out _);
+            if (regions.Count == 0) throw new FeatureException($"Profile {i + 1}: the face's edges do not close a profile.");
+            return new(frame, regions);
         }
 
         /// <summary>Whether a boolean changed the body (native: topology counts, so no tessellation is needed).</summary>

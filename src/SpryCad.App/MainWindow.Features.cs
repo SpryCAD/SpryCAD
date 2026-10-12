@@ -428,10 +428,16 @@ public partial class MainWindow
     {
         var page = new PmPage(f.IsCut ? "Cut-Loft" : "Loft", f.IsCut ? "cutloft" : "loft");
         var sec = page.Section("Profiles");
-        var profBox = page.Selection(sec, "Profiles", SelFilter.Sketch, "Profile sketches in order: closed profiles (the first or last may be a single point)");
-        foreach (var id in f.SectionSketchIds) profBox.Items.Add(new SelItem { Kind = SelKind.Sketch, FeatureId = id });
+        var profBox = page.Selection(sec, "Profiles", SelFilter.Sketch | SelFilter.PlanarFace,
+            "Profiles in order: sketches of closed profiles (the first or last may be a single point), or planar faces of the model");
+        for (int i = 0; i < f.SectionSketchIds.Count; i++)
+            profBox.Items.Add(f.SectionSketchIds[i] == "" && f.SectionFaces.ElementAtOrDefault(i) is { } sf ? FaceItem(sf) : new SelItem { Kind = SelKind.Sketch, FeatureId = f.SectionSketchIds[i] });
         profBox.Refresh();
-        profBox.Changed += () => f.SectionSketchIds = profBox.Items.Select(i => i.FeatureId).ToList();
+        profBox.Changed += () =>
+        {
+            f.SectionSketchIds = profBox.Items.Select(i => i.Kind == SelKind.Face ? "" : i.FeatureId ?? "").ToList();
+            f.SectionFaces = profBox.Items.Any(i => i.Kind == SelKind.Face) ? profBox.Items.Select(i => i.Kind == SelKind.Face ? i.ToFaceRef() : null).ToList() : new();
+        };
         page.Info(sec, "The loft runs through the profiles in the order they are picked. Each profile's corners are matched to the next one's with the least twist.");
         var gsec = page.Section("Guide Curves");
         var guideBox = page.Selection(gsec, "Guides", SelFilter.Sketch, "Optional: sketches of tangent lines and arcs through every profile (one guide per chain)");

@@ -296,6 +296,54 @@ static class CoreTests
             t.Near(Volume(all.Clone()), 80 * 40 * 20, 1);
         });
 
+        t.Test("Sketch: an angle dimension to the sketch's horizontal axis fully defines a line from the origin", () =>
+        {
+            var sk = new Sketch();
+            var end = sk.AddPoint(new Vec2(3, 9));
+            var line = sk.Add(new SkLine { P1 = Sketch.OriginId, P2 = end.Id, Construction = true });
+            var axis = SketchReferences.Axis(sk, "H", 2);
+            t.True(ReferenceEquals(SketchReferences.Axis(sk, "H", 5), axis), "reused");
+            var len = sk.AddConstraint(CType.Distance, line.Id); len.Value = 1;
+            var ang = sk.AddConstraint(CType.Angle, axis.Id, line.Id); ang.Value = 70;
+            SketchSolver.CaptureSign(sk, len); SketchSolver.CaptureSign(sk, ang);
+            var res = SketchSolver.Solve(sk);
+            t.True(res.Converged, "solves");
+            t.Eq(res.Dof, 0);
+            t.Near(Vec2.Distance(sk.P(end.Id), new Vec2(Math.Cos(70 * Math.PI / 180), Math.Sin(70 * Math.PI / 180))), 0, 1e-9);
+            // in a part: the rebuild leaves the axis alone (no model edge behind it), and it is saved
+            var doc = new CadDocument();
+            var sf = doc.AddFeature(new SketchFeature { Plane = PlaneRef.Front, Sketch = sk });
+            var r = new Regenerator().Rebuild(doc);
+            t.True(r.Status[sf.Id].Ok && r.Status[sf.Id].Warnings.Count == 0, r.Status[sf.Id].Error ?? string.Join("; ", r.Status[sf.Id].Warnings));
+            var copy = (SketchFeature)sf.Clone();
+            t.Eq(copy.Sketch.Entities.OfType<SkLine>().Count(e => e.External?.Axis == "H"), 1);
+        });
+
+        t.Test("Loft from a model face to a sketch", () =>
+        {
+            var doc = new CadDocument();
+            var s1 = doc.AddFeature(new SketchFeature { Plane = PlaneRef.Front, Sketch = Rect(100, 60) });
+            var e1 = doc.AddFeature(new ExtrudeFeature { SketchId = s1.Id, Depth = "20" });
+            var p = doc.AddFeature(new PlaneFeature { Base = PlaneRef.Front, Offset = "60" });
+            var sk = new Sketch(); var c = sk.AddPoint(new Vec2(50, 30)); sk.Add(new SkCircle { Center = c.Id, R = 15 });
+            var s2 = doc.AddFeature(new SketchFeature { Plane = new PlaneRef { Feature = p.Id }, Sketch = sk });
+            var loft = doc.AddFeature(new LoftFeature
+            {
+                SectionSketchIds = { "", s2.Id },
+                SectionFaces = { new FaceRef { Name = e1.Id + ".End", Hint = new Vec3(50, 30, 20), Normal = Vec3.UnitZ }, null },
+            });
+            var r = new Regenerator().Rebuild(doc);
+            foreach (var f in doc.Features) t.True(r.Status[f.Id].Ok, $"{f.Name}: {r.Status[f.Id].Error}");
+            var b = r.State.Bodies.Single();
+            t.Eq(b.Solid.Native!.Validate(), null);
+            var v = KernelTests.Vex(b.Solid) - 100 * 60 * 20;
+            t.True(v > 40 * Math.PI * 225 && v < 40 * 6000, $"the loft between its ends: {v}");
+            t.Eq(string.Join(",", loft.Consumes), s2.Id);
+            // saved and read back
+            var back = CadDocument.FromJson(doc.ToJson());
+            t.Eq(((LoftFeature)back.Find(loft.Id)!).SectionFaces[0]!.Name, e1.Id + ".End");
+        });
+
         t.Test("Extrude Up To Surface (a face, a plane, a cylinder) and Up To Body", () =>
         {
             static Sketch CircleAt(Frame fr, Vec3 world, double r)

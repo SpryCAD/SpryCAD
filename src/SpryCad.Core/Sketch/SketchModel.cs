@@ -24,9 +24,11 @@ public sealed class SkExternal
     /// <summary>True: the end vertex of <see cref="Edge"/> nearest to <see cref="Hint"/>.</summary>
     public bool Vertex { get; set; }
     public Vec3 Hint { get; set; }
+    /// <summary>"H" or "V": the sketch's own horizontal or vertical axis through its origin (no model edge).</summary>
+    public string? Axis { get; set; }
 
     public bool SameAs(SkExternal o) =>
-        Vertex == o.Vertex && Vec3.Distance(Hint, o.Hint) < 1e-6 &&
+        Axis == o.Axis && Vertex == o.Vertex && Vec3.Distance(Hint, o.Hint) < 1e-6 &&
         ((Edge.A == o.Edge.A && Edge.B == o.Edge.B) || (Edge.A == o.Edge.B && Edge.B == o.Edge.A));
 }
 

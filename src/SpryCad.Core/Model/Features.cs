@@ -157,7 +157,10 @@ public enum LoftTangency { None, Normal }
 public sealed class LoftFeature : Feature
 {
     public override string Kind => IsCut ? "Cut-Loft" : "Loft";
+    /// <summary>The profiles in order: sketches; blank where the profile is a model face (<see cref="SectionFaces"/>).</summary>
     public List<string> SectionSketchIds { get; set; } = new();
+    /// <summary>Planar model faces as profiles, at the places the sketch id is blank (null elsewhere; empty: none).</summary>
+    public List<FaceRef?> SectionFaces { get; set; } = new();
     public List<string> GuideSketchIds { get; set; } = new();
     /// <summary>A sketch of one tangent chain of lines and arcs through every profile's plane: the loft follows it (blank: none).</summary>
     public string? CenterlineSketchId { get; set; }
@@ -170,7 +173,7 @@ public sealed class LoftFeature : Feature
     public string EndLength { get; set; } = "1";
     public bool IsCut { get; set; }
     public bool Merge { get; set; } = true;
-    public override IEnumerable<string> Consumes => SectionSketchIds.Concat(GuideSketchIds).Concat(string.IsNullOrEmpty(CenterlineSketchId) ? Array.Empty<string>() : new[] { CenterlineSketchId });
+    public override IEnumerable<string> Consumes => SectionSketchIds.Where(id => id != "").Concat(GuideSketchIds).Concat(string.IsNullOrEmpty(CenterlineSketchId) ? Array.Empty<string>() : new[] { CenterlineSketchId });
 }
 
 /// <summary>
