@@ -197,8 +197,8 @@ public static class OptionsDialog
     static Commit FilesPage(Form f, Context c)
     {
         f.Section("Saving parts");
-        var container = f.Check("Always save parts as containers (with a preview image)", UserSettings.SaveContainer,
-            "Otherwise parts are saved as plain JSON, unless they embed other files (e.g. an imported model). Either kind opens normally.");
+        var author = new TextBox { Text = UserSettings.AuthorName, MinWidth = 200 };
+        f.Row("Your name", author, "Every save of a part is kept in its history, under this name.");
         var modes = new[] { KeepDisplay.Always, KeepDisplay.SlowParts, KeepDisplay.Never };
         var keep = Combo(new[] { "Of every part", "Of slow parts", "Never" }, Array.IndexOf(modes, UserSettings.KeepDisplay));
         keep.MinWidth = 150;
@@ -208,19 +208,19 @@ public static class OptionsDialog
         keep.SelectionChanged += (_, _) => Sync();
         Sync();
         f.Row("Keep the display", new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, Children = { keep, slower } },
-            "A container keeps the part as last built, so it shows at once when opened while it rebuilds (larger files). Plain JSON files never do.");
+            "The part keeps its display as last built, so it shows at once when opened while it rebuilds (larger files).");
         f.Section("Saving assemblies");
         var meshes = f.Check("Keep the parts' meshes", UserSettings.AssemblyMeshes,
             "The assembly opens without rebuilding its parts, and shows parts that have gone missing (larger files). Otherwise its parts are rebuilt when it opens; lightweight parts always keep theirs.");
         double seconds = UserSettings.KeepDisplaySeconds;
         return new Commit(
-            () => keep.SelectedIndex != 0 || (Expr.TryEval(secs.Text, null, out seconds, out _) && seconds >= 0) ? null : "Keep the display: a number of seconds, 0 or more.",
+            () => keep.SelectedIndex != 1 || (Expr.TryEval(secs.Text, null, out seconds, out _) && seconds >= 0) ? null : "Keep the display: a number of seconds, 0 or more.",
             () => () =>
             {
-                UserSettings.SaveContainer = container.IsChecked == true;
+                if (!string.IsNullOrWhiteSpace(author.Text)) UserSettings.AuthorName = author.Text.Trim();
                 UserSettings.AssemblyMeshes = meshes.IsChecked == true;
                 if (keep.SelectedIndex >= 0) UserSettings.KeepDisplay = modes[keep.SelectedIndex];
-                if (keep.SelectedIndex == 0) UserSettings.KeepDisplaySeconds = seconds;
+                if (keep.SelectedIndex == 1) UserSettings.KeepDisplaySeconds = seconds;
             });
     }
 

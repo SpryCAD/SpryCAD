@@ -5,7 +5,9 @@ using System.Text;
 namespace SpryCad.Core.Model;
 
 /// <summary>
-/// Reads and writes .sprt files. Plain files are the document's JSON. Containers are ZIP archives:
+/// Reads and writes .sprt files. A part is saved as a database (<see cref="Storage.PartFile"/>: its history,
+/// embedded files, preview and display). Parts saved before are still read: plain files are the document's JSON,
+/// containers ZIP archives:
 /// <code>
 ///   mimetype                "application/x-sprycad-part", the first entry, uncompressed (<see cref="MimeEntry"/>)
 ///   model.json              the document (the same JSON as a plain file)
@@ -14,7 +16,8 @@ namespace SpryCad.Core.Model;
 ///   display.mesh            the display as last built (optional; a display cache, made for display.revision)
 ///   display.revision        the revision the display was made for
 /// </code>
-/// The kind is recognized from the first bytes ("PK" for ZIP), not the extension.
+/// The kind is recognized from the first bytes (SQLite's header, "PK" for ZIP), not the extension. The ZIP layout's
+/// names stay in use for assemblies (<see cref="Assembly.AssemblyContainer"/>).
 /// </summary>
 public static class DocumentContainer
 {
@@ -35,13 +38,6 @@ public static class DocumentContainer
 
     /// <summary>Writes the <see cref="MimeEntry"/>: it must be the archive's first entry.</summary>
     public static void WriteMime(ZipArchive zip, string mime) => Write(zip, MimeEntry, Encoding.ASCII.GetBytes(mime), CompressionLevel.NoCompression);
-
-    public static bool IsContainer(string path)
-    {
-        using var fs = File.OpenRead(path);
-        Span<byte> head = stackalloc byte[4];
-        return fs.Read(head) == 4 && IsZip(head);
-    }
 
     static bool IsZip(ReadOnlySpan<byte> b) => b.Length >= 4 && b[0] == 0x50 && b[1] == 0x4B && b[2] == 0x03 && b[3] == 0x04;
 
@@ -71,43 +67,11 @@ public static class DocumentContainer
         return Kernel.Thumbnail.Render(bodies.Select(b => (b.Mesh, doc.Color)));
     }
 
-    public static void Save(CadDocument doc, string path, bool container)
+    /// <summary>Saves the part (a revision of its history: <see cref="Storage.PartFile.Save"/>).</summary>
+    public static void Save(CadDocument doc, string path, string? author = null)
     {
         foreach (var name in doc.Files.Keys) CheckName(name);
-        // the part's identity (kept), and this save's revision
-        doc.Id ??= CadDocument.NewGuid();
-        doc.Revision = CadDocument.NewGuid();
-        // the index in model.json always matches the files written
-        doc.Attachments = doc.Files.Count == 0 ? null
-            : doc.Files.OrderBy(f => f.Key, StringComparer.Ordinal)
-                .Select(f => new AttachmentInfo { Name = f.Key, Size = f.Value.LongLength, Sha256 = HashOf(f.Value) }).ToList();
-        var json = doc.ToJson();
-        var tmp = path + ".saving";
-        try
-        {
-            if (!container && doc.Files.Count == 0) File.WriteAllText(tmp, json);
-            else
-            {
-                using var fs = File.Create(tmp);
-                using var zip = new ZipArchive(fs, ZipArchiveMode.Create);
-                WriteMime(zip, PartMime);
-                Write(zip, ModelEntry, Encoding.UTF8.GetBytes(json), CompressionLevel.Optimal);
-                foreach (var a in doc.Attachments ?? new())
-                    Write(zip, AttachmentFolder + a.Name, doc.Files[a.Name], CompressionLevel.Optimal);
-                if (doc.Thumbnail != null) Write(zip, ThumbnailEntry, doc.Thumbnail, CompressionLevel.NoCompression);
-                if (doc.Display != null)
-                {
-                    Write(zip, DisplayEntry, doc.Display, CompressionLevel.Fastest);
-                    Write(zip, DisplayRevisionEntry, Encoding.UTF8.GetBytes(doc.Revision!), CompressionLevel.NoCompression);
-                }
-            }
-            File.Move(tmp, path, overwrite: true);
-        }
-        catch
-        {
-            try { File.Delete(tmp); } catch { /* best effort */ }
-            throw;
-        }
+        Storage.PartFile.Save(doc, path, author);
     }
 
     static void Write(ZipArchive zip, string name, byte[] data, CompressionLevel level)
@@ -117,11 +81,13 @@ public static class DocumentContainer
         s.Write(data);
     }
 
-    public static CadDocument Load(string path) => Load(File.ReadAllBytes(path), Path.GetFileName(path));
+    public static CadDocument Load(string path) =>
+        Storage.PartDatabase.IsFile(path) ? Storage.PartFile.Load(path) : Load(File.ReadAllBytes(path), Path.GetFileName(path));
 
     /// <summary>A part from its file's bytes (e.g. a part embedded in an assembly); <paramref name="name"/> for messages.</summary>
     public static CadDocument Load(byte[] bytes, string name)
     {
+        if (Storage.PartDatabase.Is(bytes)) return OnDisk(bytes, Storage.PartFile.Load);
         if (!IsZip(bytes)) return CadDocument.FromJson(Encoding.UTF8.GetString(bytes)); // (BOM is skipped by the decoder)
         using var zip = new ZipArchive(new MemoryStream(bytes), ZipArchiveMode.Read);
         var model = zip.GetEntry(ModelEntry) ?? throw new InvalidDataException("Not a SpryCAD document (no model.json in the container).");
@@ -153,6 +119,7 @@ public static class DocumentContainer
     {
         try
         {
+            if (Storage.PartDatabase.IsFile(path)) return Storage.PartFile.ReadIdentity(path);
             var bytes = File.ReadAllBytes(path);
             byte[] json;
             if (IsZip(bytes))
@@ -168,10 +135,22 @@ public static class DocumentContainer
             string? Str(string name) => d.RootElement.TryGetProperty(name, out var v) && v.ValueKind == System.Text.Json.JsonValueKind.String ? v.GetString() : null;
             return (Str("id"), Str("revision"));
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or System.Text.Json.JsonException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or System.Text.Json.JsonException or Microsoft.Data.Sqlite.SqliteException)
         {
             return (null, null);
         }
+    }
+
+    /// <summary>A database's bytes read as a file (SQLite opens files): written to a temporary one, removed after.</summary>
+    static T OnDisk<T>(byte[] bytes, Func<string, T> read)
+    {
+        var tmp = Path.Combine(Path.GetTempPath(), "sprycad-" + Guid.NewGuid().ToString("N") + ".sprt");
+        try
+        {
+            File.WriteAllBytes(tmp, bytes);
+            return read(tmp);
+        }
+        finally { try { File.Delete(tmp); } catch { /* best effort */ } }
     }
 
     static byte[] Read(ZipArchiveEntry e)

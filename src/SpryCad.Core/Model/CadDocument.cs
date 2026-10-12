@@ -200,13 +200,11 @@ public sealed class CadDocument
     /// Saves the part: plain JSON, or a container when it has embedded files or <paramref name="container"/> is set.
     /// Written to a temporary file first, so a failed save never destroys the previous version.
     /// </summary>
-    public void Save(string path, bool container = false) => DocumentContainer.Save(this, path, container);
+    public void Save(string path, string? author = null) => DocumentContainer.Save(this, path, author);
 
     /// <summary>Loads plain JSON or container files.</summary>
     public static CadDocument Load(string path) => DocumentContainer.Load(path);
 
-    /// <summary>Whether the file is a container (ZIP) rather than plain JSON.</summary>
-    public static bool IsContainer(string path) => DocumentContainer.IsContainer(path);
 }
 
 /// <summary>An embedded file as listed in model.json.</summary>

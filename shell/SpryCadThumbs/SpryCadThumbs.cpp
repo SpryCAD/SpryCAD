@@ -1,9 +1,12 @@
-// Windows Explorer thumbnail handler for SpryCAD parts (.sprt).
+// Windows Explorer thumbnail handler for SpryCAD parts (.sprt) and assemblies (.sasm).
 //
-// A part saved as a container is a ZIP holding model.json and thumbnail.png, the preview the app renders on
-// save; the PNG is stored uncompressed (it is compressed already). This handler finds that entry, decodes it with
-// WIC and hands Explorer a bitmap. Plain JSON parts have no preview: the handler declines and Explorer shows the
-// file type icon. Explorer runs thumbnail handlers in an isolated surrogate process, on the file's stream.
+// A part is an SQLite database (marked "SPRY" at offset 68) whose Thumbnail table holds the preview the app renders
+// on save, as a plain PNG: read with Windows' own SQLite (winsqlite3, part of Windows 10 and later), from a
+// temporary copy of the stream (SQLite opens files), with one query. Assemblies and parts saved before are ZIP
+// containers holding thumbnail.png, stored uncompressed (it is compressed already): found through the ZIP's
+// directory. Either PNG is decoded with WIC and handed to Explorer as a bitmap. A file with no preview (plain
+// JSON parts saved long ago) is declined, and Explorer shows the file type icon. Explorer runs thumbnail handlers
+// in an isolated surrogate process, on the file's stream.
 //
 // Built by build\make-thumbs.ps1 (cl.exe from the Visual Studio C++ build tools) and registered by the installer;
 // for a development build, "regsvr32 SpryCadThumbs.dll" registers it for the current user.
@@ -14,12 +17,14 @@
 #include <shlwapi.h>
 #include <thumbcache.h>
 #include <wincodec.h>
+#include <winsqlite/winsqlite3.h>
 #include <wrl/client.h>
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
 #include <cwchar>
 #include <new>
+#include <string>
 #include <vector>
 
 #pragma comment(lib, "shlwapi.lib")
@@ -28,6 +33,7 @@
 #pragma comment(lib, "advapi32.lib")
 #pragma comment(lib, "gdi32.lib")
 #pragma comment(lib, "ole32.lib")
+#pragma comment(lib, "winsqlite3.lib")
 
 using Microsoft::WRL::ComPtr;
 
@@ -110,6 +116,54 @@ static bool FindThumbnail(const std::vector<BYTE>& z, const BYTE*& data, size_t&
         p += 46 + nameLen + extraLen + commentLen;
     }
     return false;
+}
+
+// Whether the file is a SpryCAD database: SQLite's header, and the application id "SPRY" (big-endian) at offset 68.
+static bool IsSpryDatabase(const std::vector<BYTE>& f)
+{
+    static const char Header[] = "SQLite format 3";
+    if (f.size() < 72 || std::memcmp(f.data(), Header, sizeof Header) != 0) return false; // (the header ends in a 0 byte)
+    const uint32_t id = (static_cast<uint32_t>(f[68]) << 24) | (f[69] << 16) | (f[70] << 8) | f[71];
+    return id == 0x53505259;
+}
+
+// The largest preview in a SpryCAD database's Thumbnail table. The bytes are written to a temporary file that
+// Windows' SQLite opens read-only (the file is ours alone: no locks to share), then removed.
+static bool DatabaseThumbnail(const std::vector<BYTE>& f, std::vector<BYTE>& png)
+{
+    if (f.size() > MAXDWORD) return false;
+    wchar_t dir[MAX_PATH + 1], path[MAX_PATH + 1];
+    if (!GetTempPathW(MAX_PATH + 1, dir) || !GetTempFileNameW(dir, L"spr", 0, path)) return false;
+    bool ok = false;
+    HANDLE h = CreateFileW(path, GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_TEMPORARY, nullptr);
+    if (h != INVALID_HANDLE_VALUE)
+    {
+        DWORD written = 0;
+        const bool all = WriteFile(h, f.data(), static_cast<DWORD>(f.size()), &written, nullptr) && written == f.size();
+        CloseHandle(h);
+        const int n = all ? WideCharToMultiByte(CP_UTF8, 0, path, -1, nullptr, 0, nullptr, nullptr) : 0;
+        if (n > 0)
+        {
+            std::string utf8(static_cast<size_t>(n), '\0');
+            WideCharToMultiByte(CP_UTF8, 0, path, -1, utf8.data(), n, nullptr, nullptr);
+            sqlite3* db = nullptr;
+            if (sqlite3_open_v2(utf8.c_str(), &db, SQLITE_OPEN_READONLY, nullptr) == SQLITE_OK)
+            {
+                sqlite3_stmt* q = nullptr;
+                if (sqlite3_prepare_v2(db, "SELECT Png FROM Thumbnail ORDER BY Size DESC LIMIT 1", -1, &q, nullptr) == SQLITE_OK
+                    && sqlite3_step(q) == SQLITE_ROW)
+                {
+                    const BYTE* p = static_cast<const BYTE*>(sqlite3_column_blob(q, 0));
+                    const int len = sqlite3_column_bytes(q, 0);
+                    if (p && len > 0) { png.assign(p, p + len); ok = true; }
+                }
+                sqlite3_finalize(q);
+            }
+            sqlite3_close(db);
+        }
+    }
+    DeleteFileW(path);
+    return ok;
 }
 
 // Decodes a PNG and scales it to fit cx x cx (keeping its proportions) into a 32-bit top-down DIB with alpha.
@@ -198,6 +252,12 @@ public:
         std::vector<BYTE> file;
         HRESULT hr = ReadAll(_stream.Get(), file);
         if (FAILED(hr)) return hr;
+        if (IsSpryDatabase(file))
+        {
+            std::vector<BYTE> png;
+            if (!DatabaseThumbnail(file, png)) return E_FAIL; // no preview: Explorer shows the icon
+            return PngToBitmap(png.data(), png.size(), cx, bitmap);
+        }
         const BYTE* png = nullptr;
         size_t size = 0;
         if (!FindThumbnail(file, png, size)) return E_FAIL; // no preview: Explorer shows the icon

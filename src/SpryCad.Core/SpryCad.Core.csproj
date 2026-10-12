@@ -11,4 +11,9 @@
     <ProjectReference Include="..\SpryCad.Kernel\SpryCad.Kernel.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.10" />
+    <PackageReference Include="ZstdSharp.Port" Version="0.8.6" />
+  </ItemGroup>
+
 </Project>
