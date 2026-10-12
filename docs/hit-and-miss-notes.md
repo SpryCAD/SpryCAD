@@ -73,9 +73,6 @@ Commands (from the repository root):
    the cheeks' outer top edges) 2.8 s, the loft itself 1.5 s. And the pit edges at R4 fail: "the fillet, cut back
    where it runs into neighbouring geometry, cannot be joined to the body (classification failed)" (they run into the
    barrel's end and the pedestals); R2 works.
-4e. **The casting's volume dropped 13,485 mm³ with no change to the part** (master b44e9e1 → f09e043, with #51, #53,
-   #55): 3,680,189 → 3,666,704, exact and valid both times. Not found yet which step (the per-step volumes on f09e043
-   look right where they can be checked); asked the session that follows the kernel.
 5. ~~A mirror with a suppressed seed silently mirrors nothing.~~ **FIXED (#37)**: it mirrors the rest and warns.
    Was: "Bearing pedestal, back" mirrored the pedestal, its
    corner rounds and "Pedestal into the body" (suppressed): no error, no warning, and the back pedestal was simply
