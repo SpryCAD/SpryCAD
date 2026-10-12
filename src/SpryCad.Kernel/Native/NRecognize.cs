@@ -44,7 +44,7 @@ public static class NRecognize
             }
         if (best < 1e-6) return null; // normals (nearly) parallel: no axis to find
         axis = axis.Normalized;
-        foreach (var n in nrm) if (Math.Abs(Vec3.Dot(n, axis)) > 1e-7) return null;
+        foreach (var n in nrm) if (Math.Abs(Vec3.Dot(n, axis)) > 1e-7) return Cone(s, pts, nrm, tol, out flip);
 
         // circle through the points projected along the axis: |p - c|² = r² is linear in (c, r² - |c|²)
         var x = axis.AnyPerpendicular(); var y = Vec3.Cross(axis, x);
@@ -83,6 +83,80 @@ public static class NRecognize
         flip = !outward; // a cylinder's natural normal points away from the axis
         var refDir = (pts[0] - center) - axis * Vec3.Dot(pts[0] - center, axis);
         return new NSurface(new SurfaceDef { Kind = SurfaceKind.Cylinder, Origin = center, Axis = axis, RefDir = refDir, Radius = r, Segments = SurfaceDef.SegmentsFor(r) });
+    }
+
+    /// <summary>
+    /// The cone the surface is, or null: every normal at one angle to the axis (the differences of the normals are
+    /// perpendicular to it), every normal line through it, and the radius linear along it.
+    /// </summary>
+    static NSurface? Cone(NurbsSurface s, List<Vec3> pts, List<Vec3> nrm, double tol, out bool flip)
+    {
+        flip = false;
+        // the axis: perpendicular to the normals' differences
+        Vec3 axis = default; double best = 0;
+        for (int i = 1; i < nrm.Count; i++)
+            for (int j = i + 1; j < nrm.Count; j++)
+            {
+                var c = Vec3.Cross(nrm[i] - nrm[0], nrm[j] - nrm[0]);
+                if (c.LengthSq > best) { best = c.LengthSq; axis = c; }
+            }
+        if (best < 1e-12) return null;
+        axis = axis.Normalized;
+        var cos = Vec3.Dot(nrm[0], axis);
+        foreach (var n in nrm) if (Math.Abs(Vec3.Dot(n, axis) - cos) > 1e-7) return null;
+        if (Math.Abs(cos) > 1 - 1e-6) return null;
+        // a point of the axis: where the normal lines (seen along the axis) meet, by least squares
+        var x = axis.AnyPerpendicular(); var y = Vec3.Cross(axis, x);
+        var o = pts[0];
+        double a11 = 0, a12 = 0, a22 = 0, b1 = 0, b2 = 0;
+        for (int i = 0; i < pts.Count; i++)
+        {
+            var q = new Vec2(Vec3.Dot(pts[i] - o, x), Vec3.Dot(pts[i] - o, y));
+            var m = new Vec2(Vec3.Dot(nrm[i], x), Vec3.Dot(nrm[i], y)).Normalized;
+            // (I - m mᵀ) c = (I - m mᵀ) q
+            double p11 = 1 - m.X * m.X, p12 = -m.X * m.Y, p22 = 1 - m.Y * m.Y;
+            a11 += p11; a12 += p12; a22 += p22;
+            b1 += p11 * q.X + p12 * q.Y; b2 += p12 * q.X + p22 * q.Y;
+        }
+        var det = a11 * a22 - a12 * a12;
+        if (Math.Abs(det) < 1e-12 * pts.Count * pts.Count) return null;
+        var c2 = new Vec2((b1 * a22 - b2 * a12) / det, (a11 * b2 - a12 * b1) / det);
+        var centre = o + x * c2.X + y * c2.Y;
+        // the radius along the axis: r = r0 + k h
+        var h = pts.Select(p => Vec3.Dot(p - centre, axis)).ToList();
+        var r = pts.Select((p, i) => { var d = p - centre; return (d - axis * h[i]).Length; }).ToList();
+        double hm = h.Average(), rm = r.Average(), shh = 0, shr = 0;
+        for (int i = 0; i < h.Count; i++) { shh += (h[i] - hm) * (h[i] - hm); shr += (h[i] - hm) * (r[i] - rm); }
+        if (shh < 1e-24) return null;
+        var k = shr / shh;
+        if (Math.Abs(k) < 1e-9) return null;
+        double R(double hh) => rm + k * (hh - hm);
+        for (int i = 0; i < h.Count; i++) if (Math.Abs(r[i] - R(h[i])) > tol) return null;
+        // also between the samples
+        for (int i = 0; i + 1 < N; i++)
+            for (int j = 0; j + 1 < N; j++)
+            {
+                var p = s.Eval(s.U0 + (s.U1 - s.U0) * (i + 0.5) / (N - 1), s.V0 + (s.V1 - s.V0) * (j + 0.5) / (N - 1));
+                var hh = Vec3.Dot(p - centre, axis);
+                var d = p - centre - axis * hh;
+                if (Math.Abs(d.Length - R(hh)) > tol) return null;
+            }
+        // the axis towards the growing radius, the origin at the first sample's height (its radius there)
+        if (k < 0) { axis = -axis; k = -k; for (int i = 0; i < h.Count; i++) h[i] = -h[i]; }
+        var origin = centre + axis * h[0];
+        var refDir = pts[0] - origin; refDir -= axis * Vec3.Dot(refDir, axis);
+        var cone = new NSurface(new SurfaceDef { Kind = SurfaceKind.Cone, Origin = origin, Axis = axis, RefDir = refDir.Normalized, Radius = r[0], Param2 = Math.Atan(k), Segments = SurfaceDef.SegmentsFor(Math.Max(r.Max(), 1e-3)) });
+        // the normals agree (one side throughout)
+        int agree = 0;
+        for (int i = 0; i < pts.Count; i++)
+        {
+            var dot = Vec3.Dot(cone.Normal(pts[i]), nrm[i]);
+            if (Math.Abs(Math.Abs(dot) - 1) > 1e-6) return null;
+            agree += dot > 0 ? 1 : -1;
+        }
+        if (Math.Abs(agree) != pts.Count) return null;
+        flip = agree < 0;
+        return cone;
     }
 
     /// <summary>The line or circle a curve (on [0, 1], increasing in the edge's direction) is, or null.</summary>

@@ -27,6 +27,9 @@ public static class Icons
         ["revolve"] = ("M12 2v20 M12 5c5 0 8 3 8 7s-3 7-8 7", "M16 19l-4 0 2-3"),
         ["cutrevolve"] = ("M2 8L12 3l10 5v7l-10 5-10-5z M2 8l3.5 1.75 M8.5 11.25L12 13l10-5 M12 13v7", "M5.5 9.75c0 4.5 3 6 3 1.5 M5.5 9.75l10-5 M8.5 11.25l10-5"),
         ["sweep"] = ("M6 17c0-7 5-12 15-12 M9 20c0-5 4-9 12-9", "M3 18.5a4.5 2 0 1 0 9 0a4.5 2 0 1 0-9 0z"),
+        // loft: a square below, a circle above, joined at their sides; the circle (where it ends) in the accent
+        ["loft"] = ("M3 18l9 3.5 9-3.5-9-3.5z M3 18L7 6 M21 18L17 6", "M7 6a5 2 0 1 0 10 0a5 2 0 1 0-10 0z"),
+        ["cutloft"] = ("M2 8L12 3l10 5v7l-10 5-10-5z M2 8l3.5 1.75 M8.5 11.25L12 13l10-5 M12 13v7", "M5.5 9.75l1.5 4l2 1-0.5-3.5 M5.5 9.75l10-5 M8.5 11.25l10-5"),
         ["helical"] = ("M6 5h12 M6 9h12 M6 13h12 M6 17h12 M6 5l12 4 M6 9l12 4 M6 13l12 4", "M12 2v20"),
         ["cuthelical"] = ("M6 5h12 M6 9h12 M6 13h12 M6 17h12 M6 5l12 4 M6 9l12 4 M6 13l12 4 M3 21h18", "M12 2v20"),
         ["thread"] = ("M8 3v18 M16 3v18 M8 5l8 2 M8 9l8 2 M8 13l8 2 M8 17l8 2", "M4 21h16"),
