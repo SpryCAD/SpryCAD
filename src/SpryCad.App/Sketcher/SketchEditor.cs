@@ -120,7 +120,7 @@ public sealed partial class SketchEditor : IViewportMode
             SketchTool.Slot => "Straight Slot: click the first center, the second center, then the width.",
             SketchTool.SmartDimension => "Smart Dimension: select one or two entities, then click to place the dimension.",
             SketchTool.Trim => "Trim: click the part of an entity to delete (between intersections).",
-            SketchTool.Fillet => $"Sketch Fillet (R {Expr.Format(FilletRadius)}): click corners where two lines meet, or two lines. Deleting a fillet's arc restores the corner.",
+            SketchTool.Fillet => $"Sketch Fillet (R {Expr.Format(FilletRadius)}): click corners where two lines or arcs meet, or the two of them. Deleting a fillet's arc restores the corner.",
             _ => "Select sketch entities. Drag to move; double-click a dimension to edit it.",
         });
         _vp.Cursor = Cursor;

@@ -237,6 +237,7 @@ public partial class MainWindow
         if (d.Edge != null) return EdgeItem(d.Edge, st);
         if (d.Face != null) return FaceItem(d.Face);
         if (d.Plane != null) return PlaneItem(d.Plane, st);
+        if (d.Curve is { Sketch: { } cs }) return new SelItem { Kind = SelKind.SketchSegment, FeatureId = cs, SketchItem = d.Curve.SketchEntity };
         return null;
     }
 
@@ -286,8 +287,14 @@ public partial class MainWindow
         page.Combo(d1, "End", new List<(EndCondition, string)>
         {
             (EndCondition.Blind, "Blind"), (EndCondition.ThroughAll, "Through All"), (EndCondition.ThroughAllBoth, "Through All - Both"), (EndCondition.MidPlane, "Mid Plane"),
+            (EndCondition.UpToSurface, "Up To Surface"), (EndCondition.UpToBody, "Up To Body"),
         }, () => f.End, v => f.End = v);
         page.Check(d1, "Reverse direction", () => f.Reverse, v => f.Reverse = v);
+        // Up To Surface / Up To Body: where it ends (a plane, a planar or cylindrical face; for a body, any face of it)
+        var upTo = page.Selection(d1, "Up to", SelFilter.Face | SelFilter.Plane,
+            "Up To Surface: a plane, or a planar or cylindrical face, the extrude ends at. Up To Body: a face of the body it ends at", 1);
+        if (PlaneItem(f.UpTo, StateForEdit(f, isNew)) is { } ui) upTo.Items.Add(ui);
+        upTo.Changed += () => f.UpTo = upTo.Items.FirstOrDefault() is { } it ? (it.Kind == SelKind.Face ? new PlaneRef { Face = it.ToFaceRef() } : it.ToPlaneRef()) : null;
         page.Number(d1, "Depth", () => f.Depth, v => f.Depth = v, "dimension");
         // the side walls tapered from the sketch plane (narrowing along the extrusion; outward: widening)
         page.Number(d1, "Draft angle", () => f.Draft ?? "", v => f.Draft = string.IsNullOrWhiteSpace(v) ? null : v, "draft", "°", optional: true);
@@ -1110,7 +1117,7 @@ public partial class MainWindow
         var offsetRow = page.Number(r, "Offset", () => f.Offset, v => f.Offset = v, "dimension");
 
         var ax = page.Section("Axis");
-        var axisBox = page.Selection(ax, "Axis", SelFilter.Edge | SelFilter.Axis, "Linear edge, or the axis of a round face or circular edge (or choose X / Y / Z)", 1);
+        var axisBox = page.Selection(ax, "Axis", SelFilter.Edge | SelFilter.Axis | SelFilter.SketchSegment, "Linear edge, sketch line, or the axis of a round face or circular edge (or choose X / Y / Z)", 1);
         if (DirItem(f.Axis, st) is { } aItem) axisBox.Items.Add(aItem);
         page.Combo(ax, "Or axis", new List<(string, string)> { ("", "(selected edge)"), ("X", "X axis"), ("Y", "Y axis"), ("Z", "Z axis") },
             () => f.Axis?.Axis ?? "", v => { if (v != "") f.Axis = new DirRef { Axis = v }; });

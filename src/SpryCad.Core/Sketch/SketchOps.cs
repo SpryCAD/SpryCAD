@@ -11,11 +11,26 @@ public static class SketchOps
     /// </summary>
     public static (SkLine a, SkLine b)? CornerAt(Sketch sk, long point, out string? why)
     {
+        if (CurveCornerAt(sk, point, out why) is not var (a, b)) return null;
+        if (a is SkLine la && b is SkLine lb) return (la, lb);
+        why = "Sketch Fillet: click a corner where two lines meet.";
+        return null;
+    }
+
+    /// <summary>The ends of a line or arc (an arc's start and end, not its centre).</summary>
+    public static long[] EndsOf(SkEntity e) => e switch { SkLine l => new[] { l.P1, l.P2 }, SkArc a => new[] { a.Start, a.End }, _ => Array.Empty<long>() };
+
+    /// <summary>
+    /// The two solid lines or arcs ending at a point (a corner that can be filleted). Null, with why, otherwise.
+    /// </summary>
+    public static (SkEntity a, SkEntity b)? CurveCornerAt(Sketch sk, long point, out string? why)
+    {
         why = null;
         var solid = sk.EntitiesUsing(point).Where(e => !e.Construction && !e.IsReference && e is not SkPointEntity).ToList();
-        if (solid.Any(e => e is not SkLine)) { why = "Sketch Fillet: rounding a line to an arc is not supported yet; click a corner between two lines."; return null; }
-        if (solid.Count != 2) { why = "Sketch Fillet: click a corner where two lines meet."; return null; }
-        return ((SkLine)solid[0], (SkLine)solid[1]);
+        if (solid.Any(e => e is not (SkLine or SkArc) || !EndsOf(e).Contains(point)))
+        { why = "Sketch Fillet: click a corner where two lines or arcs end."; return null; }
+        if (solid.Count != 2) { why = "Sketch Fillet: click a corner where two lines or arcs meet."; return null; }
+        return (solid[0], solid[1]);
     }
 
     /// <summary>
@@ -26,8 +41,10 @@ public static class SketchOps
     /// </summary>
     public static string? Fillet(Sketch sk, long corner, double r)
     {
-        if (CornerAt(sk, corner, out var why) is not var (xa, xb)) return why;
+        if (CurveCornerAt(sk, corner, out var why0) is not var (ea, eb)) return why0;
         if (!(r > 0)) return "Sketch Fillet: the radius must be more than 0.";
+        if (ea is not SkLine || eb is not SkLine) return FilletCurves(sk, corner, ea, eb, r);
+        if (CornerAt(sk, corner, out var why) is not var (xa, xb)) return why;
         // a line trimmed by a fillet at its other end already stands for that fillet's original line
         SkLine OriginalOf(SkLine x) =>
             sk.Fillets?.FirstOrDefault(f => f.TrimA == x.Id) is { } fa ? (SkLine)sk.Entity(fa.LineA)!
@@ -79,6 +96,145 @@ public static class SketchOps
         dim.Value = r; dim.Expr = Expr.Format(r);
         dim.Name = "D" + sk.Constraints.Count(x => x.IsDimension);
         (sk.Fillets ??= new()).Add(new SkFillet { Arc = arc.Id, LineA = oa.Id, LineB = ob.Id, TrimA = trimA.Id, TrimB = trimB.Id });
+        return null;
+    }
+
+    /// <summary>
+    /// A fillet where an arc meets a line or another arc: as for two lines (<see cref="Fillet"/>), the originals stay
+    /// as construction and trimmed copies of them carry the profile. The fillet's centre is where the two curves'
+    /// offsets by the radius cross (a line moved either way, a circle grown or shrunk): of those, the one whose
+    /// tangent points lie on the two pieces next to the corner, nearest it.
+    /// </summary>
+    static string? FilletCurves(Sketch sk, long corner, SkEntity xa, SkEntity xb, double r)
+    {
+        // a piece trimmed by a fillet at its other end already stands for that fillet's original
+        SkEntity OriginalOf(SkEntity x) =>
+            sk.Fillets?.FirstOrDefault(f => f.TrimA == x.Id) is { } fa ? sk.Entity(fa.LineA)!
+            : sk.Fillets?.FirstOrDefault(f => f.TrimB == x.Id) is { } fb ? sk.Entity(fb.LineB)!
+            : x;
+        bool IsTrim(SkEntity x) => sk.Fillets?.Any(f => f.TrimA == x.Id || f.TrimB == x.Id) == true;
+        var c = sk.P(corner);
+        // each curve's offsets: lines (a point and direction) or circles (centre and radius)
+        var offs = new List<(bool line, Vec2 p, Vec2 d, double R)>[2];
+        var ents = new[] { xa, xb };
+        for (int k = 0; k < 2; k++)
+        {
+            offs[k] = new();
+            switch (ents[k])
+            {
+                case SkLine l:
+                    {
+                        var far = sk.P(l.P1 == corner ? l.P2 : l.P1); var d = (far - c).Normalized;
+                        foreach (var s in new[] { 1, -1 }) offs[k].Add((true, c + d.Perp * (s * r), d, 0));
+                        break;
+                    }
+                case SkArc a:
+                    {
+                        var o = sk.P(a.Center); var R = sk.ArcRadius(a);
+                        offs[k].Add((false, o, default, R + r));
+                        if (R - r > 1e-9) offs[k].Add((false, o, default, R - r));
+                        break;
+                    }
+            }
+        }
+        static List<Vec2> Meet((bool line, Vec2 p, Vec2 d, double R) a, (bool line, Vec2 p, Vec2 d, double R) b)
+        {
+            var res = new List<Vec2>();
+            if (a.line && b.line)
+            {
+                var den = Vec2.Cross(a.d, b.d);
+                if (Math.Abs(den) > 1e-12) res.Add(a.p + a.d * (Vec2.Cross(b.p - a.p, b.d) / den));
+                return res;
+            }
+            if (!a.line && b.line) (a, b) = (b, a);
+            if (a.line)
+            {
+                // line a against circle b
+                var t0 = Vec2.Dot(b.p - a.p, a.d); var foot = a.p + a.d * t0; var h = Vec2.Distance(foot, b.p);
+                if (h <= b.R) { var w = Math.Sqrt(b.R * b.R - h * h); res.Add(foot - a.d * w); res.Add(foot + a.d * w); }
+                return res;
+            }
+            var dd = Vec2.Distance(a.p, b.p);
+            if (dd < 1e-12 || dd > a.R + b.R || dd < Math.Abs(a.R - b.R)) return res;
+            var x = (a.R * a.R - b.R * b.R + dd * dd) / (2 * dd); var y = Math.Sqrt(Math.Max(0, a.R * a.R - x * x));
+            var u = (b.p - a.p) / dd;
+            res.Add(a.p + u * x + u.Perp * y); res.Add(a.p + u * x - u.Perp * y);
+            return res;
+        }
+        // where a centre touches a curve, and whether that is on the piece of it next to the corner
+        (Vec2 at, bool ok) Touch(SkEntity e, Vec2 center)
+        {
+            switch (e)
+            {
+                case SkLine l:
+                    {
+                        var far = sk.P(l.P1 == corner ? l.P2 : l.P1); var d = far - c; var len = d.Length; d /= len;
+                        var t = Vec2.Dot(center - c, d);
+                        return (c + d * t, t > 1e-9 && t < len - 1e-9);
+                    }
+                case SkArc a:
+                    {
+                        var o = sk.P(a.Center); var R = sk.ArcRadius(a);
+                        var q = center - o; if (q.Length < 1e-12) return (o, false);
+                        var at = o + q.Normalized * R;
+                        double a0 = (sk.P(a.Start) - o).Angle, a1 = (sk.P(a.End) - o).Angle, aq = q.Angle;
+                        double Ccw(double from, double to) { var x = to - from; while (x < 0) x += 2 * Math.PI; while (x >= 2 * Math.PI) x -= 2 * Math.PI; return x; }
+                        var sweep = Ccw(a0, a1); var at0 = Ccw(a0, aq);
+                        return (at, at0 > 1e-9 && at0 < sweep - 1e-9 && Vec2.Distance(at, c) > 1e-9);
+                    }
+            }
+            return (default, false);
+        }
+        (Vec2 center, Vec2 ta, Vec2 tb)? best = null; double bestScore = double.MaxValue;
+        foreach (var oa in offs[0])
+            foreach (var ob in offs[1])
+                foreach (var cen in Meet(oa, ob))
+                {
+                    var (ta, okA) = Touch(xa, cen); var (tb, okB) = Touch(xb, cen);
+                    if (!okA || !okB) continue;
+                    var score = Vec2.Distance(ta, c) + Vec2.Distance(tb, c);
+                    if (score < bestScore) { bestScore = score; best = (cen, ta, tb); }
+                }
+        if (best is not var (center, pa, pb)) return $"Sketch Fillet: a radius of {Expr.Format(r)} does not fit at that corner.";
+        var origA = OriginalOf(xa); var origB = OriginalOf(xb);
+        var pTa = sk.AddPoint(pa); var pTb = sk.AddPoint(pb); var pC = sk.AddPoint(center);
+        // each side's solid piece: the existing trimmed one, or a new copy (the original turns construction), its
+        // end at the corner moved to the tangent point
+        SkEntity Trim(SkEntity x, SkPoint tangent)
+        {
+            var trim = x;
+            if (!IsTrim(x))
+            {
+                trim = x switch
+                {
+                    SkLine l => sk.Add(new SkLine { P1 = l.P1, P2 = l.P2 }),
+                    SkArc a => sk.Add(new SkArc { Center = a.Center, Start = a.Start, End = a.End }),
+                    _ => x,
+                };
+                x.Construction = true;
+            }
+            switch (trim)
+            {
+                case SkLine tl: if (tl.P1 == corner) tl.P1 = tangent.Id; else tl.P2 = tangent.Id; break;
+                case SkArc ta2: if (ta2.Start == corner) ta2.Start = tangent.Id; else ta2.End = tangent.Id; break;
+            }
+            return trim;
+        }
+        var trimA = Trim(xa, pTa); var trimB = Trim(xb, pTb);
+        var ccw = Vec2.Cross(pa - center, pb - center) > 0;
+        var arc = sk.Add(new SkArc { Center = pC.Id, Start = ccw ? pTa.Id : pTb.Id, End = ccw ? pTb.Id : pTa.Id });
+        // the tangent points stay on the originals; the fillet meets the trimmed pieces tangentially
+        foreach (var (pt, orig) in new[] { (pTa, origA), (pTb, origB) })
+            sk.AddConstraint(orig is SkLine ? CType.PointOnLine : CType.PointOnCircle, pt.Id, orig.Id);
+        foreach (var piece in new[] { trimA, trimB })
+        {
+            var tg = sk.AddConstraint(CType.Tangent, piece.Id, arc.Id);
+            SketchSolver.CaptureSign(sk, tg);
+        }
+        var dim = sk.AddConstraint(CType.Radius, arc.Id);
+        dim.Value = r; dim.Expr = Expr.Format(r);
+        dim.Name = "D" + sk.Constraints.Count(x => x.IsDimension);
+        (sk.Fillets ??= new()).Add(new SkFillet { Arc = arc.Id, LineA = origA.Id, LineB = origB.Id, TrimA = trimA.Id, TrimB = trimB.Id });
         return null;
     }
 

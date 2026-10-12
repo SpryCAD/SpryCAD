@@ -296,6 +296,103 @@ static class CoreTests
             t.Near(Volume(all.Clone()), 80 * 40 * 20, 1);
         });
 
+        t.Test("Extrude Up To Surface (a face, a plane, a cylinder) and Up To Body", () =>
+        {
+            static Sketch CircleAt(Frame fr, Vec3 world, double r)
+            {
+                var sk = new Sketch(); var c = sk.AddPoint(fr.ToLocal(world));
+                sk.Add(new SkCircle { Center = c.Id, R = r });
+                return sk;
+            }
+            // a block (z 0..20); a post from a plane 50 up, back down to the block's top face
+            var doc = new CadDocument();
+            var s1 = doc.AddFeature(new SketchFeature { Plane = PlaneRef.Front, Sketch = Rect(100, 60) });
+            var e1 = doc.AddFeature(new ExtrudeFeature { SketchId = s1.Id, Depth = "20" });
+            var p50 = doc.AddFeature(new PlaneFeature { Base = PlaneRef.Front, Offset = "50" });
+            var s2 = doc.AddFeature(new SketchFeature { Plane = new PlaneRef { Feature = p50.Id }, Sketch = CircleAt(Resolver.StdPlane("Front"), new Vec3(50, 30, 0), 5) });
+            var post = doc.AddFeature(new ExtrudeFeature
+            {
+                SketchId = s2.Id, End = EndCondition.UpToSurface, Reverse = true,
+                UpTo = new PlaneRef { Face = new FaceRef { Name = e1.Id + ".End", Hint = new Vec3(50, 30, 20), Normal = Vec3.UnitZ } },
+            });
+            var r = new Regenerator().Rebuild(doc);
+            foreach (var f in doc.Features) t.True(r.Status[f.Id].Ok, $"{f.Name}: {r.Status[f.Id].Error}");
+            t.Near(KernelTests.Vex(r.State.Bodies.Single().Solid), 100 * 60 * 20 + Math.PI * 25 * 30, 0.5);
+            // up to a reference plane (15 short of the block: a body of its own)
+            var p35 = doc.AddFeature(new PlaneFeature { Base = PlaneRef.Front, Offset = "35" }, doc.Features.IndexOf(post));
+            post.UpTo = new PlaneRef { Feature = p35.Id };
+            r = new Regenerator().Rebuild(doc);
+            t.True(r.Status[post.Id].Ok, r.Status[post.Id].Error ?? "");
+            t.Near(r.State.Bodies.Sum(b => KernelTests.Vex(b.Solid)), 100 * 60 * 20 + Math.PI * 25 * 15, 0.5);
+
+            // a round bar (radius 20 along Z); a peg from y 50 down to its surface, then to the body
+            var doc2 = new CadDocument();
+            var bar = new Sketch(); var bc = bar.AddPoint(new Vec2(0, 0)); var circ = bar.Add(new SkCircle { Center = bc.Id, R = 20 });
+            var b1 = doc2.AddFeature(new SketchFeature { Plane = PlaneRef.Front, Sketch = bar });
+            var be = doc2.AddFeature(new ExtrudeFeature { SketchId = b1.Id, Depth = "100" });
+            var top = Resolver.StdPlane("Top");
+            var py = doc2.AddFeature(new PlaneFeature { Base = PlaneRef.Top, Offset = "50" });
+            var s3 = doc2.AddFeature(new SketchFeature { Plane = new PlaneRef { Feature = py.Id }, Sketch = CircleAt(top, new Vec3(0, 0, 50), 5) });
+            var round = new FaceRef { Name = be.Id + ".S." + ProfileExtractor.FaceName(circ), Hint = new Vec3(0, 20, 50) };
+            var peg = doc2.AddFeature(new ExtrudeFeature { SketchId = s3.Id, End = EndCondition.UpToSurface, UpTo = new PlaneRef { Face = round }, Reverse = top.Normal.Y > 0 });
+            double bar0 = Math.PI * 400 * 100;
+            foreach (var end in new[] { EndCondition.UpToSurface, EndCondition.UpToBody })
+            {
+                peg.End = end;
+                r = new Regenerator().Rebuild(doc2);
+                t.True(r.Status[peg.Id].Ok, $"{end}: {r.Status[peg.Id].Error}");
+                var v = KernelTests.Vex(r.State.Bodies.Single().Solid) - bar0;
+                t.True(v > Math.PI * 25 * 30 && v < Math.PI * 25 * 30.7, $"{end}: the peg {v}");
+            }
+            // off the bar's side: part of it misses
+            s3.Sketch = CircleAt(top, new Vec3(18, 0, 50), 5);
+            r = new Regenerator().Rebuild(doc2);
+            t.True(!r.Status[peg.Id].Ok && r.Status[peg.Id].Error!.Contains("misses"), r.Status[peg.Id].Error ?? "built");
+        });
+
+        t.Test("Sketch fillet where an arc meets a line, and where two arcs meet; deleting it restores the arc", () =>
+        {
+            bool Extrudes(Sketch sk)
+            {
+                var doc = new CadDocument();
+                var s = doc.AddFeature(new SketchFeature { Plane = PlaneRef.Front, Sketch = sk });
+                doc.AddFeature(new ExtrudeFeature { SketchId = s.Id, Depth = "5" });
+                var r = new Regenerator().Rebuild(doc);
+                return r.Status.Values.All(x => x.Ok) && r.State.Bodies.Single().Solid.Native?.Validate() == null;
+            }
+            // a block whose top is an arc about (20, 10) from (40, 30) round to (0, 30)
+            var sk = new Sketch();
+            var a = sk.AddPoint(new Vec2(0, 0)); var b = sk.AddPoint(new Vec2(40, 0)); var c = sk.AddPoint(new Vec2(40, 30)); var d = sk.AddPoint(new Vec2(0, 30));
+            var o = sk.AddPoint(new Vec2(20, 10));
+            sk.Add(new SkLine { P1 = a.Id, P2 = b.Id }); sk.Add(new SkLine { P1 = b.Id, P2 = c.Id }); sk.Add(new SkLine { P1 = d.Id, P2 = a.Id });
+            var top = sk.Add(new SkArc { Center = o.Id, Start = c.Id, End = d.Id });
+            t.True(SketchOps.Fillet(sk, c.Id, 3) is null, "line to arc filleted: " + SketchOps.Fillet(sk.Clone(), c.Id, 3));
+            var f = sk.Fillets!.Single();
+            var fa = (SkArc)sk.Entity(f.Arc)!;
+            t.Near(sk.ArcRadius(fa), 3, 1e-9);
+            // inside the big arc, touching it: its centre 28.28 - 3 from the big one's
+            t.Near(Vec2.Distance(sk.P(fa.Center), sk.P(o.Id)), Math.Sqrt(800) - 3, 1e-9);
+            t.True(sk.Entity(top.Id)!.Construction, "the original arc as construction");
+            var res = SketchSolver.Solve(sk);
+            t.True(res.Status is not (SketchStatus.OverDefined or SketchStatus.Failed), $"solves: {res.Status}");
+            t.True(Extrudes(sk.Clone()), "the profile extrudes");
+            sk.DeleteEntity(f.Arc);
+            t.True(sk.Fillets == null && !sk.Entity(top.Id)!.Construction, "the arc solid again");
+            t.Eq(sk.Entities.Count, 4);
+
+            // a lens of two arcs (about (0, -10) and (0, 10)) meeting at (-10, 0) and (10, 0)
+            var lens = new Sketch();
+            var p = lens.AddPoint(new Vec2(-10, 0)); var q = lens.AddPoint(new Vec2(10, 0));
+            var c1 = lens.AddPoint(new Vec2(0, -10)); var c2 = lens.AddPoint(new Vec2(0, 10));
+            lens.Add(new SkArc { Center = c1.Id, Start = q.Id, End = p.Id });
+            lens.Add(new SkArc { Center = c2.Id, Start = p.Id, End = q.Id });
+            t.True(SketchOps.Fillet(lens, q.Id, 1) is null, "arc to arc filleted: " + SketchOps.Fillet(lens.Clone(), q.Id, 1));
+            var lf = (SkArc)lens.Entity(lens.Fillets!.Single().Arc)!;
+            foreach (var cc in new[] { c1, c2 }) t.Near(Vec2.Distance(lens.P(lf.Center), lens.P(cc.Id)), Math.Sqrt(200) - 1, 1e-9);
+            t.True(SketchSolver.Solve(lens).Status is not (SketchStatus.OverDefined or SketchStatus.Failed), "the lens solves");
+            t.True(Extrudes(lens.Clone()), "the lens extrudes");
+        });
+
         t.Test("Sketch offset: lines and arcs, outward and inward, follow the originals and the distance", () =>
         {
             double Ring(Sketch sk)
@@ -558,6 +655,17 @@ static class CoreTests
             var pn = r.State.Planes[normal.Id];
             t.Near(Vec3.Distance(pn.Origin, new Vec3(40, 50, 0)), 0, 1e-9);
             t.Near(Vec3.Distance(pn.Normal, new Vec3(30, 40, 0).Normalized), 0, 1e-12);
+            // the Front plane turned 90° about that sketch line: it holds the line, square to Front
+            var about = doc.AddFeature(new PlaneFeature
+            {
+                Mode = PlaneMode.Angle, Base = PlaneRef.Front, Axis = new DirRef { Curve = new CurveRef { Sketch = lsk.Id, SketchEntity = line.Id } }, Angle = "90",
+            });
+            r = regen.Rebuild(doc);
+            t.True(r.Status[about.Id].Ok, r.Status[about.Id].Error ?? "");
+            var pl = r.State.Planes[about.Id];
+            t.Near(Vec3.Dot(new Vec3(10, 10, 0) - pl.Origin, pl.Normal), 0, 1e-9);
+            t.Near(Vec3.Dot(new Vec3(40, 50, 0) - pl.Origin, pl.Normal), 0, 1e-9);
+            t.Near(Vec3.Dot(pl.Normal, Vec3.UnitZ), 0, 1e-12);
             // normal to a model edge (the box's vertical edge at x=W, y=60) at its top end
             var en = doc.AddFeature(new PlaneFeature
             {

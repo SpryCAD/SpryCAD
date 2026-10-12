@@ -14,30 +14,31 @@ public sealed partial class SketchEditor
     // a line clicked with the Fillet tool, waiting for the second one
     long _filletFirstLine = -1;
 
-    /// <summary>A click with the Fillet tool: a corner (two lines meeting there), or two lines one after the other.</summary>
+    /// <summary>A click with the Fillet tool: a corner (two lines or arcs ending there), or the two one after the other.</summary>
     void FilletAt(PointerInfo p)
     {
         var h = HitTest(p.X, p.Y, includeDims: false);
         long corner = -1;
         if (h is { Kind: SkRefKind.Point } hp) corner = hp.Id;
-        else if (h is { Kind: SkRefKind.Entity } he && Sk.Entity(he.Id) is SkLine line)
+        else if (h is { Kind: SkRefKind.Entity } he && Sk.Entity(he.Id) is SkLine or SkArc)
         {
-            if (_filletFirstLine < 0 || _filletFirstLine == line.Id || Sk.Entity(_filletFirstLine) is not SkLine first)
+            var piece = Sk.Entity(he.Id)!;
+            if (_filletFirstLine < 0 || _filletFirstLine == piece.Id || Sk.Entity(_filletFirstLine) is not (SkLine or SkArc))
             {
-                _filletFirstLine = line.Id;
-                Selected.Clear(); Selected.Add(new SkRef(SkRefKind.Entity, line.Id)); SelectionChanged?.Invoke();
-                Message?.Invoke("Sketch Fillet: now click the other line of the corner.");
+                _filletFirstLine = piece.Id;
+                Selected.Clear(); Selected.Add(new SkRef(SkRefKind.Entity, piece.Id)); SelectionChanged?.Invoke();
+                Message?.Invoke("Sketch Fillet: now click the other line or arc of the corner.");
                 return;
             }
-            corner = SharedPoint(first, line);
+            corner = SharedPoint(Sk.Entity(_filletFirstLine)!, piece);
             _filletFirstLine = -1;
-            if (corner < 0) { Message?.Invoke("Sketch Fillet: those lines do not meet at a corner."); return; }
+            if (corner < 0) { Message?.Invoke("Sketch Fillet: those do not meet at a corner."); return; }
         }
-        else { Message?.Invoke("Sketch Fillet: click a corner where two lines meet, or the two lines."); return; }
+        else { Message?.Invoke("Sketch Fillet: click a corner where two lines or arcs meet, or the two of them."); return; }
         FilletCorners(new[] { corner });
     }
 
-    static long SharedPoint(SkLine a, SkLine b) => a.P1 == b.P1 || a.P1 == b.P2 ? a.P1 : a.P2 == b.P1 || a.P2 == b.P2 ? a.P2 : -1;
+    static long SharedPoint(SkEntity a, SkEntity b) => SketchOps.EndsOf(a).Intersect(SketchOps.EndsOf(b)).DefaultIfEmpty(-1).First();
 
     /// <summary>The Sketch Fillet tool: corners (or pairs of lines) already selected are filleted first.</summary>
     public void StartFillet()
@@ -49,7 +50,7 @@ public sealed partial class SketchEditor
     void FilletSelection()
     {
         var corners = SelectedPoints.ToList();
-        var lines = SelectedEntities.OfType<SkLine>().ToList();
+        var lines = SelectedEntities.Where(e => e is SkLine or SkArc).ToList();
         for (int i = 0; i < lines.Count; i++)
             for (int j = i + 1; j < lines.Count; j++)
                 if (SharedPoint(lines[i], lines[j]) is var c && c >= 0) corners.Add(c);
@@ -75,7 +76,7 @@ public sealed partial class SketchEditor
         }
         Selected.Clear(); SelectionChanged?.Invoke();
         Resolve();
-        Message?.Invoke(error ?? $"Filleted {done} corner{(done == 1 ? "" : "s")} (R {Expr.Format(FilletRadius)}). The original lines remain as construction geometry; delete the arc to restore the corner.");
+        Message?.Invoke(error ?? $"Filleted {done} corner{(done == 1 ? "" : "s")} (R {Expr.Format(FilletRadius)}). The original lines and arcs remain as construction geometry; delete the fillet to restore the corner.");
         _vp.Redraw();
     }
 

@@ -117,6 +117,7 @@ public sealed class SelItem
         if (Kind == SelKind.Edge && Edge != null) return new DirRef { Edge = Edge.Clone() };
         if (Kind == SelKind.Face) return new DirRef { Face = ToFaceRef() };
         if (Kind == SelKind.Plane) return new DirRef { Plane = ToPlaneRef() };
+        if (Kind == SelKind.SketchSegment && ToCurveRef() is { } cr) return new DirRef { Curve = cr };
         return null;
     }
 

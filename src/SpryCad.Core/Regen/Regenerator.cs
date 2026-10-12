@@ -511,7 +511,7 @@ public sealed class Regenerator
             {
                 case EndCondition.Blind: z0 = 0; z1 = Positive(e.Depth, "Depth") * dir; break;
                 case EndCondition.MidPlane: { var d = Positive(e.Depth, "Depth"); z0 = -d / 2; z1 = d / 2; break; }
-                case EndCondition.ThroughAll: z0 = 0; z1 = BigDepth(sk.Frame) * dir; break;
+                case EndCondition.ThroughAll: case EndCondition.UpToSurface: case EndCondition.UpToBody: z0 = 0; z1 = BigDepth(sk.Frame) * dir; break;
                 default: { var d = BigDepth(sk.Frame); z0 = -d; z1 = d; break; }
             }
             if (!string.IsNullOrWhiteSpace(e.Depth2) && e.End == EndCondition.Blind)
@@ -520,6 +520,12 @@ public sealed class Regenerator
                 if (d2 > 0) z0 = -d2 * dir;
             }
             var tool = Builders.Extrude(sk.Regions, sk.Frame, Math.Min(z0, z1), Math.Max(z0, z1), f.Id);
+            if (e.End is EndCondition.UpToSurface or EndCondition.UpToBody)
+            {
+                if (!string.IsNullOrWhiteSpace(e.Draft) && Num(e.Draft, "Draft angle") != 0)
+                    throw new FeatureException("A draft cannot be combined with Up To Surface or Up To Body.");
+                tool = UpTo(e, sk, tool, dir);
+            }
             // a draft: the side walls tapered from the sketch plane, narrowing along the extrusion (outward: widening);
             // in two directions (Mid Plane, a second depth, Through All - Both) each side narrowing away from the sketch
             // plane: the two halves drafted on their own and joined there
@@ -565,6 +571,82 @@ public sealed class Regenerator
             }
             ApplyTool(tool, e.IsCut, e.Merge);
             State.Tools[f.Id] = new ToolInfo(tool, e.IsCut, e.Merge);
+        }
+
+        /// <summary>
+        /// Up To Surface / Up To Body: the through-all extrude cut back where it reaches the surface (a plane, or a
+        /// planar or cylindrical face, extended) or enters the body; the piece on the sketch's side kept.
+        /// </summary>
+        Solid UpTo(ExtrudeFeature e, SketchResult sk, Solid tool, double dir)
+        {
+            var body = e.End == EndCondition.UpToBody;
+            if (e.UpTo == null) throw new FeatureException(body ? "Select the body to extrude up to (a face of it)." : "Select the plane or face to extrude up to.");
+            // where the sketch starts: a point of the profile, and the cap there (Start at z 0 going forward, End reversed)
+            var p0 = sk.Frame.ToWorld(sk.Regions[0].Outer.Verts[0].P.X, sk.Regions[0].Outer.Verts[0].P.Y, 0);
+            string near = f.Id + (dir > 0 ? ".Start" : ".End"), far = f.Id + (dir > 0 ? ".End" : ".Start");
+            Solid beyond;
+            bool keepInside = false;
+            var box = tool.Bounds;
+            double pad = box.Diagonal + 10;
+            if (body)
+            {
+                if (e.UpTo.Face == null || Resolver.NativeFace(e.UpTo.Face, State) is not { } hit)
+                    throw new FeatureException("The body to extrude up to could not be found: select a face of it.");
+                beyond = hit.body.Solid;
+            }
+            else
+            {
+                Plane? plane = null;
+                if (e.UpTo.Face == null) { var fr = Resolver.ResolvePlane(e.UpTo, State); plane = Plane.FromPointNormal(fr.Origin, fr.Normal); }
+                else
+                {
+                    if (Resolver.NativeFace(e.UpTo.Face, State) is not { } hit) throw new FeatureException("The face to extrude up to could not be found.");
+                    var s = hit.face.Surface;
+                    if (s.Kind == SurfaceKind.Plane) plane = s.Plane!;
+                    else if (s.Kind == SurfaceKind.Cylinder)
+                    {
+                        // the round surface's whole cylinder, long enough to cover the extrude
+                        var ax = s.Axis;
+                        double h0 = double.MaxValue, h1 = double.MinValue;
+                        for (int c = 0; c < 8; c++)
+                        {
+                            var p = new Vec3((c & 1) == 0 ? box.Min.X : box.Max.X, (c & 2) == 0 ? box.Min.Y : box.Max.Y, (c & 4) == 0 ? box.Min.Z : box.Max.Z);
+                            var h = Vec3.Dot(p - s.Origin, ax);
+                            h0 = Math.Min(h0, h); h1 = Math.Max(h1, h);
+                        }
+                        beyond = Builders.Cylinder(s.Origin + ax * (h0 - 1), ax, s.R, h1 - h0 + 2, "upto", s.F.XDir);
+                        // starting inside it: what lies outside is beyond
+                        var r = (p0 - s.Origin - ax * Vec3.Dot(p0 - s.Origin, ax)).Length;
+                        if (Math.Abs(r - s.R) < 1e-6) throw new FeatureException("The sketch lies on the surface to extrude up to.");
+                        keepInside = r < s.R;
+                        goto trim;
+                    }
+                    else throw new FeatureException("Up To Surface ends at a plane, or a planar or cylindrical face (for another shape, Up To Body).");
+                }
+                // the half of space past the plane, as a slab around the extrude
+                var side = plane.Distance(p0);
+                if (Math.Abs(side) < 1e-6) throw new FeatureException("The sketch lies on the plane to extrude up to.");
+                var n = plane.Normal;
+                var o = plane.Project(box.Center);
+                var x = n.AnyPerpendicular();
+                var frame = new Frame(o, x, Vec3.Cross(n, x), n);
+                var rect = ProfileLoop.Polygon(new[] { new Vec2(-pad, -pad), new Vec2(pad, -pad), new Vec2(pad, pad), new Vec2(-pad, pad) }, "E");
+                beyond = side > 0
+                    ? Builders.Extrude(new[] { new ProfileRegion(rect) }, frame, -pad, 0, "upto")
+                    : Builders.Extrude(new[] { new ProfileRegion(rect) }, frame, 0, pad, "upto");
+            }
+        trim:
+            var part = keepInside ? Csg.Intersect(tool, beyond) : Csg.Subtract(tool, beyond);
+            if (part.Native == null || part.IsEmpty) throw new FeatureException(body ? "The extrude does not reach the body." : "The extrude does not reach the surface.");
+            var kept = part.Native.Lumps().Where(l => l.Faces.Any(x => x.Tag.Name == near)).ToList();
+            if (kept.Count == 0) throw new FeatureException(body ? "The extrude does not reach the body." : "The extrude does not reach the surface.");
+            if (kept.Any(l => l.Faces.Any(x => x.Tag.Name == far)))
+                throw new FeatureException(body ? "Part of the profile misses the body: the extrude would run on past it." :
+                    "Part of the profile misses the surface: the extrude would run on past it. Use Reverse direction if it lies the other way.");
+            var nb = new Kernel.Native.NBody();
+            foreach (var l in kept) nb.Faces.AddRange(l.Faces);
+            nb.Link();
+            return Kernel.Native.NTess.ToSolid(nb);
         }
 
         void DoRevolve(RevolveFeature r)
@@ -1806,7 +1888,7 @@ public sealed class Regenerator
                     break;
                 case PlaneMode.Angle:
                     {
-                        if (p.Axis == null) throw new FeatureException("Select the axis (an edge, or X, Y or Z) to rotate the plane about.");
+                        if (p.Axis == null) throw new FeatureException("Select the axis (an edge, a sketch line, or X, Y or Z) to rotate the plane about.");
                         var (o, axis) = Resolver.ResolveDir(p.Axis, State);
                         var rot = Transform.Rotation(o, axis, Num(p.Angle, "Angle") * Math.PI / 180);
                         frame = new Frame(rot.Point(frame.Origin), rot.Vector(frame.XDir), rot.Vector(frame.YDir), rot.Vector(frame.Normal));

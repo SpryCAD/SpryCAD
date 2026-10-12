@@ -379,6 +379,14 @@ public static class Resolver
                 "Z" => (Vec3.Zero, Vec3.UnitZ),
                 _ => throw new FeatureException("Bad axis"),
             };
+        if (r.Curve is { Sketch: { } skId } cr)
+        {
+            if (!st.Sketches.TryGetValue(skId, out var sr)) throw new FeatureException("The sketch of the axis is missing.");
+            if (sr.Sketch.Entity(cr.SketchEntity) is not Sketching.SkLine l) throw new FeatureException("The axis must be a sketch line.");
+            Vec3 a = sr.Frame.ToWorld(sr.Sketch.P(l.P1)), b = sr.Frame.ToWorld(sr.Sketch.P(l.P2));
+            if ((b - a).Length < 1e-12) throw new FeatureException("The axis line has no length.");
+            return (a, (b - a).Normalized);
+        }
         if (r.Plane != null)
         {
             var f = ResolvePlane(r.Plane, st);

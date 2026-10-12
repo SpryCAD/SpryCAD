@@ -798,7 +798,7 @@ public static class NLoft
                     clusters.Add(c);
                 }
         }
-        var all = anchors.Concat(clusters).OrderBy(b => b.Gamma).ToList();
+        var all = Ordered(anchors.Concat(clusters).ToList(), ks);
         // a loop needs two pieces at least (a closed edge would be its own seam)
         if (all.Count == 1) all.Add(New(0.5));
         // sections without a vertex at a breakpoint: along the loop in proportion between their neighbours that have one
@@ -815,6 +815,44 @@ public static class NLoft
             for (int b = 1; b < all.Count; b++)
                 if (!(all[b].Rel[k] > all[b - 1].Rel[k])) throw new ArgumentException("the profiles' corners cannot be matched (they run in a different order)");
         g.Brks = all;
+    }
+
+    /// <summary>
+    /// The breakpoints in loop order: by their (mean) place, but never against a section's own order of its vertices
+    /// (a breakpoint paired across sections averages its places, and could sort past one a single section has just
+    /// before it: a rounded rectangle's corner to an obround's). The pairings keep each section's order, so such an
+    /// order exists: built front to back, always taking the earliest-placed breakpoint no section has another before.
+    /// Its places then made to rise with it.
+    /// </summary>
+    static List<Brk> Ordered(List<Brk> brks, IReadOnlyList<int> ks)
+    {
+        int n = brks.Count;
+        var before = new List<int>[n]; var waiting = new int[n];
+        for (int i = 0; i < n; i++) before[i] = new();
+        foreach (var k in ks)
+        {
+            var on = Enumerable.Range(0, n).Where(i => brks[i].Member[k]).OrderBy(i => brks[i].Rel[k]).ToList();
+            for (int q = 0; q + 1 < on.Count; q++) { before[on[q]].Add(on[q + 1]); waiting[on[q + 1]]++; }
+        }
+        var res = new List<Brk>(n);
+        var ready = new SortedSet<(double g, int i)>(Enumerable.Range(0, n).Where(i => waiting[i] == 0).Select(i => (brks[i].Gamma, i)));
+        while (ready.Count > 0)
+        {
+            var (_, i) = ready.Min; ready.Remove(ready.Min);
+            res.Add(brks[i]);
+            foreach (var j in before[i]) if (--waiting[j] == 0) ready.Add((brks[j].Gamma, j));
+        }
+        // (a cycle: no order keeps every section's; left by place, for the check that follows to report)
+        if (res.Count < n) return brks.OrderBy(b => b.Gamma).ToList();
+        for (int i = 1; i < n; i++)
+            if (!(res[i].Gamma > res[i - 1].Gamma))
+            {
+                // between its neighbour before and the next that is placed further on (or the end)
+                int j = i + 1; while (j < n && !(res[j].Gamma > res[i - 1].Gamma)) j++;
+                double hi = j < n ? res[j].Gamma : 1;
+                res[i].Gamma = res[i - 1].Gamma + (hi - res[i - 1].Gamma) / (j - i + 1);
+            }
+        return res;
     }
 
     // ------------------------------------------------------------------------------------------

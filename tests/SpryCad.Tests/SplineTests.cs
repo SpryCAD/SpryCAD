@@ -516,6 +516,59 @@ static class SplineTests
             }
         });
 
+        t.Test("Loft: a rounded rectangle to an obround (eight segments to four)", () =>
+        {
+            static ProfileLoop RoundRect(double w, double h, double r)
+            {
+                var l = new ProfileLoop();
+                double x = w / 2, y = h / 2;
+                l.Verts.Add(new ProfileVertex(new Vec2(-x + r, -y), "B"));
+                l.AddArc(new Vec2(x - r, -y + r), r, -Math.PI / 2, 0, true, "A1");
+                l.Verts.Add(new ProfileVertex(new Vec2(x, -y + r), "R"));
+                l.AddArc(new Vec2(x - r, y - r), r, 0, Math.PI / 2, true, "A2");
+                l.Verts.Add(new ProfileVertex(new Vec2(x - r, y), "T"));
+                l.AddArc(new Vec2(-x + r, y - r), r, Math.PI / 2, Math.PI, true, "A3");
+                l.Verts.Add(new ProfileVertex(new Vec2(-x, y - r), "L"));
+                l.AddArc(new Vec2(-x + r, -y + r), r, Math.PI, 1.5 * Math.PI, true, "A4");
+                return l;
+            }
+            // turned by phi (the obround's flat sides then run another way, and its loop starts elsewhere)
+            static ProfileLoop Obround(double w, double h, double phi)
+            {
+                var l = new ProfileLoop(); double r = h / 2, x = w / 2 - r;
+                Vec2 R(double px, double py) => new(px * Math.Cos(phi) - py * Math.Sin(phi), px * Math.Sin(phi) + py * Math.Cos(phi));
+                l.Verts.Add(new ProfileVertex(R(-x, -r), "OB"));
+                l.AddArc(R(x, 0), r, -Math.PI / 2 + phi, Math.PI / 2 + phi, true, "OR");
+                l.Verts.Add(new ProfileVertex(R(x, r), "OT"));
+                l.AddArc(R(-x, 0), r, Math.PI / 2 + phi, 1.5 * Math.PI + phi, true, "OL");
+                return l;
+            }
+            var a = new[] { new ProfileRegion(RoundRect(40, 24, 4)) };
+            var top = new Frame(new Vec3(0, 0, 30), Vec3.UnitX, Vec3.UnitY, Vec3.UnitZ);
+            foreach (var phi in new[] { 0, 0.5 * Math.PI, Math.PI, 1.5 * Math.PI, 0.3 })
+                foreach (var (w, h) in new[] { (36.0, 14.0), (30.0, 20.0) })
+                {
+                    var b = new[] { new ProfileRegion(Obround(w, h, phi)) };
+                    var loft = Kernel.Native.NLoft.Loft(new[] { new Kernel.Native.NLoft.Section(frame, a), new Kernel.Native.NLoft.Section(top, b) }, null, null, "RO");
+                    t.Eq(loft.Validate(), null);
+                    var v = Kernel.Native.NMass.Of(loft)!.Volume;
+                    double a0 = 40 * 24 - (4 - Math.PI) * 16, a1 = (w - h) * h + Math.PI * h * h / 4;
+                    t.True(v > 30 * Math.Min(a0, a1) * 0.9 && v < 30 * Math.Max(a0, a1), $"between the ends: {v} (turned {phi:0.##})");
+                }
+            // the brake duct's: a flat plenum section (5.25 by 1, R.25 corners) to the outlet's tall slot (2.5 across,
+            // 3.25 long) on a plane tilted 20°, turned either way
+            var flat = new[] { new ProfileRegion(RoundRect(5.25, 1, 0.25)) };
+            foreach (var tilt in new[] { 0.0, 20.0, -20.0 })
+                foreach (var phi in new[] { 0.5 * Math.PI, 0.0 })
+                {
+                    var tr = tilt * Math.PI / 180;
+                    var up = new Frame(new Vec3(0, 0, 2.5), Vec3.UnitX, new Vec3(0, Math.Cos(tr), Math.Sin(tr)), new Vec3(0, -Math.Sin(tr), Math.Cos(tr)));
+                    var slot = new[] { new ProfileRegion(Obround(3.25, 2.5, phi)) };
+                    var loft = Kernel.Native.NLoft.Loft(new[] { new Kernel.Native.NLoft.Section(frame, flat), new Kernel.Native.NLoft.Section(up, slot) }, null, null, "RS");
+                    t.Eq(loft.Validate(), null);
+                }
+        });
+
         t.Test("Spline profile: a boolean with a box, and a STEP round trip", () =>
         {
             var body = Kernel.Native.NBuild.Extrude(new[] { new ProfileRegion(Loop()) }, frame, 0, 15, "E");

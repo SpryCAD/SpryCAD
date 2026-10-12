@@ -623,17 +623,34 @@ public sealed class Sketch
     {
         Fillets!.Remove(f);
         if (Fillets.Count == 0) Fillets = null;
-        if (Entity(f.Arc) is SkArc arc && Entity(f.LineA) is SkLine la && Entity(f.LineB) is SkLine lb)
+        // (lines, or arcs: a fillet where an arc meets a line or arc keeps them so too)
+        static long[] Ends(SkEntity? e) => e switch { SkLine l => new[] { l.P1, l.P2 }, SkArc a => new[] { a.Start, a.End }, _ => Array.Empty<long>() };
+        if (Entity(f.Arc) is SkArc arc && Entity(f.LineA) is { } la && Entity(f.LineB) is { } lb)
         {
-            var corner = la.P1 == lb.P1 || la.P1 == lb.P2 ? la.P1 : la.P2 == lb.P1 || la.P2 == lb.P2 ? la.P2 : -1;
+            var corner = Ends(la).Intersect(Ends(lb)).DefaultIfEmpty(-1).First();
             foreach (var (orig, trimId) in new[] { (la, f.TrimA), (lb, f.TrimB) })
             {
-                if (corner < 0 || Entity(trimId) is not SkLine trim) continue;
-                // the trimmed line's end at this fillet's tangent point goes back to the corner
-                if (trim.P1 == arc.Start || trim.P1 == arc.End) trim.P1 = corner;
-                else if (trim.P2 == arc.Start || trim.P2 == arc.End) trim.P2 = corner;
-                // spanning the whole original again (no other fillet on it): the original is the line again
-                var whole = (trim.P1 == orig.P1 && trim.P2 == orig.P2) || (trim.P1 == orig.P2 && trim.P2 == orig.P1);
+                var trim = Entity(trimId);
+                if (corner < 0 || trim == null) continue;
+                // the trimmed piece's end at this fillet's tangent point goes back to the corner
+                switch (trim)
+                {
+                    case SkLine tl:
+                        if (tl.P1 == arc.Start || tl.P1 == arc.End) tl.P1 = corner;
+                        else if (tl.P2 == arc.Start || tl.P2 == arc.End) tl.P2 = corner;
+                        break;
+                    case SkArc ta:
+                        if (ta.Start == arc.Start || ta.Start == arc.End) ta.Start = corner;
+                        else if (ta.End == arc.Start || ta.End == arc.End) ta.End = corner;
+                        break;
+                }
+                // spanning the whole original again (no other fillet on it): the original is solid again
+                var whole = (trim, orig) switch
+                {
+                    (SkLine t1, SkLine o1) => (t1.P1 == o1.P1 && t1.P2 == o1.P2) || (t1.P1 == o1.P2 && t1.P2 == o1.P1),
+                    (SkArc t2, SkArc o2) => t2.Start == o2.Start && t2.End == o2.End,
+                    _ => false,
+                };
                 if (whole && Fillets?.Any(o => o.TrimA == trimId || o.TrimB == trimId) != true)
                 {
                     DeleteEntityOnly(trimId);

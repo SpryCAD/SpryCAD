@@ -47,7 +47,9 @@ public sealed class DirRef
     /// <summary>Planar face (normal) or cylindrical face (axis).</summary>
     public FaceRef? Face { get; set; }
     public PlaneRef? Plane { get; set; }
-    public DirRef Clone() => new() { Axis = Axis, Edge = Edge?.Clone(), Face = Face?.Clone(), Plane = Plane?.Clone() };
+    /// <summary>A sketch line (from its first point to its second).</summary>
+    public CurveRef? Curve { get; set; }
+    public DirRef Clone() => new() { Axis = Axis, Edge = Edge?.Clone(), Face = Face?.Clone(), Plane = Plane?.Clone(), Curve = Curve?.Clone() };
 }
 
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "$type")]
@@ -94,7 +96,7 @@ public sealed class SketchFeature : Feature
     public Sketch Sketch { get; set; } = new();
 }
 
-public enum EndCondition { Blind, ThroughAll, MidPlane, ThroughAllBoth }
+public enum EndCondition { Blind, ThroughAll, MidPlane, ThroughAllBoth, UpToSurface, UpToBody }
 
 public sealed class ExtrudeFeature : Feature
 {
@@ -104,6 +106,8 @@ public sealed class ExtrudeFeature : Feature
     public EndCondition End { get; set; } = EndCondition.Blind;
     public string Depth { get; set; } = "10";
     public bool Reverse { get; set; }
+    /// <summary>Up To Surface: the plane, or the planar or cylindrical face, the extrude ends at; Up To Body: a face of the body.</summary>
+    public PlaneRef? UpTo { get; set; }
     /// <summary>Optional second direction depth (blank = none).</summary>
     public string? Depth2 { get; set; }
     public bool Merge { get; set; } = true;
