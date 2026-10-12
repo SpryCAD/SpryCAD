@@ -480,13 +480,6 @@ public sealed class Regenerator
 
         // ---- extrude / revolve ----
 
-        /// <summary>Features that build from lines and arcs only (as yet): a spline in the profile says so.</summary>
-        static void NoSplines(IEnumerable<ProfileRegion> regions, string what)
-        {
-            if (regions.Any(r => r.AllLoops().Any(l => l.Verts.Any(v => v.Spline != null))))
-                throw new FeatureException($"{what} does not take splines in its profile yet: use lines and arcs (Extrude, Revolve, Sweep and Loft take splines).");
-        }
-
         double BigDepth(Frame frame)
         {
             var b = State.Bounds;
@@ -635,7 +628,6 @@ public sealed class Regenerator
                 dir = (b - a).Normalized;
             }
             if (regions.Count == 0) throw new FeatureException("The sketch has no closed profile.");
-            NoSplines(regions, "Helical Sweep");
             var pitch = Positive(h.Pitch, "Pitch");
             var turns = Positive(h.Revolutions, "Revolutions");
             if (h.Reverse) dir = -dir;

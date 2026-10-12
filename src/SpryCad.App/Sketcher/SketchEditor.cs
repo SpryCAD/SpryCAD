@@ -238,6 +238,8 @@ public sealed partial class SketchEditor : IViewportMode
         if (splines.Count > 0)
         {
             if (splines.Count == 1 && pts.Count == 0 && ents.Count == 2 && SplineTangentOf(splines[0], lines.Concat(rounds).FirstOrDefault()) != null) res.Add(CType.Tangent);
+            // two splines meeting end to end: the second picked follows the first
+            if (splines.Count == 2 && pts.Count == 0 && ents.Count == 2 && SplineTangentOf(splines[1], splines[0]) != null) res.Add(CType.Tangent);
             return res;
         }
         int others = ents.Count - lines.Count - rounds.Count - ents.OfType<SkPointEntity>().Count();
@@ -306,8 +308,10 @@ public sealed partial class SketchEditor : IViewportMode
         SkConstraint New(CType t, params long[] refs) { var c = new SkConstraint { Id = Sk.NewId(), Type = t, Refs = refs }; SketchSolver.CaptureSign(Sk, c); added.Add(c); return c; }
         if (type == CType.Tangent && ents.OfType<SkSpline>().FirstOrDefault() is { } spl)
         {
-            // (one a spline end: the same end tied twice is the newer)
-            if (SplineTangentOf(spl, lines.Concat(rounds).FirstOrDefault()) is { } st)
+            // (one a spline end: the same end tied twice is the newer; of two splines the second follows the first)
+            var spls = ents.OfType<SkSpline>().ToList();
+            if (spls.Count == 2) spl = spls[1];
+            if (SplineTangentOf(spl, spls.Count == 2 ? spls[0] : lines.Concat(rounds).FirstOrDefault()) is { } st)
             {
                 var end = Sk.SplineTangent(st)!.Value.point;
                 Sk.Constraints.RemoveAll(o => Sk.SplineTangent(o) is { } ot && ReferenceEquals(ot.spline, spl) && ot.point == end);
@@ -1148,7 +1152,17 @@ public sealed partial class SketchEditor : IViewportMode
     void TrimAt(PointerInfo p)
     {
         var h = HitTest(p.X, p.Y, includeDims: false);
-        if (h is not { Kind: SkRefKind.Entity } || Sk.Entity(h.Value.Id) is not SkLine line) { Message?.Invoke("Trim currently supports lines: click the segment to remove."); return; }
+        if (h is { Kind: SkRefKind.Entity } && Sk.Entity(h.Value.Id) is SkSpline spline)
+        {
+            Snapshot();
+            var (cuts, why) = SketchOps.TrimSpline(Sk, spline, SketchPos(p));
+            if (why != null) { Undo(); _redo.Clear(); Message?.Invoke($"Trim: {why}."); return; }
+            foreach (var (pt, by) in cuts) TieTrimEnd(pt, by);
+            Sk.Cleanup();
+            Resolve();
+            return;
+        }
+        if (h is not { Kind: SkRefKind.Entity } || Sk.Entity(h.Value.Id) is not SkLine line) { Message?.Invoke("Trim works on lines and splines: click the segment to remove."); return; }
         var a = Sk.P(line.P1); var b = Sk.P(line.P2);
         var m = SketchPos(p);
         var dir = b - a; var len2 = dir.LengthSq;

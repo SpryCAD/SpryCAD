@@ -229,6 +229,102 @@ static class SplineTests
             t.Near(Kernel.Native.NMass.Of(body)!.Volume, want, want * 1e-6);
         });
 
+        t.Test("Spline profile: a helical sweep (a spline generator), its volume as the revolve's; a run-out; STEP", () =>
+        {
+            // the profile 5 right of the y axis, in a plane through it: a helical sweep of one turn sweeps as much as
+            // the revolve (the advance runs along the profile's plane)
+            var reg = new[] { new ProfileRegion(Loop(new Vec2(5, 0))) };
+            var body = Kernel.Native.NHelical.Sweep(reg, frame, Vec3.Zero, Vec3.UnitY, 60, 2 * Math.PI, "HX");
+            t.Eq(body.Validate(), null);
+            t.True(body.Faces.Count(f => f.Surface.Kind == SurfaceKind.Screw && f.Surface.Screw!.Gen is Kernel.Native.NSpline) == 1, "a screw face on the spline");
+            var (area, mx) = Shape(Loop());
+            var vol = 2 * Math.PI * (mx + 5 * area);
+            t.Near(Kernel.Native.NMass.Of(body)!.Volume, vol, vol * 1e-6);
+            var run = Kernel.Native.NHelical.Sweep(reg, frame, Vec3.Zero, Vec3.UnitY, 60, Math.PI, "HR", exitLength: 10);
+            t.Eq(run.Validate(), null);
+            using var ms = new MemoryStream();
+            StepWriter.Write(ms, new[] { ("helix", Kernel.Native.NTess.ToSolid(body)) }, "helix");
+            t.Eq(StepWriter.LastError, null);
+            var back = StepImport.Read(ms.ToArray(), "H.").Solids.Single().Body;
+            t.Eq(back.Validate(), null);
+            t.Near(Kernel.Native.NTess.ToSolid(back, 1e-3).Volume(), vol, vol * 1e-3);
+        });
+
+        t.Test("Sweep along a spline path: a tube's volume is its section times the path's length (open and closed)", () =>
+        {
+            // a circle r 1 centred on the path, the path leaving its plane square (along +z)
+            var tube = new[] { new ProfileRegion(ProfileLoop.Circle(Vec2.Zero, 1, "C")) };
+            var path = SplineFit.Through(new[] { new Vec3(0, 0, 0), new Vec3(4, 3, 12), new Vec3(-5, 8, 25), new Vec3(2, 2, 40) }, false, startDir: Vec3.UnitZ)!;
+            var seg = new Kernel.Native.NSweep.Seg(path.Eval(0), path.Eval(1), Curve: path);
+            // and on along a line from its end, tangent
+            path.Derivs(1, out var pe, out var de, out _);
+            var line = new Kernel.Native.NSweep.Seg(pe, pe + de.Normalized * 10);
+            var body = Kernel.Native.NSweep.Sweep(tube, frame, new[] { seg, line }, "T");
+            t.Eq(body.Validate(), null);
+            var want = Math.PI * (seg.Length + 10);
+            t.Near(Kernel.Native.NMass.Of(body)!.Volume, want, want * 1e-3);
+
+            // a closed spline path (its frame turned to meet itself at the end)
+            var ring = SplineFit.Through(new[] { new Vec3(0, 0, 0), new Vec3(20, -4, 10), new Vec3(30, 6, 0), new Vec3(10, 12, -12) }, true)!;
+            ring.Derivs(0, out var r0, out var rd, out _);
+            var rf = new Frame(r0, rd.Normalized.AnyPerpendicular(), Vec3.Cross(rd.Normalized, rd.Normalized.AnyPerpendicular()), rd.Normalized);
+            var closed = Kernel.Native.NSweep.Sweep(tube, rf, new[] { new Kernel.Native.NSweep.Seg(r0, r0, Curve: ring) }, "R");
+            t.Eq(closed.Validate(), null);
+            var len = new Kernel.Native.NSweep.Seg(r0, r0, Curve: ring).Length;
+            t.Near(Kernel.Native.NMass.Of(closed)!.Volume, Math.PI * len, Math.PI * len * 1e-3);
+        });
+
+        t.Test("Sketch spline: tangent to another spline (the second follows the first; a round of them does not loop)", () =>
+        {
+            var sk = new Core.Sketching.Sketch();
+            var a = sk.AddPoint(new Vec2(0, 0)); var b = sk.AddPoint(new Vec2(10, 8)); var c = sk.AddPoint(new Vec2(20, 0));
+            var d = sk.AddPoint(new Vec2(30, -10)); var e = sk.AddPoint(new Vec2(40, 5));
+            var s1 = sk.Add(new Core.Sketching.SkSpline { Points = new() { a.Id, b.Id, c.Id } });
+            var s2 = sk.Add(new Core.Sketching.SkSpline { Points = new() { c.Id, d.Id, e.Id } });
+            sk.AddConstraint(Core.Sketching.CType.Tangent, s1.Id, s2.Id);
+            sk.SplineCurve(s1)!.Derivs(1, out _, out var d1, out _);
+            sk.SplineCurve(s2)!.Derivs(0, out _, out var d2, out _);
+            t.True(Vec3.Distance(d1.Normalized, d2.Normalized) < 1e-9, $"the second leaves along the first: {d1.Normalized} vs {d2.Normalized}");
+            // the first is its own (its curve as before)
+            var free = SplineFit.Through(new[] { new Vec3(0, 0, 0), new Vec3(10, 8, 0), new Vec3(20, 0, 0) }, false)!;
+            t.True(Vec3.Distance(free.Eval(0.3), sk.SplineCurve(s1)!.Eval(0.3)) < 1e-12, "the first unchanged");
+            // a round (each following the other, at both ends) still gives curves
+            var s3 = sk.Add(new Core.Sketching.SkSpline { Points = new() { e.Id, sk.AddPoint(new Vec2(20, 30)).Id, a.Id } });
+            sk.AddConstraint(Core.Sketching.CType.Tangent, s2.Id, s3.Id);
+            sk.AddConstraint(Core.Sketching.CType.Tangent, s3.Id, s1.Id);
+            t.True(sk.SplineCurve(s1) != null && sk.SplineCurve(s2) != null && sk.SplineCurve(s3) != null, "curves round a cycle");
+        });
+
+        t.Test("Sketch spline: trimmed between two lines crossing it (two splines left, ending on the lines)", () =>
+        {
+            var sk = new Core.Sketching.Sketch();
+            var ids = new[] { new Vec2(0, 0), new Vec2(10, 10), new Vec2(20, 0), new Vec2(30, 10), new Vec2(40, 0) }.Select(q => sk.AddPoint(q).Id).ToList();
+            var spl = sk.Add(new Core.Sketching.SkSpline { Points = ids });
+            var l1 = sk.Add(new Core.Sketching.SkLine { P1 = sk.AddPoint(new Vec2(15, -5)).Id, P2 = sk.AddPoint(new Vec2(15, 20)).Id });
+            var l2 = sk.Add(new Core.Sketching.SkLine { P1 = sk.AddPoint(new Vec2(25, -5)).Id, P2 = sk.AddPoint(new Vec2(25, 20)).Id });
+            var before = sk.SplineCurve(spl)!;
+            var (cuts, why) = Core.Sketching.SketchOps.TrimSpline(sk, spl, new Vec2(20, 0.2));
+            t.Eq(why, null);
+            t.Eq(cuts.Count, 2);
+            t.True(sk.Entity(spl.Id) == null, "the old spline gone");
+            var left = sk.Entities.OfType<Core.Sketching.SkSpline>().ToList();
+            t.Eq(left.Count, 2);
+            var ends = left.SelectMany(s => new[] { sk.P(s.Points[0]), sk.P(s.Points[^1]) }).ToList();
+            t.True(ends.Any(q => Math.Abs(q.X - 15) < 1e-3) && ends.Any(q => Math.Abs(q.X - 25) < 1e-3), "the cut ends on the lines");
+            t.True(cuts.All(c => c.by == l1.Id || c.by == l2.Id), "cut by the lines");
+            // the kept pieces follow the old curve closely (the same points, the cut ends on it)
+            foreach (var s in left)
+            {
+                var c = sk.SplineCurve(s)!;
+                for (int i = 0; i <= 20; i++)
+                {
+                    var q = c.Eval(i / 20.0);
+                    var d = Enumerable.Range(0, 4001).Min(k => Vec3.Distance(before.Eval(k / 4000.0), q));
+                    t.True(d < 0.01, $"near the old curve: {d:g3}");
+                }
+            }
+        });
+
         t.Test("Spline profile: a boolean with a box, and a STEP round trip", () =>
         {
             var body = Kernel.Native.NBuild.Extrude(new[] { new ProfileRegion(Loop()) }, frame, 0, 15, "E");

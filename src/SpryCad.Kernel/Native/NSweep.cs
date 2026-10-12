@@ -9,17 +9,41 @@ namespace SpryCad.Kernel.Native;
 /// </summary>
 public static class NSweep
 {
-    /// <summary>A path segment: a line from A to B, or an arc from A about Center, turning Angle (radians, positive) about Axis.</summary>
-    public sealed record Seg(Vec3 A, Vec3 B, Vec3? Center = null, Vec3? Axis = null, double Angle = 0)
+    /// <summary>
+    /// A path segment: a line from A to B, an arc from A about Center, turning Angle (radians, positive) about Axis,
+    /// or a spline (Curve, from A at its parameter 0 to B at 1).
+    /// </summary>
+    public sealed record Seg(Vec3 A, Vec3 B, Vec3? Center = null, Vec3? Axis = null, double Angle = 0, BSplineCurve? Curve = null)
     {
         public bool IsArc => Center != null;
+        public bool IsSpline => Curve != null;
+        static Vec3 D(BSplineCurve c, double t) { c.Derivs(t, out _, out var d, out _); return d.Normalized; }
         /// <summary>Unit tangent at the start (direction of travel).</summary>
-        public Vec3 StartTangent => IsArc ? Vec3.Cross(Axis!.Value, A - Center!.Value).Normalized : (B - A).Normalized;
+        public Vec3 StartTangent => IsSpline ? D(Curve!, 0) : IsArc ? Vec3.Cross(Axis!.Value, A - Center!.Value).Normalized : (B - A).Normalized;
         /// <summary>Unit tangent at the end.</summary>
-        public Vec3 EndTangent => IsArc ? Vec3.Cross(Axis!.Value, B - Center!.Value).Normalized : (B - A).Normalized;
-        /// <summary>The motion taking the start of the segment (and the profile there) to its end.</summary>
+        public Vec3 EndTangent => IsSpline ? D(Curve!, 1) : IsArc ? Vec3.Cross(Axis!.Value, B - Center!.Value).Normalized : (B - A).Normalized;
+        /// <summary>The motion taking the start of the segment (and the profile there) to its end (not a spline's: see <see cref="Sweep"/>).</summary>
         public Transform Motion => IsArc ? Transform.Rotation(Center!.Value, Axis!.Value, Angle) : Transform.Translation(B - A);
-        public double Length => IsArc ? Angle * (A - Center!.Value).Length : (B - A).Length;
+        public double Length
+        {
+            get
+            {
+                if (!IsSpline) return IsArc ? Angle * (A - Center!.Value).Length : (B - A).Length;
+                double l = 0; var p = A;
+                for (int i = 1; i <= 256; i++) { var q = Curve!.Eval(i / 256.0); l += Vec3.Distance(p, q); p = q; }
+                return l;
+            }
+        }
+
+        /// <summary>The segment run the other way.</summary>
+        public Seg Reversed() => IsSpline ? new Seg(B, A, Curve: Reverse(Curve!)) : IsArc ? new Seg(B, A, Center, -Axis!.Value, Angle) : new Seg(B, A);
+
+        /// <summary>A curve run backwards (still over 0..1).</summary>
+        public static BSplineCurve Reverse(BSplineCurve c)
+        {
+            double a = c.Knots[0], b = c.Knots[^1];
+            return new BSplineCurve(c.Degree, c.Poles.Reverse().ToArray(), c.Knots.Select(k => a + b - k).Reverse().ToArray());
+        }
     }
 
     /// <summary>
@@ -33,13 +57,37 @@ public static class NSweep
         var scale = Math.Max(1, path.Sum(s => s.Length));
         var tol = 1e-9 * scale;
         bool closed = path.Count > 1 && Vec3.Distance(path[^1].B, path[0].A) < tol * 1e3
-            || path.Count == 1 && path[0].IsArc && path[0].Angle >= 2 * Math.PI - 1e-9;
+            || path.Count == 1 && path[0].IsArc && path[0].Angle >= 2 * Math.PI - 1e-9
+            || path.Count == 1 && path[0].IsSpline && Vec3.Distance(path[0].B, path[0].A) < tol * 1e3;
         // a single full turn: a revolution all the way round (no caps, nothing to stitch)
-        if (path.Count == 1 && closed)
+        // a spline closing on itself: two halves (no face of the sweep runs all the way round)
+        if (path.Count == 1 && closed && path[0].IsSpline)
+        {
+            var hc = new HCurve(path[0].Curve!.Degree, path[0].Curve!.Knots, path[0].Curve!.Poles.Select(q => H.Of(q)).ToArray());
+            var (h0, h1) = hc.Split(0.5 * (hc.T0 + hc.T1));
+            var c0 = h0.Reparam(0, 1).ToBSpline(); var c1 = h1.Reparam(0, 1).ToBSpline();
+            path = new[] { new Seg(c0.Eval(0), c0.Eval(1), Curve: c0), new Seg(c1.Eval(0), c1.Eval(1), Curve: c1) };
+        }
+        if (path.Count == 1 && closed && path[0].IsArc)
         {
             var s = path[0];
             var body = NBuild.Revolve(regions, frame, frame.ToLocal(s.Center!.Value), AxisIn(frame, s.Axis!.Value), 2 * Math.PI, prefix + ".0");
             return body;
+        }
+        // a closed path through splines: their turning frames need not come back round to the start's (the frame
+        // turns about the path as it goes); the difference spread over the splines by length, as a twist
+        var twists = new double[path.Count];
+        if (closed && path.Any(s => s.IsSpline))
+        {
+            var g = frame;
+            foreach (var s in path) g = s.IsSpline ? Frames(g, s.Curve!, 0, 1).Last() : g.Transformed(s.Motion);
+            // (about the path's tangent there: both frames' parts square to it)
+            var tz = path[0].StartTangent;
+            Vec3 Sq(Vec3 v) => (v - tz * Vec3.Dot(v, tz)).Normalized;
+            var (gx, fx) = (Sq(g.XDir), Sq(frame.XDir));
+            var miss = Math.Atan2(Vec3.Dot(tz, Vec3.Cross(gx, fx)), Vec3.Dot(gx, fx));
+            var total = path.Where(s => s.IsSpline).Sum(s => s.Length);
+            for (int k = 0; k < path.Count; k++) if (path[k].IsSpline) twists[k] = miss * path[k].Length / total;
         }
         var pieces = new List<NBody>();
         var f = frame;
@@ -47,9 +95,19 @@ public static class NSweep
         {
             var s = path[k];
             var name = prefix + "." + k;
-            if (Vec3.Dot(s.StartTangent, f.Normal) < 1 - 1e-6)
-                throw new ArgumentException($"the path turns sharply at segment {k + 1} (sweeps need a tangent-continuous path)");
+            // (a spline carries the profile at whatever angle it meets the path: from the start, it need only leave
+            // the profile's plane; further on, run on smoothly from the piece before. Lines and arcs take it square.)
+            if (s.IsSpline ? (k == 0 ? Vec3.Dot(s.StartTangent, f.Normal) < 0.05 : Vec3.Dot(s.StartTangent, path[k - 1].EndTangent) < 1 - 1e-6)
+                : Vec3.Dot(s.StartTangent, f.Normal) < 1 - 1e-6)
+                throw new ArgumentException(k == 0 && s.IsSpline ? "the path must leave the profile's plane" : $"the path turns sharply at segment {k + 1} (sweeps need a tangent-continuous path)");
             NBody piece;
+            if (s.IsSpline)
+            {
+                var frames = Frames(f, s.Curve!, twists[k], Math.Max(12, 8 * Math.Max(1, s.Curve!.Poles.Length - s.Curve.Degree)));
+                pieces.Add(NLoft.Loft(frames.Select(fr => new NLoft.Section(fr, regions)).ToList(), null, null, name));
+                f = frames[^1];
+                continue;
+            }
             if (!s.IsArc) piece = NBuild.Extrude(regions, f, 0, s.Length, name);
             else
             {
@@ -89,6 +147,58 @@ public static class NSweep
         }
         res.Link();
         return res;
+    }
+
+    /// <summary>
+    /// The profile's frame carried along a spline, at stations (the first f, the last at the curve's end): rotation-
+    /// minimizing (turned with the tangent, no twist: double reflection, Wang et al. 2008), and turned about the tangent
+    /// by <paramref name="twist"/> in all by the end, evenly. The profile placed on each and skinned through them is the
+    /// sweep along the spline (an exact loft through every station; within a small fraction of their spacing between).
+    /// </summary>
+    static List<Frame> Frames(Frame f, BSplineCurve c, double twist, int stations)
+    {
+        const int sub = 16;
+        var p0 = c.Eval(0);
+        Vec3 T(double u) { c.Derivs(u, out _, out var dd, out _); return dd.Normalized; }
+        // a basis along the path (its tangent, r, t × r) carried round; the profile's frame (at whatever angle to the
+        // path) turned as the basis turns, its offset from the path point with it
+        var t0 = T(0);
+        var r0 = f.XDir - t0 * Vec3.Dot(f.XDir, t0);
+        if (r0.Length < 1e-6) r0 = f.YDir - t0 * Vec3.Dot(f.YDir, t0);
+        r0 = r0.Normalized; var b0 = Vec3.Cross(t0, r0);
+        Vec3 Local(Vec3 v) => new(Vec3.Dot(v, t0), Vec3.Dot(v, r0), Vec3.Dot(v, b0));
+        Vec3 lo = Local(f.Origin - p0), lx = Local(f.XDir), ly = Local(f.YDir), ln = Local(f.Normal);
+        Frame At(Vec3 p, Vec3 t, Vec3 r)
+        {
+            var bb = Vec3.Cross(t, r);
+            Vec3 W(Vec3 l) => t * l.X + r * l.Y + bb * l.Z;
+            return new Frame(p + W(lo), W(lx), W(ly), W(ln));
+        }
+        var frames = new List<Frame> { f };
+        Vec3 xi = p0, ti = t0, ri = r0;
+        int steps = stations * sub;
+        for (int k = 1; k <= steps; k++)
+        {
+            double u = (double)k / steps;
+            var x1 = c.Eval(u); var t1 = T(u);
+            var v1 = x1 - xi; var c1 = Vec3.Dot(v1, v1);
+            if (c1 > 1e-300)
+            {
+                var rL = ri - v1 * (2 / c1 * Vec3.Dot(v1, ri));
+                var tL = ti - v1 * (2 / c1 * Vec3.Dot(v1, ti));
+                var v2 = t1 - tL; var c2 = Vec3.Dot(v2, v2);
+                ri = c2 > 1e-300 ? rL - v2 * (2 / c2 * Vec3.Dot(v2, rL)) : rL;
+            }
+            // (kept square to the tangent and of unit length against drift)
+            ri = (ri - t1 * Vec3.Dot(ri, t1)).Normalized;
+            xi = x1; ti = t1;
+            if (k % sub == 0)
+            {
+                var th = twist * k / steps;
+                frames.Add(At(x1, t1, ri * Math.Cos(th) + Vec3.Cross(t1, ri) * Math.Sin(th)));
+            }
+        }
+        return frames;
     }
 
     /// <summary>The direction of a 3D axis lying in the frame's plane, in the frame's coordinates.</summary>

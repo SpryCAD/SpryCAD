@@ -10,7 +10,8 @@ namespace SpryCad.Core.Regen;
 /// </summary>
 static class SweepPath
 {
-    sealed record Piece(Vec2 A, Vec2 B, Vec2? Center, double Angle); // an arc turns Angle (signed: + counter-clockwise) about Center
+    // an arc turns Angle (signed: + counter-clockwise) about Center; a spline runs along Curve (the sketch's x–y) from A at 0 to B at 1
+    sealed record Piece(Vec2 A, Vec2 B, Vec2? Center, double Angle, BSplineCurve? Curve = null);
 
     /// <summary>
     /// The path segments, starting on <paramref name="plane"/> (the profile's) and leaving it along its normal or
@@ -20,11 +21,10 @@ static class SweepPath
     {
         var sk = path.Sketch; var fr = path.Frame;
         var ents = sk.Entities.Where(e => !e.Construction).ToList();
-        if (ents.Any(e => e is SkSpline)) throw new FeatureException("A sweep path of splines is not supported yet: use lines and arcs.");
         var circles = ents.OfType<SkCircle>().ToList();
         var pieces = Pieces(sk, ents);
         if (circles.Count > 0 && (circles.Count > 1 || pieces.Count > 0))
-            throw new FeatureException("The path must be one chain of lines and arcs, or one circle.");
+            throw new FeatureException("The path must be one chain of lines, arcs and splines, or one circle.");
         if (circles.Count == 1)
         {
             // a circle: once round, from where the profile's plane cuts it
@@ -41,11 +41,13 @@ static class SweepPath
             if (Vec3.Dot(Vec3.Cross(axis, p - c), plane.Normal) < 0) axis = -axis;
             return new List<NSweep.Seg> { new(p, p, c, axis, 2 * Math.PI) };
         }
-        if (pieces.Count == 0) throw new FeatureException("The path sketch has no lines or arcs.");
+        if (pieces.Count == 0) throw new FeatureException("The path sketch has no lines, arcs or splines.");
         var scale = Math.Max(1, pieces.Max(x => Math.Max(x.A.Length, x.B.Length)));
         var tol = 1e-7 * scale;
         var order = Chain(pieces, tol, "path");
-        bool closed = order.Count > 1 && Vec2.Distance(End(order[^1]), Start(order[0])) < tol;
+        // (one spline closing on itself is a closed path too)
+        bool closed = order.Count > 1 && Vec2.Distance(End(order[^1]), Start(order[0])) < tol
+            || order.Count == 1 && order[0].p.Curve != null && Vec2.Distance(order[0].p.A, order[0].p.B) < tol;
         // the start: an end of the path on the profile's plane (open), or a vertex on it (closed)
         double Dist(Vec2 q) => Math.Abs(plane.Distance(fr.ToWorld(q)));
         var ptol = 1e-6 * scale;
@@ -71,11 +73,7 @@ static class SweepPath
         if (closed && Vec3.Dot(segs[0].StartTangent, plane.Normal) < 0)
         {
             var back = new List<NSweep.Seg>();
-            for (int i = segs.Count - 1; i >= 0; i--)
-            {
-                var s = segs[i];
-                back.Add(s.IsArc ? new NSweep.Seg(s.B, s.A, s.Center, -s.Axis!.Value, s.Angle) : new NSweep.Seg(s.B, s.A));
-            }
+            for (int i = segs.Count - 1; i >= 0; i--) back.Add(segs[i].Reversed());
             segs = back;
         }
         return segs;
@@ -93,6 +91,12 @@ static class SweepPath
             switch (e)
             {
                 case SkLine l: pieces.Add(new Piece(sk.P(l.P1), sk.P(l.P2), null, 0)); break;
+                case SkSpline sp when sk.SplineCurve(sp) is { } curve:
+                    {
+                        var a = curve.Eval(0); var b = curve.Eval(1);
+                        pieces.Add(new Piece(new Vec2(a.X, a.Y), new Vec2(b.X, b.Y), null, 0, curve));
+                        break;
+                    }
                 case SkArc a:
                     {
                         var c = sk.P(a.Center); var s = sk.P(a.Start); var t = sk.P(a.End);
@@ -143,6 +147,12 @@ static class SweepPath
         foreach (var (p, fwd) in order)
         {
             var a = fr.ToWorld(fwd ? p.A : p.B); var b = fr.ToWorld(fwd ? p.B : p.A);
+            if (p.Curve is { } curve)
+            {
+                var world = curve with { Poles = curve.Poles.Select(q => fr.ToWorld(q.X, q.Y, 0)).ToArray() };
+                segs.Add(new NSweep.Seg(a, b, Curve: fwd ? world : NSweep.Seg.Reverse(world)));
+                continue;
+            }
             if (p.Center is not { } c) { segs.Add(new NSweep.Seg(a, b)); continue; }
             // counter-clockwise in the sketch is about its normal; walked backwards, about the reversed normal
             var axis = fwd ? fr.Normal : -fr.Normal;

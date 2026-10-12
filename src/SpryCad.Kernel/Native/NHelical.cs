@@ -36,7 +36,7 @@ public static class NHelical
         Vec3 refDir = Vec3.Zero; double rRef = -1;
         foreach (var (_, segs) in loops)
             foreach (var s in segs)
-                foreach (var q in s.Arc == null ? new[] { s.A } : ArcPoints(s))
+                foreach (var q in PointsOf(s))
                 {
                     var w = frame.ToWorld(q); var d = w - axisOrigin; var h = Vec3.Dot(d, a);
                     var radial = d - a * h; var r = radial.Length;
@@ -66,7 +66,7 @@ public static class NHelical
         Vec3 exitDir = Vec3.Zero; double exitLen = 0;
         if (exitRadius > 0 || exitLength > 0)
         {
-            bool arcs = loops.Any(l => l.segs.Any(s => s.Arc != null));
+            bool arcs = loops.Any(l => l.segs.Any(s => s.Arc != null || s.Spline != null));
             var c0 = Vec3.Zero; int nc = 0;
             foreach (var (_, segs) in loops) foreach (var s in segs) { c0 += frame.ToWorld(s.A); nc++; }
             c0 /= nc;
@@ -77,7 +77,7 @@ public static class NHelical
                 var dp = exitDir - a * Vec3.Dot(exitDir, a);
                 foreach (var (_, segs) in loops)
                     foreach (var s in segs)
-                        foreach (var q2 in s.Arc == null ? new[] { s.A } : ArcPoints(s))
+                        foreach (var q2 in PointsOf(s))
                         {
                             var q = end.Point(frame.ToWorld(q2)) - axisOrigin; var rq = q - a * Vec3.Dot(q, a);
                             double qa = dp.LengthSq, qb = 2 * Vec3.Dot(rq, dp), qc = rq.LengthSq - exitRadius * exitRadius;
@@ -107,7 +107,17 @@ public static class NHelical
             {
                 int j = (i + 1) % m;
                 var s = segs[i];
-                if (s.Arc == null)
+                if (s.Spline is { } sp)
+                {
+                    // a spline: its curve in space the generator, the edges along it with rising parameters
+                    var c3 = new NSpline(sp.Curve with { Poles = sp.Curve.Poles.Select(q => frame.ToWorld(q.X, q.Y, 0)).ToArray() });
+                    gens[i] = c3;
+                    bool up = sp.T0 <= sp.T1;
+                    double lo = Math.Min(sp.T0, sp.T1), hi = Math.Max(sp.T0, sp.T1);
+                    bottom[i] = up ? (new NEdge(c3, lo, hi, v0[i], v0[j]), true) : (new NEdge(c3, lo, hi, v0[j], v0[i]), false);
+                    top[i] = up ? (new NEdge(c3.Transformed(end), lo, hi, v1[i], v1[j]), true) : (new NEdge(c3.Transformed(end), lo, hi, v1[j], v1[i]), false);
+                }
+                else if (s.Arc == null)
                 {
                     var d = v0[j].P - v0[i].P;
                     var line = new NLine(v0[i].P, d);
@@ -175,7 +185,20 @@ public static class NHelical
                     var s = segs[i];
                     var name = prefix + ".X." + s.Name;
                     NSurface surf; bool sense; Vec3? anchor = null;
-                    if (s.Arc == null)
+                    if (s.Spline != null)
+                    {
+                        // a spline carried straight out: ruled between it and its copy; outward across it, about the moved normal
+                        var c0 = ((NSpline)te.Curve).S; var c1 = ((NSpline)far[i].e.Curve).S;
+                        var poles = new Vec3[c0.Poles.Length, 2];
+                        for (int k = 0; k < c0.Poles.Length; k++) { poles[k, 0] = c0.Poles[k]; poles[k, 1] = c1.Poles[k]; }
+                        surf = NSurface.BSpline(new NurbsSurface(c0.Degree, 1, poles, null, c0.Knots, new double[] { 0, 0, 1, 1 }));
+                        var tm = 0.5 * (te.T0 + te.T1);
+                        var tan = te.Curve.Deriv(tm) * (top[i].fwd ? 1 : -1);
+                        var mid = te.Curve.Eval(tm) + exitDir * (exitLen / 2);
+                        sense = Vec3.Dot(surf.Normal(mid), Vec3.Cross(tan, nEnd)) > 0;
+                        anchor = mid;
+                    }
+                    else if (s.Arc == null)
                     {
                         // outward: across the line, away from the region (interior on the line's left about the moved normal)
                         var d = v1[j].P - v1[i].P;
@@ -197,7 +220,7 @@ public static class NHelical
                         sense = s.Ccw; // convex arcs face away from the axis
                         anchor = te.Curve.Eval(0.5 * (te.T0 + te.T1)) + exitDir * (exitLen / 2);
                     }
-                    if (!tags.TryGetValue(name, out var tag)) tags[name] = tag = new FaceTag(name, s.Arc == null ? SurfaceDef.PlaneDef : surf.Def);
+                    if (!tags.TryGetValue(name, out var tag)) tags[name] = tag = new FaceTag(name, s.Arc == null && s.Spline == null ? SurfaceDef.PlaneDef : surf.Def);
                     var face = new NFace(surf, sense, tag, anchor);
                     // as an extrusion's sides: the segment (a → b), b's line out, the copy back, a's line in; counter-
                     // clockwise about the outward normal when the run-out leaves along the moved sketch normal
@@ -229,6 +252,18 @@ public static class NHelical
     {
         var rev = l.Coedges.Select(c => new NCoedge(c.Edge, !c.Forward)).Reverse().ToList();
         l.Coedges.Clear(); l.Coedges.AddRange(rev);
+    }
+
+    // points along a segment (for the profile's extent): its start, or along an arc or spline
+    static IEnumerable<Vec2> PointsOf(NBuild.Seg s)
+    {
+        if (s.Spline is { } sp)
+        {
+            for (int k = 0; k <= 32; k++) { var q = sp.Curve.Eval(sp.T0 + (sp.T1 - sp.T0) * k / 32); yield return new Vec2(q.X, q.Y); }
+            yield break;
+        }
+        if (s.Arc == null) { yield return s.A; yield break; }
+        foreach (var q in ArcPoints(s)) yield return q;
     }
 
     // points along an arc segment (for the profile's extent)

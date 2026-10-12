@@ -294,7 +294,12 @@ public static class SketchOps
                 SkArc ar => new SkArc { Center = MapPoint(ar.Center), Start = MapPoint(ar.End), End = MapPoint(ar.Start) },
                 SkCircle ci => new SkCircle { Center = MapPoint(ci.Center), R = ci.R },
                 SkPointEntity pe => new SkPointEntity { P = MapPoint(pe.P) },
-                SkSpline sp => new SkSpline { Points = sp.Points.Select(MapPoint).ToList(), Closed = sp.Closed },
+                // (its handles mirrored too: a direction reflects as a point about the line through the origin)
+                SkSpline sp => new SkSpline
+                {
+                    Points = sp.Points.Select(MapPoint).ToList(), Closed = sp.Closed, Params = sp.Params == null ? null : new List<double>(sp.Params),
+                    StartDir = sp.StartDir is { } sd ? u * (2 * Vec2.Dot(u, sd)) - sd : null, EndDir = sp.EndDir is { } ed ? u * (2 * Vec2.Dot(u, ed)) - ed : null,
+                },
                 _ => null!,
             };
             if (copy == null) continue;
@@ -305,5 +310,138 @@ public static class SketchOps
             made.Add(copy.Id);
         }
         return made;
+    }
+
+    /// <summary>An entity as a polyline (lines, arcs, circles, splines), for crossings.</summary>
+    public static List<Vec2> Polyline(Sketch sk, SkEntity e)
+    {
+        switch (e)
+        {
+            case SkLine l: return new() { sk.P(l.P1), sk.P(l.P2) };
+            case SkCircle c: return Enumerable.Range(0, 97).Select(i => sk.P(c.Center) + Vec2.FromAngle(2 * Math.PI * i / 96, c.R)).ToList();
+            case SkArc a:
+                {
+                    var c = sk.P(a.Center); var s = sk.P(a.Start) - c; var en = sk.P(a.End) - c;
+                    double a0 = s.Angle, a1 = en.Angle;
+                    while (a1 <= a0) a1 += 2 * Math.PI;
+                    return Enumerable.Range(0, 65).Select(i => c + Vec2.FromAngle(a0 + (a1 - a0) * i / 64, s.Length)).ToList();
+                }
+            case SkSpline sp when sk.SplineCurve(sp) is { } curve:
+                return Enumerable.Range(0, 401).Select(i => { var q = curve.Eval(i / 400.0); return new Vec2(q.X, q.Y); }).ToList();
+        }
+        return new();
+    }
+
+    /// <summary>
+    /// Trims a spline: the piece around <paramref name="at"/> between its crossings with other (non-construction)
+    /// entities, or its ends, goes. What is left is a spline (two, cut in the middle; a closed one opens) through the
+    /// fit points it keeps and a new point at each cut, tangent relations at its kept ends kept. The new points and
+    /// the entity each was cut at (to tie them there), or null with why not.
+    /// </summary>
+    public static (List<(long point, long by)> cuts, string? error) TrimSpline(Sketch sk, SkSpline s, Vec2 at)
+    {
+        var none = new List<(long, long)>();
+        if (sk.SplineCurve(s) is not { } curve) return (none, "the spline has no curve");
+        const int N = 1200;
+        var P = Enumerable.Range(0, N + 1).Select(i => { var q = curve.Eval((double)i / N); return new Vec2(q.X, q.Y); }).ToArray();
+        double Param(Vec2 q)
+        {
+            double best = double.MaxValue, bt = 0;
+            for (int i = 0; i < N; i++)
+            {
+                var d = P[i + 1] - P[i]; var l2 = d.LengthSq;
+                var f = l2 > 0 ? Math.Clamp(Vec2.Dot(q - P[i], d) / l2, 0, 1) : 0;
+                var dist = Vec2.Distance(P[i] + d * f, q);
+                if (dist < best) { best = dist; bt = (i + f) / N; }
+            }
+            return bt;
+        }
+        var tm = Param(at);
+        // crossings with the other entities (and where they are)
+        var cuts = new List<(double t, long by, Vec2 p)>();
+        foreach (var e in sk.Entities)
+        {
+            if (e.Id == s.Id || e.Construction) continue;
+            var poly = Polyline(sk, e);
+            for (int k = 0; k + 1 < poly.Count; k++)
+            {
+                Vec2 c = poly[k], d = poly[k + 1];
+                for (int i = 0; i < N; i++)
+                {
+                    Vec2 a = P[i], b = P[i + 1], dir = b - a;
+                    var den = Vec2.Cross(dir, d - c);
+                    if (Math.Abs(den) < 1e-15) continue;
+                    var u = Vec2.Cross(c - a, d - c) / den; var v = Vec2.Cross(c - a, dir) / den;
+                    if (u < 0 || u > 1 || v < -1e-9 || v > 1 + 1e-9) continue;
+                    var t = (i + u) / N;
+                    if (!s.Closed && (t < 1e-4 || t > 1 - 1e-4)) continue; // at the spline's own ends
+                    cuts.Add((t, e.Id, a + dir * u));
+                }
+            }
+        }
+        cuts.Sort((x, y) => x.t.CompareTo(y.t));
+        for (int i = cuts.Count - 1; i > 0; i--) if (cuts[i].t - cuts[i - 1].t < 1e-5) cuts.RemoveAt(i);
+        // the fit points' parameters
+        var fp = s.Points.Select(id => Param(sk.P(id))).ToList();
+        fp[0] = 0;
+        if (!s.Closed) fp[^1] = 1;
+        var tangents = sk.Constraints.Where(c => sk.SplineTangent(c) is { } st && ReferenceEquals(st.spline, s)).Select(c => (c, sk.SplineTangent(c)!.Value.point)).ToList();
+        var made = new List<SkSpline>();
+        var res = new List<(long, long)>();
+        long NewPoint((double t, long by, Vec2 p) cut) { var np = sk.AddPoint(cut.p); res.Add((np.Id, cut.by)); return np.Id; }
+        // a piece keeps the old curve's directions at its ends (the cuts, and the old ends where nothing else sets them)
+        // (the derivative per the piece's own parameter: the old one's times the share of it the piece spans)
+        Vec2 Dir(double t, double span) { curve.Derivs(Math.Clamp(t, 0, 1), out _, out var d, out _); return new Vec2(d.X, d.Y) * span; }
+        SkSpline? Piece(List<long> pts, double t0, double t1)
+        {
+            if (pts.Count < 2) return null;
+            var span = t1 >= t0 ? t1 - t0 : t1 + 1 - t0;
+            // the points' parameters on the old curve, as the piece's own (the same curve where they are)
+            var prm = pts.Select((id, i) => i == 0 ? 0.0 : i == pts.Count - 1 ? 1.0 : ((Param(sk.P(id)) - t0 + 1) % 1) / span).ToList();
+            var sp = sk.Add(new SkSpline { Points = pts, Construction = s.Construction, StartDir = Dir(t0, span), EndDir = Dir(t1, span), Params = prm });
+            made.Add(sp);
+            return sp;
+        }
+        if (s.Closed)
+        {
+            if (cuts.Count < 2) return (none, "a closed spline is trimmed between two crossings");
+            // the piece round the click goes: from the crossing after it round to the one before
+            var lo = cuts.LastOrDefault(x => x.t <= tm); if (lo.by == 0) lo = cuts[^1];
+            var hi = cuts.FirstOrDefault(x => x.t > tm); if (hi.by == 0) hi = cuts[0];
+            var pts = new List<long> { NewPoint(hi) };
+            // fit points from hi on round to lo
+            var order = Enumerable.Range(0, s.Points.Count).OrderBy(i => (fp[i] - hi.t + 1) % 1).Where(i => (fp[i] - hi.t + 1) % 1 < (lo.t - hi.t + 1) % 1 && (fp[i] - hi.t + 1) % 1 > 1e-6).ToList();
+            pts.AddRange(order.Select(i => s.Points[i]));
+            pts.Add(NewPoint(lo));
+            Piece(pts, hi.t, lo.t);
+        }
+        else
+        {
+            (double t, long by, Vec2 p) lo = (0, -1, default), hi = (1, -1, default);
+            foreach (var x in cuts) { if (x.t <= tm) lo = x; else { hi = x; break; } }
+            if (lo.by < 0 && hi.by < 0) { sk.DeleteEntity(s.Id); return (res, null); }
+            if (lo.by >= 0)
+            {
+                var pts = Enumerable.Range(0, s.Points.Count).Where(i => fp[i] < lo.t - 1e-6).Select(i => s.Points[i]).ToList();
+                pts.Add(NewPoint(lo));
+                Piece(pts, 0, lo.t);
+            }
+            if (hi.by >= 0)
+            {
+                var pts = new List<long> { NewPoint(hi) };
+                pts.AddRange(Enumerable.Range(0, s.Points.Count).Where(i => fp[i] > hi.t + 1e-6).Select(i => s.Points[i]));
+                Piece(pts, hi.t, 1);
+            }
+        }
+        // tangent relations at the ends kept: on the piece that has the end
+        foreach (var (c, pt) in tangents)
+        {
+            var piece = made.FirstOrDefault(m => m.Points[0] == pt || m.Points[^1] == pt);
+            if (piece == null) continue;
+            var other = c.Refs[0] == s.Id ? c.Refs[1] : c.Refs[0];
+            sk.Constraints.Add(new SkConstraint { Id = sk.NewId(), Type = CType.Tangent, Refs = new[] { other, piece.Id } });
+        }
+        sk.DeleteEntity(s.Id);
+        return (res, null);
     }
 }

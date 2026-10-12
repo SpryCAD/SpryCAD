@@ -234,6 +234,8 @@ public sealed class ScrewSurface
             var lim = Math.PI / 2;
             if (Math.Abs(du) > lim) { var k = lim / Math.Abs(du); du *= k; dv *= k; }
             u += du; v += dv;
+            // a spline generator ends where its curve does (evaluated past it, it stays at its end): kept on it
+            if (Gen is NSpline gs) v = Math.Clamp(v, gs.S.Knots[gs.S.Degree], gs.S.Knots[^(gs.S.Degree + 1)]);
             if (Math.Abs(du) < 1e-15 * (1 + Math.Abs(u)) && Math.Abs(dv) < 1e-15 * (1 + Math.Abs(v))) break;
         }
         var c = Eval(u, v);

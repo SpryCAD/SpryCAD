@@ -11,18 +11,30 @@ public static class SplineFit
     /// <summary>The spline through the points (points repeated in a row count once); null for fewer than two distinct ones (three closed).</summary>
     /// <param name="startDir">Open splines: the direction it leaves the first point in (tangent to what it continues), or null.</param>
     /// <param name="endDir">Open splines: the direction it arrives at the last point in, or null.</param>
-    public static BSplineCurve? Through(IReadOnlyList<Vec3> points, bool closed, Vec3? startDir = null, Vec3? endDir = null)
+    /// <param name="exactEnds">The directions are the derivatives themselves (their lengths kept), not just directions.</param>
+    /// <param name="parameters">Open splines: the points' parameters (0 first, 1 last, rising), else centripetal ones.</param>
+    public static BSplineCurve? Through(IReadOnlyList<Vec3> points, bool closed, Vec3? startDir = null, Vec3? endDir = null, bool exactEnds = false,
+        IReadOnlyList<double>? parameters = null)
     {
         var pts = new List<Vec3>();
-        foreach (var p in points)
-            if (pts.Count == 0 || Vec3.Distance(pts[^1], p) > 1e-9) pts.Add(p);
+        var given = new List<double>();
+        for (int i = 0; i < points.Count; i++)
+        {
+            var p = points[i];
+            if (pts.Count == 0 || Vec3.Distance(pts[^1], p) > 1e-9) { pts.Add(p); if (parameters != null && i < parameters.Count) given.Add(parameters[i]); }
+        }
         if (closed && pts.Count > 1 && Vec3.Distance(pts[0], pts[^1]) <= 1e-9) pts.RemoveAt(pts.Count - 1);
         if (closed) return pts.Count >= 3 ? Closed(pts) : null;
         if (pts.Count < 2) return null;
         var uk = new double[pts.Count];
-        for (int k = 1; k < pts.Count; k++) uk[k] = uk[k - 1] + Math.Sqrt(Vec3.Distance(pts[k], pts[k - 1]));
-        for (int k = 1; k < pts.Count; k++) uk[k] /= uk[^1];
-        uk[^1] = 1;
+        bool usable = given.Count == pts.Count && given[0] == 0 && given[^1] == 1 && Enumerable.Range(1, given.Count - 1).All(k => given[k] > given[k - 1] + 1e-9);
+        if (usable) for (int k = 0; k < pts.Count; k++) uk[k] = given[k];
+        else
+        {
+            for (int k = 1; k < pts.Count; k++) uk[k] = uk[k - 1] + Math.Sqrt(Vec3.Distance(pts[k], pts[k - 1]));
+            for (int k = 1; k < pts.Count; k++) uk[k] /= uk[^1];
+            uk[^1] = 1;
+        }
         var free = BSplineCurve.Interpolate(pts, uk, 3);
         if (startDir == null && endDir == null) return free;
         // an end tied to a direction: the derivative there along it, as long as the points' chords (an end left free
@@ -30,8 +42,8 @@ public static class SplineFit
         double len = 0;
         for (int k = 1; k < pts.Count; k++) len += Vec3.Distance(pts[k], pts[k - 1]);
         free.Derivs(0, out _, out var d0, out _); free.Derivs(1, out _, out var d1, out _);
-        if (startDir is { } sd && sd.Length > 1e-12) d0 = sd.Normalized * len;
-        if (endDir is { } ed && ed.Length > 1e-12) d1 = ed.Normalized * len;
+        if (startDir is { } sd && sd.Length > 1e-12) d0 = exactEnds ? sd : sd.Normalized * len;
+        if (endDir is { } ed && ed.Length > 1e-12) d1 = exactEnds ? ed : ed.Normalized * len;
         return WithEnds(pts, uk, d0, d1);
     }
 

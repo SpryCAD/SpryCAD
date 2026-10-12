@@ -137,8 +137,17 @@ public sealed class SkSpline : SkEntity
 {
     public List<long> Points { get; set; } = new();
     public bool Closed { get; set; }
+    /// <summary>
+    /// Handles: its derivative leaving its first point, arriving at its last (sketch x–y, per its parameter 0 to 1:
+    /// the direction and how far it runs on that way; null: free), where no Tangent relation sets the direction (then
+    /// its length stays). Trim keeps a piece's shape with them.
+    /// </summary>
+    public Vec2? StartDir { get; set; }
+    public Vec2? EndDir { get; set; }
+    /// <summary>The points' parameters (0 to 1, rising: one each), kept from a curve it was cut from; null: centripetal.</summary>
+    public List<double>? Params { get; set; }
     public override IEnumerable<long> PointIds => Points;
-    public override SkEntity Clone() { var c = (SkSpline)MemberwiseClone(); c.Points = new List<long>(Points); return c; }
+    public override SkEntity Clone() { var c = (SkSpline)MemberwiseClone(); c.Points = new List<long>(Points); c.Params = Params == null ? null : new List<double>(Params); return c; }
     public override void RemapPoint(long from, long to) { for (int i = 0; i < Points.Count; i++) if (Points[i] == from) Points[i] = to; }
 }
 
@@ -317,19 +326,38 @@ public sealed class Sketch
     public BSplineCurve? SplineCurve(SkSpline s)
     {
         Vec3? start = null, end = null;
-        if (!s.Closed && s.Points.Count >= 2)
-            foreach (var c in Constraints)
-                if (SplineTangent(c) is { } t && ReferenceEquals(t.spline, s))
-                {
-                    var d = new Vec3(t.away.X, t.away.Y, 0);
-                    if (t.atStart) start = d; else end = -d;
-                }
-        return SplineFit.Through(s.Points.Select(id => { var p = P(id); return new Vec3(p.X, p.Y, 0); }).ToList(), s.Closed, start, end);
+        bool exact = false;
+        // (a spline whose direction comes, in a round, from itself: free while it is being worked out)
+        var busy = _splinesBusy ??= new HashSet<SkSpline>(ReferenceEqualityComparer.Instance);
+        if (!s.Closed && s.Points.Count >= 2 && busy.Add(s))
+        {
+            try
+            {
+                foreach (var c in Constraints)
+                    if (SplineTangent(c) is { } t && ReferenceEquals(t.spline, s))
+                    {
+                        // (as long as the handle there, if it has one)
+                        var hl = (t.atStart ? s.StartDir : s.EndDir)?.Length;
+                        var d = new Vec3(t.away.X, t.away.Y, 0) * (hl ?? 1);
+                        if (t.atStart) start = d; else end = -d;
+                    }
+            }
+            finally { busy.Remove(s); }
+            start ??= s.StartDir is { } sd ? new Vec3(sd.X, sd.Y, 0) : null;
+            end ??= s.EndDir is { } ed ? new Vec3(ed.X, ed.Y, 0) : null;
+            exact = s.StartDir != null || s.EndDir != null;
+        }
+        // (with handles the ends' derivatives are given whole; a free end there keeps the fit's own)
+        return SplineFit.Through(s.Points.Select(id => { var p = P(id); return new Vec3(p.X, p.Y, 0); }).ToList(), s.Closed, start, end, exact,
+            s.Params != null && s.Params.Count == s.Points.Count ? s.Params : null);
     }
 
+    [ThreadStatic] static HashSet<SkSpline>? _splinesBusy;
+
     /// <summary>
-    /// A Tangent relation between a spline and a line or arc meeting one of its ends: the spline, the point, whether it
-    /// is the spline's start, and the direction away from the other entity there (along it). Null for any other relation.
+    /// A Tangent relation between a spline and a line, arc or spline meeting one of its ends: the spline, the point,
+    /// whether it is the spline's start, and the direction away from the other entity there (along it). Of two
+    /// splines, the second follows the first (its end takes the first's direction). Null for any other relation.
     /// </summary>
     public (SkSpline spline, SkEntity other, long point, bool atStart, Vec2 away)? SplineTangent(SkConstraint c)
     {
@@ -354,6 +382,15 @@ public sealed class Sketch
                         // the arc runs counter-clockwise from its start: it leaves its start along t, arrives at its end along t
                         var r = P(pt) - P(a.Center); var t = new Vec2(-r.Y, r.X);
                         away = pt == a.Start ? -t : t;
+                        break;
+                    }
+                case SkSpline os when !os.Closed && os.Points.Count >= 2 && (pt == os.Points[0] || pt == os.Points[^1]):
+                    {
+                        // the other spline's own direction at its end there (away from it: back along it at its start)
+                        if (SplineCurve(os) is not { } oc) continue;
+                        bool atOtherStart = pt == os.Points[0] && !(pt == os.Points[^1]);
+                        oc.Derivs(atOtherStart ? 0 : 1, out _, out var od, out _);
+                        away = atOtherStart ? new Vec2(-od.X, -od.Y) : new Vec2(od.X, od.Y);
                         break;
                     }
                 default: continue;
