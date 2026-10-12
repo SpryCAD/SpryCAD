@@ -172,11 +172,13 @@ public partial class MainWindow
                 Item("_Extrude...", () => ExtrudeCommand(false), null, "extrude"),
                 Item("_Revolve...", () => RevolveCommand(false), null, "revolve"),
                 Item("S_wept...", () => SweepCommand(false), null, "sweep"),
+                Item("_Lofted...", () => LoftCommand(false), null, "loft"),
                 Item("_Helical...", () => HelicalCommand(false), null, "helical")),
             Sub("_Cut",
                 Item("_Extrude...", () => ExtrudeCommand(true), null, "cut"),
                 Item("_Revolve...", () => RevolveCommand(true), null, "cutrevolve"),
                 Item("S_wept...", () => SweepCommand(true), null, "cutsweep"),
+                Item("_Lofted...", () => LoftCommand(true), null, "cutloft"),
                 Item("_Helical...", () => HelicalCommand(true), null, "cuthelical")),
             Sub("_Features",
                 Item("_Fillet...", () => BlendCommand(true), null, "fillet"),
@@ -270,11 +272,13 @@ public partial class MainWindow
                 Cmd("extrude", "Extruded\nBoss/Base", () => ExtrudeCommand(false));
                 Cmd("revolve", "Revolved\nBoss/Base", () => RevolveCommand(false));
                 Cmd("sweep", "Swept\nBoss/Base", () => SweepCommand(false));
+                Cmd("loft", "Lofted\nBoss/Base", () => LoftCommand(false));
                 Cmd("helical", "Helical\nBoss/Base", () => HelicalCommand(false));
                 Sep();
                 Cmd("cut", "Extruded\nCut", () => ExtrudeCommand(true));
                 Cmd("cutrevolve", "Revolved\nCut", () => RevolveCommand(true));
                 Cmd("cutsweep", "Swept\nCut", () => SweepCommand(true));
+                Cmd("cutloft", "Lofted\nCut", () => LoftCommand(true));
                 Cmd("cuthelical", "Helical\nCut", () => HelicalCommand(true));
                 Cmd("hole", "Hole\nWizard", HoleCommand);
                 Cmd("thread", "Thread", ThreadCommand);
@@ -365,6 +369,8 @@ public partial class MainWindow
         ["Revolved Cut"] = "Revolves a sketch profile about a centerline to remove material.",
         ["Swept Boss/Base"] = "Sweeps a closed profile along a path of lines and arcs to add material.",
         ["Swept Cut"] = "Sweeps a closed profile along a path of lines and arcs to remove material.",
+        ["Lofted Boss/Base"] = "Adds material between profiles in order (and through guide curves): a transition from one shape to the next.",
+        ["Lofted Cut"] = "Removes material between profiles in order (and through guide curves).",
         ["Hole Wizard"] = "Simple, counterbored or countersunk holes placed on a face.",
         ["Helical Boss/Base"] = "Sweeps a closed profile along a helix about a centerline of its sketch (springs, coils).",
         ["Helical Cut"] = "Cuts a closed profile swept along a helix about a centerline of its sketch.",

@@ -56,6 +56,7 @@ public sealed class DirRef
 [JsonDerivedType(typeof(RevolveFeature), "revolve")]
 [JsonDerivedType(typeof(SweepFeature), "sweep")]
 [JsonDerivedType(typeof(HelicalSweepFeature), "helicalSweep")]
+[JsonDerivedType(typeof(LoftFeature), "loft")]
 [JsonDerivedType(typeof(ThreadFeature), "thread")]
 [JsonDerivedType(typeof(FilletFeature), "fillet")]
 [JsonDerivedType(typeof(ChamferFeature), "chamfer")]
@@ -140,6 +141,28 @@ public sealed class SweepFeature : Feature
     public bool IsCut { get; set; }
     public bool Merge { get; set; } = true;
     public override IEnumerable<string> Consumes => new[] { ProfileSketchId, PathSketchId };
+}
+
+/// <summary>How a loft leaves its first section or arrives at its last.</summary>
+public enum LoftTangency { None, Normal }
+
+/// <summary>
+/// A solid lofted through profile sketches in order (closed profiles; the first or last may be a single point),
+/// optionally following guide curves: sketches of open chains of lines and arcs through every profile.
+/// </summary>
+public sealed class LoftFeature : Feature
+{
+    public override string Kind => IsCut ? "Cut-Loft" : "Loft";
+    public List<string> SectionSketchIds { get; set; } = new();
+    public List<string> GuideSketchIds { get; set; } = new();
+    /// <summary>Square to the first profile's plane (its tangent's length <see cref="StartLength"/> times the loft's length).</summary>
+    public LoftTangency StartTangency { get; set; }
+    public string StartLength { get; set; } = "1";
+    public LoftTangency EndTangency { get; set; }
+    public string EndLength { get; set; } = "1";
+    public bool IsCut { get; set; }
+    public bool Merge { get; set; } = true;
+    public override IEnumerable<string> Consumes => SectionSketchIds.Concat(GuideSketchIds);
 }
 
 /// <summary>

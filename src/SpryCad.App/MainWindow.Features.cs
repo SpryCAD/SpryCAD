@@ -176,6 +176,7 @@ public partial class MainWindow
             case ExtrudeFeature e: OpenExtrudePage((ExtrudeFeature)e.Clone(), false); break;
             case RevolveFeature rv: OpenRevolvePage((RevolveFeature)rv.Clone(), false); break;
             case SweepFeature sw: OpenSweepPage((SweepFeature)sw.Clone(), false); break;
+            case LoftFeature lf: OpenLoftPage((LoftFeature)lf.Clone(), false); break;
             case HelicalSweepFeature hs: OpenHelicalPage((HelicalSweepFeature)hs.Clone(), false); break;
             case ThreadFeature th: OpenThreadPage((ThreadFeature)th.Clone(), false); break;
             case FilletFeature fi: OpenBlendPage(fi.Clone(), false); break;
@@ -402,6 +403,44 @@ public partial class MainWindow
         page.Activate(string.IsNullOrEmpty(f.ProfileSketchId) ? profBox : string.IsNullOrEmpty(f.PathSketchId) ? pathBox : null);
         BeginEdit(f, isNew, page, overlay: false,
             hint: string.IsNullOrEmpty(f.ProfileSketchId) ? "Select the profile sketch, then the path sketch." : string.IsNullOrEmpty(f.PathSketchId) ? "Select the path sketch." : null);
+    }
+
+    // ------------------------------------------------------------------------------------------
+    // Loft
+
+    void LoftCommand(bool cut)
+    {
+        if (_sketch != null) ExitSketch(true);
+        // selected sketches, in the order picked: the profiles (the sketch just finished: the first)
+        var sketches = Selection.Items.Where(s => s.Kind == SelKind.Sketch).Select(s => s.FeatureId).Distinct().ToList();
+        if (sketches.Count == 0 && SketchFromSelection() is { } last) sketches.Add(last);
+        OpenLoftPage(new LoftFeature { SectionSketchIds = sketches, IsCut = cut }, true);
+    }
+
+    void OpenLoftPage(LoftFeature f, bool isNew)
+    {
+        var page = new PmPage(f.IsCut ? "Cut-Loft" : "Loft", f.IsCut ? "cutloft" : "loft");
+        var sec = page.Section("Profiles");
+        var profBox = page.Selection(sec, "Profiles", SelFilter.Sketch, "Profile sketches in order: closed profiles (the first or last may be a single point)");
+        foreach (var id in f.SectionSketchIds) profBox.Items.Add(new SelItem { Kind = SelKind.Sketch, FeatureId = id });
+        profBox.Refresh();
+        profBox.Changed += () => f.SectionSketchIds = profBox.Items.Select(i => i.FeatureId).ToList();
+        page.Info(sec, "The loft runs through the profiles in the order they are picked. Each profile's corners are matched to the next one's with the least twist.");
+        var gsec = page.Section("Guide Curves");
+        var guideBox = page.Selection(gsec, "Guides", SelFilter.Sketch, "Optional: sketches of tangent lines and arcs through every profile (one guide per chain)");
+        foreach (var id in f.GuideSketchIds) guideBox.Items.Add(new SelItem { Kind = SelKind.Sketch, FeatureId = id });
+        guideBox.Refresh();
+        guideBox.Changed += () => f.GuideSketchIds = guideBox.Items.Select(i => i.FeatureId).ToList();
+        var opts = page.Section("Start/End Constraints");
+        var tangency = new List<(LoftTangency, string)> { (LoftTangency.None, "None"), (LoftTangency.Normal, "Normal to profile") };
+        page.Combo(opts, "Start", tangency, () => f.StartTangency, v => f.StartTangency = v);
+        page.Number(opts, "Start tangent length", () => f.StartLength, v => f.StartLength = v);
+        page.Combo(opts, "End", tangency, () => f.EndTangency, v => f.EndTangency = v);
+        page.Number(opts, "End tangent length", () => f.EndLength, v => f.EndLength = v);
+        if (!f.IsCut) page.Check(page.Section("Options"), "Merge result", () => f.Merge, v => f.Merge = v);
+        page.Activate(f.SectionSketchIds.Count < 2 ? profBox : null);
+        BeginEdit(f, isNew, page, overlay: false,
+            hint: f.SectionSketchIds.Count < 2 ? "Select the profile sketches in order (two at least), then any guide curves." : null);
     }
 
     // ------------------------------------------------------------------------------------------

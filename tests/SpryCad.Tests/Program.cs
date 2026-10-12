@@ -156,6 +156,7 @@ static class Program
         if (args.Length > 2 && args[0] == "determinism") return Bench.Determinism(args[1], int.Parse(args[2]), args[3..]);
         if (args.Length > 2 && args[0] == "featprof") { Bench.FeatureProfile(args[1], args[2], args.Length > 3 ? int.Parse(args[3]) : 3); return 0; }
         if (args.Length > 1 && args[0] == "localbench") return LocalBench.Run(args[1], args.Length > 2 ? int.Parse(args[2]) : 5);
+        if (args.Length > 0 && args[0] == "loftbench") return LoftBench.Run();
         if (args.Length > 1 && args[0] == "bench")
         {
             Bench.Run(args[1], args.Length > 2 ? int.Parse(args[2]) : 5);
@@ -187,6 +188,8 @@ static class Program
             DirectBlendTests.Run(t);
             SweepTests.Run(t);
             SweepFeatureTests.Run(t);
+            LoftTests.Run(t);
+            LoftFeatureTests.Run(t);
             HelicalTests.Run(t);
             ThreadFeatureTests.Run(t);
             AssemblyTests.Run(t);

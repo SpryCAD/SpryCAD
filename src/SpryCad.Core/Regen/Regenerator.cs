@@ -388,6 +388,7 @@ public sealed class Regenerator
                 case RevolveFeature r: DoRevolve(r); break;
                 case SweepFeature sw: DoSweep(sw); break;
                 case HelicalSweepFeature hs: DoHelical(hs); break;
+                case LoftFeature lf: DoLoft(lf); break;
                 case ThreadFeature th: DoThread(th); break;
                 case FilletFeature fi: DoBlend(fi.Edges, Positive(fi.Radius, "Radius"), true, fi.TangentPropagation, fi.Overflow); break;
                 case ChamferFeature ch: { var cs = ChamferSizeOf(ch); DoBlend(ch.Edges, cs.D1, false, ch.TangentPropagation, ch.Overflow, cs); break; }
@@ -444,8 +445,9 @@ public sealed class Regenerator
             var res = SketchSolver.Solve(sk);
             if (res.Status == SketchStatus.OverDefined) status.Warnings.Add("Sketch is over defined or cannot be solved.");
             var regions = ProfileExtractor.Extract(sk, out var warns);
-            // a sweep's path is open by design: no profile warnings for it
-            if (!doc.Features.OfType<SweepFeature>().Any(w => w.PathSketchId == s.Id)) status.Warnings.AddRange(warns);
+            // a sweep's path and a loft's guides are open by design: no profile warnings for them
+            if (!doc.Features.OfType<SweepFeature>().Any(w => w.PathSketchId == s.Id) && !doc.Features.OfType<LoftFeature>().Any(l => l.GuideSketchIds.Contains(s.Id)))
+                status.Warnings.AddRange(warns);
             State.Sketches[s.Id] = new SketchResult { Frame = frame, Sketch = sk, Regions = regions, Solve = res };
             State.Planes[s.Id] = frame;
         }
@@ -839,6 +841,41 @@ public sealed class Regenerator
             State.Tools[f.Id] = new ToolInfo(tool, s.IsCut, s.Merge);
         }
 
+        void DoLoft(LoftFeature l)
+        {
+            if (l.SectionSketchIds.Count < 2) throw new FeatureException("Select two profile sketches at least.");
+            if (l.SectionSketchIds.Distinct().Count() < l.SectionSketchIds.Count) throw new FeatureException("A profile sketch is selected twice.");
+            if (l.GuideSketchIds.Intersect(l.SectionSketchIds).Any()) throw new FeatureException("A sketch cannot be both a profile and a guide.");
+            var sections = new List<Kernel.Native.NLoft.Section>();
+            for (int i = 0; i < l.SectionSketchIds.Count; i++)
+            {
+                var sk = GetSketch(l.SectionSketchIds[i]);
+                if (sk.Regions.Count > 0) { sections.Add(new(sk.Frame, sk.Regions)); continue; }
+                // no closed profile: a single point (the loft's first or last section)
+                var pts = sk.Sketch.Entities.OfType<SkPointEntity>().Where(e => !e.Construction).ToList();
+                if (pts.Count != 1 || sk.Sketch.Entities.Any(e => !e.Construction && e is not SkPointEntity))
+                    throw new FeatureException($"Profile {i + 1} has no closed profile (or a single point, for the first or last).");
+                sections.Add(new(sk.Frame, Array.Empty<ProfileRegion>(), sk.Frame.ToWorld(sk.Sketch.P(pts[0].P))));
+            }
+            var guides = new List<IReadOnlyList<Kernel.Native.NSweep.Seg>>();
+            foreach (var id in l.GuideSketchIds) guides.AddRange(SweepPath.Guides(GetSketch(id)));
+            var opt = new Kernel.Native.NLoft.Options(
+                l.StartTangency == LoftTangency.Normal ? Kernel.Native.NLoft.Tangency.Normal : Kernel.Native.NLoft.Tangency.None,
+                l.StartTangency == LoftTangency.Normal ? Positive(l.StartLength, "Start tangent length") : 1,
+                l.EndTangency == LoftTangency.Normal ? Kernel.Native.NLoft.Tangency.Normal : Kernel.Native.NLoft.Tangency.None,
+                l.EndTangency == LoftTangency.Normal ? Positive(l.EndLength, "End tangent length") : 1);
+            Solid tool;
+            try
+            {
+                var nb = Kernel.Native.NLoft.Loft(sections, guides, opt, f.Id);
+                if (nb.Validate() is { } bad) throw new FeatureException("The loft is not a valid solid: " + bad);
+                tool = Kernel.Native.NTess.ToSolid(nb);
+            }
+            catch (ArgumentException ex) { throw new FeatureException(char.ToUpper(ex.Message[0]) + ex.Message[1..] + "."); }
+            ApplyTool(tool, l.IsCut, l.Merge);
+            State.Tools[f.Id] = new ToolInfo(tool, l.IsCut, l.Merge);
+        }
+
         /// <summary>Whether a boolean changed the body (native: topology counts, so no tessellation is needed).</summary>
         static bool Changed(Solid before, Solid after)
         {
@@ -1216,7 +1253,7 @@ public sealed class Regenerator
                     if (Earlier.TryGetValue(seedId, out var seedStatus) && seedStatus.Error != null)
                         throw new FeatureException($"{Describe(seedId)} failed: {seedStatus.Error}");
                     if (seedStatus is { Suppressed: true }) throw new FeatureException($"{Describe(seedId)} is suppressed.");
-                    throw new FeatureException("Only extrude, revolve, sweep, helical sweep, thread, hole, fillet, chamfer, pattern and mirror features can be patterned.");
+                    throw new FeatureException("Only extrude, revolve, sweep, helical sweep, loft, thread, hole, fillet, chamfer, pattern and mirror features can be patterned.");
                 }
                 var copies = new List<(int i, Solid tool)>();
                 var plain = new List<int>();
