@@ -1211,9 +1211,10 @@ public static class NIntersect
                 else
                 {
                     pts = new List<Vec3>(chain.Count);
-                    foreach (var k in chain) pts.Add(NSurface.ProjectToIntersection(sa, sb, dom.Eval(cpt[k])));
-                    if (closed) pts.RemoveAt(pts.Count - 1);
-                    pts = Densify(pts, closed, sa, sb, tol);
+                    var dirs = new List<Vec3>(chain.Count);
+                    foreach (var k in chain) { pts.Add(NSurface.ProjectToIntersection(sa, sb, dom.Eval(cpt[k]), out var d, stopStep: StopStep)); dirs.Add(d); }
+                    if (closed) { pts.RemoveAt(pts.Count - 1); dirs.RemoveAt(dirs.Count - 1); }
+                    pts = Densify(pts, dirs, closed, sa, sb, tol);
                 }
                 if (pts.Count >= 2) result.Add(new NPolyline(pts, closed));
             }
@@ -1277,7 +1278,14 @@ public static class NIntersect
         }
     }
 
-    static List<Vec3> Densify(List<Vec3> pts, bool closed, NSurface a, NSurface b, double tol)
+    // a Gauss-Newton step this short ends a trace's projection (what is left is far below the 1e-12 it aims for)
+    const double StopStep = 1e-7;
+
+    /// <summary>
+    /// Inserts points of the intersection between the chain's until the chord error is below tol: each the projection
+    /// of a segment's middle, started from the cubic through its ends along the curve's directions there.
+    /// </summary>
+    static List<Vec3> Densify(List<Vec3> pts, List<Vec3> dirs, bool closed, NSurface a, NSurface b, double tol)
     {
         var res = new List<Vec3>();
         int n = pts.Count;
@@ -1286,21 +1294,31 @@ public static class NIntersect
         {
             var p = pts[i]; var q = pts[(i + 1) % n];
             res.Add(p);
-            Sub(p, q, 0);
+            Sub(p, dirs[i], q, dirs[(i + 1) % n], 0);
         }
         if (!closed) res.Add(pts[^1]);
         return res;
 
-        void Sub(Vec3 p, Vec3 q, int depth)
+        void Sub(Vec3 p, Vec3 tp, Vec3 q, Vec3 tq, int depth)
         {
             if (depth > 6) return;
+            var mid = (p + q) * 0.5;
+            // started from the cubic through both ends along the curve's directions there, at its middle (where
+            // they turn little: one Gauss-Newton step from it is usually enough)
+            var start = mid;
+            var c = q - p; double lp = tp.Length, lq = tq.Length, L = c.Length;
+            if (lp > 1e-300 && lq > 1e-300 && L > 0)
+            {
+                var up = tp / lp * Math.Sign(Vec3.Dot(tp, c)); var uq = tq / lq * Math.Sign(Vec3.Dot(tq, c));
+                if (Vec3.Dot(up, uq) > 0.5) start = mid + (up - uq) * (L / 8);
+            }
             // (a chain segment already within tolerance too: the trace grid is usually much finer than tol)
-            var m = NSurface.ProjectToIntersection(a, b, (p + q) * 0.5);
-            if (Vec3.Distance(m, (p + q) * 0.5) < tol * 0.25) return;
+            var m = NSurface.ProjectToIntersection(a, b, start, out var tm, stopStep: StopStep);
+            if (Vec3.Distance(m, mid) < tol * 0.25) return;
             if (Vec3.Distance(p, q) < tol) return;
-            Sub(p, m, depth + 1);
+            Sub(p, tp, m, tm, depth + 1);
             res.Add(m);
-            Sub(m, q, depth + 1);
+            Sub(m, tm, q, tq, depth + 1);
         }
     }
 }
