@@ -51,8 +51,13 @@ public static class NativeBlend
         // when that does better)
         var errs1 = new List<string>(); var probs1 = problemEdges == null ? null : new List<Vec3[]>(); var app1 = applied == null ? null : new List<(Solid, bool)>();
         int used = _pivotsUsed;
-        var r1 = ApplyOne(body, edges, size, fillet, prefix, errs1, overflow, probs1, app1, chamfer, buildOnly, trimmedOut);
-        if (errs1.Count > 0 && _pivotsUsed > used && !_noPivots)
+        var failedBefore = _pivotFailed;
+        _pivotFailed = false;
+        Solid r1;
+        bool pivotFailed;
+        try { r1 = ApplyOne(body, edges, size, fillet, prefix, errs1, overflow, probs1, app1, chamfer, buildOnly, trimmedOut); }
+        finally { pivotFailed = _pivotFailed; _pivotFailed = failedBefore; }
+        if ((errs1.Count > 0 || pivotFailed) && _pivotsUsed > used && !_noPivots)
         {
             var errs2 = new List<string>(); var probs2 = problemEdges == null ? null : new List<Vec3[]>(); var app2 = applied == null ? null : new List<(Solid, bool)>();
             _noPivots = true;
@@ -60,7 +65,8 @@ public static class NativeBlend
             try { r2 = ApplyOne(body, edges, size, fillet, prefix, errs2, overflow, probs2, app2, chamfer, buildOnly, trimmedOut); }
             finally { _noPivots = false; }
             Debug?.Invoke($"pivots: {errs1.Count} error(s) ({string.Join("; ", errs1)}); mitred: {errs2.Count}");
-            if (errs2.Count < errs1.Count) (r1, errs1, probs1, app1) = (r2, errs2, probs2, app2);
+            // (a pivot not glued: that run is incomplete)
+            if (pivotFailed || errs2.Count < errs1.Count) (r1, errs1, probs1, app1) = (r2, errs2, probs2, app2);
         }
         errors.AddRange(errs1);
         if (probs1 != null) problemEdges!.AddRange(probs1);
@@ -70,6 +76,7 @@ public static class NativeBlend
 
     // (per thread: pattern instances are built in parallel)
     [ThreadStatic] static int _pivotsUsed;
+    [ThreadStatic] static bool _pivotFailed;
     [ThreadStatic] static bool _noPivots;
 
     /// <summary>Whether three or more of the edges, of one kind (convex or concave), meet at a vertex.</summary>
@@ -641,7 +648,7 @@ public static class NativeBlend
     /// </summary>
     static RoundCornerCut? RoundCorner(NVertex v, NFace fa, NFace fb, IEnumerable<NEdge> blended, IReadOnlyCollection<NEdge> selected, Plane miter, double size, string name)
     {
-        if (_noPivots) return null;
+        if (_noPivots || _pivotFailed) return null;
         NEdge? g = null; int count = 0;
         foreach (var face in new[] { fa, fb })
             foreach (var c in face.Coedges)
@@ -738,8 +745,11 @@ public static class NativeBlend
     static Solid JoinPivot(Solid tool, Solid pivot)
     {
         if (DirectBlend.Glue(new List<DirectBlend.Tool> { new(tool, false, "tool", 0), new(pivot, false, "pivot", 0) }, out var why) is { } one) return one.Strip;
-        Debug?.Invoke($"pivot not glued ({why}): by boolean; tool ends {string.Join(" | ", tool.Native!.Faces.Where(f => f.Surface.Kind == SurfaceKind.Plane && f.Loops.Count == 1).Select(f => $"{f.Tag.Name}:{f.Loops[0].Coedges.Count}"))}; pivot ends {string.Join(" | ", pivot.Native!.Faces.Where(f => f.Tag.Name.Contains(".End")).Select(f => $"{f.Tag.Name}:{f.Loops[0].Coedges.Count}@{f.Surface.Plane!.Normal}"))}");
-        return Csg.Union(tool, pivot);
+        // (not glued, the booleans joining them and the body are slow and fail often: the feature is built mitred,
+        // no pivot built from here on in this run, which is thrown away)
+        Debug?.Invoke($"pivot not glued ({why}): the feature mitred");
+        _pivotFailed = true;
+        return tool;
     }
 
     /// <summary>The corners whose pivot a tool now kept carries.</summary>
