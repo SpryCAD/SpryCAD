@@ -264,7 +264,17 @@ public static class StepWriter
         foreach (var f in b.Faces)
         {
             if (f.Loops.Count == 0) continue;
-            int surf = fitOf.TryGetValue(f, out var fit) ? WriteBSplineSurface(c, fit) : WriteSurface(c, f, b);
+            var sameSense = f.SameSense;
+            int surf;
+            if (fitOf.TryGetValue(f, out var fit)) surf = WriteBSplineSurface(c, fit);
+            else if (ScrewCylinder(f) is { } cyl)
+            {
+                // a screw surface swept by a line along its axis (a thread's root or crest) is a cylinder: written
+                // exactly, its sense taken against the cylinder's outward normal
+                surf = c.Add($"CYLINDRICAL_SURFACE('',#{Axis2(c, cyl.origin, cyl.axis, cyl.refDir)},{R(cyl.r)})");
+                if (!cyl.outward) sameSense = !sameSense;
+            }
+            else surf = WriteSurface(c, f, b);
             // planar faces: the loop enclosing the largest area is the outer bound
             int outer = -1;
             if (f.Surface.Kind == SurfaceKind.Plane)
@@ -283,7 +293,7 @@ public static class StepWriter
                 var loop = c.Add($"EDGE_LOOP('',({string.Join(",", oes.Select(i => "#" + i))}))");
                 bounds.Add(c.Add(li == outer ? $"FACE_OUTER_BOUND('',#{loop},.T.)" : $"FACE_BOUND('',#{loop},.T.)"));
             }
-            var face = c.Add($"ADVANCED_FACE('{Esc(f.Name)}',({string.Join(",", bounds.Select(i => "#" + i))}),#{surf},{(f.SameSense ? ".T." : ".F.")})");
+            var face = c.Add($"ADVANCED_FACE('{Esc(f.Name)}',({string.Join(",", bounds.Select(i => "#" + i))}),#{surf},{(sameSense ? ".T." : ".F.")})");
             if (!facesByLump.TryGetValue(f.Lump, out var list)) facesByLump[f.Lump] = list = new List<int>();
             list.Add(face);
         }
@@ -368,6 +378,24 @@ public static class StepWriter
 
     /// <summary>No pipe surface in AP214: a bicubic B-spline fitted over the face's (angle, spine) box.</summary>
     /// <summary>STEP has no helical surface: a B-spline fitted over the face's (u, v) box.</summary>
+    /// <summary>
+    /// The cylinder a screw face lies on when its generator is a line along the motion's axis (the radius its distance
+    /// from the axis), and whether the screw surface's natural normal points out of it; null for other screw faces.
+    /// </summary>
+    static (Vec3 origin, Vec3 axis, Vec3 refDir, double r, bool outward)? ScrewCylinder(ExactFace f)
+    {
+        if (f.Surface.Kind != SurfaceKind.Screw || f.Surface.Def.Screw is not { Gen: Native.NLine ln } sc) return null;
+        var m = sc.Motion;
+        if (Vec3.Cross(ln.D.Normalized, m.A).Length > 1e-12) return null;
+        var d = ln.P - m.O;
+        var r = (d - m.A * Vec3.Dot(d, m.A)).Length;
+        if (r < 1e-9) return null;
+        double u = 0.5 * (sc.U0 + sc.U1), v = 0.5 * (sc.V0 + sc.V1);
+        var p = sc.Eval(u, v); var q = p - m.O;
+        var radial = q - m.A * Vec3.Dot(q, m.A);
+        return (m.O, m.A, m.X, r, Vec3.Dot(sc.NormalAt(u, v), radial) > 0);
+    }
+
     static BSplineSurface ScrewFit(ExactFace f, ExactBrep b)
     {
         var sc = f.Surface.Def.Screw!;
