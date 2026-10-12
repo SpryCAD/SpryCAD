@@ -202,6 +202,7 @@ static class Program
             NativeTests.Run(t);
             RollingBallTool.Tests(t);
             ContainerTests.Run(t);
+            StorageTests.Run(t);
             ImportTests.Run(t);
             NativeBoolTests.Run(t);
             NativeRevolveTests.Run(t);

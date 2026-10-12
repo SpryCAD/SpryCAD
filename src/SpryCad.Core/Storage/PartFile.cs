@@ -73,7 +73,7 @@ public static class PartFile
         using var db = PartDatabase.Open(path);
         var partId = RootPart(db);
         var head = db.GetHead(partId) ?? throw new InvalidDataException("The file holds no saved part.");
-        var objects = db.GetObjects(head.RevisionId).ToDictionary(kv => kv.Key, kv => db.Blobs.Get(kv.Value));
+        var objects = db.GetObjects(head.RevisionId).ToDictionary(kv => kv.Key, kv => db.Blobs.Get(kv.Value, verify: kv.Key.Kind == ObjectKind.File));
         var doc = PartObjects.ToDocument(objects);
         doc.Id = partId.ToString("D");
         doc.Revision = head.RevisionId.ToString("D");

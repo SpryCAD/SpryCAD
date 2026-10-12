@@ -71,6 +71,7 @@ static class IdTests
             var back = CadDocument.Load(path);
             t.Eq(back.FormatVersion, 2);
             t.True(doc.Features.Select(f => f.Id).SequenceEqual(back.Features.Select(f => f.Id)), "ids kept through save and open");
+            doc.NameCounters = doc.NameCounters.OrderBy(kv => kv.Key, StringComparer.Ordinal).ToDictionary(); // (the file keeps them sorted)
             t.Eq(back.ToJson(), doc.ToJson());
             var r2 = new Regenerator().Rebuild(back);
             foreach (var f in back.Features) t.True(r2.Status[f.Id].Ok, $"reopened {f.Name}: {r2.Status[f.Id].Error}");

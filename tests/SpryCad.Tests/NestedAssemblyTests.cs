@@ -320,6 +320,7 @@ static class NestedAssemblyTests
             t.True(Math.Abs(after.Max.X - 8) < 1e-3 && Math.Abs(before.Max.X - 5) < 1e-3 && m.DisplayAt("C2/C3")!.Mesh.Bounds.Max.X > 7.99, "both pins bigger");
 
             // deferred (as the app does): shown as it was meanwhile, built by the pending jobs
+            ((SpryCad.Core.Sketching.SkCircle)sketch.Sketch.Entities.Single(e => e is SpryCad.Core.Sketching.SkCircle)).R = 9;
             pin.Save(pinPath);
             changed = m.ReloadChanged(new[] { pinPath });
             var jobs = m.PendingJobs();

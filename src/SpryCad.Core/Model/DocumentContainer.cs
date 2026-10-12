@@ -72,6 +72,7 @@ public static class DocumentContainer
     {
         foreach (var name in doc.Files.Keys) CheckName(name);
         Storage.PartFile.Save(doc, path, author);
+        doc.Attachments = null; // (the old containers' index of embedded files: the database keeps its own)
     }
 
     static void Write(ZipArchive zip, string name, byte[] data, CompressionLevel level)

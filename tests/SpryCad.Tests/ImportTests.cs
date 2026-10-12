@@ -122,7 +122,8 @@ static class ImportTests
             t.True(v1 < volume - 1e-3, "fillet removed nothing");
             var path = Temp("imported.sprt");
             d.Save(path);
-            t.True(CadDocument.IsContainer(path), "a part with an imported file must be a container");
+            t.True(SpryCad.Core.Storage.PartDatabase.IsFile(path), "not saved as a database");
+            t.True(CadDocument.Load(path).Files.Count == d.Files.Count && d.Files.Count > 0, "the imported file is not kept in the part");
             var r2 = new Regenerator().Rebuild(CadDocument.Load(path));
             t.True(r2.Status.Values.All(s => s.Ok), "reloaded part does not rebuild");
             t.Near(Vol(r2.State.Bodies[0].Solid), v1, 1e-6);

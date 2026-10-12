@@ -47,7 +47,11 @@ public sealed class BlobStore
         return cmd.ExecuteScalar() != null;
     }
 
-    public byte[] Get(Hash hash)
+    /// <summary>
+    /// The blob's bytes. Checked against its hash when <paramref name="verify"/> (embedded files: as a ZIP's checksums
+    /// did) and always in debug builds; model objects are not, for speed (damage shows as JSON that does not read).
+    /// </summary>
+    public byte[] Get(Hash hash, bool verify = false)
     {
         using var cmd = _db.CreateCommand();
         cmd.CommandText = "SELECT Codec, RawSize, Data FROM Blobs WHERE Hash = $h";
@@ -62,8 +66,9 @@ public sealed class BlobStore
             _ => throw new InvalidDataException($"The file uses an unknown compression ({codec}): made by a newer SpryCAD?"),
         };
 #if DEBUG
-        if (Hash.Of(raw) != hash) throw new InvalidDataException($"The file is damaged: blob {hash} does not match its content.");
+        verify = true;
 #endif
+        if (verify && Hash.Of(raw) != hash) throw new InvalidDataException($"The file is damaged: blob {hash} does not match its content.");
         return raw;
     }
 
