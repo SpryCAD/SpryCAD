@@ -450,12 +450,20 @@ static partial class Demos
         d.AddFeature(new MirrorFeature { Name = "Bearing pedestal, back", Seeds = { ped.Id, pedR.Id, pedJ.Id }, Plane = PlaneRef.Front });
         // a rib under each pedestal, down the body's side (Right: sketch x = -z)
         var pr = new Sk(d);
-        pr.Poly(pr.P("-RibIn", "-BrgDrop"), pr.P("-BrgOut", "-BrgDrop"), pr.P("-RibIn", "-PedRibY"));
+        var prl = pr.Poly(pr.P("-RibIn", "-BrgDrop"), pr.P("-BrgOut", "-BrgDrop"), pr.P("-RibIn", "-PedRibY"));
         var prs = d.AddFeature(new SketchFeature { Name = "Pedestal rib", Plane = PlaneRef.Right, Sketch = pr.S });
         var pedRib = d.AddFeature(new ExtrudeFeature { Name = "Pedestal rib", SketchId = prs.Id, End = EndCondition.MidPlane, Depth = "RibT" });
-        // filleted into the body's side and under the pedestal
+        // filleted all round: into the body's side and under the pedestal, and its sloping back where it meets the
+        // body's side (that edge's foot: where the slope comes down to the drafted side, found by bisection)
         double SideZ(double yAt) => V("BodyW/2") - (yAt + V("BaseY-BaseT")) * Math.Tan(V("BodyDraft") * Math.PI / 180);
         double rt = V("RibT/2"), ry = -V("(BrgDrop+PedRibY)/2");
+        Vec3 SlopeFoot()
+        {
+            double Slope(double y) => V("BrgOut") - (-V("BrgDrop") - y) * V("(BrgOut-RibIn)/(PedRibY-BrgDrop)");
+            double lo = -V("PedRibY"), hi = -V("BrgDrop");
+            for (int i = 0; i < 80; i++) { var m = 0.5 * (lo + hi); if (Slope(m) - SideZ(m) > 0) hi = m; else lo = m; }
+            return new Vec3(0, lo, SideZ(lo));
+        }
         var pedRibR = d.AddFeature(new FilletFeature
         {
             Name = "Pedestal rib fillets", Radius = "RibR",
@@ -464,6 +472,7 @@ static partial class Demos
                 E($"{pedRib.Id}.Start", YF(0), new Vec3(-rt, ry, SideZ(ry))), E($"{pedRib.Id}.End", YF(0), new Vec3(rt, ry, SideZ(ry))),
                 E($"{pedRib.Id}.Start", $"{ped.Id}.S.L{Ids.Name(pl[0])}", new Vec3(-rt, -V("BrgDrop"), V("BrgOut") - 6)),
                 E($"{pedRib.Id}.End", $"{ped.Id}.S.L{Ids.Name(pl[0])}", new Vec3(rt, -V("BrgDrop"), V("BrgOut") - 6)),
+                E($"{pedRib.Id}.S.L{Ids.Name(prl[1])}", YF(0), SlopeFoot()),
             },
         });
         d.AddFeature(new MirrorFeature { Name = "Pedestal rib, back", Seeds = { pedRib.Id, pedRibR.Id }, Plane = PlaneRef.Front });
@@ -1448,7 +1457,7 @@ static partial class Demos
                 // and from the other side (the part turned half round about the vertical)
                 var back = HmRy(Math.PI);
                 File.WriteAllBytes(Path.Combine(dir, name + " (other side).png"), Thumbnail.Render(r.State.Bodies.Select(bb => (AssemblyModel.PlacedMesh(bb.Mesh, back), doc.Color)), 700));
-                doc.Save(Path.Combine(dir, name + ".sprt"), container: true);
+                doc.Save(Path.Combine(dir, name + ".sprt"));
             }
         }
         return bad;

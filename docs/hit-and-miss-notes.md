@@ -97,6 +97,12 @@ Commands (from the repository root):
    Shank.S.L...)"). Repro: in `HmConRod`, replace "Shank into the small end" with
    `new FilletFeature { Radius = "Rf", Features = { shank.Id } }`, `verify-engine - Connecting`. *Instead:* only the
    small end blended, the big end's joint left sharp.
+4i. **The base ribs' scoped blend slow since #75 (OPEN, master eed9631).** "Base ribs blended" (R3 by scope on the
+   rib seed) went from about 1 s to 5.5-13 s: at one rib, which stands half on the body's corner round, the new
+   corner pivots fail and the feature is built again mitred, so both builds are paid for (the "Chamfers around
+   filleted corners" session, fixing it on `corner-pivot-2`). With #75 the pedestal rib is filleted all round as
+   well: its sloping back into the body's side is one more edge of "Pedestal rib fillets" (its foot found by
+   bisection), the rib's lower corners rounded off.
 4g. **Mate face order (not kernel, the demo's helper).** `HmAsm.Any` (a face for a Lock mate) took the display
    mesh's first face; since the display caches are laid out anew (#59) that can be a face a mate cannot hold (the
    crankshaft's first is a surface of revolution), and `RefTo` gives null. It now takes the first face that gives a
