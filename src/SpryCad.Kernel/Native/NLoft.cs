@@ -512,13 +512,16 @@ public static class NLoft
         const int M = 48;
         Vec3 At(Loop3 l, double t) => (l.At(t) - l.Centroid) / l.Size;
         Vec3[] Shape(Loop3 l, double tau) => Enumerable.Range(0, M).Select(m => At(l, tau + (double)m / M)).ToArray();
-        // where a loop may start: its vertices; anywhere (with a little penalty where it has vertices) when none is sharp
+        // where a loop may start: at one of its vertices (sharp or not); anywhere only on a loop without any (a full
+        // circle). A start inside a segment is a breakpoint of its own: it splits that segment on every section, at
+        // a different fraction of it on each, and the two pieces' faces then meet with a slight kink between the
+        // sections (a rounded rectangle's corner arc in two, its pieces' normals 0.3° apart halfway)
         List<(double tau, double pen)> Cands(Loop3 l)
         {
             var c = new List<(double tau, double pen)>();
             for (int i = 0; i < l.Vertices; i++) c.Add((l.VertexFraction(i), 1));
-            if (!Enumerable.Range(0, l.Vertices).Any(l.Sharp))
-                for (int i = 0; i < 72; i++) c.Add((i / 72.0, l.Vertices > 0 ? 1.05 : 1));
+            if (l.Vertices == 0)
+                for (int i = 0; i < 72; i++) c.Add((i / 72.0, 1));
             return c;
         }
         // how far apart two loops are started there: their points at equal fractions, and the two starts themselves
