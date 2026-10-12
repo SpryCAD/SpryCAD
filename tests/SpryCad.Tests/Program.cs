@@ -74,7 +74,7 @@ static class Program
             // a part whose one sketch is sketchbench's k×k grid of rectangles (a large sketch to edit in the app)
             var doc = new SpryCad.Core.Model.CadDocument();
             doc.AddFeature(new SpryCad.Core.Model.SketchFeature { Plane = SpryCad.Core.Model.PlaneRef.Front, Sketch = SketchBench.Grid(int.Parse(args[1])) });
-            doc.Save(args[2], container: true);
+            doc.Save(args[2]);
             return 0;
         }
         if (args.Length > 1 && args[0] == "asmsolve")
@@ -215,6 +215,7 @@ static class Program
             NativeTests.Run(t);
             RollingBallTool.Tests(t);
             ContainerTests.Run(t);
+            StorageTests.Run(t);
             ImportTests.Run(t);
             NativeBoolTests.Run(t);
             NativeRevolveTests.Run(t);

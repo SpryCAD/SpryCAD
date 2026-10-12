@@ -103,8 +103,8 @@ find "$pkg" -type d -exec chmod 755 {} +
 find "$pkg" -type f -exec chmod 644 {} +
 chmod 755 "$pkg/opt/sprycad/SpryCAD"
 [ -f "$pkg/opt/sprycad/createdump" ] && chmod 755 "$pkg/opt/sprycad/createdump"
-# The app is self-contained (.NET included); it still needs the C/C++ runtime, ICU and, for Avalonia, X11,
-# fontconfig and OpenGL. The oldest systems it runs on are those with glibc_min (2.27, checked after the publish):
+# The app is self-contained (.NET included); it still needs the C/C++ runtime, ICU, SQLite (the system's: part
+# files are SQLite databases, src/SpryCad.Core/Storage/SqliteSetup.cs) and, for Avalonia, X11, fontconfig and OpenGL. The oldest systems it runs on are those with glibc_min (2.27, checked after the publish):
 # Ubuntu 18.04 and Mint 19, Debian 10, RHEL 8. ICU's package name carries its version, and .NET loads whichever is
 # installed, so any from 80 down to 60 does: Ubuntu 18.04 (60), Debian 10 (63), 20.04 and Mint 20 (66), Debian 11
 # (67), 22.04 (70), Debian 12 (72), 24.04 (74) and on. Older systems' C runtime is libgcc1 (Ubuntu 18.04, Debian 10).
@@ -115,7 +115,7 @@ Version: $debver
 Architecture: amd64
 Maintainer: Kurt Jacobson <kcjengr@gmail.com>
 Installed-Size: $(du -sk "$pkg/opt" | cut -f1)
-Depends: libc6 (>= $glibc_min), libgcc-s1 | libgcc1, libstdc++6, ${icu% | }, libx11-6, libice6, libsm6, libfontconfig1, libgl1
+Depends: libc6 (>= $glibc_min), libgcc-s1 | libgcc1, libstdc++6, ${icu% | }, libsqlite3-0, libx11-6, libice6, libsm6, libfontconfig1, libgl1
 Section: graphics
 Priority: optional
 Homepage: https://github.com/SpryCAD/SpryCAD
@@ -149,7 +149,7 @@ License: MIT
 URL: https://github.com/SpryCAD/SpryCAD
 BuildArch: x86_64
 AutoReqProv: no
-Requires: libc.so.6(GLIBC_$glibc_min)(64bit), libstdc++.so.6()(64bit), libgcc_s.so.1()(64bit), libicu
+Requires: libc.so.6(GLIBC_$glibc_min)(64bit), libstdc++.so.6()(64bit), libgcc_s.so.1()(64bit), libicu, libsqlite3.so.0()(64bit)
 Requires: libX11.so.6()(64bit), libICE.so.6()(64bit), libSM.so.6()(64bit), libfontconfig.so.1()(64bit), libGL.so.1()(64bit)
 %global debug_package %{nil}
 %global __os_install_post %{nil}

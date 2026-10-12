@@ -368,7 +368,7 @@ static partial class Demos
     }
 
     /// <summary>
-    /// <c>-- containerize &lt;file or folder&gt;...</c>: rebuilds parts and saves each in place as a container with
+    /// <c>-- containerize &lt;file or folder&gt;...</c>: rebuilds parts and saves each in place (the current format) with
     /// its preview image (the content is unchanged). Folders: their *.sprt files, not subfolders.
     /// </summary>
     public static int Containerize(IEnumerable<string> paths)
@@ -380,8 +380,8 @@ static partial class Demos
             var r = new Regenerator().Rebuild(doc);
             doc.Thumbnail = DocumentContainer.RenderThumbnail(doc, r) ?? doc.Thumbnail;
             doc.Display = r.State.Bodies.Count > 0 ? SpryCad.Core.Assembly.MeshCache.Of(r, doc.Color) : null; // (shows at once when opened, as the app saves parts)
-            doc.Save(path, container: true);
-            Console.WriteLine($"{path}: container{(doc.Thumbnail != null ? " with preview" : ", NO PREVIEW (nothing solid)")}");
+            doc.Save(path);
+            Console.WriteLine($"{path}: saved{(doc.Thumbnail != null ? " with preview" : ", NO PREVIEW (nothing solid)")}");
             if (doc.Thumbnail == null) bad++;
         }
         return bad == 0 ? 0 : 1;
@@ -395,10 +395,10 @@ static partial class Demos
         {
             var doc = build();
             var r = new Regenerator().Rebuild(doc);
-            // a container with its preview, as the app saves parts (Explorer shows it as the thumbnail)
+            // with its preview, as the app saves parts (Explorer shows it as the thumbnail)
             doc.Thumbnail = DocumentContainer.RenderThumbnail(doc, r);
             doc.Display = r.State.Bodies.Count > 0 ? SpryCad.Core.Assembly.MeshCache.Of(r, doc.Color) : null; // (shows at once when opened, as the app saves parts)
-            doc.Save(Path.Combine(dir, file), container: true);
+            doc.Save(Path.Combine(dir, file));
             Console.WriteLine($"{file}: {doc.Features.Count} features, {r.Milliseconds:0} ms");
             foreach (var f in doc.Features)
                 if (!r.Status[f.Id].Ok || r.Status[f.Id].Warnings.Count > 0)

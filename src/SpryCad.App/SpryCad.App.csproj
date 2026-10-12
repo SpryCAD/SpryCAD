@@ -82,4 +82,10 @@
     </PropertyGroup>
   </Target>
 
+  <!-- Linux builds use the system's SQLite (libsqlite3.so.0, a package dependency): the bundled library is left out,
+       as it needs a newer glibc than the packages promise (build/make-linux-package.sh checks). -->
+  <ItemGroup Condition="$(RuntimeIdentifier.StartsWith('linux'))">
+    <PackageReference Include="SQLitePCLRaw.lib.e_sqlite3" Version="2.1.12" ExcludeAssets="native" />
+  </ItemGroup>
+
 </Project>

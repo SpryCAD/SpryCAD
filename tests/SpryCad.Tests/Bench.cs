@@ -35,7 +35,7 @@ static class Bench
                 break;
             }
         }
-        doc.Save(output, container: true);
+        doc.Save(output);
         Console.WriteLine($"{changed} directions changed");
         return changed > 0 ? 0 : 1;
     }

@@ -372,7 +372,7 @@ public sealed partial class AssemblyModel
         var doc = CadDocument.Load(partPath);
         if (doc.Id == null)
         {
-            doc.Save(partPath, DocumentContainer.IsContainer(partPath));
+            doc.Save(partPath);
             Notes.Add($"{System.IO.Path.GetFileName(partPath)} was given an identity (saved again) so the assembly can always find it.");
         }
         Index?.Record(doc.Id!, doc.Revision, partPath);
@@ -416,7 +416,7 @@ public sealed partial class AssemblyModel
         {
             // saved as a part file would be (its identity and revision given), kept inside the assembly
             var tmp = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "fc-embed-" + Guid.NewGuid().ToString("N") + CadDocument.FileExtension);
-            try { doc.Save(tmp, container: true); Doc.Files[UniqueName("parts/" + SafeFileName(name) + CadDocument.FileExtension)] = File.ReadAllBytes(tmp); }
+            try { doc.Save(tmp); Doc.Files[UniqueName("parts/" + SafeFileName(name) + CadDocument.FileExtension)] = File.ReadAllBytes(tmp); }
             finally { try { File.Delete(tmp); } catch { } }
             var file = Doc.Files.Keys.Last(k => k.StartsWith("parts/" + SafeFileName(name), StringComparison.Ordinal));
             r = new PartRef { PartId = doc.Id, Revision = doc.Revision, Embedded = file };

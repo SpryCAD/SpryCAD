@@ -569,7 +569,7 @@ static class AssemblyTests
             t.True(DocumentContainer.ReadIdentity(legacy).id != null && m5.Notes.Any(n => n.Contains("identity")), "given one");
         });
 
-        t.Test("Part identity: an id on the first save (kept), a new revision on every save, a new id for a copy", () =>
+        t.Test("Part identity: an id on the first save (kept), a new revision on every save that changes it, a new id for a copy", () =>
         {
             var dir = NewDir("identity");
             var doc = new CadDocument();
@@ -579,11 +579,14 @@ static class AssemblyTests
             var (id, rev) = (doc.Id, doc.Revision);
             t.True(id != null && rev != null, "an id and a revision");
             doc.Save(p);
+            t.True(doc.Id == id && doc.Revision == rev, "nothing changed: same revision");
+            doc.Equations.Add(new Equation { Name = "W", Expr = "10" });
+            doc.Save(p);
             t.True(doc.Id == id && doc.Revision != rev, "same id, new revision");
             t.Eq(DocumentContainer.ReadIdentity(p), (doc.Id, doc.Revision));
-            // in a container too
+            // another file of the same part
             var pc = Path.Combine(dir, "c.sprt");
-            doc.Save(pc, container: true);
+            doc.Save(pc);
             t.Eq(DocumentContainer.ReadIdentity(pc), (doc.Id, doc.Revision));
             t.Eq(CadDocument.Load(pc).Id, doc.Id);
             // a copy saved under another name: its own identity, remembering where it came from
@@ -723,6 +726,7 @@ static class AssemblyTests
             var older = Path.Combine(dir8, "old", "Plate.sprt");
             Directory.CreateDirectory(Path.GetDirectoryName(older)!);
             File.Copy(p8, older);
+            plate.Equations.Add(new Equation { Name = "T", Expr = "1" });
             plate.Save(p8); // a newer revision in place...
             File.Move(p8, Path.Combine(dir8, "Plate-new.sprt"));
             var ix8 = new PartIndex();

@@ -137,15 +137,14 @@ public sealed class DocumentSession
         var json = string.Concat(Doc.Features.Select(CadDocument.JsonOf));
         foreach (var name in Doc.Files.Keys.ToList())
             if (!json.Contains($"\"{name}\"")) Doc.Files.Remove(name);
-        var container = UserSettings.SaveContainer || Doc.Files.Count > 0;
-        if (container) Doc.Thumbnail = RenderThumbnail() ?? Doc.Thumbnail;
+        Doc.Thumbnail = RenderThumbnail() ?? Doc.Thumbnail;
         // a slow part keeps its display (Options), to show at once when opened again
-        if (container) Doc.Display = DisplayToKeep();
+        Doc.Display = DisplayToKeep();
         // saved as another file: that file is a copy, with its own identity (the original keeps its own; a failed
         // save keeps the document as it was)
         var (id, rev, from) = (Doc.Id, Doc.Revision, Doc.DerivedFrom);
         if (FilePath != null && !PartIndex.SamePath(FilePath, path)) Doc.ForkIdentity();
-        try { Doc.Save(path, container); }
+        try { Doc.Save(path, UserSettings.AuthorName); }
         catch { (Doc.Id, Doc.Revision, Doc.DerivedFrom) = (id, rev, from); throw; }
         finally { Doc.Display = null; }
         PartsIndexStore.Record(Doc, path);

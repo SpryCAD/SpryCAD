@@ -1,14 +1,17 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
-  <!-- Containers (ZIP) start with an uncompressed "mimetype" entry, as ODF and EPUB do: its text is at byte 38, so
-       a part or an assembly is known by its content too (renamed, or without its extension), not only its name.
-       A part is plain JSON unless it embeds files or is saved as a container. -->
+  <!-- A part is an SQLite database marked as SpryCAD's: application id "SPRY" (0x53505259, big-endian) at byte 68.
+       Assemblies, and parts saved before, are ZIP containers starting with an uncompressed "mimetype" entry, as ODF
+       and EPUB do: its text is at byte 38. Either way a file is known by its content too (renamed, or without its
+       extension), not only its name. -->
   <mime-type type="application/x-sprycad-part">
     <comment>SpryCAD part</comment>
-    <sub-class-of type="application/json"/>
-    <sub-class-of type="application/zip"/>
+    <sub-class-of type="application/vnd.sqlite3"/>
     <glob pattern="*.sprt"/>
     <magic priority="80">
+      <match type="string" offset="0" value="SQLite format 3">
+        <match type="big32" offset="68" value="0x53505259"/>
+      </match>
       <match type="string" offset="38" value="application/x-sprycad-part"/>
     </magic>
     <icon name="application-x-sprycad-part"/>

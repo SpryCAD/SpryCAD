@@ -38,12 +38,9 @@ public static class UserSettings
 
     public static bool ReverseWheel { get; set; }
     public static bool Perspective { get; set; }
-    /// <summary>
-    /// Save every part as a container (ZIP with a preview image, which Explorer shows as its thumbnail), not only
-    /// parts with embedded files. On by default.
-    /// </summary>
-    public static bool SaveContainer { get; set; } = true;
-    /// <summary>When saved parts keep their display (in containers only). Every part by default: it shows at once when opened.</summary>
+    /// <summary>The name saved revisions are made by (their history shows it): the user's sign-in name until set.</summary>
+    public static string AuthorName { get; set; } = Environment.UserName;
+    /// <summary>When saved parts keep their display. Every part by default: it shows at once when opened.</summary>
     public static KeepDisplay KeepDisplay { get; set; } = KeepDisplay.Always;
     /// <summary>How long a part takes to rebuild for it to keep its display (<see cref="KeepDisplay.SlowParts"/>).</summary>
     public static double KeepDisplaySeconds { get; set; } = 1;
@@ -90,7 +87,7 @@ public static class UserSettings
                 var (k, v) = (line[..i].Trim(), line[(i + 1)..].Trim());
                 if (k == nameof(ReverseWheel)) ReverseWheel = v == "1";
                 else if (k == nameof(Perspective)) Perspective = v == "1";
-                else if (k == nameof(SaveContainer)) SaveContainer = v == "1";
+                else if (k == nameof(AuthorName) && v.Length > 0) AuthorName = v;
                 else if (k == nameof(KeepDisplay) && Enum.TryParse<KeepDisplay>(v, out var kd)) KeepDisplay = kd;
                 else if (k == nameof(KeepDisplaySeconds) && double.TryParse(v, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var ks) && ks >= 0) KeepDisplaySeconds = ks;
                 else if (k == nameof(AssemblyMeshes)) AssemblyMeshes = v == "1";
@@ -121,7 +118,7 @@ public static class UserSettings
                 $"{nameof(Version)}={Version}",
                 $"{nameof(ReverseWheel)}={(ReverseWheel ? 1 : 0)}",
                 $"{nameof(Perspective)}={(Perspective ? 1 : 0)}",
-                $"{nameof(SaveContainer)}={(SaveContainer ? 1 : 0)}",
+                $"{nameof(AuthorName)}={AuthorName}",
                 $"{nameof(KeepDisplay)}={KeepDisplay}",
                 $"{nameof(KeepDisplaySeconds)}={KeepDisplaySeconds.ToString(System.Globalization.CultureInfo.InvariantCulture)}",
                 $"{nameof(AssemblyMeshes)}={(AssemblyMeshes ? 1 : 0)}",
