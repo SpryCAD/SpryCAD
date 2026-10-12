@@ -156,6 +156,7 @@ public static class PartHistory
                 db.Execute("DELETE FROM Tags WHERE RevisionId = $r", ("$r", id));
                 db.Execute("DELETE FROM RevisionObjects WHERE RevisionId = $r", ("$r", id));
                 db.Execute("DELETE FROM Revisions WHERE RevisionId = $r", ("$r", id));
+                RevisionPreview.Forget(db, r.RevisionId);
             }
             DeleteUnusedBlobs(db);
             db.CommitTransaction();
@@ -173,11 +174,19 @@ public static class PartHistory
         db.Execute("VACUUM");
     }
 
-    /// <summary>Removes the display caches (the part is rebuilt when opened), then compacts.</summary>
+    /// <summary>
+    /// Removes the display caches (the part is rebuilt when opened), then compacts. The revisions' previews are kept:
+    /// they could not be made again.
+    /// </summary>
     public static void ClearCache(PartDatabase db)
     {
         db.Begin();
-        try { db.Execute("DELETE FROM Cache"); DeleteUnusedBlobs(db); db.CommitTransaction(); }
+        try
+        {
+            db.Execute("DELETE FROM Cache WHERE Kind NOT IN ($f, $p)", ("$f", RevisionPreview.FacesKind), ("$p", RevisionPreview.PreviewKind));
+            DeleteUnusedBlobs(db);
+            db.CommitTransaction();
+        }
         catch { db.Rollback(); throw; }
         db.Execute("VACUUM");
     }

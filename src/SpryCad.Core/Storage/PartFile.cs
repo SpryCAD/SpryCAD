@@ -35,7 +35,12 @@ public static class PartFile
                 {
                     db.SetPart(partId, Path.GetFileNameWithoutExtension(path));
                     var objects = PartObjects.From(doc).ToDictionary(kv => kv.Key, kv => db.Blobs.Put(kv.Value));
-                    head = db.Commit(partId, objects, author ?? DefaultAuthor, message, kind) ?? db.GetHead(partId)!;
+                    var made = db.Commit(partId, objects, author ?? DefaultAuthor, message, kind);
+                    head = made ?? db.GetHead(partId)!;
+                    // a new revision: what it looks like, its changes shown (the Revisions pane)
+                    if (made != null && PreviewMeshOf(doc) is { } mesh)
+                        try { RevisionPreview.Record(db, made, mesh, doc.Color, doc); }
+                        catch (Exception ex) when (ex is not Microsoft.Data.Sqlite.SqliteException) { /* a preview is never worth failing a save */ }
                     db.DropWorking(partId); // (saved: what autosave kept is in the head now)
                     WriteManifest(db, doc, partId);
                     db.SetThumbnail(doc.Thumbnail);
@@ -52,6 +57,15 @@ public static class PartFile
             throw;
         }
         doc.Revision = head.RevisionId.ToString("D");
+    }
+
+    /// <summary>The part's display as saved: the one the app built (<see cref="CadDocument.PreviewMesh"/>), else its display cache's.</summary>
+    static Kernel.DisplayMesh? PreviewMeshOf(CadDocument doc)
+    {
+        if (doc.PreviewMesh != null) return doc.PreviewMesh;
+        if (doc.Display == null) return null;
+        try { return Assembly.MeshCache.Read(doc.Display).Mesh; }
+        catch (InvalidDataException) { return null; }
     }
 
     static void WriteManifest(PartDatabase db, CadDocument doc, Guid partId)

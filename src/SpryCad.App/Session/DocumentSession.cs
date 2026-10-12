@@ -138,9 +138,21 @@ public sealed class DocumentSession
     {
         if (_wc is not { Exists: true } wc) throw new InvalidOperationException("The part has no history yet: save it first.");
         wc.Edit(edit);
+        HistoryVersion++;
         SetDirty();
         DocumentChanged?.Invoke();
     }
+
+    /// <summary>Counts the changes made to the history (<see cref="EditHistory"/>): what shows it knows when to read it again.</summary>
+    public int HistoryVersion { get; private set; }
+
+    /// <summary>
+    /// The revision the part is as it is now: the one last saved or opened while nothing has changed since, the one
+    /// reverted to (<see cref="Revert"/>) while nothing has changed after; null when the part has unsaved changes.
+    /// </summary>
+    public Guid? ShownRevision =>
+        _revert is { revision: { } r } rv && _undo.Count == rv.depth ? r
+        : !Dirty && Guid.TryParse(Doc.Revision, out var head) ? head : null;
 
     /// <summary>Reads the part's history (as last saved, with the changes to it made since).</summary>
     public T ReadHistory<T>(Func<PartDatabase, T> read) =>
@@ -149,8 +161,9 @@ public sealed class DocumentSession
     /// <summary>
     /// Makes <paramref name="doc"/> the part's state (a revert: <see cref="PartRevert"/>), as one change that can be undone.
     /// The next save records it as a revert revision with <paramref name="message"/> (while the change is not undone).
+    /// <paramref name="revision"/>: the revision it is (a revert to one, as it was), shown as the part's (<see cref="ShownRevision"/>).
     /// </summary>
-    public void Revert(CadDocument doc, string message)
+    public void Revert(CadDocument doc, string message, Guid? revision = null)
     {
         BeginChange();
         // the part's identity and what is not the model stay as they are
@@ -160,12 +173,12 @@ public sealed class DocumentSession
         // the embedded files it had stay too (undo snapshots do not hold files; saving drops the ones no feature uses)
         foreach (var (k, v) in Doc.Files) doc.Files.TryAdd(k, v);
         Doc = doc;
-        _revert = (message, _undo.Count);
+        _revert = (message, _undo.Count, revision);
         EndChange();
     }
 
     // the revert the next save records (its message), while the change it made (undo depth) is not undone
-    (string message, int depth)? _revert;
+    (string message, int depth, Guid? revision)? _revert;
 
     /// <summary>The part as it was in one of its revisions.</summary>
     public CadDocument LoadRevision(Guid revisionId) => _wc?.LoadRevision(revisionId) ?? throw new InvalidOperationException("The part has no history yet.");
@@ -283,6 +296,9 @@ public sealed class DocumentSession
         Doc.Thumbnail = RenderThumbnail() ?? Doc.Thumbnail;
         // a slow part keeps its display (Options), to show at once when opened again
         Doc.Display = DisplayToKeep();
+        // the new revision's preview, its changes shown (the Revisions pane), from the last rebuild when it is of this state
+        Doc.PreviewMesh = Result is { } built && ResultRevision == RequestedRevision && built.State.Bodies.Count > 0
+            ? AssemblyModel.Merge(built.State.Bodies.Select(b => b.Mesh)) : null;
         // saved as another file: that file is a copy, with its own identity (the original keeps its own; a failed
         // save keeps the document as it was)
         var (id, rev, from) = (Doc.Id, Doc.Revision, Doc.DerivedFrom);
@@ -293,7 +309,7 @@ public sealed class DocumentSession
         var revert = _revert is { } rv && _undo.Count >= rv.depth ? rv.message : null;
         try { _wc.Save(Doc, UserSettings.AuthorName, same ? null : path, overwrite, revert ?? "", revert != null ? RevisionKind.Revert : RevisionKind.Save); }
         catch { (Doc.Id, Doc.Revision, Doc.DerivedFrom) = (id, rev, from); throw; }
-        finally { Doc.Display = null; }
+        finally { Doc.Display = null; Doc.PreviewMesh = null; }
         PartsIndexStore.Record(Doc, path);
         FilePath = path; Dirty = false; ReadOnly = false;
         _revert = null;

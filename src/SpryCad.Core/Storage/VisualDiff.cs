@@ -13,9 +13,11 @@ public enum FaceChange { Unchanged, Changed, Added, Removed }
 public static class VisualDiff
 {
     /// <summary>Each face name of either mesh, and what happened to it from <paramref name="older"/> to <paramref name="newer"/>.</summary>
-    public static Dictionary<string, FaceChange> Compare(DisplayMesh older, DisplayMesh newer)
+    public static Dictionary<string, FaceChange> Compare(DisplayMesh older, DisplayMesh newer) => Compare(Hashes(older), Hashes(newer));
+
+    /// <summary>As <see cref="Compare(DisplayMesh, DisplayMesh)"/>, from the two states' faces (name → geometry hash).</summary>
+    public static Dictionary<string, FaceChange> Compare(IReadOnlyDictionary<string, ulong> a, IReadOnlyDictionary<string, ulong> b)
     {
-        var a = Hashes(older); var b = Hashes(newer);
         var d = new Dictionary<string, FaceChange>();
         foreach (var (name, h) in b)
             d[name] = !a.TryGetValue(name, out var old) ? FaceChange.Added
@@ -25,8 +27,8 @@ public static class VisualDiff
         return d;
     }
 
-    // a face's facets share its name (and its hash): the first range's
-    static Dictionary<string, ulong> Hashes(DisplayMesh m)
+    /// <summary>A mesh's faces: name → geometry hash (a face's facets share its name and hash: the first range's).</summary>
+    public static Dictionary<string, ulong> Hashes(DisplayMesh m)
     {
         var d = new Dictionary<string, ulong>();
         foreach (var f in m.Faces) d.TryAdd(f.Name, f.GeometryHash);

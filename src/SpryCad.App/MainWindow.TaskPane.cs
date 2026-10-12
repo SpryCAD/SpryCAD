@@ -15,7 +15,7 @@ namespace SpryCad.App;
 /// The task pane, as SolidWorks': a strip of tabs at the right edge of the window. A tab slides its pane out over the
 /// graphics area; clicking the model (or Esc, or the tab again) tucks it away. Pinned, the pane stays open beside
 /// the graphics area instead (its width set by the splitter). The header collapses it, pops it out into a window of
-/// its own, or pins it. Panes: Open Parts (more can be added with <see cref="AddTaskPane"/>).
+/// its own, or pins it. Panes: Open Parts, Revisions (more can be added with <see cref="AddTaskPane"/>).
 /// </summary>
 public partial class MainWindow
 {
@@ -37,7 +37,7 @@ public partial class MainWindow
     ContentControl _taskBody = null!;
     TextBlock _taskTitle = null!;
     Button _taskPin = null!, _taskPopOut = null!;
-    TaskPane _partsPane = null!;
+    TaskPane _partsPane = null!, _revisionsPane = null!;
 
     static IBrush TaskTabActive => Palette.SelectedBg;
     static readonly BoxShadows TaskShadow = BoxShadows.Parse("-4 0 14 0 #40000000");
@@ -86,6 +86,7 @@ public partial class MainWindow
 
         _partsPane = AddTaskPane("OpenParts", "Open Parts", "parts", () => { var l = PartsListControl(); l.Padding = new Thickness(0); return l; },
             popOut: () => MovePartsList(docked: false));
+        _revisionsPane = AddTaskPane("Revisions", "Revisions", "revisions", RevisionsControl);
 
         TaskSplitter.DragCompleted += (_, _) => { UserSettings.TaskWidth = (int)MainGrid.ColumnDefinitions[4].ActualWidth; UserSettings.Save(); };
         // unpinned, the pane tucks away when the model (or anything else outside it) is clicked

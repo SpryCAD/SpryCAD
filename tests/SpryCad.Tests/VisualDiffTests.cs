@@ -72,5 +72,69 @@ static class VisualDiffTests
             var added = PartDescribe.Changes(edited, more);
             t.True(added.Count == 1 && added[0].Change.Kind == ChangeKind.Added, string.Join(" | ", added.Select(c => c.Text)));
         });
+
+        t.Test("Revision previews: each save records its faces and a preview of what it changed; purge takes them, clearing the cache keeps them", () =>
+        {
+            var path = Path.Combine(Path.GetTempPath(), "sprycad-revprev-" + Guid.NewGuid().ToString("N") + ".sprt");
+            try
+            {
+                var doc = Bracket();
+                doc.Id = null; doc.Revision = null;
+                var first = Mesh(doc);
+                doc.PreviewMesh = first;
+                PartFile.Save(doc, path);
+                var rev1 = Guid.Parse(doc.Revision!);
+                // the fillet bigger: its faces (and their neighbours) changed
+                var fillet = doc.Features.OfType<FilletFeature>().First();
+                ((FilletFeature)doc.Find(fillet.Id)!).Radius = "(" + fillet.Radius + ")*1.5";
+                var second = Mesh(doc);
+                doc.PreviewMesh = second;
+                PartFile.Save(doc, path);
+                var rev2 = Guid.Parse(doc.Revision!);
+                // nothing changed: no revision, so nothing recorded
+                PartFile.Save(doc, path);
+                t.Eq(Guid.Parse(doc.Revision!), rev2);
+                // no mesh given: the display cache's, when there is one; none: no preview, and the save still works
+                doc.PreviewMesh = null;
+                doc.Features.OfType<FilletFeature>().First().Radius = fillet.Radius;
+                doc.Display = MeshCache.Write(first, doc.Color);
+                PartFile.Save(doc, path);
+                var rev3 = Guid.Parse(doc.Revision!);
+                doc.Display = null;
+                ((FilletFeature)doc.Find(fillet.Id)!).Radius = "(" + fillet.Radius + ")*2";
+                PartFile.Save(doc, path);
+                var rev4 = Guid.Parse(doc.Revision!);
+
+                using (var db = PartDatabase.Open(path))
+                {
+                    foreach (var r in new[] { rev1, rev2, rev3 })
+                    {
+                        var png = RevisionPreview.Get(db, r);
+                        t.True(png is { Length: > 100 } && png[1] == 'P' && png[2] == 'N' && png[3] == 'G', $"revision {r}: no preview");
+                        t.True(RevisionPreview.Faces(db, r) is { Count: > 0 }, $"revision {r}: no faces");
+                    }
+                    t.True(RevisionPreview.Get(db, rev4) == null && RevisionPreview.Faces(db, rev4) == null, "a save without a mesh made a preview");
+                    // the second revision's faces against the first's: the fillet's changed
+                    var changes = VisualDiff.Compare(RevisionPreview.Faces(db, rev1)!, RevisionPreview.Faces(db, rev2)!);
+                    t.True(changes.Any(kv => kv.Value == FaceChange.Changed && VisualDiff.FeatureOf(kv.Key) == fillet.Id), "the fillet's faces not changed");
+                    t.True(changes.Values.Count(v => v == FaceChange.Unchanged) > 0, "no face unchanged");
+                    t.True(changes.SequenceEqual(VisualDiff.Compare(first, second)), "recorded faces compare otherwise than the meshes");
+                    // highlighted: not the plain picture of the part
+                    var plain = Thumbnail.Render(new[] { (second, doc.Color) }, RevisionPreview.Size);
+                    t.True(!RevisionPreview.Get(db, rev2)!.AsSpan().SequenceEqual(plain), "the second revision's preview shows no change");
+                }
+                using (var db = PartDatabase.Open(path, readOnly: false))
+                {
+                    PartHistory.ClearCache(db);
+                    t.True(RevisionPreview.Get(db, rev1) != null && RevisionPreview.Faces(db, rev2) != null, "clearing the cache removed the previews");
+                    PartHistory.Purge(db, rev2);
+                    t.True(RevisionPreview.Get(db, rev1) == null && RevisionPreview.Faces(db, rev1) == null, "a purged revision's preview kept");
+                    t.True(RevisionPreview.Get(db, rev2) != null, "the kept revision's preview purged");
+                    var orphans = db.Query("SELECT count(*) FROM Blobs WHERE Hash NOT IN (SELECT Hash FROM RevisionObjects) AND Hash NOT IN (SELECT Hash FROM Cache)", r => r.GetInt64(0))[0];
+                    t.Eq(orphans, 0L);
+                }
+            }
+            finally { try { File.Delete(path); } catch { } }
+        });
     }
 }

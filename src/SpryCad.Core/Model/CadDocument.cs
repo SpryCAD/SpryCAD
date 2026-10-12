@@ -92,6 +92,12 @@ public sealed class CadDocument
     /// </summary>
     [JsonIgnore] public byte[]? Display { get; set; }
 
+    /// <summary>
+    /// The part as built, given to a save to make the new revision's preview (its changes shown) when there is no
+    /// <see cref="Display"/> to make it from; never saved itself.
+    /// </summary>
+    [JsonIgnore] public Kernel.DisplayMesh? PreviewMesh { get; set; }
+
     /// <summary>A new identity for a copy saved under another name: the original keeps its own.</summary>
     public void ForkIdentity()
     {

@@ -171,6 +171,7 @@ public partial class MainWindow : Window
         UpdateUndoButtons();
         Viewport.PartColor = new Rgba((float)Session.Doc.Color[0], (float)Session.Doc.Color[1], (float)Session.Doc.Color[2]);
         RebuildTree();
+        RefreshRevisions();
     }
 
     // what the feature tree was last built from
