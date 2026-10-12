@@ -212,6 +212,7 @@ static class Program
             SketchOverlapTests.Run(t);
             SketchLookupTests.Run(t);
             IdTests.Run(t);
+            FeatureColorTests.Run(t);
             DirectBlendTests.Run(t);
             SweepTests.Run(t);
             SweepFeatureTests.Run(t);

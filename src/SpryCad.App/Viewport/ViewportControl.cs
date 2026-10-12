@@ -64,6 +64,11 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
     /// <summary>Placed meshes (an assembly's components), drawn in the display style with their own colors.</summary>
     public IReadOnlyList<MeshInstance> Instances { get; set; } = Array.Empty<MeshInstance>();
     public Rgba PartColor = new(0.74f, 0.76f, 0.80f);
+    /// <summary>
+    /// Color by Feature: each feature's color, by id (see <see cref="Core.Model.FeatureColors"/>); the part's faces are
+    /// shaded in the colors of the features that made them (others in the part color). Null: off.
+    /// </summary>
+    public IReadOnlyDictionary<string, Rgba>? ColorByFeature { get; set; }
     public DisplayStyle Style = DisplayStyle.ShadedWithEdges;
     public bool ShowPlanes = true;
     public bool ShowOrigin = true;
@@ -178,7 +183,7 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
             foreach (var b in Bodies)
             {
                 var g = _gpu[b.Mesh];
-                _r.DrawMesh(g, PartColor.WithAlpha(GhostAlpha), vp, view, Camera.Perspective);
+                DrawBody(g, GhostAlpha, vp, view);
                 foreach (var (fr, color) in hl.Faces(b.Id, b.Mesh))
                     _r.DrawMesh(g, color.WithAlpha(GhostAlpha), vp, view, Camera.Perspective, fr.IndexStart, fr.IndexCount);
             }
@@ -199,7 +204,7 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
                     _r.Gl.ColorMask(true, true, true, true);
                     continue;
                 }
-                _r.DrawMesh(g, PartColor, vp, view, Camera.Perspective);
+                DrawBody(g, 1, vp, view);
                 foreach (var (fr, color) in hl.Faces(b.Id, b.Mesh))
                     _r.DrawMesh(g, color, vp, view, Camera.Perspective, fr.IndexStart, fr.IndexCount);
             }
@@ -326,6 +331,29 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
                  $"overlay built in {_rnDynMs / _rnFrames:0.00} ms ({_rnDynMax:0.00} worst), {_rnFloats / _rnFrames / 7 / 1000.0:0.0}k vertices a frame" +
                  (Mode != null ? $"; {Mode.GetType().Name} drew in {_rnModeMs / _rnFrames:0.00} ms ({_rnModeMax:0.00} worst)" : ""));
         _rnFrames = 0; _rnMs = _rnMax = _rnDynMs = _rnDynMax = _rnModeMs = _rnModeMax = 0; _rnFloats = 0; _rnSince = now;
+    }
+
+    /// <summary>A body shaded in the part color, or (Color by Feature) each run of one feature's faces in its color.</summary>
+    void DrawBody(GpuMesh g, float alpha, Matrix4x4 vp, Matrix4x4 view)
+    {
+        if (ColorByFeature is not { } colors) { _r!.DrawMesh(g, PartColor.WithAlpha(alpha), vp, view, Camera.Perspective); return; }
+        foreach (var (start, count, feature) in _runs.GetValue(g.Source, Core.Model.FeatureColors.Runs))
+        {
+            var c = feature != null && colors.TryGetValue(feature, out var fc) ? fc : PartColor;
+            _r!.DrawMesh(g, c.WithAlpha(alpha), vp, view, Camera.Perspective, start, count);
+        }
+    }
+
+    static readonly System.Runtime.CompilerServices.ConditionalWeakTable<DisplayMesh, List<(int start, int count, string? feature)>> _runs = new();
+
+    /// <summary>A face's color by its feature (Color by Feature), else the part color.</summary>
+    Rgba FaceColor(string faceName) =>
+        ColorByFeature is { } colors && Core.Model.FeatureColors.FeatureOf(faceName) is { } id && colors.TryGetValue(id, out var c) ? c : PartColor;
+
+    static Rgba Vivid(Rgba c)
+    {
+        var v = Core.Model.FeatureColors.Vivid(new double[] { c.R, c.G, c.B });
+        return new Rgba((float)v[0], (float)v[1], (float)v[2], c.A);
     }
 
     /// <summary>The placed meshes: shaded (or depth only for hidden lines) in their colors, then their edges.</summary>
@@ -466,6 +494,8 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
     sealed class Highlights
     {
         public readonly List<(SelItem item, Rgba color)> Items = new();
+        /// <summary>Each face's own color for an item's color (Color by Feature: faces differ in color), else null.</summary>
+        public Func<SelItem, Rgba, FaceRange, Rgba>? Tint;
 
         public IEnumerable<(FaceRange, Rgba)> Faces(string bodyId, DisplayMesh m)
         {
@@ -473,15 +503,15 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
             {
                 if (it.Kind == SelKind.Face && it.BodyId == bodyId)
                 {
-                    foreach (var fr in m.Faces) if (fr.Name == it.Name) yield return (fr, c);
+                    foreach (var fr in m.Faces) if (fr.Name == it.Name) yield return (fr, Tint?.Invoke(it, c, fr) ?? c);
                 }
                 else if (it.Kind == SelKind.Feature && it.FeatureId != null)
                 {
                     var prefix = it.FeatureId + ".";
-                    foreach (var fr in m.Faces) if (fr.Name.StartsWith(prefix, StringComparison.Ordinal) || fr.Name.Contains("." + prefix, StringComparison.Ordinal)) yield return (fr, c);
+                    foreach (var fr in m.Faces) if (fr.Name.StartsWith(prefix, StringComparison.Ordinal) || fr.Name.Contains("." + prefix, StringComparison.Ordinal)) yield return (fr, Tint?.Invoke(it, c, fr) ?? c);
                 }
                 else if (it.Kind == SelKind.Body && it.BodyId == bodyId)
-                    foreach (var fr in m.Faces) yield return (fr, c);
+                    foreach (var fr in m.Faces) yield return (fr, Tint?.Invoke(it, c, fr) ?? c);
             }
         }
 
@@ -506,6 +536,18 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         foreach (var e in Emphasis) h.Items.Add((e, SelectColor.WithAlpha(1)));
         if (Selection != null) foreach (var s in Selection.Items) h.Items.Add((s, SelectColor));
         if (Hover != null) h.Items.Add((Hover, HoverColor));
+        if (ColorByFeature != null)
+        {
+            // each face from its own color: what is hovered, and features (as picked in the tree), in their feature's
+            // color made stronger; selected faces and bodies tinted with the selection color as usual
+            var hover = Hover;
+            h.Tint = (it, c, fr) =>
+            {
+                var own = FaceColor(fr.Name);
+                return it == hover || it.Kind == SelKind.Feature ? Vivid(own) : Mix(own, c, 0.55f);
+            };
+            return h;
+        }
         // faces are drawn tinted rather than solid
         for (int i = 0; i < h.Items.Count; i++)
         {
