@@ -57,6 +57,17 @@ public static class NativeBlend
         bool pivotFailed;
         try { r1 = ApplyOne(body, edges, size, fillet, prefix, errs1, overflow, probs1, app1, chamfer, buildOnly, trimmedOut); }
         finally { pivotFailed = _pivotFailed; _pivotFailed = failedBefore; }
+        // (applied directly, a pivot's tool can fail where by boolean it does not: so, before mitring)
+        if (!pivotFailed && errs1.Count > 0 && _pivotsUsed > used && !_noPivots && !_noDirect && DirectBlend.Enabled && !buildOnly)
+        {
+            var errsB = new List<string>(); var probsB = problemEdges == null ? null : new List<Vec3[]>(); var appB = applied == null ? null : new List<(Solid, bool)>();
+            _noDirect = true; _pivotFailed = false;
+            Solid rB; bool failedB;
+            try { rB = ApplyOne(body, edges, size, fillet, prefix, errsB, overflow, probsB, appB, chamfer, buildOnly, trimmedOut); }
+            finally { _noDirect = false; failedB = _pivotFailed; _pivotFailed = failedBefore; }
+            Debug?.Invoke($"pivots direct: {errs1.Count} error(s); by boolean: {errsB.Count}{(failedB ? ", not glued" : "")}");
+            if (!failedB && errsB.Count < errs1.Count) (r1, errs1, probs1, app1) = (rB, errsB, probsB, appB);
+        }
         if ((errs1.Count > 0 || pivotFailed) && _pivotsUsed > used && !_noPivots)
         {
             var errs2 = new List<string>(); var probs2 = problemEdges == null ? null : new List<Vec3[]>(); var app2 = applied == null ? null : new List<(Solid, bool)>();
@@ -78,6 +89,7 @@ public static class NativeBlend
     [ThreadStatic] static int _pivotsUsed;
     [ThreadStatic] static bool _pivotFailed;
     [ThreadStatic] static bool _noPivots;
+    [ThreadStatic] static bool _noDirect;
 
     /// <summary>Whether three or more of the edges, of one kind (convex or concave), meet at a vertex.</summary>
     static bool Corner3(IReadOnlyList<NEdge> edges)
@@ -197,7 +209,7 @@ public static class NativeBlend
         var entries = new List<(List<Solid> tools, bool convex, Solid? strip, string name, List<NEdge> group, bool trimmed)>();
         // failures, reported once the chains below have had their second try
         var fails = new List<(List<NEdge> group, string msg)>();
-        bool direct = DirectBlend.Enabled && !buildOnly;
+        bool direct = DirectBlend.Enabled && !buildOnly && !_noDirect;
         int i = 0;
         foreach (var e in edges)
         {
