@@ -76,6 +76,23 @@ static class IdTests
             foreach (var f in back.Features) t.True(r2.Status[f.Id].Ok, $"reopened {f.Name}: {r2.Status[f.Id].Error}");
         });
 
+        t.Test("Ids: a loft saved before random ids keeps its sections and guides (lists of sketch ids)", () =>
+        {
+            // (SectionSketchIds, GuideSketchIds: kept as "F1", "F2", the loft lost its sketches on opening)
+            var doc = new CadDocument { Id = "loft-part" };
+            doc.Features.Add(new SketchFeature { Id = "F1", Name = "Section 1" });
+            doc.Features.Add(new SketchFeature { Id = "F2", Name = "Section 2" });
+            doc.Features.Add(new SketchFeature { Id = "F3", Name = "Guide" });
+            doc.Features.Add(new SketchFeature { Id = "F4", Name = "Centerline" });
+            var loft = new LoftFeature { Id = "F5", SectionSketchIds = { "F1", "F2" }, GuideSketchIds = { "F3" }, CenterlineSketchId = "F4" };
+            doc.Features.Add(loft);
+            LegacyIds.Upgrade(doc, doc.ToJson());
+            var ids = doc.Features.Select(f => f.Id).ToList();
+            t.True(loft.SectionSketchIds.SequenceEqual(ids.Take(2)), $"sections {string.Join(",", loft.SectionSketchIds)} for {string.Join(",", ids)}");
+            t.True(loft.GuideSketchIds.SequenceEqual(new[] { ids[2] }), $"guides {string.Join(",", loft.GuideSketchIds)}");
+            t.Eq(loft.CenterlineSketchId, ids[3]);
+        });
+
         t.Test("Ids: old face names translated once (idempotent), their structure kept", () =>
         {
             const string seed = "6a1f0c2e-1111-4222-8333-944455556666";
