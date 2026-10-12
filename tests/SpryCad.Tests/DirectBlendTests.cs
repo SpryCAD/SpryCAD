@@ -662,6 +662,23 @@ static class DirectBlendTests
             t.True(nb != null && nb.Validate() == null, $"exact and valid: {nb?.Validate()}");
         });
 
+        t.Test("Fillet round a boss's foot over a rounded edge, its end under a ledge in the plane of the top: exact", () =>
+        {
+            // the fillet's end, run on and cut back to the ledge's underside: the boolean took the blend face and that
+            // plane (one the ball rolls on at the chain's other end, on the top) for touching only, and left the run-on
+            // uncut; the uncut tool's end then failed the union ("edge used 1 times")
+            var doc = Demos.BlendCases.First(c => c.name == "box with a ledge over its side, a boss across the side and under the ledge filleted").build();
+            var foot = doc.Features.First(f => f.Name == "Boss foot");
+            var reg = new Regenerator();
+            var before = KernelTests.Vex(reg.Rebuild(doc, doc.Features.IndexOf(foot)).State.Bodies[0].Solid);
+            var r = reg.Rebuild(doc);
+            t.True(r.Status[foot.Id].Ok && r.Status[foot.Id].Warnings.Count == 0, $"{r.Status[foot.Id].Error} {string.Join("; ", r.Status[foot.Id].Warnings)}");
+            var nb = r.State.Bodies[0].Solid.Native;
+            t.True(nb != null && nb.Validate() == null, $"exact and valid: {nb?.Validate()}");
+            var added = KernelTests.Vex(r.State.Bodies[0].Solid) - before;
+            t.True(added > 50 && added < 400, $"added {added:R}");
+        });
+
         t.Test("Direct blend: off (FC_BLEND=boolean) applies nothing directly", () =>
         {
             var before = DirectBlend.Counts;
