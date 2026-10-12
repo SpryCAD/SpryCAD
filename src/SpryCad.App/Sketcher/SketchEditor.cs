@@ -425,7 +425,12 @@ public sealed partial class SketchEditor : IViewportMode
             if (h != _hover) { _hover = h; }
             _hoverVertex = null;
             if (h == null && Tool == SketchTool.Select)
-                _vp.Hover = _vp.Pick(p.X, p.Y, SelFilter.Edge | SelFilter.Face);
+            {
+                // a model vertex lights up as a point (a click takes it as one, for relations), else edges and faces
+                var v = _vp.PickVertex(p.X, p.Y);
+                _hoverVertex = v?.point;
+                _vp.Hover = v == null ? _vp.Pick(p.X, p.Y, SelFilter.Edge | SelFilter.Face) : null;
+            }
             else if (h == null && Tool == SketchTool.SmartDimension)
             {
                 var v = _vp.PickVertex(p.X, p.Y);
@@ -461,7 +466,12 @@ public sealed partial class SketchEditor : IViewportMode
         {
             case SketchTool.Select:
                 {
+                    PruneReferencePoints();
                     var h = HitTest(p.X, p.Y);
+                    // a vertex of the model (an earlier feature's): a reference point at it, picked as a sketch point,
+                    // so it can be related to (coincident, on a line...) and follows the model
+                    // (hit again once made: as the sketch's other point entities, it is picked as the entity)
+                    if (h == null && _vp.PickVertex(p.X, p.Y) != null && CreateModelReference(p.X, p.Y) is { Kind: SkRefKind.Point }) h = HitTest(p.X, p.Y);
                     LastClick = h;
                     if (p.ClickCount >= 2 && h is { Kind: SkRefKind.Constraint } hc && Sk.Constraint(hc.Id) is { IsDimension: true } dim)
                     {
@@ -1274,6 +1284,22 @@ public sealed partial class SketchEditor : IViewportMode
         return (body, body.Solid.Topology.Edges[e.EdgeIndex], false, e.Point);
     }
 
+    /// <summary>
+    /// Takes out the reference points of model vertices picked in the Select tool but not used: nothing relates or
+    /// dimensions to them, nothing else shares them, and they are not selected (a click away from one leaves no
+    /// trace of it).
+    /// </summary>
+    void PruneReferencePoints()
+    {
+        var unused = Sk.Entities.OfType<SkPointEntity>().Where(e => e.External is { Vertex: true }
+            && !Selected.Contains(new SkRef(SkRefKind.Point, e.P)) && !Selected.Contains(new SkRef(SkRefKind.Entity, e.Id))
+            && !Sk.Constraints.Any(c => c.Refs.Contains(e.P) || c.Refs.Contains(e.Id))
+            && !Sk.Entities.Any(o => o != e && o.PointIds.Contains(e.P))).ToList();
+        if (unused.Count == 0) return;
+        foreach (var e in unused) Sk.Entities.Remove(e);
+        Sk.Cleanup();
+    }
+
     /// <summary>Projects the model edge/vertex under the cursor into the sketch as reference geometry.</summary>
     SkRef? CreateModelReference(double x, double y)
     {
@@ -1501,6 +1527,12 @@ public sealed partial class SketchEditor : IViewportMode
                 : Selected.Contains(new SkRef(SkRefKind.Point, p.Id)) || _dimPicks.Contains(new SkRef(SkRefKind.Point, p.Id)) ? ViewportControl.SelectColor
                 : ColorOfPoint(p.Id);
             SketchDrawing.PointMark(g, f, p.P, c, px, 2.2);
+        }
+        // the origin is a point too (to relate and dimension to): its dot, lit when hovered or selected as any other
+        {
+            var hov = _hover is { Kind: SkRefKind.Point } ho && ho.Id == o;
+            var sel = Selected.Contains(new SkRef(SkRefKind.Point, o)) || _dimPicks.Contains(new SkRef(SkRefKind.Point, o));
+            SketchDrawing.PointMark(g, f, Sk.P(o), hov ? ViewportControl.HoverColor : sel ? ViewportControl.SelectColor : oc, px, hov || sel ? 3.5 : 2.5);
         }
         // dimensions
         // a selected or hovered dimension is drawn whole (lines, extension lines, arrows) in its label's color, so
