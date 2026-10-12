@@ -629,6 +629,33 @@ public sealed class NBoolean
     void CrossOnSurfaceEdges(List<(NEdge e, NFace f)> onSurface, Dictionary<NEdge, List<(double t, NVertex v)>> splits)
     {
         var near = Math.Max(_onTol * 200, 1e3 * _tol);
+        // the crossings of every pair first, in parallel (pure geometry; the pairs keyed in the order met, as below);
+        // the splits are then made in order from them
+        var todo = new List<(NEdge, NEdge)>();
+        var seen = new HashSet<(NEdge, NEdge)>();
+        foreach (var (e, f) in onSurface)
+        {
+            var eb = e.Bounds(_sampleTol * 500);
+            foreach (var c in f.Coedges)
+            {
+                var g = c.Edge;
+                if (ReferenceEquals(g, e) || !eb.Overlaps(g.Bounds(_sampleTol * 500), _onTol)) continue;
+                int oe = Order(e), og = Order(g);
+                var key = oe > og ? (g, e) : (e, g);
+                if (!_crossings.ContainsKey(key) && seen.Add(key)) todo.Add(key);
+            }
+        }
+        if (todo.Count > 1)
+        {
+            var res = new List<(double, double, Vec3, double)>[todo.Count];
+            Parallel.For(0, todo.Count, k =>
+            {
+                var (x, y) = todo[k];
+                bool flip = x.FinestSamples(_tol * 50).Count < y.FinestSamples(_tol * 50).Count;
+                res[k] = flip ? CurveCrossings(y, x).Select(c => (c.tb, c.ta, c.p, c.reach)).ToList() : CurveCrossings(x, y).Select(c => (c.ta, c.tb, c.p, c.reach)).ToList();
+            });
+            for (int k = 0; k < todo.Count; k++) _crossings[todo[k]] = res[k];
+        }
         foreach (var (e, f) in onSurface)
         {
             var eb = e.Bounds(_sampleTol * 500);
