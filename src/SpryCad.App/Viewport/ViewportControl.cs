@@ -293,20 +293,22 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
     static readonly bool RenderProfile = Environment.GetEnvironmentVariable("SPRYCAD_PROFILE_RENDER") != null;
     static readonly bool RenderContinuous = Environment.GetEnvironmentVariable("SPRYCAD_PROFILE_RENDER") == "continuous";
     static readonly bool PickProfile = Environment.GetEnvironmentVariable("SPRYCAD_PROFILE_RENDER") == "picks";
-    int _pkCalls, _pkHits; double _pkMs, _pkMax; long _pkSince = Stopwatch.GetTimestamp();
+    int _pkCalls, _pkHits; double _pkMs, _pkMax; long _pkSince = Stopwatch.GetTimestamp(); ulong _pkSum = 14695981039346656037;
 
     void ProfilePick()
     {
-        double x = Bounds.Width * (0.1 + 0.8 * (_pkCalls % 200) / 200.0), y = Bounds.Height * (0.3 + 0.4 * (_pkCalls % 7) / 7.0);
+        double x = Bounds.Width * (0.1 + 0.8 * (_pkCalls % 240) / 240.0), y = Bounds.Height * (0.3 + 0.4 * (_pkCalls % 7) / 7.0);
         var t = Stopwatch.GetTimestamp();
-        bool hit = Instances.Count > 0 ? PickInstance(x, y) != null : Pick(x, y, SelFilter.Any) != null;
+        string? what = Instances.Count > 0 ? PickInstance(x, y) is { } pi ? $"{pi.id} {pi.face} {pi.t:R}" : null : Pick(x, y, SelFilter.Any)?.Key;
         var now = Stopwatch.GetTimestamp();
         var ms = Stopwatch.GetElapsedTime(t, now).TotalMilliseconds;
-        _pkCalls++; _pkHits += hit ? 1 : 0; _pkMs += ms; _pkMax = Math.Max(_pkMax, ms);
+        _pkCalls++; _pkMs += ms; _pkMax = Math.Max(_pkMax, ms);
+        // what was hit, summed up: two builds picking the same things at the same points log the same sum
+        if (what != null) { _pkHits++; foreach (var ch in what) _pkSum = (_pkSum ^ ch) * 1099511628211; }
+        if (_pkCalls < 240) return;
         var span = Stopwatch.GetElapsedTime(_pkSince, now).TotalSeconds;
-        if (span < 2) return;
-        App.Note($"picks: {_pkCalls} in {span:0.0} s ({_pkHits} hits), {_pkMs / _pkCalls:0.000} ms average ({_pkMax:0.000} worst) ({(Instances.Count > 0 ? "components" : "model items")})");
-        _pkCalls = _pkHits = 0; _pkMs = _pkMax = 0; _pkSince = now;
+        App.Note($"picks: {_pkCalls} in {span:0.0} s ({_pkHits} hits, sum {_pkSum:X16}), {_pkMs / _pkCalls:0.000} ms average ({_pkMax:0.000} worst) ({(Instances.Count > 0 ? "components" : "model items")})");
+        _pkCalls = _pkHits = 0; _pkMs = _pkMax = 0; _pkSince = now; _pkSum = 14695981039346656037;
     }
     int _rnFrames; double _rnMs, _rnMax, _rnDynMs, _rnDynMax; long _rnFloats; long _rnSince = Stopwatch.GetTimestamp();
 
@@ -377,7 +379,17 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
             var m = inst.Mesh;
             if (!RayHitsBox(o, d, m.Bounds)) continue;
             var lo = new Vec3(o.X, o.Y, o.Z); var ld = new Vec3(d.X, d.Y, d.Z);
-            for (int k = 0; k + 2 < m.Indices.Length; k += 3)
+            // only the faces whose boxes the ray meets (in order: the same nearest triangle as testing them all; the
+            // boxes are of the exact points, padded for their positions' rounding to float)
+            if (FacesCoverAll(m))
+                foreach (var fr in m.Faces)
+                {
+                    if (!RayHitsBox(o, d, fr.Bounds, FloatPad(fr.Bounds))) continue;
+                    for (int k = fr.IndexStart; k + 2 < fr.IndexStart + fr.IndexCount; k += 3) Test(k);
+                }
+            else
+                for (int k = 0; k + 2 < m.Indices.Length; k += 3) Test(k);
+            void Test(int k)
             {
                 var t = RayTriangle(lo, ld, P(m, m.Indices[k]), P(m, m.Indices[k + 1]), P(m, m.Indices[k + 2]));
                 if (t > 0 && (best == null || t < best.Value.t)) { best = (inst.Id, t, ro + rd * t, null); bestMesh = m; bestTri = k; }
@@ -389,7 +401,20 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         return best;
     }
 
-    static bool RayHitsBox(Vector3 o, Vector3 d, Box3 b)
+    // whether the faces' ranges run through every triangle in order, each one after the last (as DisplayMesh makes them)
+    static readonly System.Runtime.CompilerServices.ConditionalWeakTable<DisplayMesh, object> _covered = new();
+    static bool FacesCoverAll(DisplayMesh m) => (bool)_covered.GetValue(m, mesh =>
+    {
+        int at = 0;
+        foreach (var fr in mesh.Faces) { if (fr.IndexStart != at || fr.IndexCount % 3 != 0) return false; at += fr.IndexCount; }
+        return at == mesh.Indices.Length;
+    });
+
+    // more than a float's rounding of the box's coordinates (a face's box may be flat on one axis)
+    static double FloatPad(Box3 b) => 1e-6 * (1 + Math.Max(Math.Max(Math.Abs(b.Min.X), Math.Abs(b.Max.X)),
+        Math.Max(Math.Max(Math.Abs(b.Min.Y), Math.Abs(b.Max.Y)), Math.Max(Math.Abs(b.Min.Z), Math.Abs(b.Max.Z)))));
+
+    static bool RayHitsBox(Vector3 o, Vector3 d, Box3 b, double extraPad = 0)
     {
         if (b.IsEmpty) return false;
         double t0 = double.MinValue, t1 = double.MaxValue;
@@ -397,7 +422,7 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         {
             double oa = a == 0 ? o.X : a == 1 ? o.Y : o.Z, da = a == 0 ? d.X : a == 1 ? d.Y : d.Z;
             double lo = a == 0 ? b.Min.X : a == 1 ? b.Min.Y : b.Min.Z, hi = a == 0 ? b.Max.X : a == 1 ? b.Max.Y : b.Max.Z;
-            var pad = 1e-6 * (1 + Math.Abs(hi - lo));
+            var pad = 1e-6 * (1 + Math.Abs(hi - lo)) + extraPad;
             if (Math.Abs(da) < 1e-12) { if (oa < lo - pad || oa > hi + pad) return false; continue; }
             double ta = (lo - pad - oa) / da, tb = (hi + pad - oa) / da;
             if (ta > tb) (ta, tb) = (tb, ta);
@@ -1513,15 +1538,20 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         (Body, TopoEdge, Vec3)? best = null; double bestPx = radiusPx;
         foreach (var b in Bodies)
             foreach (var e in b.Solid.Topology.Edges)
-                foreach (var p in e.Closed ? new[] { e.Start } : new[] { e.Start, e.End })
-                {
-                    var s = Camera.Project(p);
-                    var d = Math.Sqrt((s.X - x) * (s.X - x) + (s.Y - y) * (s.Y - y));
-                    if (d >= bestPx) continue;
-                    if (Vec3.Dot(p - ro, rd) > faceDepth + Camera.PixelSize * 3 + 1e-4) continue;
-                    bestPx = d; best = (b, e, p);
-                }
+            {
+                Try(b, e, e.Start);
+                if (!e.Closed) Try(b, e, e.End);
+            }
         return best;
+
+        void Try(Body b, TopoEdge e, Vec3 p)
+        {
+            var s = Camera.Project(p);
+            var d = Math.Sqrt((s.X - x) * (s.X - x) + (s.Y - y) * (s.Y - y));
+            if (d >= bestPx) return;
+            if (Vec3.Dot(p - ro, rd) > faceDepth + Camera.PixelSize * 3 + 1e-4) return;
+            bestPx = d; best = (b, e, p);
+        }
     }
 
     /// <summary>Face under the cursor (any filter), used e.g. for sketch-on-face inference.</summary>
