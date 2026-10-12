@@ -23,10 +23,11 @@ internal static class CornerPatch
     /// <summary>The corner's tool and where each fillet ends (their tools are cut on these planes, keeping the side
     /// along their edge).</summary>
     /// <param name="OwnAtJoint">The own fillet ends square at v (its tool, not run on, needs no cut).</param>
-    public sealed record Result(Solid Tool, Plane EndOwn, Plane EndNext, bool OwnAtJoint = false, bool NextAtJoint = false)
+    /// <param name="QOwn">Where the own fillet ends on its edge (v where it ends square there).</param>
+    public sealed record Result(Solid Tool, Plane EndOwn, Plane EndNext, Vec3 QOwn, Vec3 QNext, bool OwnAtJoint = false, bool NextAtJoint = false)
     {
         /// <summary>As seen from the next fillet.</summary>
-        public Result Swapped => this with { EndOwn = EndNext, EndNext = EndOwn, OwnAtJoint = NextAtJoint, NextAtJoint = OwnAtJoint };
+        public Result Swapped => this with { EndOwn = EndNext, EndNext = EndOwn, QOwn = QNext, QNext = QOwn, OwnAtJoint = NextAtJoint, NextAtJoint = OwnAtJoint };
     }
 
     static Vec3 Outward(NFace f, Vec3 p) => f.Surface.Normal(p) * (f.Sense ? 1 : -1);
@@ -277,7 +278,7 @@ internal static class CornerPatch
         if (body.Validate() is { } err) return Fail("internal: " + err);
         var tool = NTess.ToSolid(body);
         NativeBlend.Debug?.Invoke($"corner at {v.P}: pivot {Phi * 180 / Math.PI:0.#}°, the corner edge from {Math.Min(zs[0], zs[n]):g4} to {Math.Max(zs[0], zs[n]):g4}, volume {tool.Volume():g4}");
-        return new Result(tool, endOwn, atJoint ?? endNext, false, pastNext);
+        return new Result(tool, endOwn, atJoint ?? endNext, Q0.P, pastNext ? v.P : QN.P, false, pastNext);
 
         static Result? Fail(string why) { NativeBlend.Debug?.Invoke("corner patch: " + why); return null; }
     }
