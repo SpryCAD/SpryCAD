@@ -156,6 +156,7 @@ static class Program
         if (args.Length > 1 && args[0] == "demo-sketches") return Demos.SketchReport(args[1]);
         if (args.Length > 0 && args[0] == "blendab") return BlendAB.Run(args.Length > 1 ? args[1] : null);
         if (args.Length > 0 && args[0] == "matebench") return MateBench.Run(args[1..]);
+        if (args.Length > 1 && args[0] == "meshsize") return MeshSizeBench.Run(args[1..]);
         if (args.Length > 0 && args[0] == "sketchfuzz") return SketchFuzz.Cli(args[1..]);
         if (args.Length > 0 && args[0] == "sketchbench") return SketchBench.Run(args[1..]);
         if (args.Length > 0 && args[0] == "demos") return Demos.Write(args.Length > 1 ? args[1] : Path.Combine(Path.GetTempPath(), "fc-demos"));
@@ -200,6 +201,7 @@ static class Program
             PatternUnionTests.Run(t);
             SketchOverlapTests.Run(t);
             SketchLookupTests.Run(t);
+            MeshQuantTests.Run(t);
             DirectBlendTests.Run(t);
             SweepTests.Run(t);
             SweepFeatureTests.Run(t);
