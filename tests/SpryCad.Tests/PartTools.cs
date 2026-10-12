@@ -71,11 +71,12 @@ public static class PartTools
         var doc = Part(a[0]);
         int k = UpTo(doc, a[1]) - 1;
         if (k < 0) { Console.WriteLine($"no feature {a[1]}"); return 1; }
-        new Regenerator().Rebuild(doc, k);
+        var reg = new Regenerator();
+        reg.Rebuild(doc, k);
         NativeBlend.Debug = s => Console.WriteLine("NB " + s); DirectBlend.Debug = s => Console.WriteLine("DB " + s);
         RollingBall.Debug = s => Console.WriteLine("RB " + s); SweptChamfer.Debug = s => Console.WriteLine("SC " + s);
         Console.WriteLine("---- " + a[1]);
-        var r = new Regenerator().Rebuild(doc, k + 1);
+        var r = reg.Rebuild(doc, k + 1);
         NativeBlend.Debug = null; DirectBlend.Debug = null; RollingBall.Debug = null; SweptChamfer.Debug = null;
         var st = r.Status[doc.Features[k].Id];
         Console.WriteLine($"status ok={st.Ok} {st.Error} {string.Join("; ", st.Warnings)}");
