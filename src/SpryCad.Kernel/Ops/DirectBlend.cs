@@ -107,10 +107,13 @@ public static class DirectBlend
                     foreach (var b in bodies[j].Faces.Where(f => f.Surface.Kind == SurfaceKind.Plane && !drop.Contains(f)))
                     {
                         if (drop.Contains(a)) break;
-                        if (a.Loops.Count != 1 || b.Loops.Count != 1 || a.Loops[0].Coedges.Count != b.Loops[0].Coedges.Count) continue;
+                        if (a.Loops.Count != 1 || b.Loops.Count != 1) continue;
                         if (!a.Surface.CoincidentWith(b.Surface, tol)) continue;
                         var pa = a.Coedges.First().Start.P;
                         if (Vec3.Dot(Out(a, pa), Out(b, pa)) > 0) continue;
+                        // (one end with a straight edge in two where the other's has it in one, a vertex on it: split so)
+                        if (a.Loops[0].Coedges.Count != b.Loops[0].Coedges.Count && (SplitAt(bodies[i], a, b, tol) | SplitAt(bodies[j], b, a, tol))) { }
+                        if (a.Loops[0].Coedges.Count != b.Loops[0].Coedges.Count) continue;
                         // the same boundary: each edge of b lies along one of a's with the same end points
                         var pairs = new List<(NEdge eb, NEdge ea, bool flip)>();
                         foreach (var cb in b.Coedges)
@@ -151,6 +154,38 @@ public static class DirectBlend
         var err = merged.Validate();
         if (err != null) { why = "glued: " + err; return null; }
         return new Tool(NTess.ToSolid(merged), tools[0].Convex, tools[0].Name, tools.Min(t => t.Size));
+    }
+
+    /// <summary>
+    /// The straight edges of face x split at the vertices of face y lying inside them (two ends meeting, one with the
+    /// edge in two pieces): in x's body, on both faces using them. Whether any was.
+    /// </summary>
+    static bool SplitAt(NBody body, NFace x, NFace y, double tol)
+    {
+        bool any = false;
+        foreach (var p in y.Coedges.Select(c => c.Start.P).ToList())
+        {
+            if (x.Coedges.Any(c => Vec3.Distance(c.Start.P, p) < tol)) continue;
+            var c = x.Coedges.FirstOrDefault(c => c.Edge.Curve is NLine l && Vec3.Distance(l.Eval(l.Param(p)), p) < tol
+                && l.Param(p) > Math.Min(c.Edge.T0, c.Edge.T1) + tol && l.Param(p) < Math.Max(c.Edge.T0, c.Edge.T1) - tol);
+            if (c == null) continue;
+            var e = c.Edge; var tp = e.Curve.Param(p);
+            var nv = new NVertex(p);
+            var e1 = new NEdge(e.Curve, e.T0, tp, e.V0, nv); var e2 = new NEdge(e.Curve, tp, e.T1, nv, e.V1);
+            foreach (var f in body.Faces)
+                foreach (var l in f.Loops)
+                    for (int k = 0; k < l.Coedges.Count; k++)
+                    {
+                        var u = l.Coedges[k];
+                        if (!ReferenceEquals(u.Edge, e)) continue;
+                        l.Coedges.RemoveAt(k);
+                        l.Coedges.InsertRange(k, u.Forward ? new[] { new NCoedge(e1, true), new NCoedge(e2, true) } : new[] { new NCoedge(e2, false), new NCoedge(e1, false) });
+                        k++;
+                    }
+            any = true;
+        }
+        if (any) body.Link();
+        return any;
     }
 
     static bool IsBlendFace(NFace t)

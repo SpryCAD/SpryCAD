@@ -58,19 +58,29 @@ public static class RollingBall
     /// into at an angle. Contact points <paramref name="cutOff"/> says are cut off with it are not checked for fit.
     /// </summary>
     public static Result Build(IReadOnlyList<NEdge> chain, double r, string name, Func<NFace, Vec3, bool> onFaces,
-        Func<NVertex, Vec3, NFace, NFace, double>? runOn = null, Func<Vec3, bool>? cutOff = null)
+        Func<NVertex, Vec3, NFace, NFace, double>? runOn = null, Func<Vec3, bool>? cutOff = null, Func<NVertex, Vec3?>? endAt = null)
     {
         if (cutOff != null) { var of = onFaces; onFaces = (f, p) => cutOff(p) || of(f, p); }
         var pieces = Order(chain, out var closed);
         if (pieces == null) return Fail("the edges do not form a single chain.");
-        if (!closed && runOn != null)
+        if (!closed && (runOn != null || endAt != null))
             foreach (var atStart in new[] { true, false })
             {
                 int k = atStart ? 0 : pieces.Count - 1;
                 var pc = pieces[k];
-                if (pc.E.Curve is not (NLine or NCircle or NEllipse) || pc.E.Uses.Count != 2) continue;
                 var t = atStart ? pc.Ta : pc.Tb;
                 var v = Vec3.Distance(pc.E.V0.P, pc.E.Curve.Eval(t)) <= Vec3.Distance(pc.E.V1.P, pc.E.Curve.Eval(t)) ? pc.E.V0 : pc.E.V1;
+                // (ending at a given point of the edge, its curve run on or cut short to it: where the ball starts to
+                // pivot round a corner)
+                if (endAt?.Invoke(v) is { } q)
+                {
+                    if (Vec3.Distance(q, v.P) < 1e-12) continue;
+                    var tq = pc.E.Curve.Param(q, t);
+                    if (Vec3.Distance(pc.E.Curve.Eval(tq), q) > 1e-6 * Math.Max(1, r)) return Fail("internal: the end is not on the edge.");
+                    pieces[k] = atStart ? pc with { Ta = tq } : pc with { Tb = tq };
+                    continue;
+                }
+                if (runOn == null || pc.E.Curve is not (NLine or NCircle or NEllipse) || pc.E.Uses.Count != 2) continue;
                 var len = runOn(v, pc.Dir(t) * (atStart ? -1 : 1), pc.E.Uses[0].Face, pc.E.Uses[1].Face);
                 if (!(len > 0)) continue;
                 var dt = len / Math.Max(pc.E.Curve.Deriv(t).Length, 1e-12) * Math.Sign(pc.Tb - pc.Ta);
