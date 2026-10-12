@@ -172,6 +172,7 @@ static class Program
         if (args.Length > 2 && args[0] == "featprof") { Bench.FeatureProfile(args[1], args[2], args.Length > 3 ? int.Parse(args[3]) : 3); return 0; }
         if (args.Length > 1 && args[0] == "localbench") return LocalBench.Run(args[1], args.Length > 2 ? int.Parse(args[2]) : 5);
         if (args.Length > 0 && args[0] == "loftbench") return LoftBench.Run();
+        if (args.Length > 0 && args[0] == "loftmirror") return LoftMirrorBench.Run();
         if (args.Length > 0 && args[0] == "loftstep") return LoftProbe.Step();
         if (args.Length > 0 && args[0] == "loftprobe") return LoftProbe.Run(args.Length > 1 ? args[1] : null);
         if (args.Length > 1 && args[0] == "bench")

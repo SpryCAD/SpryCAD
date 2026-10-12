@@ -370,6 +370,9 @@ public sealed class NBody
         return b;
     }
 
+    /// <summary>Whether a transformed surface keeps its parameters (so a mirror turns its natural normal round).</summary>
+    static bool KeepsParams(NSurface s) => s.Kind is SurfaceKind.Screw or SurfaceKind.BSpline || s.Kind == SurfaceKind.Offset && KeepsParams(s.Base!);
+
     /// <summary>Diagnostics: a copy with new edge objects (no sample caches).</summary>
     public static NBody CopyFresh(NBody b) => b.Map(c => c, s => s, x => x, false);
 
@@ -420,8 +423,9 @@ public sealed class NBody
                 tmap[f.Tag] = tag = ReferenceEquals(s, f.Surface) && name == f.Tag.Name ? f.Tag
                     : new FaceTag(name, s.Kind == SurfaceKind.Plane ? SurfaceDef.PlaneDef : s.Def, f.Tag.Seq);
             }
-            // a mirrored screw surface keeps its parameterization, so its natural normal (Su × Sv) turns to the other side
-            var nf = new NFace(s, mirrored && s.Kind == SurfaceKind.Screw ? !f.Sense : f.Sense, tag, f.Anchor is { } an ? point(an) : null);
+            // a mirrored screw or B-spline surface (or an offset of one) keeps its parameterization, so its natural
+            // normal (Su × Sv) turns to the other side
+            var nf = new NFace(s, mirrored && KeepsParams(s) ? !f.Sense : f.Sense, tag, f.Anchor is { } an ? point(an) : null);
             if (ReferenceEquals(s, f.Surface)) nf.BoundsCache = f.BoundsCache; // same geometry (clone / flip)
             foreach (var l in f.Loops)
             {

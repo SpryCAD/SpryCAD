@@ -120,6 +120,8 @@ public static class NLoft
         public readonly double L;
         public readonly Vec3 Centroid;
         public readonly double Size;
+        /// <summary>The loop's plane's normal, by its turning sense.</summary>
+        public readonly Vec3 Normal;
         /// <summary>One full circle: no vertices, its seam can go anywhere.</summary>
         public bool FreeSeam => Segs.Count == 1;
         public int Vertices => FreeSeam ? 0 : Segs.Count;
@@ -136,6 +138,10 @@ public static class NLoft
             var pts = new Vec3[n];
             for (int i = 0; i < n; i++) { pts[i] = At((double)i / n); c += pts[i]; }
             Centroid = c / n;
+            // (Newell: along the loft's direction for an outline, against it for a hole)
+            var nn = Vec3.Zero;
+            for (int i = 0; i < n; i++) nn += Vec3.Cross(pts[i] - Centroid, pts[(i + 1) % n] - Centroid);
+            Normal = nn.Normalized;
             double s = 0;
             foreach (var p in pts) s += (p - Centroid).LengthSq;
             Size = Math.Max(Math.Sqrt(s / n), 1e-12);
@@ -178,6 +184,15 @@ public static class NLoft
     }
 
     static double Frac(double f) { f -= Math.Floor(f); return f >= 1 ? 0 : f; }
+
+    /// <summary>v turned by the least rotation taking the direction from onto to (loops in turned planes compared as if in one).</summary>
+    static Vec3 Turn(Vec3 v, Vec3 from, Vec3 to)
+    {
+        var axis = Vec3.Cross(from, to); var sin = axis.Length; var cos = Vec3.Dot(from, to);
+        if (sin < 1e-12) return cos > 0 ? v : -v;
+        axis /= sin;
+        return v * cos + Vec3.Cross(axis, v) * sin + axis * (Vec3.Dot(axis, v) * (1 - cos));
+    }
 
     /// <summary>On a closed path (length L), arc lengths taken on round from the first: s0 ≤ s &lt; s0 + L.</summary>
     static double[] Round(double[] s, double L, bool closed)
@@ -495,28 +510,52 @@ public static class NLoft
     static void Align(Group g, IReadOnlyList<int> ks)
     {
         const int M = 48;
-        Vec3[] Shape(Loop3 l, double tau) => Enumerable.Range(0, M).Select(m => (l.At(tau + (double)m / M) - l.Centroid) / l.Size).ToArray();
-        var first = g.Loops[ks[0]]!;
-        int sharp0 = Enumerable.Range(0, first.Vertices).FirstOrDefault(i => first.Sharp(i), 0);
-        g.Tau[ks[0]] = first.Vertices > 0 ? first.VertexFraction(sharp0) : 0;
-        for (int q = 1; q < ks.Count; q++)
+        Vec3 At(Loop3 l, double t) => (l.At(t) - l.Centroid) / l.Size;
+        Vec3[] Shape(Loop3 l, double tau) => Enumerable.Range(0, M).Select(m => At(l, tau + (double)m / M)).ToArray();
+        // where a loop may start: its vertices; anywhere (with a little penalty where it has vertices) when none is sharp
+        List<(double tau, double pen)> Cands(Loop3 l)
         {
-            var prev = Shape(g.Loops[ks[q - 1]]!, g.Tau[ks[q - 1]]);
-            var l = g.Loops[ks[q]]!;
-            var cand = new List<(double tau, double pen)>();
-            for (int i = 0; i < l.Vertices; i++) cand.Add((l.VertexFraction(i), 1));
+            var c = new List<(double tau, double pen)>();
+            for (int i = 0; i < l.Vertices; i++) c.Add((l.VertexFraction(i), 1));
             if (!Enumerable.Range(0, l.Vertices).Any(l.Sharp))
-                for (int i = 0; i < 72; i++) cand.Add((i / 72.0, l.Vertices > 0 ? 1.05 : 1));
+                for (int i = 0; i < 72; i++) c.Add((i / 72.0, l.Vertices > 0 ? 1.05 : 1));
+            return c;
+        }
+        // how far apart two loops are started there: their points at equal fractions, and the two starts themselves
+        // (as much as all of those: starts that are the same corner of the shape matter most where the loops' sides
+        // are in different proportions)
+        (double tau, double e) Best(Loop3 l, Vec3[] prev, Vec3 prevStart, Vec3 prevNormal)
+        {
             double best = double.MaxValue, bt = 0;
-            foreach (var (tau, pen) in cand)
+            foreach (var (tau, pen) in Cands(l))
             {
-                var cur = Shape(l, tau);
+                var cur = Shape(l, tau).Select(x => Turn(x, l.Normal, prevNormal)).ToArray();
                 double e = 0;
                 for (int m = 0; m < M; m++) e += (cur[m] - prev[m]).LengthSq;
+                e = (e + M * (cur[0] - prevStart).LengthSq) * pen;
+                if (e < best - 1e-12) { best = e; bt = tau; }
+            }
+            return (bt, best);
+        }
+        // the first loop's start: the one (of its vertices) the second loop can be started best against
+        var first = g.Loops[ks[0]]!;
+        if (ks.Count > 1)
+        {
+            double best = double.MaxValue, bt = 0;
+            foreach (var (tau, pen) in Cands(first))
+            {
+                var sh = Shape(first, tau);
+                var (_, e) = Best(g.Loops[ks[1]]!, sh, sh[0], first.Normal);
                 e *= pen;
                 if (e < best - 1e-12) { best = e; bt = tau; }
             }
-            g.Tau[ks[q]] = bt;
+            g.Tau[ks[0]] = bt;
+        }
+        for (int q = 1; q < ks.Count; q++)
+        {
+            var pl = g.Loops[ks[q - 1]]!;
+            var prev = Shape(pl, g.Tau[ks[q - 1]]);
+            g.Tau[ks[q]] = Best(g.Loops[ks[q]]!, prev, prev[0], pl.Normal).tau;
         }
     }
 
@@ -590,19 +629,65 @@ public static class NLoft
                 }
                 continue;
             }
-            // different counts: vertices close along the loop (and from different sections) are one breakpoint
-            const double delta = 0.04;
-            Brk? cur = null; double first = 0; int members = 0;
-            foreach (var x in inner)
+            // different counts: each section's vertices paired with the next section's by where they are in the shape
+            // (about the loop's centre, in its size), in order, a vertex left unpaired where pairing would cost more
+            // than leaving it (an order-keeping alignment); the pairs chained through the sections are breakpoints.
+            // (Matching by the fraction along the loop instead goes wrong where sides are in different proportions:
+            // half a rectangle to half a circle, its flat side 30% of one outline and 39% of the other.)
+            var byK = ks.ToDictionary(k => k, k => inner.Where(x => x.k == k).ToList());
+            Vec3 Shape(int k, double rel) { var l = g.Loops[k]!; return (l.At(g.Tau[k] + rel) - l.Centroid) / l.Size; }
+            // (between sections that have vertices here: a circle between two squares passes their corners on)
+            var withV = Enumerable.Range(0, ks.Count).Where(q => byK[ks[q]].Count > 0).ToList();
+            var next = new Dictionary<(int k, int i), (int q, int j)>();
+            for (int w = 0; w + 1 < withV.Count; w++)
             {
-                if (cur == null || x.gamma - first > delta || cur.Member[x.k])
+                int q = withV[w], q2 = withV[w + 1];
+                var A = byK[ks[q]]; var B = byK[ks[q2]];
+                int na = A.Count, nb = B.Count;
+                if (na == 0 || nb == 0) continue;
+                // the cost of leaving a vertex unpaired: about half the shape's size away (squared)
+                const double skip = 0.25;
+                var cost = new double[na + 1, nb + 1];
+                var move = new int[na + 1, nb + 1]; // 0 pair, 1 skip a, 2 skip b
+                for (int i = 0; i <= na; i++)
+                    for (int jj2 = 0; jj2 <= nb; jj2++)
+                    {
+                        if (i == 0 && jj2 == 0) continue;
+                        double best = double.MaxValue; int mv = 0;
+                        if (i > 0 && jj2 > 0)
+                        {
+                            var c = cost[i - 1, jj2 - 1] + (Shape(ks[q], A[i - 1].rel) - Turn(Shape(ks[q2], B[jj2 - 1].rel), g.Loops[ks[q2]]!.Normal, g.Loops[ks[q]]!.Normal)).LengthSq;
+                            if (c < best) { best = c; mv = 0; }
+                        }
+                        if (i > 0 && cost[i - 1, jj2] + skip < best) { best = cost[i - 1, jj2] + skip; mv = 1; }
+                        if (jj2 > 0 && cost[i, jj2 - 1] + skip < best) { best = cost[i, jj2 - 1] + skip; mv = 2; }
+                        cost[i, jj2] = best; move[i, jj2] = mv;
+                    }
+                for (int i = na, jj2 = nb; i > 0 || jj2 > 0;)
                 {
-                    if (cur != null) { cur.Gamma /= members; clusters.Add(cur); }
-                    cur = New(0); first = x.gamma; members = 0;
+                    var mv = move[i, jj2];
+                    if (i > 0 && jj2 > 0 && mv == 0) { next[(q, i - 1)] = (q2, jj2 - 1); i--; jj2--; }
+                    else if (i > 0 && (jj2 == 0 || mv == 1)) i--;
+                    else jj2--;
                 }
-                cur.Rel[x.k] = x.rel; cur.Member[x.k] = true; cur.Vertex[x.k] = x.vi; cur.Gamma += x.gamma; members++;
             }
-            cur!.Gamma /= members; clusters.Add(cur);
+            // chains through the sections: each vertex starts one unless the section before paired it
+            var paired = new HashSet<(int q, int j)>(next.Values);
+            for (int q = 0; q < ks.Count; q++)
+                for (int i = 0; i < byK[ks[q]].Count; i++)
+                {
+                    if (paired.Contains((q, i))) continue;
+                    var c = New(0); int members = 0;
+                    for (int qq = q, ii = i; ;)
+                    {
+                        var x = byK[ks[qq]][ii];
+                        c.Rel[x.k] = x.rel; c.Member[x.k] = true; c.Vertex[x.k] = x.vi; c.Gamma += x.gamma; members++;
+                        if (!next.TryGetValue((qq, ii), out var nx)) break;
+                        (qq, ii) = nx;
+                    }
+                    c.Gamma /= members;
+                    clusters.Add(c);
+                }
         }
         var all = anchors.Concat(clusters).OrderBy(b => b.Gamma).ToList();
         // a loop needs two pieces at least (a closed edge would be its own seam)

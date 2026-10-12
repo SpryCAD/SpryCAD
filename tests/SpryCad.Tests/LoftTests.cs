@@ -434,6 +434,35 @@ static class LoftFeatureTests
             t.True(again.Features.Last() is SpryCad.Core.Model.LoftFeature l2 && l2.CenterlineSketchId == cf.Id, "centerline saved");
         });
 
+        t.Test("Loft feature: half a part lofted on the mirror plane and mirrored: twice the volume, exact, no free-form tracing", () =>
+        {
+            // half a 20 × 30 rectangle (x 0..20) lofted to half a circle r 12, both with their flat side on Right (x = 0)
+            var half = new SpryCad.Core.Sketching.Sketch();
+            var hc = half.AddPoint(Vec2.Zero); var ha = half.AddPoint(new Vec2(0, -12)); var hb = half.AddPoint(new Vec2(0, 12));
+            half.Add(new SpryCad.Core.Sketching.SkArc { Center = hc.Id, Start = ha.Id, End = hb.Id });
+            half.Add(new SpryCad.Core.Sketching.SkLine { P1 = hb.Id, P2 = ha.Id });
+            var doc = new SpryCad.Core.Model.CadDocument();
+            var a = OnPlane(doc, 0, RectAt(new Vec2(10, 0), 20, 30));
+            var b = OnPlane(doc, 40, half);
+            var lf = doc.AddFeature(new SpryCad.Core.Model.LoftFeature { SectionSketchIds = { a.Id, b.Id } });
+            var m = doc.AddFeature(new SpryCad.Core.Model.MirrorFeature { Seeds = { lf.Id }, Plane = SpryCad.Core.Model.PlaneRef.Right });
+            var seed = KernelTests.Vex(new SpryCad.Core.Regen.Regenerator().Rebuild(doc, doc.Features.IndexOf(m)).State.Bodies[0].Solid);
+            SpryCad.Kernel.Prof.Reset(); SpryCad.Kernel.Prof.Enabled = true;
+            SpryCad.Core.Regen.RegenResult r;
+            try { r = new SpryCad.Core.Regen.Regenerator().Rebuild(doc); }
+            finally { SpryCad.Kernel.Prof.Enabled = false; }
+            t.True(r.Status[m.Id].Ok, r.Status[m.Id].Error ?? "");
+            t.Eq(r.State.Bodies.Count, 1);
+            var body = r.State.Bodies[0].Solid;
+            t.True(body.Native != null, "exact");
+            t.Eq(body.Topology.OpenHalfEdges, 0);
+            t.True(Math.Abs(KernelTests.Vex(body) - 2 * seed) < 1e-7 * seed, $"twice the half: {KernelTests.Vex(body)} vs {2 * seed}");
+            // the halves meet only in the plane: every free-form pair traced against it (B-spline against B-spline is
+            // slow: seconds here)
+            var bb = SpryCad.Kernel.Prof.Results().Where(x => x.name.StartsWith("tr.BSplinexBSpline")).Sum(x => x.calls);
+            t.True(bb == 0, $"{bb} B-spline pairs traced: " + string.Join(", ", SpryCad.Kernel.Prof.Results().Where(x => x.name.StartsWith("tr.") || x.name.StartsWith("feature.") || x.name.StartsWith("csg")).Select(x => $"{x.name} {x.calls} {x.ms:0}ms")));
+        });
+
         t.Test("Loft feature: a cut loft pockets a block exactly; a guide sketch bows a side out", () =>
         {
             var doc = new SpryCad.Core.Model.CadDocument();

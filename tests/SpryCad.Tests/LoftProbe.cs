@@ -197,3 +197,109 @@ static class LoftProbe
         return bad;
     }
 }
+
+/// <summary>`loftmirror`: a loft mirrored (alone, and merged on a block), each feature's rebuild time.</summary>
+static class LoftMirrorBench
+{
+    static SpryCad.Core.Sketching.Sketch RectAt(Vec2 c, double w, double h)
+    {
+        var sk = new SpryCad.Core.Sketching.Sketch();
+        var p = new[] { sk.AddPoint(c + new Vec2(-w / 2, -h / 2)), sk.AddPoint(c + new Vec2(w / 2, -h / 2)), sk.AddPoint(c + new Vec2(w / 2, h / 2)), sk.AddPoint(c + new Vec2(-w / 2, h / 2)) };
+        for (int i = 0; i < 4; i++) sk.Add(new SpryCad.Core.Sketching.SkLine { P1 = p[i].Id, P2 = p[(i + 1) % 4].Id });
+        return sk;
+    }
+    static SpryCad.Core.Sketching.Sketch CircleAt(Vec2 c, double r)
+    {
+        var sk = new SpryCad.Core.Sketching.Sketch();
+        sk.Add(new SpryCad.Core.Sketching.SkCircle { Center = sk.AddPoint(c).Id, R = r });
+        return sk;
+    }
+    static SpryCad.Core.Model.SketchFeature OnPlane(SpryCad.Core.Model.CadDocument doc, double offset, SpryCad.Core.Sketching.Sketch sk)
+    {
+        if (offset == 0) return doc.AddFeature(new SpryCad.Core.Model.SketchFeature { Plane = SpryCad.Core.Model.PlaneRef.Top, Sketch = sk });
+        var pl = doc.AddFeature(new SpryCad.Core.Model.PlaneFeature { Base = SpryCad.Core.Model.PlaneRef.Top, Offset = offset.ToString(System.Globalization.CultureInfo.InvariantCulture) });
+        return doc.AddFeature(new SpryCad.Core.Model.SketchFeature { Plane = new SpryCad.Core.Model.PlaneRef { Feature = pl.Id }, Sketch = sk });
+    }
+
+    // half a circle r (x ≥ 0) closed by its diameter on x = 0, centred at (0, cy)
+    static SpryCad.Core.Sketching.Sketch HalfCircle(double r)
+    {
+        var sk = new SpryCad.Core.Sketching.Sketch();
+        var c = sk.AddPoint(Vec2.Zero); var a = sk.AddPoint(new Vec2(0, -r)); var b = sk.AddPoint(new Vec2(0, r));
+        sk.Add(new SpryCad.Core.Sketching.SkArc { Center = c.Id, Start = a.Id, End = b.Id });
+        sk.Add(new SpryCad.Core.Sketching.SkLine { P1 = b.Id, P2 = a.Id });
+        return sk;
+    }
+
+    public static int Run()
+    {
+        foreach (var rad in new[] { 12.0, 13.0, 11.0 })
+        {
+            // the usual symmetric part: half a square lofted to half a circle, its flat side on the mirror plane
+            var doc = new SpryCad.Core.Model.CadDocument();
+            var a = OnPlane(doc, 0, RectAt(new Vec2(10, 0), 20, 30));
+            var c = OnPlane(doc, 40, HalfCircle(rad));
+            var lf = doc.AddFeature(new SpryCad.Core.Model.LoftFeature { SectionSketchIds = { a.Id, c.Id } });
+            var m = doc.AddFeature(new SpryCad.Core.Model.MirrorFeature { Seeds = { lf.Id }, Plane = SpryCad.Core.Model.PlaneRef.Right });
+            for (int it = 0; it < 2; it++)
+            {
+                SpryCad.Kernel.Prof.Reset(); SpryCad.Kernel.Prof.Enabled = it == 0;
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                var r = new SpryCad.Core.Regen.Regenerator().Rebuild(doc);
+                if (it == 0) foreach (var (pn, ms, calls) in SpryCad.Kernel.Prof.Results().Where(x => x.ms > 20 || x.name.StartsWith("closest") || x.name.StartsWith("project"))) Console.WriteLine($"    {pn}: {ms:0} ms ({calls})");
+                SpryCad.Kernel.Prof.Enabled = false;
+                Console.WriteLine($"half on the plane (r {rad}): {sw.Elapsed.TotalMilliseconds:0} ms; loft {(r.Status[lf.Id].Ok ? "ok" : r.Status[lf.Id].Error)}, mirror {(r.Status[m.Id].Ok ? "ok" : r.Status[m.Id].Error)}, bodies {r.State.Bodies.Count}, native {r.State.Bodies.All(x => x.Solid.Native != null)}");
+            }
+        }
+        foreach (var xc in new[] { 15.0, 8.0 })
+        foreach (var block in new[] { false })
+            foreach (var guided in new[] { false })
+            {
+                var doc = new SpryCad.Core.Model.CadDocument();
+                double z0 = 0;
+                if (block)
+                {
+                    var b = OnPlane(doc, 0, RectAt(Vec2.Zero, 120, 60));
+                    doc.AddFeature(new SpryCad.Core.Model.ExtrudeFeature { SketchId = b.Id, Depth = "20" });
+                    z0 = 20;
+                }
+                var a = OnPlane(doc, z0, RectAt(new Vec2(xc, 0), 30, 30));
+                var c = OnPlane(doc, z0 + 40, CircleAt(new Vec2(xc, 0), 10));
+                var lf = new SpryCad.Core.Model.LoftFeature { SectionSketchIds = { a.Id, c.Id } };
+                if (guided)
+                {
+                    // on Front: from the square's corner (45, z0) out through (50, z0 + 20) to the circle's (40, z0 + 40)
+                    var g = new SpryCad.Core.Sketching.Sketch();
+                    Vec2 p0 = new(xc + 15, z0), p1 = new(xc + 20, z0 + 20), p2 = new(xc + 10, z0 + 40);
+                    // the circle through three points
+                    double ax = p0.X, ay = p0.Y, bx = p1.X, by = p1.Y, cx = p2.X, cy = p2.Y;
+                    double d = 2 * (ax * (by - cy) + bx * (cy - ay) + cx * (ay - by));
+                    var cc = new Vec2(((ax * ax + ay * ay) * (by - cy) + (bx * bx + by * by) * (cy - ay) + (cx * cx + cy * cy) * (ay - by)) / d,
+                        ((ax * ax + ay * ay) * (cx - bx) + (bx * bx + by * by) * (ax - cx) + (cx * cx + cy * cy) * (bx - ax)) / d);
+                    var ce = g.AddPoint(cc); var s = g.AddPoint(p0); var e = g.AddPoint(p2);
+                    g.Add(new SpryCad.Core.Sketching.SkArc { Center = ce.Id, Start = s.Id, End = e.Id });
+                    var gf = doc.AddFeature(new SpryCad.Core.Model.SketchFeature { Plane = SpryCad.Core.Model.PlaneRef.Front, Sketch = g });
+                    lf.GuideSketchIds.Add(gf.Id);
+                }
+                doc.AddFeature(lf);
+                var m = doc.AddFeature(new SpryCad.Core.Model.MirrorFeature { Seeds = { lf.Id }, Plane = SpryCad.Core.Model.PlaneRef.Right });
+                for (int it = 0; it < 2; it++)
+                {
+                    SpryCad.Kernel.Prof.Reset(); SpryCad.Kernel.Prof.Enabled = true;
+                    var sw = System.Diagnostics.Stopwatch.StartNew();
+                    var r1 = new SpryCad.Core.Regen.Regenerator().Rebuild(doc, doc.Features.IndexOf(m));
+                    var t1 = sw.Elapsed.TotalMilliseconds;
+                    var r = new SpryCad.Core.Regen.Regenerator().Rebuild(doc);
+                    var t2 = sw.Elapsed.TotalMilliseconds - t1;
+                    if (it == 0) { Console.WriteLine($"x {xc} block {block}, guided {guided}: cold: up to the loft {t1:0} ms, with the mirror {t2:0} ms"); foreach (var (pn, ms, calls) in SpryCad.Kernel.Prof.Results().Take(200)) Console.WriteLine($"    {pn}: {ms:0} ms ({calls})"); }
+                    if (it == 1)
+                    {
+                        Console.WriteLine($"   warm: block {block}, guided {guided}: up to the loft {t1:0} ms, with the mirror {t2:0} ms; loft {(r.Status[lf.Id].Ok ? "ok" : r.Status[lf.Id].Error)}, mirror {(r.Status[m.Id].Ok ? "ok" : r.Status[m.Id].Error)}, bodies {r.State.Bodies.Count}, native {r.State.Bodies.All(x => x.Solid.Native != null)}");
+                        foreach (var (pn, ms, calls) in SpryCad.Kernel.Prof.Results().Take(8)) Console.WriteLine($"    {pn}: {ms:0} ms ({calls})");
+                    }
+                    SpryCad.Kernel.Prof.Enabled = false;
+                }
+            }
+        return 0;
+    }
+}
