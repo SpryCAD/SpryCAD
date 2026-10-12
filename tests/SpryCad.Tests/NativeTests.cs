@@ -46,6 +46,26 @@ static class NativeTests
             Console.WriteLine($"      tess {tTess} ms ({s.Faces.Count} facets), topology {tTopo} ms, validate {sw.ElapsedMilliseconds} ms");
         });
 
+        t.Test("Native domain: a half-round face turned to any angle bounds (its far edge half a turn from its anchor)", () =>
+        {
+            // a connecting rod's half bore: a block with a half cylinder cut into its top face. Turned about the bore's
+            // axis, at some angles the face's far edge came out half a turn from its anchor on either side, point by
+            // point: "wraps around its surface" from bounding the moved body
+            var block = Builders.Box(new Vec3(-20, -10, 0), new Vec3(20, 0, 20), "B");
+            var bore = Builders.Cylinder(new Vec3(0, 0, -1), Vec3.UnitZ, 8, 22, "C");
+            var rod = Csg.Subtract(block, bore).Native!;
+            t.True(rod.Faces.Any(f => f.Surface.Kind == SurfaceKind.Cylinder), "a half bore");
+            int failed = 0; string? first = null;
+            for (int i = 0; i < 3600; i++)
+            {
+                var a = i * Math.PI / 1800;
+                var tr = Transform.Translation(new Vec3(18.263, -23.801, 0)) * Transform.Rotation(Vec3.Zero, Vec3.UnitZ, a);
+                try { rod.Transformed(tr).Bounds.ToString(); }
+                catch (InvalidOperationException ex) { failed++; first ??= $"{i / 10.0}°: {ex.Message}"; }
+            }
+            t.True(failed == 0, $"{failed} angles of 3600 failed, first {first}");
+        });
+
         t.Test("Native: extruded box and cylinder", () =>
         {
             var box = Box(Vec3.Zero, new Vec3(100, 50, 20));
