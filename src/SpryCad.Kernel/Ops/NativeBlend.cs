@@ -47,8 +47,30 @@ public static class NativeBlend
             Debug?.Invoke($"mixed blends: {first.Count} first, then {rest.Count} edges");
             return rest.Count == 0 ? nb1 : Apply(nb1, rest, size, fillet, prefix, errors, overflow, problemEdges, applied, chamfer, false, trimmedOut);
         }
-        return ApplyOne(body, edges, size, fillet, prefix, errors, overflow, problemEdges, applied, chamfer, buildOnly, trimmedOut);
+        // (the ball pivoting round convex corners: where that leaves errors, the fillets mitred there instead, as before,
+        // when that does better)
+        var errs1 = new List<string>(); var probs1 = problemEdges == null ? null : new List<Vec3[]>(); var app1 = applied == null ? null : new List<(Solid, bool)>();
+        int used = _pivotsUsed;
+        var r1 = ApplyOne(body, edges, size, fillet, prefix, errs1, overflow, probs1, app1, chamfer, buildOnly, trimmedOut);
+        if (errs1.Count > 0 && _pivotsUsed > used && !_noPivots)
+        {
+            var errs2 = new List<string>(); var probs2 = problemEdges == null ? null : new List<Vec3[]>(); var app2 = applied == null ? null : new List<(Solid, bool)>();
+            _noPivots = true;
+            Solid r2;
+            try { r2 = ApplyOne(body, edges, size, fillet, prefix, errs2, overflow, probs2, app2, chamfer, buildOnly, trimmedOut); }
+            finally { _noPivots = false; }
+            Debug?.Invoke($"pivots: {errs1.Count} error(s); mitred: {errs2.Count}");
+            if (errs2.Count < errs1.Count) (r1, errs1, probs1, app1) = (r2, errs2, probs2, app2);
+        }
+        errors.AddRange(errs1);
+        if (probs1 != null) problemEdges!.AddRange(probs1);
+        if (app1 != null) applied!.AddRange(app1);
+        return r1;
     }
+
+    // (per thread: pattern instances are built in parallel)
+    [ThreadStatic] static int _pivotsUsed;
+    [ThreadStatic] static bool _noPivots;
 
     /// <summary>Whether three or more of the edges, of one kind (convex or concave), meet at a vertex.</summary>
     static bool Corner3(IReadOnlyList<NEdge> edges)
@@ -126,6 +148,21 @@ public static class NativeBlend
     }
 
     static Solid ApplyOne(Solid body, IReadOnlyList<NEdge> edges, double size, bool fillet, string prefix, List<string> errors,
+        bool overflow, List<Vec3[]>? problemEdges, List<(Solid tool, bool cut)>? applied, ChamferSize? chamfer,
+        bool buildOnly, System.Runtime.CompilerServices.StrongBox<bool>? trimmedOut)
+    {
+        // (the corners' pivots, and which tool carries each, for this run only)
+        var saved = (_pivoted, _patches);
+        _pivoted = new HashSet<NVertex>(ReferenceEqualityComparer.Instance);
+        _patches = new Dictionary<NVertex, RoundCornerCut.Built>(ReferenceEqualityComparer.Instance);
+        try { return ApplyRun(body, edges, size, fillet, prefix, errors, overflow, problemEdges, applied, chamfer, buildOnly, trimmedOut); }
+        finally { (_pivoted, _patches) = saved; }
+    }
+
+    [ThreadStatic] static HashSet<NVertex>? _pivoted;
+    [ThreadStatic] static Dictionary<NVertex, RoundCornerCut.Built>? _patches;
+
+    static Solid ApplyRun(Solid body, IReadOnlyList<NEdge> edges, double size, bool fillet, string prefix, List<string> errors,
         bool overflow, List<Vec3[]>? problemEdges, List<(Solid tool, bool cut)>? applied, ChamferSize? chamfer,
         bool buildOnly, System.Runtime.CompilerServices.StrongBox<bool>? trimmedOut)
     {
@@ -549,19 +586,18 @@ public static class NativeBlend
         public CornerPatch.Result? Patch()
         {
             // (built once for the corner, by the first of its two fillets: the other ends on the same plane)
-            lock (_patches)
-                if (_patches.TryGetValue(_v, out var known))
+            if (_patches != null && _patches.TryGetValue(_v, out var known))
                     return known.Result is { } k ? ReferenceEquals(known.Own, _own) ? k : k.Swapped : null;
             var along = ReferenceEquals(_corner.V0, _v) ? _corner.Curve.Deriv(_corner.T0) : -_corner.Curve.Deriv(_corner.T1);
             CornerPatch.Result? p;
             using (Prof.Time("blend.corner.patch"))
                 p = CornerPatch.Build(_v, along, Vec3.Distance(_corner.V0.P, _corner.V1.P), _own, _g, _shared, _ownFace, _nextFace, _size, _name + ".C");
-            lock (_patches) _patches.AddOrUpdate(_v, new Built(p, _own));
+            if (_patches != null) _patches[_v] = new Built(p, _own);
+            if (p != null) _pivotsUsed++;
             return p;
         }
 
-        sealed record Built(CornerPatch.Result? Result, NEdge Own);
-        static readonly System.Runtime.CompilerServices.ConditionalWeakTable<NVertex, Built> _patches = new();
+        public sealed record Built(CornerPatch.Result? Result, NEdge Own);
 
         /// <summary>Whether p lies beyond the next face, near the corner.</summary>
         public bool Beyond(Vec3 p) => _next.Distance(p) > -1e-9 && Vec3.Distance(p, _v.P) < Reach;
@@ -605,6 +641,7 @@ public static class NativeBlend
     /// </summary>
     static RoundCornerCut? RoundCorner(NVertex v, NFace fa, NFace fb, IEnumerable<NEdge> blended, IReadOnlyCollection<NEdge> selected, Plane miter, double size, string name)
     {
+        if (_noPivots) return null;
         NEdge? g = null; int count = 0;
         foreach (var face in new[] { fa, fb })
             foreach (var c in face.Coedges)
@@ -669,9 +706,6 @@ public static class NativeBlend
         return ReferenceEquals(t, rb.Tool) ? rb : rb with { Tool = t };
     }
 
-    // the corners whose pivot is carried by a tool already (the first of its two fillets built takes it)
-    static readonly System.Runtime.CompilerServices.ConditionalWeakTable<NVertex, object> _pivoted = new();
-
     /// <summary>
     /// A fillet's tool ended where the ball starts to pivot round the corner (<see cref="CornerPatch"/>), the pivot's
     /// tool joined to it unless the other fillet's carries it.
@@ -681,7 +715,7 @@ public static class NativeBlend
         // (a tool not run on that the corner takes on from v's joint: as it is)
         var t = !runOn && patch.OwnAtJoint ? tool : TrimNear(tool, patch.EndOwn, c.V.P, reach);
         bool taken;
-        lock (_pivoted) taken = _pivoted.TryGetValue(c.V, out _);
+        taken = _pivoted?.Contains(c.V) == true;
         if (taken) return (t, added);
         // (a union that fails leaves the pivot to the other fillet's tool)
         try
@@ -701,7 +735,7 @@ public static class NativeBlend
     /// <summary>The corners whose pivot a tool now kept carries.</summary>
     static void Carry(List<NVertex> carried)
     {
-        lock (_pivoted) foreach (var v in carried) _pivoted.TryAdd(v, v);
+        if (_pivoted != null) foreach (var v in carried) _pivoted.Add(v);
     }
 
     /// <summary>The tool less what lies on the negative side of the plane within reach of p (a box about p).</summary>
@@ -894,7 +928,7 @@ public static class NativeBlend
         foreach (var (c, patch) in pivots)
         {
             bool taken;
-            lock (_pivoted) taken = _pivoted.TryGetValue(c.V, out _);
+            taken = _pivoted?.Contains(c.V) == true;
             if (taken) continue;
             tools.Add(patch.Tool);
             if (strip != null)
