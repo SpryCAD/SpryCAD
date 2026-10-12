@@ -4,7 +4,9 @@ namespace SpryCad.Kernel;
 public sealed class VertexWelder
 {
     readonly double _tol, _tol2, _cell;
-    readonly Dictionary<(long, long, long), List<int>> _grid = new();
+    // each cell's points in the order added: its first and last, and each point's next in its cell (-1: none)
+    readonly Dictionary<(long, long, long), (int first, int last)> _grid = new();
+    readonly List<int> _next = new();
     public readonly List<Vec3> Points = new();
 
     public VertexWelder(double tol = 1e-6)
@@ -36,14 +38,15 @@ public sealed class VertexWelder
         for (long x = x0; x <= x1; x++)
             for (long y = y0; y <= y1; y++)
                 for (long z = z0; z <= z1; z++)
-                    if (_grid.TryGetValue((x, y, z), out var list))
-                        foreach (var i in list)
+                    if (_grid.TryGetValue((x, y, z), out var cell))
+                        for (int i = cell.first; i >= 0; i = _next[i])
                             if ((Points[i] - p).LengthSq <= _tol2) return i;
         var idx = Points.Count;
         Points.Add(p);
+        _next.Add(-1);
         var k = (kx, ky, kz);
-        if (!_grid.TryGetValue(k, out var l)) _grid[k] = l = new List<int>(2);
-        l.Add(idx);
+        if (_grid.TryGetValue(k, out var c)) { _next[c.last] = idx; _grid[k] = (c.first, idx); }
+        else _grid[k] = (idx, idx);
         return idx;
     }
 

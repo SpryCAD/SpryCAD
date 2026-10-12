@@ -69,6 +69,21 @@ static class Program
             return 0;
         }
         if (args.Length > 1 && args[0] == "unfold") return UnfoldTool.Run(args);
+        if (args.Length > 1 && args[0] == "asmsolve")
+        {
+            // what solving each assembly's mates costs once it is open (best of ten, after a first solve)
+            foreach (var file in args.Skip(1))
+            {
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                var m = SpryCad.Core.Assembly.AssemblyModel.Open(SpryCad.Core.Assembly.AssemblyDocument.Load(file), file);
+                var open = sw.Elapsed.TotalMilliseconds;
+                var first = m.SolveMates();
+                double best = double.MaxValue;
+                for (int i = 0; i < 10; i++) { sw.Restart(); m.SolveMates(); best = Math.Min(best, sw.Elapsed.TotalMilliseconds); }
+                Console.WriteLine($"{Path.GetFileName(file),-22} open {open,7:0} ms  components {m.Doc.Components.Count,4}  mates {m.Doc.Mates.Count,4}  solve {best,8:0.00} ms");
+            }
+            return 0;
+        }
         if (args.Length > 1 && args[0] == "loadtime")
         {
             // what opening a STEP file in the app costs: rebuild of the importing part, then the display mesh

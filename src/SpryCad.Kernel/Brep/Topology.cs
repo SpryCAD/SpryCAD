@@ -148,14 +148,30 @@ public sealed class Topology
 
         ptj.Dispose();
         using var prest = Prof.Time("topo.edges");
-        // half-edge map
-        int halfEdges = 0;
-        foreach (var fl in t.FaceLoops) foreach (var l in fl) halfEdges += l.Length;
-        var owner = new Dictionary<(int, int), int>(halfEdges); // -> face index
+        // half-edges by their start vertex (each vertex's in the order met): the face of a → b is the first a → b met
+        int nv = t.Vertices.Count, halfEdges = 0;
+        var from = new int[nv + 1];
+        foreach (var fl in t.FaceLoops)
+            foreach (var l in fl)
+            {
+                halfEdges += l.Length;
+                foreach (var v in l) from[v + 1]++;
+            }
+        for (int v = 0; v < nv; v++) from[v + 1] += from[v];
+        var to = new int[halfEdges]; var ownerFace = new int[halfEdges]; var at = new int[nv];
+        Array.Copy(from, at, nv);
         for (int fi = 0; fi < t.FaceLoops.Count; fi++)
             foreach (var l in t.FaceLoops[fi])
                 for (int i = 0; i < l.Length; i++)
-                    owner.TryAdd((l[i], l[(i + 1) % l.Length]), fi);
+                {
+                    int k = at[l[i]]++;
+                    to[k] = l[(i + 1) % l.Length]; ownerFace[k] = fi;
+                }
+        int Owner(int a, int b)
+        {
+            for (int k = from[a]; k < from[a + 1]; k++) if (to[k] == b) return ownerFace[k];
+            return -1;
+        }
 
         // collect boundary segments between differently named faces
         var segsByPair = new Dictionary<(string, string), List<EdgeSeg>>();
@@ -167,7 +183,8 @@ public sealed class Topology
                 for (int i = 0; i < l.Length; i++)
                 {
                     int a = l[i], b = l[(i + 1) % l.Length];
-                    if (!owner.TryGetValue((b, a), out var fj))
+                    var fj = Owner(b, a);
+                    if (fj < 0)
                     {
                         open++;
                         if (Debug != null && open <= 20) Debug($"open {(resolveTJunctions ? "full" : "quick")}: {nameA} {t.Vertices[a]} -> {t.Vertices[b]}");

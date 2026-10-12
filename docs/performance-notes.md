@@ -90,6 +90,14 @@ profile; the profile's times are summed over threads). On the heavy samples (`sa
       `Face` object (and a 3-point loop array) per triangle; `Solid.Faces` is read widely. What is left of
       `topo.weld` is the grid search for each distinct point (~33 ms on the spoked handwheel).
     - `Topology.Build` welding once for its quick and full passes was tried: the quick pass succeeds on every sample.
+    - Done, bit for bit (full hashes with the display mesh as drawn, every sample): the welder chains each grid
+      cell's points by index (no list per cell); `Topology.Build` finds the facet across each half-edge in arrays by
+      start vertex instead of a dictionary of (a, b) pairs (hand-wheel `topo.edges` ~24 to ~10.5 ms); `DisplayMesh`
+      takes facets that are already triangles as they are and triangulates only the others in parallel (hand-wheel
+      `mesh.triangulate` 27 to 5 ms: a list and a parallel work item per triangle before). Display mesh, medians of
+      four alternating runs: hand-wheel 76 to 60 ms, acme-lead-screw 76 to 62, spur-gear-nice 38 to 35. What is left:
+      free-form normals (acme-lead-screw ~27 ms, a closest-point search on the screw surface per point; the
+      tessellator's own parameters would avoid it but change the normals in the last bits).
 11. **Small items**: `SplitFace` pruning, `AddSec`, STEP units and ordinal names, `Solid.Combine` done (see above).
     Left:
     - `NFace.ComputeBounds` builds a throwaway domain. Sharing the cached one changed results; see *Tried and rejected*.
@@ -115,9 +123,11 @@ profile; the profile's times are summed over threads). On the heavy samples (`sa
     zeros in the dense rows alone barely helped.)
   - Left: skipping converged clusters; equations with no variables; analytic derivatives (the Jacobian is central
     differences).
-- **Mate solver** (`Assembly/MateSolver.cs`): `matebench` on a stack of gears: 200 components solve in ~360 ms, a drag
-  step ~60 ms (100: 64 and 28 ms); one connected piece, so splitting does not help it. Already sparse. Solve the connected pieces separately and skip those
-  already within tolerance. `Settle` runs two full solves.
+- **Mate solver** (`Assembly/MateSolver.cs`): nothing left worth doing. Since the exact derivatives and one setup per
+  drag (#19, #38), `matebench`'s stack of 200 gears solves in ~16 ms and a drag step takes ~10 ms (from ~360 and
+  ~60); drags and motors already solve only the components linked to the moved one. `-- asmsolve <files>` times
+  each assembly's solve once open: every sample's mates solve in 0.08 ms or less (linkage, 11 components and 24
+  mates). Solving each connected piece separately would gain nothing measurable.
 - **Regenerator**:
   - Cancellation: done. The rebuild's token is ambient in the kernel (`Kernel.Cancellation`), checked between a
     boolean's stages and a blend's edge groups; the kernel's catch-alls let `OperationCanceledException` through, so a
@@ -163,6 +173,10 @@ profile; the profile's times are summed over threads). On the heavy samples (`sa
 
 ## Tried and rejected
 
+- **`ClassifyAll` building the near faces' domains and boxes in one parallel batch** (before `cls.lone`/`cls.union`,
+  instead of lazily one at a time): `bool.classify` 425 to 388 ms best of five interleaved runs, but with runs
+  spreading 400–7000 ms on a busy machine that could not be shown to be real; batching every piece's box as well
+  was slower (478 ms). Worth retrying on a quiet machine.
 - **`ClassifyAll` box test before `CoincidentWith`**: slower (`cls.lone` 8 to 50 ms on spur-gear-nice). `FBox` computes a
   face's bounds on first use, often for faces nothing else needs; `CoincidentWith` rejects most pairs at once (kinds).
 - **`Topology.Build` welding once for the quick and the full pass**: the quick pass succeeds on every sample.
