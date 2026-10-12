@@ -56,6 +56,18 @@ Commands (from the repository root):
    drafted back face, which the boss's back now cuts through just where it meets the merged side face. The casting
    goes faceted and rebuilds in 230 s. Repro: set `HopW` to that expression, repoint "Hopper corners" to `YF(0)`/`YF(2)`
    with `HF(1)`/`HF(3)`, `verify-engine - Casting`. *Instead:* the hopper 116 wide again (the ledge kept).
+4c. **A placed body's bounds throw: "face F13.S.C1 wraps around its surface" (OPEN, new on master b44e9e1).** In
+   `engine-asm <dir>`'s interference check through the motion, at step 63 (the crank at 307.5°), `NBody.Bounds` of the
+   connecting rod's body transformed to where it is (translated to (18.263, -23.801, 0), turned about Z by about
+   -10.55°) throws from `NDomain`'s constructor (via `NFace.ComputeBounds`). F13.S.C1 is the rod's half-round bore for
+   the crank pin (the cap holds the other half). Every other step bounds it fine, so it depends on the transform.
+   Unhandled, it took the whole interference check down (`Interference.Find`); the demo's check now catches it and
+   names the part. It did not happen before this rebase (the same check ran through all 72 steps on master 7913d0c).
+4d. **Fillets on a loft's B-spline face are slow.** The casting rebuilds in about 10-13 s with the saddle (2.3 s
+   before): "Pit edges" (R2, two edges where the crank pit's walls cut the saddle's top) 3.6 s, "Saddle edges" (R4,
+   the cheeks' outer top edges) 2.8 s, the loft itself 1.5 s. And the pit edges at R4 fail: "the fillet, cut back
+   where it runs into neighbouring geometry, cannot be joined to the body (classification failed)" (they run into the
+   barrel's end and the pedestals); R2 works.
 5. **A mirror with a suppressed seed silently mirrors nothing.** "Bearing pedestal, back" mirrored the pedestal, its
    corner rounds and "Pedestal into the body" (suppressed): no error, no warning, and the back pedestal was simply
    missing (the casting 36,000 mm³ light), so later fillets ("Wall tops") failed with "run into each other" and
@@ -179,7 +191,10 @@ Commands (from the repository root):
 
 ## Modeling features
 
-- **Loft.** Casting transitions (hopper to barrel, body to bearing towers) and the muffler's bulb would be lofts.
+- **Loft. DONE (#50), used:** the casting's saddle is a loft from a section up the hopper's back (as high as the
+  barrel's top) down to the body's top short of the bearing pedestals, arriving square to its end so its top curves
+  down and lands tangent on the body's top; the crank pit, cut later, leaves a cheek of it either side. (The muffler's
+  bulb stays a revolve: it is round.) Was: casting transitions (hopper to barrel, body to bearing towers) and the muffler's bulb would be lofts.
   *Instead:* drafted extrudes, revolves. To add: a `LoftFeature` beside `SweepFeature` (`Features.cs`), regenerated
   like `DoSweep` (regions from each section sketch, the kernel tool, `Validate`, `ApplyTool`, `State.Tools` so it can
   be patterned); the kernel skinning between sections next to `NSweep.Sweep`, with the sections' `ProfileLoop`s

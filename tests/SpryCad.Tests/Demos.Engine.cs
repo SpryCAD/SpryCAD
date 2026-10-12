@@ -371,10 +371,11 @@ static partial class Demos
     {
         var d = Doc(("BaseY", "150"), ("BaseT", "20"), ("BaseX0", "215"), ("BaseX1", "60"), ("BaseW", "170"), ("BaseR", "15"), ("BaseDraft", "5"),
             ("BodyX0", "170"), ("BodyX1", "40"), ("BodyW", "116"), ("BodyDraft", "2"), ("BodyR", "20"), ("Fl", "8"), ("FlH", "16"),
-            ("WallR", "4"), ("RibR", "3"), ("JointR", "5"), ("RibT", "12"), ("RibIn", "50"), ("PedRibY", "110"), ("BaseRibX", "150"), ("BaseRibP", "90"), ("BaseRibOut", "80"), ("BaseRibH", "45"),
+            ("WallR", "4"), ("PitR", "2"), ("RibR", "3"), ("JointR", "5"), ("RibT", "12"), ("RibIn", "50"), ("PedRibY", "110"), ("BaseRibX", "150"), ("BaseRibP", "90"), ("BaseRibOut", "80"), ("BaseRibH", "45"),
             ("BrgIn", $"{HmBrgIn}"), ("BrgOut", $"{HmBrgOut}"), ("BrgW", "64"), ("BrgDrop", "40"), ("J", $"{HmJ}"), ("CapStud", "25"), ("PedR", "6"),
             ("HeadX", $"{-HmHeadX}"), ("BarrelD", "104"), ("BarrelEnd", "70"), ("FlangeD", "116"), ("FlangeT", "12"), ("StudPCD", "96"), ("NStud", "6"),
             ("HopX0", "175"), ("HopX1", "85"), ("HopW", "116"), ("HopH", "82"), ("HopWall", "7"), ("HopDraft", "2"), ("HopR", "12"), ("HopTopR", "4"), ("Jacket", "20"), ("FillD", "44"),
+            ("SadW", "BodyW-2*(BaseY-BaseT)*tan(BodyDraft)"), ("SadH", "BarrelD/2"), ("SadDip", "6"), ("SadX1", "34"),
             ("LinerD", "66"), ("Bore", $"{HmBore}"), ("Relief", "58"), ("ReliefL", "8"),
             ("PitX1", "60"), ("PitW", "2*BrgIn"), ("PitBot", "110"),
             ("CamX", $"{-HmCamX}"), ("CamD", "36"), ("Stud", "16"), ("GearZ", $"{HmGearZ}"), ("CamIn", "40"),
@@ -511,6 +512,20 @@ static partial class Demos
             Name = "Hopper top edge", Radius = "HopTopR",
             Edges = { E(HF(0), $"{hop.Id}.End", new Vec3(-V("(HopX0+HopX1)/2"), V("HopH"), V("HopW/2-HopH*tan(HopDraft)"))) },
         });
+        // the saddle: lofted from up the hopper's back down to the body's top short of the bearing pedestals, arriving
+        // square to its end so its top curves down and lands tangent on the body's top (the crank pit, cut later,
+        // leaves a cheek of it either side) (Right: sketch x = -z)
+        var s0 = d.AddFeature(new PlaneFeature { Name = "Saddle start", Base = PlaneRef.Right, Offset = "-HopX1" });
+        var sa = new Sk(d);
+        var sl = sa.Rect("-SadW/2", "-SadDip", "SadW/2", "SadH");
+        var sas = d.AddFeature(new SketchFeature { Name = "Saddle at the hopper", Plane = new PlaneRef { Feature = s0.Id }, Sketch = sa.S });
+        var s1 = d.AddFeature(new PlaneFeature { Name = "Saddle end", Base = PlaneRef.Right, Offset = "-SadX1" });
+        var sb = new Sk(d);
+        sb.Rect("-SadW/2", "-SadDip", "SadW/2", "0");
+        var sbs = d.AddFeature(new SketchFeature { Name = "Saddle at the pedestals", Plane = new PlaneRef { Feature = s1.Id }, Sketch = sb.S });
+        var saddle = d.AddFeature(new LoftFeature { Name = "Saddle", SectionSketchIds = { sas.Id, sbs.Id }, EndTangency = LoftTangency.Normal });
+        // its faces: named after the first section's lines (bottom, right, top, left; sketch x = -z, so "right" is -Z)
+        string SF(int i) => $"{saddle.Id}.S.L{sl[i]}";
         var ht = d.AddFeature(new PlaneFeature { Name = "Under the hopper's top", Base = PlaneRef.Top, Offset = "HopH-HopWall" });
         var w = new Sk(d);
         w.Rect("-(HopX0-HopWall)", "-(HopW/2-HopWall)", "-(HopX1+HopWall)", "HopW/2-HopWall");
@@ -542,19 +557,19 @@ static partial class Demos
         var kl = k.Rect("-BarrelEnd", "-PitW/2", "PitX1", "PitW/2");
         var ks = d.AddFeature(new SketchFeature { Name = "Crank pit", Plane = new PlaneRef { Feature = pt.Id }, Sketch = k.S });
         var pit = d.AddFeature(new ExtrudeFeature { Name = "Crank pit", SketchId = ks.Id, IsCut = true, Reverse = true, Depth = "BarrelD/2+PitBot" });
-        // the walls' tops rounded either side of the pedestals: inside along the pit, outside along the body's sides
+        // the saddle's top edges rounded: outside along its cheeks, inside along the pit (smaller: they run into the
+        // barrel's end and the pedestals, and R4 there does not join, docs/hit-and-miss-notes.md)
         // (Top: sketch y = -z, so the pit's first line is its +Z wall)
-        double side = V("BodyW/2-(BaseY-BaseT)*tan(BodyDraft)"), pw = V("PitW/2");
-        string Body(int i) => $"{body.Id}.S.L{yl[i]}";
-        // (behind the pedestals the body's sides are its corner rounds already)
+        double pw = V("PitW/2");
         d.AddFeature(new FilletFeature
         {
-            Name = "Wall tops", Radius = "WallR",
-            Edges =
-            {
-                E($"{pit.Id}.S.L{kl[0]}", $"{body.Id}.End", new Vec3(-50, 0, pw)), E($"{pit.Id}.S.L{kl[2]}", $"{body.Id}.End", new Vec3(-50, 0, -pw)),
-                E(Body(0), $"{body.Id}.End", new Vec3(-43, 0, side)), E(Body(2), $"{body.Id}.End", new Vec3(-60, 0, -side)),
-            },
+            Name = "Saddle edges", Radius = "WallR",
+            Edges = { E(SF(3), SF(2), new Vec3(-50, 10, V("SadW/2"))), E(SF(1), SF(2), new Vec3(-50, 10, -V("SadW/2"))) },
+        });
+        d.AddFeature(new FilletFeature
+        {
+            Name = "Pit edges", Radius = "PitR",
+            Edges = { E($"{pit.Id}.S.L{kl[0]}", SF(2), new Vec3(-50, 10, pw)), E($"{pit.Id}.S.L{kl[2]}", SF(2), new Vec3(-50, 10, -pw)) },
         });
         // the main bearings' bore, the cap studs' tapped holes
         var j = new Sk(d);
@@ -627,7 +642,7 @@ static partial class Demos
         d.AddFeature(new FilletFeature
         {
             Name = "Cam boss into the body", Radius = "JointR", Suppressed = true,
-            Edges = { E($"{camBoss.Id}.S.C{camC}", Body(0), new Vec3(-V("CamX"), -V("CamD/2"), SideZ(-V("CamD/2")))) },
+            Edges = { E($"{camBoss.Id}.S.C{camC}", YF(0), new Vec3(-V("CamX"), -V("CamD/2"), SideZ(-V("CamD/2")))) },
         });
         d.Color = new[] { 0.72, 0.08, 0.07 };
         HmMaterial(d, "Cast iron");
@@ -1380,7 +1395,7 @@ static partial class Demos
     public static int EngineFaces(string name, string feature, Vec3 at, double r = 3)
     {
         var doc = HmParts.First(p => p.name.StartsWith(name, StringComparison.OrdinalIgnoreCase)).build();
-        var upTo = doc.Features.FindIndex(f => f.Name == feature) + 1;
+        var upTo = doc.Features.FindLastIndex(f => f.Name == feature) + 1;
         var res = new Regenerator().Rebuild(doc, upTo > 0 ? upTo : doc.Features.Count);
         var near = new Box3 { Min = at - new Vec3(r, r, r), Max = at + new Vec3(r, r, r) };
         foreach (var b in res.State.Bodies)
@@ -1410,6 +1425,8 @@ static partial class Demos
             var vol = r.State.Bodies.Sum(bb => KernelTests.Vex(bb.Solid));
             Console.WriteLine($"{(ok ? "ok  " : "FAIL")} {name,-22} {doc.Features.Count,3} features {ms,7:0} ms  bodies {r.State.Bodies.Count}  vol {vol,10:0}  {string.Join(" | ", problems)}");
             if (!ok) bad++;
+            foreach (var f in doc.Features.Where(f => r.Status[f.Id].Milliseconds > 500).OrderByDescending(f => r.Status[f.Id].Milliseconds))
+                Console.WriteLine($"       slow: {f.Name} {r.Status[f.Id].Milliseconds:0} ms");
             if (dir != null)
             {
                 doc.Thumbnail = DocumentContainer.RenderThumbnail(doc, r);

@@ -453,8 +453,17 @@ static partial class Demos
             if (dir != null && i % 9 == 0)
             {
                 File.WriteAllBytes(Path.Combine(dir, $"engine-{i:00}.png"), HmPicture(m, 500, 90));
-                // anything running into anything as it turns (screws in their tapped holes aside)
-                var moving = Interference.Find(Interference.Items(m), new List<string>())
+                // anything running into anything as it turns (screws in their tapped holes aside); a part whose placed
+                // body cannot even be bounded is named (the check itself throws on it)
+                var items = Interference.Items(m);
+                foreach (var it in items)
+                    foreach (var s in AssemblySolids.Of(it.Display))
+                        try { _ = s.Native?.Transformed(it.World).Bounds; }
+                        catch (Exception ex) { Console.WriteLine($"  step {i}: {m.NameAt(it.Path)} placed at {it.World.T}: {ex.Message}"); bad++; }
+                List<Clash> clashes;
+                try { clashes = Interference.Find(items, new List<string>()); }
+                catch (Exception ex) { Console.WriteLine($"  step {i}: interference check failed: {ex.Message}"); bad++; continue; }
+                var moving = clashes
                     .Where(c => !new[] { c.A, c.B }.Any(p => m.NameAt(p).Contains("Socket screw") || m.NameAt(p).Contains("Valve spring"))).ToList();
                 foreach (var c in moving) Console.WriteLine($"  step {i}: {c.Volume:0.0} mm3  {m.NameAt(c.A)}  x  {m.NameAt(c.B)}  at {c.Bounds.Center}");
                 if (moving.Count > 0) bad++;
