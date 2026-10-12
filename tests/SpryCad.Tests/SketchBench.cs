@@ -23,7 +23,7 @@ static class SketchBench
     }
 
     /// <summary>k × k rectangles, each horizontal/vertical with its width and height, placed from the one before.</summary>
-    static Sketch Grid(int k)
+    internal static Sketch Grid(int k)
     {
         var sk = new Sketch();
         int prev = Sketch.OriginId;
