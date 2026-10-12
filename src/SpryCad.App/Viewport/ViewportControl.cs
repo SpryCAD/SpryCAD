@@ -143,6 +143,7 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
     protected override void OnOpenGlRender(GlInterface gl, int fb)
     {
         if (_r == null) return;
+        long t0 = RenderProfile ? Stopwatch.GetTimestamp() : 0, tDyn0 = 0, tDyn1 = 0;
         var w = (int)Math.Max(1, Bounds.Width * Scaling); var h = (int)Math.Max(1, Bounds.Height * Scaling);
         Camera.Width = (float)Bounds.Width; Camera.Height = (float)Bounds.Height;
         StepAnimation();
@@ -245,6 +246,7 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         }
 
         // dynamic geometry
+        if (RenderProfile) tDyn0 = Stopwatch.GetTimestamp();
         _dyn.Clear();
         DrawPlanes(_dyn, hl);
         DrawSketches(_dyn, hl);
@@ -263,6 +265,7 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         // edges a feature failed on (e.g. a fillet that does not fit), drawn on top in red
         foreach (var pl in ProblemEdges)
             for (int i = 0; i + 1 < pl.Length; i++) _dyn.Line(pl[i], pl[i + 1], new Rgba(0.9f, 0.1f, 0.1f), top: true);
+        if (RenderProfile) tDyn1 = Stopwatch.GetTimestamp();
 
         _r.SetupDepth(true, true);
         _r.DrawDynamic(_dyn.Tris, PrimitiveType.Triangles, vp);
@@ -277,8 +280,28 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
 
         DrawTriad(w, h);
         _r.EndFrame(fb);
+        if (RenderProfile) NoteRender(t0, tDyn0, tDyn1);
 
-        if (_animating || Spinning) RequestNextFrameRendering();
+        if (_animating || Spinning || RenderContinuous) RequestNextFrameRendering();
+    }
+
+    // SPRYCAD_PROFILE_RENDER: the CPU time of frames (the whole render call, and building its overlay geometry), and
+    // how much overlay it uploads, in the log every 2 s; "continuous" renders frame after frame to measure a still view
+    static readonly bool RenderProfile = Environment.GetEnvironmentVariable("SPRYCAD_PROFILE_RENDER") != null;
+    static readonly bool RenderContinuous = Environment.GetEnvironmentVariable("SPRYCAD_PROFILE_RENDER") == "continuous";
+    int _rnFrames; double _rnMs, _rnMax, _rnDynMs, _rnDynMax; long _rnFloats; long _rnSince = Stopwatch.GetTimestamp();
+
+    void NoteRender(long t0, long tDyn0, long tDyn1)
+    {
+        var now = Stopwatch.GetTimestamp();
+        double ms = Stopwatch.GetElapsedTime(t0, now).TotalMilliseconds, dyn = Stopwatch.GetElapsedTime(tDyn0, tDyn1).TotalMilliseconds;
+        _rnFrames++; _rnMs += ms; _rnMax = Math.Max(_rnMax, ms); _rnDynMs += dyn; _rnDynMax = Math.Max(_rnDynMax, dyn);
+        _rnFloats += _dyn.Lines.Count + _dyn.Tris.Count + _dyn.TopLines.Count + _dyn.TopTris.Count + _dyn.TransTris.Count;
+        var span = Stopwatch.GetElapsedTime(_rnSince, now).TotalSeconds;
+        if (span < 2) return;
+        App.Note($"render: {_rnFrames} frames in {span:0.0} s, {_rnMs / _rnFrames:0.00} ms average ({_rnMax:0.00} worst); " +
+                 $"overlay built in {_rnDynMs / _rnFrames:0.00} ms ({_rnDynMax:0.00} worst), {_rnFloats / _rnFrames / 7 / 1000.0:0.0}k vertices a frame");
+        _rnFrames = 0; _rnMs = _rnMax = _rnDynMs = _rnDynMax = 0; _rnFloats = 0; _rnSince = now;
     }
 
     /// <summary>The placed meshes: shaded (or depth only for hidden lines) in their colors, then their edges.</summary>
