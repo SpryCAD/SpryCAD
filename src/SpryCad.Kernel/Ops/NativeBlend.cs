@@ -59,7 +59,7 @@ public static class NativeBlend
             Solid r2;
             try { r2 = ApplyOne(body, edges, size, fillet, prefix, errs2, overflow, probs2, app2, chamfer, buildOnly, trimmedOut); }
             finally { _noPivots = false; }
-            Debug?.Invoke($"pivots: {errs1.Count} error(s); mitred: {errs2.Count}");
+            Debug?.Invoke($"pivots: {errs1.Count} error(s) ({string.Join("; ", errs1)}); mitred: {errs2.Count}");
             if (errs2.Count < errs1.Count) (r1, errs1, probs1, app1) = (r2, errs2, probs2, app2);
         }
         errors.AddRange(errs1);
