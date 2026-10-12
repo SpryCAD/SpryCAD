@@ -471,15 +471,17 @@ public static class NativeBlend
         // (only a tool running past its faces: one that fits ends where it should)
         if (rb.Error != null || rb.Tool?.Native == null || rb.Fits) return rb;
         var cuts = new List<(Vec3 v, Plane pl)>();
+        var corners = new List<RoundCornerCut>();
         var sel = selected as IReadOnlyCollection<NEdge> ?? selected.ToList();
         var run = 3 * size;
         var on = RollingBall.Build(chain, size, name, OnFaces, (v, dirOut, fa, fb) =>
         {
             if (EndPlane(v, dirOut, fa, fb, chain, sel) is not { } pl) return 0;
-            cuts.Add((v.P, pl));
+            if (RoundCorner(v, fa, fb, chain, sel, pl, size, name) is { } rc) corners.Add(rc);
+            else cuts.Add((v.P, pl));
             return run;
-        }, p => cuts.Any(c => c.pl.Distance(p) < 1e-9 && Vec3.Distance(p, c.v) < run + 2 * size));
-        if (cuts.Count == 0 || on.Error != null || on.Tool?.Native == null) return rb;
+        }, p => cuts.Any(c => c.pl.Distance(p) < 1e-9 && Vec3.Distance(p, c.v) < run + 2 * size) || corners.Any(c => c.Beyond(p)));
+        if (cuts.Count + corners.Count == 0 || on.Error != null || on.Tool?.Native == null) return rb;
         var old = Csg.NoFallback;
         Csg.NoFallback = true;
         try
@@ -488,6 +490,7 @@ public static class NativeBlend
             // (only near the end: the plane may cut the tool elsewhere too, as a wall's underside in the plane of a
             // top the chain runs on along)
             foreach (var (v, pl) in cuts) t = TrimNear(t, pl, v, run + 2 * size);
+            foreach (var c in corners) t = c.Trim(t);
             double v0 = rb.Tool.Volume(), v1 = t.Volume(), vOn = on.Tool.Volume();
             // (cut back at all: an intersection the boolean misses leaves the run-on whole, as if nothing were there)
             if (t.IsEmpty || t.Native == null || t.Native.Validate() != null || Math.Abs(v1 - v0) > 0.25 * Math.Abs(v0)
@@ -496,7 +499,7 @@ public static class NativeBlend
                 Debug?.Invoke($"rolling ball {name}: not cut back ({(t.Native == null ? "faceted" : t.Native.Validate() ?? $"volume {v1:g4} for {v0:g4}")})");
                 return rb;
             }
-            Debug?.Invoke($"rolling ball {name}: {cuts.Count} end(s) cut back ({(rb.Fits ? "fits" : "overflows")} -> {(on.Fits ? "fits" : "overflows")})");
+            Debug?.Invoke($"rolling ball {name}: {cuts.Count + corners.Count} end(s) cut back ({(rb.Fits ? "fits" : "overflows")} -> {(on.Fits ? "fits" : "overflows")})");
             // (fitting but for what was cut off)
             return rb with { Tool = t, Fits = on.Fits };
         }
@@ -506,6 +509,67 @@ public static class NativeBlend
             return rb;
         }
         finally { Csg.NoFallback = old; }
+    }
+
+    /// <summary>
+    /// A fillet's end where it turns round a corner onto the next selected edge G, on a round face both run along, the
+    /// corner between two planes (its own other face, and G's): a pedestal standing out of a casting's corner round,
+    /// blended into it along its foot and up its side. No plane matches the two fillets' ends there: the one bisecting
+    /// the corner leaves a sliver running on along the round past the other's end, the edges' bisector leans off it.
+    /// Beyond the next face only what lies under the other fillet too is kept (its run-on past the corner): the two
+    /// meet where their surfaces cross.
+    /// </summary>
+    sealed class RoundCornerCut
+    {
+        readonly NVertex _v; readonly NEdge _g; readonly Plane _next, _miter;
+        readonly double _size; readonly IReadOnlyList<NEdge> _selected; readonly string _name;
+        public RoundCornerCut(NVertex v, NEdge g, Plane next, Plane miter, double size, IReadOnlyList<NEdge> selected, string name)
+        {
+            _v = v; _g = g; _next = next; _miter = miter; _size = size; _selected = selected; _name = name;
+        }
+        double Reach => 5 * _size;
+
+        /// <summary>Whether p lies beyond the next face, near the corner.</summary>
+        public bool Beyond(Vec3 p) => _next.Distance(p) > -1e-9 && Vec3.Distance(p, _v.P) < Reach;
+
+        /// <summary>The tool less what lies beyond the next face and not under the other fillet; cut on the mitre plane
+        /// near the corner where the other fillet cannot be built.</summary>
+        public Solid Trim(Solid tool)
+        {
+            var other = RollingBall.Build(TangentChain(_g, _selected, new HashSet<NEdge>(ReferenceEqualityComparer.Instance)), _size, _name, OnFaces,
+                (w, _, _, _) => ReferenceEquals(w, _v) ? 3 * _size : 0);
+            if (other.Error != null || other.Tool?.Native == null) return TrimNear(tool, _miter, _v.P, Reach);
+            var n = _next.Normal; var x = n.AnyPerpendicular(); var y = Vec3.Cross(n, x);
+            var rect = ProfileLoop.Polygon(new[] { new Vec2(-Reach, -Reach), new Vec2(Reach, -Reach), new Vec2(Reach, Reach), new Vec2(-Reach, Reach) }, "corner");
+            var beyond = Builders.Extrude(new[] { new ProfileRegion(rect) }, new Frame(_next.Project(_v.P), x, y, n), 0, Reach, "corner");
+            return Csg.Subtract(tool, Csg.Subtract(beyond, other.Tool));
+        }
+    }
+
+    /// <summary>
+    /// The cut at a fillet's end v turning round a corner onto the next selected edge on a round face (see
+    /// <see cref="RoundCornerCut"/>; on a plane the mitre plane matches both ends), the corner between two planes.
+    /// Null otherwise.
+    /// </summary>
+    static RoundCornerCut? RoundCorner(NVertex v, NFace fa, NFace fb, IEnumerable<NEdge> blended, IReadOnlyCollection<NEdge> selected, Plane miter, double size, string name)
+    {
+        NEdge? g = null; int count = 0;
+        foreach (var face in new[] { fa, fb })
+            foreach (var c in face.Coedges)
+            {
+                var e = c.Edge;
+                if (!ReferenceEquals(e.V0, v) && !ReferenceEquals(e.V1, v) || blended.Contains(e) || !selected.Contains(e) || IsSeam(e) || ReferenceEquals(e, g)) continue;
+                g = e; count++;
+            }
+        if (count != 1 || g!.Uses.Count != 2) return null;
+        var shared = g.Uses.Any(u => ReferenceEquals(u.Face, fa)) ? fa : fb;
+        if (shared.Surface.Kind == SurfaceKind.Plane) return null;
+        var own = ReferenceEquals(shared, fa) ? fb : fa;
+        var next = g.Uses.Select(u => u.Face).First(f => !ReferenceEquals(f, shared));
+        if (own.Surface.Kind != SurfaceKind.Plane || next.Surface.Kind != SurfaceKind.Plane || ReferenceEquals(own, next)) return null;
+        if (CornerEdge(v, shared, new[] { fa, fb, next }, blended, selected) is null) return null;
+        if (Math.Abs(Vec3.Dot(Outward(own, v.P), Outward(next, v.P))) > 0.999) return null;
+        return new RoundCornerCut(v, g, Plane.FromPointNormal(v.P, Outward(next, v.P)), miter, size, selected as IReadOnlyList<NEdge> ?? selected.ToList(), name);
     }
 
     /// <summary>The tool less what lies on the negative side of the plane within reach of p (a box about p).</summary>
@@ -657,7 +721,12 @@ public static class NativeBlend
         {
             if ((p0 != null || p1 != null) && p0?.Plane is not null == (p0 != null) && p1?.Plane is not null == (p1 != null)
                 && NBuild.ExtrudeBetween(new[] { new ProfileRegion(prof) }, lframe, p0?.Plane, 0, p1?.Plane, L, name) is { } nb)
-                return NTess.ToSolid(nb);
+            {
+                var sol0 = NTess.ToSolid(nb);
+                if (p0 != null) sol0 = p0.TrimOthers(sol0);
+                if (p1 != null) sol0 = p1.TrimOthers(sol0);
+                return sol0;
+            }
             var sol = Builders.Extrude(new[] { new ProfileRegion(prof) }, lframe, p0 != null && extend ? -ext : 0, p1 != null && extend ? L + ext : L, name);
             if (p0 != null) sol = p0.Trim(sol);
             if (p1 != null) sol = p1.Trim(sol);
@@ -771,7 +840,12 @@ public static class NativeBlend
                     if (arcs.Count(o => ReferenceEquals(o.V0, v) || ReferenceEquals(o.V1, v)) > 1) continue; // joint inside the chain
                     var dirOut = atStart ? -DirAt(a0) : DirAt(a0 + sweep);
                     if (delta > 1e-9 && EndCutAt(v, dirOut, cP.Face, cC.Face, arcs, selected) is { } pl)
+                    {
+                        // (turning round a corner on the round face onto the next fillet: no plane matches both ends,
+                        // the rolling ball's tool is cut back to the other fillet instead)
+                        if (fillet && pl.Plane != null && RoundCorner(v, cP.Face, cC.Face, arcs, selected, pl.Plane, size, name) != null) return (null, false, false, null);
                         extensions.Add((atStart ? a0 - delta : a0 + sweep, delta, pl, i));
+                    }
                 }
             }
         }
@@ -886,9 +960,12 @@ public static class NativeBlend
     {
         public Plane? Plane { get; }
         readonly NFace? _face; readonly double _sign;
-        public EndCut(Plane pl) => Plane = pl;
-        public EndCut(NFace face, double sign) { _face = face; _sign = sign; }
-        public double Distance(Vec3 p) => Plane?.Distance(p) ?? _face!.Surface.F_(p) * _sign;
+        /// <summary>The other faces' planes at the end, past Plane (the blend's reach into the material beside it, cut
+        /// on Plane alone, can stand out past one of them).</summary>
+        public IReadOnlyList<Plane> Others { get; }
+        public EndCut(Plane pl, IReadOnlyList<Plane>? others = null) { Plane = pl; Others = others ?? Array.Empty<Plane>(); }
+        public EndCut(NFace face, double sign) { _face = face; _sign = sign; Others = Array.Empty<Plane>(); }
+        public double Distance(Vec3 p) => Plane != null ? Others.Aggregate(Plane.Distance(p), (d, o) => Math.Min(d, o.Distance(p))) : _face!.Surface.F_(p) * _sign;
         /// <summary>Whether two cuts are by the same round face (or coincident planes).</summary>
         public bool SameFace(EndCut o) => Plane != null ? o.Plane != null && Math.Abs(Vec3.Dot(Plane.Normal, o.Plane.Normal) - 1) < 1e-9 && Math.Abs(Plane.Distance(o.Plane.Project(Vec3.Zero))) < 1e-9
             : o._face != null && (ReferenceEquals(_face, o._face) || _face!.Surface.CoincidentWith(o._face.Surface, 1e-9)) && _sign == o._sign;
@@ -897,7 +974,7 @@ public static class NativeBlend
         /// <summary>The part of the tool on the kept side.</summary>
         public Solid Trim(Solid tool)
         {
-            if (Plane != null) return NativeBlend.Trim(tool, Plane);
+            if (Plane != null) return TrimOthers(NativeBlend.Trim(tool, Plane));
             // the cylinder over the tool's span along its axis: the blend kept outside it (a hole) or inside it
             var s = _face!.Surface; var ax = s.Axis;
             double h0 = double.MaxValue, h1 = double.MinValue;
@@ -911,6 +988,9 @@ public static class NativeBlend
             var cyl = Builders.Cylinder(s.Origin + ax * (h0 - 1), ax, s.R, h1 - h0 + 2, "trim", s.F.XDir);
             return _sign > 0 ? Csg.Subtract(tool, cyl) : Csg.Intersect(tool, cyl);
         }
+
+        /// <summary>The tool less what lies past the other planes.</summary>
+        public Solid TrimOthers(Solid tool) => Others.Aggregate(tool, (t, o) => NativeBlend.Trim(t, o));
     }
 
     /// <summary>
@@ -919,7 +999,7 @@ public static class NativeBlend
     /// </summary>
     internal static EndCut? EndCutAt(NVertex v, Vec3 dirOut, NFace fa, NFace fb, IEnumerable<NEdge> blended, IReadOnlyCollection<NEdge>? selected = null)
     {
-        if (EndPlane(v, dirOut, fa, fb, blended, selected) is { } pl) return new EndCut(pl);
+        if (EndPlane(v, dirOut, fa, fb, blended, selected, out var past) is { } pl) return new EndCut(pl, past);
         var others = new List<NFace>();
         foreach (var face in new[] { fa, fb })
             foreach (var c in face.Coedges)
@@ -945,12 +1025,18 @@ public static class NativeBlend
     /// <summary>
     /// The plane of the face a blend's end vertex runs into, when that face is planar and meets the edge at an
     /// angle (a face square to the edge already matches the tool's square end). Oriented with the edge next to
-    /// the vertex on its positive side. Null when there is no single such face.
+    /// the vertex on its positive side. Of several faces there, the one that cuts the blend off first. Null when there
+    /// is none.
     /// </summary>
     internal static Plane? EndPlane(NVertex v, Vec3 dirOut, NFace fa, NFace fb, IEnumerable<NEdge> blended, IReadOnlyCollection<NEdge>? selected = null)
+        => EndPlane(v, dirOut, fa, fb, blended, selected, out _);
+
+    /// <summary><see cref="EndPlane(NVertex, Vec3, NFace, NFace, IEnumerable{NEdge}, IReadOnlyCollection{NEdge}?)"/>,
+    /// with the other faces' planes there (oriented the same way).</summary>
+    internal static Plane? EndPlane(NVertex v, Vec3 dirOut, NFace fa, NFace fb, IEnumerable<NEdge> blended, IReadOnlyCollection<NEdge>? selected, out List<Plane>? others)
     {
+        others = null;
         var inside = v.P - dirOut.Normalized * 1e-3;
-        Plane? found = null;
         // the next edge on one of the faces blended too (round a hole's rim, a box's top): the two meet on the plane
         // bisecting the corner (the next face's plane cuts a hole's corner off, leaving it unblended)
         if (selected != null)
@@ -981,6 +1067,7 @@ public static class NativeBlend
                 return cos > 0.9999 ? null : miter;
             }
         }
+        var planes = new List<(Plane pl, bool square)>();
         foreach (var face in new[] { fa, fb })
             foreach (var c in face.Coedges)
             {
@@ -995,14 +1082,45 @@ public static class NativeBlend
                     if (f.Surface.Kind != SurfaceKind.Plane) return null;
                     var n = f.Surface.Plane!.Normal;
                     var cos = Math.Abs(Vec3.Dot(n, dirOut.Normalized));
-                    if (cos > 0.9999 || cos < 0.05) return null; // square end, or a face along the edge
+                    if (cos < 0.05) return null; // a face along the edge
                     var pl = Plane.FromPointNormal(v.P, n);
                     if (pl.Distance(inside) < 0) pl = Plane.FromPointNormal(v.P, -n);
-                    if (found != null && Math.Abs(Vec3.Dot(found.Normal, pl.Normal) - 1) > 1e-9) return null;
-                    found = pl;
+                    if (!planes.Any(q => Math.Abs(Vec3.Dot(q.pl.Normal, pl.Normal) - 1) < 1e-9)) planes.Add((pl, cos > 0.9999));
                 }
             }
-        return found;
+        if (planes.Count > 1)
+        {
+            // several faces at the end (a rib's sloping back reaching the underside it stands under, where that ends
+            // too): the blend lies in the wedge between its faces, and ends where the first of them cuts that off
+            if (Wedge(v, fa, fb, blended) is not { } w) return null;
+            planes = planes.OrderBy(q => Vec3.Dot(q.pl.Normal, w)).ToList();
+            if (Vec3.Dot(planes[1].pl.Normal, w) - Vec3.Dot(planes[0].pl.Normal, w) < 1e-6) return null;
+        }
+        // (a face square to the edge: the tool's square end already matches it)
+        if (planes.Count == 0 || planes[0].square) return null;
+        others = planes.Skip(1).Select(q => q.pl).ToList();
+        return planes[0].pl;
+    }
+
+    /// <summary>
+    /// The direction from the blended edge at v (between fa and fb) into the wedge its blend fills: along both faces,
+    /// away from the edge (into the material at a convex edge, out of it at a concave one). Null if no such edge.
+    /// </summary>
+    static Vec3? Wedge(NVertex v, NFace fa, NFace fb, IEnumerable<NEdge> blended)
+    {
+        foreach (var c in fa.Coedges)
+        {
+            var e = c.Edge;
+            if (!ReferenceEquals(e.V0, v) && !ReferenceEquals(e.V1, v) || !blended.Contains(e)) continue;
+            var cb = e.Uses.FirstOrDefault(u => ReferenceEquals(u.Face, fb) && !ReferenceEquals(u, c));
+            if (cb == null) continue;
+            var t = ReferenceEquals(e.V0, v) ? e.T0 : e.T1;
+            // faces lie to the left of their loops (seen from outside): n × direction points into the face
+            var uA = Vec3.Cross(Outward(fa, v.P), Tangent(c, t)).Normalized;
+            var uB = Vec3.Cross(Outward(fb, v.P), Tangent(cb, t)).Normalized;
+            return uA + uB;
+        }
+        return null;
     }
 
     /// <summary>
