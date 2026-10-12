@@ -325,6 +325,115 @@ static class SplineTests
             }
         });
 
+        t.Test("Sketch spline: a length dimension measures it, and drives it (the solver stretches it to length)", () =>
+        {
+            var sk = new Core.Sketching.Sketch();
+            var a = sk.AddPoint(new Vec2(0, 0), fix: true); var b = sk.AddPoint(new Vec2(10, 6)); var c = sk.AddPoint(new Vec2(20, 0), fix: true);
+            var spl = sk.Add(new Core.Sketching.SkSpline { Points = new() { a.Id, b.Id, c.Id } });
+            var dim = new Core.Sketching.SkConstraint { Id = sk.NewId(), Type = Core.Sketching.CType.Length, Refs = new[] { spl.Id } };
+            var len0 = Core.Sketching.SketchSolver.Measure(sk, dim);
+            t.True(len0 > 20 && len0 < 30, $"measured {len0}");
+            // pull it longer: the free middle point moves until the curve is 30 long
+            dim.Value = 30; dim.Expr = "30";
+            sk.Constraints.Add(dim);
+            var res = Core.Sketching.SketchSolver.Solve(sk);
+            t.True(res.Status != Core.Sketching.SketchStatus.Failed, $"{res.Status}");
+            t.Near(Core.Sketching.SketchSolver.Measure(sk, dim), 30, 1e-6);
+            t.True(dim.IsDimension, "a dimension");
+        });
+
+        t.Test("Sketch spline: handles set its end derivatives; with a tangent relation, only how long", () =>
+        {
+            var sk = new Core.Sketching.Sketch();
+            var a = sk.AddPoint(new Vec2(0, 0)); var b = sk.AddPoint(new Vec2(10, 6)); var c = sk.AddPoint(new Vec2(20, 0));
+            var spl = sk.Add(new Core.Sketching.SkSpline { Points = new() { a.Id, b.Id, c.Id } });
+            spl.StartDir = new Vec2(0, 30);
+            sk.SplineCurve(spl)!.Derivs(0, out _, out var d0, out _);
+            t.True(Vec3.Distance(d0, new Vec3(0, 30, 0)) < 1e-9, $"the handle is the derivative: {d0}");
+            foreach (var q in new[] { a, b, c }) t.True(Enumerable.Range(0, 2001).Min(i => Vec3.Distance(sk.SplineCurve(spl)!.Eval(i / 2000.0), new Vec3(q.X, q.Y, 0))) < 1e-3, "through its points");
+            // a line into the start, tangent: the direction is the line's, the length the handle's
+            var l = sk.Add(new Core.Sketching.SkLine { P1 = sk.AddPoint(new Vec2(-10, 0)).Id, P2 = a.Id });
+            sk.AddConstraint(Core.Sketching.CType.Tangent, l.Id, spl.Id);
+            sk.SplineCurve(spl)!.Derivs(0, out _, out var d1, out _);
+            t.True(Vec3.Distance(d1, new Vec3(30, 0, 0)) < 1e-9, $"along the line, the handle's length: {d1}");
+            // the other end free: the plain fit's derivative there whatever the start's handle
+            spl.StartDir = null;
+            sk.SplineCurve(spl)!.Derivs(0, out _, out var d2, out _);
+            t.True(Math.Abs(d2.Y) < 1e-9 && d2.X > 0, "a tangent relation alone: along the line");
+        });
+
+        t.Test("Sketch spline: offset (alone, in a tangent chain, closed): the copy keeps its distance, and follows", () =>
+        {
+            // every point of the copy at the distance from the original curve (its true offset, not just at the points)
+            double Worst(Core.Sketching.Sketch sk, Core.Sketching.SkSpline o, Core.Sketching.SkSpline q, double want)
+            {
+                var oc = sk.SplineCurve(o)!; var qc = sk.SplineCurve(q)!;
+                var poly = Enumerable.Range(0, 4001).Select(i => { var p = oc.Eval(i / 4000.0); return new Vec2(p.X, p.Y); }).ToList();
+                double worst = 0;
+                for (int i = 0; i <= 200; i++)
+                {
+                    var p3 = qc.Eval(i / 200.0); var p = new Vec2(p3.X, p3.Y);
+                    var dmin = Enumerable.Range(0, poly.Count - 1).Min(k =>
+                    {
+                        var u = poly[k + 1] - poly[k]; var f = Math.Clamp(Vec2.Dot(p - poly[k], u) / u.LengthSq, 0, 1);
+                        return Vec2.Distance(poly[k] + u * f, p);
+                    });
+                    worst = Math.Max(worst, Math.Abs(dmin - want));
+                }
+                return worst;
+            }
+            {
+                var sk = new Core.Sketching.Sketch();
+                var ids = new[] { new Vec2(0, 0), new Vec2(15, 10), new Vec2(30, 4), new Vec2(45, 12) }.Select(q => sk.AddPoint(q, fix: true).Id).ToList();
+                var spl = sk.Add(new Core.Sketching.SkSpline { Points = ids });
+                var (off, err) = Core.Sketching.SketchOps.Offset(sk, new[] { spl.Id }, 2);
+                t.Eq(err, null);
+                var res = Core.Sketching.SketchSolver.Solve(sk);
+                t.True(res.Status != Core.Sketching.SketchStatus.Failed && res.Status != Core.Sketching.SketchStatus.OverDefined, $"{res.Status}");
+                var copy = sk.Entities.OfType<Core.Sketching.SkSpline>().Single(x => x.Id != spl.Id);
+                var w = Worst(sk, spl, copy, 2);
+                t.True(w < 0.02, $"the copy 2 from the curve all along: off by {w:g3}");
+                // the original moved: the copy follows
+                sk.Point(ids[1])!.Y = 14;
+                Core.Sketching.SketchSolver.Solve(sk);
+                t.True(Worst(sk, spl, copy, 2) < 0.03, "follows");
+                // and its distance, as a dimension
+                off!.Value = 3; Core.Sketching.SketchSolver.Solve(sk);
+                t.True(Worst(sk, spl, copy, 3) < 0.04, "the distance changed");
+            }
+            {
+                // a line running on into a spline (tangent), offset as one chain
+                var sk = new Core.Sketching.Sketch();
+                var a = sk.AddPoint(new Vec2(-20, 0), fix: true); var b = sk.AddPoint(new Vec2(0, 0), fix: true);
+                var ids = new List<long> { b.Id }; ids.AddRange(new[] { new Vec2(15, 8), new Vec2(30, 2) }.Select(q => sk.AddPoint(q, fix: true).Id));
+                var line = sk.Add(new Core.Sketching.SkLine { P1 = a.Id, P2 = b.Id });
+                var spl = sk.Add(new Core.Sketching.SkSpline { Points = ids });
+                sk.AddConstraint(Core.Sketching.CType.Tangent, line.Id, spl.Id);
+                // (the line's chain, as Offset Entities takes it)
+                var (_, err) = Core.Sketching.SketchOps.Offset(sk, Core.Sketching.SketchOps.Chain(sk, new[] { line.Id }), 1.5);
+                t.Eq(err, null);
+                var res = Core.Sketching.SketchSolver.Solve(sk);
+                t.True(res.Status != Core.Sketching.SketchStatus.Failed && res.Status != Core.Sketching.SketchStatus.OverDefined, $"{res.Status}");
+                var copy = sk.Entities.OfType<Core.Sketching.SkSpline>().Single(x => x.Id != spl.Id);
+                t.True(Worst(sk, spl, copy, 1.5) < 0.02, "the spline's copy");
+                var lc = sk.Entities.OfType<Core.Sketching.SkLine>().Single(x => x.Id != line.Id);
+                t.True(lc.P2 == copy.Points[0] || lc.P1 == copy.Points[0], "the copies joined");
+            }
+            {
+                var sk = new Core.Sketching.Sketch();
+                var ids = new[] { new Vec2(0, 0), new Vec2(20, -3), new Vec2(26, 12), new Vec2(5, 15) }.Select(q => sk.AddPoint(q, fix: true).Id).ToList();
+                var spl = sk.Add(new Core.Sketching.SkSpline { Points = ids, Closed = true });
+                var (_, err) = Core.Sketching.SketchOps.Offset(sk, new[] { spl.Id }, 1);
+                t.Eq(err, null);
+                Core.Sketching.SketchSolver.Solve(sk);
+                var copy = sk.Entities.OfType<Core.Sketching.SkSpline>().Single(x => x.Id != spl.Id);
+                t.True(Worst(sk, spl, copy, 1) < 0.05, "a closed spline's copy");
+                // outward: the copy's loop the bigger
+                var regs = Core.Sketching.ProfileExtractor.Extract(sk, out _);
+                t.True(regs.Count == 1 && regs[0].Holes.Count == 1, "the copy round the original (a ring)");
+            }
+        });
+
         t.Test("Spline profile: a boolean with a box, and a STEP round trip", () =>
         {
             var body = Kernel.Native.NBuild.Extrude(new[] { new ProfileRegion(Loop()) }, frame, 0, 15, "E");

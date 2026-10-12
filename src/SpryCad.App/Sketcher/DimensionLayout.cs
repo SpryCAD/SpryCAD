@@ -318,6 +318,16 @@ public sealed partial class SketchEditor
                                 list.Add(mid + dir * (t * len) + nrm * (outward * (FirstOffset + k * Step) * px));
                         break;
                     }
+                case CType.Length:
+                    {
+                        // round the spline's middle, outward first (away from the sketch's middle)
+                        var at = DimAnchor(c);
+                        var u0 = (at - middle).LengthSq > 1e-12 ? (at - middle).Normalized : Vec2.FromAngle(Math.PI / 4, 1);
+                        for (int k = 0; k < 4; k++)
+                            foreach (var j in new[] { 0, 1, -1, 2, -2, 3, -3, 4 })
+                                list.Add(at + Rotate(u0, j * Math.PI / 8) * ((FirstOffset + k * Step) * px));
+                        break;
+                    }
                 case CType.Radius:
                 case CType.Diameter:
                     {

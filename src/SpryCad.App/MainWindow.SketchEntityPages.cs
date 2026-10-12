@@ -59,7 +59,7 @@ public partial class MainWindow
         var what = page.Section("Entities to Offset");
         var ents = page.Selection(what, "Entities", SelFilter.SketchSegment,
             "Click lines, arcs or circles: each brings the chain it is part of. Click one again (or Delete in the box) to take it out.",
-            accept: i => ed.Sk.Entity(i.SketchItem) is SkLine or SkArc or SkCircle);
+            accept: i => ed.Sk.Entity(i.SketchItem) is SkLine or SkArc or SkCircle or SkSpline);
         var prm = page.Section("Parameters");
         var distance = ed.OffsetDistance;
         var reverse = false;
@@ -69,7 +69,7 @@ public partial class MainWindow
         }, "offset");
         page.Check(prm, "Reverse direction", () => reverse, v => reverse = v);
         page.Info(prm, "The copies keep the distance as the originals change (its dimension can be edited later).");
-        foreach (var e in ed.SelectedEntities.Where(e => e is SkLine or SkArc or SkCircle)) ents.Add(EntityItem(e.Id));
+        foreach (var e in ed.SelectedEntities.Where(e => e is SkLine or SkArc or SkCircle or SkSpline)) ents.Add(EntityItem(e.Id));
         OpenEntityPage(page, () => ed.Offset(ents.Items.Select(i => i.SketchItem).ToList(), distance, reverse), ents,
             "Offset made. To change the distance later, double-click its dimension.");
     }

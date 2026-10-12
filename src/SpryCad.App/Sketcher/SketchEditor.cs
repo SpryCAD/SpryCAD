@@ -446,6 +446,12 @@ public sealed partial class SketchEditor : IViewportMode
     {
         _lastScreen = new Point(p.X, p.Y);
         _mouse = SketchPos(p);
+        if (_down && _dragHandle is { } dh)
+        {
+            DragHandle(dh.spline, dh.start, _mouse);
+            vp.Redraw();
+            return;
+        }
         if (_down && Tool == SketchTool.Select)
         {
             var d = Math.Abs(p.X - _downScreen.X) + Math.Abs(p.Y - _downScreen.Y);
@@ -500,6 +506,20 @@ public sealed partial class SketchEditor : IViewportMode
             case SketchTool.Select:
                 {
                     PruneReferencePoints();
+                    // a selected spline's handle: dragged (double-click: free again)
+                    if (HandleAt(p.X, p.Y) is { } hd)
+                    {
+                        Snapshot();
+                        if (p.ClickCount >= 2)
+                        {
+                            if (hd.start) hd.spline.StartDir = null; else hd.spline.EndDir = null;
+                            _down = false;
+                            Resolve();
+                            return;
+                        }
+                        _dragHandle = (hd.spline, hd.start);
+                        return;
+                    }
                     var h = HitTest(p.X, p.Y);
                     // a vertex of the model (an earlier feature's): a reference point at it, picked as a sketch point,
                     // so it can be related to (coincident, on a line...) and follows the model
@@ -554,6 +574,7 @@ public sealed partial class SketchEditor : IViewportMode
 
     public void PointerUp(ViewportControl vp, PointerInfo p)
     {
+        if (_dragHandle != null) { _dragHandle = null; _down = false; Resolve(); vp.Redraw(); return; }
         var wasDragging = _dragging;
         _down = false;
         if (!wasDragging && _modelPick is { } mp && _vp.Selection != null)
@@ -1409,6 +1430,7 @@ public sealed partial class SketchEditor : IViewportMode
             {
                 case SkCircle ci: c = new SkConstraint { Type = CType.Diameter, Refs = new[] { ci.Id } }; break;
                 case SkArc ar: c = new SkConstraint { Type = CType.Radius, Refs = new[] { ar.Id } }; break;
+                case SkSpline sp: c = new SkConstraint { Type = CType.Length, Refs = new[] { sp.Id } }; break;
                 case SkLine l: c = new SkConstraint { Type = TwoPointType(Sk.P(l.P1), Sk.P(l.P2), mouse), Refs = new[] { l.Id } }; break;
             }
         }
@@ -1563,6 +1585,57 @@ public sealed partial class SketchEditor : IViewportMode
     // the points drawn with a mark of their own each frame (reused, drawing allocates nothing for them)
     readonly HashSet<long> _shownPoints = new(), _ownMarks = new();
 
+    // ---- spline handles ----
+
+    (SkSpline spline, bool start)? _dragHandle;
+
+    /// <summary>
+    /// The handles of the selected open splines: at each end, out to where a Bézier control point would be (a third
+    /// of the end's derivative, into the curve).
+    /// </summary>
+    IEnumerable<(SkSpline spline, bool start, Vec2 end, Vec2 tip)> Handles()
+    {
+        foreach (var r in Selected)
+        {
+            if (r.Kind != SkRefKind.Entity || Sk.Entity(r.Id) is not SkSpline s || s.Closed || s.Points.Count < 2 || Sk.SplineCurve(s) is not { } c) continue;
+            c.Derivs(0, out var p0, out var d0, out _);
+            c.Derivs(1, out var p1, out var d1, out _);
+            yield return (s, true, new Vec2(p0.X, p0.Y), new Vec2(p0.X + d0.X / 3, p0.Y + d0.Y / 3));
+            yield return (s, false, new Vec2(p1.X, p1.Y), new Vec2(p1.X - d1.X / 3, p1.Y - d1.Y / 3));
+        }
+    }
+
+    (SkSpline spline, bool start)? HandleAt(double sx, double sy)
+    {
+        foreach (var (s, start, _, tip) in Handles())
+        {
+            var q = Screen(tip);
+            if (Math.Abs(q.X - sx) + Math.Abs(q.Y - sy) < 9) return (s, start);
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// A handle dragged to m: the end's derivative three times the end-to-handle vector (pointing on along the curve);
+    /// where a Tangent relation sets that end's direction, only its length (along that direction) changes.
+    /// </summary>
+    void DragHandle(SkSpline s, bool start, Vec2 m)
+    {
+        if (Sk.SplineCurve(s) is not { } c) return;
+        var e = c.Eval(start ? 0 : 1);
+        var end = new Vec2(e.X, e.Y);
+        var d = start ? (m - end) * 3 : (end - m) * 3;
+        if (d.Length < 1e-9) return;
+        var tied = Sk.Constraints.Select(x => Sk.SplineTangent(x)).FirstOrDefault(t => t is { } tt && ReferenceEquals(tt.spline, s) && tt.atStart == start);
+        if (tied is { } tv)
+        {
+            // along the relation's direction (the spline leaves along away at its start, arrives against it at its end)
+            var dir = start ? tv.away : -tv.away;
+            d = dir * Math.Max(Vec2.Dot(d, dir), 1e-6);
+        }
+        if (start) s.StartDir = d; else s.EndDir = d;
+    }
+
     public void Draw(ViewportControl vp, DynamicGeometry g)
     {
         var px = Px; var f = Frame;
@@ -1590,6 +1663,14 @@ public sealed partial class SketchEditor : IViewportMode
                 if (e.Construction) g.Dashed(f.ToWorld(a), f.ToWorld(b), e == null ? c : (c == Under || c == Full ? Constr : c), px * 6, top: true);
                 else g.Line(f.ToWorld(a), f.ToWorld(b), c, top: true);
             }
+        }
+        // the selected splines' handles: a line out to a diamond
+        foreach (var (hs, hstart, hend, htip) in Handles())
+        {
+            var hc = _dragHandle is { } dh && ReferenceEquals(dh.spline, hs) && dh.start == hstart ? ViewportControl.HoverColor : ViewportControl.SelectColor;
+            g.Line(f.ToWorld(hend), f.ToWorld(htip), hc, top: true);
+            var k = px * 4;
+            g.Quad(f.ToWorld(htip + new Vec2(-k, 0)), f.ToWorld(htip + new Vec2(0, -k)), f.ToWorld(htip + new Vec2(k, 0)), f.ToWorld(htip + new Vec2(0, k)), hc, top: true);
         }
         // end points, and points only relations use (e.g. a center rectangle's center, where its diagonals meet):
         // shown, as they can be snapped to and dimensioned. Point entities have their own mark (above).
@@ -1775,6 +1856,12 @@ public sealed partial class SketchEditor : IViewportMode
                         var e = Sk.Entity(r[0]);
                         return e is SkCircle ci ? Sk.P(ci.Center) : e is SkArc a ? Sk.P(a.Center) : Vec2.Zero;
                     }
+                case CType.Length:
+                    {
+                        // the middle of the spline
+                        var q = Sk.Entity(r[0]) is SkSpline sp && Sk.SplineCurve(sp) is { } sc ? sc.Eval(0.5) : default;
+                        return new Vec2(q.X, q.Y);
+                    }
                 case CType.Angle:
                     {
                         var (a1, b1) = LinePts(r[0]); var (a2, b2) = LinePts(r[1]);
@@ -1916,6 +2003,11 @@ public sealed partial class SketchEditor : IViewportMode
                         End(a); End(b);
                         break;
                     }
+                case CType.Length:
+                    // a leader from the spline's middle to the label
+                    L(anchor, label);
+                    End(anchor);
+                    break;
                 case CType.Radius:
                 case CType.Diameter:
                     {
@@ -2239,7 +2331,7 @@ public sealed partial class SketchEditor : IViewportMode
     static string DimText(SkConstraint c)
     {
         var v = Expr.Format(c.Value);
-        var prefix = c.Type switch { CType.Diameter => "⌀", CType.Radius => "R", _ => "" };
+        var prefix = c.Type switch { CType.Diameter => "⌀", CType.Radius => "R", CType.Length => "L ", _ => "" };
         var suffix = c.Type == CType.Angle ? "°" : "";
         var txt = prefix + v + suffix;
         if (c.Driven) txt = "(" + txt + ")";

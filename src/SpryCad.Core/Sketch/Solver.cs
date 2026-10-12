@@ -167,6 +167,9 @@ public static class SketchSolver
             {
                 case (SkLine ol, SkLine ql): Map(ql.P1, ol.P1, ol, ql, side); Map(ql.P2, ol.P2, ol, ql, side); break;
                 case (SkArc oa, SkArc qa): Map(qa.Start, oa.Start, oa, qa, side); Map(qa.End, oa.End, oa, qa, side); break;
+                case (SkSpline os, SkSpline qs) when os.Points.Count == qs.Points.Count:
+                    for (int i = 0; i < os.Points.Count; i++) Map(qs.Points[i], os.Points[i], os, qs, side);
+                    break;
                 case (SkCircle oc, SkCircle qc):
                     {
                         var ro = s.RRefs[oc.Id]; var rq = s.RRefs[qc.Id]; var sd = side;
@@ -208,8 +211,33 @@ public static class SketchSolver
             };
             return Math.Abs(Vec2.Cross(Normal(e1), Normal(e2))) < 1e-6;
         }
+        // a spline's copy point: at the distance along the original curve's normal (to the left of its direction) at the
+        // point's parameter, from the trial positions (the curve's other points, and what its ends are tangent to)
+        void SplinePt(long qp, long op, SkSpline o, int side)
+        {
+            var q = s.PRefs[qp];
+            int i = o.Points.IndexOf(op);
+            var ids = o.Points.ToHashSet();
+            foreach (var tc in sk.Constraints)
+                if (tc.Type == CType.Tangent && tc.Refs.Contains(o.Id))
+                    foreach (var oid in tc.Refs) if (sk.Entity(oid) is { } oe) ids.UnionWith(oe.PointIds);
+            var refs = ids.Where(s.PRefs.ContainsKey).Select(k => s.PRefs[k]).Append(q).ToArray();
+            Vec2 Want(double[] x)
+            {
+                Vec2 Pos(long k) => s.PRefs.TryGetValue(k, out var pr) ? pr.Get(x) : sk.P(k);
+                if (sk.SplineCurve(o, Pos) is not { } c) return q.Get(x);
+                var t = sk.SplineFitParams(o, Pos)[i];
+                c.Derivs(t, out var p, out var dv, out _);
+                var n = new Vec2(-dv.Y, dv.X);
+                n = n.LengthSq > 0 ? n.Normalized : n;
+                return Pos(op) + n * (side * d);
+            }
+            AddEq(s, id, x => q.Get(x).X - Want(x).X, refs);
+            AddEq(s, id, x => q.Get(x).Y - Want(x).Y, refs);
+        }
         foreach (var (qp, (op, pairs)) in at)
         {
+            if (pairs.FirstOrDefault(x => x.o is SkSpline) is { o: SkSpline so } sp) { SplinePt(qp, op, so, sp.side); continue; }
             var lines = pairs.Where(x => x.o is SkLine).ToList();
             var arcEnds = pairs.Where(x => x.q is SkArc qa && qa.End == qp).ToList();
             var arcStarts = pairs.Where(x => x.q is SkArc qa && qa.Start == qp).ToList();
@@ -374,6 +402,19 @@ public static class SketchSolver
                     var p = s.PRefs[r[0]]; var q = s.PRefs[r[1]]; var (a, b) = Line(s, r[2]);
                     AddEq(s, id, x => { var d = b.Get(x) - a.Get(x); var m = (p.Get(x) + q.Get(x)) * 0.5; return Vec2.Cross(d, m - a.Get(x)) / Math.Max(d.Length, 1e-12); }, p, q, a, b);
                     AddEq(s, id, x => { var d = b.Get(x) - a.Get(x); return Vec2.Dot(d, q.Get(x) - p.Get(x)) / Math.Max(d.Length, 1e-12); }, p, q, a, b);
+                    break;
+                }
+            case CType.Length:
+                {
+                    // a spline's length: its curve from the trial positions (the other ends of its tangents too)
+                    if (s.Sketch.Entity(r[0]) is not SkSpline sp) break;
+                    var v = c.Value; var sk = s.Sketch;
+                    var ids = sp.Points.ToHashSet();
+                    foreach (var tc in sk.Constraints)
+                        if (tc.Type == CType.Tangent && tc.Refs.Contains(sp.Id))
+                            foreach (var oid in tc.Refs) if (sk.Entity(oid) is { } oe) ids.UnionWith(oe.PointIds);
+                    var refs = ids.Where(s.PRefs.ContainsKey).Select(i => s.PRefs[i]).ToArray();
+                    AddEq(s, id, x => sk.SplineCurve(sp, q => s.PRefs.TryGetValue(q, out var pr) ? pr.Get(x) : sk.P(q)) is { } curve ? Sketch.CurveLength(curve) - v : 0, refs);
                     break;
                 }
             case CType.Distance:
@@ -985,6 +1026,8 @@ public static class SketchSolver
         bool IsPt(long id) => sk.Point(id) != null;
         switch (c.Type)
         {
+            case CType.Length:
+                return sk.Entity(r[0]) is SkSpline ms && sk.SplineCurve(ms) is { } mc ? Sketch.CurveLength(mc) : 0;
             case CType.Distance:
                 if (r.Length == 1) { var (a, b) = L(r[0]); return (b - a).Length; }
                 if (IsPt(r[0]) && IsPt(r[1])) return (P(r[1]) - P(r[0])).Length;

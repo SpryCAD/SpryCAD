@@ -176,6 +176,7 @@ public enum CType
     Radius, Diameter,               // circle/arc
     Angle,                          // line,line
     Offset,                         // original, copy, original, copy, ... (Sides: the side of each copy); Value: the distance
+    Length,                         // spline: its length along the curve
 }
 
 public sealed class SkConstraint
@@ -210,7 +211,7 @@ public sealed class SkConstraint
     /// <summary>Optional user name (e.g. D1) usable in equations as D1@Sketch1.</summary>
     public string? Name { get; set; }
 
-    [JsonIgnore] public bool IsDimension => Type is CType.Distance or CType.HDistance or CType.VDistance or CType.Radius or CType.Diameter or CType.Angle or CType.Offset;
+    [JsonIgnore] public bool IsDimension => Type is CType.Distance or CType.HDistance or CType.VDistance or CType.Radius or CType.Diameter or CType.Angle or CType.Offset or CType.Length;
     public SkConstraint Clone() { var c = (SkConstraint)MemberwiseClone(); c.Refs = (long[])Refs.Clone(); c.Sides = (int[]?)Sides?.Clone(); return c; }
 }
 
@@ -323,22 +324,66 @@ public sealed class Sketch
     /// A spline's curve through its points now (in the sketch's x–y, z = 0; parameters 0 to 1); null when its points do
     /// not make one. An end tangent to a line or arc it meets there (a Tangent relation) leaves in that one's direction.
     /// </summary>
-    public BSplineCurve? SplineCurve(SkSpline s)
+    /// <param name="at">Where the points are (the solver's trial positions), else where they are now.</param>
+    public BSplineCurve? SplineCurve(SkSpline s, Func<long, Vec2>? at = null)
     {
+        Vec2 P(long id) => at?.Invoke(id) ?? this.P(id);
         Vec3? start = null, end = null;
         bool exact = false;
         // (a spline whose direction comes, in a round, from itself: free while it is being worked out)
         var busy = _splinesBusy ??= new HashSet<SkSpline>(ReferenceEqualityComparer.Instance);
+        // an offset copy: the original curve's true offset, sampled densely (its points' parameters and four between
+        // each), ending on the copy's own end points, its ends' derivatives the offset curve's (the original's, times
+        // 1 − d κ): it follows the offset between its points too
+        if (OffsetSource(s) is { } src && busy.Add(s))
+        {
+            try
+            {
+                if (SplineCurve(src.orig, at) is { } oc)
+                {
+                    var prm = SplineFitParams(src.orig, at);
+                    var ts = new List<double>();
+                    var ends = s.Closed ? prm.Append(1.0).ToArray() : prm;
+                    for (int i = 0; i + 1 < ends.Length; i++)
+                        for (int k = 0; k < 5; k++) ts.Add(ends[i] + (ends[i + 1] - ends[i]) * k / 5);
+                    if (!s.Closed) ts.Add(1);
+                    Vec3 Off(double t)
+                    {
+                        oc.Derivs(t, out var p0, out var d1, out _);
+                        var n = new Vec3(-d1.Y, d1.X, 0); n = n.Length > 0 ? n.Normalized : n;
+                        return p0 + n * src.d;
+                    }
+                    Vec3 D(double t)
+                    {
+                        oc.Derivs(t, out _, out var d1, out var d2);
+                        var l = d1.Length;
+                        var k = l > 1e-12 ? (d1.X * d2.Y - d1.Y * d2.X) / (l * l * l) : 0;
+                        return d1 * (1 - src.d * k);
+                    }
+                    var pts = ts.Select(Off).ToList();
+                    if (!s.Closed)
+                    {
+                        // (on the copy's end points as solved: the neighbours' copies end there)
+                        var e0 = P(s.Points[0]); var e1 = P(s.Points[^1]);
+                        pts[0] = new Vec3(e0.X, e0.Y, 0); pts[^1] = new Vec3(e1.X, e1.Y, 0);
+                    }
+                    return SplineFit.Through(pts, s.Closed, s.Closed ? null : D(0), s.Closed ? null : D(1), exactEnds: true, parameters: s.Closed ? null : ts);
+                }
+            }
+            finally { busy.Remove(s); }
+        }
         if (!s.Closed && s.Points.Count >= 2 && busy.Add(s))
         {
             try
             {
                 foreach (var c in Constraints)
-                    if (SplineTangent(c) is { } t && ReferenceEquals(t.spline, s))
+                    if (SplineTangent(c, at) is { } t && ReferenceEquals(t.spline, s))
                     {
-                        // (as long as the handle there, if it has one)
+                        // (as long as the handle there, if it has one, else as the points' chords: the fit's own length)
                         var hl = (t.atStart ? s.StartDir : s.EndDir)?.Length;
-                        var d = new Vec3(t.away.X, t.away.Y, 0) * (hl ?? 1);
+                        double chords = 0;
+                        for (int k = 1; k < s.Points.Count; k++) chords += Vec2.Distance(P(s.Points[k]), P(s.Points[k - 1]));
+                        var d = new Vec3(t.away.X, t.away.Y, 0) * (hl ?? chords);
                         if (t.atStart) start = d; else end = -d;
                     }
             }
@@ -355,12 +400,63 @@ public sealed class Sketch
     [ThreadStatic] static HashSet<SkSpline>? _splinesBusy;
 
     /// <summary>
+    /// The spline an offset copy is of, and the signed distance (to the left of the original's direction), from the
+    /// Offset relation; null for a spline that is no copy.
+    /// </summary>
+    public (SkSpline orig, double d)? OffsetSource(SkSpline s)
+    {
+        foreach (var c in Constraints)
+        {
+            if (c.Type != CType.Offset) continue;
+            for (int k = 0; k + 1 < c.Refs.Length; k += 2)
+                if (c.Refs[k + 1] == s.Id && Entity(c.Refs[k]) is SkSpline o && o.Points.Count == s.Points.Count)
+                    return (o, (c.Sides != null && k / 2 < c.Sides.Length ? c.Sides[k / 2] : 1) * c.Value);
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// The parameters a spline's fit gives its points (as <see cref="SplineFit.Through"/> does: kept ones, else
+    /// centripetal; closed: round the loop, the first at 0).
+    /// </summary>
+    public double[] SplineFitParams(SkSpline s, Func<long, Vec2>? at = null)
+    {
+        Vec2 P(long id) => at?.Invoke(id) ?? this.P(id);
+        int n = s.Points.Count;
+        if (!s.Closed && s.Params is { } kp && kp.Count == n) return kp.ToArray();
+        var t = new double[n];
+        double total = 0;
+        for (int i = 1; i < n; i++) { total += Math.Sqrt(Vec2.Distance(P(s.Points[i]), P(s.Points[i - 1]))); t[i] = total; }
+        if (s.Closed) total += Math.Sqrt(Vec2.Distance(P(s.Points[0]), P(s.Points[^1])));
+        if (total > 0) for (int i = 0; i < n; i++) t[i] /= total;
+        if (!s.Closed && n > 1) t[^1] = 1;
+        return t;
+    }
+
+    /// <summary>A curve's length (Gauss-Legendre, eight points a knot span).</summary>
+    public static double CurveLength(BSplineCurve c)
+    {
+        double[] gx = { -0.9602898564975363, -0.7966664774136267, -0.5255324099163290, -0.1834346424956498, 0.1834346424956498, 0.5255324099163290, 0.7966664774136267, 0.9602898564975363 };
+        double[] gw = { 0.1012285362903763, 0.2223810344533745, 0.3137066458778873, 0.3626837833783620, 0.3626837833783620, 0.3137066458778873, 0.2223810344533745, 0.1012285362903763 };
+        var ks = c.Knots.Distinct().ToList();
+        double len = 0;
+        for (int i = 0; i + 1 < ks.Count; i++)
+        {
+            double a = ks[i], b = ks[i + 1], h = 0.5 * (b - a), m = 0.5 * (a + b);
+            if (h <= 0) continue;
+            for (int k = 0; k < 8; k++) { c.Derivs(m + h * gx[k], out _, out var d, out _); len += gw[k] * h * d.Length; }
+        }
+        return len;
+    }
+
+    /// <summary>
     /// A Tangent relation between a spline and a line, arc or spline meeting one of its ends: the spline, the point,
     /// whether it is the spline's start, and the direction away from the other entity there (along it). Of two
     /// splines, the second follows the first (its end takes the first's direction). Null for any other relation.
     /// </summary>
-    public (SkSpline spline, SkEntity other, long point, bool atStart, Vec2 away)? SplineTangent(SkConstraint c)
+    public (SkSpline spline, SkEntity other, long point, bool atStart, Vec2 away)? SplineTangent(SkConstraint c, Func<long, Vec2>? at = null)
     {
+        Vec2 P(long id) => at?.Invoke(id) ?? this.P(id);
         if (c.Type != CType.Tangent || c.Refs.Length != 2) return null;
         var e0 = Entity(c.Refs[0]); var e1 = Entity(c.Refs[1]);
         var (sp, o) = e1 is SkSpline s1 ? (s1, e0) : e0 is SkSpline s0 ? (s0, e1) : (null, null);
@@ -387,7 +483,7 @@ public sealed class Sketch
                 case SkSpline os when !os.Closed && os.Points.Count >= 2 && (pt == os.Points[0] || pt == os.Points[^1]):
                     {
                         // the other spline's own direction at its end there (away from it: back along it at its start)
-                        if (SplineCurve(os) is not { } oc) continue;
+                        if (SplineCurve(os, at) is not { } oc) continue;
                         bool atOtherStart = pt == os.Points[0] && !(pt == os.Points[^1]);
                         oc.Derivs(atOtherStart ? 0 : 1, out _, out var od, out _);
                         away = atOtherStart ? new Vec2(-od.X, -od.Y) : new Vec2(od.X, od.Y);

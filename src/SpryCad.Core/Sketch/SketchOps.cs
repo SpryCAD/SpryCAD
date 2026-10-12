@@ -88,9 +88,14 @@ public static class SketchOps
     /// </summary>
     public static List<long> Chain(Sketch sk, IEnumerable<long> start)
     {
-        var set = new HashSet<long>(start.Where(id => sk.Entity(id) is SkLine or SkArc));
-        bool Joinable(SkEntity e) => e is SkLine or SkArc && !e.Construction;
-        IEnumerable<long> Ends(SkEntity e) => e switch { SkLine l => new[] { l.P1, l.P2 }, SkArc a => new[] { a.Start, a.End }, _ => Array.Empty<long>() };
+        var set = new HashSet<long>(start.Where(id => sk.Entity(id) is SkLine or SkArc or SkSpline { Closed: false }));
+        bool Joinable(SkEntity e) => e is SkLine or SkArc or SkSpline { Closed: false } && !e.Construction;
+        IEnumerable<long> Ends(SkEntity e) => e switch
+        {
+            SkLine l => new[] { l.P1, l.P2 }, SkArc a => new[] { a.Start, a.End },
+            SkSpline { Closed: false } sp when sp.Points.Count >= 2 => new[] { sp.Points[0], sp.Points[^1] },
+            _ => Array.Empty<long>(),
+        };
         for (bool grew = true; grew;)
         {
             grew = false;
@@ -102,7 +107,7 @@ public static class SketchOps
                         foreach (var e in there) if (set.Add(e.Id)) grew = true;
                 }
         }
-        return set.Concat(start.Where(id => sk.Entity(id) is SkCircle)).Distinct().ToList();
+        return set.Concat(start.Where(id => sk.Entity(id) is SkCircle or SkSpline { Closed: true })).Distinct().ToList();
     }
 
     /// <summary>
@@ -114,11 +119,25 @@ public static class SketchOps
     public static (SkConstraint? offset, string? error) Offset(Sketch sk, IEnumerable<long> entityIds, double d, bool reverse = false)
     {
         if (!(d > 0)) return (null, "Offset: the distance must be more than 0.");
-        var ents = entityIds.Distinct().Select(sk.Entity).OfType<SkEntity>().Where(e => e is SkLine or SkArc or SkCircle).ToList();
-        if (ents.Count == 0) return (null, "Offset: select lines, arcs or circles.");
+        var ents = entityIds.Distinct().Select(sk.Entity).OfType<SkEntity>().Where(e => e is SkLine or SkArc or SkCircle or SkSpline).ToList();
+        if (ents.Count == 0) return (null, "Offset: select lines, arcs, circles or splines.");
         var circles = ents.OfType<SkCircle>().ToList();
-        var curves = ents.Where(e => e is not SkCircle).ToList();
-        IEnumerable<long> Ends(SkEntity e) => e switch { SkLine l => new[] { l.P1, l.P2 }, SkArc a => new[] { a.Start, a.End }, _ => Array.Empty<long>() };
+        // closed splines go on their own, as circles do
+        var loops = ents.OfType<SkSpline>().Where(x => x.Closed).ToList();
+        var curves = ents.Where(e => e is not SkCircle && e is not SkSpline { Closed: true }).ToList();
+        IEnumerable<long> Ends(SkEntity e) => e switch
+        {
+            SkLine l => new[] { l.P1, l.P2 }, SkArc a => new[] { a.Start, a.End },
+            SkSpline sp when sp.Points.Count >= 2 => new[] { sp.Points[0], sp.Points[^1] },
+            _ => Array.Empty<long>(),
+        };
+        // a spline's direction (of its curve) at one of its points, by index
+        Vec2 SplineDir(SkSpline sp, int i)
+        {
+            if (sk.SplineCurve(sp) is not { } c) return new Vec2(1, 0);
+            c.Derivs(sk.SplineFitParams(sp)[i], out _, out var dv, out _);
+            return new Vec2(dv.X, dv.Y).Normalized;
+        }
         // order the chain: start at an end (a point only one of them uses), else anywhere (closed)
         var use = curves.SelectMany(Ends).GroupBy(p => p).ToDictionary(g => g.Key, g => g.Count());
         if (use.Values.Any(n => n > 2)) return (null, "Offset: the selection branches; select a single chain of lines and arcs.");
@@ -156,10 +175,10 @@ public static class SketchOps
             global = area > 0 ? -1 : 1;
         }
         if (reverse) global = -global;
-        // per entity: lines by their own direction (left +), arcs and circles by radius (outward +)
+        // per entity: lines and splines by their own direction (left +), arcs and circles by radius (outward +)
         int SideOf(SkEntity e, bool fwd) => e switch
         {
-            SkLine => fwd ? global : -global,
+            SkLine or SkSpline => fwd ? global : -global,
             SkArc => fwd ? -global : global, // left of travel along a counter-clockwise arc is toward its center
             _ => reverse ? -1 : 1,
         };
@@ -168,8 +187,22 @@ public static class SketchOps
         {
             SkLine l => (sk.P(l.P2) - sk.P(l.P1)).Normalized.Perp * (fwd ? 1 : -1),
             SkArc a => (sk.P(a.Center) - p).Normalized * (fwd ? 1 : -1),
+            SkSpline sp => SplineDir(sp, Vec2.Distance(sk.P(sp.Points[0]), p) < Vec2.Distance(sk.P(sp.Points[^1]), p) ? 0 : sp.Points.Count - 1).Perp * (fwd ? 1 : -1),
             _ => default,
         };
+        // a spline's copy follows the offset of its curve only where it runs on smoothly into its neighbours
+        foreach (var (e, fwd) in order)
+        {
+            if (e is not SkSpline sp) continue;
+            foreach (var (pt, i) in new[] { (sp.Points[0], 0), (sp.Points[^1], sp.Points.Count - 1) })
+                foreach (var (o, ofwd) in order)
+                {
+                    if (ReferenceEquals(o, e) || !Ends(o).Contains(pt)) continue;
+                    var n1 = LeftNormal(e, fwd, sk.P(pt)); var n2 = LeftNormal(o, ofwd, sk.P(pt));
+                    if (Math.Abs(Vec2.Cross(n1, n2)) > 1e-4 || Vec2.Dot(n1, n2) < 0)
+                        return (null, "Offset: a spline in the chain meets the next at a corner; offset it where it runs on smoothly (tangent), or on its own.");
+                }
+        }
 
         // copy points: each original end point once, placed near where it will settle (the solver finishes it)
         var copyOf = new Dictionary<long, long>();
@@ -194,6 +227,12 @@ public static class SketchOps
             {
                 SkLine l => new SkLine { P1 = CopyPoint(l.P1), P2 = CopyPoint(l.P2) },
                 SkArc a => new SkArc { Center = a.Center, Start = CopyPoint(a.Start), End = CopyPoint(a.End) },
+                // a spline: its ends shared with the neighbours' copies, its inner points across from the original's
+                SkSpline sp => new SkSpline
+                {
+                    Points = sp.Points.Select((p, i) => i == 0 || i == sp.Points.Count - 1 ? CopyPoint(p)
+                        : sk.AddPoint(sk.P(p) + SplineDir(sp, i).Perp * (SideOf(e, fwd) * d)).Id).ToList(),
+                },
                 _ => null!,
             };
             sk.Add(copy);
@@ -205,6 +244,16 @@ public static class SketchOps
             if (ci.R + side * d <= 0) return (null, $"Offset: a circle of radius {Expr.Format(ci.R)} cannot be offset {Expr.Format(d)} inward.");
             var copy = sk.Add(new SkCircle { Center = ci.Center, R = ci.R + side * d });
             refs.Add(ci.Id); refs.Add(copy.Id); sides.Add(side);
+        }
+        foreach (var sp in loops)
+        {
+            // outward: to the right of a counter-clockwise loop
+            var poly = Polyline(sk, sp);
+            double area = 0;
+            for (int i = 0; i + 1 < poly.Count; i++) area += Vec2.Cross(poly[i], poly[i + 1]);
+            var side = (area > 0 ? -1 : 1) * (reverse ? -1 : 1);
+            var copy = sk.Add(new SkSpline { Closed = true, Points = sp.Points.Select((p, i) => sk.AddPoint(sk.P(p) + SplineDir(sp, i).Perp * (side * d)).Id).ToList() });
+            refs.Add(sp.Id); refs.Add(copy.Id); sides.Add(side);
         }
         var c = new SkConstraint { Id = sk.NewId(), Type = CType.Offset, Refs = refs.ToArray(), Sides = sides.ToArray(), Value = d, Expr = Expr.Format(d) };
         c.Name = "D" + (sk.Constraints.Count(x => x.IsDimension) + 1);
@@ -228,6 +277,9 @@ public static class SketchOps
                 case (SkCircle oc, SkCircle qc): qc.R = Math.Max(1e-9, 2 * oc.R - qc.R); break;
                 case (SkLine ol, SkLine ql): flip[ql.P1] = ol.P1; flip[ql.P2] = ol.P2; break;
                 case (SkArc oa, SkArc qa): flip[qa.Start] = oa.Start; flip[qa.End] = oa.End; break;
+                case (SkSpline os, SkSpline qs) when os.Points.Count == qs.Points.Count:
+                    for (int i = 0; i < os.Points.Count; i++) flip[qs.Points[i]] = os.Points[i];
+                    break;
             }
         }
         foreach (var (qp, op) in flip) if (sk.Point(qp) is { } pt) pt.P = sk.P(op) * 2 - pt.P;
@@ -237,6 +289,7 @@ public static class SketchOps
     static List<Vec2> Samples(Sketch sk, SkEntity e)
     {
         if (e is SkLine l) return new() { sk.P(l.P1), sk.P(l.P2) };
+        if (e is SkSpline) return Polyline(sk, e);
         if (e is SkArc a)
         {
             var c = sk.P(a.Center); var s = sk.P(a.Start) - c; var en = sk.P(a.End) - c;

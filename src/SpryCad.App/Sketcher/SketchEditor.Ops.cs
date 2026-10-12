@@ -88,7 +88,7 @@ public sealed partial class SketchEditor
     /// </summary>
     public string? OffsetSelection()
     {
-        var ids = SelectedEntities.Where(e => e is SkLine or SkArc or SkCircle).Select(e => e.Id).ToList();
+        var ids = SelectedEntities.Where(e => e is SkLine or SkArc or SkCircle or SkSpline).Select(e => e.Id).ToList();
         var err = Offset(ids, OffsetDistance, false);
         if (err == null && Selected.FirstOrDefault() is { Kind: SkRefKind.Constraint } r && Sk.Constraint(r.Id) is { } off)
             OpenModifyBox(off); // type the distance straight away
@@ -102,8 +102,8 @@ public sealed partial class SketchEditor
     /// </summary>
     public string? Offset(IReadOnlyCollection<long> ids, double distance, bool reverse)
     {
-        ids = ids.Where(id => Sk.Entity(id) is SkLine or SkArc or SkCircle).ToList();
-        if (ids.Count == 0) return "Offset Entities: select a line, arc or circle (the chain it is part of is offset).";
+        ids = ids.Where(id => Sk.Entity(id) is SkLine or SkArc or SkCircle or SkSpline).ToList();
+        if (ids.Count == 0) return "Offset Entities: select a line, arc, circle or spline (the chain it is part of is offset).";
         Snapshot();
         OffsetDistance = distance;
         var (off, err) = SketchOps.Offset(Sk, SketchOps.Chain(Sk, ids), distance, reverse);
