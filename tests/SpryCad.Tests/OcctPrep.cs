@@ -37,6 +37,12 @@ static class OcctPrep
             new[] { t.M00, t.M01, t.M02, t.T.X, t.M10, t.M11, t.M12, t.T.Y, t.M20, t.M21, t.M22, t.T.Z }.Select(x => x.ToString("R", ci)))));
         File.WriteAllText(Path.Combine(outDir, "op.txt"), info.IsCut ? "cut" : "fuse");
         Console.WriteLine($"{name}: {transforms.Count} copies of a {tool.Native!.Faces.Count}-face tool, {(info.IsCut ? "cut from" : "added to")} a {body.Native!.Faces.Count}-face body");
+        foreach (var f in new[] { "body.step", "tool.step" })
+        {
+            var nb = StepImport.Read(File.ReadAllBytes(Path.Combine(outDir, f)), "R.").Solids.Single().Body;
+            Console.WriteLine($"{f} read back: volume {NMass.Of(nb)?.Volume ?? NTess.ToSolid(nb).Volume():R}, {nb.Faces.Count} faces, {nb.Validate() ?? "valid"}");
+        }
+        Console.WriteLine($"exact volumes: body {NMass.Of(body.Native!)?.Volume:R}, tool {NMass.Of(tool.Native!)?.Volume:R}; STEP files {new FileInfo(Path.Combine(outDir, "body.step")).Length / 1024} + {new FileInfo(Path.Combine(outDir, "tool.step")).Length / 1024} KB");
 
         void Time(string label, Solid b0, Solid t0)
         {

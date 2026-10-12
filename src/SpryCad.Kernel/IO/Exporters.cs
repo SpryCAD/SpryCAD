@@ -411,9 +411,10 @@ public static class StepWriter
         u0 -= du; u1 += du; v0 -= dv; v1 += dv;
         // about 16 spans a turn around the axis; along a line generator a cubic is exact
         const double fitTol = 1e-5;
-        int nu = Math.Max(4, (int)Math.Ceiling((u1 - u0) / (Math.PI / 8)));
-        int nv = sc.Gen is Native.NLine ? 4 : Math.Max(4, (int)Math.Ceiling((v1 - v0) / (Math.PI / 8)));
-        return BSplineSurface.Fit(sc.Eval, u0, u1, v0, v1, fitTol, nu, nv);
+        // quintic: about 6 spans a turn reach the tolerance (cubics need many more); long threads may need hundreds
+        int nu = Math.Max(5, (int)Math.Ceiling((u1 - u0) / (Math.PI / 3)));
+        int nv = sc.Gen is Native.NLine ? 5 : Math.Max(5, (int)Math.Ceiling((v1 - v0) / (Math.PI / 3)));
+        return BSplineSurface.Fit(sc.Eval, u0, u1, v0, v1, fitTol, nu, nv, degree: 5, maxU: 1024, maxV: 256);
     }
 
     static BSplineSurface PipeFit(ExactFace f, ExactBrep b)
@@ -462,8 +463,9 @@ public static class StepWriter
         var du0 = Math.Pow(384 * fitTol / Math.Max(rad, 1e-3), 0.25);
         var bend = Math.Max(Math.Min(sp.MinCurvatureRadius - rad, 1e6), rad * 0.25);
         var dv0 = Math.Pow(384 * fitTol * bend * bend * bend, 0.25);
+        // quintic, from a third of the cubic's spans (its error falls as h⁶, not h⁴): far fewer control points
         return BSplineSurface.Fit(Surface, u0, u1, v0, v1, fitTol,
-            Math.Max(4, (int)Math.Ceiling((u1 - u0) / du0)), Math.Clamp((int)Math.Ceiling((v1 - v0) / dv0), 4, 192));
+            Math.Max(5, (int)Math.Ceiling((u1 - u0) / du0 / 3)), Math.Clamp((int)Math.Ceiling((v1 - v0) / dv0 / 3), 5, 192), degree: 5);
     }
 
     /// <summary>A B-spline surface as it is (rational ones as the complex entity STEP uses).</summary>

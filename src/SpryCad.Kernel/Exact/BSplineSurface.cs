@@ -23,12 +23,14 @@ public sealed record BSplineSurface(int DegreeU, int DegreeV, Vec3[,] Poles, dou
     /// Bicubic interpolation of f on a uniform grid over [u0,u1]×[v0,v1], refined (up to a size limit) until the
     /// surface is within tol of f at the cell centres.
     /// </summary>
-    public static BSplineSurface Fit(Func<double, double, Vec3> f, double u0, double u1, double v0, double v1, double tol, int nu = 4, int nv = 4)
+    public static BSplineSurface Fit(Func<double, double, Vec3> f, double u0, double u1, double v0, double v1, double tol, int nu = 4, int nv = 4,
+        int degree = 3, int maxU = 128, int maxV = 256)
     {
         BSplineSurface s;
+        nu = Math.Max(nu, degree); nv = Math.Max(nv, degree);
         while (true)
         {
-            s = Interpolate(f, u0, u1, v0, v1, nu, nv);
+            s = Interpolate(f, u0, u1, v0, v1, nu, nv, degree);
             double eu = 0, ev = 0, ec = 0;
             for (int i = 0; i < nu; i++)
                 for (int j = 0; j < nv; j++)
@@ -42,20 +44,20 @@ public sealed record BSplineSurface(int DegreeU, int DegreeV, Vec3[,] Poles, dou
                     ev = Math.Max(ev, Vec3.Distance(s.Eval(ub, vb), f(ub, vb)));
                 }
             Debug?.Invoke($"fit {nu}x{nv}: err u {eu:g2} v {ev:g2} centre {ec:g2}");
-            if (Math.Max(ec, Math.Max(eu, ev)) <= tol || (nu >= 128 && nv >= 256)) return s;
+            if (Math.Max(ec, Math.Max(eu, ev)) <= tol || (nu >= maxU && nv >= maxV)) return s;
             // refine the direction whose error is above tolerance (both when both are)
             bool refU = eu > tol || (ec > tol && eu >= ev), refV = ev > tol || (ec > tol && ev > eu);
-            if (refU && nu < 128) nu *= 2;
-            if (refV && nv < 256) nv *= 2;
-            if ((!refU || nu >= 128) && (!refV || nv >= 256)) return s;
+            if (refU && nu < maxU) nu = Math.Min(maxU, nu * 2);
+            if (refV && nv < maxV) nv = Math.Min(maxV, nv * 2);
+            if ((!refU || nu >= maxU) && (!refV || nv >= maxV)) return s;
         }
     }
 
-    static BSplineSurface Interpolate(Func<double, double, Vec3> f, double u0, double u1, double v0, double v1, int nu, int nv)
+    static BSplineSurface Interpolate(Func<double, double, Vec3> f, double u0, double u1, double v0, double v1, int nu, int nv, int degree)
     {
         var us = Enumerable.Range(0, nu + 1).Select(i => (double)i / nu).ToArray();
         var vs = Enumerable.Range(0, nv + 1).Select(j => (double)j / nv).ToArray();
-        int pu = Math.Min(3, nu), pv = Math.Min(3, nv);
+        int pu = Math.Min(degree, nu), pv = Math.Min(degree, nv);
         var ku = Knots(us, pu); var kv = Knots(vs, pv);
         var Au = new Lu(Matrix(us, pu, ku)); var Av = new Lu(Matrix(vs, pv, kv));
         // rows along u for each v, then columns along v
