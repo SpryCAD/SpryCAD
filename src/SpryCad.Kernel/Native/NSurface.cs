@@ -364,9 +364,19 @@ public sealed class NSurface
         if (Prof.Enabled && (a.Kind is SurfaceKind.BSpline or SurfaceKind.Offset || b.Kind is SurfaceKind.BSpline or SurfaceKind.Offset)) Prof.Count("project.freeform", 1);
         var q = p;
         dir = Vec3.Zero;
+        // a B-spline's closest-point search started from the step before's (q moves little between steps)
+        double ua = double.NaN, va = double.NaN, ub = double.NaN, vb = double.NaN;
+        double FG(NSurface s, Vec3 x, out Vec3 g, ref double hu, ref double hv)
+        {
+            if (s.Kind != SurfaceKind.BSpline) { hu = double.NaN; return s.FGrad(x, out g); }
+            var c = s.Nurbs!.ClosestFrom(x, hu, hv);
+            hu = c.u; hv = c.v;
+            g = s.Nurbs.Normal(c.u, c.v);
+            return Vec3.Dot(x - c.c, g) >= 0 ? c.dist : -c.dist;
+        }
         for (int it = 0; it < 40; it++)
         {
-            var fa = a.FGrad(q, out var na); var fb = b.FGrad(q, out var nb);
+            var fa = FG(a, q, out var na, ref ua, ref va); var fb = FG(b, q, out var nb, ref ub, ref vb);
             dir = Vec3.Cross(na, nb);
             if (Math.Abs(fa) < tol && Math.Abs(fb) < tol) return q;
             double g11 = Vec3.Dot(na, na), g12 = Vec3.Dot(na, nb), g22 = Vec3.Dot(nb, nb);
@@ -564,6 +574,9 @@ public sealed class NSurface
     {
         if (Kind == SurfaceKind.Plane) return FromPlane(Plane!.Transformed(t));
         var d = Def.Transformed(t);
+        // an offset of a B-spline lies along its base's natural normal, which a mirror turns round (the base keeps its
+        // parameters): the same side again is the other offset
+        if (t.Determinant < 0 && Kind == SurfaceKind.Offset && Base!.Kind is SurfaceKind.BSpline) d = d with { Radius = -d.Radius };
         if (Math.Abs(t.Determinant - 1) > 1e-9 && Math.Abs(t.Determinant + 1) > 1e-9)
         {
             var s = Math.Cbrt(Math.Abs(t.Determinant));

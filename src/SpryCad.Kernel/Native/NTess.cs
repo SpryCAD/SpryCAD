@@ -330,15 +330,17 @@ public static class NTess
                 return Spacing(s.Base!, tol);
             case SurfaceKind.BSpline:
                 {
-                    // one grid cell per knot span (the surface is a single polynomial piece in each); the refinement
-                    // below then adds points only where the surface really curves away from the facets. (A uniform
-                    // grid sized for the tightest bend would fill large flat areas of the same face with tiny facets.)
+                    // each direction spaced for its own tightest bend, as a cylinder or torus is: a face curved one
+                    // way only gets long cells the other way. (A grid too coarse across a bend, one cell per knot
+                    // span, leaves it to the refinement below, which splits every way at once: several times the
+                    // triangles; a torus as a B-spline five times its analytic mesh.)
                     var nb = s.Nurbs!;
-                    var (su, sv) = MetricScale(s);
-                    var rho = Math.Min(nb.MinCurvatureRadius(), 1e6);
-                    var hc = Ang(rho) * rho;
-                    var hu = Math.Max(hc, (nb.U1 - nb.U0) * su / Math.Max(1, nb.SpansU));
-                    var hv = Math.Max(hc, (nb.V1 - nb.V0) * sv / Math.Max(1, nb.SpansV));
+                    var (ru, rv) = nb.DirectionalCurvatureRadius();
+                    ru = Math.Min(ru, 1e6); rv = Math.Min(rv, 1e6);
+                    // (a little inside the tolerance, so the cells' diagonals mostly need no split either; and cells at
+                    // most 8 times as long as wide, as a cylinder's: long thin ones fan into slivers the refinement splits)
+                    double hu = 0.7 * Ang(ru) * ru, hv = 0.7 * Ang(rv) * rv;
+                    hu = Math.Min(hu, 8 * hv); hv = Math.Min(hv, 8 * hu);
                     return (Math.Max(hu, 1e-6), Math.Max(hv, 1e-6));
                 }
             case SurfaceKind.Screw:

@@ -449,7 +449,7 @@ public sealed class Regenerator
             if (res.Status == SketchStatus.OverDefined) status.Warnings.Add("Sketch is over defined or cannot be solved.");
             var regions = ProfileExtractor.Extract(sk, out var warns);
             // a sweep's path and a loft's guides are open by design: no profile warnings for them
-            if (!doc.Features.OfType<SweepFeature>().Any(w => w.PathSketchId == s.Id) && !doc.Features.OfType<LoftFeature>().Any(l => l.GuideSketchIds.Contains(s.Id)))
+            if (!doc.Features.OfType<SweepFeature>().Any(w => w.PathSketchId == s.Id) && !doc.Features.OfType<LoftFeature>().Any(l => l.GuideSketchIds.Contains(s.Id) || l.CenterlineSketchId == s.Id))
                 status.Warnings.AddRange(warns);
             State.Sketches[s.Id] = new SketchResult { Frame = frame, Sketch = sk, Regions = regions, Solve = res };
             State.Planes[s.Id] = frame;
@@ -849,6 +849,9 @@ public sealed class Regenerator
             if (l.SectionSketchIds.Count < 2) throw new FeatureException("Select two profile sketches at least.");
             if (l.SectionSketchIds.Distinct().Count() < l.SectionSketchIds.Count) throw new FeatureException("A profile sketch is selected twice.");
             if (l.GuideSketchIds.Intersect(l.SectionSketchIds).Any()) throw new FeatureException("A sketch cannot be both a profile and a guide.");
+            var centerline = string.IsNullOrEmpty(l.CenterlineSketchId) ? null : l.CenterlineSketchId;
+            if (centerline != null && (l.SectionSketchIds.Contains(centerline) || l.GuideSketchIds.Contains(centerline)))
+                throw new FeatureException("The centerline must be a sketch of its own.");
             var sections = new List<Kernel.Native.NLoft.Section>();
             for (int i = 0; i < l.SectionSketchIds.Count; i++)
             {
@@ -861,12 +864,18 @@ public sealed class Regenerator
                 sections.Add(new(sk.Frame, Array.Empty<ProfileRegion>(), sk.Frame.ToWorld(sk.Sketch.P(pts[0].P))));
             }
             var guides = new List<IReadOnlyList<Kernel.Native.NSweep.Seg>>();
-            foreach (var id in l.GuideSketchIds) guides.AddRange(SweepPath.Guides(GetSketch(id)));
+            foreach (var id in l.GuideSketchIds) guides.AddRange(SweepPath.Guides(GetSketch(id), l.Closed));
             var opt = new Kernel.Native.NLoft.Options(
                 l.StartTangency == LoftTangency.Normal ? Kernel.Native.NLoft.Tangency.Normal : Kernel.Native.NLoft.Tangency.None,
                 l.StartTangency == LoftTangency.Normal ? Positive(l.StartLength, "Start tangent length") : 1,
                 l.EndTangency == LoftTangency.Normal ? Kernel.Native.NLoft.Tangency.Normal : Kernel.Native.NLoft.Tangency.None,
-                l.EndTangency == LoftTangency.Normal ? Positive(l.EndLength, "End tangent length") : 1);
+                l.EndTangency == LoftTangency.Normal ? Positive(l.EndLength, "End tangent length") : 1, l.Closed);
+            if (centerline != null)
+            {
+                var chains = SweepPath.Guides(GetSketch(centerline), l.Closed);
+                if (chains.Count != 1) throw new FeatureException("The centerline sketch must hold one chain of lines and arcs.");
+                opt = opt with { Centerline = chains[0] };
+            }
             Solid tool;
             try
             {

@@ -242,6 +242,19 @@ public static class NMass
                     if (t1 < t0) { res.Sort(); res.Reverse(); } else res.Sort();
                     return res;
                 }
+            case NSpline sp:
+                {
+                    // each knot span a polynomial piece (two panels: the integrand also carries the surface): breaks at
+                    // the knots, where the curve may be only C0 or C1
+                    double lo = Math.Min(t0, t1), hi = Math.Max(t0, t1);
+                    var ks = new List<double> { lo };
+                    foreach (var k in sp.S.Knots.Distinct()) if (k > lo + 1e-12 && k < hi - 1e-12) ks.Add(k);
+                    ks.Add(hi);
+                    for (int i = 0; i + 1 < ks.Count; i++) { res.Add(ks[i]); res.Add(0.5 * (ks[i] + ks[i + 1])); }
+                    res.Add(hi);
+                    if (t1 < t0) res.Reverse();
+                    return res;
+                }
             // the curve's own sampling density (not the edge's sample cache: measuring must not change the body)
             // (8 Gauss points per panel: a quarter of the samples a polyline would need)
             default: n = Math.Clamp((e.Curve.Samples(Math.Min(t0, t1), Math.Max(t0, t1), scale * 1e-4) + 3) / 4, 2, 200); break;

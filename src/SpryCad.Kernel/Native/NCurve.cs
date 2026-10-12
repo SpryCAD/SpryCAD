@@ -236,6 +236,9 @@ public sealed class NSpline : NCurve
     public override Vec3 Eval(double t) => S.Eval(t);
     public override Vec3 Deriv(double t)
     {
+        // exact (a knot: the derivative on the span after it)
+        S.Derivs(t, out _, out var d1, out _);
+        if (double.IsFinite(d1.X) && double.IsFinite(d1.Y) && double.IsFinite(d1.Z)) return d1;
         const double h = 1e-6;
         var a = Math.Max(0, t - h); var b = Math.Min(1, t + h);
         return (S.Eval(b) - S.Eval(a)) / (b - a);

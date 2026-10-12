@@ -333,6 +333,11 @@ public sealed class NBoolean
             foreach (var i in toTrace)
                 foreach (var f in new[] { pairs[i].fa, pairs[i].fb })
                     if (!traceDoms.ContainsKey(f)) traceDoms[f] = NDomain.Of(f, Math.Max(traceTol, 1e-3));
+            // the planes B-spline faces here are mirrored in (a body and its mirror image, met along the plane)
+            var mirrors = new List<Plane>();
+            foreach (var i in toTrace)
+                if (MirrorPlane(pairs[i].fa, pairs[i].fb) is { } mpl && !mirrors.Any(q => Same(q, mpl))) mirrors.Add(mpl);
+            static bool Same(Plane a, Plane b) => Vec3.Dot(a.Normal, b.Normal) > 1 - 1e-12 && Math.Abs(a.D - b.D) < 1e-9 * Math.Max(1, Math.Abs(a.D));
             Parallel.ForEach(toTrace, i =>
             {
                 var (fa, fb, _) = pairs[i];
@@ -349,13 +354,30 @@ public sealed class NBoolean
                 else if (fa.Surface.Kind == SurfaceKind.BSpline && fb.Surface.Kind is not (SurfaceKind.BSpline or SurfaceKind.Offset or SurfaceKind.Screw or SurfaceKind.Pipe)
                     && Width(fb) <= 4 * fa.Bounds().Diagonal / 96) (fa, fb) = (fb, fa);
                 var swt = System.Diagnostics.Stopwatch.StartNew();
-                List<NCurve> c; using (Prof.Time(Prof.Enabled ? $"tr.{fa.Surface.Kind}x{fb.Surface.Kind}" : "")) c = NIntersect.Trace(fa, fb.Surface, traceTol, traceDoms[fa]).Cast<NCurve>().ToList();
+                // a B-spline face against its own mirror image (a mirror or a pattern's mirrored copy, meeting its seed),
+                // the face on one side of the mirror plane: they meet only in that plane, so the face is traced against
+                // the plane instead (exact, and the plane's distance is cheap where the B-spline's is a closest-point
+                // search). Two faces on opposite sides of such a plane (the seed's and another of the copy's, touching
+                // along it) likewise meet only in it: the first's section by the plane, where it lies on the second.
+                var mp = MirrorPlane(fa, fb);
+                bool apart = false;
+                if (mp == null && fa.Surface.Kind == SurfaceKind.BSpline && fb.Surface.Kind == SurfaceKind.BSpline)
+                    foreach (var q in mirrors) if (Apart(fa, fb, q)) { mp = q; apart = true; break; }
+                var against = mp is { } mpp ? NSurface.FromPlane(mpp) : fb.Surface;
+                List<NCurve> c; using (Prof.Time(Prof.Enabled ? $"tr.{fa.Surface.Kind}x{against.Kind}" : "")) c = NIntersect.Trace(fa, against, traceTol, traceDoms[fa]).Cast<NCurve>().ToList();
+                if (apart) c = OnSurface(c, fb.Surface, traceTol);
                 if (Prof.Enabled && c.Count == 0) Prof.Add($"tr.empty.{fa.Surface.Kind}x{fb.Surface.Kind}", 0);
                 // traced from the other side too (small faces)
                 // (from the analytic face only when it is much smaller: a curve on it may fall between the B-spline's grid
                 // points. A narrow one, a thin hole, was traced on its own face to begin with. Elsewhere the B-spline's
                 // distance is slow, and past the patch's edge its sign flips with nothing crossing)
-                if (c.Count == 0 && fa.Surface.Kind != SurfaceKind.Screw && (!onSpline || fb.Bounds().Diagonal < 0.25 * fa.Bounds().Diagonal)) c = NIntersect.Trace(fb, fa.Surface, traceTol, traceDoms[fb]).Cast<NCurve>().ToList();
+                // (meeting only in a mirror plane: the other face's section by the plane, where it lies on the first)
+                if (c.Count == 0 && mp is { } mq)
+                {
+                    c = NIntersect.Trace(fb, NSurface.FromPlane(mq), traceTol, traceDoms[fb]).Cast<NCurve>().ToList();
+                    if (apart) c = OnSurface(c, fa.Surface, traceTol);
+                }
+                else if (c.Count == 0 && fa.Surface.Kind != SurfaceKind.Screw && (!onSpline || fb.Bounds().Diagonal < 0.25 * fa.Bounds().Diagonal)) c = NIntersect.Trace(fb, fa.Surface, traceTol, traceDoms[fb]).Cast<NCurve>().ToList();
                 pairCurves[i] = c;
                 if (Trace != null && Environment.GetEnvironmentVariable("FC_TRACE_SLOW") != null)
                     T($"  trace {fa.Tag.Name}({fa.Surface.Kind}) x {fb.Tag.Name}({fb.Surface.Kind}): {c.Count} curves, {string.Join(" ", c.Select(x => x is NPolyline pl ? pl.Pts.Length + "pts" : x.GetType().Name))} in {swt.ElapsedMilliseconds} ms");
@@ -1856,4 +1878,76 @@ public sealed class NBoolean
     }
 
     static bool SameCurve(NCurve a, NCurve b) => ReferenceEquals(a, b);
+
+    /// <summary>Whether the faces lie on opposite sides of the plane (their B-spline poles do), touching it at most.</summary>
+    static bool Apart(NFace fa, NFace fb, Plane pl)
+    {
+        var a = fa.Surface.Nurbs!; var b = fb.Surface.Nurbs!;
+        var tol = 1e-9 * Math.Max(1, Math.Max(a.Box.Diagonal, b.Box.Diagonal));
+        (double lo, double hi) Side(NurbsSurface s)
+        {
+            double lo = double.MaxValue, hi = double.MinValue;
+            foreach (var p in s.P) { var d = pl.Distance(p); lo = Math.Min(lo, d); hi = Math.Max(hi, d); }
+            return (lo, hi);
+        }
+        var (la, ha) = Side(a); var (lb, hb) = Side(b);
+        return la >= -tol && hb <= tol || ha <= tol && lb >= -tol;
+    }
+
+    /// <summary>The parts of the curves (polylines) lying on the surface: runs of their points within tol of it.</summary>
+    static List<NCurve> OnSurface(List<NCurve> curves, NSurface s, double tol)
+    {
+        var res = new List<NCurve>();
+        foreach (var c in curves)
+        {
+            if (c is not NPolyline pl) { res.Add(c); continue; }
+            var run = new List<Vec3>();
+            void Flush() { if (run.Count >= 2) res.Add(new NPolyline(run.ToList(), false)); run.Clear(); }
+            var pts = pl.IsClosed ? pl.Pts.Take(pl.Pts.Length - 1).ToArray() : pl.Pts;
+            var on = pts.Select(p => Math.Abs(s.F_(p)) <= tol).ToArray();
+            // a closed curve all on the surface stays closed
+            if (pl.IsClosed && on.All(x => x)) { res.Add(c); continue; }
+            for (int i = 0; i < pts.Length; i++)
+            {
+                if (on[i]) run.Add(pts[i]);
+                else Flush();
+            }
+            Flush();
+        }
+        return res;
+    }
+
+    /// <summary>
+    /// The plane two B-spline faces are mirror images in (poles reflected one for one, the same knots and weights),
+    /// when the first lies on one side of it (its poles do, so the surface does): then the faces meet only in that
+    /// plane. Null otherwise.
+    /// </summary>
+    static Plane? MirrorPlane(NFace fa, NFace fb)
+    {
+        if (fa.Surface.Nurbs is not { } a || fb.Surface.Nurbs is not { } b || ReferenceEquals(a, b)) return null;
+        if (a.Pu != b.Pu || a.Pv != b.Pv || a.P.GetLength(0) != b.P.GetLength(0) || a.P.GetLength(1) != b.P.GetLength(1)) return null;
+        if (!a.U.SequenceEqual(b.U) || !a.V.SequenceEqual(b.V) || (a.W == null) != (b.W == null)) return null;
+        var tol = 1e-9 * Math.Max(1, a.Box.Diagonal);
+        // the pair of poles farthest apart fixes the plane (their perpendicular bisector)
+        int ni = a.P.GetLength(0), nj = a.P.GetLength(1);
+        double far = 0; Vec3 pa = default, pb = default;
+        for (int i = 0; i < ni; i++)
+            for (int j = 0; j < nj; j++)
+            {
+                if (a.W != null && Math.Abs(a.W[i, j] - b.W![i, j]) > 1e-12 * Math.Abs(a.W[i, j])) return null;
+                var d = Vec3.Distance(a.P[i, j], b.P[i, j]);
+                if (d > far) { far = d; pa = a.P[i, j]; pb = b.P[i, j]; }
+            }
+        if (far < 100 * tol) return null; // the same surface
+        var pl = Plane.FromPointNormal(0.5 * (pa + pb), (pb - pa).Normalized);
+        double lo = 0, hi = 0;
+        for (int i = 0; i < ni; i++)
+            for (int j = 0; j < nj; j++)
+            {
+                var p = a.P[i, j]; var dp = pl.Distance(p);
+                if (Vec3.Distance(p - pl.Normal * (2 * dp), b.P[i, j]) > tol) return null;
+                lo = Math.Min(lo, dp); hi = Math.Max(hi, dp);
+            }
+        return lo >= -tol || hi <= tol ? pl : null;
+    }
 }

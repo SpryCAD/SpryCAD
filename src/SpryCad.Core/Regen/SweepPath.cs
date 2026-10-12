@@ -154,11 +154,11 @@ static class SweepPath
     /// A loft's guide curves in a sketch: each connected chain of lines and arcs (construction geometry left out) is
     /// one guide, in world space; throws if a chain branches or closes on itself.
     /// </summary>
-    public static List<List<NSweep.Seg>> Guides(SketchResult sketch)
+    public static List<List<NSweep.Seg>> Guides(SketchResult sketch, bool closed = false)
     {
         var sk = sketch.Sketch;
         var ents = sk.Entities.Where(e => !e.Construction && !e.Dangling).ToList();
-        if (ents.OfType<SkCircle>().Any()) throw new FeatureException("A guide curve cannot be a circle: guides are open chains of lines and arcs.");
+        if (ents.OfType<SkCircle>().Any()) throw new FeatureException("A guide curve cannot be a circle: draw it as arcs (a chain of lines and arcs).");
         var pieces = Pieces(sk, ents);
         if (pieces.Count == 0) throw new FeatureException("The guide sketch has no lines or arcs.");
         var scale = Math.Max(1, pieces.Max(x => Math.Max(x.A.Length, x.B.Length)));
@@ -177,8 +177,9 @@ static class SweepPath
         foreach (var comp in Enumerable.Range(0, pieces.Count).GroupBy(Find))
         {
             var order = Chain(comp.Select(i => pieces[i]).ToList(), tol, "guide curve");
-            if (order.Count > 1 && Vec2.Distance(End(order[^1]), Start(order[0])) < tol)
-                throw new FeatureException("A guide curve cannot be closed: guides run from the first section to the last.");
+            bool ring = order.Count > 1 && Vec2.Distance(End(order[^1]), Start(order[0])) < tol;
+            if (ring != closed)
+                throw new FeatureException(closed ? "On a closed loft, guide curves and the centerline must be closed too." : "A guide curve or centerline cannot be closed unless the loft is: it runs from the first profile to the last.");
             res.Add(ToWorld(order, sketch.Frame));
         }
         return res;
