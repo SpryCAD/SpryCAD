@@ -135,10 +135,13 @@ public sealed class WorkingCopy : IDisposable
     /// <summary>Marks the file as being edited here (from the first edit): its lock file, unless someone else's holds it.</summary>
     public void TakeLock()
     {
-        if (_locked || Source == null) return;
+        // (someone else's live lock stays theirs: opened anyway, this copy edits without one)
+        if (_locked || Source == null || ReadLock(Source) != null) return;
         try
         {
             var me = new LockInfo(Environment.UserName, Environment.MachineName, DateTime.UtcNow);
+            // a lock left by a crash, or gone stale, is hidden: Windows refuses to write over a hidden file
+            if (File.Exists(LockOf(Source))) File.SetAttributes(LockOf(Source), FileAttributes.Normal);
             File.WriteAllText(LockOf(Source), JsonSerializer.Serialize(me));
             if (OperatingSystem.IsWindows()) File.SetAttributes(LockOf(Source), File.GetAttributes(LockOf(Source)) | FileAttributes.Hidden);
             _locked = true;
@@ -228,6 +231,14 @@ public sealed class WorkingCopy : IDisposable
             catch (Exception ex) when (ex is IOException or InvalidDataException or Microsoft.Data.Sqlite.SqliteException) { }
             // nothing to recover (or not readable): not kept
             foreach (var f in new[] { path, OwnerOf(path), InfoOf(path) })
+                try { File.Delete(f); } catch { /* best effort */ }
+        }
+        // what is left of copies never written (a new part not yet autosaved when the app closed)
+        foreach (var owner in Directory.GetFiles(Folder, "*.owner"))
+        {
+            var path = System.IO.Path.ChangeExtension(owner, CadDocument.FileExtension);
+            if (File.Exists(path) || Held(path)) continue;
+            foreach (var f in new[] { owner, InfoOf(path) })
                 try { File.Delete(f); } catch { /* best effort */ }
         }
         return found.OrderByDescending(r => r.SavedUtc).ToList();
