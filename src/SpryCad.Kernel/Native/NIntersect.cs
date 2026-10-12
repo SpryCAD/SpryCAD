@@ -64,6 +64,8 @@ public static class NIntersect
     // edge ∩ surface
 
     public sealed record EdgeHits(List<double> Params, bool OnSurface);
+    static readonly bool TmpPara = Environment.GetEnvironmentVariable("TMP_NOPARA") == null;
+    static readonly object _dumpLock = new();
 
     /// <summary>
     /// Parameters where the edge crosses the surface, plus end points lying on it; pure tangential touches are
@@ -174,6 +176,30 @@ public static class NIntersect
                     return;
                 }
                 var m = 0.5 * (ta + tb); var fm = F(m);
+                // an edge grazing the surface: the distance changes far slower than the arc length, and the bound
+                // above cannot rule out a root next to a crossing until the pieces are tiny (thousands of evaluations
+                // for one crossing at a shallow angle). The parabola through the three values: on one side, and
+                // clear of zero by more than the bend it shows (4 times its second difference), the piece holds no
+                // root unless the distance bends far more sharply between the samples than across them.
+                // a piece lying on the surface (ends and middle within tol of it, e.g. a fillet's boundary running along
+                // the B-spline it blends into): the sign there is rounding, and a run along the surface is at most one
+                // crossing, settled from either side of it (OneCrossingPerRun); where the edge leaves the surface, a
+                // piece with an end off it is still searched
+                if (depth >= 2 && Math.Abs(fa) < tol && Math.Abs(fm) < tol && Math.Abs(fb) < tol && TmpPara) return;
+                if (depth >= 2 && fa * fm > 0 && fm * fb > 0 && TmpPara)
+                {
+                    double d2 = fa - 2 * fm + fb, lowest = Math.Min(Math.Min(Math.Abs(fa), Math.Abs(fm)), Math.Abs(fb));
+                    if (d2 != 0)
+                    {
+                        var x = (fa - fb) / (2 * d2);
+                        if (Math.Abs(x) < 1)
+                        {
+                            var ext = fm - (fb - fa) * (fb - fa) / (8 * d2);
+                            lowest = ext * fm <= 0 ? 0 : Math.Min(lowest, Math.Abs(ext));
+                        }
+                    }
+                    if (lowest > 4 * Math.Abs(d2) + tol) return;
+                }
                 Iso(ta, m, fa, fm, depth + 1);
                 Iso(m, tb, fm, fb, depth + 1);
             }
@@ -227,6 +253,10 @@ public static class NIntersect
         if (count && s.Kind is SurfaceKind.BSpline or SurfaceKind.Pipe)
         {
             Prof.Add($"es.n.{s.Kind}.{c.GetType().Name}", evals);
+            if (evals > 3000 && Environment.GetEnvironmentVariable("TMP_DUMP") is { } dump)
+                lock (_dumpLock)
+                    System.IO.File.AppendAllLines(dump, new[] { $"== {s.Kind} {c.GetType().Name} evals {evals} roots {string.Join(",", merged.Select(x => x.ToString("g6")))} lo {lo:g6} hi {hi:g6}" }
+                        .Concat(Enumerable.Range(0, 401).Select(i => { var t = lo + (hi - lo) * i / 400; return $"{t:g8} {s.F_(c.Eval(t)):g8}"; })));
             if (evals > 400)
             {
                 double mx = 0; for (int i = 0; i <= 64; i++) mx = Math.Max(mx, Math.Abs(s.F_(c.Eval(lo + (hi - lo) * i / 64))));
