@@ -16,10 +16,62 @@ public static class NShell
         var inner = Offset(body, f => openFaces.Contains(f.Tag.Name) ? thickness : -thickness, prefix + ".I.");
         var err = inner.Validate();
         if (err != null) throw new InvalidOperationException("shell: " + err);
+        // the topology kept, a face that should vanish at this thickness (a round tighter than the wall, a face
+        // narrower than it) turns inside out instead, and its neighbours fold over it: its outline runs the other
+        // way round, or crosses itself where it did not. Valid as topology, but the skin passes through itself.
+        if (Folded(body, inner) is { } bad) throw new InvalidOperationException($"shell: the inner face of {bad} turns inside out at this thickness");
         // the inner body runs a wall's thickness inside the outer one and breaks out only through the open faces:
         // only an open face and an inner face, or an outer face and an open face's (outward) offset, can meet
         var openInner = openFaces.Select(n => prefix + ".I." + n).ToHashSet();
         return NBoolean.Run(body, inner, BoolOp.Subtract, (a, b) => openFaces.Contains(a) || openInner.Contains(b));
+    }
+
+    /// <summary>
+    /// The first face whose rebuilt copy (the same index in <paramref name="rebuilt"/>) is turned inside out: its
+    /// outline in its surface's parameters the other way round, or crossing itself where the original's does not.
+    /// </summary>
+    static string? Folded(NBody original, NBody rebuilt)
+    {
+        string? bad = null;
+        Parallel.For(0, Math.Min(original.Faces.Count, rebuilt.Faces.Count), (i, st) =>
+        {
+            try
+            {
+                var a = NDomain.Of(original.Faces[i]); var b = NDomain.Of(rebuilt.Faces[i]);
+                double sa = a.SignedArea(), sb = b.SignedArea();
+                bool flipped = Math.Abs(sa) > 1e-12 && Math.Abs(sb) > 1e-12 && Math.Sign(sa) != Math.Sign(sb);
+                if (flipped || Crossings(b) > Crossings(a)) { Debug?.Invoke($"folded {original.Faces[i].Tag.Name} {original.Faces[i].Surface.Kind}: area {sa:g4} -> {sb:g4}, crossings {Crossings(a)} -> {Crossings(b)}, loops {a.Loops.Count}"); lock (original) bad ??= original.Faces[i].Tag.Name; st.Stop(); }
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or ArgumentException) { /* no domain: left to the boolean */ }
+        });
+        return bad;
+    }
+
+    /// <summary>
+    /// How many times the domain's loops cross themselves (proper crossings of their segments). Not one loop another: a
+    /// hole's offset running into the outline's is an overlap the boolean resolves; a loop through itself is a fold.
+    /// </summary>
+    static int Crossings(NDomain d)
+    {
+        var segs = new List<(Vec2 a, Vec2 b, int loop, int k, int n)>();
+        for (int li = 0; li < d.Loops.Count; li++)
+        {
+            var l = d.Loops[li];
+            for (int k = 0; k < l.Length; k++) segs.Add((l[k], l[(k + 1) % l.Length], li, k, l.Length));
+        }
+        static double O(Vec2 p, Vec2 q, Vec2 r) => (q.X - p.X) * (r.Y - p.Y) - (q.Y - p.Y) * (r.X - p.X);
+        int n = 0;
+        for (int i = 0; i < segs.Count; i++)
+            for (int j = i + 1; j < segs.Count; j++)
+            {
+                var (a0, a1, la, ka, na) = segs[i]; var (b0, b1, lb, kb, _) = segs[j];
+                if (la != lb) continue;
+                // (neighbours along a loop share an end: not a crossing)
+                if (kb == ka + 1 || ka == 0 && kb == na - 1) continue;
+                double o1 = O(a0, a1, b0), o2 = O(a0, a1, b1), o3 = O(b0, b1, a0), o4 = O(b0, b1, a1);
+                if (o1 * o2 < 0 && o3 * o4 < 0) n++;
+            }
+        return n;
     }
 
     /// <summary>Offsets each face along its outward normal by dist(face) and rebuilds the topology.</summary>

@@ -27,7 +27,9 @@ public static class ShellOp
             catch (Exception ex) when (ex is InvalidOperationException or Native.NBooleanException or NotSupportedException)
             {
                 Csg.LastFallbackReason = ex.Message;
-                why = ex.Message.Contains("fillet radius")
+                why = ex.Message.Contains("turns inside out")
+                    ? "at this wall thickness a face narrower than the wall (a fillet's corner, a thin strip between rounds) would turn inside out on the inside. Use a thinner wall, or shell before adding those fillets"
+                    : ex.Message.Contains("fillet radius")
                     ? "the wall is as thick as a fillet or round is wide, so that fillet's inner surface vanishes. Use a thinner wall, or shell before adding the fillet"
                     : "at this wall thickness the inner surface changes shape (a fillet, hole or other face comes closer to another face than the wall is thick). Try a thinner wall, or shell before adding fillets and chamfers";
             }
