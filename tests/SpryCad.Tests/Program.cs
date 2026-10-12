@@ -209,6 +209,7 @@ static class Program
         if (args.Length > 1 && args[0] == "cases") { Bench.Cases(args[1]); return 0; }
         if (args.Length > 2 && args[0] is "tessrepeat" or "tessrepeat-fresh") return Bench.TessRepeat(args[1], int.Parse(args[2]), args[3..], args[0] == "tessrepeat-fresh");
         if (args.Length > 2 && args[0] == "edgedir") return Bench.EdgeDirections(args[1], args[2]);
+        if (args.Length > 1 && args[0] == "openedges") return OpenEdges.Run(args[1], args.Length > 2 ? args[2] : null);
         if (args.Length > 1 && args[0] == "massprops") return Bench.MassPropsTool(args[1], args[2..]);
         if (args.Length > 1 && args[0] == "demoprints") return Bench.DemoPrints(args[1]);
         if (args.Length > 2 && args[0] == "determinism") return Bench.Determinism(args[1], int.Parse(args[2]), args[3..]);

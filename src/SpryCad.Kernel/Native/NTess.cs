@@ -72,6 +72,24 @@ public static class NTess
     /// </summary>
     static void Curved(NFace f, NDomain dom, IReadOnlyList<Vec2[]> loopsUv, IReadOnlyList<Vec3[]> loops3, double tol, List<Face> outFaces)
     {
+        // loops running clockwise in (u, v) (a surface turned inside out about the face: an offset past its own
+        // radius, a shell's inner wall of a smaller round): triangulated run the other way round (as the
+        // triangulation expects), the triangles then turned back to run with the loops, which give the facets' side
+        // and the directions their neighbours meet the edges in
+        double signed = 0;
+        foreach (var l in loopsUv) for (int i = 0, j = l.Length - 1; i < l.Length; j = i++) signed += l[j].X * l[i].Y - l[i].X * l[j].Y;
+        if (signed < 0)
+        {
+            var back = new List<Face>();
+            Curved(f, dom, loopsUv.Select(l => l.Reverse().ToArray()).ToList(), loops3.Select(l => l.Reverse().ToArray()).ToList(), tol, back, flip: true);
+            outFaces.AddRange(back);
+            return;
+        }
+        Curved(f, dom, loopsUv, loops3, tol, outFaces, flip: false);
+    }
+
+    static void Curved(NFace f, NDomain dom, IReadOnlyList<Vec2[]> loopsUv, IReadOnlyList<Vec3[]> loops3, double tol, List<Face> outFaces, bool flip)
+    {
         var uv = loopsUv.SelectMany(l => l).ToList();
         var p3 = loops3.SelectMany(l => l).ToList();
         var boundary = new HashSet<(int, int)>();
@@ -163,8 +181,9 @@ public static class NTess
             if (!changed) break;
             // (no flips between refinement levels: splits already keep a valid tiling)
         }
-        foreach (var (a, b, c) in tris)
+        foreach (var (a, b0, c0) in tris)
         {
+            var (b, c) = flip ? (c0, b0) : (b0, c0);
             var pl = Plane.FromPoints(p3[a], p3[b], p3[c]);
             if (pl == null) continue; // degenerate (pole)
             outFaces.Add(new Face(pl, f.Tag, p3[a], p3[b], p3[c]) { Pool = p3, PoolA = a, PoolB = b, PoolC = c });

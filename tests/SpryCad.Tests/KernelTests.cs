@@ -313,5 +313,21 @@ static class KernelTests
                 area += Vec2.Cross(all[idx[i + 1]] - all[idx[i]], all[idx[i + 2]] - all[idx[i]]) / 2;
             t.Near(area, 100 - 8, 1e-9);
         });
+
+        t.Test("Triangulator: a loop that repeats its first point at the end (ran forever)", () =>
+        {
+            foreach (var ccw in new[] { true, false })
+            {
+                var l = new[] { new Vec2(0, 0), new Vec2(4, 0), new Vec2(4, 3), new Vec2(0, 3), new Vec2(0, 0) };
+                if (!ccw) Array.Reverse(l);
+                var task = Task.Run(() => Triangulator.Triangulate(new[] { l }));
+                t.True(task.Wait(5000), "finishes");
+                var idx = task.Result;
+                double area = 0;
+                for (int i = 0; i < idx.Count; i += 3)
+                    area += Vec2.Cross(l[idx[i + 1]] - l[idx[i]], l[idx[i + 2]] - l[idx[i]]) / 2;
+                t.Near(area, 12, 1e-9);
+            }
+        });
     }
 }

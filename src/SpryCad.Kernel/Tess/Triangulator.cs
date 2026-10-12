@@ -101,7 +101,8 @@ public static class Triangulator
         int count = 0; var q = start; do { count++; q = q.Next; } while (q != start);
         while (count > 2 && guard++ < 100000)
         {
-            if (Same(p, p.Next)) { Remove(p.Next); count--; if (p.Next == start || p == start) start = p; continue; }
+            // (the start itself removed: p, before it, becomes the start, else the ring never gets back to it)
+            if (Same(p, p.Next)) { if (p.Next == start) start = p; Remove(p.Next); count--; continue; }
             p = p.Next;
             if (p == start) break;
         }
