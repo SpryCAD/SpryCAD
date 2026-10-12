@@ -86,7 +86,9 @@ Commands (from the repository root):
    its edges (found by the "Chamfers around filleted corners" session). Fix: add the two list names to that test.
    The casting built fresh is fine, and the demo file is regenerated, so the engine does not hit it. Fix in #68
    (open).
-4h. **A loft's rounded section cannot be blended into a flat face (OPEN, master bb044ae).** The connecting rod's
+4h. ~~A loft's rounded section cannot be blended into a flat face.~~ **FIXED (#79)**: "Shank into the ends", by scope,
+   blends both ends at R3, the rod in under 1 s (the shank's big end made 20 deep, not 24, so the blend clears the
+   cap's nuts). Was: the connecting rod's
    shank is now a loft (`HmConRod`): from a 16 x 11 rounded rectangle (R5 corners, so 1 mm flats on its narrow
    sides) inside the small end to a 24 x 15 one (R7) on the big end block's face (x = -16). Blended into the small
    end's round boss, R3, picked or by scope: fine (but 5.7 s for that one fillet). Into the block's flat face it
@@ -98,8 +100,8 @@ Commands (from the repository root):
    `new FilletFeature { Radius = "Rf", Features = { shank.Id } }`, `verify-engine - Connecting`. *Instead:* only the
    small end blended, the big end's joint left sharp. Cause (the documentation review session): the loft split each
    corner arc into two patches at different fractions on the two sections, so their seam kinked (up to 0.37°) and
-   the rolling ball cannot cross it. Fixed on `loft-warmup` (456a724, "a loop with vertices starts at one"), pushed
-   after #65 was merged, so not on master yet: with it both ends blend by scope at R3 (2.1 s) and R2, and the small
+   the rolling ball cannot cross it. Fixed by #79 (first on `loft-warmup`, pushed
+   after #65 was merged): with it both ends blend by scope at R3 (2.1 s) and R2, and the small
    end alone takes 1.1 s, not 5.7.
 4i. **The base ribs' scoped blend slow since #75 (OPEN, master eed9631).** "Base ribs blended" (R3 by scope on the
    rib seed) went from about 1 s to 5.5-13 s: at one rib, which stands half on the body's corner round, the new
@@ -240,7 +242,7 @@ Commands (from the repository root):
   barrel's top) down to the body's top short of the bearing pedestals, arriving square to its end so its top curves
   down and lands tangent on the body's top; the crank pit, cut later, leaves a cheek of it either side. The connecting
   rod's shank is a loft too: rounded sections growing from the small end to the big end, as such rods are forged
-  (it was a tapered extrude with an I-section recess; one end's blend is open, 4h). (The muffler's
+  (it was a tapered extrude with an I-section recess; blended into both ends by scope). (The muffler's
   bulb stays a revolve: it is round.) Was: casting transitions (hopper to barrel, body to bearing towers) and the muffler's bulb would be lofts.
   *Instead:* drafted extrudes, revolves. To add: a `LoftFeature` beside `SweepFeature` (`Features.cs`), regenerated
   like `DoSweep` (regions from each section sketch, the kernel tool, `Validate`, `ApplyTool`, `State.Tools` so it can

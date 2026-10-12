@@ -122,7 +122,7 @@ static partial class Demos
     static CadDocument HmConRod()
     {
         var d = Doc(("Len", $"{HmRod}"), ("Pin", $"{HmPin}"), ("Wp", $"{HmWp}"), ("BigW", "22"), ("SmallW", "20"), ("SmallD", "26"),
-            ("BlockH", "56"), ("BlockL", "16"), ("W1", "16"), ("W2", "24"), ("T1", "11"), ("T2", "15"), ("Rs1", "5"), ("Rs2", "7"),
+            ("BlockH", "56"), ("BlockL", "16"), ("W1", "16"), ("W2", "20"), ("T1", "11"), ("T2", "15"), ("Rs1", "5"), ("Rs2", "7"),
             ("BoltY", "20"), ("BoltD", "6.4"), ("Rf", "3"), ("Rr", "2"));
         // big end block (x -BlockL..0), centred on the axis
         var b = new Sk(d);
@@ -138,22 +138,14 @@ static partial class Demos
         // (Right planes: sketch x = -z, y = y), blended into both ends
         var s0 = d.AddFeature(new PlaneFeature { Name = "Shank at the small end", Base = PlaneRef.Right, Offset = "-(Len-SmallD/2+4)" });
         var t0 = new Sk(d);
-        var sl0 = HmRoundRect(t0, "T1/2", "W1/2", "Rs1");
+        HmRoundRect(t0, "T1/2", "W1/2", "Rs1");
         var t0s = d.AddFeature(new SketchFeature { Name = "Small section", Plane = new PlaneRef { Feature = s0.Id }, Sketch = t0.S });
         var s1 = d.AddFeature(new PlaneFeature { Name = "Shank at the big end", Base = PlaneRef.Right, Offset = "-BlockL" });
         var t1 = new Sk(d);
         HmRoundRect(t1, "T2/2", "W2/2", "Rs2");
         var t1s = d.AddFeature(new SketchFeature { Name = "Big section", Plane = new PlaneRef { Feature = s1.Id }, Sketch = t1.S });
         var shank = d.AddFeature(new LoftFeature { Name = "Shank", SectionSketchIds = { t0s.Id, t1s.Id } });
-        // blended into the small end all round (one edge picked, the rest follow tangent); the big end's joint is left
-        // sharp: blending it fails in the kernel (docs/hit-and-miss-notes.md)
-        double V(string e) => t0.Eval(e);
-        double sy = V("W1/2") + 0.03, sx = -V("Len") + Math.Sqrt(V("SmallD/2") * V("SmallD/2") - sy * sy);
-        d.AddFeature(new FilletFeature
-        {
-            Name = "Shank into the small end", Radius = "Rf",
-            Edges = { E($"{shank.Id}.S.L{Ids.Name(sl0[0])}", $"{small.Id}.S.C{Ids.Name(se)}", new Vec3(sx, -sy, 0)) },
-        });
+        d.AddFeature(new FilletFeature { Name = "Shank into the ends", Radius = "Rf", Features = { shank.Id } });
         // bores: the crank pin's (half of it here), the wrist pin's
         var h = new Sk(d);
         h.Circle(Sketch.OriginId, "Pin");
