@@ -1498,7 +1498,7 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
             foreach (var s in Sketches)
                 foreach (var e in s.Result.Sketch.Entities)
                 {
-                    if (e is not (Core.Sketching.SkLine or Core.Sketching.SkArc or Core.Sketching.SkCircle)) continue;
+                    if (e is not (Core.Sketching.SkLine or Core.Sketching.SkArc or Core.Sketching.SkCircle or Core.Sketching.SkSpline)) continue;
                     foreach (var (a2, b2) in SketchDrawing.Segments2D(s.Result.Sketch, e))
                     {
                         var (d, wp) = ScreenDistance(s.Result.Frame.ToWorld(a2), s.Result.Frame.ToWorld(b2), x, y);

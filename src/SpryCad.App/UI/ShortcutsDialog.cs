@@ -20,7 +20,7 @@ public static class ShortcutsDialog
     {
         [SketchTool.Line] = "Line", [SketchTool.Rectangle] = "Corner Rectangle", [SketchTool.Circle] = "Circle",
         [SketchTool.CenterArc] = "Centerpoint Arc", [SketchTool.Point] = "Point", [SketchTool.SmartDimension] = "Smart Dimension",
-        [SketchTool.Trim] = "Trim Entities",
+        [SketchTool.Trim] = "Trim Entities", [SketchTool.Spline] = "Spline",
     };
 
     static (string title, Shortcut[] items)[] Sections() => new[]

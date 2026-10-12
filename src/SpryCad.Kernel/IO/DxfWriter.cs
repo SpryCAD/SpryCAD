@@ -29,6 +29,19 @@ public static class DxfWriter
                 }
                 foreach (var s in segs)
                 {
+                    if (s.Spline is { } sp)
+                    {
+                        // (as short lines along it)
+                        var prev = s.A;
+                        for (int i = 1; i <= 64; i++)
+                        {
+                            var q = sp.Curve.Eval(sp.T0 + (sp.T1 - sp.T0) * i / 64);
+                            var next = i == 64 ? s.B : new Vec2(q.X, q.Y);
+                            G(0, "LINE"); G(8, "OUTLINE"); P(10, prev); P(11, next);
+                            prev = next;
+                        }
+                        continue;
+                    }
                     if (s.Arc == null) { G(0, "LINE"); G(8, "OUTLINE"); P(10, s.A); P(11, s.B); continue; }
                     // DXF arcs run counterclockwise from the start angle to the end angle
                     var (a, b) = s.Ccw ? (s.A, s.B) : (s.B, s.A);

@@ -480,6 +480,13 @@ public sealed class Regenerator
 
         // ---- extrude / revolve ----
 
+        /// <summary>Features that build from lines and arcs only (as yet): a spline in the profile says so.</summary>
+        static void NoSplines(IEnumerable<ProfileRegion> regions, string what)
+        {
+            if (regions.Any(r => r.AllLoops().Any(l => l.Verts.Any(v => v.Spline != null))))
+                throw new FeatureException($"{what} does not take splines in its profile yet: use lines and arcs (Extrude and Revolve take splines).");
+        }
+
         double BigDepth(Frame frame)
         {
             var b = State.Bounds;
@@ -628,6 +635,7 @@ public sealed class Regenerator
                 dir = (b - a).Normalized;
             }
             if (regions.Count == 0) throw new FeatureException("The sketch has no closed profile.");
+            NoSplines(regions, "Helical Sweep");
             var pitch = Positive(h.Pitch, "Pitch");
             var turns = Positive(h.Revolutions, "Revolutions");
             if (h.Reverse) dir = -dir;
@@ -833,6 +841,7 @@ public sealed class Regenerator
             var path = GetSketch(s.PathSketchId);
             var regions = prof.Regions;
             if (regions.Count == 0) throw new FeatureException("The profile sketch has no closed profile.");
+            NoSplines(regions, "Sweep");
             var frame = prof.Frame;
             // the profile's centre (in world space): picks where a closed path or a circle starts
             var centre = Vec3.Zero; int n = 0;
@@ -872,7 +881,7 @@ public sealed class Regenerator
             for (int i = 0; i < l.SectionSketchIds.Count; i++)
             {
                 var sk = GetSketch(l.SectionSketchIds[i]);
-                if (sk.Regions.Count > 0) { sections.Add(new(sk.Frame, sk.Regions)); continue; }
+                if (sk.Regions.Count > 0) { NoSplines(sk.Regions, "Loft"); sections.Add(new(sk.Frame, sk.Regions)); continue; }
                 // no closed profile: a single point (the loft's first or last section)
                 var pts = sk.Sketch.Entities.OfType<SkPointEntity>().Where(e => !e.Construction).ToList();
                 if (pts.Count != 1 || sk.Sketch.Entities.Any(e => !e.Construction && e is not SkPointEntity))

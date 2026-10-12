@@ -249,7 +249,7 @@ public static class SketchOps
     }
 
     /// <summary>
-    /// Mirrors entities about a line: copies of lines, arcs, circles and points on the other side, each copied
+    /// Mirrors entities about a line: copies of lines, arcs, circles, splines and points on the other side, each copied
     /// point tied to its original by a symmetric relation (and circles by equal radii), so they stay mirrored.
     /// Points on the mirror line are shared rather than copied (kept on it), so a half profile closes. Returns
     /// the new entities' ids.
@@ -294,6 +294,7 @@ public static class SketchOps
                 SkArc ar => new SkArc { Center = MapPoint(ar.Center), Start = MapPoint(ar.End), End = MapPoint(ar.Start) },
                 SkCircle ci => new SkCircle { Center = MapPoint(ci.Center), R = ci.R },
                 SkPointEntity pe => new SkPointEntity { P = MapPoint(pe.P) },
+                SkSpline sp => new SkSpline { Points = sp.Points.Select(MapPoint).ToList(), Closed = sp.Closed },
                 _ => null!,
             };
             if (copy == null) continue;

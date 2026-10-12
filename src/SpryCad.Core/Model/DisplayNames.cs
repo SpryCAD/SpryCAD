@@ -34,6 +34,7 @@ public static partial class DisplayNames
     {
         SkLine l => l.Construction ? "Centerline" : "Line",
         SkArc => "Arc",
+        SkSpline => "Spline",
         SkCircle => "Circle",
         _ => "Point",
     };

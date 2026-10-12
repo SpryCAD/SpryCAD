@@ -314,6 +314,7 @@ public partial class MainWindow
                 Cmd("tangentarc", "Tangent\nArc", () => SetSketchTool(SketchTool.TangentArc), SketchTool.TangentArc);
                 Cmd("polygon", "Polygon", () => SetSketchTool(SketchTool.Polygon), SketchTool.Polygon);
                 Cmd("slot", "Straight\nSlot", () => SetSketchTool(SketchTool.Slot), SketchTool.Slot);
+                Cmd("spline", "Spline", () => SetSketchTool(SketchTool.Spline), SketchTool.Spline);
                 Cmd("point", "Point", () => SetSketchTool(SketchTool.Point), SketchTool.Point);
                 Sep();
                 Cmd("trim", "Trim\nEntities", () => SetSketchTool(SketchTool.Trim), SketchTool.Trim);
@@ -362,7 +363,7 @@ public partial class MainWindow
     internal static readonly Dictionary<SketchTool, string> SketchToolKeys = new()
     {
         [SketchTool.Line] = "L", [SketchTool.Rectangle] = "R", [SketchTool.Circle] = "C", [SketchTool.CenterArc] = "A",
-        [SketchTool.SmartDimension] = "D", [SketchTool.Point] = "P", [SketchTool.Trim] = "T",
+        [SketchTool.SmartDimension] = "D", [SketchTool.Point] = "P", [SketchTool.Trim] = "T", [SketchTool.Spline] = "S",
     };
 
     /// <summary>One-line descriptions shown under the command name in toolbar tooltips.</summary>

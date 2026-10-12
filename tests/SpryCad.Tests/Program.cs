@@ -241,6 +241,7 @@ static class Program
             KernelTests.Run(t);
             Console.WriteLine("Exact");
             ExactTests.Run(t);
+            SplineTests.Run(t);
             Console.WriteLine("Native");
             NativeTests.Run(t);
             RollingBallTool.Tests(t);

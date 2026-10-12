@@ -21,19 +21,19 @@ public static class Icons
         ["sketch"] = ("M3 21l3.5-1 11-11-2.5-2.5-11 11z M14 5.5l2.5 2.5", "M3 3h8v6H3z"),
         ["exitsketch"] = ("M3 21l3.5-1 11-11-2.5-2.5-11 11z", "M13 17l3 3 6-7"),
         ["extrude"] = ("M3 15l9 4 9-4-9-4z M3 15v3l9 4 9-4v-3", "M12 2v8 M9 5l3-3 3 3"),
-        // cuts: a block with a slot through it, the slot (what is taken away) in the accent; its notch shows in the
-        // outline even small: square for an extruded cut, a round trough for a revolved one, curving for a swept one
-        ["cut"] = ("M2 8L12 3l10 5v7l-10 5-10-5z M2 8l3.5 1.75 M8.5 11.25L12 13l10-5 M12 13v7", "M5.5 9.75v3.5l3 1.5v-3.5 M5.5 9.75l10-5 M8.5 11.25l10-5"),
+        // cuts: each its boss's motif (in the accent) going into one dark block: the extrude arrow down into a pocket,
+        // the revolve axis and its turn, the sweep's profile and path, the loft's funnel, the helix's coil
+        ["cut"] = ("M2 11l10-5 10 5v6l-10 5-10-5z M2 11l10 5 10-5 M12 16v6", "M7 11l5-2.5 5 2.5-5 2.5z M12 0.5v8 M9.5 6l2.5 2.5 2.5-2.5"),
         ["revolve"] = ("M12 2v20 M12 5c5 0 8 3 8 7s-3 7-8 7", "M16 19l-4 0 2-3"),
-        ["cutrevolve"] = ("M2 8L12 3l10 5v7l-10 5-10-5z M2 8l3.5 1.75 M8.5 11.25L12 13l10-5 M12 13v7", "M5.5 9.75c0 4.5 3 6 3 1.5 M5.5 9.75l10-5 M8.5 11.25l10-5"),
+        ["cutrevolve"] = ("M2 11l10-5 10 5v6l-10 5-10-5z M2 11l10 5 10-5 M12 16v6", "M12 1v13 M7 4.5a5 1.8 0 0 0 10 0a5 1.8 0 0 0-7.6-1.7 M9.4 2.8l1.6-1.2 M9.4 2.8l1.8 0.9"),
         ["sweep"] = ("M6 17c0-7 5-12 15-12 M9 20c0-5 4-9 12-9", "M3 18.5a4.5 2 0 1 0 9 0a4.5 2 0 1 0-9 0z"),
         // loft: a square below, a circle above, joined at their sides; the circle (where it ends) in the accent
         ["loft"] = ("M3 18l9 3.5 9-3.5-9-3.5z M3 18L7 6 M21 18L17 6", "M7 6a5 2 0 1 0 10 0a5 2 0 1 0-10 0z"),
-        ["cutloft"] = ("M2 8L12 3l10 5v7l-10 5-10-5z M2 8l3.5 1.75 M8.5 11.25L12 13l10-5 M12 13v7", "M5.5 9.75l1.5 4l2 1-0.5-3.5 M5.5 9.75l10-5 M8.5 11.25l10-5"),
+        ["cutloft"] = ("M2 11l10-5 10 5v6l-10 5-10-5z M2 11l10 5 10-5 M12 16v6", "M5 3.5a7 2 0 1 0 14 0a7 2 0 1 0-14 0z M5 3.5L9.5 11 M19 3.5L14.5 11 M9.5 11a2.5 1 0 1 0 5 0a2.5 1 0 1 0-5 0z"),
         ["helical"] = ("M6 5h12 M6 9h12 M6 13h12 M6 17h12 M6 5l12 4 M6 9l12 4 M6 13l12 4", "M12 2v20"),
-        ["cuthelical"] = ("M6 5h12 M6 9h12 M6 13h12 M6 17h12 M6 5l12 4 M6 9l12 4 M6 13l12 4 M3 21h18", "M12 2v20"),
+        ["cuthelical"] = ("M2 11l10-5 10 5v6l-10 5-10-5z M2 11l10 5 10-5 M12 16v6", "M12 0.5v14 M6 2.5c3-1.6 9-1.6 12 0s-9 1.6-12 3.2 9 1.6 12 3.2-9 1.6-12 3.2"),
         ["thread"] = ("M8 3v18 M16 3v18 M8 5l8 2 M8 9l8 2 M8 13l8 2 M8 17l8 2", "M4 21h16"),
-        ["cutsweep"] = ("M2 8L12 3l10 5v7l-10 5-10-5z M2 8l3.5 1.75 M8.5 11.25L12 13l10-5 M12 13v7", "M5.5 9.75v3.5l3 1.5v-3.5 M5.5 9.75c3-3 4 0 10-5 M8.5 11.25c3-3 4 0 10-5"),
+        ["cutsweep"] = ("M2 11l10-5 10 5v6l-10 5-10-5z M2 11l10 5 10-5 M12 16v6", "M1.5 3.5a2.5 1.2 0 1 0 5 0a2.5 1.2 0 1 0-5 0z M4 4.7c0 4 4 3 6 5.5s1.5 3.3 2 4.8"),
         // fillet / chamfer: a block's corner, the rounded or cut edge (what the command makes) in the accent
         ["fillet"] = ("M3 21V12 M12 3h9v18H3", "M3 12a9 9 0 0 1 9-9"),
         ["chamfer"] = ("M3 21V12 M12 3h9v18H3", "M3 12l9-9"),
@@ -96,6 +96,7 @@ public static class Icons
         ["point"] = ("M12 12m-2.5 0a2.5 2.5 0 1 0 5 0a2.5 2.5 0 1 0-5 0", null),
         ["polygon"] = ("M7 4h10l5 8-5 8H7l-5-8z", null),
         ["slot"] = ("M7 7h10a5 5 0 0 1 0 10H7a5 5 0 0 1 0-10z", "M7 12h10"),
+        ["spline"] = ("M3 18C6 6 10 6 12 12s6 6 9-6", "M2 17h2v2H2z M11 11h2v2h-2z M20 5h2v2h-2z"),
         ["dimension"] = ("M3 6v12 M21 6v12 M3 12h18 M6 9l-3 3 3 3 M18 9l3 3-3 3", null),
         ["trim"] = ("M6 6l12 12 M18 6L6 18", "M3 12h18"),
         // offset entities: a shape and a copy of it a little way out

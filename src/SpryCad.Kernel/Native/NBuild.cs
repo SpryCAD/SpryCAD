@@ -3,16 +3,34 @@ namespace SpryCad.Kernel.Native;
 /// <summary>Builds exact native bodies from 2D profiles.</summary>
 public static class NBuild
 {
-    /// <summary>One exact profile segment (line or circular arc) from A to B, interior on the left.</summary>
-    public sealed record Seg(Vec2 A, Vec2 B, string Name, ArcInfo? Arc, bool Ccw);
+    /// <summary>
+    /// One exact profile segment (line, circular arc, or a piece of a spline from its T0 to its T1) from A to B,
+    /// interior on the left.
+    /// </summary>
+    public sealed record Seg(Vec2 A, Vec2 B, string Name, ArcInfo? Arc, bool Ccw, SplineInfo? Spline = null);
 
-    /// <summary>Converts a (faceted) profile loop back into exact lines and arcs. Full circles become two arcs (seam rule).</summary>
+    /// <summary>
+    /// Converts a (faceted) profile loop back into exact lines, arcs and splines. Full circles become two arcs, a
+    /// spline closing on itself two halves (seam rule).
+    /// </summary>
     public static List<Seg> Segments(ProfileLoop loop)
     {
         var v = loop.Verts;
         int n = v.Count;
         var segs = new List<Seg>();
         if (n == 0) return segs;
+        // pieces of one spline in a row (each starting where the one before ended)
+        static bool Follows(ProfileVertex a, ProfileVertex b) => a.Spline != null && b.Spline != null && a.Name == b.Name
+            && ReferenceEquals(a.Spline.Curve, b.Spline.Curve) && Math.Abs(a.Spline.T1 - b.Spline.T0) < 1e-9;
+        // a spline all the way round: two halves
+        if (v.All(x => x.Spline != null && ReferenceEquals(x.Spline.Curve, v[0].Spline!.Curve) && x.Name == v[0].Name))
+        {
+            double ta = v[0].Spline!.T0, tb = v[^1].Spline!.T1, tm = 0.5 * (ta + tb);
+            var c = v[0].Spline!.Curve; var pm = c.Eval(tm); var mid = new Vec2(pm.X, pm.Y);
+            segs.Add(new Seg(v[0].P, mid, v[0].Name, null, true, new SplineInfo(c, ta, tm)));
+            segs.Add(new Seg(mid, v[0].P, v[0].Name, null, true, new SplineInfo(c, tm, tb)));
+            return segs;
+        }
         // full circle: one arc entity around the whole loop
         if (v.All(x => x.Arc != null && x.Name == v[0].Name && SameArc(x.Arc, v[0].Arc)))
         {
@@ -28,13 +46,22 @@ public static class NBuild
         for (int i = 0; i < n; i++)
         {
             var prev = v[(i - 1 + n) % n];
-            if (!(prev.Name == v[i].Name && SameArc(prev.Arc, v[i].Arc) && v[i].Arc != null)) { start = i; break; }
+            if (!(prev.Name == v[i].Name && SameArc(prev.Arc, v[i].Arc) && v[i].Arc != null) && !Follows(prev, v[i])) { start = i; break; }
         }
         int k = 0;
         while (k < n)
         {
             var i = (start + k) % n;
             var cur = v[i];
+            if (cur.Spline != null)
+            {
+                int run = 1;
+                while (k + run < n && Follows(v[(start + k + run - 1) % n], v[(start + k + run) % n])) run++;
+                var last = v[(start + k + run - 1) % n];
+                segs.Add(new Seg(cur.P, v[(start + k + run) % n].P, cur.Name, null, true, new SplineInfo(cur.Spline.Curve, cur.Spline.T0, last.Spline!.T1)));
+                k += run;
+                continue;
+            }
             if (cur.Arc == null)
             {
                 segs.Add(new Seg(cur.P, v[(i + 1) % n].P, cur.Name, null, true));
@@ -78,6 +105,70 @@ public static class NBuild
         return (new NEdge(circle, t0, t1, from, to), ccw);
     }
 
+    /// <summary>A sketch spline in space: its poles mapped (an affine map from the sketch's x–y: the same curve).</summary>
+    static BSplineCurve Mapped(BSplineCurve c, Func<double, double, Vec3> map) => c with { Poles = c.Poles.Select(q => map(q.X, q.Y)).ToArray() };
+
+    /// <summary>
+    /// An edge along a spline piece from a to b (its parameter t0 to t1): the edge's parameter rises, so a piece run
+    /// backwards is the edge from b to a, used reversed.
+    /// </summary>
+    static (NEdge edge, bool forward) SplineEdge(BSplineCurve c, double t0, double t1, NVertex a, NVertex b)
+    {
+        var curve = new NSpline(c);
+        return t0 <= t1 ? (new NEdge(curve, t0, t1, a, b), true) : (new NEdge(curve, t1, t0, b, a), false);
+    }
+
+    /// <summary>The surface ruled between two curves with the same knots (a spline's side between two caps): degree (p, 1).</summary>
+    static NSurface Ruled(BSplineCurve bottom, BSplineCurve top)
+    {
+        int m = bottom.Poles.Length;
+        var poles = new Vec3[m, 2];
+        for (int i = 0; i < m; i++) { poles[i, 0] = bottom.Poles[i]; poles[i, 1] = top.Poles[i]; }
+        return NSurface.BSpline(new NurbsSurface(bottom.Degree, 1, poles, null, bottom.Knots, new double[] { 0, 0, 1, 1 }));
+    }
+
+    /// <summary>
+    /// The surface a spline sweeps turning about the axis (O, A) through the angle: rational, the curve's degree along
+    /// it, quadratic around (spans of at most a quarter turn: the middle poles out by 1 / cos of half the span, weighted
+    /// by it). One surface for the whole angle: every face of it (half turns at most) lies on it.
+    /// </summary>
+    static NSurface Revolved(BSplineCurve c, Vec3 O, Vec3 A, double angle)
+    {
+        int arcs = Math.Max(1, (int)Math.Ceiling(angle / (Math.PI / 2) - 1e-9));
+        double span = angle / arcs, w = Math.Cos(span / 2);
+        int m = c.Poles.Length, nv = 2 * arcs + 1;
+        var poles = new Vec3[m, nv]; var weights = new double[m, nv];
+        for (int i = 0; i < m; i++)
+        {
+            var q = c.Poles[i];
+            var h = Vec3.Dot(q - O, A);
+            var rho = (q - O) - A * h; var r = rho.Length;
+            var X = r > 1e-12 ? rho / r : A.AnyPerpendicular(); var Y = Vec3.Cross(A, X);
+            for (int k = 0; k < nv; k++)
+            {
+                var phi = span * k / 2;
+                var rr = k % 2 == 1 ? r / w : r;
+                poles[i, k] = O + A * h + (X * Math.Cos(phi) + Y * Math.Sin(phi)) * rr;
+                weights[i, k] = k % 2 == 1 ? w : 1;
+            }
+        }
+        var kv = new List<double> { 0, 0, 0 };
+        for (int a = 1; a < arcs; a++) { kv.Add((double)a / arcs); kv.Add((double)a / arcs); }
+        kv.AddRange(new double[] { 1, 1, 1 });
+        return NSurface.BSpline(new NurbsSurface(c.Degree, 2, poles, weights, c.Knots, kv.ToArray()));
+    }
+
+    /// <summary>A spline piece's direction of travel at its middle, in the sketch.</summary>
+    static Vec2 SplineTangent(Seg s)
+    {
+        s.Spline!.Curve.Derivs(0.5 * (s.Spline.T0 + s.Spline.T1), out _, out var d1, out _);
+        var t = new Vec2(d1.X, d1.Y).Normalized;
+        return s.Spline.T1 >= s.Spline.T0 ? t : -t;
+    }
+
+    /// <summary>A spline piece's middle point in the sketch.</summary>
+    static Vec2 MidOfSpline(Seg s) { var p = s.Spline!.Curve.Eval(0.5 * (s.Spline.T0 + s.Spline.T1)); return new Vec2(p.X, p.Y); }
+
     /// <summary>Exact extrusion of profile regions along the frame normal from z0 to z1.</summary>
     public static NBody Extrude(IEnumerable<ProfileRegion> regions, Frame frame, double z0, double z1, string prefix)
     {
@@ -112,7 +203,12 @@ public static class NBuild
                 {
                     int j = (i + 1) % m;
                     var s = segs[i];
-                    if (s.Arc == null)
+                    if (s.Spline is { } sp)
+                    {
+                        bottom[i] = SplineEdge(Mapped(sp.Curve, (x, y) => frame.ToWorld(x, y, z0)), sp.T0, sp.T1, vb[i], vb[j]);
+                        top[i] = SplineEdge(Mapped(sp.Curve, (x, y) => frame.ToWorld(x, y, z1)), sp.T0, sp.T1, vt[i], vt[j]);
+                    }
+                    else if (s.Arc == null)
                     {
                         var db = vb[j].P - vb[i].P;
                         bottom[i] = (new NEdge(new NLine(vb[i].P, db), 0, db.Length, vb[i], vb[j]), true);
@@ -133,7 +229,13 @@ public static class NBuild
                     var s = segs[i];
                     var name = prefix + ".S." + s.Name;
                     NSurface surf; bool sense;
-                    if (s.Arc == null)
+                    if (s.Spline is { } sp)
+                    {
+                        // (the natural normal is the curve's tangent × the extrusion: outward where the loop runs with the curve)
+                        surf = Ruled(((NSpline)bottom[i].e.Curve).S, ((NSpline)top[i].e.Curve).S);
+                        sense = sp.T1 > sp.T0;
+                    }
+                    else if (s.Arc == null)
                     {
                         var d = (vb[j].P - vb[i].P).Normalized;
                         surf = NSurface.FromPlane(Plane.FromPointNormal(vb[i].P, Vec3.Cross(d, u)));
@@ -150,8 +252,9 @@ public static class NBuild
                         sense = s.Ccw; // convex arcs (ccw with interior on the left) face away from the axis
                     }
                     if (!sideTags.TryGetValue(name, out var tag))
-                        sideTags[name] = tag = new FaceTag(name, s.Arc == null ? SurfaceDef.PlaneDef : surf.Def);
+                        sideTags[name] = tag = new FaceTag(name, s.Arc == null && s.Spline == null ? SurfaceDef.PlaneDef : surf.Def);
                     Vec3? anchor = null;
+                    if (s.Spline != null) { var mid = MidOfSpline(s); anchor = frame.ToWorld(mid.X, mid.Y, (z0 + z1) / 2); }
                     if (s.Arc != null)
                     {
                         var c2 = s.Arc.Center; var a0 = (s.A - c2).Angle; var a1 = (s.B - c2).Angle;
@@ -206,6 +309,8 @@ public static class NBuild
         // a cap's edge along a side: a line between its ends, or the ellipse where the plane crosses the arc's cylinder
         (NEdge e, bool fwd) CapEdge(Plane pl, Seg s, NVertex a, NVertex b)
         {
+            // a spline carried along the normal onto the plane: its poles so (an affine map), the same knots
+            if (s.Spline is { } sp) return SplineEdge(Mapped(sp.Curve, (x, y) => frame.ToWorld(x, y, Z(pl, x, y))), sp.T0, sp.T1, a, b);
             if (s.Arc == null)
             {
                 var d = b.P - a.P;
@@ -268,7 +373,12 @@ public static class NBuild
                     var s = segs[i];
                     var name = prefix + ".S." + s.Name;
                     NSurface surf; bool sense;
-                    if (s.Arc == null)
+                    if (s.Spline is { } sp)
+                    {
+                        surf = Ruled(((NSpline)bottom[i].e.Curve).S, ((NSpline)top[i].e.Curve).S);
+                        sense = sp.T1 > sp.T0;
+                    }
+                    else if (s.Arc == null)
                     {
                         var d = (frame.ToWorld(segs[j].A.X, segs[j].A.Y, 0) - frame.ToWorld(s.A.X, s.A.Y, 0)).Normalized;
                         surf = NSurface.FromPlane(Plane.FromPointNormal(vb[i].P, Vec3.Cross(d, u)));
@@ -285,8 +395,9 @@ public static class NBuild
                         sense = s.Ccw;
                     }
                     if (!sideTags.TryGetValue(name, out var tag))
-                        sideTags[name] = tag = new FaceTag(name, s.Arc == null ? SurfaceDef.PlaneDef : surf.Def);
+                        sideTags[name] = tag = new FaceTag(name, s.Arc == null && s.Spline == null ? SurfaceDef.PlaneDef : surf.Def);
                     Vec3? anchor = null;
+                    if (s.Spline != null) { var mid = MidOfSpline(s); anchor = frame.ToWorld(mid.X, mid.Y, 0.5 * (Z(start, mid.X, mid.Y) + Z(end, mid.X, mid.Y))); }
                     if (s.Arc != null)
                     {
                         var c2 = s.Arc.Center; var a0 = (s.A - c2).Angle; var a1 = (s.B - c2).Angle;
@@ -380,14 +491,15 @@ public static class NBuild
             {
                 var segs = loops[li];
                 // segments lying on the axis are the same edge at every angle
-                if (OnAxis(li, si) && OnAxis(li, (si + 1) % segs.Count) && segs[si].Arc == null) ai = 0;
+                if (OnAxis(li, si) && OnAxis(li, (si + 1) % segs.Count) && segs[si].Arc == null && segs[si].Spline == null) ai = 0;
                 var aik = AngleIndex(ai);
                 if (profEdges.TryGetValue((li, si, aik), out var pe)) return pe;
                 var s = segs[si];
                 var va = V(li, si, aik); var vb = V(li, (si + 1) % segs.Count, aik);
                 var rot = rots[aik];
                 (NEdge, bool) res;
-                if (s.Arc == null)
+                if (s.Spline is { } sp) res = SplineEdge(Mapped(sp.Curve, (x, y) => rot.Point(frame.ToWorld(x, y, 0))), sp.T0, sp.T1, va, vb);
+                else if (s.Arc == null)
                 {
                     var d = vb.P - va.P;
                     res = (new NEdge(new NLine(va.P, d), 0, d.Length, va, vb), true);
@@ -420,11 +532,12 @@ public static class NBuild
                     var pa = frame.ToWorld(s.A); var pb = frame.ToWorld(s.B);
                     double ra = R(pa), rb = R(pb), ha = H(pa), hb = H(pb);
                     bool aOn = ra < onAxis, bOn = rb < onAxis;
-                    if (aOn && bOn && s.Arc == null) continue; // segment on the axis: no surface
+                    if (aOn && bOn && s.Arc == null && s.Spline == null) continue; // segment on the axis: no surface
                     var name = prefix + ".R." + s.Name;
                     NSurface surf;
                     var refDir = radial0;
-                    if (s.Arc != null)
+                    if (s.Spline is { } sp) surf = Revolved(Mapped(sp.Curve, (x, y) => frame.ToWorld(x, y, 0)), O, A, angle);
+                    else if (s.Arc != null)
                     {
                         var c = frame.ToWorld(s.Arc.Center);
                         var rc = R(c); var hc = H(c);
@@ -448,8 +561,9 @@ public static class NBuild
                         surf = new NSurface(new SurfaceDef { Kind = SurfaceKind.Cone, Origin = O + A * ha, Axis = A * sign, RefDir = refDir, Radius = ra, Param2 = half, Segments = SurfaceDef.SegmentsFor(Math.Max(ra, rb)) });
                     }
                     if (!tags.TryGetValue(name, out var tag)) tags[name] = tag = new FaceTag(name, surf.Kind == SurfaceKind.Plane ? SurfaceDef.PlaneDef : surf.Def);
-                    var midP = s.Arc == null ? (pa + pb) * 0.5 : frame.ToWorld(MidOfArc(s));
-                    var tangent = s.Arc == null ? (pb - pa).Normalized : ArcTangent(s, frame);
+                    var midP = s.Spline != null ? frame.ToWorld(MidOfSpline(s)) : s.Arc == null ? (pa + pb) * 0.5 : frame.ToWorld(MidOfArc(s));
+                    var tangent = s.Spline != null ? (frame.ToWorld(MidOfSpline(s) + SplineTangent(s)) - frame.ToWorld(MidOfSpline(s))).Normalized
+                        : s.Arc == null ? (pb - pa).Normalized : ArcTangent(s, frame);
                     var outward = Vec3.Cross(tangent, n);
                     bool sense = surf.Kind == SurfaceKind.Plane || Vec3.Dot(surf.Normal(midP), outward) > 0;
                     for (int k = 0; k < pieces; k++)

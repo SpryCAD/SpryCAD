@@ -80,6 +80,7 @@ public sealed class SkConvertGroup
 [JsonDerivedType(typeof(SkCircle), "circle")]
 [JsonDerivedType(typeof(SkArc), "arc")]
 [JsonDerivedType(typeof(SkPointEntity), "point")]
+[JsonDerivedType(typeof(SkSpline), "spline")]
 public abstract class SkEntity
 {
     public long Id { get; set; }
@@ -126,6 +127,19 @@ public sealed class SkArc : SkEntity
     public override IEnumerable<long> PointIds { get { yield return Center; yield return Start; yield return End; } }
     public override SkEntity Clone() => (SkEntity)MemberwiseClone();
     public override void RemapPoint(long from, long to) { if (Center == from) Center = to; if (Start == from) Start = to; if (End == from) End = to; }
+}
+
+/// <summary>
+/// A spline through its points, in order (cubic; closed: round through the first point again, smooth there too). The
+/// points are ordinary sketch points: relations and dimensions hold them, and the curve follows.
+/// </summary>
+public sealed class SkSpline : SkEntity
+{
+    public List<long> Points { get; set; } = new();
+    public bool Closed { get; set; }
+    public override IEnumerable<long> PointIds => Points;
+    public override SkEntity Clone() { var c = (SkSpline)MemberwiseClone(); c.Points = new List<long>(Points); return c; }
+    public override void RemapPoint(long from, long to) { for (int i = 0; i < Points.Count; i++) if (Points[i] == from) Points[i] = to; }
 }
 
 public sealed class SkPointEntity : SkEntity
@@ -295,6 +309,9 @@ public sealed class Sketch
     }
 
     public double ArcRadius(SkArc a) => Vec2.Distance(P(a.Center), P(a.Start));
+
+    /// <summary>A spline's curve through its points now (in the sketch's x–y, z = 0; parameters 0 to 1); null when its points do not make one.</summary>
+    public BSplineCurve? SplineCurve(SkSpline s) => SplineFit.Through(s.Points.Select(id => { var p = P(id); return new Vec3(p.X, p.Y, 0); }).ToList(), s.Closed);
     public double Radius(SkEntity e) => e switch { SkCircle c => c.R, SkArc a => ArcRadius(a), _ => 0 };
 
     public Sketch Clone() => new()

@@ -22,6 +22,7 @@ public static class ProfileExtractor
         SkLine => "L",
         SkArc => "A",
         SkCircle => "C",
+        SkSpline => "S",
         _ => "E",
     } + Model.Ids.Name(e.Id);
 
@@ -42,6 +43,16 @@ public static class ProfileExtractor
                     if (l.P1 == l.P2 || Vec2.Distance(sk.P(l.P1), sk.P(l.P2)) < 1e-9) break;
                     edges.Add(new GEdge { A = l.P1, B = l.P2, Entity = l, Fwd = { new ProfileVertex(sk.P(l.P1), FaceName(l)) } });
                     break;
+                case SkSpline sp:
+                    {
+                        if (sp.Points.Count < 2 || sk.SplineCurve(sp) is not { } curve) break;
+                        var tmp = new ProfileLoop();
+                        tmp.AddSpline(curve, 0, 1, FaceName(sp));
+                        // closed, or ending where it started: a loop of its own
+                        if (sp.Closed || sp.Points[0] == sp.Points[^1]) { loops.Add(tmp); break; }
+                        edges.Add(new GEdge { A = sp.Points[0], B = sp.Points[^1], Entity = sp, Fwd = tmp.Verts });
+                        break;
+                    }
                 case SkArc a:
                     {
                         var c = sk.P(a.Center); var s = sk.P(a.Start); var en = sk.P(a.End);
@@ -84,6 +95,13 @@ public static class ProfileExtractor
         {
             var e = edges[h / 2];
             if (h % 2 == 0) return e.Fwd;
+            if (e.Fwd[0].Spline != null)
+            {
+                // a spline run backwards: each piece from its end to its start
+                var f = e.Fwd; var back = new List<ProfileVertex>(f.Count);
+                for (int k = f.Count - 1; k >= 0; k--) back.Add(new ProfileVertex(k + 1 < f.Count ? f[k + 1].P : sk.P(e.B), f[k].Name, null, f[k].Spline!.Reversed()));
+                return back;
+            }
             // reversed: vertices from B to A (exclusive of A), keep names
             var pts = e.Fwd.Select(v => v.P).ToList(); pts.Add(sk.P(e.B));
             pts.Reverse();

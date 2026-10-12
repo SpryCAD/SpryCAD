@@ -20,6 +20,7 @@ static class SweepPath
     {
         var sk = path.Sketch; var fr = path.Frame;
         var ents = sk.Entities.Where(e => !e.Construction).ToList();
+        if (ents.Any(e => e is SkSpline)) throw new FeatureException("A sweep path of splines is not supported yet: use lines and arcs.");
         var circles = ents.OfType<SkCircle>().ToList();
         var pieces = Pieces(sk, ents);
         if (circles.Count > 0 && (circles.Count > 1 || pieces.Count > 0))
@@ -158,6 +159,7 @@ static class SweepPath
     {
         var sk = sketch.Sketch;
         var ents = sk.Entities.Where(e => !e.Construction && !e.Dangling).ToList();
+        if (ents.Any(e => e is SkSpline)) throw new FeatureException("A guide curve of splines is not supported yet: use lines and arcs.");
         if (ents.OfType<SkCircle>().Any()) throw new FeatureException("A guide curve cannot be a circle: draw it as arcs (a chain of lines and arcs).");
         var pieces = Pieces(sk, ents);
         if (pieces.Count == 0) throw new FeatureException("The guide sketch has no lines or arcs.");

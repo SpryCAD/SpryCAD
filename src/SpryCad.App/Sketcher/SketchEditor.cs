@@ -16,7 +16,7 @@ namespace SpryCad.App.Sketcher;
 
 public enum SketchTool
 {
-    Select, Line, Centerline, Rectangle, CenterRectangle, Circle, CenterArc, ThreePointArc, TangentArc, Point, Polygon, Slot, SmartDimension, Trim, Fillet,
+    Select, Line, Centerline, Rectangle, CenterRectangle, Circle, CenterArc, ThreePointArc, TangentArc, Point, Polygon, Slot, SmartDimension, Trim, Fillet, Spline,
 }
 
 public enum SkRefKind { Point, Entity, Constraint }
@@ -115,6 +115,7 @@ public sealed partial class SketchEditor : IViewportMode
             SketchTool.ThreePointArc => "3 Point Arc: click start, end, then a point on the arc.",
             SketchTool.TangentArc => "Tangent Arc: click the end of a line or arc, then the arc end point.",
             SketchTool.Point => "Point: click to place points.",
+            SketchTool.Spline => "Spline: click the points it passes through; click the first again to close it. Double-click, Enter or Esc ends it.",
             SketchTool.Polygon => $"Polygon ({PolygonSides} sides): click the center, then a vertex.",
             SketchTool.Slot => "Straight Slot: click the first center, the second center, then the width.",
             SketchTool.SmartDimension => "Smart Dimension: select one or two entities, then click to place the dimension.",
@@ -508,6 +509,7 @@ public sealed partial class SketchEditor : IViewportMode
                 break;
             default:
                 if (p.ClickCount >= 2 && (Tool is SketchTool.Line or SketchTool.Centerline)) { EndChain(); return; }
+                if (p.ClickCount >= 2 && Tool == SketchTool.Spline) { EndSpline(false); return; }
                 DrawClick();
                 break;
         }
@@ -546,6 +548,7 @@ public sealed partial class SketchEditor : IViewportMode
         switch (key)
         {
             case Key.Escape:
+                if (Tool == SketchTool.Spline && _clicks.Count >= 2) { EndSpline(false); return true; }
                 if (_clicks.Count > 0 || _dimPicks.Count > 0) { CancelOperation(); return true; }
                 if (Tool != SketchTool.Select) { SetTool(SketchTool.Select); return true; }
                 if (Selected.Count > 0) { Selected.Clear(); SelectionChanged?.Invoke(); vp.Redraw(); return true; }
@@ -553,6 +556,9 @@ public sealed partial class SketchEditor : IViewportMode
             case Key.Delete:
             case Key.Back:
                 DeleteSelection();
+                return true;
+            case Key.Enter when Tool == SketchTool.Spline && _clicks.Count >= 2:
+                EndSpline(false);
                 return true;
         }
         if (mods == KeyModifiers.None)
@@ -566,6 +572,7 @@ public sealed partial class SketchEditor : IViewportMode
                 Key.D => SketchTool.SmartDimension,
                 Key.P => SketchTool.Point,
                 Key.T => SketchTool.Trim,
+                Key.S => SketchTool.Spline,
                 _ => null,
             };
             if (t != null) { SetTool(t.Value); return true; }
@@ -848,6 +855,9 @@ public sealed partial class SketchEditor : IViewportMode
             case SketchTool.Centerline:
                 LineClick(s);
                 return;
+            case SketchTool.Spline:
+                SplineClick(s);
+                return;
         }
         _clicks.Add(s.P); _clickSnaps.Add(s);
         if (Tool == SketchTool.CenterArc && _clicks.Count == 2) { _arcSweep = 0; _arcLast = s.P; }
@@ -906,6 +916,33 @@ public sealed partial class SketchEditor : IViewportMode
         _chainPoint = b;
         // closing the loop or connecting to existing geometry ends the chain
         if (Tool == SketchTool.Centerline || (s.Kind is SnapKind.Point or SnapKind.Origin && b == _chainStartPoint)) EndChain();
+    }
+
+    /// <summary>A spline's point: on the first again (three points or more), it closes and is made.</summary>
+    void SplineClick(Snap s)
+    {
+        if (_clicks.Count >= 3 && Vec2.Distance(s.P, _clicks[0]) < Px * 8) { EndSpline(true); return; }
+        if (_clicks.Count > 0 && Vec2.Distance(s.P, _clicks[^1]) < Px * 2) return;
+        _clicks.Add(s.P); _clickSnaps.Add(s);
+    }
+
+    /// <summary>Makes the spline through the points clicked (two at least; three closed), each point resolved as a line's ends are.</summary>
+    void EndSpline(bool closed)
+    {
+        if (_clicks.Count >= (closed ? 3 : 2))
+        {
+            Snapshot();
+            var ids = new List<long>();
+            foreach (var sn in _clickSnaps)
+            {
+                var id = ResolvePoint(sn);
+                if (ids.Count == 0 || ids[^1] != id) ids.Add(id);
+            }
+            if (ids.Count >= (closed ? 3 : 2)) Sk.Add(new SkSpline { Points = ids, Closed = closed });
+            Resolve();
+        }
+        _clicks.Clear(); _clickSnaps.Clear();
+        _vp.Redraw();
     }
 
     void EndChain()
@@ -1594,6 +1631,26 @@ public sealed partial class SketchEditor : IViewportMode
             case SketchTool.Rectangle:
                 L(c0, new Vec2(m.X, c0.Y)); L(new Vec2(m.X, c0.Y), m); L(m, new Vec2(c0.X, m.Y)); L(new Vec2(c0.X, m.Y), c0);
                 break;
+            case SketchTool.Spline:
+                {
+                    // the spline through the points so far and the cursor (closed when the cursor is on the first)
+                    bool closing = _clicks.Count >= 3 && Vec2.Distance(m, c0) < px * 8;
+                    var pts = _clicks.Select(q => new Vec3(q.X, q.Y, 0)).ToList();
+                    if (!closing) pts.Add(new Vec3(m.X, m.Y, 0));
+                    if (SplineFit.Through(pts, closing) is { } curve)
+                    {
+                        int n = Math.Max(24, 24 * (curve.Poles.Length - curve.Degree));
+                        Vec2? prev = null;
+                        for (int i = 0; i <= n; i++)
+                        {
+                            var q = curve.Eval((double)i / n); var p2 = new Vec2(q.X, q.Y);
+                            if (prev != null) L(prev.Value, p2);
+                            prev = p2;
+                        }
+                    }
+                    foreach (var q in _clicks) SketchDrawing.PointMark(g, f, q, pc, px, 2.2);
+                    break;
+                }
             case SketchTool.CenterRectangle:
                 {
                     var d = m - c0;

@@ -18,6 +18,18 @@ public static class SketchDrawing
         for (int i = 0; i <= n; i++) yield return c + Vec2.FromAngle(a0 + (a1 - a0) * i / n, r);
     }
 
+    /// <summary>Points along a spline (24 a span), start to end; its fit points joined where they make no curve yet (fewer than two, three closed).</summary>
+    public static IEnumerable<Vec2> SplinePoints(Sketch sk, SkSpline sp)
+    {
+        if (sk.SplineCurve(sp) is not { } c)
+        {
+            foreach (var id in sp.Points) yield return sk.P(id);
+            yield break;
+        }
+        int n = Math.Max(24, 24 * (c.Poles.Length - c.Degree));
+        for (int i = 0; i <= n; i++) { var q = c.Eval((double)i / n); yield return new Vec2(q.X, q.Y); }
+    }
+
     /// <summary>2D polyline segments of an entity.</summary>
     public static IEnumerable<(Vec2 a, Vec2 b)> Segments2D(Sketch sk, SkEntity e)
     {
@@ -30,6 +42,12 @@ public static class SketchDrawing
                 {
                     Vec2? prev = null;
                     foreach (var p in ArcPoints(sk.P(c.Center), c.R, 0, 2 * Math.PI, 48)) { if (prev != null) yield return (prev.Value, p); prev = p; }
+                    break;
+                }
+            case SkSpline sp:
+                {
+                    Vec2? prev = null;
+                    foreach (var p in SplinePoints(sk, sp)) { if (prev != null) yield return (prev.Value, p); prev = p; }
                     break;
                 }
             case SkArc a:
