@@ -420,13 +420,19 @@ public static class DirectBlend
                 // other geometry of this face close to the blend: the boolean decides
                 var toolBox = Box3.Empty;
                 foreach (var t in gt) toolBox.Add(t.Bounds());
-                var toolPts = new HashSet<NVertex>(kept.Where(x => x.tool).SelectMany(x => new[] { x.e.V0, x.e.V1 }), Ref);
+                // (one ending on the tool's boundary too: a barrel coming out through a face the blended corner is on, its
+                // curve through the strip. Inside by more than the boundary's sampling: an edge the strip was cut back
+                // to lies along it)
+                var margin = Math.Max(10 * pad, 0.02 * tool.Size);
                 foreach (var x in kept)
-                    if (!x.tool && !toolPts.Contains(x.e.V0) && !toolPts.Contains(x.e.V1) && x.e.Bounds().Overlaps(toolBox, -pad)
-                        && gt.Any(t => Crosses(x.e, t, tool.Size / 4, tol)))
+                {
+                    // (not shrunk: a face square to an axis has no thickness along it)
+                    if (x.tool || !x.e.Bounds().Overlaps(toolBox, tol)) continue;
+                    if (gt.Any(t => Crosses(x.e, t, tool.Size / 4, margin)))
                     {
                         why = $"other edges of {F.Tag.Name} run into the blend"; return null;
                     }
+                }
 
                 var nf = new NFace(F.Surface, F.Sense, F.Tag, F.Anchor);
                 foreach (var l in loops)

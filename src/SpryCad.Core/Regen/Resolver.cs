@@ -198,6 +198,23 @@ public static class Resolver
                 }
             if (best != null) return (bb!, best);
         }
+        // 4) one of the faces is gone, merged into a neighbour in its plane (a side made flush with the body's): the
+        // other's edge nearest the hint, near against its length
+        {
+            var names = new HashSet<string>(bodies.SelectMany(b => b.Solid.Native!.Faces.Select(f => f.Tag.Name)));
+            var kept = names.Contains(r.A) && !names.Contains(r.B) ? r.A : names.Contains(r.B) && !names.Contains(r.A) ? r.B : null;
+            if (kept == null) return null;
+            Body? bb = null; Kernel.Native.NEdge? best = null; double bestD = double.MaxValue, bestL = 0;
+            foreach (var b in bodies)
+                foreach (var e in b.Solid.Native!.Edges)
+                {
+                    if (e.Uses.Count != 2 || !e.Uses.Any(u => u.Face.Tag.Name == kept)) continue;
+                    var pts = e.Samples(1e-3);
+                    var d = DistanceToPolyline(pts, r.Hint);
+                    if (d < bestD) { bestD = d; bb = b; best = e; bestL = pts.Zip(pts.Skip(1), Vec3.Distance).Sum(); }
+                }
+            if (best != null && bestD < 0.1 * bestL) return (bb!, best);
+        }
         return null;
     }
 
