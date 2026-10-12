@@ -47,49 +47,8 @@ public static class NativeBlend
             Debug?.Invoke($"mixed blends: {first.Count} first, then {rest.Count} edges");
             return rest.Count == 0 ? nb1 : Apply(nb1, rest, size, fillet, prefix, errors, overflow, problemEdges, applied, chamfer, false, trimmedOut);
         }
-        // (the ball pivoting round convex corners: where that leaves errors, the fillets mitred there instead, as before,
-        // when that does better)
-        var errs1 = new List<string>(); var probs1 = problemEdges == null ? null : new List<Vec3[]>(); var app1 = applied == null ? null : new List<(Solid, bool)>();
-        int used = _pivotsUsed;
-        var failedBefore = _pivotFailed;
-        _pivotFailed = false;
-        Solid r1;
-        bool pivotFailed;
-        try { r1 = ApplyOne(body, edges, size, fillet, prefix, errs1, overflow, probs1, app1, chamfer, buildOnly, trimmedOut); }
-        finally { pivotFailed = _pivotFailed; _pivotFailed = failedBefore; }
-        // (applied directly, a pivot's tool can fail where by boolean it does not: so, before mitring)
-        if (!pivotFailed && errs1.Count > 0 && _pivotsUsed > used && !_noPivots && !_noDirect && DirectBlend.Enabled && !buildOnly)
-        {
-            var errsB = new List<string>(); var probsB = problemEdges == null ? null : new List<Vec3[]>(); var appB = applied == null ? null : new List<(Solid, bool)>();
-            _noDirect = true; _pivotFailed = false;
-            Solid rB; bool failedB;
-            try { rB = ApplyOne(body, edges, size, fillet, prefix, errsB, overflow, probsB, appB, chamfer, buildOnly, trimmedOut); }
-            finally { _noDirect = false; failedB = _pivotFailed; _pivotFailed = failedBefore; }
-            Debug?.Invoke($"pivots direct: {errs1.Count} error(s); by boolean: {errsB.Count}{(failedB ? ", not glued" : "")}");
-            if (!failedB && errsB.Count < errs1.Count) (r1, errs1, probs1, app1) = (rB, errsB, probsB, appB);
-        }
-        if ((errs1.Count > 0 || pivotFailed) && _pivotsUsed > used && !_noPivots)
-        {
-            var errs2 = new List<string>(); var probs2 = problemEdges == null ? null : new List<Vec3[]>(); var app2 = applied == null ? null : new List<(Solid, bool)>();
-            _noPivots = true;
-            Solid r2;
-            try { r2 = ApplyOne(body, edges, size, fillet, prefix, errs2, overflow, probs2, app2, chamfer, buildOnly, trimmedOut); }
-            finally { _noPivots = false; }
-            Debug?.Invoke($"pivots: {errs1.Count} error(s) ({string.Join("; ", errs1)}); mitred: {errs2.Count}");
-            // (a pivot not glued: that run is incomplete)
-            if (pivotFailed || errs2.Count < errs1.Count) (r1, errs1, probs1, app1) = (r2, errs2, probs2, app2);
-        }
-        errors.AddRange(errs1);
-        if (probs1 != null) problemEdges!.AddRange(probs1);
-        if (app1 != null) applied!.AddRange(app1);
-        return r1;
+        return ApplyOne(body, edges, size, fillet, prefix, errors, overflow, problemEdges, applied, chamfer, buildOnly, trimmedOut);
     }
-
-    // (per thread: pattern instances are built in parallel)
-    [ThreadStatic] static int _pivotsUsed;
-    [ThreadStatic] static bool _pivotFailed;
-    [ThreadStatic] static bool _noPivots;
-    [ThreadStatic] static bool _noDirect;
 
     /// <summary>Whether three or more of the edges, of one kind (convex or concave), meet at a vertex.</summary>
     static bool Corner3(IReadOnlyList<NEdge> edges)
@@ -170,21 +129,6 @@ public static class NativeBlend
         bool overflow, List<Vec3[]>? problemEdges, List<(Solid tool, bool cut)>? applied, ChamferSize? chamfer,
         bool buildOnly, System.Runtime.CompilerServices.StrongBox<bool>? trimmedOut)
     {
-        // (the corners' pivots, and which tool carries each, for this run only)
-        var saved = (_pivoted, _patches);
-        _pivoted = new HashSet<NVertex>(ReferenceEqualityComparer.Instance);
-        _patches = new Dictionary<NVertex, RoundCornerCut.Built>(ReferenceEqualityComparer.Instance);
-        try { return ApplyRun(body, edges, size, fillet, prefix, errors, overflow, problemEdges, applied, chamfer, buildOnly, trimmedOut); }
-        finally { (_pivoted, _patches) = saved; }
-    }
-
-    [ThreadStatic] static HashSet<NVertex>? _pivoted;
-    [ThreadStatic] static Dictionary<NVertex, RoundCornerCut.Built>? _patches;
-
-    static Solid ApplyRun(Solid body, IReadOnlyList<NEdge> edges, double size, bool fillet, string prefix, List<string> errors,
-        bool overflow, List<Vec3[]>? problemEdges, List<(Solid tool, bool cut)>? applied, ChamferSize? chamfer,
-        bool buildOnly, System.Runtime.CompilerServices.StrongBox<bool>? trimmedOut)
-    {
         body.Native!.Link();
         var ch = chamfer ?? ChamferSize.Equal(size);
         // an unequal chamfer is measured on the same face all along a chain (e.g. the top face around a box):
@@ -209,7 +153,7 @@ public static class NativeBlend
         var entries = new List<(List<Solid> tools, bool convex, Solid? strip, string name, List<NEdge> group, bool trimmed)>();
         // failures, reported once the chains below have had their second try
         var fails = new List<(List<NEdge> group, string msg)>();
-        bool direct = DirectBlend.Enabled && !buildOnly && !_noDirect;
+        bool direct = DirectBlend.Enabled && !buildOnly;
         int i = 0;
         foreach (var e in edges)
         {
@@ -524,10 +468,8 @@ public static class NativeBlend
     static RollingBall.Result Ball(List<NEdge> chain, double size, string name, IReadOnlyList<NEdge> selected)
     {
         var rb = RollingBall.Build(chain, size, name, OnFaces);
-        if (rb.Error != null || rb.Tool?.Native == null) return rb;
-        // (only a tool running past its faces: one that fits ends where it should, but for the ball pivoting round a
-        // corner on a round there)
-        if (rb.Fits) return PivotEnds(rb, chain, size, name, selected);
+        // (only a tool running past its faces: one that fits ends where it should)
+        if (rb.Error != null || rb.Tool?.Native == null || rb.Fits) return rb;
         var cuts = new List<(Vec3 v, Plane pl)>();
         var corners = new List<RoundCornerCut>();
         var sel = selected as IReadOnlyCollection<NEdge> ?? selected.ToList();
@@ -550,15 +492,8 @@ public static class NativeBlend
             foreach (var (v, pl) in cuts) t = TrimNear(t, pl, v, run + 2 * size);
             // (a run-on still running past its faces is cut back again, or given up for its whole tangent chain's:
             // cut on the mitre plane, as cheaper)
-            // a fitting one: the ball pivoting round the corner edge (the fillet ended where it starts to, the first
-            // of the two carrying the pivot's tool), else cut to the other fillet
-            double added = 0; var carried = new List<NVertex>();
-            foreach (var c in corners)
-                if (!on.Fits) t = c.TrimOnMiter(t);
-                else if (c.Patch() is { } patch) (t, added) = Pivot(t, c, patch, run + 2 * size, added, carried);
-                else t = c.Trim(t);
-            // (less the pivots' tools joined to it)
-            double v0 = rb.Tool.Volume(), v1 = t.Volume() - added, vOn = on.Tool.Volume();
+            foreach (var c in corners) t = on.Fits ? c.Trim(t) : c.TrimOnMiter(t);
+            double v0 = rb.Tool.Volume(), v1 = t.Volume(), vOn = on.Tool.Volume();
             // (cut back at all: an intersection the boolean misses leaves the run-on whole, as if nothing were there)
             if (t.IsEmpty || t.Native == null || t.Native.Validate() != null || Math.Abs(v1 - v0) > 0.25 * Math.Abs(v0)
                 || Math.Abs(vOn - v1) < 1e-3 * Math.Abs(vOn - v0))
@@ -568,7 +503,6 @@ public static class NativeBlend
             }
             Debug?.Invoke($"rolling ball {name}: {cuts.Count + corners.Count} end(s) cut back ({(rb.Fits ? "fits" : "overflows")} -> {(on.Fits ? "fits" : "overflows")})");
             // (fitting but for what was cut off)
-            Carry(carried);
             return rb with { Tool = t, Fits = on.Fits };
         }
         catch (Exception ex) when (ex is InvalidOperationException or NBooleanException)
@@ -591,32 +525,11 @@ public static class NativeBlend
     {
         readonly NVertex _v; readonly NEdge _g; readonly Plane _next, _miter;
         readonly double _size; readonly IReadOnlyList<NEdge> _selected; readonly string _name;
-        readonly NEdge _own, _corner; readonly NFace _shared, _ownFace, _nextFace;
-        public RoundCornerCut(NVertex v, NEdge g, Plane next, Plane miter, double size, IReadOnlyList<NEdge> selected, string name,
-            NEdge own, NEdge corner, NFace shared, NFace ownFace, NFace nextFace)
+        public RoundCornerCut(NVertex v, NEdge g, Plane next, Plane miter, double size, IReadOnlyList<NEdge> selected, string name)
         {
             _v = v; _g = g; _next = next; _miter = miter; _size = size; _selected = selected; _name = name;
-            _own = own; _corner = corner; _shared = shared; _ownFace = ownFace; _nextFace = nextFace;
         }
         double Reach => 5 * _size;
-        public NVertex V => _v;
-
-        /// <summary>The ball pivoting round the corner edge (<see cref="CornerPatch"/>); null where it does not.</summary>
-        public CornerPatch.Result? Patch()
-        {
-            // (built once for the corner, by the first of its two fillets: the other ends on the same plane)
-            if (_patches != null && _patches.TryGetValue(_v, out var known))
-                    return known.Result is { } k ? ReferenceEquals(known.Own, _own) ? k : k.Swapped : null;
-            var along = ReferenceEquals(_corner.V0, _v) ? _corner.Curve.Deriv(_corner.T0) : -_corner.Curve.Deriv(_corner.T1);
-            CornerPatch.Result? p;
-            using (Prof.Time("blend.corner.patch"))
-                p = CornerPatch.Build(_v, along, Vec3.Distance(_corner.V0.P, _corner.V1.P), _own, _g, _shared, _ownFace, _nextFace, _size, _name + ".C");
-            if (_patches != null) _patches[_v] = new Built(p, _own);
-            if (p != null) _pivotsUsed++;
-            return p;
-        }
-
-        public sealed record Built(CornerPatch.Result? Result, NEdge Own);
 
         /// <summary>Whether p lies beyond the next face, near the corner.</summary>
         public bool Beyond(Vec3 p) => _next.Distance(p) > -1e-9 && Vec3.Distance(p, _v.P) < Reach;
@@ -636,20 +549,7 @@ public static class NativeBlend
             var n = _next.Normal; var x = n.AnyPerpendicular(); var y = Vec3.Cross(n, x);
             var rect = ProfileLoop.Polygon(new[] { new Vec2(-Reach, -Reach), new Vec2(Reach, -Reach), new Vec2(Reach, Reach), new Vec2(-Reach, Reach) }, "corner");
             var beyond = Builders.Extrude(new[] { new ProfileRegion(rect) }, new Frame(_next.Project(_v.P), x, y, n), 0, Reach, "corner");
-            // (a boolean that fails or leaves the tool invalid: on the mitre plane, as without the other fillet; the
-            // cut back at the chain's other end, if any, kept)
-            using (Prof.Time("blend.corner.cut"))
-                try
-                {
-                    var cut = Csg.Subtract(tool, Csg.Subtract(beyond, other.Tool));
-                    if (!cut.IsEmpty && cut.Native != null && cut.Native.Validate() == null) return cut;
-                    Debug?.Invoke($"round corner at {_v.P}: cut to the other fillet {(cut.Native == null ? "faceted" : cut.Native.Validate() ?? "empty")}, on the mitre plane instead");
-                }
-                catch (Exception ex) when (ex is InvalidOperationException or NBooleanException)
-                {
-                    Debug?.Invoke($"round corner at {_v.P}: cut to the other fillet failed ({ex.Message}), on the mitre plane instead");
-                }
-            return TrimOnMiter(tool);
+            using (Prof.Time("blend.corner.cut")) return Csg.Subtract(tool, Csg.Subtract(beyond, other.Tool));
         }
     }
 
@@ -660,7 +560,6 @@ public static class NativeBlend
     /// </summary>
     static RoundCornerCut? RoundCorner(NVertex v, NFace fa, NFace fb, IEnumerable<NEdge> blended, IReadOnlyCollection<NEdge> selected, Plane miter, double size, string name)
     {
-        if (_noPivots || _pivotFailed) return null;
         NEdge? g = null; int count = 0;
         foreach (var face in new[] { fa, fb })
             foreach (var c in face.Coedges)
@@ -671,103 +570,13 @@ public static class NativeBlend
             }
         if (count != 1 || g!.Uses.Count != 2) return null;
         var shared = g.Uses.Any(u => ReferenceEquals(u.Face, fa)) ? fa : fb;
+        if (shared.Surface.Kind == SurfaceKind.Plane) return null;
         var own = ReferenceEquals(shared, fa) ? fb : fa;
         var next = g.Uses.Select(u => u.Face).First(f => !ReferenceEquals(f, shared));
         if (own.Surface.Kind != SurfaceKind.Plane || next.Surface.Kind != SurfaceKind.Plane || ReferenceEquals(own, next)) return null;
-        if (CornerEdgeOf(v, shared, new[] { fa, fb, next }, blended, selected) is not { } corner || corner.Curve is not NLine || corner.Uses.Count != 2) return null;
-        // (a convex corner edge, what stands on the shared face sticking out: the ball pivots round it; at a concave one,
-        // a socket's inside corner, the fillets meet in a mitre)
-        {
-            var co = corner.Uses.FirstOrDefault(u => ReferenceEquals(u.Face, own)); var cn = corner.Uses.FirstOrDefault(u => ReferenceEquals(u.Face, next));
-            if (co == null || cn == null) return null;
-            var tm = 0.5 * (corner.T0 + corner.T1); var pm = corner.Curve.Eval(tm);
-            var uO = Vec3.Cross(Outward(own, pm), Tangent(co, tm));
-            if (Vec3.Dot(uO, Outward(next, pm)) >= 0) return null;
-        }
+        if (CornerEdge(v, shared, new[] { fa, fb, next }, blended, selected) is null) return null;
         if (Math.Abs(Vec3.Dot(Outward(own, v.P), Outward(next, v.P))) > 0.999) return null;
-        // (concave: the ball outside the faces, rolling round what stands on the shared one)
-        if (Wedge(v, shared, own, blended) is not { } w || Vec3.Dot(w, Outward(shared, v.P) + Outward(own, v.P)) <= 0) return null;
-        var ownEdge = blended.FirstOrDefault(e => (ReferenceEquals(e.V0, v) || ReferenceEquals(e.V1, v)) && e.Uses.Any(u => ReferenceEquals(u.Face, own)) && e.Uses.Any(u => ReferenceEquals(u.Face, shared)));
-        if (ownEdge == null) return null;
-        return new RoundCornerCut(v, g, Plane.FromPointNormal(v.P, Outward(next, v.P)), miter, size, selected as IReadOnlyList<NEdge> ?? selected.ToList(), name,
-            ownEdge, corner, shared, own, next);
-    }
-
-    /// <summary>
-    /// A fitting rolling-ball tool, its ends where the ball pivots round a corner on a round (<see cref="Pivot"/>):
-    /// as it is where none does or the pivot cannot be built.
-    /// </summary>
-    static RollingBall.Result PivotEnds(RollingBall.Result rb, List<NEdge> chain, double size, string name, IReadOnlyList<NEdge> selected)
-    {
-        var sel = selected as IReadOnlyCollection<NEdge> ?? selected.ToList();
-        var t = rb.Tool!;
-        var old = Csg.NoFallback;
-        Csg.NoFallback = true;
-        try
-        {
-            foreach (var e in chain)
-                foreach (var v in new[] { e.V0, e.V1 })
-                {
-                    // (an end of the chain: no other edge of it there)
-                    if (chain.Count(x => ReferenceEquals(x.V0, v) || ReferenceEquals(x.V1, v)) != 1 || e.Uses.Count != 2) continue;
-                    var dirOut = (ReferenceEquals(v, e.V1) ? e.Curve.Deriv(e.T1) : -e.Curve.Deriv(e.T0)).Normalized;
-                    var (fa, fb) = Faces(e);
-                    if (EndPlane(v, dirOut, fa, fb, chain, sel) is not { } pl || RoundCorner(v, fa, fb, chain, sel, pl, size, name) is not { } rc || rc.Patch() is not { } patch) continue;
-                    var carried = new List<NVertex>();
-                    var (cut, _) = Pivot(t, rc, patch, 5 * size, 0, carried, runOn: false);
-                    if (cut.IsEmpty || cut.Native == null || cut.Native.Validate() != null) { Debug?.Invoke($"rolling ball {name}: no pivot at {v.P} ({cut.Native?.Validate() ?? "faceted"})"); continue; }
-                    t = cut;
-                    Carry(carried);
-                }
-        }
-        catch (Exception ex) when (ex is InvalidOperationException or NBooleanException) { Debug?.Invoke($"rolling ball {name}: no pivot ({ex.Message})"); return rb; }
-        finally { Csg.NoFallback = old; }
-        return ReferenceEquals(t, rb.Tool) ? rb : rb with { Tool = t };
-    }
-
-    /// <summary>
-    /// A fillet's tool ended where the ball starts to pivot round the corner (<see cref="CornerPatch"/>), the pivot's
-    /// tool joined to it unless the other fillet's carries it.
-    /// </summary>
-    static (Solid tool, double added) Pivot(Solid tool, RoundCornerCut c, CornerPatch.Result patch, double reach, double added, List<NVertex> carried, bool runOn = true)
-    {
-        // (a tool not run on that the corner takes on from v's joint: as it is)
-        Solid t;
-        using (Prof.Time("blend.pivot.cut")) t = !runOn && patch.OwnAtJoint ? tool : TrimNear(tool, patch.EndOwn, c.V.P, reach);
-        bool taken;
-        taken = _pivoted?.Contains(c.V) == true;
-        if (taken) return (t, added);
-        // (a union that fails leaves the pivot to the other fillet's tool)
-        try
-        {
-            Solid u;
-            using (Prof.Time("blend.pivot.join")) u = JoinPivot(t, patch.Tool);
-            if (!u.IsEmpty && u.Native != null && u.Native.Validate() == null)
-            {
-                carried.Add(c.V);
-                return (u, added + patch.Tool.Volume());
-            }
-            Debug?.Invoke($"pivot at {c.V.P}: not joined to this tool ({u.Native?.Validate() ?? "faceted"})");
-        }
-        catch (Exception ex) when (ex is InvalidOperationException or NBooleanException) { Debug?.Invoke($"pivot at {c.V.P}: not joined to this tool ({ex.Message})"); }
-        return (t, added);
-    }
-
-    /// <summary>A fillet's tool and a pivot's joined: glued where their ends match (as built), else by boolean.</summary>
-    static Solid JoinPivot(Solid tool, Solid pivot)
-    {
-        if (DirectBlend.Glue(new List<DirectBlend.Tool> { new(tool, false, "tool", 0), new(pivot, false, "pivot", 0) }, out var why) is { } one) return one.Strip;
-        // (not glued, the booleans joining them and the body are slow and fail often: the feature is built mitred,
-        // no pivot built from here on in this run, which is thrown away)
-        Debug?.Invoke($"pivot not glued ({why}): the feature mitred");
-        _pivotFailed = true;
-        return tool;
-    }
-
-    /// <summary>The corners whose pivot a tool now kept carries.</summary>
-    static void Carry(List<NVertex> carried)
-    {
-        if (_pivoted != null) foreach (var v in carried) _pivoted.Add(v);
+        return new RoundCornerCut(v, g, Plane.FromPointNormal(v.P, Outward(next, v.P)), miter, size, selected as IReadOnlyList<NEdge> ?? selected.ToList(), name);
     }
 
     /// <summary>The tool less what lies on the negative side of the plane within reach of p (a box about p).</summary>
@@ -902,20 +711,8 @@ public static class NativeBlend
         // that face on one side, into the material beyond it, and falls short on the other. The tool is cut back to
         // the face, and an extension past the end, also cut back to it, fills the other side
         var ext = 3 * Math.Max(size, Math.Max(tlA, tlB));
-        // (a fillet turning round a corner onto the next: ended where the ball starts to pivot round it)
-        var pivots = new List<(RoundCornerCut c, CornerPatch.Result patch)>();
-        EndCut? End(NVertex v, Vec3 dirOut)
-        {
-            if (fillet && EndPlane(v, dirOut, cA.Face, cB.Face, new[] { e }, selected) is { } pl
-                && RoundCorner(v, cA.Face, cB.Face, new[] { e }, selected, pl, size, name) is { } rc && rc.Patch() is { } patch)
-            {
-                pivots.Add((rc, patch));
-                return new EndCut(patch.EndOwn);
-            }
-            return EndCutAt(v, dirOut, cA.Face, cB.Face, new[] { e }, selected);
-        }
-        var p0 = End(cA.Start, -t);
-        var p1 = End(cA.End, t);
+        var p0 = EndCutAt(cA.Start, -t, cA.Face, cB.Face, new[] { e }, selected);
+        var p1 = EndCutAt(cA.End, t, cA.Face, cB.Face, new[] { e }, selected);
         // (contact points the ends' faces cut off are not the blend's)
         bool Cut(Vec3 x) => p0 != null && p0.Distance(x) < 0 || p1 != null && p1.Distance(x) < 0;
         bool fits = true;
@@ -942,12 +739,6 @@ public static class NativeBlend
             if (p1 != null) sol = p1.Trim(sol);
             return sol;
         }
-        // (ending where the ball pivots round a corner: bounded by the faces, its end the pivot's own section; reaching
-        // past them, its end stands beside the pivot's in slivers (along the other edge, on a drafted face) and the union
-        // fails)
-        ProfileLoop? sl0 = null;
-        if (pivots.Count > 0 && EdgeBlend.Profile2D(P(uA), P(uB), P(nA), P(nB), Vec2.Zero, dA, fillet, convex, dB, atCorner: true) is { } atJoint)
-            loop = sl0 = atJoint;
         var tools = new List<Solid> { Between(loop, true) };
         tools.RemoveAll(x => x.IsEmpty);
         // the tool bounded by the faces (applied directly, or cut back where it runs past them), its ends at an angle on
@@ -957,22 +748,6 @@ public static class NativeBlend
         {
             strip = Between(sl, true);
             if (strip.IsEmpty || strip.Native == null) strip = null;
-        }
-        // the pivots' tools, unless the other fillets' carry them
-        foreach (var (c, patch) in pivots)
-        {
-            bool taken;
-            taken = _pivoted?.Contains(c.V) == true;
-            if (taken) continue;
-            // (the tool bounded by the faces at a pivot: the strip itself, joined to the pivot as one)
-            if (tools.Count == 1 && strip != null && ReferenceEquals(loop, sl0))
-                try { using (Prof.Time("blend.pivot.strip")) tools[0] = JoinPivot(tools[0], patch.Tool); }
-                catch (Exception ex) when (ex is InvalidOperationException or NBooleanException) { tools.Add(patch.Tool); }
-            else tools.Add(patch.Tool);
-            if (strip != null)
-                try { using (Prof.Time("blend.pivot.strip")) strip = JoinPivot(strip, patch.Tool); if (strip.Native == null || strip.Native.Validate() != null) strip = null; }
-                catch (Exception ex) when (ex is InvalidOperationException or NBooleanException) { strip = null; }
-            Carry(new List<NVertex> { c.V });
         }
         return (tools, convex, fits, strip);
     }
@@ -1360,18 +1135,14 @@ public static class NativeBlend
     /// nor selected: the corner two blends on the shared face turn round. Null when there is not exactly one.
     /// </summary>
     static Vec3? CornerEdge(NVertex v, NFace shared, IEnumerable<NFace> faces, IEnumerable<NEdge> blended, IReadOnlyCollection<NEdge> selected)
-        => CornerEdgeOf(v, shared, faces, blended, selected) is { } u ? (ReferenceEquals(u.V0, v) ? u.Curve.Deriv(u.T0) : -u.Curve.Deriv(u.T1)).Normalized : null;
-
-    /// <summary>The edge <see cref="CornerEdge"/> gives the direction of.</summary>
-    static NEdge? CornerEdgeOf(NVertex v, NFace shared, IEnumerable<NFace> faces, IEnumerable<NEdge> blended, IReadOnlyCollection<NEdge> selected)
     {
-        NEdge? found = null; int count = 0;
+        Vec3? found = null; int count = 0;
         var seen = new HashSet<NEdge>(ReferenceEqualityComparer.Instance);
         foreach (var u in faces.SelectMany(f => f.Coedges).Select(c => c.Edge).Where(x => ReferenceEquals(x.V0, v) || ReferenceEquals(x.V1, v)))
         {
             if (!seen.Add(u) || blended.Contains(u) || selected.Contains(u) || IsSeam(u) || u.Uses.Any(w => ReferenceEquals(w.Face, shared))) continue;
             count++;
-            found = u;
+            found = (ReferenceEquals(u.V0, v) ? u.Curve.Deriv(u.T0) : -u.Curve.Deriv(u.T1)).Normalized;
         }
         return count == 1 ? found : null;
     }
