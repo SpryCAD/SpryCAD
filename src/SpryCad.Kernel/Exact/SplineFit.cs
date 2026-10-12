@@ -13,8 +13,11 @@ public static class SplineFit
     /// <param name="endDir">Open splines: the direction it arrives at the last point in, or null.</param>
     /// <param name="exactEnds">The directions are the derivatives themselves (their lengths kept), not just directions.</param>
     /// <param name="parameters">Open splines: the points' parameters (0 first, 1 last, rising), else centripetal ones.</param>
+    /// <param name="startCurv">Open splines: its curvature leaving the first point (the curvature vector: towards the centre of
+    /// curvature, 1 / radius long; zero for straight), with startDir; or null.</param>
+    /// <param name="endCurv">Likewise arriving at the last.</param>
     public static BSplineCurve? Through(IReadOnlyList<Vec3> points, bool closed, Vec3? startDir = null, Vec3? endDir = null, bool exactEnds = false,
-        IReadOnlyList<double>? parameters = null)
+        IReadOnlyList<double>? parameters = null, Vec3? startCurv = null, Vec3? endCurv = null)
     {
         var pts = new List<Vec3>();
         var given = new List<double>();
@@ -44,7 +47,48 @@ public static class SplineFit
         free.Derivs(0, out _, out var d0, out _); free.Derivs(1, out _, out var d1, out _);
         if (startDir is { } sd && sd.Length > 1e-12) d0 = exactEnds ? sd : sd.Normalized * len;
         if (endDir is { } ed && ed.Length > 1e-12) d1 = exactEnds ? ed : ed.Normalized * len;
-        return WithEnds(pts, uk, d0, d1);
+        if (startCurv == null && endCurv == null) return WithEnds(pts, uk, d0, d1);
+        // the second derivative of a curve of that curvature, run at that speed (along the normal: no speeding up)
+        Vec3? Second(Vec3? k, Vec3 d) => k is { } kv ? kv * d.LengthSq : null;
+        return WithEnds2(pts, uk, d0, d1, Second(startDir != null ? startCurv : null, d0), Second(endDir != null ? endCurv : null, d1));
+    }
+
+    /// <summary>
+    /// Cubic interpolation with the end derivatives given and, at either end, the second derivative too: one more
+    /// knot in the end span for each (so one more pole), the poles solved together (collocation rows for the points,
+    /// the derivatives and the second derivatives).
+    /// </summary>
+    static BSplineCurve WithEnds2(List<Vec3> q, double[] uk, Vec3 d0, Vec3 d1, Vec3? s0, Vec3? s1)
+    {
+        const int p = 3;
+        int n = q.Count - 1;
+        var inner = uk.Skip(1).Take(n - 1).ToList();
+        double first = n >= 2 ? uk[1] : 1, last = n >= 2 ? uk[n - 1] : 0;
+        if (s0 != null) inner.Add(n >= 2 ? 0.5 * first : (s1 != null ? 1.0 / 3 : 0.5));
+        if (s1 != null) inner.Add(n >= 2 ? 0.5 * (last + 1) : (s0 != null ? 2.0 / 3 : 0.5));
+        inner.Sort();
+        var U = new double[] { 0, 0, 0, 0 }.Concat(inner).Concat(new double[] { 1, 1, 1, 1 }).ToArray();
+        int m = U.Length - p - 1;
+        // each basis function's value and derivatives, from the curve with that pole alone (x) and the rest at nothing
+        (double v, double d, double dd) B(int j, double u)
+        {
+            var poles = new Vec3[m]; poles[j] = new Vec3(1, 0, 0);
+            new BSplineCurve(p, poles, U).Derivs(u, out var c, out var c1, out var c2);
+            return (c.X, c1.X, c2.X);
+        }
+        var rows = new List<(double u, int kind, Vec3 rhs)>();
+        for (int k = 0; k <= n; k++) rows.Add((uk[k], 0, q[k]));
+        rows.Add((0, 1, d0)); rows.Add((1, 1, d1));
+        if (s0 is { } a) rows.Add((0, 2, a));
+        if (s1 is { } b) rows.Add((1, 2, b));
+        var A = new double[m, m]; var rhs = new Vec3[m];
+        for (int r = 0; r < m; r++)
+        {
+            var (u, kind, val) = rows[r];
+            for (int j = 0; j < m; j++) { var (v, d, dd) = B(j, u); A[r, j] = kind == 0 ? v : kind == 1 ? d : dd; }
+            rhs[r] = val;
+        }
+        return new BSplineCurve(p, Solve(A, rhs), U);
     }
 
     /// <summary>

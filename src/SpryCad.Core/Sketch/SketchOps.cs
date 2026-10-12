@@ -190,20 +190,6 @@ public static class SketchOps
             SkSpline sp => SplineDir(sp, Vec2.Distance(sk.P(sp.Points[0]), p) < Vec2.Distance(sk.P(sp.Points[^1]), p) ? 0 : sp.Points.Count - 1).Perp * (fwd ? 1 : -1),
             _ => default,
         };
-        // a spline's copy follows the offset of its curve only where it runs on smoothly into its neighbours
-        foreach (var (e, fwd) in order)
-        {
-            if (e is not SkSpline sp) continue;
-            foreach (var (pt, i) in new[] { (sp.Points[0], 0), (sp.Points[^1], sp.Points.Count - 1) })
-                foreach (var (o, ofwd) in order)
-                {
-                    if (ReferenceEquals(o, e) || !Ends(o).Contains(pt)) continue;
-                    var n1 = LeftNormal(e, fwd, sk.P(pt)); var n2 = LeftNormal(o, ofwd, sk.P(pt));
-                    if (Math.Abs(Vec2.Cross(n1, n2)) > 1e-4 || Vec2.Dot(n1, n2) < 0)
-                        return (null, "Offset: a spline in the chain meets the next at a corner; offset it where it runs on smoothly (tangent), or on its own.");
-                }
-        }
-
         // copy points: each original end point once, placed near where it will settle (the solver finishes it)
         var copyOf = new Dictionary<long, long>();
         long CopyPoint(long p)

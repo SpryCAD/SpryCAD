@@ -434,6 +434,88 @@ static class SplineTests
             }
         });
 
+        t.Test("Loft along a spline centerline (a tube's volume) and with a spline guide", () =>
+        {
+            var path = SplineFit.Through(new[] { new Vec3(0, 0, 0), new Vec3(4, 3, 12), new Vec3(-5, 8, 25), new Vec3(2, 2, 40) }, false, startDir: Vec3.UnitZ)!;
+            var seg = new Kernel.Native.NSweep.Seg(path.Eval(0), path.Eval(1), Curve: path);
+            path.Derivs(1, out var pe, out var de, out _);
+            var tz = de.Normalized; var tx = tz.AnyPerpendicular().Normalized;
+            var endFrame = new Frame(pe, tx, Vec3.Cross(tz, tx), tz);
+            var circ = new[] { new ProfileRegion(ProfileLoop.Circle(Vec2.Zero, 2, "C")) };
+            var loft = Kernel.Native.NLoft.Loft(new[] { new Kernel.Native.NLoft.Section(frame, circ), new Kernel.Native.NLoft.Section(endFrame, circ) }, null,
+                new Kernel.Native.NLoft.Options { Centerline = new[] { seg } }, "LC");
+            t.Eq(loft.Validate(), null);
+            var want = Math.PI * 4 * seg.Length;
+            t.Near(Kernel.Native.NMass.Of(loft)!.Volume, want, want * 2e-3);
+
+            // two squares 30 apart, a spline guide from a corner of one to the same corner of the other, bowing out
+            var sq = new[] { new ProfileRegion(ProfileLoop.Polygon(new[] { new Vec2(0, 0), new Vec2(10, 0), new Vec2(10, 10), new Vec2(0, 10) }, "Q")) };
+            var top = new Frame(new Vec3(0, 0, 30), Vec3.UnitX, Vec3.UnitY, Vec3.UnitZ);
+            var g = SplineFit.Through(new[] { new Vec3(10, 10, 0), new Vec3(14, 14, 15), new Vec3(10, 10, 30) }, false)!;
+            var guided = Kernel.Native.NLoft.Loft(new[] { new Kernel.Native.NLoft.Section(frame, sq), new Kernel.Native.NLoft.Section(top, sq) },
+                new[] { (IReadOnlyList<Kernel.Native.NSweep.Seg>)new[] { new Kernel.Native.NSweep.Seg(g.Eval(0), g.Eval(1), Curve: g) } }, null, "LG");
+            t.Eq(guided.Validate(), null);
+            // bowed out: more than the plain prism, and through the guide's middle
+            t.True(Kernel.Native.NMass.Of(guided)!.Volume > 3000 + 1, "bulges along the guide");
+            guided.Link();
+            t.True(guided.Edges.Any(e => Vec3.Distance(e.Mid, g.Eval(0.5)) < 0.05), "an edge along the guide");
+        });
+
+        t.Test("Sketch spline: curvature continuous (G2) with a line and an arc at its ends", () =>
+        {
+            var sk = new Core.Sketching.Sketch();
+            var a = sk.AddPoint(new Vec2(0, 0)); var b = sk.AddPoint(new Vec2(10, 0));
+            var m = sk.AddPoint(new Vec2(20, 9)); var c = sk.AddPoint(new Vec2(30, 0));
+            var ac = sk.AddPoint(new Vec2(35, 0)); var ae = sk.AddPoint(new Vec2(35, 5));
+            var line = sk.Add(new Core.Sketching.SkLine { P1 = a.Id, P2 = b.Id });
+            var spl = sk.Add(new Core.Sketching.SkSpline { Points = new() { b.Id, m.Id, c.Id } });
+            var arc = sk.Add(new Core.Sketching.SkArc { Center = ac.Id, Start = ae.Id, End = c.Id });
+            sk.AddConstraint(Core.Sketching.CType.Curvature, line.Id, spl.Id);
+            sk.AddConstraint(Core.Sketching.CType.Curvature, arc.Id, spl.Id);
+            var cv = sk.SplineCurve(spl)!;
+            Vec3 K(double u) { cv.Derivs(u, out _, out var d1, out var d2); var l2 = d1.LengthSq; var tn = d1 * (1 / Math.Sqrt(l2)); return (d2 - tn * Vec3.Dot(d2, tn)) * (1 / l2); }
+            cv.Derivs(0, out _, out var t0, out _); cv.Derivs(1, out _, out var t1, out _);
+            t.True(Math.Abs(t0.Y) < 1e-9 * t0.Length && t0.X > 0, "leaves along the line");
+            t.True(K(0).Length < 1e-9, $"straight where it leaves the line: {K(0)}");
+            t.True(Math.Abs(t1.X) < 1e-9 * t1.Length && t1.Y > 0, "arrives into the arc");
+            t.True(Vec3.Distance(K(1), new Vec3(0.2, 0, 0)) < 1e-9, $"as curved as the arc (1/5, towards its centre): {K(1)}");
+            foreach (var q in new[] { b, m, c }) t.True(Enumerable.Range(0, 4001).Min(i => Vec3.Distance(cv.Eval(i / 4000.0), new Vec3(q.X, q.Y, 0))) < 2e-3, "through its points");
+            var res = Core.Sketching.SketchSolver.Solve(sk);
+            t.True(res.Status is not (Core.Sketching.SketchStatus.Failed or Core.Sketching.SketchStatus.OverDefined), $"{res.Status}");
+        });
+
+        t.Test("Sketch spline: offset where it meets a line at a corner (both sides: the copy trimmed, and run on)", () =>
+        {
+            foreach (var reverse in new[] { false, true })
+            {
+                var sk = new Core.Sketching.Sketch();
+                var a = sk.AddPoint(new Vec2(-20, 0), fix: true); var b = sk.AddPoint(new Vec2(0, 0), fix: true);
+                var ids = new List<long> { b.Id }; ids.AddRange(new[] { new Vec2(6, 10), new Vec2(2, 22) }.Select(q => sk.AddPoint(q, fix: true).Id));
+                var line = sk.Add(new Core.Sketching.SkLine { P1 = a.Id, P2 = b.Id });
+                var spl = sk.Add(new Core.Sketching.SkSpline { Points = ids });
+                var (_, err) = Core.Sketching.SketchOps.Offset(sk, Core.Sketching.SketchOps.Chain(sk, new[] { line.Id }), 2, reverse);
+                t.Eq(err, null);
+                var res = Core.Sketching.SketchSolver.Solve(sk);
+                t.True(res.Status is not (Core.Sketching.SketchStatus.Failed or Core.Sketching.SketchStatus.OverDefined), $"{res.Status}");
+                var copy = sk.Entities.OfType<Core.Sketching.SkSpline>().Single(x => x.Id != spl.Id);
+                var lc = sk.Entities.OfType<Core.Sketching.SkLine>().Single(x => x.Id != line.Id);
+                t.True(lc.P1 == copy.Points[0] || lc.P2 == copy.Points[0], "the copies meet");
+                var corner = sk.P(copy.Points[0]);
+                t.Near(Math.Abs(corner.Y), 2, 1e-6);
+                var oc = sk.SplineCurve(spl)!;
+                var (_, fp, _) = Core.Sketching.Sketch.ExtendedFoot(oc, corner);
+                t.Near(Vec2.Distance(fp, corner), 2, 1e-6);
+                // the copy 2 from the original (run on past its start) all along
+                var qc = sk.SplineCurve(copy)!;
+                for (int i = 0; i <= 50; i++)
+                {
+                    var q = qc.Eval(i / 50.0);
+                    var (_, f2, _) = Core.Sketching.Sketch.ExtendedFoot(oc, new Vec2(q.X, q.Y));
+                    t.True(Math.Abs(Vec2.Distance(f2, new Vec2(q.X, q.Y)) - 2) < 0.03, $"at {i}: {Vec2.Distance(f2, new Vec2(q.X, q.Y)):g4} (reverse {reverse})");
+                }
+            }
+        });
+
         t.Test("Spline profile: a boolean with a box, and a STEP round trip", () =>
         {
             var body = Kernel.Native.NBuild.Extrude(new[] { new ProfileRegion(Loop()) }, frame, 0, 15, "E");

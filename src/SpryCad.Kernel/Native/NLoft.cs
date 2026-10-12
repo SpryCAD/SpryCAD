@@ -315,30 +315,21 @@ public static class NLoft
         }
 
         /// <summary>The chain closes on itself: arc lengths past its end run on round it.</summary>
-        public bool Closed => Segs.Count > 1 && Vec3.Distance(Segs[^1].B, Segs[0].A) < 1e-9 * Math.Max(1, L);
+        // (one spline closing on itself is a closed chain too)
+        public bool Closed => (Segs.Count > 1 || Segs.Count == 1 && Segs[0].IsSpline) && Vec3.Distance(Segs[^1].B, Segs[0].A) < 1e-9 * Math.Max(1, L);
 
         (int i, double t) Locate(double s)
         {
             s = Closed ? s - Math.Floor(s / L) * L : Math.Clamp(s, 0, L);
             int i = Segs.Count - 1;
             for (int k = 1; k < Segs.Count; k++) if (s < _cum[k]) { i = k - 1; break; }
-            var len = Segs[i].Length;
+            var len = _cum[i + 1] - _cum[i];
             return (i, len > 0 ? (s - _cum[i]) / len : 0);
         }
 
-        static Vec3 SegAt(NSweep.Seg g, double t)
-        {
-            if (!g.IsArc) return t <= 0 ? g.A : t >= 1 ? g.B : Vec3.Lerp(g.A, g.B, t);
-            var r = g.A - g.Center!.Value; var phi = g.Angle * t;
-            return g.Center.Value + r * Math.Cos(phi) + Vec3.Cross(g.Axis!.Value, r) * Math.Sin(phi);
-        }
+        static Vec3 SegAt(NSweep.Seg g, double t) => g.PointAt(t);
 
-        static Vec3 SegTangent(NSweep.Seg g, double t)
-        {
-            if (!g.IsArc) return (g.B - g.A).Normalized;
-            var r = g.A - g.Center!.Value; var phi = g.Angle * t;
-            return (r * -Math.Sin(phi) + Vec3.Cross(g.Axis!.Value, r) * Math.Cos(phi)).Normalized;
-        }
+        static Vec3 SegTangent(NSweep.Seg g, double t) => g.TangentAt(t);
 
         public Vec3 At(double s) { var (i, t) = Locate(s); return SegAt(Segs[i], t); }
         public Vec3 Tangent(double s) { var (i, t) = Locate(s); return SegTangent(Segs[i], t); }
@@ -358,8 +349,7 @@ public static class NLoft
             var r = new List<NSweep.Seg>();
             for (int i = Segs.Count - 1; i >= 0; i--)
             {
-                var s = Segs[i];
-                r.Add(s.IsArc ? new NSweep.Seg(s.B, s.A, s.Center, -s.Axis!.Value, s.Angle) : new NSweep.Seg(s.B, s.A));
+                r.Add(Segs[i].Reversed());
             }
             return new GuidePath(r);
         }
@@ -371,7 +361,7 @@ public static class NLoft
             for (int i = 0; i < Segs.Count; i++)
             {
                 var g = Segs[i];
-                int n = g.IsArc ? Math.Max(8, (int)Math.Ceiling(g.Angle / (Math.PI / 32))) : 1;
+                int n = g.IsSpline ? 128 : g.IsArc ? Math.Max(8, (int)Math.Ceiling(g.Angle / (Math.PI / 32))) : 1;
                 double F(double t) => pl.Distance(SegAt(g, t));
                 double pt = 0, pf = F(0);
                 for (int k = 1; k <= n; k++)
@@ -426,9 +416,51 @@ public static class NLoft
 
         static Vec3 Rot(Vec3 v, Vec3 a, double phi) => v * Math.Cos(phi) + Vec3.Cross(a, v) * Math.Sin(phi) + a * (Vec3.Dot(a, v) * (1 - Math.Cos(phi)));
 
+        /// <summary>
+        /// A spline's rotation-minimizing frames at even fractions of its length (double reflection from its start
+        /// tangent and a perpendicular): the tangent and the perpendicular there, worked out once a curve.
+        /// </summary>
+        sealed record RmfTable(Vec3[] T, Vec3[] R);
+        static readonly System.Runtime.CompilerServices.ConditionalWeakTable<BSplineCurve, RmfTable> _rmf = new();
+        const int RmfN = 512;
+        static (Vec3[] t, Vec3[] r) Rmf(NSweep.Seg g) { var tb = _rmf.GetValue(g.Curve!, _ => MakeRmf(g)); return (tb.T, tb.R); }
+        static RmfTable MakeRmf(NSweep.Seg g)
+        {
+            var ts = new Vec3[RmfN + 1]; var rs = new Vec3[RmfN + 1];
+            var x = g.PointAt(0); var tt = g.TangentAt(0); var rr = tt.AnyPerpendicular().Normalized;
+            ts[0] = tt; rs[0] = rr;
+            for (int k = 1; k <= RmfN; k++)
+            {
+                double f = (double)k / RmfN;
+                var x1 = g.PointAt(f); var t1 = g.TangentAt(f);
+                var v1 = x1 - x; var c1 = Vec3.Dot(v1, v1);
+                if (c1 > 1e-300)
+                {
+                    var rL = rr - v1 * (2 / c1 * Vec3.Dot(v1, rr)); var tL = tt - v1 * (2 / c1 * Vec3.Dot(v1, tt));
+                    var v2 = t1 - tL; var c2 = Vec3.Dot(v2, v2);
+                    rr = c2 > 1e-300 ? rL - v2 * (2 / c2 * Vec3.Dot(v2, rL)) : rL;
+                }
+                rr = (rr - t1 * Vec3.Dot(rr, t1)).Normalized;
+                x = x1; tt = t1; ts[k] = t1; rs[k] = rr;
+            }
+            return new RmfTable(ts, rs);
+        }
+
         /// <summary>The frame a fraction t along piece g from its start frame.</summary>
         static SpineFrame Turned(NSweep.Seg g, SpineFrame f, double t)
         {
+            if (g.IsSpline)
+            {
+                // the start frame carried as the table's frame turns: the rotation from its first to the one at t
+                var (ts, rs) = Rmf(g);
+                var k = Math.Clamp(t, 0, 1) * RmfN; int k0 = Math.Min((int)k, RmfN - 1); var w = k - k0;
+                var tk = (ts[k0] * (1 - w) + ts[k0 + 1] * w).Normalized;
+                var rk = rs[k0] * (1 - w) + rs[k0 + 1] * w; rk = (rk - tk * Vec3.Dot(rk, tk)).Normalized;
+                var bk = Vec3.Cross(tk, rk);
+                var t0 = ts[0]; var r0 = rs[0]; var b0 = Vec3.Cross(t0, r0);
+                Vec3 R(Vec3 v) => tk * Vec3.Dot(v, t0) + rk * Vec3.Dot(v, r0) + bk * Vec3.Dot(v, b0);
+                return new SpineFrame(g.PointAt(t), R(f.E1), R(f.E2), R(f.E3));
+            }
             if (!g.IsArc) return f with { O = Vec3.Lerp(g.A, g.B, t) };
             var a = g.Axis!.Value; var phi = g.Angle * t;
             var r = g.A - g.Center!.Value;
@@ -459,7 +491,16 @@ public static class NLoft
             {
                 var g = Segs[i];
                 if (s <= c + g.Length || i == Segs.Count - 1)
+                {
+                    if (g.IsSpline)
+                    {
+                        // a rotation-minimizing frame turns about the binormal at the curvature: (C' × C'') / |C'|³
+                        g.Curve!.Derivs(g.ParamAt(g.Length > 0 ? Math.Clamp((s - c) / g.Length, 0, 1) : 0), out _, out var d1, out var d2);
+                        var l = d1.Length;
+                        return l > 1e-12 ? Vec3.Cross(d1, d2) * (1 / (l * l * l)) : Vec3.Zero;
+                    }
                     return g.IsArc ? g.Axis!.Value * (1 / (g.A - g.Center!.Value).Length) : Vec3.Zero;
+                }
                 c += g.Length;
             }
             return Vec3.Zero;
@@ -564,12 +605,19 @@ public static class NLoft
         public List<GuideInfo> Guides = new();
     }
 
-    /// <summary>Picks each section's start on its loop: the least twisted from the section before (by shape, about the centroids).</summary>
-    static void Align(Group g, IReadOnlyList<int> ks)
+    /// <summary>
+    /// Picks each section's start on its loop: the least twisted from the section before (by shape, about the
+    /// centroids). Along a centerline (<paramref name="local"/>: a direction at section k in the centerline's frame
+    /// there) the shapes are compared in its frames, which turn with it without twisting.
+    /// </summary>
+    static void Align(Group g, IReadOnlyList<int> ks, Func<int, Vec3, Vec3>? local = null)
     {
         const int M = 48;
         Vec3 At(Loop3 l, double t) => (l.At(t) - l.Centroid) / l.Size;
         Vec3[] Shape(Loop3 l, double tau) => Enumerable.Range(0, M).Select(m => At(l, tau + (double)m / M)).ToArray();
+        int KOf(Loop3 l) { for (int i = 0; i < g.Loops.Length; i++) if (ReferenceEquals(g.Loops[i], l)) return i; return -1; }
+        Vec3 Turned(Loop3 l, Vec3 x, Vec3 prevNormal) => local != null ? local(KOf(l), x) : Turn(x, l.Normal, prevNormal);
+        Vec3[] Seen(Loop3 l, double tau) => local != null ? Shape(l, tau).Select(x => local(KOf(l), x)).ToArray() : Shape(l, tau);
         // where a loop may start: at one of its vertices (sharp or not); anywhere only on a loop without any (a full
         // circle). A start inside a segment is a breakpoint of its own: it splits that segment on every section, at
         // a different fraction of it on each, and the two pieces' faces then meet with a slight kink between the
@@ -590,7 +638,7 @@ public static class NLoft
             double best = double.MaxValue, bt = 0;
             foreach (var (tau, pen) in Cands(l))
             {
-                var cur = Shape(l, tau).Select(x => Turn(x, l.Normal, prevNormal)).ToArray();
+                var cur = Shape(l, tau).Select(x => Turned(l, x, prevNormal)).ToArray();
                 double e = 0;
                 for (int m = 0; m < M; m++) e += (cur[m] - prev[m]).LengthSq;
                 e = (e + M * (cur[0] - prevStart).LengthSq) * pen;
@@ -605,7 +653,7 @@ public static class NLoft
             double best = double.MaxValue, bt = 0;
             foreach (var (tau, pen) in Cands(first))
             {
-                var sh = Shape(first, tau);
+                var sh = Seen(first, tau);
                 var (_, e) = Best(g.Loops[ks[1]]!, sh, sh[0], first.Normal);
                 e *= pen;
                 if (e < best - 1e-12) { best = e; bt = tau; }
@@ -615,7 +663,7 @@ public static class NLoft
         for (int q = 1; q < ks.Count; q++)
         {
             var pl = g.Loops[ks[q - 1]]!;
-            var prev = Shape(pl, g.Tau[ks[q - 1]]);
+            var prev = Seen(pl, g.Tau[ks[q - 1]]);
             g.Tau[ks[q]] = Best(g.Loops[ks[q]]!, prev, prev[0], pl.Normal).tau;
         }
     }
@@ -941,11 +989,28 @@ public static class NLoft
             allGuides.Add(info);
         }
 
+        // along a centerline, the sections compared in its frames there (not turned straight from plane to plane:
+        // round a bend that twists them, and a loft between two circles would narrow between them)
+        Func<int, Vec3, Vec3>? alignIn = null;
+        if (opt.Centerline != null)
+            try
+            {
+                var asp = new Spine(opt.Centerline.ToList());
+                var fr = new SpineFrame[N];
+                for (int k = 0; k < N; k++)
+                {
+                    var pl = sections[k].Point is { } pt ? Plane.FromPointNormal(pt, normal[k]) : sections[k].Frame.Plane;
+                    var c = asp.Crossings(pl, tolOn);
+                    fr[k] = asp.FrameAt(c.MinBy(x => Vec3.Distance(asp.At(x), centre[k])));
+                }
+                alignIn = (k, x) => new Vec3(Vec3.Dot(x, fr[k].E1), Vec3.Dot(x, fr[k].E2), Vec3.Dot(x, fr[k].E3));
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or ArgumentException) { alignIn = null; }
         // start of each loop: the first guide, or the least twisted; then the breakpoints
         foreach (var g in groups)
         {
             if (g.Guides.Count > 0) foreach (var k in ks) g.Tau[k] = g.Loops[k]!.FractionOf(g.Guides[0].Loc[k].i, g.Guides[0].Loc[k].t);
-            else Align(g, ks);
+            else Align(g, ks, alignIn);
             Breakpoints(g, ks, N);
         }
         if (closed)

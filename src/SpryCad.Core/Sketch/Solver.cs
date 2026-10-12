@@ -101,7 +101,7 @@ public static class SketchSolver
         {
             if (c.Driven) continue;
             // a spline tangent to what it meets: the spline's fit holds it (its end leaves in that direction), not an equation
-            if (c.Type == CType.Tangent && c.Refs.Any(id => sk.Entity(id) is SkSpline)) continue;
+            if (c.Type is CType.Tangent or CType.Curvature && c.Refs.Any(id => sk.Entity(id) is SkSpline)) continue;
             try { AddConstraint(s, c); } catch { /* malformed constraint: ignore */ }
         }
         return s;
@@ -203,12 +203,18 @@ public static class SketchSolver
         bool Smooth(SkEntity e1, SkEntity e2, long op)
         {
             var p = sk.P(op);
-            Vec2 Normal(SkEntity e) => e switch
+            Vec2 Normal(SkEntity e)
             {
-                SkLine l => (sk.P(l.P2) - sk.P(l.P1)).Normalized.Perp,
-                SkArc a => (p - sk.P(a.Center)).Normalized,
-                _ => default,
-            };
+                switch (e)
+                {
+                    case SkLine l: return (sk.P(l.P2) - sk.P(l.P1)).Normalized.Perp;
+                    case SkArc a: return (p - sk.P(a.Center)).Normalized;
+                    case SkSpline sp when sk.SplineCurve(sp) is { } c:
+                        c.Derivs(sp.Points[0] == op ? 0 : 1, out _, out var dv, out _);
+                        return new Vec2(dv.X, dv.Y).Normalized.Perp;
+                }
+                return default;
+            }
             return Math.Abs(Vec2.Cross(Normal(e1), Normal(e2))) < 1e-6;
         }
         // a spline's copy point: at the distance along the original curve's normal (to the left of its direction) at the
@@ -219,7 +225,7 @@ public static class SketchSolver
             int i = o.Points.IndexOf(op);
             var ids = o.Points.ToHashSet();
             foreach (var tc in sk.Constraints)
-                if (tc.Type == CType.Tangent && tc.Refs.Contains(o.Id))
+                if (tc.Type is CType.Tangent or CType.Curvature && tc.Refs.Contains(o.Id))
                     foreach (var oid in tc.Refs) if (sk.Entity(oid) is { } oe) ids.UnionWith(oe.PointIds);
             var refs = ids.Where(s.PRefs.ContainsKey).Select(k => s.PRefs[k]).Append(q).ToArray();
             Vec2 Want(double[] x)
@@ -235,9 +241,42 @@ public static class SketchSolver
             AddEq(s, id, x => q.Get(x).X - Want(x).X, refs);
             AddEq(s, id, x => q.Get(x).Y - Want(x).Y, refs);
         }
+        // a copy point on a spline's offset: its distance from the original curve (run on straight past its ends), to the
+        // left of its direction, the offset
+        void SplineOn(long qp, SkSpline o, int side)
+        {
+            var q = s.PRefs[qp];
+            var ids = o.Points.ToHashSet();
+            foreach (var tc in sk.Constraints)
+                if (tc.Type is CType.Tangent or CType.Curvature && tc.Refs.Contains(o.Id))
+                    foreach (var oid in tc.Refs) if (sk.Entity(oid) is { } oe) ids.UnionWith(oe.PointIds);
+            var refs = ids.Where(s.PRefs.ContainsKey).Select(k => s.PRefs[k]).Append(q).ToArray();
+            AddEq(s, id, x =>
+            {
+                Vec2 Pos(long k) => s.PRefs.TryGetValue(k, out var pr) ? pr.Get(x) : sk.P(k);
+                if (sk.SplineCurve(o, Pos) is not { } c) return 0;
+                var (_, fp, fd) = Sketch.ExtendedFoot(c, q.Get(x));
+                var n = fd.LengthSq > 0 ? fd.Normalized.Perp : fd;
+                return Vec2.Dot(q.Get(x) - fp, n) - side * d;
+            }, refs);
+        }
         foreach (var (qp, (op, pairs)) in at)
         {
-            if (pairs.FirstOrDefault(x => x.o is SkSpline) is { o: SkSpline so } sp) { SplinePt(qp, op, so, sp.side); continue; }
+            var spl = pairs.Where(x => x.o is SkSpline).ToList();
+            if (spl.Count > 0)
+            {
+                var so = (SkSpline)spl[0].o;
+                var others = pairs.Where(x => x.o is not SkSpline).ToList();
+                var nb = others.Count > 0 ? others[0].o : spl.Count > 1 ? spl[1].o : null;
+                // where it runs on smoothly into its neighbour (or ends free): across from its point
+                if (nb == null || Smooth(so, nb, op)) { SplinePt(qp, op, so, spl[0].side); continue; }
+                // a corner: on both neighbours' offsets (the spline's run on straight past its end where it must)
+                SplineOn(qp, so, spl[0].side);
+                if (spl.Count > 1) SplineOn(qp, (SkSpline)spl[1].o, spl[1].side);
+                else if (nb is SkLine nl) LineDist(qp, nl, others[0].side);
+                else if (nb is SkArc na) Radius(qp, na, others[0].side);
+                continue;
+            }
             var lines = pairs.Where(x => x.o is SkLine).ToList();
             var arcEnds = pairs.Where(x => x.q is SkArc qa && qa.End == qp).ToList();
             var arcStarts = pairs.Where(x => x.q is SkArc qa && qa.Start == qp).ToList();
@@ -411,7 +450,7 @@ public static class SketchSolver
                     var v = c.Value; var sk = s.Sketch;
                     var ids = sp.Points.ToHashSet();
                     foreach (var tc in sk.Constraints)
-                        if (tc.Type == CType.Tangent && tc.Refs.Contains(sp.Id))
+                        if (tc.Type is CType.Tangent or CType.Curvature && tc.Refs.Contains(sp.Id))
                             foreach (var oid in tc.Refs) if (sk.Entity(oid) is { } oe) ids.UnionWith(oe.PointIds);
                     var refs = ids.Where(s.PRefs.ContainsKey).Select(i => s.PRefs[i]).ToArray();
                     AddEq(s, id, x => sk.SplineCurve(sp, q => s.PRefs.TryGetValue(q, out var pr) ? pr.Get(x) : sk.P(q)) is { } curve ? Sketch.CurveLength(curve) - v : 0, refs);
@@ -1078,7 +1117,7 @@ public static class SketchSolver
         (Vec2 a, Vec2 b) L(long id) { var l = (SkLine)sk.Entity(id)!; return (P(l.P1), P(l.P2)); }
         bool IsPt(long id) => sk.Point(id) != null;
         int Sg(double v) => v < 0 ? -1 : 1;
-        if (c.Type == CType.Tangent && c.Refs.Any(id => sk.Entity(id) is SkSpline)) return;
+        if (c.Type is CType.Tangent or CType.Curvature && c.Refs.Any(id => sk.Entity(id) is SkSpline)) return;
         switch (c.Type)
         {
             case CType.HDistance:

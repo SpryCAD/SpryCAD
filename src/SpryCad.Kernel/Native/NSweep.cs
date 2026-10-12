@@ -24,15 +24,49 @@ public static class NSweep
         public Vec3 EndTangent => IsSpline ? D(Curve!, 1) : IsArc ? Vec3.Cross(Axis!.Value, B - Center!.Value).Normalized : (B - A).Normalized;
         /// <summary>The motion taking the start of the segment (and the profile there) to its end (not a spline's: see <see cref="Sweep"/>).</summary>
         public Transform Motion => IsArc ? Transform.Rotation(Center!.Value, Axis!.Value, Angle) : Transform.Translation(B - A);
-        public double Length
+        public double Length => !IsSpline ? (IsArc ? Angle * (A - Center!.Value).Length : (B - A).Length) : Table(Curve!).len;
+
+        // a spline's arc length table (cumulative, at even parameters), worked out once a curve
+        static readonly System.Runtime.CompilerServices.ConditionalWeakTable<BSplineCurve, Tab> _tables = new();
+        sealed record Tab(double[] S, double len);
+        const int TabN = 512;
+        static Tab Table(BSplineCurve c) => _tables.GetValue(c, cc =>
         {
-            get
-            {
-                if (!IsSpline) return IsArc ? Angle * (A - Center!.Value).Length : (B - A).Length;
-                double l = 0; var p = A;
-                for (int i = 1; i <= 256; i++) { var q = Curve!.Eval(i / 256.0); l += Vec3.Distance(p, q); p = q; }
-                return l;
-            }
+            var s = new double[TabN + 1]; var p = cc.Eval(0);
+            for (int i = 1; i <= TabN; i++) { var q = cc.Eval((double)i / TabN); s[i] = s[i - 1] + Vec3.Distance(p, q); p = q; }
+            return new Tab(s, s[^1]);
+        });
+
+        /// <summary>A spline's parameter a fraction f of its length along it.</summary>
+        public double ParamAt(double f)
+        {
+            var tab = Table(Curve!);
+            var target = Math.Clamp(f, 0, 1) * tab.len;
+            int i = Array.BinarySearch(tab.S, target);
+            if (i >= 0) return (double)i / TabN;
+            i = ~i;
+            if (i <= 0) return 0;
+            if (i > TabN) return 1;
+            var w = tab.S[i] - tab.S[i - 1];
+            return (i - 1 + (w > 0 ? (target - tab.S[i - 1]) / w : 0)) / TabN;
+        }
+
+        /// <summary>The point a fraction t of the way along the segment (by length).</summary>
+        public Vec3 PointAt(double t)
+        {
+            if (IsSpline) return t <= 0 ? A : t >= 1 ? B : Curve!.Eval(ParamAt(t));
+            if (!IsArc) return t <= 0 ? A : t >= 1 ? B : Vec3.Lerp(A, B, t);
+            var r = A - Center!.Value; var phi = Angle * t;
+            return Center.Value + r * Math.Cos(phi) + Vec3.Cross(Axis!.Value, r) * Math.Sin(phi);
+        }
+
+        /// <summary>The unit tangent a fraction t of the way along (by length).</summary>
+        public Vec3 TangentAt(double t)
+        {
+            if (IsSpline) { Curve!.Derivs(ParamAt(t), out _, out var d, out _); return d.Normalized; }
+            if (!IsArc) return (B - A).Normalized;
+            var r = A - Center!.Value; var phi = Angle * t;
+            return (r * -Math.Sin(phi) + Vec3.Cross(Axis!.Value, r) * Math.Cos(phi)).Normalized;
         }
 
         /// <summary>The segment run the other way.</summary>

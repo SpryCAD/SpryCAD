@@ -177,6 +177,7 @@ public enum CType
     Angle,                          // line,line
     Offset,                         // original, copy, original, copy, ... (Sides: the side of each copy); Value: the distance
     Length,                         // spline: its length along the curve
+    Curvature,                      // spline + line/arc/spline at its end: tangent there, and as curved (G2)
 }
 
 public sealed class SkConstraint
@@ -328,7 +329,7 @@ public sealed class Sketch
     public BSplineCurve? SplineCurve(SkSpline s, Func<long, Vec2>? at = null)
     {
         Vec2 P(long id) => at?.Invoke(id) ?? this.P(id);
-        Vec3? start = null, end = null;
+        Vec3? start = null, end = null, startK = null, endK = null;
         bool exact = false;
         // (a spline whose direction comes, in a round, from itself: free while it is being worked out)
         var busy = _splinesBusy ??= new HashSet<SkSpline>(ReferenceEqualityComparer.Instance);
@@ -342,23 +343,36 @@ public sealed class Sketch
                 if (SplineCurve(src.orig, at) is { } oc)
                 {
                     var prm = SplineFitParams(src.orig, at);
+                    // the original's part the copy spans: from the foot of its start to the foot of its end (trimmed, at an
+                    // inside corner; run on straight past the original's end, at an outside one)
+                    double ta = 0, tb = 1;
+                    if (!s.Closed) { ta = ExtendedFoot(oc, P(s.Points[0])).t; tb = ExtendedFoot(oc, P(s.Points[^1])).t; }
+                    if (!s.Closed && !(tb > ta + 1e-9)) { ta = 0; tb = 1; }
+                    var ends = s.Closed ? prm.Append(1.0).ToList() : new[] { ta }.Concat(prm.Where(x => x > ta + 1e-9 && x < tb - 1e-9)).Append(tb).ToList();
                     var ts = new List<double>();
-                    var ends = s.Closed ? prm.Append(1.0).ToArray() : prm;
-                    for (int i = 0; i + 1 < ends.Length; i++)
+                    for (int i = 0; i + 1 < ends.Count; i++)
                         for (int k = 0; k < 5; k++) ts.Add(ends[i] + (ends[i + 1] - ends[i]) * k / 5);
-                    if (!s.Closed) ts.Add(1);
+                    if (!s.Closed) ts.Add(tb);
+                    // the original (run on straight past its ends) and its derivatives there
+                    (Vec3 p, Vec3 d1, Vec3 d2) E(double t)
+                    {
+                        var e = Math.Clamp(t, 0, 1);
+                        oc.Derivs(e, out var p0, out var d1, out var d2);
+                        return t == e ? (p0, d1, d2) : (p0 + d1 * (t - e), d1, default);
+                    }
                     Vec3 Off(double t)
                     {
-                        oc.Derivs(t, out var p0, out var d1, out _);
+                        var (p0, d1, _) = E(t);
                         var n = new Vec3(-d1.Y, d1.X, 0); n = n.Length > 0 ? n.Normalized : n;
                         return p0 + n * src.d;
                     }
+                    // (per the copy's own parameter, 0 to 1 over ta to tb)
                     Vec3 D(double t)
                     {
-                        oc.Derivs(t, out _, out var d1, out var d2);
+                        var (_, d1, d2) = E(t);
                         var l = d1.Length;
                         var k = l > 1e-12 ? (d1.X * d2.Y - d1.Y * d2.X) / (l * l * l) : 0;
-                        return d1 * (1 - src.d * k);
+                        return d1 * ((1 - src.d * k) * (tb - ta));
                     }
                     var pts = ts.Select(Off).ToList();
                     if (!s.Closed)
@@ -367,7 +381,8 @@ public sealed class Sketch
                         var e0 = P(s.Points[0]); var e1 = P(s.Points[^1]);
                         pts[0] = new Vec3(e0.X, e0.Y, 0); pts[^1] = new Vec3(e1.X, e1.Y, 0);
                     }
-                    return SplineFit.Through(pts, s.Closed, s.Closed ? null : D(0), s.Closed ? null : D(1), exactEnds: true, parameters: s.Closed ? null : ts);
+                    return SplineFit.Through(pts, s.Closed, s.Closed ? null : D(ta), s.Closed ? null : D(tb), exactEnds: true,
+                        parameters: s.Closed ? null : ts.Select(t => (t - ta) / (tb - ta)).ToList());
                 }
             }
             finally { busy.Remove(s); }
@@ -379,6 +394,12 @@ public sealed class Sketch
                 foreach (var c in Constraints)
                     if (SplineTangent(c, at) is { } t && ReferenceEquals(t.spline, s))
                     {
+                        // curvature continuous: as curved as what it meets, there (the curvature vector, as seen going on)
+                        if (c.Type == CType.Curvature)
+                        {
+                            var kv = CurvatureAt(t.other, t.point, at);
+                            if (t.atStart) startK = kv; else endK = kv;
+                        }
                         // (as long as the handle there, if it has one, else as the points' chords: the fit's own length)
                         var hl = (t.atStart ? s.StartDir : s.EndDir)?.Length;
                         double chords = 0;
@@ -394,10 +415,61 @@ public sealed class Sketch
         }
         // (with handles the ends' derivatives are given whole; a free end there keeps the fit's own)
         return SplineFit.Through(s.Points.Select(id => { var p = P(id); return new Vec3(p.X, p.Y, 0); }).ToList(), s.Closed, start, end, exact,
-            s.Params != null && s.Params.Count == s.Points.Count ? s.Params : null);
+            s.Params != null && s.Params.Count == s.Points.Count ? s.Params : null, startK, endK);
     }
 
     [ThreadStatic] static HashSet<SkSpline>? _splinesBusy;
+
+    /// <summary>
+    /// An entity's curvature vector at one of its end points (towards its centre of curvature, 1 / radius long): none
+    /// for a line, towards an arc's centre, a spline's own at its end.
+    /// </summary>
+    Vec3 CurvatureAt(SkEntity e, long point, Func<long, Vec2>? at)
+    {
+        Vec2 P(long id) => at?.Invoke(id) ?? this.P(id);
+        switch (e)
+        {
+            case SkArc a:
+                {
+                    var r = P(a.Center) - P(point); var l2 = r.LengthSq;
+                    return l2 > 0 ? new Vec3(r.X / l2, r.Y / l2, 0) : default;
+                }
+            case SkSpline os when SplineCurve(os, at) is { } oc:
+                {
+                    oc.Derivs(point == os.Points[0] ? 0 : 1, out _, out var d1, out var d2);
+                    var l2 = d1.LengthSq;
+                    if (l2 <= 0) return default;
+                    var tn = d1 * (1 / Math.Sqrt(l2));
+                    return (d2 - tn * Vec3.Dot(d2, tn)) * (1 / l2);
+                }
+        }
+        return default;
+    }
+
+    /// <summary>
+    /// The point of a curve (over 0 to 1, run on straight along its end tangents past its ends) nearest q: its
+    /// parameter (below 0 or past 1 on the run-ons), the point and the derivative there.
+    /// </summary>
+    public static (double t, Vec2 p, Vec2 d) ExtendedFoot(BSplineCurve c, Vec2 q)
+    {
+        var q3 = new Vec3(q.X, q.Y, 0);
+        // seeded from the nearest of a few samples
+        int best = 0; double bd = double.MaxValue;
+        for (int i = 0; i <= 64; i++) { var d = Vec3.Distance(c.Eval(i / 64.0), q3); if (d < bd) { bd = d; best = i; } }
+        var t = c.ClosestParam(q3, 0, 1, best / 64.0);
+        if (double.IsNaN(t)) t = best / 64.0;
+        foreach (var end in new[] { 0.0, 1.0 })
+        {
+            if (Math.Abs(t - end) > 1e-9) continue;
+            c.Derivs(end, out var pe, out var de, out _);
+            var l2 = de.LengthSq;
+            if (l2 <= 0) continue;
+            var s = Vec3.Dot(q3 - pe, de) / l2;
+            if (end == 0 && s < 0 || end == 1 && s > 0) { var pp = pe + de * s; return (end + s, new Vec2(pp.X, pp.Y), new Vec2(de.X, de.Y)); }
+        }
+        c.Derivs(t, out var p0, out var d0, out _);
+        return (t, new Vec2(p0.X, p0.Y), new Vec2(d0.X, d0.Y));
+    }
 
     /// <summary>
     /// The spline an offset copy is of, and the signed distance (to the left of the original's direction), from the
@@ -457,7 +529,7 @@ public sealed class Sketch
     public (SkSpline spline, SkEntity other, long point, bool atStart, Vec2 away)? SplineTangent(SkConstraint c, Func<long, Vec2>? at = null)
     {
         Vec2 P(long id) => at?.Invoke(id) ?? this.P(id);
-        if (c.Type != CType.Tangent || c.Refs.Length != 2) return null;
+        if (c.Type is not (CType.Tangent or CType.Curvature) || c.Refs.Length != 2) return null;
         var e0 = Entity(c.Refs[0]); var e1 = Entity(c.Refs[1]);
         var (sp, o) = e1 is SkSpline s1 ? (s1, e0) : e0 is SkSpline s0 ? (s0, e1) : (null, null);
         if (sp == null || o == null || sp.Closed || sp.Points.Count < 2) return null;

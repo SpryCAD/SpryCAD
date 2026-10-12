@@ -237,9 +237,10 @@ public sealed partial class SketchEditor : IViewportMode
         var splines = ents.OfType<SkSpline>().ToList();
         if (splines.Count > 0)
         {
-            if (splines.Count == 1 && pts.Count == 0 && ents.Count == 2 && SplineTangentOf(splines[0], lines.Concat(rounds).FirstOrDefault()) != null) res.Add(CType.Tangent);
+            // (and curvature continuous there: as curved as it, G2)
+            if (splines.Count == 1 && pts.Count == 0 && ents.Count == 2 && SplineTangentOf(splines[0], lines.Concat(rounds).FirstOrDefault()) != null) { res.Add(CType.Tangent); res.Add(CType.Curvature); }
             // two splines meeting end to end: the second picked follows the first
-            if (splines.Count == 2 && pts.Count == 0 && ents.Count == 2 && SplineTangentOf(splines[1], splines[0]) != null) res.Add(CType.Tangent);
+            if (splines.Count == 2 && pts.Count == 0 && ents.Count == 2 && SplineTangentOf(splines[1], splines[0]) != null) { res.Add(CType.Tangent); res.Add(CType.Curvature); }
             return res;
         }
         int others = ents.Count - lines.Count - rounds.Count - ents.OfType<SkPointEntity>().Count();
@@ -257,10 +258,10 @@ public sealed partial class SketchEditor : IViewportMode
     }
 
     /// <summary>The Tangent relation a spline would have with the line or arc meeting one of its ends (null: they do not meet so).</summary>
-    SkConstraint? SplineTangentOf(SkSpline s, SkEntity? other)
+    SkConstraint? SplineTangentOf(SkSpline s, SkEntity? other, CType type = CType.Tangent)
     {
         if (other == null) return null;
-        var c = new SkConstraint { Id = Sk.NewId(), Type = CType.Tangent, Refs = new[] { other.Id, s.Id } };
+        var c = new SkConstraint { Id = Sk.NewId(), Type = type, Refs = new[] { other.Id, s.Id } };
         return Sk.SplineTangent(c) != null ? c : null;
     }
 
@@ -275,6 +276,7 @@ public sealed partial class SketchEditor : IViewportMode
         CType.Collinear => "Collinear",
         CType.Equal => "Equal",
         CType.Tangent => "Tangent",
+        CType.Curvature => "Curvature",
         CType.Concentric => "Concentric",
         CType.Symmetric => "Symmetric",
         _ => t.ToString(),
@@ -289,6 +291,7 @@ public sealed partial class SketchEditor : IViewportMode
         CType.Collinear => "⁄",
         CType.Equal => "=",
         CType.Tangent => "T",
+        CType.Curvature => "κ",
         CType.PointOnLine or CType.PointOnCircle or CType.Coincident => "•",
         CType.Midpoint => "M",
         CType.Concentric => "◎",
@@ -306,12 +309,12 @@ public sealed partial class SketchEditor : IViewportMode
         Snapshot();
         var added = new List<SkConstraint>();
         SkConstraint New(CType t, params long[] refs) { var c = new SkConstraint { Id = Sk.NewId(), Type = t, Refs = refs }; SketchSolver.CaptureSign(Sk, c); added.Add(c); return c; }
-        if (type == CType.Tangent && ents.OfType<SkSpline>().FirstOrDefault() is { } spl)
+        if (type is CType.Tangent or CType.Curvature && ents.OfType<SkSpline>().FirstOrDefault() is { } spl)
         {
             // (one a spline end: the same end tied twice is the newer; of two splines the second follows the first)
             var spls = ents.OfType<SkSpline>().ToList();
             if (spls.Count == 2) spl = spls[1];
-            if (SplineTangentOf(spl, spls.Count == 2 ? spls[0] : lines.Concat(rounds).FirstOrDefault()) is { } st)
+            if (SplineTangentOf(spl, spls.Count == 2 ? spls[0] : lines.Concat(rounds).FirstOrDefault(), type) is { } st)
             {
                 var end = Sk.SplineTangent(st)!.Value.point;
                 Sk.Constraints.RemoveAll(o => Sk.SplineTangent(o) is { } ot && ReferenceEquals(ot.spline, spl) && ot.point == end);
