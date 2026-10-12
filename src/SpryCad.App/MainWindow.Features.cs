@@ -431,13 +431,20 @@ public partial class MainWindow
         foreach (var id in f.GuideSketchIds) guideBox.Items.Add(new SelItem { Kind = SelKind.Sketch, FeatureId = id });
         guideBox.Refresh();
         guideBox.Changed += () => f.GuideSketchIds = guideBox.Items.Select(i => i.FeatureId).ToList();
+        var csec = page.Section("Centerline");
+        var clBox = page.Selection(csec, "Centerline", SelFilter.Sketch, "Optional: a sketch of tangent lines and arcs through every profile's plane; the loft follows it", 1);
+        if (!string.IsNullOrEmpty(f.CenterlineSketchId)) clBox.Items.Add(new SelItem { Kind = SelKind.Sketch, FeatureId = f.CenterlineSketchId });
+        clBox.Refresh();
+        clBox.Changed += () => f.CenterlineSketchId = clBox.Items.FirstOrDefault()?.FeatureId;
         var opts = page.Section("Start/End Constraints");
         var tangency = new List<(LoftTangency, string)> { (LoftTangency.None, "None"), (LoftTangency.Normal, "Normal to profile") };
         page.Combo(opts, "Start", tangency, () => f.StartTangency, v => f.StartTangency = v);
         page.Number(opts, "Start tangent length", () => f.StartLength, v => f.StartLength = v);
         page.Combo(opts, "End", tangency, () => f.EndTangency, v => f.EndTangency = v);
         page.Number(opts, "End tangent length", () => f.EndLength, v => f.EndLength = v);
-        if (!f.IsCut) page.Check(page.Section("Options"), "Merge result", () => f.Merge, v => f.Merge = v);
+        var osec = page.Section("Options");
+        page.Check(osec, "Close loft (back to the first profile)", () => f.Closed, v => f.Closed = v);
+        if (!f.IsCut) page.Check(osec, "Merge result", () => f.Merge, v => f.Merge = v);
         page.Activate(f.SectionSketchIds.Count < 2 ? profBox : null);
         BeginEdit(f, isNew, page, overlay: false,
             hint: f.SectionSketchIds.Count < 2 ? "Select the profile sketches in order (two at least), then any guide curves." : null);

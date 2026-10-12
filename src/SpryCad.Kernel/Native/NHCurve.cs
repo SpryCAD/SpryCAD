@@ -202,6 +202,17 @@ internal sealed class HCurve
         return new HCurve(p, knots.ToArray(), poles.ToArray());
     }
 
+    /// <summary>The curve cut at t (inside its range) into the piece before and the piece after.</summary>
+    public (HCurve before, HCurve after) Split(double t)
+    {
+        int mult = U.Count(u => u == t);
+        var c = Refine(Enumerable.Repeat(t, Math.Max(0, P - mult)).ToList());
+        int s = Array.IndexOf(c.U, t);
+        var ua = c.U.Take(s).Concat(Enumerable.Repeat(t, c.P + 1)).ToArray();
+        var ub = Enumerable.Repeat(t, c.P + 1).Concat(c.U.Skip(s + c.P)).ToArray();
+        return (new HCurve(c.P, ua, c.Q.Take(s).ToArray()), new HCurve(c.P, ub, c.Q.Skip(s - 1).ToArray()));
+    }
+
     /// <summary>The non-rational curve (all weights 1) as a B-spline of Cartesian poles.</summary>
     public BSplineCurve ToBSpline() => new(P, Q.Select(q => q.P).ToArray(), U);
 }

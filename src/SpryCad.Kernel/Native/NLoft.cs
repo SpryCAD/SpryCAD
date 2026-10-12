@@ -31,8 +31,18 @@ public static class NLoft
     /// <summary>How the loft leaves its first section or arrives at its last.</summary>
     public enum Tangency { None, Normal }
 
-    /// <summary>End conditions: the loft square to its end sections, the tangent's length a multiple of the loft's length.</summary>
-    public sealed record Options(Tangency Start = Tangency.None, double StartLength = 1, Tangency End = Tangency.None, double EndLength = 1);
+    /// <summary>
+    /// End conditions: the loft square to its end sections, the tangent's length a multiple of the loft's length.
+    /// Closed: the loft runs on from the last section back to the first (smoothly, no end faces).
+    /// </summary>
+    public sealed record Options(Tangency Start = Tangency.None, double StartLength = 1, Tangency End = Tangency.None, double EndLength = 1, bool Closed = false)
+    {
+        /// <summary>
+        /// A centerline (a tangent chain of lines and arcs through every section's plane): between the sections the
+        /// loft follows it, the sections' shapes carried along it without twisting (and blended from one to the next).
+        /// </summary>
+        public IReadOnlyList<NSweep.Seg>? Centerline { get; init; }
+    }
 
     // ------------------------------------------------------------------------------------------
     // section geometry
@@ -282,6 +292,71 @@ public static class NLoft
         }
     }
 
+    /// <summary>An orthonormal frame at a point of a centerline (E3 along it).</summary>
+    readonly record struct SpineFrame(Vec3 O, Vec3 E1, Vec3 E2, Vec3 E3)
+    {
+        /// <summary>A homogeneous point in the frame's coordinates (and back).</summary>
+        public H ToLocal(H h)
+        {
+            var d = h.V - O * h.W;
+            return new H(new Vec3(Vec3.Dot(d, E1), Vec3.Dot(d, E2), Vec3.Dot(d, E3)), h.W);
+        }
+        public H ToWorld(H h) => new(O * h.W + E1 * h.V.X + E2 * h.V.Y + E3 * h.V.Z, h.W);
+    }
+
+    /// <summary>A centerline with rotation-minimizing frames: constant along a line, turned with an arc about its axis.</summary>
+    sealed class Spine
+    {
+        readonly GuidePath _path;
+        readonly SpineFrame[] _start; // the frame at each piece's start
+        public List<NSweep.Seg> Segs => _path.Segs;
+        public double L => _path.L;
+
+        public Spine(List<NSweep.Seg> segs)
+        {
+            _path = new GuidePath(segs);
+            _start = new SpineFrame[segs.Count];
+            if (segs.Count == 0) return;
+            var t = _path.Tangent(0);
+            var e1 = t.AnyPerpendicular().Normalized;
+            var f = new SpineFrame(segs[0].A, e1, Vec3.Cross(t, e1), t);
+            for (int i = 0; i < segs.Count; i++)
+            {
+                _start[i] = f with { O = segs[i].A };
+                f = Turned(segs[i], _start[i], 1);
+            }
+        }
+
+        static Vec3 Rot(Vec3 v, Vec3 a, double phi) => v * Math.Cos(phi) + Vec3.Cross(a, v) * Math.Sin(phi) + a * (Vec3.Dot(a, v) * (1 - Math.Cos(phi)));
+
+        /// <summary>The frame a fraction t along piece g from its start frame.</summary>
+        static SpineFrame Turned(NSweep.Seg g, SpineFrame f, double t)
+        {
+            if (!g.IsArc) return f with { O = Vec3.Lerp(g.A, g.B, t) };
+            var a = g.Axis!.Value; var phi = g.Angle * t;
+            var r = g.A - g.Center!.Value;
+            return new SpineFrame(g.Center.Value + Rot(r, a, phi), Rot(f.E1, a, phi), Rot(f.E2, a, phi), Rot(f.E3, a, phi));
+        }
+
+        public SpineFrame FrameAt(double s)
+        {
+            s = Math.Clamp(s, 0, L);
+            double c = 0;
+            for (int i = 0; i < Segs.Count; i++)
+            {
+                var len = Segs[i].Length;
+                if (s <= c + len || i == Segs.Count - 1) return Turned(Segs[i], _start[i], len > 0 ? Math.Clamp((s - c) / len, 0, 1) : 0);
+                c += len;
+            }
+            return _start[0];
+        }
+
+        public Vec3 At(double s) => _path.At(s);
+        public bool Smooth() => _path.Smooth();
+        public List<double> Crossings(Plane pl, double tol) => _path.Crossings(pl, tol);
+        public Spine Reversed() => new(_path.Reversed().Segs);
+    }
+
     /// <summary>A guide through the sections: its arc lengths and (snapped) points at each, its loop group and locations.</summary>
     sealed class GuideInfo
     {
@@ -513,12 +588,27 @@ public static class NLoft
     /// every section). Faces are named prefix.S.(the first profile's segment name) and prefix.Start / prefix.End.
     /// Throws an <see cref="ArgumentException"/> saying what is wrong.
     /// </summary>
-    public static NBody Loft(IReadOnlyList<Section> sections, IReadOnlyList<IReadOnlyList<NSweep.Seg>>? guides, Options? options, string prefix)
+    public static NBody Loft(IReadOnlyList<Section> sectionList, IReadOnlyList<IReadOnlyList<NSweep.Seg>>? guides, Options? options, string prefix)
     {
         var opt = options ?? new Options();
         guides ??= Array.Empty<IReadOnlyList<NSweep.Seg>>();
+        var sections = sectionList.ToList();
         int N = sections.Count;
+        bool closed = opt.Closed;
         if (N < 2) throw new ArgumentException("a loft needs two sections at least");
+        if (closed)
+        {
+            if (N < 3) throw new ArgumentException("a closed loft needs three sections at least");
+            if (sections.Any(x => x.Point != null)) throw new ArgumentException("a closed loft cannot have a point section");
+            if (opt.Start != Tangency.None || opt.End != Tangency.None) throw new ArgumentException("a closed loft has no ends to set a tangency at");
+            if (guides.Count > 0) throw new ArgumentException("guide curves cannot be used on a closed loft yet");
+        }
+        if (opt.Centerline != null)
+        {
+            if (closed) throw new ArgumentException("a closed loft cannot follow a centerline");
+            if (guides.Count > 0) throw new ArgumentException("a loft follows guide curves or a centerline, not both");
+            if (opt.Start != Tangency.None || opt.End != Tangency.None) throw new ArgumentException("a loft along a centerline leaves its ends along the centerline (no tangency)");
+        }
         for (int k = 1; k < N - 1; k++) if (sections[k].Point != null) throw new ArgumentException("only the first and the last section can be a point");
         var ks = Enumerable.Range(0, N).Where(k => sections[k].Point == null).ToList();
         if (ks.Count == 0) throw new ArgumentException("a loft needs a closed profile in one section at least");
@@ -541,12 +631,13 @@ public static class NLoft
         double tolOn = Math.Max(1e-6, 1e-5 * scale), tolFit = Math.Max(1e-9, 1e-7 * scale);
         double loftLength = 0;
         for (int k = 1; k < N; k++) loftLength += Vec3.Distance(centre[k], centre[k - 1]);
+        if (closed) loftLength += Vec3.Distance(centre[0], centre[N - 1]);
         if (loftLength < 1e-6 * scale) throw new ArgumentException("the sections lie on top of each other");
         var normal = new Vec3[N];
         var flip = new bool[N];
         for (int k = 0; k < N; k++)
         {
-            var d = (centre[Math.Min(k + 1, N - 1)] - centre[Math.Max(k - 1, 0)]).Normalized;
+            var d = (closed ? centre[(k + 1) % N] - centre[(k + N - 1) % N] : centre[Math.Min(k + 1, N - 1)] - centre[Math.Max(k - 1, 0)]).Normalized;
             var n = sections[k].Frame.Normal;
             if (sections[k].Point == null && Math.Abs(Vec3.Dot(n, d)) < 0.02)
                 throw new ArgumentException($"section {k + 1} lies along the loft (its plane must cross the line between the sections)");
@@ -674,6 +765,20 @@ public static class NLoft
             else Align(g, ks);
             Breakpoints(g, ks, N);
         }
+        if (closed)
+        {
+            // the first section again at the end: the loft is built open from it round to itself
+            sections.Add(sections[0]);
+            T[] More<T>(T[] a) => a.Append(a[0]).ToArray();
+            centre = More(centre); normal = More(normal); flip = More(flip);
+            foreach (var g in groups)
+            {
+                g.Loops = More(g.Loops); g.Tau = More(g.Tau);
+                foreach (var b in g.Brks) { b.Rel = More(b.Rel); b.Member = More(b.Member); b.Vertex = More(b.Vertex); }
+            }
+            ks.Add(N);
+            N++;
+        }
 
         // the loft's parameter at each section: the guides' arc length, or the mean distance between matched points
         var vk = new double[N];
@@ -696,14 +801,89 @@ public static class NLoft
             var tot = dist.Sum();
             for (int k = 1; k < N; k++) vk[k] = vk[k - 1] + dist[k - 1] / tot;
         }
+        Spine? spine = null; double[]? sk = null;
+        if (opt.Centerline != null)
+        {
+            spine = new Spine(opt.Centerline.ToList());
+            if (spine.Segs.Count == 0 || spine.L < 1e-9 * scale) throw new ArgumentException("the centerline is empty");
+            if (!spine.Smooth()) throw new ArgumentException("the centerline has a sharp corner (it must be a tangent chain of lines and arcs)");
+            double[] Cross(Spine sp)
+            {
+                var r = new double[N];
+                for (int k = 0; k < N; k++)
+                {
+                    var pl = sections[k].Point is { } pt ? Plane.FromPointNormal(pt, normal[k]) : sections[k].Frame.Plane;
+                    var c = sp.Crossings(pl, tolOn);
+                    if (c.Count == 0) throw new ArgumentException($"the centerline does not cross section {k + 1}");
+                    r[k] = c.MinBy(x => Vec3.Distance(sp.At(x), centre[k]));
+                }
+                return r;
+            }
+            sk = Cross(spine);
+            if (sk[^1] < sk[0]) { spine = spine.Reversed(); sk = Cross(spine); }
+            for (int k = 1; k < N; k++)
+                if (!(sk[k] > sk[k - 1] + 1e-9 * scale)) throw new ArgumentException("the centerline must cross the sections in order");
+            for (int k = 0; k < N; k++) vk[k] = (sk[k] - sk[0]) / (sk[N - 1] - sk[0]);
+        }
         vk[0] = 0; vk[N - 1] = 1;
         for (int k = 1; k < N; k++)
             if (!(vk[k] > vk[k - 1] + 1e-9)) throw new ArgumentException($"sections {k} and {k + 1} are at the same place");
         foreach (var g in allGuides) g.Fit = FitGuide(g, vk, tolFit);
 
-        var interp = new Interpolation(vk, 3, opt.Start != Tangency.None, opt.End != Tangency.None);
+        var interp = new Interpolation(vk, 3, closed || opt.Start != Tangency.None, closed || opt.End != Tangency.None);
         var D0 = normal[0] * (opt.StartLength * loftLength);
         var D1 = normal[N - 1] * (opt.EndLength * loftLength);
+        // the end derivatives of a column of values across the sections: along the end sections' normals (scaled by the
+        // poles' weights, so the surface's own derivative is D0 / D1 all along the end); on a closed loft the same at
+        // both ends, the slopes either side of the seam averaged (Bessel), so the seam is smooth
+        (H d0, H d1) Ends(IReadOnlyList<H> vals)
+        {
+            if (!closed) return (new H(D0 * vals[0].W, 0), new H(D1 * vals[^1].W, 0));
+            double hp = vk[N - 1] - vk[N - 2], hn = vk[1] - vk[0];
+            var d = ((vals[1] - vals[0]) * (hp / hn) + (vals[0] - vals[N - 2]) * (hn / hp)) * (1 / (hp + hn));
+            return (d, d);
+        }
+        // a column of values (one per section) as a curve across the sections: interpolated, or along a centerline
+        // carried in its frames (interpolated in them) and interpolated again through stations close enough to follow it
+        Func<IReadOnlyList<H>, HCurve> column = vals => { var (e0, e1) = Ends(vals); return interp.Curve(vals, e0, e1); };
+        if (spine != null)
+        {
+            var frames = Enumerable.Range(0, N).Select(k => spine.FrameAt(sk![k])).ToArray();
+            double S(double v) => sk![0] + v * (sk[N - 1] - sk[0]);
+            // the exact blend at v of a column: its values in their sections' frames, interpolated, carried to v's frame
+            Func<double, H> Exact(IReadOnlyList<H> vals)
+            {
+                var local = interp.Curve(vals.Select((h, k) => frames[k].ToLocal(h)).ToList());
+                return v => spine.FrameAt(S(v)).ToWorld(local.EvalH(v));
+            }
+            // stations: each span cut into as many pieces as it takes to follow the centerline within the tolerance
+            // (judged on the loops' points)
+            var probes = new List<IReadOnlyList<H>>();
+            foreach (var g in groups)
+                for (int q = 0; q < 16; q++)
+                    probes.Add(Enumerable.Range(0, N).Select(k => H.Of(sections[k].Point ?? g.Loops[k]!.At(g.Tau[k] + q / 16.0))).ToList());
+            var exacts = probes.Select(Exact).ToList();
+            double[] stations = vk;
+            Interpolation through = interp;
+            for (int cuts = 2; ; cuts *= 2)
+            {
+                stations = Enumerable.Range(0, N - 1).SelectMany(k => Enumerable.Range(0, cuts).Select(i => vk[k] + (vk[k + 1] - vk[k]) * i / cuts)).Append(1.0).ToArray();
+                through = new Interpolation(stations, 3, false, false);
+                double err = 0;
+                foreach (var ex in exacts)
+                {
+                    var c = through.Curve(stations.Select(ex).ToList());
+                    for (int j = 0; j + 1 < stations.Length; j++)
+                    {
+                        var v = 0.5 * (stations[j] + stations[j + 1]);
+                        err = Math.Max(err, Vec3.Distance(c.Eval(v), ex(v).P));
+                    }
+                }
+                if (err < tolFit || cuts >= 64) break;
+            }
+            var st = stations; var th = through;
+            column = vals => { var ex = Exact(vals); var c = th.Curve(st.Select(ex).ToList()); return c; };
+        }
 
         // ---- topology
         var body = new NBody();
@@ -711,6 +891,7 @@ public static class NLoft
         NVertex? apex0 = sections[0].Point is { } q0 ? new NVertex(q0) : null;
         NVertex? apex1 = sections[^1].Point is { } q1 ? new NVertex(q1) : null;
         var names = new Dictionary<string, int>();
+        var rings = new List<List<NurbsSurface>>();
         var startLoops = new List<(int region, bool hole, List<(NEdge e, bool fwd)> loop)>();
         var endLoops = new List<(int region, bool hole, List<(NEdge e, bool fwd)> loop)>();
         foreach (var g in groups)
@@ -743,30 +924,53 @@ public static class NLoft
                 if (l.FreeSeam) return (l.Segs[0], t0, t1 + (t1 <= t0 ? 1 : 0));
                 throw new InvalidOperationException("loft: a piece spans a vertex");
             }
+            static (NEdge e, bool fwd) Edge((Seg3 s, double t0, double t1) p, NVertex a, NVertex b) => p.s.Edge(p.t0, a, b);
             // vertices and the edges along the sections at the ends
             int kf = ks[0] == 0 ? 0 : -1, kl = ks[^1] == N - 1 ? N - 1 : -1;
             var vf = new NVertex[m]; var vl = new NVertex[m];
             for (int b = 0; b < m; b++)
             {
                 vf[b] = apex0 ?? new NVertex(pt[0, b]);
-                vl[b] = apex1 ?? new NVertex(pt[N - 1, b]);
+                vl[b] = closed ? vf[b] : apex1 ?? new NVertex(pt[N - 1, b]);
+            }
+            // a closed loft's faces are cut at a middle section (no face runs all the way round)
+            int km = closed ? N / 2 : 0;
+            var vm = new NVertex[m];
+            var mid = new (NEdge e, bool fwd)[m];
+            if (km > 0)
+            {
+                for (int b = 0; b < m; b++) vm[b] = new NVertex(pt[km, b]);
+                for (int b = 0; b < m; b++) mid[b] = Edge(Piece(km, b), vm[b], vm[(b + 1) % m]);
             }
             var bottom = new (NEdge e, bool fwd)[m]; var top = new (NEdge e, bool fwd)[m];
             for (int b = 0; b < m; b++)
             {
                 if (kf >= 0) { var (s, t0, _) = Piece(0, b); bottom[b] = s.Edge(t0, vf[b], vf[(b + 1) % m]); }
-                if (kl >= 0) { var (s, t0, _) = Piece(N - 1, b); top[b] = s.Edge(t0, vl[b], vl[(b + 1) % m]); }
+                if (kl >= 0) top[b] = closed ? bottom[b] : Edge(Piece(N - 1, b), vl[b], vl[(b + 1) % m]);
             }
             // the side edges: the guide, or the interpolation of the breakpoint's points
             var guideAt = new GuideInfo?[m];
             for (int b = 0; b < m; b++) if (g.Brks[b].Guide >= 0) guideAt[b] = g.Guides[g.Brks[b].Guide];
-            var side = new NEdge[m];
+            var side = new NEdge[m]; var side2 = new NEdge[m];
             for (int b = 0; b < m; b++)
             {
-                var curve = guideAt[b]?.Fit ?? interp.Curve(Enumerable.Range(0, N).Select(k => H.Of(pt[k, b])).ToList(), new H(D0, 0), new H(D1, 0));
-                side[b] = SideEdge(curve.ToBSpline(), vf[b], vl[b], tol);
+                HCurve curve;
+                if (guideAt[b]?.Fit is { } fit) curve = fit;
+                else
+                {
+                    curve = column(Enumerable.Range(0, N).Select(k => H.Of(pt[k, b])).ToList());
+                }
+                if (km > 0)
+                {
+                    var (ca, cb) = curve.Split(vk[km]);
+                    side[b] = SideEdge(ca.ToBSpline(), vf[b], vm[b], tol);
+                    side2[b] = SideEdge(cb.ToBSpline(), vm[b], vl[b], tol);
+                }
+                else side[b] = SideEdge(curve.ToBSpline(), vf[b], vl[b], tol);
             }
             // the faces
+            var surfs = new List<NurbsSurface>();
+            rings.Add(surfs);
             for (int b = 0; b < m; b++)
             {
                 var pieces = new HCurve?[N];
@@ -778,25 +982,38 @@ public static class NLoft
                     name ??= s.Name;
                 }
                 var g0 = guideAt[b]; var g1 = guideAt[(b + 1) % m];
-                var surf = Strip(pieces, sections, interp, D0, D1, g0?.Fit, g1?.Fit);
-                var nm = $"{prefix}.S.{name}";
-                names[nm] = names.GetValueOrDefault(nm) + 1;
-                if (names[nm] > 1) nm += "." + names[nm];
-                var mid = surf.Eval(0.5 * (surf.U0 + surf.U1), 0.5 * (surf.V0 + surf.V1));
-                var rec = NRecognize.Surface(surf, 1e-7 * Math.Max(1, surf.Box.Diagonal), out var flipped);
-                var ns = rec ?? NSurface.BSpline(surf);
-                var face = new NFace(ns, !flipped, new FaceTag(nm, ns.Kind == SurfaceKind.Plane ? SurfaceDef.PlaneDef : ns.Def), mid);
-                var lp = new NLoop();
-                if (kf >= 0) lp.Coedges.Add(new NCoedge(bottom[b].e, bottom[b].fwd));
-                lp.Coedges.Add(new NCoedge(side[(b + 1) % m], true));
-                if (kl >= 0) lp.Coedges.Add(new NCoedge(top[b].e, !top[b].fwd));
-                lp.Coedges.Add(new NCoedge(side[b], false));
-                face.Loops.Add(lp);
-                body.Faces.Add(face);
+                var (cols, U, pu) = Strip(pieces, sections, column, g0?.Fit, g1?.Fit);
+                surfs.Add(SurfaceOf(cols, U, pu));
+                void Face(NurbsSurface surf, (NEdge e, bool fwd)? lo, NEdge right, (NEdge e, bool fwd)? hi, NEdge left)
+                {
+                    var nm = $"{prefix}.S.{name}";
+                    names[nm] = names.GetValueOrDefault(nm) + 1;
+                    if (names[nm] > 1) nm += "." + names[nm];
+                    var inside = surf.Eval(0.5 * (surf.U0 + surf.U1), 0.5 * (surf.V0 + surf.V1));
+                    var rec = NRecognize.Surface(surf, 1e-7 * Math.Max(1, surf.Box.Diagonal), out var flipped);
+                    var ns = rec ?? NSurface.BSpline(surf);
+                    var face = new NFace(ns, !flipped, new FaceTag(nm, ns.Kind == SurfaceKind.Plane ? SurfaceDef.PlaneDef : ns.Def), inside);
+                    var lp = new NLoop();
+                    if (lo is { } l0) lp.Coedges.Add(new NCoedge(l0.e, l0.fwd));
+                    lp.Coedges.Add(new NCoedge(right, true));
+                    if (hi is { } h0) lp.Coedges.Add(new NCoedge(h0.e, !h0.fwd));
+                    lp.Coedges.Add(new NCoedge(left, false));
+                    face.Loops.Add(lp);
+                    body.Faces.Add(face);
+                }
+                if (km > 0)
+                {
+                    var split = cols.Select(c => c.Split(vk[km])).ToArray();
+                    Face(SurfaceOf(split.Select(x => x.before).ToArray(), U, pu), bottom[b], side[(b + 1) % m], mid[b], side[b]);
+                    Face(SurfaceOf(split.Select(x => x.after).ToArray(), U, pu), mid[b], side2[(b + 1) % m], top[b], side2[b]);
+                }
+                else Face(SurfaceOf(cols, U, pu), kf >= 0 ? bottom[b] : null, side[(b + 1) % m], kl >= 0 ? top[b] : null, side[b]);
             }
+            if (closed) continue;
             if (kf >= 0) startLoops.Add((g.Region, g.Hole, Enumerable.Range(0, m).Reverse().Select(b => (bottom[b].e, !bottom[b].fwd)).ToList()));
             if (kl >= 0) endLoops.Add((g.Region, g.Hole, Enumerable.Range(0, m).Select(b => top[b]).ToList()));
         }
+        CheckCrossing(rings, vk);
         // the end caps: one plane face per region (its outline and its holes)
         void Caps(List<(int region, bool hole, List<(NEdge e, bool fwd)> loop)> ls, int k, string name)
         {
@@ -818,6 +1035,82 @@ public static class NLoft
         // inside out (the sections' loops turned the other way): turn it round
         if (body.Validate() == null && NMass.Of(body) is { } mp && mp.Volume < 0) body = body.Flipped();
         return body;
+    }
+
+    /// <summary>
+    /// Throws if the loft passes through itself: between the sections, the rings across it (every loop at one v,
+    /// seen along the loft) must neither cross themselves nor each other. A loft twisted past its profiles' corners
+    /// or pulled across by a guide folds over like this.
+    /// </summary>
+    static void CheckCrossing(List<List<NurbsSurface>> groups, double[] vk)
+    {
+        const int perSpan = 8, perStrip = 12;
+        var prevN = Vec3.Zero;
+        List<Vec3[]> Rings(double v) => groups.Select(strips => strips.SelectMany(sf => Enumerable.Range(0, perStrip)
+            .Select(i => sf.Eval(sf.U0 + (sf.U1 - sf.U0) * i / perStrip, v))).ToArray()).ToList();
+        // twice the area of the first (outer) ring, along its normal (Newell)
+        static Vec3 Area(Vec3[] o)
+        {
+            var n = Vec3.Zero;
+            for (int i = 0; i < o.Length; i++) n += Vec3.Cross(o[i] - o[0], o[(i + 1) % o.Length] - o[0]);
+            return n;
+        }
+        for (int k = 0; k + 1 < vk.Length; k++)
+        {
+            double area0 = Area(Rings(vk[k])[0]).Length, area1 = Area(Rings(vk[k + 1])[0]).Length;
+            for (int q = 1; q < perSpan; q++)
+            {
+                var v = vk[k] + (vk[k + 1] - vk[k]) * q / perSpan;
+                var loops = Rings(v);
+                var o = loops[0];
+                var nrm = Area(o);
+                // much smaller than the sections either side: the loft pinches through itself (a half turn)
+                if (nrm.Length < 0.02 * (area0 + (area1 - area0) * q / perSpan))
+                    throw new ArgumentException($"the loft passes through itself between sections {k + 1} and {k + 2} (it twists too far: match the profiles' corners or add a section)");
+                // the ring turned inside out (or shrunk to nothing) since the last: the loft folds back through itself
+                if (!(Vec3.Dot(nrm, prevN) > 0) && prevN != Vec3.Zero)
+                    throw new ArgumentException($"the loft passes through itself between sections {k + 1} and {k + 2} (it twists too far: match the profiles' corners or add a section)");
+                if (nrm.Length < 1e-300) continue;
+                nrm = nrm.Normalized;
+                prevN = nrm;
+                var x = nrm.AnyPerpendicular(); var y = Vec3.Cross(nrm, x);
+                var p2 = loops.Select(l => l.Select(p => new Vec2(Vec3.Dot(p, x), Vec3.Dot(p, y))).ToArray()).ToList();
+                double size = 0;
+                foreach (var l in p2) foreach (var p in l) size = Math.Max(size, Math.Max(Math.Abs(p.X), Math.Abs(p.Y)));
+                var eps = 1e-9 * Math.Max(size, 1);
+                static double Orient(Vec2 a, Vec2 b, Vec2 c) => (b.X - a.X) * (c.Y - a.Y) - (b.Y - a.Y) * (c.X - a.X);
+                for (int a = 0; a < p2.Count; a++)
+                    for (int b = a; b < p2.Count; b++)
+                    {
+                        var A = p2[a]; var B = p2[b];
+                        for (int i = 0; i < A.Length; i++)
+                        {
+                            Vec2 a0 = A[i], a1 = A[(i + 1) % A.Length];
+                            for (int j = a == b ? i + 2 : 0; j < B.Length; j++)
+                            {
+                                if (a == b && (j + 1) % B.Length == i) continue; // neighbours share a point
+                                Vec2 b0 = B[j], b1 = B[(j + 1) % B.Length];
+                                double d1 = Orient(b0, b1, a0), d2 = Orient(b0, b1, a1), d3 = Orient(a0, a1, b0), d4 = Orient(a0, a1, b1);
+                                double la = (a1 - a0).Length, lb = (b1 - b0).Length;
+                                if ((d1 > eps * lb && d2 < -eps * lb || d1 < -eps * lb && d2 > eps * lb) && (d3 > eps * la && d4 < -eps * la || d3 < -eps * la && d4 > eps * la))
+                                    throw new ArgumentException($"the loft passes through itself between sections {k + 1} and {k + 2} ("
+                                        + (a == b ? "it twists too far: match the profiles' corners or add a section" : "two of its loops run into each other") + ")");
+                            }
+                        }
+                    }
+            }
+        }
+    }
+
+    /// <summary>The surface of pole columns (each a curve across the sections, one knot vector) over the u knots.</summary>
+    static NurbsSurface SurfaceOf(HCurve[] cols, double[] U, int pu)
+    {
+        int nu = cols.Length, nv = cols[0].Q.Length;
+        var poles = new Vec3[nu, nv];
+        var w = new double[nu, nv];
+        for (int i = 0; i < nu; i++)
+            for (int j = 0; j < nv; j++) { poles[i, j] = cols[i].Q[j].P; w[i, j] = cols[i].Q[j].W; }
+        return new NurbsSurface(pu, cols[0].P, poles, w, U, cols[0].U);
     }
 
     /// <summary>A side edge from va to vb on the (non-rational) curve: a line when it is straight.</summary>
@@ -842,7 +1135,7 @@ public static class NLoft
     /// One side face's surface: the pieces (null at a point section) made compatible and their poles interpolated
     /// across the sections; corrected to the guides at its edges (u = 0 and u = 1) when given.
     /// </summary>
-    static NurbsSurface Strip(HCurve?[] pieces, IReadOnlyList<Section> sections, Interpolation interp, Vec3 D0, Vec3 D1, HCurve? g0, HCurve? g1)
+    static (HCurve[] cols, double[] U, int pu) Strip(HCurve?[] pieces, IReadOnlyList<Section> sections, Func<IReadOnlyList<H>, HCurve> column, HCurve? g0, HCurve? g1)
     {
         int N = pieces.Length;
         bool guided = g0 != null || g1 != null;
@@ -859,13 +1152,12 @@ public static class NLoft
             }
         int nu = cur[0].Q.Length;
         var U = cur[0].U; int pu = cur[0].P;
-        // every pole column across the sections; the end derivatives scaled by the poles' weights (so the
-        // surface's derivative is D0 / D1 all along the end)
+        // every pole column across the sections
         var cols = new HCurve[nu];
         for (int i = 0; i < nu; i++)
         {
             var vals = Enumerable.Range(0, N).Select(k => cur[k].Q[i]).ToList();
-            cols[i] = interp.Curve(vals, new H(D0 * vals[0].W, 0), new H(D1 * vals[^1].W, 0));
+            cols[i] = column(vals);
         }
         if (guided)
         {
@@ -891,11 +1183,6 @@ public static class NLoft
                 }
             }
         }
-        int nv = cols[0].Q.Length;
-        var poles = new Vec3[nu, nv];
-        var w = new double[nu, nv];
-        for (int i = 0; i < nu; i++)
-            for (int j = 0; j < nv; j++) { poles[i, j] = cols[i].Q[j].P; w[i, j] = cols[i].Q[j].W; }
-        return new NurbsSurface(pu, cols[0].P, poles, w, U, cols[0].U);
+        return (cols, U, pu);
     }
 }

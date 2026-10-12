@@ -124,6 +124,91 @@ static class LoftTests
             Volume(t, g3, "guide through three sections");
         });
 
+        t.Test("Loft: closed, a ring of sections round an axis (no end faces, smooth all round)", () =>
+        {
+            // sections in planes through the Y axis, at angle a round it, the ring's radius R
+            const double R = 40;
+            NLoft.Section Ring(double a, ProfileRegion r)
+            {
+                var x = new Vec3(Math.Cos(a), 0, Math.Sin(a));
+                return new NLoft.Section(new Frame(x * R, x, Vec3.UnitY, Vec3.Cross(x, Vec3.UnitY)), new[] { r });
+            }
+            var ring = NLoft.Loft(Enumerable.Range(0, 8).Select(i => Ring(i * Math.PI / 4, Circle(6))).ToArray(), null, new NLoft.Options(Closed: true), "R");
+            var v = Volume(t, ring, "ring of circles");
+            var torus = 2 * Math.PI * Math.PI * R * 36;
+            t.True(Math.Abs(v - torus) < 0.01 * torus, $"close to the torus: {v} vs {torus}");
+            t.True(ring.Faces.All(f => !f.Tag.Name.EndsWith(".Start") && !f.Tag.Name.EndsWith(".End")), "no end faces");
+            t.Eq(ring.Lumps().Count, 1);
+            // smooth across the seam (section 1, where the loft closes): the faces either side have one normal there
+            var p = new Vec3(R + 6, 0, 0);
+            var near = ring.Faces.Where(f => f.Surface.Kind != SurfaceKind.Plane && Vec3.Distance(f.Surface.Project(p), p) < 1e-6).ToList();
+            t.True(near.Count >= 2, $"faces meet at the seam: {near.Count}");
+            var ns = near.Select(f => f.Surface.Normal(f.Surface.Project(p)) * (f.Sense ? 1 : -1)).ToList();
+            t.True(ns.All(n => Vec3.Dot(n, ns[0]) > 1 - 1e-6), "tangent across the seam");
+            // squares and circles alternating round the ring
+            var mixed = NLoft.Loft(Enumerable.Range(0, 6).Select(i => Ring(i * Math.PI / 3, i % 2 == 0 ? Rect(10, 10) : Circle(6))).ToArray(), null, new NLoft.Options(Closed: true), "M");
+            Volume(t, mixed, "mixed ring");
+            string? err = null;
+            try { NLoft.Loft(new[] { Ring(0, Circle(5)), Ring(1, Circle(5)) }, null, new NLoft.Options(Closed: true), "X"); } catch (ArgumentException ex) { err = ex.Message; }
+            t.True(err != null && err.Contains("three sections"), "explained: " + err);
+        });
+
+        t.Test("Loft: along a centerline (a quarter bend: the torus, to the tolerance; an S bend square to circle to square)", () =>
+        {
+            // two circles r 6 square to an arc of radius 40 about (40, 0, 0) in XZ, a quarter turn apart
+            Frame Tilt(double a)
+            {
+                var o = new Vec3(40 - 40 * Math.Cos(a), 0, 40 * Math.Sin(a));
+                var x = new Vec3(Math.Cos(a), 0, -Math.Sin(a));
+                return new Frame(o, x, Vec3.UnitY, Vec3.Cross(x, Vec3.UnitY));
+            }
+            var arc = new NSweep.Seg(Vec3.Zero, new Vec3(40, 0, 40), new Vec3(40, 0, 0), new Vec3(0, 1, 0), Math.PI / 2);
+            t.True(Vec3.Distance(arc.B, new Vec3(40, 0, 40)) < 1e-9 && Vec3.Dot(arc.StartTangent, Vec3.UnitZ) > 1 - 1e-12, "the arc leaves along +Z");
+            var opt = new NLoft.Options { Centerline = new[] { arc } };
+            var b = NLoft.Loft(new[] { new NLoft.Section(Tilt(0), new[] { Circle(6) }), new NLoft.Section(Tilt(Math.PI / 2), new[] { Circle(6) }) }, null, opt, "C");
+            var v = Volume(t, b, "quarter bend");
+            var torus = Math.PI * 36 * 40 * Math.PI / 2;
+            t.True(Math.Abs(v - torus) < 1e-6 * torus, $"the torus's quarter: {v} vs {torus}");
+            // the side stays on the torus all along
+            double off = 0;
+            foreach (var f in b.Faces.Where(f => f.Surface.Kind == SurfaceKind.BSpline))
+            {
+                var nb = f.Surface.Nurbs!;
+                for (int i = 0; i <= 10; i++)
+                    for (int j = 0; j <= 20; j++)
+                    {
+                        var q = nb.Eval(nb.U0 + (nb.U1 - nb.U0) * i / 10, nb.V0 + (nb.V1 - nb.V0) * j / 20);
+                        var d = q - new Vec3(40, 0, 0);
+                        var rho = Math.Sqrt(d.X * d.X + d.Z * d.Z);
+                        off = Math.Max(off, Math.Abs(Math.Sqrt((rho - 40) * (rho - 40) + d.Y * d.Y) - 6));
+                    }
+            }
+            t.True(off < 1e-5, $"on the torus: {off:E2}");
+            // an S: a quarter turn one way, a quarter the other, square to circle to square
+            var arc2 = new NSweep.Seg(new Vec3(40, 0, 40), new Vec3(80, 0, 80), new Vec3(40, 0, 80), new Vec3(0, -1, 0), Math.PI / 2);
+            t.True(Vec3.Distance(arc2.B, new Vec3(80, 0, 80)) < 1e-9, "the second arc ends at (80, 0, 80)");
+            var end = new Frame(new Vec3(80, 0, 80), new Vec3(1, 0, 0) * -1, Vec3.UnitY, Vec3.Cross(new Vec3(-1, 0, 0), Vec3.UnitY));
+            var s3 = NLoft.Loft(new[] { new NLoft.Section(Tilt(0), new[] { Rect(10, 10) }), new NLoft.Section(Tilt(Math.PI / 2), new[] { Circle(6) }),
+                new NLoft.Section(new Frame(new Vec3(80, 0, 80), Vec3.UnitX, Vec3.UnitY, Vec3.UnitZ), new[] { Rect(10, 10) }) }, null, new NLoft.Options { Centerline = new[] { arc, arc2 } }, "S");
+            Volume(t, s3, "S bend");
+            string? err = null;
+            try { NLoft.Loft(new[] { Sec(0, Circle(5)), Sec(20, Circle(5)) }, null, new NLoft.Options { Centerline = new[] { new NSweep.Seg(new Vec3(30, 0, 0), new Vec3(30, 0, 1)) } }, "X"); }
+            catch (ArgumentException ex) { err = ex.Message; }
+            t.True(err != null && err.Contains("does not cross"), "explained: " + err);
+        });
+
+        t.Test("Loft: a loft forced to twist through itself is refused", () =>
+        {
+            // a straight guide from one corner of the lower square to the opposite corner of the upper one: a half turn
+            var guide = new List<NSweep.Seg> { new(new Vec3(10, 10, 0), new Vec3(-10, -10, 30)) };
+            string? err = null;
+            try { NLoft.Loft(new[] { Sec(0, Rect(20, 20)), Sec(30, Rect(20, 20)) }, new[] { guide }, null, "X"); } catch (ArgumentException ex) { err = ex.Message; }
+            t.True(err != null && err.Contains("passes through itself"), "explained: " + err);
+            // a quarter turn in three steps is fine
+            var ok = NLoft.Loft(Enumerable.Range(0, 4).Select(i => new NLoft.Section(At(i * 10), new[] { new ProfileRegion(ProfileLoop.Polygon(Enumerable.Range(0, 4).Select(j => Vec2.FromAngle(i * Math.PI / 6 + j * Math.PI / 2, 14)), "N")) })).ToArray(), null, null, "X");
+            Volume(t, ok, "quarter turn");
+        });
+
         t.Test("Loft: a guide bows the side out through its point; the sections stay exact", () =>
         {
             // circles r 10 at z 0 and 40; a guide arc in XZ from (10,0,0) through (16,0,20) to (10,0,40)
@@ -274,6 +359,30 @@ static class LoftFeatureTests
             t.Eq(body.Topology.OpenHalfEdges, 0);
             var loft = KernelTests.Vex(new SpryCad.Core.Regen.Regenerator().Rebuild(doc).State.Tools[lf.Id].Tool);
             t.True(Math.Abs(KernelTests.Vex(body) - (60 * 60 * 20 + loft)) < 1e-6 * KernelTests.Vex(body), "the block plus the loft");
+        });
+
+        t.Test("Loft feature: a square along an S centerline sketch (the swept volume); saved and loaded", () =>
+        {
+            var doc = new SpryCad.Core.Model.CadDocument();
+            var a = OnPlane(doc, 0, RectAt(Vec2.Zero, 10, 10));
+            var b = OnPlane(doc, 40, RectAt(new Vec2(20, 0), 10, 10));
+            // on Front (x, y as world): up from the origin, a quarter turn right (r 10), a quarter back up, then straight to y 40
+            var cl = new SpryCad.Core.Sketching.Sketch();
+            var o = cl.Point(SpryCad.Core.Sketching.Sketch.OriginId)!;
+            var c1 = cl.AddPoint(new Vec2(10, 0)); var p1 = cl.AddPoint(new Vec2(10, 10)); var c2 = cl.AddPoint(new Vec2(10, 20)); var p2 = cl.AddPoint(new Vec2(20, 20)); var p3 = cl.AddPoint(new Vec2(20, 40));
+            cl.Add(new SpryCad.Core.Sketching.SkArc { Center = c1.Id, Start = p1.Id, End = o.Id });
+            cl.Add(new SpryCad.Core.Sketching.SkArc { Center = c2.Id, Start = p1.Id, End = p2.Id });
+            cl.Add(new SpryCad.Core.Sketching.SkLine { P1 = p2.Id, P2 = p3.Id });
+            var cf = doc.AddFeature(new SpryCad.Core.Model.SketchFeature { Plane = SpryCad.Core.Model.PlaneRef.Front, Sketch = cl });
+            var lf = doc.AddFeature(new SpryCad.Core.Model.LoftFeature { SectionSketchIds = { a.Id, b.Id }, CenterlineSketchId = cf.Id });
+            var r = new SpryCad.Core.Regen.Regenerator().Rebuild(doc);
+            t.True(r.Status[lf.Id].Ok, r.Status[lf.Id].Error ?? "");
+            t.Eq(r.Status[cf.Id].Warnings.Count, 0); // a centerline is open by design
+            var len = 2 * Math.PI / 2 * 10 + 20;
+            var vol = KernelTests.Vex(r.State.Bodies[0].Solid);
+            t.True(Math.Abs(vol - 100 * len) < 1e-5 * 100 * len, $"the swept volume: {vol} vs {100 * len}");
+            var again = SpryCad.Core.Model.CadDocument.FromJson(doc.ToJson());
+            t.True(again.Features.Last() is SpryCad.Core.Model.LoftFeature l2 && l2.CenterlineSketchId == cf.Id, "centerline saved");
         });
 
         t.Test("Loft feature: a cut loft pockets a block exactly; a guide sketch bows a side out", () =>
