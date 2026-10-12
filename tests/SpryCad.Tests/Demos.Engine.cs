@@ -362,7 +362,7 @@ static partial class Demos
             ("WallR", "4"), ("PitR", "4"), ("RibR", "3"), ("JointR", "5"), ("RibT", "12"), ("RibIn", "50"), ("PedRibY", "110"), ("BaseRibX", "150"), ("BaseRibP", "90"), ("BaseRibOut", "80"), ("BaseRibH", "45"),
             ("BrgIn", $"{HmBrgIn}"), ("BrgOut", $"{HmBrgOut}"), ("BrgW", "64"), ("BrgDrop", "40"), ("J", $"{HmJ}"), ("CapStud", "25"), ("PedR", "6"),
             ("HeadX", $"{-HmHeadX}"), ("BarrelD", "104"), ("BarrelEnd", "70"), ("FlangeD", "116"), ("FlangeT", "12"), ("StudPCD", "96"), ("NStud", "6"),
-            ("HopX0", "175"), ("HopX1", "85"), ("HopW", "BodyW-2*(BaseY-BaseT)*tan(BodyDraft)"), ("HopH", "82"), ("HopWall", "7"), ("HopDraft", "2"), ("HopR", "12"), ("HopTopR", "4"), ("Jacket", "20"), ("FillD", "44"),
+            ("HopX0", "175"), ("HopX1", "85"), ("HopW", "BodyW-2*(BaseY-BaseT)*tan(BodyDraft)"), ("HopH", "82"), ("HopWall", "7"), ("HopDraft", "2"), ("HopR", "12"), ("HopTopR", "4"), ("Jacket", "20"), ("FillD", "44"), ("PadL", "62"), ("PadH", "32"), ("PadR", "5"), ("PadT", "1.5"), ("PadY", "46"),
             ("SadW", "BodyW-2*(BaseY-BaseT)*tan(BodyDraft)"), ("SadH", "BarrelD/2"), ("SadDip", "6"), ("SadX1", "34"),
             ("LinerD", "66"), ("Bore", $"{HmBore}"), ("Relief", "58"), ("ReliefL", "8"),
             ("PitX1", "60"), ("PitW", "2*BrgIn"), ("PitBot", "110"),
@@ -644,6 +644,14 @@ static partial class Demos
         d.AddFeature(new FilletFeature { Name = "Base ribs blended", Radius = "RibR", Features = { baseRib.Id } });
         d.AddFeature(new FilletFeature { Name = "Lugs into the body", Radius = "3", Features = { lug.Id } });
         d.AddFeature(new FilletFeature { Name = "Oil boss into the barrel", Radius = "1.5", Features = { oilBoss.Id } });
+        // the nameplate's pad on the hopper's -Z side (the side the flywheels leave in view): a flat, upright face
+        // standing PadT proud of the drafted side at its foot, run back into the hopper, blended into it
+        var pp = d.AddFeature(new PlaneFeature { Name = "Nameplate face", Base = PlaneRef.Front, Offset = "-(HopW/2+PadT)" });
+        var np = new Sk(d);
+        HmRoundRect(np, "PadL/2", "PadH/2", "PadR", "-(HopX0+HopX1)/2", "PadY");
+        var nps = d.AddFeature(new SketchFeature { Name = "Nameplate pad", Plane = new PlaneRef { Feature = pp.Id }, Sketch = np.S });
+        var pad = d.AddFeature(new ExtrudeFeature { Name = "Nameplate pad", SketchId = nps.Id, Depth = "PadT+4" });
+        d.AddFeature(new FilletFeature { Name = "Nameplate pad blended", Radius = "1", Features = { pad.Id } });
         d.Color = new[] { 0.72, 0.08, 0.07 };
         HmMaterial(d, "Cast iron");
         return d;
@@ -955,17 +963,19 @@ static partial class Demos
     static readonly double[] HmBrass = { 0.85, 0.66, 0.28 }, HmBlack = { 0.13, 0.13, 0.14 }, HmSteel = { 0.80, 0.81, 0.83 }, HmRed = { 0.72, 0.08, 0.07 };
 
     /// <summary>
-    /// A rectangle on the sketch's origin, its half sizes and corner radius given by parameter names (a, b), its corners
-    /// round: lines (bottom, right, top, left) and arcs drawn in that order, so lofted sections match corner for corner.
+    /// A rectangle centred on the sketch's origin (or on cx, cy), its half sizes and corner radius given by parameter
+    /// names (a, b), its corners round: lines (bottom, right, top, left) and arcs drawn in that order, so lofted sections
+    /// match corner for corner.
     /// </summary>
-    static List<long> HmRoundRect(Sk s, string a, string b, string r)
+    static List<long> HmRoundRect(Sk s, string a, string b, string r, string? cx = null, string? cy = null)
     {
+        long P(string x, string y) => s.P(cx == null ? x : $"({cx})+({x})", cy == null ? y : $"({cy})+({y})");
         string xi = $"{a}-{r}", yi = $"{b}-{r}";
-        long b0 = s.P($"-({xi})", $"-({b})"), b1 = s.P(xi, $"-({b})"), r0 = s.P(a, $"-({yi})"), r1 = s.P(a, yi);
-        long t0 = s.P(xi, b), t1 = s.P($"-({xi})", b), l0 = s.P($"-({a})", yi), l1 = s.P($"-({a})", $"-({yi})");
+        long b0 = P($"-({xi})", $"-({b})"), b1 = P(xi, $"-({b})"), r0 = P(a, $"-({yi})"), r1 = P(a, yi);
+        long t0 = P(xi, b), t1 = P($"-({xi})", b), l0 = P($"-({a})", yi), l1 = P($"-({a})", $"-({yi})");
         var lines = new List<long> { s.Line(b0, b1), s.Line(r0, r1), s.Line(t0, t1), s.Line(l0, l1) };
-        s.Arc(s.P(xi, $"-({yi})"), b1, r0); s.Arc(s.P(xi, yi), r1, t0);
-        s.Arc(s.P($"-({xi})", yi), t1, l0); s.Arc(s.P($"-({xi})", $"-({yi})"), l1, b0);
+        s.Arc(P(xi, $"-({yi})"), b1, r0); s.Arc(P(xi, yi), r1, t0);
+        s.Arc(P($"-({xi})", yi), t1, l0); s.Arc(P($"-({xi})", $"-({yi})"), l1, b0);
         return lines;
     }
 
@@ -996,6 +1006,31 @@ static partial class Demos
     }
 
     /// <summary>The hopper's filler: a funnel flaring up from a spigot in the hopper's opening (from y = 0 on the hopper's top).</summary>
+    /// <summary>The brass nameplate on the hopper's pad: a thin plate on the Front plane (z 0..T), a rivet at each corner.</summary>
+    static CadDocument HmNameplate()
+    {
+        var d = Doc(("L", "56"), ("H", "26"), ("R", "4"), ("T", "1"), ("RivetD", "3"), ("RivetH", "0.6"), ("RivetIn", "5"));
+        var s = new Sk(d);
+        HmRoundRect(s, "L/2", "H/2", "R");
+        var ss = d.AddFeature(new SketchFeature { Name = "Plate", Plane = PlaneRef.Front, Sketch = s.S });
+        d.AddFeature(new ExtrudeFeature { Name = "Plate", SketchId = ss.Id, Depth = "T" });
+        var top = d.AddFeature(new PlaneFeature { Name = "Plate face", Base = PlaneRef.Front, Offset = "T" });
+        var rv = new Sk(d);
+        var at = new[] { ("-(L/2-RivetIn)", "-(H/2-RivetIn)"), ("L/2-RivetIn", "-(H/2-RivetIn)"), ("L/2-RivetIn", "H/2-RivetIn"), ("-(L/2-RivetIn)", "H/2-RivetIn") };
+        var heads = at.Select(p => rv.Circle(rv.P(p.Item1, p.Item2), "RivetD")).ToList();
+        var rvs = d.AddFeature(new SketchFeature { Name = "Rivets", Plane = new PlaneRef { Feature = top.Id }, Sketch = rv.S });
+        var rivets = d.AddFeature(new ExtrudeFeature { Name = "Rivets", SketchId = rvs.Id, Depth = "RivetH" });
+        // their heads rounded over (each top edge picked: a circle's side face with the extrude's end)
+        var hf = new FilletFeature { Name = "Rivet heads", Radius = "0.5" };
+        for (int i = 0; i < 4; i++)
+            hf.Edges.Add(E($"{rivets.Id}.S.C{Ids.Name(heads[i])}", $"{rivets.Id}.End",
+                new Vec3(rv.Eval(at[i].Item1) + rv.Eval("RivetD/2"), rv.Eval(at[i].Item2), rv.Eval("T+RivetH"))));
+        d.AddFeature(hf);
+        d.Color = HmBrass;
+        HmMaterial(d, "Brass");
+        return d;
+    }
+
     static CadDocument HmFunnel()
     {
         var (d, _, _) = HmRing("Funnel", new[] { ("Spig", "21.8"), ("In", "19"), ("Foot", "27"), ("Top", "40"), ("H", "40"), ("T", "3"), ("SpigL", "8") },
@@ -1367,6 +1402,7 @@ static partial class Demos
         ("Valve spring", HmValveSpring),
         ("Retainer", HmRetainer),
         ("Funnel", HmFunnel),
+        ("Nameplate", HmNameplate),
         ("Muffler", HmMuffler),
         ("Muffler cap", HmMufflerCap),
         ("Mixer", HmMixer),

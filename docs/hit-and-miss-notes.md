@@ -129,6 +129,10 @@ Commands (from the repository root):
      past the faces it blends" at R1 (an 11 mm hole through a 20 mm plate, no reason not to fit).
    Repro: add that fillet after "Oil boss into the barrel" in `HmCasting`, `verify-engine - Casting`. *Instead:*
    not added; the casting keeps its picked and per-feature blends.
+   Related, a gap in the scope rather than a failure: "between features" with one feature takes its edges with the
+   rest of the body, never the feature's own. The nameplate's rivets (an extrude of four circles) cannot have their
+   heads rounded over by scope ("There are no convex edges between Rivets and the rest of the body"); each top edge
+   is picked instead. A "this feature's own edges" choice would cover bosses, ribs' tops and rivets.
 4g. **Mate face order (not kernel, the demo's helper).** `HmAsm.Any` (a face for a Lock mate) took the display
    mesh's first face; since the display caches are laid out anew (#59) that can be a face a mate cannot hold (the
    crankshaft's first is a surface of revolution), and `RefTo` gives null. It now takes the first face that gives a

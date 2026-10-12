@@ -375,6 +375,9 @@ static partial class Demos
         var oilerPart = First(oiler);
         a.Mate(Cc, a.F(oiler, oilerPart, f => HmCyl(f, 3.4, Y)), a.F(casting, f => HmCyl(f, 3.4, Y, p => Math.Abs(p.X + 77) < 1)));
         a.Mate(Co, a.F(oiler, oilerPart, f => HmPlane(f, -Y, 0)), a.F(casting, f => HmPlane(f, Y, 56)));
+        // the nameplate on the hopper's pad (its face at z = -(HopW/2 + PadT), its centre at x -130, y 46), turned to face -Z
+        var plate = a.Add(HmNameplate(), "Nameplate", HmT(-130, 46, -(116 / 2.0 - 130 * Math.Tan(2 * Math.PI / 180) + 1.5)) * HmRy(Math.PI));
+        a.Mate(Lk, a.Any(casting), a.Any(plate));
         var fuel = a.Add(HmFuelLine(new Vec3(-210, -24, -78)), "Fuel line", Transform.Identity);
         a.Mate(Lk, a.Any(casting), a.Any(fuel));
         var footDoc = HmFoot();
