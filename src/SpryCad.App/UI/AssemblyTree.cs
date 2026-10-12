@@ -187,6 +187,8 @@ public sealed class AssemblyTree : DockPanel
         {
             var pd = owner.DisplayOf(c);
             if (c.Part.Embedded != null) tags.Add("embedded");
+            if (c.Part.PinTag != null) tags.Add("pinned to " + c.Part.PinTag);
+            else if (c.Part.Pin != null) tags.Add("pinned");
             if (pd?.Source == PartSource.Cache) tags.Add(pd.Problem != null ? "missing: the assembly's copy" : "lightweight");
             if (pd?.Source == PartSource.None) tags.Add("missing");
             // being built after the assembly opened (shown meanwhile as it last was, if the assembly has a copy)
@@ -395,8 +397,11 @@ public sealed class AssemblyTree : DockPanel
             // the menu opens, not as the tree is made, since finding the part may read its file
             menu.Opening += (_, _) => configure.IsEnabled = _shown?.Model.PartDocument(c)?.UserParameters().Count > 0;
             Add(I(c.Lightweight ? "Set to _Resolved" : "Set to _Lightweight", "lightweight", c.Lightweight ? "part" : "lightweight"), configure);
+            Add(I("_Pin to Revision...", "pin", "history"), I("Follow _Latest", "unpin", "history", c.Part.Pin != null || c.Part.PinTag != null));
         }
-        Add(new Separator(), I("Re_place Component...", "replace", "replace"), I("_Form New Sub-assembly...", "form", "formsub", c.Pattern == null));
+        Add(new Separator(), I("Re_place Component...", "replace", "replace"),
+            embedded ? I("Make E_xternal...", "makeexternal", "save") : I("Make _Virtual...", "makevirtual", "import"),
+            I("_Form New Sub-assembly...", "form", "formsub", c.Pattern == null));
         var subs = m.Doc.Components.Where(x => x != c && x.IsAssembly && m.SubOf(x) is { Model: not null, Source: not SubSource.Cache }).ToList();
         if (subs.Count > 0 && c.Pattern == null)
         {

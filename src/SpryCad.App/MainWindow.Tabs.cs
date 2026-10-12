@@ -734,6 +734,7 @@ public partial class MainWindow
         }
         else t.FitAfterLoad = t.Session.RequestedRevision;
         UpdateLoadBanner(); // a part that could not be opened says why, over the view
+        UpdateSupersededBanner();
         return true;
     }
 

@@ -16,8 +16,11 @@ namespace SpryCad.Core.Storage;
 /// </summary>
 public static class AssemblyObjects
 {
-    /// <summary>The assembly's objects. <paramref name="embedded"/>: the documents embedded in it, by name (their ids).</summary>
-    public static Dictionary<ObjectId, byte[]> From(AssemblyDocument doc, IReadOnlyDictionary<string, string> embedded)
+    /// <summary>
+    /// The assembly's objects. <paramref name="embedded"/>: the documents embedded in it, by name (their ids, and their head
+    /// revisions: a change inside one is a change of the assembly).
+    /// </summary>
+    public static Dictionary<ObjectId, byte[]> From(AssemblyDocument doc, IReadOnlyDictionary<string, (string id, string revision)> embedded)
     {
         var o = new Dictionary<ObjectId, byte[]>();
         void Add(ObjectKind kind, string? id, object value) =>
@@ -41,7 +44,8 @@ public static class AssemblyObjects
         Add(ObjectKind.AssemblySettings, null, new SettingsData
         {
             Units = doc.Units,
-            Embedded = embedded.Count > 0 ? new SortedDictionary<string, string>(embedded.ToDictionary(kv => kv.Key, kv => kv.Value), StringComparer.Ordinal) : null,
+            Embedded = embedded.Count > 0 ? new SortedDictionary<string, string>(embedded.ToDictionary(kv => kv.Key, kv => kv.Value.id), StringComparer.Ordinal) : null,
+            EmbeddedRevisions = embedded.Count > 0 ? new SortedDictionary<string, string>(embedded.ToDictionary(kv => kv.Key, kv => kv.Value.revision), StringComparer.Ordinal) : null,
         });
         return o;
     }
@@ -135,6 +139,8 @@ public static class AssemblyObjects
         public UnitSystem Units { get; set; }
         /// <summary>The documents embedded in the assembly: its name for each ("parts/Bolt.sprt") → the document's id.</summary>
         public SortedDictionary<string, string>? Embedded { get; set; }
+        /// <summary>Each embedded document's head revision when the assembly was saved (name → revision id).</summary>
+        public SortedDictionary<string, string>? EmbeddedRevisions { get; set; }
     }
 
     sealed class StateData

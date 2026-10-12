@@ -56,6 +56,13 @@ public sealed partial class AssemblyDocument
     [System.Text.Json.Serialization.JsonIgnore] public Dictionary<string, byte[]> Files { get; set; } = new(StringComparer.Ordinal);
     [System.Text.Json.Serialization.JsonIgnore] public byte[]? Thumbnail { get; set; }
 
+    /// <summary>
+    /// What the next save records the revision as (a part made external or virtual), with its message; cleared by the
+    /// save. Null: an ordinary save.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore] public string? SaveMessage { get; set; }
+    [System.Text.Json.Serialization.JsonIgnore] public Storage.RevisionKind SaveKind { get; set; }
+
     public Component? Find(string id) => Components.FirstOrDefault(c => c.Id == id);
 
     /// <summary>
@@ -240,6 +247,13 @@ public sealed class PartRef
     public string? AbsolutePath { get; set; }
     /// <summary>The part embedded in the assembly (an attachment, "parts/…") instead of a file: a virtual part.</summary>
     public string? Embedded { get; set; }
+    /// <summary>
+    /// Pinned: this revision of the part (its id) is shown, not its latest (the file format spec, section 8). Null: the
+    /// latest, updated as the part changes.
+    /// </summary>
+    public string? Pin { get; set; }
+    /// <summary>Pinned by a tag: the revision the tag names when the assembly is opened (<see cref="Pin"/> as last found).</summary>
+    public string? PinTag { get; set; }
     /// <summary>An assembly file (<see cref="AssemblyDocument.Id"/> its identity), not a part: a sub-assembly.</summary>
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
     public bool Assembly { get; set; }

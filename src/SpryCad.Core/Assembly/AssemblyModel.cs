@@ -107,7 +107,9 @@ public sealed partial class AssemblyModel
     /// </summary>
     public static string DisplayKey(Component c)
     {
-        var config = Configurations.KeyOf(c.Parameters);
+        // (a pinned one: the revision or tag pinned to, before its configuration)
+        var config = (c.Part.Pin != null || c.Part.PinTag != null ? "@" + (c.Part.PinTag != null ? "tag:" + c.Part.PinTag : c.Part.Pin) + ";" : "")
+            + Configurations.KeyOf(c.Parameters);
         return ComponentResolver.Key(c.Part) + (config.Length > 0 ? "|" + config : "");
     }
 
@@ -142,22 +144,28 @@ public sealed partial class AssemblyModel
         if (comps.Count == 0) return;
         var r = comps[0].Part;
         var groups = comps.GroupBy(DisplayKey).ToList();
-        // the part read once (not at all when every configuration is lightweight and cached)
-        CadDocument? doc = null; PartSource src = PartSource.File; string? problem = null;
-        if (!groups.All(g => g.All(c => c.Lightweight) && CachedOf(g.First()) != null))
+        // the part read once for each revision shown (the latest, each one pinned), when one is needed (not for a
+        // lightweight component with its cache)
+        var read = new Dictionary<string, (CadDocument? doc, PartSource src, string? problem)>();
+        (CadDocument? doc, PartSource src, string? problem) Read(PartRef pr)
         {
+            var which = pr.PinTag != null ? "tag:" + pr.PinTag : pr.Pin ?? "";
+            if (read.TryGetValue(which, out var had)) return had;
+            CadDocument? d = null; var s = PartSource.File; string? p = null;
             try
             {
-                doc = ReadPart(key, out src);
-                if (doc == null) problem = "not found";
+                d = ReadPart(key, out s, pr);
+                if (d == null) p = "not found";
             }
-            catch (Exception ex) { problem = ex.Message; }
+            catch (Exception ex) { p = ex.Message; }
+            return read[which] = (d, s, p);
         }
         foreach (var g in groups)
         {
             var first = g.First();
             var config = Configurations.KeyOf(first.Parameters);
             bool light = g.All(c => c.Lightweight) && CachedOf(first) != null;
+            var (doc, src, problem) = light ? (null, PartSource.File, null) : Read(first.Part);
             string? why = problem;
             if (!light && doc != null)
             {
@@ -273,12 +281,17 @@ public sealed partial class AssemblyModel
     }
 
     /// <summary>A part's document from its embedded copy or its file (null: not found).</summary>
-    CadDocument? ReadPart(string key, out PartSource source)
+    CadDocument? ReadPart(string key, out PartSource source, PartRef? pinned = null)
     {
         source = PartSource.File;
         if (ComponentsOf(key).FirstOrDefault()?.Part is not { } r) return null;
-        if (r.Embedded != null && Doc.Files.TryGetValue(r.Embedded, out var bytes)) { source = PartSource.Embedded; return DocumentContainer.Load(bytes, r.Embedded); }
-        if (Resolution.Parts.GetValueOrDefault(key) is { Status: PartStatus.Found or PartStatus.Moved, Path: { } file }) return CadDocument.Load(file);
+        if (r.Embedded != null && Doc.Files.TryGetValue(r.Embedded, out var bytes))
+        {
+            source = PartSource.Embedded;
+            return pinned is { } p && (p.Pin != null || p.PinTag != null) ? PinnedPart.Load(bytes, p) : DocumentContainer.Load(bytes, r.Embedded);
+        }
+        if (Resolution.Parts.GetValueOrDefault(key) is { Status: PartStatus.Found or PartStatus.Moved, Path: { } file })
+            return pinned is { } p2 && (p2.Pin != null || p2.PinTag != null) ? PinnedPart.Load(file, p2) : CadDocument.Load(file);
         return null;
     }
 

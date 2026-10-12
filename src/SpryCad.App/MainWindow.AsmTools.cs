@@ -54,6 +54,10 @@ public partial class MainWindow
         switch (cmd)
         {
             case "open": OpenComponent(path); break;
+            case "makeexternal": _ = MakeExternalCommand(path); break;
+            case "makevirtual": _ = MakeVirtualCommand(path); break;
+            case "pin": _ = PinCommand(path); break;
+            case "unpin": Unpin(path); break;
             case "fix": SetFixed(true); break;
             case "float": SetFixed(false); break;
             case "lightweight": ToggleLightweight(); break;

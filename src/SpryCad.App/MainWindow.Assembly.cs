@@ -252,6 +252,8 @@ public partial class MainWindow : IAssemblyHost
         var notes = s.Model.Notes;
         var opened = notes.Count == 0 ? "Opened " + path : notes.Count == 1 ? notes[0] : $"Opened {Path.GetFileName(path)}: {notes.Count} notes about its parts (under the tree)";
         Status(opened);
+        // virtual parts whose original files changed since they were made virtual here
+        await OfferChangedOriginals(s);
         // parts without a current display cache: built now, each shown when done (the busy text says which)
         await BuildPendingOf(s);
     }

@@ -55,7 +55,7 @@ public static class AssemblyFile
             {
                 // the documents embedded in it: their rows (a part or sub-assembly saved before databases, converted first)
                 Directory.CreateDirectory(scratch);
-                var embedded = new Dictionary<string, string>(StringComparer.Ordinal);
+                var embedded = new Dictionary<string, (string id, string revision)>(StringComparer.Ordinal);
                 foreach (var (name, bytes) in doc.Files.Where(f => IsEmbeddedDocument(f.Key)).OrderBy(f => f.Key, StringComparer.Ordinal))
                 {
                     var file = Path.Combine(scratch, embedded.Count + (name.EndsWith(AssemblyDocument.FileExtension, StringComparison.OrdinalIgnoreCase) ? ".sasm" : ".sprt"));
@@ -67,7 +67,8 @@ public static class AssemblyFile
                 {
                     db.SetPart(asmId, Path.GetFileNameWithoutExtension(path));
                     var objects = AssemblyObjects.From(doc, embedded).ToDictionary(kv => kv.Key, kv => db.Blobs.Put(kv.Value));
-                    head = db.Commit(asmId, objects, author ?? PartFile.DefaultAuthor, message) ?? db.GetHead(asmId)!;
+                    head = db.Commit(asmId, objects, author ?? PartFile.DefaultAuthor, message.Length > 0 ? message : doc.SaveMessage ?? "",
+                        doc.SaveMessage != null ? doc.SaveKind : RevisionKind.Save) ?? db.GetHead(asmId)!;
                     var now = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture);
                     db.SetManifest("FormatVersion", CadDocument.CurrentFormatVersion.ToString(CultureInfo.InvariantCulture));
                     db.SetManifest("AppVersion", typeof(AssemblyFile).Assembly.GetName().Version?.ToString() ?? "");
@@ -93,6 +94,7 @@ public static class AssemblyFile
         }
         finally { try { Directory.Delete(scratch, true); } catch { /* best effort */ } }
         doc.Revision = head.RevisionId.ToString("D");
+        doc.SaveMessage = null; doc.SaveKind = RevisionKind.Save;
     }
 
     /// <summary>The assembly at the head of the file's history, its embedded documents and display caches with it.</summary>
@@ -131,12 +133,17 @@ public static class AssemblyFile
 
     /// <summary>
     /// Copies a database's documents into <paramref name="db"/>: their revisions (not autosaves), tags, blobs and display
-    /// caches (in place of those they had), and their state. The id of its own document.
+    /// caches (in place of those they had), and their state. The id of its own document and its head revision.
     /// </summary>
-    static string Import(PartDatabase db, string file)
+    static (string id, string revision) Import(PartDatabase db, string file)
     {
-        string root; byte[]? preview;
-        using (var src = PartDatabase.Open(file)) { root = RootOf(src).ToString("D"); preview = src.GetThumbnail(); }
+        string root, head; byte[]? preview;
+        using (var src = PartDatabase.Open(file))
+        {
+            var id = RootOf(src);
+            root = id.ToString("D"); preview = src.GetThumbnail();
+            head = src.GetHead(id)?.RevisionId.ToString("D") ?? "";
+        }
         db.Execute("ATTACH DATABASE $f AS src", ("$f", file));
         try
         {
@@ -170,7 +177,7 @@ public static class AssemblyFile
             catch { db.Rollback(); throw; }
         }
         finally { db.Execute("DETACH DATABASE src"); }
-        return root;
+        return (root, head);
     }
 
     /// <summary>
