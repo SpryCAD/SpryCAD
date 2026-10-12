@@ -221,11 +221,20 @@ public sealed class PartDatabase : IDisposable
         var head = GetHead(partId);
         if (head != null && head.RootHash == root) return null;
         var rev = new RevisionInfo(Guid.NewGuid(), partId, head?.RevisionId, root, DateTime.UtcNow, author, message, kind);
+        Insert(rev, objects);
+        using (var cmd = Cmd("UPDATE Parts SET HeadRevisionId = $r WHERE PartId = $p", ("$r", rev.RevisionId.ToByteArray()), ("$p", partId.ToByteArray())))
+            cmd.ExecuteNonQuery();
+        return rev;
+    }
+
+    void Insert(RevisionInfo rev, IReadOnlyDictionary<ObjectId, Hash> objects)
+    {
         using (var cmd = Cmd("""
             INSERT INTO Revisions (RevisionId, PartId, ParentId, RootHash, CreatedUtc, Author, Message, Kind)
             VALUES ($r, $p, $parent, $root, $t, $a, $m, $k)
-            """, ("$r", rev.RevisionId.ToByteArray()), ("$p", partId.ToByteArray()), ("$parent", (object?)head?.RevisionId.ToByteArray() ?? DBNull.Value),
-            ("$root", root.ToBytes()), ("$t", rev.CreatedUtc.ToString("yyyy-MM-ddTHH:mm:ss.fffZ", CultureInfo.InvariantCulture)), ("$a", author), ("$m", message), ("$k", (int)kind)))
+            """, ("$r", rev.RevisionId.ToByteArray()), ("$p", rev.PartId.ToByteArray()), ("$parent", (object?)rev.ParentId?.ToByteArray() ?? DBNull.Value),
+            ("$root", rev.RootHash.ToBytes()), ("$t", rev.CreatedUtc.ToString("yyyy-MM-ddTHH:mm:ss.fffZ", CultureInfo.InvariantCulture)),
+            ("$a", rev.Author), ("$m", rev.Message), ("$k", (int)rev.Kind)))
             cmd.ExecuteNonQuery();
         using (var cmd = Cmd("INSERT INTO RevisionObjects (RevisionId, ObjectId, Hash) VALUES ($r, $o, $h)"))
         {
@@ -233,9 +242,52 @@ public sealed class PartDatabase : IDisposable
             cmd.Parameters.AddWithValue("$r", rev.RevisionId.ToByteArray());
             foreach (var (id, hash) in objects) { o.Value = id.ToArray(); h.Value = hash.ToBytes(); cmd.ExecuteNonQuery(); }
         }
-        using (var cmd = Cmd("UPDATE Parts SET HeadRevisionId = $r WHERE PartId = $p", ("$r", rev.RevisionId.ToByteArray()), ("$p", partId.ToByteArray())))
+    }
+
+    /// <summary>
+    /// Records the part's working revision (autosave: never in its history, never tagged) with these objects, its
+    /// parent the head, in place of the one it had; none when the content is the head's. Within the caller's
+    /// transaction.
+    /// </summary>
+    public RevisionInfo? CommitWorking(Guid partId, IReadOnlyDictionary<ObjectId, Hash> objects, string author)
+    {
+        DropWorking(partId);
+        var root = RootHash(objects);
+        var head = GetHead(partId);
+        if (head != null && head.RootHash == root) return null;
+        var rev = new RevisionInfo(Guid.NewGuid(), partId, head?.RevisionId, root, DateTime.UtcNow, author, "", RevisionKind.Working);
+        Insert(rev, objects);
+        using (var cmd = Cmd("UPDATE Parts SET WorkingRevisionId = $r WHERE PartId = $p", ("$r", rev.RevisionId.ToByteArray()), ("$p", partId.ToByteArray())))
             cmd.ExecuteNonQuery();
         return rev;
+    }
+
+    /// <summary>The part's working revision, if it has one.</summary>
+    public RevisionInfo? GetWorking(Guid partId)
+    {
+        using var cmd = Cmd("SELECT WorkingRevisionId FROM Parts WHERE PartId = $p", ("$p", partId.ToByteArray()));
+        return cmd.ExecuteScalar() is byte[] id ? GetRevision(new Guid(id)) : null;
+    }
+
+    /// <summary>Removes the part's working revision (saved, or discarded) and the blobs only it used.</summary>
+    public void DropWorking(Guid partId)
+    {
+        if (GetWorking(partId) is not { } w) return;
+        var hashes = GetObjects(w.RevisionId).Values.Select(h => h.ToBytes()).ToList();
+        using (var cmd = Cmd("UPDATE Parts SET WorkingRevisionId = NULL WHERE PartId = $p", ("$p", partId.ToByteArray()))) cmd.ExecuteNonQuery();
+        using (var cmd = Cmd("DELETE FROM RevisionObjects WHERE RevisionId = $r", ("$r", w.RevisionId.ToByteArray()))) cmd.ExecuteNonQuery();
+        using (var cmd = Cmd("DELETE FROM Revisions WHERE RevisionId = $r", ("$r", w.RevisionId.ToByteArray()))) cmd.ExecuteNonQuery();
+        foreach (var h in hashes) DeleteBlobIfUnused(h);
+    }
+
+    void DeleteBlobIfUnused(byte[] hash)
+    {
+        using var cmd = Cmd("""
+            DELETE FROM Blobs WHERE Hash = $h
+              AND NOT EXISTS (SELECT 1 FROM Cache WHERE Hash = $h)
+              AND NOT EXISTS (SELECT 1 FROM RevisionObjects WHERE Hash = $h)
+            """, ("$h", hash));
+        cmd.ExecuteNonQuery();
     }
 
     /// <summary>The part's history, head first (following each revision's parent).</summary>
@@ -317,15 +369,7 @@ public sealed class PartDatabase : IDisposable
             cmd.ExecuteNonQuery();
         }
         // the displays replaced, unless something else holds the same bytes
-        foreach (var h in old)
-        {
-            using var cmd = Cmd("""
-                DELETE FROM Blobs WHERE Hash = $h
-                  AND NOT EXISTS (SELECT 1 FROM Cache WHERE Hash = $h)
-                  AND NOT EXISTS (SELECT 1 FROM RevisionObjects WHERE Hash = $h)
-                """, ("$h", h));
-            cmd.ExecuteNonQuery();
-        }
+        foreach (var h in old) DeleteBlobIfUnused(h);
     }
 
     public byte[]? GetCache(Hash key)

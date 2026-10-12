@@ -785,6 +785,7 @@ public partial class MainWindow
     void RemoveTab(PartTab t)
     {
         t.Asm?.Watcher?.Dispose();
+        t.Session.Close(); // (its local copy and its lock: closed with nothing left to save)
         // an embedded document's copy (edited in this tab) thrown away
         if (t.EmbeddedName != null && (t.Asm?.FilePath ?? t.Session.FilePath) is { } copy && IsEmbeddedCopy(copy))
             try { Directory.Delete(Path.GetDirectoryName(copy)!, true); } catch (IOException) { } catch (UnauthorizedAccessException) { }

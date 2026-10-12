@@ -88,7 +88,7 @@ public static class DocumentContainer
     /// <summary>A part from its file's bytes (e.g. a part embedded in an assembly); <paramref name="name"/> for messages.</summary>
     public static CadDocument Load(byte[] bytes, string name)
     {
-        if (Storage.PartDatabase.Is(bytes)) return OnDisk(bytes, Storage.PartFile.Load);
+        if (Storage.PartDatabase.Is(bytes)) return OnDisk(bytes, p => Storage.PartFile.Load(p));
         if (!IsZip(bytes)) return CadDocument.FromJson(Encoding.UTF8.GetString(bytes)); // (BOM is skipped by the decoder)
         using var zip = new ZipArchive(new MemoryStream(bytes), ZipArchiveMode.Read);
         var model = zip.GetEntry(ModelEntry) ?? throw new InvalidDataException("Not a SpryCAD document (no model.json in the container).");
