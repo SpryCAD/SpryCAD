@@ -64,6 +64,12 @@ profile; the profile's times are summed over threads). On the heavy samples (`sa
    - Done: the block test's grid-node points are kept (blocks share their corners and edge middles) and reused by
      the grid values: `trace.grid` about 40% less (spur-gear-nice 58–68 to 33–38 ms, handwheel 76–93 to 52–58 ms
      summed), bit for bit. What is left of tracing is the projection (~250 ms summed on spur-gear-nice) and the march.
+   - Done: the march tests an active block's quarters, and theirs, down to 2 × 2 cells, with the block's own test, and
+     skips the cells of a part that cannot hold a zero (visiting the rest in the same order): grid values per trace
+     on spur-gear-nice 1870 to 568 (spoked handwheel 1114 to 391), `trace.march` ~245 to ~200 ms summed; full
+     hashes (display meshes as drawn), mass properties and every demo variant the same. The traces run in parallel
+     inside the booleans: on spur-gear-nice ~340 ms of thread time but ~45 ms of the ~560 ms rebuild, which is
+     mostly the Teeth pattern (~190 ms), Chamfer2 (~150) and Fillet1 (~140).
 2. **`NBoolean.FitSpline` and `NSpline.Param`**: done (see above). The `NSpline` constructor still evaluates 129
    samples for the scan; `Param` still ignores `hint`.
 3. **`NDomain.Classify`, `BoundaryDistance` and `ContainsUV`**: done (see above). What is left of `sec.midclass` is probably
