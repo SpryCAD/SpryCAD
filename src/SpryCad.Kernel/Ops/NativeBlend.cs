@@ -713,14 +713,16 @@ public static class NativeBlend
     static (Solid tool, double added) Pivot(Solid tool, RoundCornerCut c, CornerPatch.Result patch, double reach, double added, List<NVertex> carried, bool runOn = true)
     {
         // (a tool not run on that the corner takes on from v's joint: as it is)
-        var t = !runOn && patch.OwnAtJoint ? tool : TrimNear(tool, patch.EndOwn, c.V.P, reach);
+        Solid t;
+        using (Prof.Time("blend.pivot.cut")) t = !runOn && patch.OwnAtJoint ? tool : TrimNear(tool, patch.EndOwn, c.V.P, reach);
         bool taken;
         taken = _pivoted?.Contains(c.V) == true;
         if (taken) return (t, added);
         // (a union that fails leaves the pivot to the other fillet's tool)
         try
         {
-            var u = Csg.Union(t, patch.Tool);
+            Solid u;
+            using (Prof.Time("blend.pivot.join")) u = Csg.Union(t, patch.Tool);
             if (!u.IsEmpty && u.Native != null && u.Native.Validate() == null)
             {
                 carried.Add(c.V);
@@ -933,7 +935,7 @@ public static class NativeBlend
             if (taken) continue;
             tools.Add(patch.Tool);
             if (strip != null)
-                try { strip = Csg.Union(strip, patch.Tool); if (strip.Native == null || strip.Native.Validate() != null) strip = null; }
+                try { using (Prof.Time("blend.pivot.strip")) strip = Csg.Union(strip, patch.Tool); if (strip.Native == null || strip.Native.Validate() != null) strip = null; }
                 catch (Exception ex) when (ex is InvalidOperationException or NBooleanException) { strip = null; }
             Carry(new List<NVertex> { c.V });
         }
