@@ -106,7 +106,7 @@ public static partial class LegacyIds
     /// <summary>String properties holding feature (or body) ids.</summary>
     static bool IsFeatureRef(PropertyInfo p) =>
         (p.DeclaringType == typeof(Feature) && p.Name == nameof(Model.Feature.Id))
-        || p.Name.EndsWith("SketchId", StringComparison.Ordinal)
+        || p.Name.EndsWith("SketchId", StringComparison.Ordinal) || p.Name.EndsWith("SketchIds", StringComparison.Ordinal)
         || p.Name is "Seeds" or "MainBody" or "ToolBodies"
         || (p.Name is "Feature" && p.DeclaringType == typeof(PlaneRef))
         || (p.Name is "Sketch" && (p.DeclaringType == typeof(CurveRef) || p.DeclaringType == typeof(PointRef)));
