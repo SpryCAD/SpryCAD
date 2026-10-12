@@ -171,6 +171,30 @@ public static class Icons
     static IBrush Stroke => Palette.Text;
     static IBrush Accent => Palette.Accent;
 
+    /// <summary>A fill drawn under an icon's lines: <see cref="Light"/> material added, <see cref="Mid"/> a hollow, <see cref="White"/> a face on top.</summary>
+    enum Tint { Light, Mid, White }
+
+    // Fills under the lines, in order (later ones over earlier ones), for the icons that have them: the boss features'
+    // added material tinted light blue, a cut's hollow a deeper blue, the cuts' block and a profile on top white. The
+    // colours are the palette's selection and hover blues, so they go with the app's.
+    static readonly Dictionary<string, (string path, Tint tint)[]> Fills = new()
+    {
+        ["extrude"] = new[] { ("M3 15l9 4 9-4-9-4z M3 15v3l9 4 9-4v-3", Tint.Light) },
+        ["revolve"] = new[] { ("M12 5c5 0 8 3 8 7s-3 7-8 7z", Tint.Light) },
+        ["sweep"] = new[] { ("M6 17c0-7 5-12 15-12v6c-8 0-12 4-12 9z", Tint.Light), ("M3 18.5a4.5 2 0 1 0 9 0a4.5 2 0 1 0-9 0z", Tint.White) },
+        ["loft"] = new[] { ("M3 18L7 6h10l4 12-9 3.5z", Tint.Light), ("M7 6a5 2 0 1 0 10 0a5 2 0 1 0-10 0z", Tint.White) },
+        ["cut"] = new[] { (CutBlock, Tint.White), ("M7 11l5-2.5 5 2.5-5 2.5z", Tint.Mid) },
+        ["cutrevolve"] = new[] { (CutBlock, Tint.White), ("M7 11a5 1.8 0 0 0 10 0a5 1.8 0 0 0-10 0z", Tint.Mid) },
+        ["cutsweep"] = new[] { (CutBlock, Tint.White), ("M10 14.5c1-1.2 3-1.6 4-1 1 .8-.5 2.2-2 2.5-1.5.2-2.8-.5-2-1.5z", Tint.Mid) },
+        ["cutloft"] = new[] { (CutBlock, Tint.White), ("M5 3.5a7 2 0 1 0 14 0L14.5 11a2.5 1 0 1 1-5 0z", Tint.Light) },
+        ["cuthelical"] = new[] { (CutBlock, Tint.White) },
+    };
+
+    // the outline of the block every cut goes into (its lines are the cut icons' own)
+    const string CutBlock = "M2 11l10-5 10 5v6l-10 5-10-5z";
+
+    static IBrush BrushOf(Tint t) => t switch { Tint.Light => Palette.SelectedBg, Tint.Mid => Palette.HoverBorder, _ => Palette.Surface };
+
     // each path parsed once and shared by every icon drawn with it (the tree makes its icons on every rebuild)
     static readonly Dictionary<string, Geometry> _parsed = new();
     static Geometry Parsed(string path)
@@ -182,6 +206,9 @@ public static class Icons
     public static Control Make(string name, double size = 20, IBrush? stroke = null, IBrush? accent = null)
     {
         var canvas = new Canvas { Width = 24, Height = 24 };
+        if (Fills.TryGetValue(name, out var fills))
+            foreach (var (path, tint) in fills)
+                canvas.Children.Add(new Path { Data = Parsed(path), Fill = BrushOf(tint) });
         if (Data.TryGetValue(name, out var d))
         {
             canvas.Children.Add(new Path
