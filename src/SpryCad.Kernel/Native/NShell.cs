@@ -56,6 +56,7 @@ public static class NShell
                     if (!l.Contains(surf[f])) l.Add(surf[f]);
                 }
         var vmap = new Dictionary<NVertex, NVertex>(ReferenceEqualityComparer.Instance);
+        var pv = Prof.Time("shell.vertices");
         foreach (var (v, all) in vFaces)
         {
             // surfaces tangent at the corner (within a degree) count once: there their offsets share the corner's
@@ -74,6 +75,8 @@ public static class NShell
             vmap[v] = new NVertex(p);
         }
 
+        pv.Dispose();
+        using var pe = Prof.Time("shell.edges");
         // edges
         var emap = new Dictionary<NEdge, NEdge>(ReferenceEqualityComparer.Instance);
         foreach (var e in body.Edges)
@@ -133,22 +136,25 @@ public static class NShell
 
     static NEdge OffsetEdge(NEdge e, NSurface sa, NSurface sb, NVertex v0, NVertex v1, double tol, double scale, string what)
     {
-        var ss = new[] { sa, sb };
+        // (each surface's searches start where the last ended: the points come in order along the edge)
+        var na0 = new Near(sa); var nb0 = new Near(sb);
+        var ss = new[] { na0, nb0 };
         // how far a point is off the two surfaces
-        double Off2(Vec3 q) => Math.Max(Math.Abs(sa.F_(q)), Math.Abs(sb.F_(q)));
+        double Off2(Vec3 q) => Math.Max(Math.Abs(na0.F(q)), Math.Abs(nb0.F(q)));
         // the faces nearly tangent along the edge (within 2°, at its middle): their offsets cross at so small an angle
         // that solving for the crossing is ill-conditioned; each point goes along the mean of the two normals by the
         // mean offset instead, off both surfaces by about the offset times the angle squared over 8
         var qm = e.Mid;
-        var ga = sa.Grad(qm); var gb = sb.Grad(qm);
+        var ga = na0.Grad(qm); var gb = nb0.Grad(qm);
         bool nearTangent = ga.Length > 1e-300 && gb.Length > 1e-300 && Math.Abs(Vec3.Dot(ga.Normalized, gb.Normalized)) > Math.Cos(2 * Math.PI / 180);
         Vec3 Bisect(Vec3 q)
         {
-            var na = sa.Grad(q).Normalized; var nb = sb.Grad(q).Normalized;
+            var fa = na0.F(q, out var ga1); var fb = nb0.F(q, out var gb1);
+            var na = ga1.Normalized; var nb = gb1.Normalized;
             if (Vec3.Dot(na, nb) < 0) nb = -nb;
             var n = (na + nb).Normalized;
             // F = 0 on each offset: step back along n by their mean (F grows along the gradient)
-            var f = 0.5 * (sa.F_(q) * Math.Sign(Vec3.Dot(sa.Grad(q), n)) + sb.F_(q) * Math.Sign(Vec3.Dot(sb.Grad(q), n)));
+            var f = 0.5 * (fa * Math.Sign(Vec3.Dot(ga1, n)) + fb * Math.Sign(Vec3.Dot(gb1, n)));
             return q - n * f;
         }
         // (the offset edge between its new ends: where that curve passes through them, the ends having moved along
@@ -241,7 +247,11 @@ public static class NShell
         }
         double Floor() => 2 * pts.Max(Off2);
         var off = Off(bs);
-        for (int n = Math.Max(24, 2 * (pts.Count - 1)); off > Math.Max(fitTol, Floor()) && n <= 1536; n *= 2)
+        // (to a millionth of the part: the boolean takes points on such an edge as on its surfaces within its fit, and
+        // the loft's offsets have slight kinks where its faces are only once differentiable, which a finer fit
+        // chases with thousands of points)
+        var splineTol = 1e-6 * scale;
+        for (int n = Math.Max(24, 2 * (pts.Count - 1)); off > Math.Max(splineTol, Floor()) && n <= 384; n *= 2)
         {
             List<Vec3> dense;
             if (marched)
@@ -255,6 +265,7 @@ public static class NShell
             bs = BSplineCurve.Interpolate(pts, 3);
             off = Off(bs);
         }
+        if (Prof.Enabled) { Prof.Count($"shell.edge.pts{(nearTangent ? ".tangent" : marched ? ".marched" : "")}", pts.Count); Prof.Count("shell.edge.offTol." + (off <= 1e-6 * scale ? "fit" : "floor"), 1); }
         return new NEdge(new NSpline(bs) { FitTol = off }, 0, 1, v0, v1);
     }
 
@@ -329,7 +340,34 @@ public static class NShell
     /// Point on all surfaces closest (in the minimum-norm Gauss-Newton sense) to p0. Dependent constraints
     /// (tangent surfaces) are dropped per step, so the move stays along the shared normal.
     /// </summary>
-    static Vec3 Solve(IReadOnlyList<NSurface> ss, Vec3 p0, double tol, out double residual)
+    /// <summary>
+    /// A surface's signed distance and its gradient from one search, a B-spline's (or its offset's) closest-point
+    /// search started where the last one ended (points met in order along an edge: each next to the one before;
+    /// the same answers as <see cref="NSurface.FGrad"/>).
+    /// </summary>
+    sealed class Near(NSurface s)
+    {
+        public readonly NSurface S = s;
+        readonly NurbsSurface? _nb = s.Kind == SurfaceKind.BSpline ? s.Nurbs : s.Kind == SurfaceKind.Offset && s.Base!.Kind == SurfaceKind.BSpline ? s.Base.Nurbs : null;
+        double _u = double.NaN, _v = double.NaN;
+
+        public double F(Vec3 p, out Vec3 grad)
+        {
+            if (_nb == null) return S.FGrad(p, out grad);
+            var c = _nb.ClosestFrom(p, _u, _v);
+            _u = c.u; _v = c.v;
+            grad = _nb.Normal(c.u, c.v);
+            var d = Vec3.Dot(p - c.c, grad) >= 0 ? c.dist : -c.dist;
+            return S.Kind == SurfaceKind.Offset ? d - S.R : d;
+        }
+
+        public double F(Vec3 p) => F(p, out _);
+        public Vec3 Grad(Vec3 p) { F(p, out var g); return g; }
+    }
+
+    static Vec3 Solve(IReadOnlyList<NSurface> ss, Vec3 p0, double tol, out double residual) => Solve(ss.Select(x => new Near(x)).ToList(), p0, tol, out residual);
+
+    static Vec3 Solve(IReadOnlyList<Near> ss, Vec3 p0, double tol, out double residual)
     {
         var p = p0;
         residual = double.MaxValue;
@@ -338,12 +376,11 @@ public static class NShell
             var rows = new List<Vec3>(); var rhs = new List<double>(); var basis = new List<Vec3>();
             residual = 0;
             double minSin = 1; // the least angle (its sine) between a row and the ones before it
-            // largest residuals first so the dominant constraints are kept
-            foreach (var s in ss.OrderByDescending(s => Math.Abs(s.F_(p))))
+            // largest residuals first so the dominant constraints are kept (each surface asked once)
+            var fg = ss.Select(x => { var f0 = x.F(p, out var g0); return (f: f0, g: g0); }).OrderByDescending(x => Math.Abs(x.f)).ToList();
+            foreach (var (f, g) in fg)
             {
-                var f = s.F_(p);
                 residual = Math.Max(residual, Math.Abs(f));
-                var g = s.Grad(p);
                 var o = g;
                 foreach (var b in basis) o -= b * Vec3.Dot(o, b);
                 // (nearly tangent surfaces, within a few hundredths of a degree, as one: lofted faces that meet smoothly
@@ -373,7 +410,7 @@ public static class NShell
             p -= step;
             if (step.Length < tol * 1e-6) break;
         }
-        residual = ss.Max(s => Math.Abs(s.F_(p)));
+        residual = ss.Max(x => Math.Abs(x.F(p)));
         return p;
     }
 
