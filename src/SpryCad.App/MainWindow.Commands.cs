@@ -156,6 +156,7 @@ public partial class MainWindow
                 StyleItem("Shaded", DisplayStyle.Shaded),
                 StyleItem("Hidden Lines Visible", DisplayStyle.HiddenLinesVisible),
                 StyleItem("Wireframe", DisplayStyle.Wireframe)),
+            Toggle("Color by _Feature", () => _colorByFeature, ToggleColorByFeature),
             Toggle("Perspective", () => Viewport.Camera.Perspective, () => { Viewport.Camera.Perspective = !Viewport.Camera.Perspective; Viewport.Redraw(); }),
             Sub("_Threads",
                 Toggle("As Set in Each Thread", () => ThreadMode == ThreadDisplay.AsSet, () => _ = SetThreadMode(ThreadDisplay.AsSet), radio: true),
@@ -514,6 +515,7 @@ public partial class MainWindow
         df.Items.Add(StyleItem("Wireframe", DisplayStyle.Wireframe));
         disp.Flyout = df;
         H("planes", "Hide/Show Planes", TogglePlanes);
+        H("colorbyfeature", "Color by Feature", ToggleColorByFeature);
     }
 
     Flyout OrientationFlyout()
@@ -538,6 +540,21 @@ public partial class MainWindow
     void SetStyle(DisplayStyle s) { Viewport.Style = s; Viewport.Redraw(); }
 
     void TogglePlanes() { _showPlanes = !_showPlanes; RefreshScene(); }
+
+    /// <summary>View > Color by Feature: each face in its feature's color, with a swatch of it on the feature's tree row.</summary>
+    bool _colorByFeature;
+
+    void ToggleColorByFeature()
+    {
+        _colorByFeature = !_colorByFeature;
+        RebuildTree();
+        RefreshScene();
+    }
+
+    /// <summary>The feature tree's color swatches (Color by Feature on, a part shown), else null.</summary>
+    IReadOnlyDictionary<string, Avalonia.Media.Color>? FeatureSwatches() => _colorByFeature && Asm == null
+        ? FeatureColors.Of(Session.Doc).ToDictionary(kv => kv.Key, kv => Avalonia.Media.Color.FromRgb((byte)Math.Round(kv.Value[0] * 255), (byte)Math.Round(kv.Value[1] * 255), (byte)Math.Round(kv.Value[2] * 255)))
+        : null;
 
     void NormalTo()
     {

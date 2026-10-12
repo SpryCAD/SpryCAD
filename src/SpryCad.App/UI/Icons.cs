@@ -132,6 +132,8 @@ public static class Icons
         ["normalto"] = ("M3 6h18v12H3z", "M12 12m-2 0a2 2 0 1 0 4 0a2 2 0 1 0-4 0"),
         ["display"] = ("M12 3l9 5v8l-9 5-9-5V8z", "M12 13l9-5 M12 13v8 M12 13L3 8"),
         ["planes"] = ("M2 17l5-10h15l-5 10z", "M7 7l5 10"),
+        // color by feature: a block, one of its faces picked out in another color
+        ["colorbyfeature"] = ("M12 3l9 5v8l-9 5-9-5V8z M12 13v8 M12 13L3 8", "M12 13l9-5v8l-9 5z"),
         ["section"] = ("M3 8l9-5 9 5v8l-9 5-9-5z", "M2 14l20-4"),
         ["ok"] = ("M4 12l5 5L20 6", null),
         ["cancel"] = ("M5 5l14 14 M19 5L5 19", null),
