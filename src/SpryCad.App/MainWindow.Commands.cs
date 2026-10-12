@@ -319,6 +319,7 @@ public partial class MainWindow
                 Cmd("offset", "Offset\nEntities", OffsetEntities);
                 Cmd("convert", "Convert\nEntities", ConvertEntities);
                 Cmd("construction", "Construction\nGeometry", ToggleConstruction);
+                Cmd("relations", "Add\nRelations", AddRelationCommand);
                 Cmd("normalto", "Normal\nTo", NormalTo);
                 break;
             case "Sheet Metal":
@@ -397,6 +398,7 @@ public partial class MainWindow
         ["Offset Entities"] = "Offsets the selected sketch chain (lines, arcs, circles) by a distance. The copy follows the original; the distance is a dimension.",
         ["Mirror Entities"] = "Mirrors the selected entities about the selected centerline. The copies stay mirrored.",
         ["Construction Geometry"] = "Toggles the selected sketch entities to construction.",
+        ["Add Relations"] = "Relates points and entities you click (coincident, horizontal, tangent…), no Ctrl needed.",
         ["Measure"] = "Distance, angle, radius, length and area of the faces, edges and vertices you click.",
         ["Mass Properties"] = "Mass, volume, surface area, center of mass and moments of inertia, with the part's material.",
         ["Equations"] = "Global variables that drive dimensions; conditions on them suppress features (right-click a feature: Suppress When).",

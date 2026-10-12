@@ -1075,8 +1075,8 @@ public sealed partial class SketchEditor : IViewportMode
         var m = SketchPos(p);
         var dir = b - a; var len2 = dir.LengthSq;
         var tm = Vec2.Dot(m - a, dir) / len2;
-        // intersections with other entities along the line
-        var ts = new List<double> { 0, 1 };
+        // intersections with other entities along the line, and which entity each is with
+        var ts = new List<(double t, long by)> { (0, -1), (1, -1) };
         foreach (var e in Sk.Entities)
         {
             if (e.Id == line.Id || e.Construction) continue;
@@ -1086,27 +1086,50 @@ public sealed partial class SketchEditor : IViewportMode
                 if (Math.Abs(den) < 1e-12) continue;
                 var t = Vec2.Cross(c - a, d - c) / den;
                 var u = Vec2.Cross(c - a, dir) / den;
-                if (t > 1e-6 && t < 1 - 1e-6 && u >= -1e-9 && u <= 1 + 1e-9) ts.Add(t);
+                if (t > 1e-6 && t < 1 - 1e-6 && u >= -1e-9 && u <= 1 + 1e-9) ts.Add((t, e.Id));
             }
         }
-        ts.Sort();
-        double lo = 0, hi = 1;
-        foreach (var t in ts) { if (t <= tm) lo = t; else { hi = t; break; } }
+        ts.Sort((x, y) => x.t.CompareTo(y.t));
+        (double t, long by) lo = (0, -1), hi = (1, -1);
+        foreach (var x in ts) { if (x.t <= tm) lo = x; else { hi = x; break; } }
         Snapshot();
-        if (lo <= 1e-9 && hi >= 1 - 1e-9) { Sk.DeleteEntity(line.Id); }
-        else if (lo <= 1e-9) { var np = Sk.AddPoint(a + dir * hi); ReplaceEnd(line, line.P1, np.Id); }
-        else if (hi >= 1 - 1e-9) { var np = Sk.AddPoint(a + dir * lo); ReplaceEnd(line, line.P2, np.Id); }
+        if (lo.t <= 1e-9 && hi.t >= 1 - 1e-9) { Sk.DeleteEntity(line.Id); }
+        else if (lo.t <= 1e-9) { var np = Sk.AddPoint(a + dir * hi.t); ReplaceEnd(line, line.P1, np.Id); TieTrimEnd(np.Id, hi.by); }
+        else if (hi.t >= 1 - 1e-9) { var np = Sk.AddPoint(a + dir * lo.t); ReplaceEnd(line, line.P2, np.Id); TieTrimEnd(np.Id, lo.by); }
         else
         {
-            var p1 = Sk.AddPoint(a + dir * lo); var p2 = Sk.AddPoint(a + dir * hi);
+            var p1 = Sk.AddPoint(a + dir * lo.t); var p2 = Sk.AddPoint(a + dir * hi.t);
             var oldEnd = line.P2;
             line.P2 = p1.Id;
-            Sk.Add(new SkLine { P1 = p2.Id, P2 = oldEnd, Construction = line.Construction });
+            var rest = Sk.Add(new SkLine { P1 = p2.Id, P2 = oldEnd, Construction = line.Construction });
+            // the two pieces stay one line: collinear, and horizontal or vertical as it was
+            Sk.Constraints.Add(new SkConstraint { Id = Sk.NewId(), Type = CType.Collinear, Refs = new[] { line.Id, rest.Id } });
+            foreach (var hv in Sk.Constraints.Where(c => c.Type is CType.Horizontal or CType.Vertical && c.Refs.Length == 1 && c.Refs[0] == line.Id).ToList())
+                Sk.Constraints.Add(new SkConstraint { Id = Sk.NewId(), Type = hv.Type, Refs = new[] { rest.Id } });
+            TieTrimEnd(p1.Id, lo.by); TieTrimEnd(p2.Id, hi.by);
         }
         // dimensions on the trimmed line no longer make sense
         Sk.Constraints.RemoveAll(c => c.IsDimension && c.Refs.Length == 1 && c.Refs[0] == line.Id);
         Sk.Cleanup();
         Resolve();
+    }
+
+    /// <summary>
+    /// Ties an end made by Trim to the entity it was cut at, so it stays there as the sketch changes: the same point
+    /// as that entity's end when it is one (coincident), else on its line, circle or arc.
+    /// </summary>
+    void TieTrimEnd(long point, long cutter)
+    {
+        if (Sk.Entity(cutter) is not { } e) return;
+        var at = Sk.P(point);
+        foreach (var q in e.PointIds.Distinct())
+            if (!(e is SkCircle c && q == c.Center) && !(e is SkArc ac && q == ac.Center) && Vec2.Distance(Sk.P(q), at) < 1e-6)
+            {
+                Sk.MergePoints(point, q);
+                return;
+            }
+        CType? type = e switch { SkLine => CType.PointOnLine, SkCircle or SkArc => CType.PointOnCircle, _ => null };
+        if (type is { } t) Sk.Constraints.Add(new SkConstraint { Id = Sk.NewId(), Type = t, Refs = new[] { point, cutter } });
     }
 
     void ReplaceEnd(SkLine l, long oldPoint, long newPoint)

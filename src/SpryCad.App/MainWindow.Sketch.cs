@@ -240,6 +240,8 @@ public partial class MainWindow
         if (_sketch == null) return;
         // the Convert Entities page stays up: what was selected in the sketch is picked into it
         if (Converting) { TakeConvertPicks(); return; }
+        // so do the Mirror and Offset pages
+        if (InEntityPage) { TakeEntityPicks(); return; }
         var ed = _sketch;
         var page = new PmPage(ed.PointsOnly ? "Hole Positions" : "Sketch", "sketch") { OnOk = () => ExitSketch(true), OnCancel = DiscardSketch };
         if (ed.Selected.Count == 0)
@@ -525,21 +527,7 @@ public partial class MainWindow
         return (exact, mesh, exact.SelectMany(r => r.Edges()).Distinct().Count() + mesh.Count);
     }
 
-    void OffsetEntities()
-    {
-        if (_sketch == null) { Status("Offset Entities works in a sketch: edit or start a sketch first."); return; }
-        var err = _sketch.OffsetSelection();
-        Status(err ?? "Offset made: type the distance (Enter). To put it on the other side, select its dimension and click Reverse direction.");
-        BuildSketchPage();
-    }
-
-    void MirrorEntities()
-    {
-        if (_sketch == null) { Status("Mirror Entities works in a sketch: edit or start a sketch first."); return; }
-        var err = _sketch.MirrorSelection();
-        Status(err ?? "Mirrored. The copies stay symmetric about the centerline.");
-        BuildSketchPage();
-    }
+    // Mirror Entities and Offset Entities: pages of their own (MainWindow.SketchEntityPages.cs)
 
     void ToggleConstruction()
     {

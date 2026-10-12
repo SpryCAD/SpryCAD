@@ -494,6 +494,12 @@ public partial class MainWindow : Window
             if (e.Key == Key.Enter) ConvertOk(); else EndConvert();
             e.Handled = true; return;
         }
+        // Mirror and Offset pages: Enter is OK, Esc goes back to the sketch
+        if (InEntityPage && e.Key is Key.Enter or Key.Escape && !(e.Source is TextBox))
+        {
+            if (e.Key == Key.Enter) _entityPage!.OnOk?.Invoke(); else EndEntityPage();
+            e.Handled = true; return;
+        }
         if (inControl) return;
         if (_sketch != null && _sketch.IsEditingDimension) return;
         if (_sketch != null && _sketch.KeyDown(Viewport, e.Key, e.KeyModifiers)) { e.Handled = true; return; }

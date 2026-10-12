@@ -89,15 +89,29 @@ public sealed partial class SketchEditor
     public string? OffsetSelection()
     {
         var ids = SelectedEntities.Where(e => e is SkLine or SkArc or SkCircle).Select(e => e.Id).ToList();
+        var err = Offset(ids, OffsetDistance, false);
+        if (err == null && Selected.FirstOrDefault() is { Kind: SkRefKind.Constraint } r && Sk.Constraint(r.Id) is { } off)
+            OpenModifyBox(off); // type the distance straight away
+        return err;
+    }
+
+    /// <summary>
+    /// Offsets the given lines, arcs and circles (and the chains they belong to) by <paramref name="distance"/>,
+    /// associatively, to the other side with <paramref name="reverse"/>; the offset's dimension is left selected.
+    /// Null when done, else why not.
+    /// </summary>
+    public string? Offset(IReadOnlyCollection<long> ids, double distance, bool reverse)
+    {
+        ids = ids.Where(id => Sk.Entity(id) is SkLine or SkArc or SkCircle).ToList();
         if (ids.Count == 0) return "Offset Entities: select a line, arc or circle (the chain it is part of is offset).";
         Snapshot();
-        var (off, err) = SketchOps.Offset(Sk, SketchOps.Chain(Sk, ids), OffsetDistance);
+        OffsetDistance = distance;
+        var (off, err) = SketchOps.Offset(Sk, SketchOps.Chain(Sk, ids), distance, reverse);
         if (off == null) { Undo(); _redo.Clear(); return err; }
         Selected.Clear(); Selected.Add(new SkRef(SkRefKind.Constraint, off.Id));
         SelectionChanged?.Invoke();
         Resolve();
         _vp.Redraw();
-        OpenModifyBox(off); // type the distance straight away
         return null;
     }
 
@@ -155,10 +169,20 @@ public sealed partial class SketchEditor
         var axis = lines.LastOrDefault(l => l.Construction)
             ?? Selected.Where(r => r.Kind == SkRefKind.Entity).Select(r => Sk.Entity(r.Id)).OfType<SkLine>().LastOrDefault();
         if (axis == null) return "Mirror: select the entities to mirror and a centerline (or line) to mirror about.";
-        var toMirror = ents.Where(e => e.Id != axis.Id).Select(e => e.Id).ToList();
-        if (toMirror.Count == 0) return "Mirror: select the entities to mirror as well as the line to mirror about.";
+        return Mirror(ents.Where(e => e.Id != axis.Id).Select(e => e.Id).ToList(), axis.Id);
+    }
+
+    /// <summary>
+    /// Mirrors the given entities about a line (a centerline or any line): copies kept symmetric to them, left
+    /// selected. Null when done, else why not.
+    /// </summary>
+    public string? Mirror(IReadOnlyCollection<long> ids, long axisLine)
+    {
+        if (Sk.Entity(axisLine) is not SkLine) return "Mirror: pick a centerline (or line) to mirror about.";
+        var toMirror = ids.Where(id => id != axisLine && Sk.Entity(id) is { IsReference: false }).ToList();
+        if (toMirror.Count == 0) return "Mirror: pick the entities to mirror as well as the line to mirror about.";
         Snapshot();
-        var made = SketchOps.Mirror(Sk, toMirror, axis.Id);
+        var made = SketchOps.Mirror(Sk, toMirror, axisLine);
         Selected.Clear();
         foreach (var id in made) Selected.Add(new SkRef(SkRefKind.Entity, id));
         SelectionChanged?.Invoke();
