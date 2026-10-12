@@ -202,6 +202,21 @@ static class ImportTests
             t.Near(NTess.ToSolid(b.Native!, 5e-3).Volume(), volume, volume * 1e-3);
         });
 
+        t.Test("STEP round trip: a modeled thread's flanks (B-splines in the file) read back as screw surfaces", () =>
+        {
+            var (step, volume) = Exported("acme-lead-screw.sprt");
+            var res = StepImport.Read(step, "F1.");
+            var bodies = res.Solids.Select(x => x.Body).ToList();
+            foreach (var nb in bodies) t.Eq(nb.Validate(), null);
+            var faces = bodies.SelectMany(nb => nb.Faces).ToList();
+            t.Eq(faces.Count(f => f.Surface.Kind == SurfaceKind.BSpline), 0);
+            t.True(faces.Count(f => f.Surface.Kind == SurfaceKind.Screw) >= 4, "screw faces");
+            // on the round lead about each part's axis: one motion for the flanks of a thread
+            foreach (var screws in bodies.Select(nb => nb.Faces.Where(f => f.Surface.Kind == SurfaceKind.Screw).ToList()).Where(l => l.Count > 0))
+                t.True(screws.All(f => f.Surface.Screw!.Motion.SameHelices(screws[0].Surface.Screw!.Motion)), "one motion");
+            t.Near(bodies.Sum(nb => NTess.ToSolid(nb, 1e-3).Volume()), volume, volume * 1e-4);
+        });
+
         t.Test("STEP import: B-spline blend faces (spoked wheel round trip)", () =>
         {
             var original = new Regenerator().Rebuild(Demos.All.First(d => d.file == "spoked-handwheel.sprt").build()).State.Bodies.Single().Solid;

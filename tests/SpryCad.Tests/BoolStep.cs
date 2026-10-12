@@ -17,6 +17,12 @@ static class BoolStep
         var body = Read("body.step", "B."); var tool = Read("tool.step", "T.");
         Console.WriteLine($"read: {sw.ElapsedMilliseconds} ms; body {body.Faces.Count} faces ({string.Join(", ", body.Faces.GroupBy(f => f.Surface.Kind).Select(g => $"{g.Count()} {g.Key}"))}), tool {tool.Faces.Count} ({string.Join(", ", tool.Faces.GroupBy(f => f.Surface.Kind).Select(g => $"{g.Count()} {g.Key}"))})");
         if (Environment.GetEnvironmentVariable("BOOLSTEP_RECOG") != null)
+            foreach (var f in body.Faces.Concat(tool.Faces).Where(f => f.Surface.Kind == SurfaceKind.Screw))
+            {
+                var sc = f.Surface.Screw!; var mo = sc.Motion;
+                Console.WriteLine($"  {f.Tag.Name}: screw O {mo.O.X:R} {mo.O.Y:R} {mo.O.Z:R} A {mo.A.X:R} {mo.A.Y:R} {mo.A.Z:R} lead {mo.Lead:R}, {sc.Gen.GetType().Name} {sc.Gen.Eval(sc.V0)}..{sc.Gen.Eval(sc.V1)}, u {sc.U0:0.###}..{sc.U1:0.###}");
+            }
+        if (Environment.GetEnvironmentVariable("BOOLSTEP_RECOG") != null)
             foreach (var f in body.Faces.Concat(tool.Faces).Where(f => f.Surface.Kind == SurfaceKind.Cylinder).GroupBy(f => f.Surface).Select(g => g.First()))
                 Console.WriteLine($"  {f.Tag.Name}: cylinder axis {f.Surface.Def.Axis.X:R} {f.Surface.Def.Axis.Y:R} {f.Surface.Def.Axis.Z:R} origin {f.Surface.Def.Origin.X:R} {f.Surface.Def.Origin.Y:R} {f.Surface.Def.Origin.Z:R} r {f.Surface.Def.Radius:R}");
         if (Environment.GetEnvironmentVariable("BOOLSTEP_RECOG") != null)

@@ -50,7 +50,9 @@ public static class NRecognize
             }
         if (best < 1e-6) return null; // normals (nearly) parallel: no axis to find
         axis = axis.Normalized;
-        foreach (var n in nrm) if (Math.Abs(Vec3.Dot(n, axis)) > 1e-7) return Cone(s, pts, nrm, tol, out flip);
+        foreach (var n in nrm)
+            if (Math.Abs(Vec3.Dot(n, axis)) > 1e-7)
+                return Cone(s, pts, nrm, tol, out flip) ?? (fitted > 0 ? Screw(s, tol, fitted, out flip) : null);
 
         // circle through the points projected along the axis: |p - c|² = r² is linear in (c, r² - |c|²)
         var x = axis.AnyPerpendicular(); var y = Vec3.Cross(axis, x);
@@ -92,6 +94,209 @@ public static class NRecognize
         flip = !outward; // a cylinder's natural normal points away from the axis
         var refDir = (pts[0] - center) - axis * Vec3.Dot(pts[0] - center, axis);
         return new NSurface(new SurfaceDef { Kind = SurfaceKind.Cylinder, Origin = center, Axis = axis, RefDir = refDir, Radius = r, Segments = SurfaceDef.SegmentsFor(r) });
+    }
+
+    /// <summary>
+    /// The screw surface (a line or arc swept along helices: a thread's flank, or its rounded root) the fitted
+    /// B-spline is, or null. Every normal of a screw surface is perpendicular to the motion's velocity a×(p−O) + K·a:
+    /// with b = K·a + O×a that is a·(p×n) + b·n = 0, linear in (a, b): the axis, centre and lead are the least
+    /// eigenvector of the samples' 6×6 normal matrix. Seen in the motion's frame as (r, z − K·θ), every point then lies
+    /// on the generator: a line or a circle there, within the fitting noise. Rounded as fitted cylinders are.
+    /// </summary>
+    static NSurface? Screw(NurbsSurface s, double tol, double fitted, out bool flip)
+    {
+        flip = false;
+        const int M = 32;
+        var pts = new List<Vec3>((M + 1) * (M + 1)); var nrm = new List<Vec3>(pts.Capacity);
+        for (int i = 0; i <= M; i++)
+            for (int j = 0; j <= M; j++)
+            {
+                double u = s.U0 + (s.U1 - s.U0) * i / M, v = s.V0 + (s.V1 - s.V0) * j / M;
+                var n = s.Normal(u, v);
+                if (!(n.LengthSq > 0.5)) return null;
+                pts.Add(s.Eval(u, v)); nrm.Add(n);
+            }
+        var c0 = Vec3.Zero; foreach (var p in pts) c0 += p; c0 /= pts.Count;
+        var m = new double[6, 6];
+        var row = new double[6];
+        for (int k = 0; k < pts.Count; k++)
+        {
+            var w = Vec3.Cross(pts[k] - c0, nrm[k]); var n = nrm[k];
+            row[0] = w.X; row[1] = w.Y; row[2] = w.Z; row[3] = n.X; row[4] = n.Y; row[5] = n.Z;
+            for (int i = 0; i < 6; i++) for (int j = 0; j < 6; j++) m[i, j] += row[i] * row[j];
+        }
+        var (vals, vecs) = Eigen6(m);
+        // one motion only (a plane, a cylinder or a surface of revolution has more)
+        if (!(vals[1] > 1e-8 * vals[5])) return null;
+        var a = new Vec3(vecs[0, 0], vecs[1, 0], vecs[2, 0]); var b = new Vec3(vecs[3, 0], vecs[4, 0], vecs[5, 0]);
+        var al = a.Length;
+        if (al < 1e-9) return null;
+        a /= al; b /= al;
+        var K = Vec3.Dot(a, b);
+        var o = c0 + Vec3.Cross(a, b);
+        var size = s.Box.Diagonal;
+        if (Math.Abs(K) < 1e-6 * size) return null;
+        var rtol = Math.Max(tol, fitted * pts.Max(p => { var d = p - o; return (d - a * Vec3.Dot(d, a)).Length; }));
+        var g = Profile(pts, a, o, K, null);
+        // (from noisy normals the motion is a little off, the profile with it: rounded, it may come within)
+        if (g == null || g.Value.err > 50 * rtol) return null;
+        // a surface of revolution (a fillet's, a torus), or one nearly so, fits a screw of next to no lead about as
+        // well: a lead within a few times the noise tells nothing (a real thread's is many times it)
+        if (Math.Abs(2 * Math.PI * K) < 20 * rtol) return null;
+        if (Profile(pts, a, o, 0, null) is { } rev && rev.err <= Math.Max(rtol, 2 * g.Value.err)) return null;
+        bool circle = g.Value.circle;
+        // the roundest axis, centre and lead keeping the profile within its noise (always: an accurate fit's lead
+        // and axis are off in the seventh digit too, and the faces of one thread must share one motion)
+        {
+            // (up to three times the fit's own error: the least-squares motion from noisy normals is itself off)
+            var limit = Math.Max(g.Value.err * 1.05 + tol, Math.Min(rtol, 3 * g.Value.err));
+            static Vec3 R(Vec3 v, int d) => new(Math.Round(v.X, d), Math.Round(v.Y, d), Math.Round(v.Z, d));
+            for (int d = 0; d <= 9; d++)
+            {
+                var ax = R(a, d);
+                if (!(ax.LengthSq > 0.5)) continue;
+                ax = ax.Normalized;
+                if (Profile(pts, ax, o, K, circle) is { } e && e.err <= limit) { a = ax; break; }
+            }
+            for (int d = 0; d <= 9; d++)
+            {
+                var c = R(o, d);
+                if (Profile(pts, a, c, K, circle) is { } e && e.err <= limit) { o = c; break; }
+            }
+            var lead0 = 2 * Math.PI * K;
+            for (int d = 0; d <= 9; d++)
+            {
+                var l = Math.Round(lead0, d);
+                if (l == 0) continue;
+                if (Profile(pts, a, o, l / (2 * Math.PI), circle) is { } e && e.err <= limit) { K = l / (2 * Math.PI); break; }
+            }
+            g = Profile(pts, a, o, K, circle);
+        if (g == null || g.Value.err > rtol) return null;
+        }
+        // (Profile's frame is the motion's: the same axis, centre and perpendicular)
+        var motion = ScrewMotion.About(o, a, 2 * Math.PI * K);
+        var (_, _, c2, r2, d2) = g.Value;
+        var lead = 2 * Math.PI * K;
+        // the generator in the frame's x–z half plane: (r, ζ) ↦ O + X·r + A·ζ
+        NCurve gen = circle
+            ? new NCircle(motion.O + motion.X * c2.X + motion.A * c2.Y, Vec3.Cross(motion.X, motion.A), motion.X, r2)
+            : new NLine(motion.O + motion.X * c2.X + motion.A * c2.Y, motion.X * d2.X + motion.A * d2.Y);
+        // the ranges: each point's generator parameter, and the turn that carries it there (z = ζ(v) + K·u)
+        double v0 = double.MaxValue, v1 = double.MinValue, u0 = double.MaxValue, u1 = double.MinValue;
+        foreach (var p in pts)
+        {
+            var l = motion.Local(p);
+            var r = Math.Sqrt(l.X * l.X + l.Y * l.Y);
+            var zeta = l.Z - K * Math.Atan2(l.Y, l.X);
+            // the turn of ζ nearest the generator at this radius
+            var zref = circle || Math.Abs(d2.X) < 1e-9 ? c2.Y : c2.Y + d2.Y * (r - c2.X) / d2.X;
+            zeta -= lead * Math.Round((zeta - zref) / lead);
+            var q = new Vec2(r, zeta);
+            var v = circle ? Math.Atan2(q.Y - c2.Y, q.X - c2.X) : Vec2.Dot(q - c2, d2);
+            var u = (l.Z - motion.Local(gen.Eval(v)).Z) / K;
+            v0 = Math.Min(v0, v); v1 = Math.Max(v1, v); u0 = Math.Min(u0, u); u1 = Math.Max(u1, u);
+        }
+        // (an arc's angles: one branch, unless it crosses ±π; a thread of a thousand turns is no thread)
+        if (circle && v1 - v0 > Math.PI || u1 - u0 > 2 * Math.PI * 1000) return null;
+        var padV = 0.02 * (v1 - v0) + (circle ? 1e-3 : 1e-3 * size); var padU = 0.02 * (u1 - u0) + 0.05;
+        var screw = new ScrewSurface(motion, gen, v0 - padV, v1 + padV, u0 - padU, u1 + padU);
+        // the surface's points on the screw, and on its side
+        int agree = 0;
+        for (int k = 0; k < pts.Count; k += 7)
+        {
+            var (cu, cv, _, dist) = screw.Closest(pts[k]);
+            if (dist > rtol * 1.5) return null;
+            agree += Vec3.Dot(screw.NormalAt(cu, cv), nrm[k]) > 0 ? 1 : -1;
+        }
+        flip = agree < 0;
+        return NSurface.ScrewOf(screw);
+    }
+
+    /// <summary>
+    /// The points seen as (r, z − K·θ) in the motion's frame (one turn of ζ: nearest the first), fitted by a line
+    /// (principal direction) or a circle: its kind, the largest distance of a point from it, a point of it (the line's
+    /// centroid or the circle's centre), the circle's radius and the line's direction. <paramref name="circle"/>:
+    /// that kind only.
+    /// </summary>
+    static (bool circle, double err, Vec2 c, double r, Vec2 d)? Profile(List<Vec3> pts, Vec3 a, Vec3 o, double K, bool? circle)
+    {
+        var motion = ScrewMotion.About(o, a, 2 * Math.PI * K);
+        var lead = 2 * Math.PI * K;
+        var q = new Vec2[pts.Count];
+        for (int i = 0; i < pts.Count; i++)
+        {
+            var l = motion.Local(pts[i]);
+            var zeta = l.Z - K * Math.Atan2(l.Y, l.X);
+            if (i > 0 && lead != 0) zeta -= lead * Math.Round((zeta - q[0].Y) / lead);
+            q[i] = new Vec2(Math.Sqrt(l.X * l.X + l.Y * l.Y), zeta);
+        }
+        Vec2 mean = default; foreach (var p in q) mean += p; mean /= q.Length;
+        double sxx = 0, sxy = 0, syy = 0;
+        foreach (var p in q) { var e = p - mean; sxx += e.X * e.X; sxy += e.X * e.Y; syy += e.Y * e.Y; }
+        var ang = 0.5 * Math.Atan2(2 * sxy, sxx - syy);
+        var dir = new Vec2(Math.Cos(ang), Math.Sin(ang));
+        double lineErr = 0;
+        foreach (var p in q) { var e = p - mean; lineErr = Math.Max(lineErr, Math.Abs(e.X * dir.Y - e.Y * dir.X)); }
+        (bool, double, Vec2, double, Vec2) line = (false, lineErr, mean, 0, dir);
+        if (circle == false) return line;
+        // circle: |p − c|² = r², linear in (c, r² − |c|²)
+        double a11 = 0, a12 = 0, a13 = 0, a22 = 0, a23 = 0, a33 = 0, b1 = 0, b2 = 0, b3 = 0;
+        foreach (var p0 in q)
+        {
+            var p = p0 - mean; var rhs = p.X * p.X + p.Y * p.Y;
+            a11 += 4 * p.X * p.X; a12 += 4 * p.X * p.Y; a13 += 2 * p.X; a22 += 4 * p.Y * p.Y; a23 += 2 * p.Y; a33 += 1;
+            b1 += 2 * p.X * rhs; b2 += 2 * p.Y * rhs; b3 += rhs;
+        }
+        if (!Solve3(a11, a12, a13, a22, a23, a33, b1, b2, b3, out var cx, out var cy, out var k) || !(k + cx * cx + cy * cy > 0))
+            return circle == true ? null : line;
+        var c = mean + new Vec2(cx, cy); var r = Math.Sqrt(k + cx * cx + cy * cy);
+        double circErr = 0;
+        foreach (var p in q) circErr = Math.Max(circErr, Math.Abs((p - c).Length - r));
+        if (circle == true || circErr < lineErr * 0.5) return (true, circErr, c, r, dir);
+        return line;
+    }
+
+    /// <summary>Eigenvalues (ascending) and eigenvectors (columns) of a symmetric 6×6 matrix (cyclic Jacobi).</summary>
+    static (double[] vals, double[,] vecs) Eigen6(double[,] m)
+    {
+        const int n = 6;
+        var a = (double[,])m.Clone();
+        var v = new double[n, n];
+        for (int i = 0; i < n; i++) v[i, i] = 1;
+        for (int sweep = 0; sweep < 100; sweep++)
+        {
+            double off = 0, diag = 0;
+            for (int p = 0; p < n; p++) { diag += a[p, p] * a[p, p]; for (int q = p + 1; q < n; q++) off += a[p, q] * a[p, q]; }
+            if (off <= 1e-30 * diag) break;
+            for (int p = 0; p < n; p++)
+                for (int q = p + 1; q < n; q++)
+                {
+                    if (a[p, q] == 0) continue;
+                    var theta = (a[q, q] - a[p, p]) / (2 * a[p, q]);
+                    var t = (theta >= 0 ? 1 : -1) / (Math.Abs(theta) + Math.Sqrt(theta * theta + 1));
+                    var c = 1 / Math.Sqrt(t * t + 1); var s = t * c;
+                    for (int k = 0; k < n; k++)
+                    {
+                        double akp = a[k, p], akq = a[k, q];
+                        a[k, p] = c * akp - s * akq; a[k, q] = s * akp + c * akq;
+                    }
+                    for (int k = 0; k < n; k++)
+                    {
+                        double apk = a[p, k], aqk = a[q, k];
+                        a[p, k] = c * apk - s * aqk; a[q, k] = s * apk + c * aqk;
+                    }
+                    for (int k = 0; k < n; k++)
+                    {
+                        double vkp = v[k, p], vkq = v[k, q];
+                        v[k, p] = c * vkp - s * vkq; v[k, q] = s * vkp + c * vkq;
+                    }
+                }
+        }
+        var idx = Enumerable.Range(0, n).OrderBy(i => a[i, i]).ToArray();
+        var vals = idx.Select(i => a[i, i]).ToArray();
+        var vecs = new double[n, n];
+        for (int j = 0; j < n; j++) for (int i = 0; i < n; i++) vecs[i, j] = v[i, idx[j]];
+        return (vals, vecs);
     }
 
     /// <summary>
