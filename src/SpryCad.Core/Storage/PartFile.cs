@@ -36,18 +36,8 @@ public static class PartFile
                     db.SetPart(partId, Path.GetFileNameWithoutExtension(path));
                     var objects = PartObjects.From(doc).ToDictionary(kv => kv.Key, kv => db.Blobs.Put(kv.Value));
                     head = db.Commit(partId, objects, author ?? DefaultAuthor, message) ?? db.GetHead(partId)!;
-                    var now = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture);
-                    db.SetManifest("FormatVersion", CadDocument.CurrentFormatVersion.ToString(CultureInfo.InvariantCulture));
-                    db.SetManifest("AppVersion", typeof(PartFile).Assembly.GetName().Version?.ToString() ?? "");
-                    db.SetManifest("RootPartId", partId.ToString("D"));
-                    db.SetManifest("Units", doc.Units.ToString());
-                    if (db.Manifest("CreatedUtc") == null) db.SetManifest("CreatedUtc", now);
-                    db.SetManifest("ModifiedUtc", now);
-                    db.SetManifest("DerivedFrom", doc.DerivedFrom);
-                    // not the model: where the rollback bar is, which sketches are shown
-                    db.SetManifest("RollbackIndex", doc.RollbackIndex?.ToString(CultureInfo.InvariantCulture));
-                    db.SetManifest("SketchVisibility", doc.SketchVisibility == null ? null
-                        : JsonSerializer.Serialize(new SortedDictionary<string, bool>(doc.SketchVisibility, StringComparer.Ordinal)));
+                    db.DropWorking(partId); // (saved: what autosave kept is in the head now)
+                    WriteManifest(db, doc, partId);
                     db.SetThumbnail(doc.Thumbnail);
                     db.SetDisplay(partId, DisplayKey(head.RootHash), doc.Display);
                     db.CommitTransaction();
@@ -64,15 +54,53 @@ public static class PartFile
         doc.Revision = head.RevisionId.ToString("D");
     }
 
+    static void WriteManifest(PartDatabase db, CadDocument doc, Guid partId)
+    {
+        var now = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture);
+        db.SetManifest("FormatVersion", CadDocument.CurrentFormatVersion.ToString(CultureInfo.InvariantCulture));
+        db.SetManifest("AppVersion", typeof(PartFile).Assembly.GetName().Version?.ToString() ?? "");
+        db.SetManifest("RootPartId", partId.ToString("D"));
+        db.SetManifest("Units", doc.Units.ToString());
+        if (db.Manifest("CreatedUtc") == null) db.SetManifest("CreatedUtc", now);
+        db.SetManifest("ModifiedUtc", now);
+        db.SetManifest("DerivedFrom", doc.DerivedFrom);
+        // not the model: where the rollback bar is, which sketches are shown
+        db.SetManifest("RollbackIndex", doc.RollbackIndex?.ToString(CultureInfo.InvariantCulture));
+        db.SetManifest("SketchVisibility", doc.SketchVisibility == null ? null
+            : JsonSerializer.Serialize(new SortedDictionary<string, bool>(doc.SketchVisibility, StringComparer.Ordinal)));
+    }
+
+    /// <summary>
+    /// Autosave: the part as the file's working revision (in place of the one it had), never in its history. Written in
+    /// place, in one transaction (a working copy is the app's own, local file); the file is made if there is none.
+    /// </summary>
+    public static void SaveWorking(CadDocument doc, string path, string? author = null)
+    {
+        doc.Id ??= CadDocument.NewGuid();
+        var partId = Guid.Parse(doc.Id);
+        bool same = File.Exists(path) && PartDatabase.IsFile(path) && RootPart(path) == partId;
+        using var db = same ? PartDatabase.Open(path, readOnly: false) : PartDatabase.Create(path);
+        db.Begin();
+        try
+        {
+            db.SetPart(partId, Path.GetFileNameWithoutExtension(path));
+            var objects = PartObjects.From(doc).ToDictionary(kv => kv.Key, kv => db.Blobs.Put(kv.Value));
+            db.CommitWorking(partId, objects, author ?? DefaultAuthor);
+            WriteManifest(db, doc, partId);
+            db.CommitTransaction();
+        }
+        catch { db.Rollback(); throw; }
+    }
+
     /// <summary>The name revisions are made by when none is given: the user's (set by the app from its options).</summary>
     public static string DefaultAuthor { get; set; } = Environment.UserName;
 
-    /// <summary>The part at the head of the file's history.</summary>
-    public static CadDocument Load(string path)
+    /// <summary>The part at the head of the file's history; with <paramref name="working"/>, its working revision if it has one (autosave).</summary>
+    public static CadDocument Load(string path, bool working = false)
     {
         using var db = PartDatabase.Open(path);
         var partId = RootPart(db);
-        var head = db.GetHead(partId) ?? throw new InvalidDataException("The file holds no saved part.");
+        var head = (working ? db.GetWorking(partId) : null) ?? db.GetHead(partId) ?? throw new InvalidDataException("The file holds no saved part.");
         var objects = db.GetObjects(head.RevisionId).ToDictionary(kv => kv.Key, kv => db.Blobs.Get(kv.Value, verify: kv.Key.Kind == ObjectKind.File));
         var doc = PartObjects.ToDocument(objects);
         doc.Id = partId.ToString("D");

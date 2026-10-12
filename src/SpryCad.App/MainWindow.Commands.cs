@@ -9,6 +9,7 @@ using SpryCad.App.Sketcher;
 using SpryCad.App.UI;
 using SpryCad.App.Viewport;
 using SpryCad.Core.Model;
+using SpryCad.Core.Storage;
 using SpryCad.Core.Regen;
 using SpryCad.Kernel;
 
@@ -123,7 +124,7 @@ public partial class MainWindow
             Item("Export S_TL...", () => _ = Export("stl"), null, "export-stl"),
             Item("Export Flat Pattern _DXF...", () => _ = ExportDxf(), null, "export-dxf"),
             "-",
-            Item("Recover Autosave", () => RecoverAutosave()),
+            Item("Recover Autosave", () => OfferRecovery(atStart: false)),
             "-",
             Item("E_xit", Close)));
         MainMenu.Items.Add(Sub("_Edit",
@@ -909,6 +910,15 @@ public partial class MainWindow
             if (!IsAutosave(path) && !IsEmbeddedCopy(path)) RecentFiles.Add(path);
             Status("Opened " + path);
             _tab.FitAfterLoad = Session.RequestedRevision;
+            // someone else has it open: read-only (saving makes a copy elsewhere), unless the user says otherwise
+            if (Session.ForeignLock is { } l)
+            {
+                Session.ReadOnly = await Dialogs.YesNo(this, "Opened by Someone Else",
+                    $"{Path.GetFileName(path)} is open by {l.User} on {l.Machine} since {l.SinceUtc.ToLocalTime():g}.\n\n" +
+                    "Open it read-only (saving makes a copy elsewhere), or open it anyway (whoever saves last overwrites the other)?",
+                    "Read-Only", "Open Anyway");
+                if (Session.ReadOnly) Status($"Opened {Path.GetFileName(path)} read-only: {l.User} has it open.");
+            }
             return true;
         }
         catch (Exception ex)
@@ -942,8 +952,17 @@ public partial class MainWindow
             try { if (await SaveEmbedded(_tab) is { } done) return done; }
             catch (Exception ex) { App.Log(ex, "Save embedded"); await Dialogs.Message(this, "Save failed", ex.Message); return false; }
         }
-        if (Session.FilePath == null) return await SaveAs();
+        if (Session.FilePath == null || Session.ReadOnly) return await SaveAs();
         try { Session.Save(Session.FilePath); RecentFiles.Add(Session.FilePath); Status("Saved " + Session.FilePath); return true; }
+        catch (SaveConflictException ex)
+        {
+            // someone else saved it since it was opened: keep both (a copy), or overwrite theirs
+            var r = await Dialogs.YesNoCancel(this, "Save Conflict", ex.Message + "\n\nSave your version as a copy, or overwrite theirs?", "Save as Copy", "Overwrite");
+            if (r == null) return false;
+            if (r == true) return await SaveAs();
+            try { Session.Save(Session.FilePath, overwrite: true); RecentFiles.Add(Session.FilePath); Status("Saved " + Session.FilePath); return true; }
+            catch (Exception ex2) { App.Log(ex2, "Save failed"); await Dialogs.Message(this, "Save failed", ex2.Message); return false; }
+        }
         catch (Exception ex) { App.Log(ex, "Save failed"); await Dialogs.Message(this, "Save failed", ex.Message); return false; }
     }
 
@@ -998,10 +1017,11 @@ public partial class MainWindow
             // cosmetic threads are modeled for export: the part rebuilt so (a copy, off the UI thread)
             var hasCosmetic = r.State.Cosmetics.Count > 0;
             var snapshot = hasCosmetic ? Session.Doc.Clone() : null;
+            var session = Session;
             // written off the UI thread: the exact B-rep / tessellation of big parts takes a moment
             await Task.Run(() =>
             {
-                if (snapshot != null) bodies = new Regenerator { ThreadOverride = ThreadDisplay.Modeled }.Rebuild(snapshot).State.Bodies.ToList();
+                if (snapshot != null) bodies = session.RebuildForExport(snapshot).State.Bodies.ToList();
                 using var fs = File.Create(path);
                 if (kind == "step") StepWriter.Write(fs, bodies.Select(b => (b.Id, b.Solid)), baseName, scale);
                 else StlWriter.Write(fs, bodies.Select(b => b.Solid), scale);
@@ -1045,29 +1065,6 @@ public partial class MainWindow
             Status($"Exported {string.Join(", ", written)}");
         }
         catch (Exception ex) { App.Log(ex, "Export failed"); await Dialogs.Message(this, "Export failed", ex.Message); }
-    }
-
-    /// <summary>
-    /// Opens the parts of the last autosave, each in its own tab: the files written in the same autosave tick as
-    /// the newest one (older numbered files are left over from sessions with more parts open).
-    /// </summary>
-    async void RecoverAutosave()
-    {
-        var files = Directory.Exists(AutosaveDir)
-            ? new DirectoryInfo(AutosaveDir).GetFiles("autosave*" + CadDocument.FileExtension).OrderByDescending(f => f.LastWriteTimeUtc).ToList()
-            : new List<FileInfo>();
-        if (files.Count == 0) { Status("No autosave found."); return; }
-        var newest = files[0].LastWriteTimeUtc;
-        int n = 0;
-        foreach (var f in files.Where(f => newest - f.LastWriteTimeUtc < TimeSpan.FromSeconds(10)).OrderBy(f => f.Name))
-        {
-            if (!await OpenFileAsync(f.FullName)) break;
-            Session.FilePath = null;
-            // recovered work is not saved anywhere yet: closing it must prompt
-            Session.MarkDirty();
-            n++;
-        }
-        if (n > 0) Status(n == 1 ? "Recovered the autosave: use Save As to keep it." : $"Recovered {n} autosaved parts: use Save As to keep them.");
     }
 
     // ------------------------------------------------------------------------------------------

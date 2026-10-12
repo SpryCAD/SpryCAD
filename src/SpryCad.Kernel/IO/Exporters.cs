@@ -50,13 +50,21 @@ public static class StepWriter
         public readonly StringBuilder Sb = new();
         int _id;
         public int Add(string entity) { var id = ++_id; Sb.Append('#').Append(id).Append('=').Append(entity).Append(";\n"); return id; }
+        int _ctx2d;
+        /// <summary>The parameter space of surfaces, where pcurves are drawn (written once, when first used).</summary>
+        public int Ctx2D => _ctx2d != 0 ? _ctx2d
+            : _ctx2d = Add("(GEOMETRIC_REPRESENTATION_CONTEXT(2)PARAMETRIC_REPRESENTATION_CONTEXT()REPRESENTATION_CONTEXT('2D SPACE',''))");
     }
 
     static string R(double v)
     {
         if (Math.Abs(v) < 1e-12) v = 0;
-        var s = v.ToString("0.0##########", CultureInfo.InvariantCulture);
-        return s;
+        // as "0.0##########" (at least one decimal, at most eleven), by the standard fixed format and the zeros trimmed:
+        // several times faster (a big part writes hundreds of thousands of numbers)
+        Span<char> buf = stackalloc char[96];
+        if (!v.TryFormat(buf, out int n, "F11", CultureInfo.InvariantCulture)) return v.ToString("0.0##########", CultureInfo.InvariantCulture);
+        while (n > 2 && buf[n - 1] == '0' && buf[n - 2] != '.') n--;
+        return new string(buf[..n]);
     }
 
     static string Pt(Vec3 p) => $"CARTESIAN_POINT('',({R(p.X)},{R(p.Y)},{R(p.Z)}))";
@@ -213,6 +221,46 @@ public static class StepWriter
         var vtx = new int[b.Vertices.Count];
         for (int i = 0; i < vtx.Length; i++) vtx[i] = c.Add($"VERTEX_POINT('',#{c.Add(Pt(b.Vertices[i]))})");
 
+        // the faces' surfaces first: the pcurves of edges on B-spline faces refer to them. Blend (pipe) and screw
+        // surfaces are fitted up front, in parallel (each face is independent); screw faces that are cylinders are
+        // written exactly
+        var pipes = b.Faces.Where(f => f.Loops.Count > 0 && (f.Surface.Kind == SurfaceKind.Pipe || f.Surface.Kind == SurfaceKind.Screw && ScrewCylinder(f) == null)).ToList();
+        var fits = new BSplineSurface[pipes.Count];
+        using (Prof.Time("step.fits")) Parallel.For(0, pipes.Count, i => fits[i] = pipes[i].Surface.Kind == SurfaceKind.Pipe ? PipeFit(pipes[i], b) : ScrewFit(pipes[i], b));
+        var fitOf = new Dictionary<ExactFace, BSplineSurface>(ReferenceEqualityComparer.Instance);
+        for (int i = 0; i < pipes.Count; i++) fitOf[pipes[i]] = fits[i];
+        var surfIds = new int[b.Faces.Count];
+        var senses = new bool[b.Faces.Count];
+        var param = new ParamSurface?[b.Faces.Count];
+        foreach (var f in b.Faces)
+        {
+            if (f.Loops.Count == 0) continue;
+            var sameSense = f.SameSense;
+            int surf;
+            ParamSurface? ps = null;
+            if (fitOf.TryGetValue(f, out var fit)) { surf = WriteBSplineSurface(c, fit); ps = ParamSurface.Of(fit); }
+            else if (ScrewCylinder(f) is { } cyl)
+            {
+                // a screw surface swept by a line along its axis (a thread's root or crest) is a cylinder: written
+                // exactly, its sense taken against the cylinder's outward normal
+                surf = c.Add($"CYLINDRICAL_SURFACE('',#{Axis2(c, cyl.origin, cyl.axis, cyl.refDir)},{R(cyl.r)})");
+                if (!cyl.outward) sameSense = !sameSense;
+            }
+            else surf = WriteSurface(c, f, b, out ps);
+            surfIds[f.Index] = surf; senses[f.Index] = sameSense; param[f.Index] = ps;
+        }
+        var pcTol = 1e-4 * Math.Max(1, s.Bounds.Diagonal / 100);
+        // the edges' parameter curves on B-spline faces, worked out in parallel (each edge on its own), written below
+        var pc2d = new BSplineCurve?[b.Edges.Count, 2];
+        using (Prof.Time("step.pcurves"))
+            Parallel.For(0, b.Edges.Count, k =>
+            {
+                var e = b.Edges[k];
+                if (e.FaceA == e.FaceB) return;
+                for (int side = 0; side < 2; side++)
+                    if ((side == 0 ? e.FaceA : e.FaceB) is var fi and >= 0 && param[fi] is { } ps) pc2d[k, side] = ParamCurve(ps, e, pcTol);
+            });
+
         var edgeIds = new int[b.Edges.Count];
         var _edges = Prof.Time("step.edges");
         foreach (var e in b.Edges)
@@ -250,21 +298,24 @@ public static class StepWriter
                     }
                 default: throw new InvalidOperationException("unknown curve");
             }
+            // on B-spline faces the edge also in the face's parameters (a pcurve each): readers need not find them by
+            // projecting it, which is slow and ambiguous on a surface wrapping round (a thread's turns)
+            {
+                var pcs = new List<int>();
+                for (int side = 0; side < 2; side++)
+                    if (pc2d[e.Index, side] is { } pc) pcs.Add(WritePcurve(c, pc, surfIds[side == 0 ? e.FaceA : e.FaceB]));
+                if (pcs.Count > 0) geom = c.Add($"SURFACE_CURVE('',#{geom},({string.Join(",", pcs.Select(i => "#" + i))}),.CURVE_3D.)");
+            }
             edgeIds[e.Index] = c.Add($"EDGE_CURVE('',#{vtx[e.V0]},#{vtx[e.V1]},#{geom},.T.)");
         }
 
         _edges.Dispose();
         var facesByLump = new Dictionary<int, List<int>>();
-        // blend (pipe) surfaces are fitted up front, in parallel (each face is independent)
-        var pipes = b.Faces.Where(f => f.Loops.Count > 0 && f.Surface.Kind == SurfaceKind.Pipe).ToList();
-        var fits = new BSplineSurface[pipes.Count];
-        using (Prof.Time("step.pipefits")) Parallel.For(0, pipes.Count, i => fits[i] = PipeFit(pipes[i], b));
-        var fitOf = new Dictionary<ExactFace, BSplineSurface>(ReferenceEqualityComparer.Instance);
-        for (int i = 0; i < pipes.Count; i++) fitOf[pipes[i]] = fits[i];
         foreach (var f in b.Faces)
         {
             if (f.Loops.Count == 0) continue;
-            int surf = fitOf.TryGetValue(f, out var fit) ? WriteBSplineSurface(c, fit) : WriteSurface(c, f, b);
+            var sameSense = senses[f.Index];
+            int surf = surfIds[f.Index];
             // planar faces: the loop enclosing the largest area is the outer bound
             int outer = -1;
             if (f.Surface.Kind == SurfaceKind.Plane)
@@ -283,11 +334,139 @@ public static class StepWriter
                 var loop = c.Add($"EDGE_LOOP('',({string.Join(",", oes.Select(i => "#" + i))}))");
                 bounds.Add(c.Add(li == outer ? $"FACE_OUTER_BOUND('',#{loop},.T.)" : $"FACE_BOUND('',#{loop},.T.)"));
             }
-            var face = c.Add($"ADVANCED_FACE('{Esc(f.Name)}',({string.Join(",", bounds.Select(i => "#" + i))}),#{surf},{(f.SameSense ? ".T." : ".F.")})");
+            var face = c.Add($"ADVANCED_FACE('{Esc(f.Name)}',({string.Join(",", bounds.Select(i => "#" + i))}),#{surf},{(sameSense ? ".T." : ".F.")})");
             if (!facesByLump.TryGetValue(f.Lump, out var list)) facesByLump[f.Lump] = list = new List<int>();
             list.Add(face);
         }
         return facesByLump.Values.Select(fs => c.Add($"CLOSED_SHELL('',({string.Join(",", fs.Select(i => "#" + i))}))")).ToList();
+    }
+
+    /// <summary>A surface as written: (u, v) to a point over its parameter box (B-spline faces, where pcurves are written).</summary>
+    sealed record ParamSurface(Func<double, double, Vec3> Eval, double U0, double U1, double V0, double V1)
+    {
+        /// <summary>A first guess at a point's parameters (without it, the nearest of a grid of samples).</summary>
+        public Func<Vec3, Vec2>? Seed { get; init; }
+
+        public static ParamSurface Of(BSplineSurface f)
+        {
+            int nu = f.Poles.GetLength(0) - 1, nv = f.Poles.GetLength(1) - 1;
+            // the control points lie close to the surface, each near its Greville parameters: the nearest one's
+            static double[] Greville(double[] k, int p, int n) =>
+                Enumerable.Range(0, n + 1).Select(i => Enumerable.Range(i + 1, p).Sum(j => k[j]) / p).ToArray();
+            var gu = Greville(f.KnotsU, f.DegreeU, nu); var gv = Greville(f.KnotsV, f.DegreeV, nv);
+            return new ParamSurface(f.Eval, f.KnotsU[f.DegreeU], f.KnotsU[nu + 1], f.KnotsV[f.DegreeV], f.KnotsV[nv + 1])
+            {
+                Seed = p =>
+                {
+                    double best = double.MaxValue; int bi = 0, bj = 0;
+                    for (int i = 0; i <= nu; i++)
+                        for (int j = 0; j <= nv; j++)
+                        {
+                            var d = (f.Poles[i, j] - p).LengthSq;
+                            if (d < best) { best = d; bi = i; bj = j; }
+                        }
+                    return new Vec2(gu[bi], gv[bj]);
+                },
+            };
+        }
+
+        /// <summary>
+        /// The parameters of a point of the surface: by Gauss-Newton from <paramref name="hint"/> (the point before
+        /// along an edge, so a surface wrapping round stays on the same turn), else from the nearest of a grid of
+        /// samples. Null when it does not come within tol.
+        /// </summary>
+        public Vec2? Find(Vec3 p, Vec2? hint, double tol, bool retried = false)
+        {
+            Vec2 uv;
+            if (hint is { } h) uv = h;
+            else if (Seed != null && !retried) uv = Seed(p);
+            else
+            {
+                const int gu = 240, gv = 40;
+                double best = double.MaxValue; uv = new Vec2(U0, V0);
+                for (int i = 0; i <= gu; i++)
+                    for (int j = 0; j <= gv; j++)
+                    {
+                        var q = new Vec2(U0 + (U1 - U0) * i / gu, V0 + (V1 - V0) * j / gv);
+                        var d = (Eval(q.X, q.Y) - p).LengthSq;
+                        if (d < best) { best = d; uv = q; }
+                    }
+            }
+            double hu = 1e-6 * (U1 - U0), hv = 1e-6 * (V1 - V0);
+            for (int it = 0; it < 40; it++)
+            {
+                var r = Eval(uv.X, uv.Y) - p;
+                if (r.Length < tol * 1e-3) break;
+                var su = (Eval(Math.Min(U1, uv.X + hu), uv.Y) - Eval(Math.Max(U0, uv.X - hu), uv.Y)) / (Math.Min(U1, uv.X + hu) - Math.Max(U0, uv.X - hu));
+                var sv = (Eval(uv.X, Math.Min(V1, uv.Y + hv)) - Eval(uv.X, Math.Max(V0, uv.Y - hv))) / (Math.Min(V1, uv.Y + hv) - Math.Max(V0, uv.Y - hv));
+                double a = Vec3.Dot(su, su), bb = Vec3.Dot(su, sv), cc = Vec3.Dot(sv, sv), det = a * cc - bb * bb;
+                if (!(det > 1e-300)) break;
+                double gu2 = Vec3.Dot(su, r), gv2 = Vec3.Dot(sv, r);
+                var du = -(cc * gu2 - bb * gv2) / det; var dv = -(a * gv2 - bb * gu2) / det;
+                var next = new Vec2(Math.Clamp(uv.X + du, U0, U1), Math.Clamp(uv.Y + dv, V0, V1));
+                var moved = Math.Abs(next.X - uv.X) / (U1 - U0) + Math.Abs(next.Y - uv.Y) / (V1 - V0);
+                uv = next;
+                if (moved < 1e-15) break;
+            }
+            if (Vec3.Distance(Eval(uv.X, uv.Y), p) <= tol) return uv;
+            // a hint or a seed that led astray: once more from the seed, then from the grid
+            if (hint != null) return Find(p, null, tol);
+            return Seed != null && !retried ? Find(p, null, tol, retried: true) : null;
+        }
+    }
+
+    /// <summary>
+    /// An edge's curve in a B-spline face's parameters: its points' parameters (followed along it), a 2D cubic
+    /// through them (z = 0). Null when a point is not on the surface within tol.
+    /// </summary>
+    static BSplineCurve? ParamCurve(ParamSurface ps, ExactEdge e, double tol)
+    {
+        var pts = e.Points;
+        if (pts.Count < 2) return null;
+        // (at most 256 points: the parameter curve is smooth, a helix on a screw face nearly straight)
+        int stride = Math.Max(1, (pts.Count + 255) / 256);
+        var sel = new List<Vec3>();
+        for (int i = 0; i < pts.Count; i += stride) sel.Add(pts[i]);
+        if (sel[^1] != pts[^1]) sel.Add(pts[^1]);
+        var uvs = new List<Vec3>(sel.Count);
+        Vec2? hint = null;
+        foreach (var p in sel)
+        {
+            if (ps.Find(p, hint, tol) is not { } uv) return null;
+            uvs.Add(new Vec3(uv.X, uv.Y, 0)); hint = uv;
+        }
+        // (points the same in the parameters, e.g. at a pole, would make the interpolation singular)
+        for (int i = uvs.Count - 2; i > 0; i--) if (Vec3.Distance(uvs[i], uvs[i - 1]) < 1e-14) { uvs.RemoveAt(i); sel.RemoveAt(i); }
+        if (uvs.Count < 2 || Vec3.Distance(uvs[0], uvs[^1]) < 1e-14 && uvs.Count < 3) return null;
+        // through every few of the points, as few as keep each point's place on the surface within tol: the
+        // parameter curve is smooth (on a screw face a helix is nearly straight), the file stays small
+        for (int every = Math.Max(1, uvs.Count / 16); ; every /= 2)
+        {
+            var idx = new List<int>();
+            for (int i = 0; i < uvs.Count; i += every) idx.Add(i);
+            if (idx[^1] != uvs.Count - 1) idx.Add(uvs.Count - 1);
+            var bs = BSplineCurve.Interpolate(idx.Select(i => uvs[i]).ToList(), Math.Min(3, idx.Count - 1));
+            if (every == 1) return bs;
+            bool ok = true; double t = 0;
+            for (int i = 0; i < uvs.Count && ok; i++)
+            {
+                t = bs.ClosestParam(uvs[i], 0, 1, t);
+                var q = bs.Eval(t);
+                if (Vec3.Distance(ps.Eval(q.X, q.Y), sel[i]) > tol) ok = false;
+            }
+            if (ok) return bs;
+        }
+    }
+
+    /// <summary>A parameter curve as PCURVE(surface, its definitional representation).</summary>
+    static int WritePcurve(Ctx c, BSplineCurve bs, int surf)
+    {
+        static string Pt2(Vec3 q) => $"CARTESIAN_POINT('',({R(q.X)},{R(q.Y)}))";
+        var poles = string.Join(",", bs.Poles.Select(q => "#" + c.Add(Pt2(q))));
+        var (vals, mults) = bs.KnotVector();
+        var curve = c.Add($"B_SPLINE_CURVE_WITH_KNOTS('',{bs.Degree},({poles}),.UNSPECIFIED.,.F.,.F.,({string.Join(",", mults)}),({string.Join(",", vals.Select(R))}),.UNSPECIFIED.)");
+        var rep = c.Add($"DEFINITIONAL_REPRESENTATION('',(#{curve}),#{c.Ctx2D})");
+        return c.Add($"PCURVE('',#{surf},#{rep})");
     }
 
     static double LoopArea(ExactBrep b, ExactLoop loop, Vec3 n)
@@ -307,8 +486,9 @@ public static class StepWriter
     static IEnumerable<Vec3> BoundaryPoints(ExactFace f, ExactBrep b)
         => f.Loops.SelectMany(l => l.Edges).SelectMany(x => b.Edges[x.Item1].Points);
 
-    static int WriteSurface(Ctx c, ExactFace f, ExactBrep b)
+    static int WriteSurface(Ctx c, ExactFace f, ExactBrep b, out ParamSurface? written)
     {
+        written = null;
         var d = f.Surface.Def;
         switch (f.Surface.Kind)
         {
@@ -334,8 +514,8 @@ public static class StepWriter
                     if (r < 1e-9) { hmax += 1; r = d.Radius + hmax * Math.Tan(d.Param2); }
                     return c.Add($"CONICAL_SURFACE('',#{Axis2(c, d.Origin + ax * hmax, ax, d.RefDir)},{R(r)},{R(d.Param2)})");
                 }
-            case SurfaceKind.Pipe: return WriteBSplineSurface(c, PipeFit(f, b));
-            case SurfaceKind.Screw: return WriteBSplineSurface(c, ScrewFit(f, b));
+            case SurfaceKind.Pipe: { var pf = PipeFit(f, b); written = ParamSurface.Of(pf); return WriteBSplineSurface(c, pf); }
+            case SurfaceKind.Screw: { var sf = ScrewFit(f, b); written = ParamSurface.Of(sf); return WriteBSplineSurface(c, sf); }
             case SurfaceKind.BSpline:
             case SurfaceKind.Offset:
                 {
@@ -353,13 +533,19 @@ public static class StepWriter
                     double off = d.Kind == SurfaceKind.Offset ? d.Radius : 0;
                     // (offsets of closed surfaces are fitted too: readers do not all handle them)
                     if (inside && (off == 0 || !(nb.ClosedU || nb.ClosedV)))
+                    {
+                        Func<Vec3, Vec2> seed = p => { var q = nb.Closest(p); return new Vec2(q.u, q.v); };
+                        written = off == 0 ? new ParamSurface(nb.Eval, nb.U0, nb.U1, nb.V0, nb.V1) { Seed = seed }
+                            : new ParamSurface((u, v) => nb.Eval(u, v) + nb.Normal(u, v) * off, nb.U0, nb.U1, nb.V0, nb.V1) { Seed = seed };
                         return off == 0 ? WriteNurbs(c, nb) : c.Add($"OFFSET_SURFACE('',#{WriteNurbs(c, nb)},{R(off)},.F.)");
+                    }
                     var du = (u1 - u0) * 0.02 + 1e-9; var dv = (v1 - v0) * 0.02 + 1e-9;
                     // round a closed direction: exactly one period (a padded fit would overlap itself)
                     if (nb.ClosedU && u1 - u0 > 0.9 * (nb.U1 - nb.U0)) { u0 = nb.U0; u1 = nb.U1; du = 0; }
                     if (nb.ClosedV && v1 - v0 > 0.9 * (nb.V1 - nb.V0)) { v0 = nb.V0; v1 = nb.V1; dv = 0; }
                     var fit = BSplineSurface.Fit((u, v) => nb.Eval(u, v) + (off == 0 ? Vec3.Zero : nb.Normal(u, v) * off),
                         u0 - du, u1 + du, v0 - dv, v1 + dv, 1e-5, 8, 8);
+                    written = ParamSurface.Of(fit);
                     return WriteBSplineSurface(c, fit);
                 }
         }
@@ -368,6 +554,24 @@ public static class StepWriter
 
     /// <summary>No pipe surface in AP214: a bicubic B-spline fitted over the face's (angle, spine) box.</summary>
     /// <summary>STEP has no helical surface: a B-spline fitted over the face's (u, v) box.</summary>
+    /// <summary>
+    /// The cylinder a screw face lies on when its generator is a line along the motion's axis (the radius its distance
+    /// from the axis), and whether the screw surface's natural normal points out of it; null for other screw faces.
+    /// </summary>
+    static (Vec3 origin, Vec3 axis, Vec3 refDir, double r, bool outward)? ScrewCylinder(ExactFace f)
+    {
+        if (f.Surface.Kind != SurfaceKind.Screw || f.Surface.Def.Screw is not { Gen: Native.NLine ln } sc) return null;
+        var m = sc.Motion;
+        if (Vec3.Cross(ln.D.Normalized, m.A).Length > 1e-12) return null;
+        var d = ln.P - m.O;
+        var r = (d - m.A * Vec3.Dot(d, m.A)).Length;
+        if (r < 1e-9) return null;
+        double u = 0.5 * (sc.U0 + sc.U1), v = 0.5 * (sc.V0 + sc.V1);
+        var p = sc.Eval(u, v); var q = p - m.O;
+        var radial = q - m.A * Vec3.Dot(q, m.A);
+        return (m.O, m.A, m.X, r, Vec3.Dot(sc.NormalAt(u, v), radial) > 0);
+    }
+
     static BSplineSurface ScrewFit(ExactFace f, ExactBrep b)
     {
         var sc = f.Surface.Def.Screw!;
@@ -383,9 +587,10 @@ public static class StepWriter
         u0 -= du; u1 += du; v0 -= dv; v1 += dv;
         // about 16 spans a turn around the axis; along a line generator a cubic is exact
         const double fitTol = 1e-5;
-        int nu = Math.Max(4, (int)Math.Ceiling((u1 - u0) / (Math.PI / 8)));
-        int nv = sc.Gen is Native.NLine ? 4 : Math.Max(4, (int)Math.Ceiling((v1 - v0) / (Math.PI / 8)));
-        return BSplineSurface.Fit(sc.Eval, u0, u1, v0, v1, fitTol, nu, nv);
+        // quintic: about 6 spans a turn reach the tolerance (cubics need many more); long threads may need hundreds
+        int nu = Math.Max(5, (int)Math.Ceiling((u1 - u0) / (Math.PI / 3)));
+        int nv = sc.Gen is Native.NLine ? 5 : Math.Max(5, (int)Math.Ceiling((v1 - v0) / (Math.PI / 3)));
+        return BSplineSurface.Fit(sc.Eval, u0, u1, v0, v1, fitTol, nu, nv, degree: 5, maxU: 1024, maxV: 256);
     }
 
     static BSplineSurface PipeFit(ExactFace f, ExactBrep b)
@@ -434,8 +639,9 @@ public static class StepWriter
         var du0 = Math.Pow(384 * fitTol / Math.Max(rad, 1e-3), 0.25);
         var bend = Math.Max(Math.Min(sp.MinCurvatureRadius - rad, 1e6), rad * 0.25);
         var dv0 = Math.Pow(384 * fitTol * bend * bend * bend, 0.25);
+        // quintic, from a third of the cubic's spans (its error falls as h⁶, not h⁴): far fewer control points
         return BSplineSurface.Fit(Surface, u0, u1, v0, v1, fitTol,
-            Math.Max(4, (int)Math.Ceiling((u1 - u0) / du0)), Math.Clamp((int)Math.Ceiling((v1 - v0) / dv0), 4, 192));
+            Math.Max(5, (int)Math.Ceiling((u1 - u0) / du0 / 3)), Math.Clamp((int)Math.Ceiling((v1 - v0) / dv0 / 3), 5, 192), degree: 5);
     }
 
     /// <summary>A B-spline surface as it is (rational ones as the complex entity STEP uses).</summary>

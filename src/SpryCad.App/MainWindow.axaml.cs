@@ -10,6 +10,7 @@ using SpryCad.App.Sketcher;
 using SpryCad.App.UI;
 using SpryCad.App.Viewport;
 using SpryCad.Core.Model;
+using SpryCad.Core.Storage;
 using SpryCad.Core.Regen;
 using SpryCad.Kernel;
 
@@ -93,7 +94,11 @@ public partial class MainWindow : Window
         {
             if (Session.FilePath == null) Session.RequestRebuild();
             Viewport.StandardView("Trimetric", fit: false); // nothing to fit yet: keep the default zoom
+            // work left unsaved when SpryCAD last closed without saving it (a crash, a power cut)
+            Dispatcher.UIThread.Post(() => OfferRecovery(atStart: true), DispatcherPriority.Background);
         };
+        // every part's local copy let go of (and its lock): what was not saved was chosen not to be
+        Closed += (_, _) => { foreach (var t in _parts) t.Session.Close(); };
     }
 
     // ------------------------------------------------------------------------------------------
@@ -646,40 +651,79 @@ public partial class MainWindow : Window
     public static void ShowErrorStatic(string msg) => Instance?.Status("⚠ " + msg);
 
     /// <summary>
-    /// Saves every tab with unsaved changes to the autosave folder: autosave.sprt, autosave-2.sprt, ... all in the
-    /// same tick, which is how Recover Autosave tells one session's files from older ones.
+    /// Autosave: every part with unsaved changes as its local copy's working revision (Core.Storage.WorkingCopy),
+    /// offered back if SpryCAD closes without saving it. Also renews the parts' locks on their files now and then.
     /// </summary>
     // an autosave still writing (the next tick waits for it)
     Task? _autosaving;
+    DateTime _locksRefreshed = DateTime.UtcNow;
 
     void AutoSave()
     {
+        if (DateTime.UtcNow - _locksRefreshed > WorkingCopy.LockRefresh)
+        {
+            _locksRefreshed = DateTime.UtcNow;
+            foreach (var t in _parts) t.Session.RefreshLock();
+        }
         if (_autosaving is { IsCompleted: false }) return;
-        var dirty = _parts.Where(t => t.Session.Dirty).ToList();
+        var dirty = _parts.Where(t => t.Session.Dirty && !t.Session.IsPending).ToList();
         if (dirty.Count == 0) return;
         // copies of the parts, written off the UI thread: compressing an imported model's file takes long enough to be
-        // felt, and saving gives the document a new revision, which the part being edited should not get from this
-        var copies = new List<(CadDocument doc, string path)>();
-        try
-        {
-            for (int i = 0; i < dirty.Count; i++)
-            {
-                var src = dirty[i].Session.Doc;
-                var copy = src.Clone();
-                copy.Display = src.Display;
-                copies.Add((copy, Path.Combine(AutosaveDir, "autosave" + (i == 0 ? "" : $"-{i + 1}") + CadDocument.FileExtension)));
-            }
-        }
+        // felt, and the part being edited is not touched by it
+        var copies = new List<(DocumentSession session, CadDocument doc)>();
+        try { foreach (var t in dirty) copies.Add((t.Session, t.Session.Doc.Clone())); }
         catch { return; /* best effort */ }
         _autosaving = Task.Run(() =>
         {
-            try
+            foreach (var (session, doc) in copies)
             {
-                Directory.CreateDirectory(AutosaveDir);
-                foreach (var (doc, path) in copies) doc.Save(path);
+                try { session.SaveWorking(doc); }
+                catch (Exception ex) { App.Log(ex, "Autosave"); }
             }
-            catch { /* best effort */ }
         });
+    }
+
+    /// <summary>
+    /// Offers back the parts SpryCAD closed without saving (at start, and Recover Autosave): restored as they were last
+    /// autosaved, unsaved still; or discarded; or kept to be offered again.
+    /// </summary>
+    async void OfferRecovery(bool atStart)
+    {
+        List<Recoverable> found;
+        try { found = WorkingCopy.FindRecoverable(); }
+        catch (Exception ex) { App.Log(ex, "Recovery"); return; }
+        if (found.Count == 0) { if (!atStart) Status("Nothing to recover: no part was left unsaved."); return; }
+        var one = found.Count == 1;
+        var list = string.Join("\n", found.Select(r => $"    {r.Name}   (autosaved {r.SavedUtc.ToLocalTime():g})"));
+        var choice = await Dialogs.YesNoCancel(this, "Recover Unsaved Work",
+            $"SpryCAD closed without saving {(one ? "this part" : "these parts")}:\n\n{list}\n\n" +
+            $"Restore {(one ? "it" : "them")} as last autosaved? (Cancel keeps {(one ? "it" : "them")} to decide later.)", "Restore", "Discard");
+        if (choice == null) return;
+        if (choice == false) { foreach (var r in found) WorkingCopy.Discard(r); Status("Discarded the unsaved work."); return; }
+        int n = 0;
+        foreach (var r in found) { if (!await RecoverInTab(r)) break; n++; }
+        if (n > 0) Status(n == 1 ? "Restored the unsaved part: save it to keep it." : $"Restored {n} unsaved parts: save them to keep them.");
+    }
+
+    async Task<bool> RecoverInTab(Recoverable r)
+    {
+        if (IsUntouched(_tab)) { if (!await ResolvePendingEdit()) return false; LeaveModes(); }
+        else if (await NewTab() is null) return false;
+        try
+        {
+            Viewport.ClearPivot();
+            if (r.Source == null) Session.UntitledName = r.Name;
+            Session.Recover(r);
+            _tab.FitAfterLoad = Session.RequestedRevision;
+            UpdateTabHeader(_tab);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            App.Log(ex, "Recover " + r.WorkingPath);
+            await Dialogs.Message(this, "Recover failed", ex.Message);
+            return false;
+        }
     }
 
     async void OnClosing(object? sender, WindowClosingEventArgs e)

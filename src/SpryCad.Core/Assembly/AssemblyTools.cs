@@ -89,9 +89,31 @@ public static class Bom
 }
 
 /// <summary>The solids of a part display, built once (from its document) and kept as long as the display is.</summary>
+/// <summary>
+/// Work on many parts at once (rebuilds, mostly): in parallel, leaving a core for the UI; items sharing a key (the same
+/// part document, which configured displays of one part share) one after another, so no document is read by two
+/// rebuilds at once.
+/// </summary>
+public static class PartWork
+{
+    public static void Each<T>(IReadOnlyList<T> items, Func<T, object> key, Action<T> work, CancellationToken ct = default)
+    {
+        var groups = items.GroupBy(key, ReferenceEqualityComparer.Instance).Select(g => g.ToList()).ToList();
+        var options = new ParallelOptions { MaxDegreeOfParallelism = Math.Max(1, Environment.ProcessorCount - 1), CancellationToken = ct };
+        Parallel.ForEach(groups, options, g => { foreach (var x in g) { ct.ThrowIfCancellationRequested(); work(x); } });
+    }
+}
+
 public static class AssemblySolids
 {
     static readonly ConditionalWeakTable<PartDisplay, List<Solid>> Cache = new();
+
+    /// <summary>The solids of these parts built (those not built yet), in parallel (<see cref="PartWork"/>).</summary>
+    public static void Prepare(IEnumerable<PartDisplay> displays, CancellationToken ct = default)
+    {
+        var todo = displays.Where(pd => pd.Doc != null).Distinct().Where(pd => { lock (Cache) return !Cache.TryGetValue(pd, out _); }).ToList();
+        PartWork.Each(todo, pd => pd.Doc!, pd => Of(pd), ct);
+    }
 
     /// <summary>The part's solids in its own coordinates (none when it is shown only from a copy).</summary>
     public static List<Solid> Of(PartDisplay pd)
@@ -147,7 +169,10 @@ public static class AssemblyMass
     {
         var r = new AssemblyMassResult();
         var items = new List<(double mass, Vec3 c, double[,] i)>();
-        foreach (var (o, pd) in m.PlacedParts(hidden: true))
+        // each part's measured once, in parallel
+        var placed = m.PlacedParts(hidden: true).ToList();
+        PartWork.Each(placed.Select(x => x.pd).Distinct().ToList(), pd => pd.Doc ?? (object)pd, pd => Of(pd, out _));
+        foreach (var (o, pd) in placed)
         {
             var mp = Of(pd, out var exact);
             if (mp.Volume <= 0) continue;
@@ -211,6 +236,7 @@ public static class Interference
     public static List<Clash> Find(IReadOnlyList<Item> items, List<string> notes, bool withinSubAssemblies = true, Action<int, int>? progress = null, CancellationToken ct = default)
     {
         var bodies = new List<(Item item, NBody body, Box3 box)>();
+        AssemblySolids.Prepare(items.Select(it => it.Display), ct);
         foreach (var it in items)
         {
             var solids = AssemblySolids.Of(it.Display);
@@ -230,27 +256,36 @@ public static class Interference
                 if (!withinSubAssemblies && TopOf(bodies[i].item.Path) == TopOf(bodies[j].item.Path) && bodies[i].item.Path.Contains('/')) continue;
                 pairs.Add((i, j));
             }
-        var found = new Dictionary<(string, string), (double v, Box3 b)>();
-        for (int k = 0; k < pairs.Count; k++)
+        // each pair's common volume, in parallel (the pairs' results then taken in order: the same list either way)
+        var common = new (double v, Box3 b, string? failed)[pairs.Count];
+        int done = 0;
+        progress?.Invoke(0, pairs.Count);
+        var options = new ParallelOptions { MaxDegreeOfParallelism = Math.Max(1, Environment.ProcessorCount - 1), CancellationToken = ct };
+        Parallel.For(0, pairs.Count, options, k =>
         {
-            ct.ThrowIfCancellationRequested();
-            progress?.Invoke(k, pairs.Count);
             var (i, j) = pairs[k];
             try
             {
-                var common = NBoolean.Run(bodies[i].body, bodies[j].body, BoolOp.Intersect);
-                if (common.Faces.Count == 0 || NMass.Of(common) is not { } mp || mp.Volume < 1e-6) continue;
-                var key = (bodies[i].item.Path, bodies[j].item.Path);
-                var had = found.GetValueOrDefault(key);
-                var b = had.b; b.Add(common.Bounds);
-                found[key] = (had.v + mp.Volume, had.v == 0 ? common.Bounds : b);
+                var c = NBoolean.Run(bodies[i].body, bodies[j].body, BoolOp.Intersect);
+                if (c.Faces.Count > 0 && NMass.Of(c) is { } mp && mp.Volume >= 1e-6) common[k] = (mp.Volume, c.Bounds, null);
             }
             catch (Exception ex) when (ex is NBooleanException or InvalidOperationException or ArgumentException)
             {
-                notes.Add($"{bodies[i].item.Path} and {bodies[j].item.Path}: could not be checked ({ex.Message})");
+                common[k] = (0, Box3.Empty, ex.Message);
             }
+            progress?.Invoke(Interlocked.Increment(ref done), pairs.Count);
+        });
+        var found = new Dictionary<(string, string), (double v, Box3 b)>();
+        for (int k = 0; k < pairs.Count; k++)
+        {
+            var (i, j) = pairs[k];
+            if (common[k].failed is { } why) { notes.Add($"{bodies[i].item.Path} and {bodies[j].item.Path}: could not be checked ({why})"); continue; }
+            if (common[k].v == 0) continue;
+            var key = (bodies[i].item.Path, bodies[j].item.Path);
+            var had = found.GetValueOrDefault(key);
+            var b = had.b; b.Add(common[k].b);
+            found[key] = (had.v + common[k].v, had.v == 0 ? common[k].b : b);
         }
-        progress?.Invoke(pairs.Count, pairs.Count);
         return found.Select(kv => new Clash(kv.Key.Item1, kv.Key.Item2, kv.Value.v, kv.Value.b)).OrderByDescending(c => c.Volume).ToList();
     }
 
