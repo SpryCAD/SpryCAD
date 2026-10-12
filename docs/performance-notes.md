@@ -90,6 +90,14 @@ profile; the profile's times are summed over threads). On the heavy samples (`sa
       `Face` object (and a 3-point loop array) per triangle; `Solid.Faces` is read widely. What is left of
       `topo.weld` is the grid search for each distinct point (~33 ms on the spoked handwheel).
     - `Topology.Build` welding once for its quick and full passes was tried: the quick pass succeeds on every sample.
+    - Done, bit for bit (full hashes with the display mesh as drawn, every sample): the welder chains each grid
+      cell's points by index (no list per cell); `Topology.Build` finds the facet across each half-edge in arrays by
+      start vertex instead of a dictionary of (a, b) pairs (hand-wheel `topo.edges` ~24 to ~10.5 ms); `DisplayMesh`
+      takes facets that are already triangles as they are and triangulates only the others in parallel (hand-wheel
+      `mesh.triangulate` 27 to 5 ms: a list and a parallel work item per triangle before). Display mesh, medians of
+      four alternating runs: hand-wheel 76 to 60 ms, acme-lead-screw 76 to 62, spur-gear-nice 38 to 35. What is left:
+      free-form normals (acme-lead-screw ~27 ms, a closest-point search on the screw surface per point; the
+      tessellator's own parameters would avoid it but change the normals in the last bits).
 11. **Small items**: `SplitFace` pruning, `AddSec`, STEP units and ordinal names, `Solid.Combine` done (see above).
     Left:
     - `NFace.ComputeBounds` builds a throwaway domain. Sharing the cached one changed results; see *Tried and rejected*.
@@ -163,6 +171,10 @@ profile; the profile's times are summed over threads). On the heavy samples (`sa
 
 ## Tried and rejected
 
+- **`ClassifyAll` building the near faces' domains and boxes in one parallel batch** (before `cls.lone`/`cls.union`,
+  instead of lazily one at a time): `bool.classify` 425 to 388 ms best of five interleaved runs, but with runs
+  spreading 400–7000 ms on a busy machine that could not be shown to be real; batching every piece's box as well
+  was slower (478 ms). Worth retrying on a quiet machine.
 - **`ClassifyAll` box test before `CoincidentWith`**: slower (`cls.lone` 8 to 50 ms on spur-gear-nice). `FBox` computes a
   face's bounds on first use, often for faces nothing else needs; `CoincidentWith` rejects most pairs at once (kinds).
 - **`Topology.Build` welding once for the quick and the full pass**: the quick pass succeeds on every sample.

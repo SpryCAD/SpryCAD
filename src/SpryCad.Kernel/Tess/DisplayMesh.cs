@@ -84,35 +84,36 @@ public sealed class DisplayMesh
 
         // base triangles (indices into topology vertices) per facet
         var pts = new List<Vec3>(topo.Vertices);
-        // facets are independent: triangulate in parallel, then concatenate in facet order (deterministic)
-        var perFacet = new List<(int a, int b, int c, int face)>[nf];
-        Parallel.For(0, nf, fi =>
+        // facets that are already triangles (most facets of curved faces) as they are; the others are independent:
+        // triangulated in parallel, then everything concatenated in facet order (deterministic)
+        static bool IsTriangle(List<int[]> loops) => loops.Count == 1 && loops[0].Length == 3;
+        var polygons = new List<int>();
+        for (int fi = 0; fi < nf; fi++) if (!IsTriangle(topo.FaceLoops[fi])) polygons.Add(fi);
+        var perPolygon = new List<(int a, int b, int c, int face)>[polygons.Count];
+        Parallel.For(0, polygons.Count, pi =>
+        {
+            int fi = polygons[pi];
+            var local = new List<(int, int, int, int)>();
+            var loops2 = new List<Vec2[]>();
+            var ids = new List<int>();
+            var n = solid.Faces[fi].Plane.Normal;
+            var u = n.AnyPerpendicular(); var v = Vec3.Cross(n, u);
+            foreach (var l in topo.FaceLoops[fi])
+            {
+                loops2.Add(l.Select(i => new Vec2(Vec3.Dot(pts[i], u), Vec3.Dot(pts[i], v))).ToArray());
+                ids.AddRange(l);
+            }
+            var idx = Triangulator.Triangulate(loops2);
+            for (int k = 0; k < idx.Count; k += 3) local.Add((ids[idx[k]], ids[idx[k + 1]], ids[idx[k + 2]], fi));
+            perPolygon[pi] = local;
+        });
+        var tris = new List<(int a, int b, int c, int face)>(nf);
+        for (int fi = 0, pi = 0; fi < nf; fi++)
         {
             var loops = topo.FaceLoops[fi];
-            var local = new List<(int, int, int, int)>();
-            if (loops.Count == 1 && loops[0].Length == 3)
-            {
-                var l = loops[0];
-                local.Add((l[0], l[1], l[2], fi)); // already a triangle (most facets of curved faces)
-            }
-            else
-            {
-                var loops2 = new List<Vec2[]>();
-                var ids = new List<int>();
-                var n = solid.Faces[fi].Plane.Normal;
-                var u = n.AnyPerpendicular(); var v = Vec3.Cross(n, u);
-                foreach (var l in loops)
-                {
-                    loops2.Add(l.Select(i => new Vec2(Vec3.Dot(pts[i], u), Vec3.Dot(pts[i], v))).ToArray());
-                    ids.AddRange(l);
-                }
-                var idx = Triangulator.Triangulate(loops2);
-                for (int k = 0; k < idx.Count; k += 3) local.Add((ids[idx[k]], ids[idx[k + 1]], ids[idx[k + 2]], fi));
-            }
-            perFacet[fi] = local;
-        });
-        var tris = new List<(int a, int b, int c, int face)>();
-        foreach (var l in perFacet) tris.AddRange(l);
+            if (IsTriangle(loops)) { var l = loops[0]; tris.Add((l[0], l[1], l[2], fi)); }
+            else tris.AddRange(perPolygon[pi++]);
+        }
 
         ptri.Dispose();
         // which facets use each edge
