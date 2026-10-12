@@ -64,8 +64,6 @@ public static class NIntersect
     // edge ∩ surface
 
     public sealed record EdgeHits(List<double> Params, bool OnSurface);
-    static readonly bool TmpPara = Environment.GetEnvironmentVariable("TMP_NOPARA") == null;
-    static readonly object _dumpLock = new();
 
     /// <summary>
     /// Parameters where the edge crosses the surface, plus end points lying on it; pure tangential touches are
@@ -78,24 +76,9 @@ public static class NIntersect
         var c = e.Curve;
         var count = Prof.Enabled;
         // (counted while profiling: the evaluations are the cost, a closest-point search each on a pipe or B-spline)
-        int evals = 0;
-        double F(double t)
-        {
-            evals++;
-            if (count) Prof.Count("edgesurface.eval", 1);
-            if (!count) return s.F_(c.Eval(t));
-            var t0 = System.Diagnostics.Stopwatch.GetTimestamp();
-            var p = c.Eval(t);
-            var t1 = System.Diagnostics.Stopwatch.GetTimestamp();
-            var v = s.F_(p);
-            var t2 = System.Diagnostics.Stopwatch.GetTimestamp();
-            Prof.Add("es.curve." + c.GetType().Name, (t1 - t0) * 1000.0 / System.Diagnostics.Stopwatch.Frequency);
-            Prof.Add("es.surf." + s.Kind, (t2 - t1) * 1000.0 / System.Diagnostics.Stopwatch.Frequency);
-            return v;
-        }
+        double F(double t) { if (count) Prof.Count("edgesurface.eval", 1); return s.F_(c.Eval(t)); }
         double lo = Math.Min(e.T0, e.T1), hi = Math.Max(e.T0, e.T1);
         var res = new List<double>();
-        if (count) Prof.Count("es.calls." + s.Kind, 1);
 
         // edge lying on the surface (fitted curves only within their fit tolerance: a boolean fits traced
         // sections within 50 tol of the exact intersection)
@@ -185,8 +168,8 @@ public static class NIntersect
                 // the B-spline it blends into): the sign there is rounding, and a run along the surface is at most one
                 // crossing, settled from either side of it (OneCrossingPerRun); where the edge leaves the surface, a
                 // piece with an end off it is still searched
-                if (depth >= 2 && Math.Abs(fa) < tol && Math.Abs(fm) < tol && Math.Abs(fb) < tol && TmpPara) return;
-                if (depth >= 2 && fa * fm > 0 && fm * fb > 0 && TmpPara)
+                if (depth >= 2 && Math.Abs(fa) < tol && Math.Abs(fm) < tol && Math.Abs(fb) < tol) return;
+                if (depth >= 2 && fa * fm > 0 && fm * fb > 0)
                 {
                     double d2 = fa - 2 * fm + fb, lowest = Math.Min(Math.Min(Math.Abs(fa), Math.Abs(fm)), Math.Abs(fb));
                     if (d2 != 0)
@@ -224,7 +207,7 @@ public static class NIntersect
             if (!isEnd && ((startOn && Vec3.Distance(p, p0) < tol * 100) || (endOn && Vec3.Distance(p, p1) < tol * 100))) continue;
             if (merged.Count == 0 || Vec3.Distance(p, c.Eval(merged[^1])) > tol) merged.Add(t);
         }
-        if (searched && merged.Count >= 2 && Environment.GetEnvironmentVariable("TMP_NORUNS") == null) merged = OneCrossingPerRun(merged);
+        if (searched && merged.Count >= 2) merged = OneCrossingPerRun(merged);
         // A stretch where the edge runs along the surface (within tol of it) crosses it at most once: the sign of the
         // distance there is rounding, and the search found "crossings" all along it (126 in 14 mm of a line lying on
         // a pipe), each a split of the edge. Crossings with the edge on the surface between them are one run: the run
@@ -249,19 +232,6 @@ public static class NIntersect
                 i = j + 1;
             }
             return kept;
-        }
-        if (count && s.Kind is SurfaceKind.BSpline or SurfaceKind.Pipe)
-        {
-            Prof.Add($"es.n.{s.Kind}.{c.GetType().Name}", evals);
-            if (evals > 3000 && Environment.GetEnvironmentVariable("TMP_DUMP") is { } dump)
-                lock (_dumpLock)
-                    System.IO.File.AppendAllLines(dump, new[] { $"== {s.Kind} {c.GetType().Name} evals {evals} roots {string.Join(",", merged.Select(x => x.ToString("g6")))} lo {lo:g6} hi {hi:g6}" }
-                        .Concat(Enumerable.Range(0, 401).Select(i => { var t = lo + (hi - lo) * i / 400; return $"{t:g8} {s.F_(c.Eval(t)):g8}"; })));
-            if (evals > 400)
-            {
-                double mx = 0; for (int i = 0; i <= 64; i++) mx = Math.Max(mx, Math.Abs(s.F_(c.Eval(lo + (hi - lo) * i / 64))));
-                Prof.Add($"es.big.{s.Kind}.{c.GetType().Name} roots {merged.Count} len {ArcBound(c, lo, hi):0} max|f| {mx:g2} onTol {onTol:g2} tol {tol:g2}", evals);
-            }
         }
         return new EdgeHits(merged, false);
     }
