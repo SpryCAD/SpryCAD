@@ -7,14 +7,19 @@
     <LangVersion>latest</LangVersion>
   </PropertyGroup>
 
+  <!-- SQLite (Storage/SqliteSetup.cs picks which): the system's on Linux, the bundled build elsewhere (the app's
+       Linux builds leave it out: SpryCad.App.csproj). The bundled build is pinned
+       past 2.1.11, which has a high-severity advisory (GHSA-2m69-gcr7-jv3q). -->
   <ItemGroup>
-    <ProjectReference Include="..\SpryCad.Kernel\SpryCad.Kernel.csproj" />
+    <PackageReference Include="Microsoft.Data.Sqlite.Core" Version="10.0.10" />
+    <PackageReference Include="SQLitePCLRaw.provider.sqlite3" Version="2.1.12" />
+    <PackageReference Include="SQLitePCLRaw.provider.e_sqlite3" Version="2.1.12" />
+    <PackageReference Include="SQLitePCLRaw.lib.e_sqlite3" Version="2.1.12" />
+    <PackageReference Include="ZstdSharp.Port" Version="0.8.6" />
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.10" />
-    <PackageReference Include="SQLitePCLRaw.lib.e_sqlite3" Version="2.1.12" />
-    <PackageReference Include="ZstdSharp.Port" Version="0.8.6" />
+    <ProjectReference Include="..\SpryCad.Kernel\SpryCad.Kernel.csproj" />
   </ItemGroup>
 
 </Project>

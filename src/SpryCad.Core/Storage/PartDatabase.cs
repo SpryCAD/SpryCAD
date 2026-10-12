@@ -72,6 +72,7 @@ public sealed class PartDatabase : IDisposable
 
     static SqliteConnection Connect(string path, SqliteOpenMode mode)
     {
+        SqliteSetup.Ensure();
         var cs = new SqliteConnectionStringBuilder { DataSource = path, Mode = mode, Pooling = false }.ToString();
         var db = new SqliteConnection(cs);
         db.Open();
