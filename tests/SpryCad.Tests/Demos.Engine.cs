@@ -371,7 +371,7 @@ static partial class Demos
     {
         var d = Doc(("BaseY", "150"), ("BaseT", "20"), ("BaseX0", "215"), ("BaseX1", "60"), ("BaseW", "170"), ("BaseR", "15"), ("BaseDraft", "5"),
             ("BodyX0", "170"), ("BodyX1", "40"), ("BodyW", "116"), ("BodyDraft", "2"), ("BodyR", "20"), ("Fl", "8"), ("FlH", "16"),
-            ("WallR", "4"), ("PitR", "2"), ("RibR", "3"), ("JointR", "5"), ("RibT", "12"), ("RibIn", "50"), ("PedRibY", "110"), ("BaseRibX", "150"), ("BaseRibP", "90"), ("BaseRibOut", "80"), ("BaseRibH", "45"),
+            ("WallR", "4"), ("PitR", "4"), ("RibR", "3"), ("JointR", "5"), ("RibT", "12"), ("RibIn", "50"), ("PedRibY", "110"), ("BaseRibX", "150"), ("BaseRibP", "90"), ("BaseRibOut", "80"), ("BaseRibH", "45"),
             ("BrgIn", $"{HmBrgIn}"), ("BrgOut", $"{HmBrgOut}"), ("BrgW", "64"), ("BrgDrop", "40"), ("J", $"{HmJ}"), ("CapStud", "25"), ("PedR", "6"),
             ("HeadX", $"{-HmHeadX}"), ("BarrelD", "104"), ("BarrelEnd", "70"), ("FlangeD", "116"), ("FlangeT", "12"), ("StudPCD", "96"), ("NStud", "6"),
             ("HopX0", "175"), ("HopX1", "85"), ("HopW", "BodyW-2*(BaseY-BaseT)*tan(BodyDraft)"), ("HopH", "82"), ("HopWall", "7"), ("HopDraft", "2"), ("HopR", "12"), ("HopTopR", "4"), ("Jacket", "20"), ("FillD", "44"),
@@ -490,21 +490,21 @@ static partial class Demos
         var fs = d.AddFeature(new SketchFeature { Name = "Flange", Plane = new PlaneRef { Feature = cf.Id }, Sketch = f.S });
         var flange = d.AddFeature(new ExtrudeFeature { Name = "Flange", SketchId = fs.Id, Depth = "FlangeT" });
         // the water hopper on the barrel, drafted, its corners rounded, cored out down past the bore
+        // (its corners rounded in the sketch, not by a fillet after: the corners come within 1.5 mm of the barrel's
+        // side, and a fillet on the merged body cuts a notch into the barrel there)
         var h = new Sk(d);
-        var hl = h.Rect("-HopX0", "-HopW/2", "-HopX1", "HopW/2");
+        long C(string x, string y) => h.P(x, y);
+        // (x0, x1: its front and back; y0, y1: its sides; the i's are the corners' tangent points, R in from them)
+        string x0 = "-HopX0", x1 = "-HopX1", y0 = "-HopW/2", y1 = "HopW/2";
+        string x0i = "-(HopX0-HopR)", x1i = "-(HopX1+HopR)", y0i = "-(HopW/2-HopR)", y1i = "HopW/2-HopR";
+        long b0 = C(x0i, y0), b1 = C(x1i, y0), r0 = C(x1, y0i), r1 = C(x1, y1i);
+        long t0 = C(x1i, y1), t1 = C(x0i, y1), l0 = C(x0, y1i), l1 = C(x0, y0i);
+        var hl = new List<long> { h.Line(b0, b1), h.Line(r0, r1), h.Line(t0, t1), h.Line(l0, l1) };
+        h.Arc(C(x1i, y0i), b1, r0); h.Arc(C(x1i, y1i), r1, t0);
+        h.Arc(C(x0i, y1i), t1, l0); h.Arc(C(x0i, y0i), l1, b0);
         var hs = d.AddFeature(new SketchFeature { Name = "Hopper", Plane = PlaneRef.Top, Sketch = h.S });
         var hop = d.AddFeature(new ExtrudeFeature { Name = "Hopper", SketchId = hs.Id, Depth = "HopH", Draft = "HopDraft" });
         string HF(int i) => $"{hop.Id}.S.L{Ids.Name(hl[i])}";
-        double hy = V("HopH/2");
-        d.AddFeature(new FilletFeature
-        {
-            Name = "Hopper corners", Radius = "HopR",
-            Edges =
-            {
-                E(HF(0), HF(1), new Vec3(-V("HopX1"), hy, V("HopW/2"))), E(HF(1), HF(2), new Vec3(-V("HopX1"), hy, -V("HopW/2"))),
-                E(HF(2), HF(3), new Vec3(-V("HopX0"), hy, -V("HopW/2"))), E(HF(3), HF(0), new Vec3(-V("HopX0"), hy, V("HopW/2"))),
-            },
-        });
         // the top's edge rounded all round (one edge picked, the rest follow tangent)
         d.AddFeature(new FilletFeature
         {
@@ -556,8 +556,8 @@ static partial class Demos
         var kl = k.Rect("-BarrelEnd", "-PitW/2", "PitX1", "PitW/2");
         var ks = d.AddFeature(new SketchFeature { Name = "Crank pit", Plane = new PlaneRef { Feature = pt.Id }, Sketch = k.S });
         var pit = d.AddFeature(new ExtrudeFeature { Name = "Crank pit", SketchId = ks.Id, IsCut = true, Reverse = true, Depth = "BarrelD/2+PitBot" });
-        // the saddle's top edges rounded: outside along its cheeks, inside along the pit (smaller: they run into the
-        // barrel's end and the pedestals, and R4 there does not join, docs/hit-and-miss-notes.md)
+        // the saddle's top edges rounded: outside along its cheeks, inside along the pit (where they run into the
+        // barrel's end and the pedestals)
         // (Top: sketch y = -z, so the pit's first line is its +Z wall)
         double pw = V("PitW/2");
         d.AddFeature(new FilletFeature

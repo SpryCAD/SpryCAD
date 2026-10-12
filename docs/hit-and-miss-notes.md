@@ -49,9 +49,11 @@ Commands (from the repository root):
    cannot be blended yet". Repro: unsuppress it, `verify-engine - Casting`. The same R5 on the hopper's faces into
    the barrel (front and back) and on the head's flange into the barrel works.
 4b. ~~A boss through a drafted face that carries on another: the exact boolean fails.~~ **FIXED (#49)**: the hopper
-   is flush with the body now (no ledge), its corner rounds picked as before. **Still open:** where the hopper's
-   front-bottom corner rounds (R12) overlap the barrel, the union cuts a small notch into the barrel (visible in
-   `verify-engine <dir> Casting`'s "other side" picture, below the hopper's front corner). Was: to remove the hopper's
+   is flush with the body now (no ledge). The small notch in the barrel below the hopper's front corners was modeling,
+   not the kernel (the "Hit-and-miss engine documentation review" session): the corners' vertical edges came within
+   1.5 mm of the barrel's side, so the R12 corner fillet, on the merged body, had to cut into it. The corners are now
+   arcs in the hopper's sketch (no fillet), so the drafted hopper is round-cornered before it meets the barrel; no
+   notch, and the casting rebuilds faster. Was: to remove the hopper's
    4 mm ledge (and with it item 4's trouble), the hopper was made as wide at y = 0 as the body's top
    (`HopW = BodyW-2*(BaseY-BaseT)*tan(BodyDraft)`, 106.9), with the same 2° draft, so its sides carry straight on
    from the body's (they merge: the body's side face `F7.S.L5` then runs up to the hopper's top, and the hopper's
@@ -61,7 +63,8 @@ Commands (from the repository root):
    drafted back face, which the boss's back now cuts through just where it meets the merged side face. The casting
    goes faceted and rebuilds in 230 s. Repro: set `HopW` to that expression, repoint "Hopper corners" to `YF(0)`/`YF(2)`
    with `HF(1)`/`HF(3)`, `verify-engine - Casting`. *Instead:* the hopper 116 wide again (the ledge kept).
-4c. **A placed body's bounds throw: "face F13.S.C1 wraps around its surface" (OPEN, new on master b44e9e1).** In
+4c. ~~A placed body's bounds throw: "face F13.S.C1 wraps around its surface".~~ **FIXED (#72)**: the interference
+   check runs through all 72 steps again. Was: in
    `engine-asm <dir>`'s interference check through the motion, at step 63 (the crank at 307.5°), `NBody.Bounds` of the
    connecting rod's body transformed to where it is (translated to (18.263, -23.801, 0), turned about Z by about
    -10.55°) throws from `NDomain`'s constructor (via `NFace.ComputeBounds`). F13.S.C1 is the rod's half-round bore for
@@ -70,14 +73,15 @@ Commands (from the repository root):
    names the part. It did not happen before this rebase (the same check ran through all 72 steps on master 7913d0c).
    Still open on master e58d3fb, now at step 18 (the rod placed at (-23.801, -18.263, 0)): "face
    Fpqpp7x46qy25.S.C3dqjax78450 wraps around its surface" (the same bore, under its random id).
-4d. **Fillets on a loft's B-spline face are slow.** The casting rebuilds in about 10-13 s with the saddle (2.3 s
+4d. ~~Fillets on a loft's B-spline face are slow.~~ **FIXED (#72)**: "Pit edges" at R4 now (0.5 s), "Saddle edges"
+   0.3 s, the whole casting 2.6 s (with the hopper's corners in its sketch, 4b). Was: the casting rebuilds in about 10-13 s with the saddle (2.3 s
    before): "Pit edges" (R2, two edges where the crank pit's walls cut the saddle's top) 3.6 s, "Saddle edges" (R4,
    the cheeks' outer top edges) 2.8 s, the loft itself 1.5 s. And the pit edges at R4 fail: "the fillet, cut back
    where it runs into neighbouring geometry, cannot be joined to the body (classification failed)" (they run into the
    barrel's end and the pedestals); R2 works.
 4f. **An old part's loft loses its sections when it is opened (OPEN, master e58d3fb).** Opening a part saved before
    the random ids (#52), its ids are rewritten (`LegacyIds`), but a loft's `SectionSketchIds` and `GuideSketchIds`
-   keep the old ones: `IsFeatureRef` takes properties named "...SketchId", not "...SketchIds". The casting saved by
+   keep the old ones (fixed in #68): `IsFeatureRef` takes properties named "...SketchId", not "...SketchIds". The casting saved by
    ff33d37 then says "Saddle: The sketch for this feature is missing or failed", and every fillet on the saddle loses
    its edges (found by the "Chamfers around filleted corners" session). Fix: add the two list names to that test.
    The casting built fresh is fine, and the demo file is regenerated, so the engine does not hit it. Fix in #68
