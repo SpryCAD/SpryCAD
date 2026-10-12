@@ -176,10 +176,13 @@ public partial class MainWindow : Window
         if (Asm is { } a) { _asmTree.Show(a); return; }
         var t0 = TreeProfile ? System.Diagnostics.Stopwatch.GetTimestamp() : 0;
         _treeDoc = Session.Doc; _treeResult = Session.Result;
-        Tree.Rebuild(Session.Doc, Session.Title.TrimEnd(' ', '*'), Session.Result);
+        Tree.Rebuild(Session.Doc, TreeTitle(), Session.Result);
         if (FlyoutHost.IsVisible) RebuildFlyoutTree();
         if (TreeProfile) NoteTree(System.Diagnostics.Stopwatch.GetElapsedTime(t0).TotalMilliseconds);
     }
+
+    /// <summary>The part's name atop the tree; while it shows the display saved with it (just opened), saying so.</summary>
+    string TreeTitle() => Session.Title.TrimEnd(' ', '*') + (Session.SavedDisplay != null ? " (as saved, rebuilding)" : "");
 
     // SPRYCAD_PROFILE_TREE: the feature tree's rebuilds (count, average and worst time) written to the log every 2 s
     static readonly bool TreeProfile = Environment.GetEnvironmentVariable("SPRYCAD_PROFILE_TREE") != null;
