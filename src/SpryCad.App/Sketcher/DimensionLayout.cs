@@ -19,7 +19,7 @@ public sealed partial class SketchEditor
     const double FirstOffset = 24, Step = 22, LabelGap = 3, RowGap = 16;
 
     /// <summary>Where the layout put the labels the user did not place (sketch coordinates), by dimension id.</summary>
-    readonly Dictionary<int, Vec2> _autoLabels = new();
+    readonly Dictionary<long, Vec2> _autoLabels = new();
 
     /// <summary>Where a dimension's label is: where the user put it, else where the layout put it.</summary>
     Vec2 LabelPos(SkConstraint c)
@@ -53,7 +53,7 @@ public sealed partial class SketchEditor
         if (dims.Count == 0) return null;
         var probe = MakeLabel();
         Size SizeOf(SkConstraint c) => LabelSize(probe, DimText(c));
-        var keep = new Dictionary<int, Vec2>(_autoLabels);
+        var keep = new Dictionary<long, Vec2>(_autoLabels);
         _layoutCamera = cam;
         try
         {
@@ -100,7 +100,7 @@ public sealed partial class SketchEditor
         foreach (var e in Sk.Entities)
             foreach (var (a, b) in SketchDrawing.Segments2D(Sk, e)) lines.Add((Screen(a), Screen(b)));
         var middle = SketchMiddle();
-        var auto = dims.Where(c => !c.HasPlacedLabel).OrderBy(LayoutRank).ThenBy(c => c.Id).ToList();
+        var auto = dims.Where(c => !c.HasPlacedLabel).OrderBy(LayoutRank).ToList(); // (a stable sort: ties in the order made)
 
         // 1) horizontal and vertical linear dimensions, as on a drawing: in rows around the outside of the sketch
         //    (and the model face behind it), each on the side nearest what it measures. Shortest first, each in the

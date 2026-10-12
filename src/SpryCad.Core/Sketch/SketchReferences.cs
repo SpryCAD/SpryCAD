@@ -84,7 +84,7 @@ public static class SketchReferences
         }
     }
 
-    static void Set(Sketch sk, int id, Vec2 p)
+    static void Set(Sketch sk, long id, Vec2 p)
     {
         if (sk.Point(id) is { } pt) { pt.X = p.X; pt.Y = p.Y; pt.Fixed = true; }
     }

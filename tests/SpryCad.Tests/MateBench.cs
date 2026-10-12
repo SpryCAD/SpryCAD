@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using SpryCad.Core.Assembly;
+using SpryCad.Core.Model;
 using SpryCad.Kernel;
 
 namespace SpryCad.Tests;
@@ -29,7 +30,7 @@ static class MateBench
             comps[0].Fixed = true;
             for (int i = 1; i < n; i++) comps[i].Fixed = false;
             var faces = m.DisplayOf(comps[0])!.Mesh.Faces;
-            string bore = faces.First(f => f.Name == "F2.S.C3").Name;
+            string bore = faces.First(f => f.Name == LegacyIds.Name(part.Id!, "F2.S.C3")).Name;
             // the gear's two ends: its lowest face looking down (-Z), its highest looking up
             var planes = faces.Where(f => f.Surface.Kind == SurfaceKind.Plane).ToList();
             string start = planes.Where(f => f.FirstPlane.Normal.Z < -0.9).MinBy(f => f.FirstPlane.Origin.Z)!.Name;

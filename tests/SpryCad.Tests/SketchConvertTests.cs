@@ -101,10 +101,11 @@ static class SketchConvertTests
             var doc = CadDocument.Load(Path.Combine(dir!, "samples", "demos", "spur-gear.sprt"));
             var regen = new Regenerator();
             var r0 = regen.Rebuild(doc);
-            var gear = r0.State.Bodies.Single(b => b.Id == "F2");
+            var gearId = LegacyIds.Feature(doc.Id!, "F2"); // the gear body (saved before random ids)
+            var gear = r0.State.Bodies.Single(b => b.Id == gearId);
             var frame = new Frame(new Vec3(0, 0, 30), Vec3.UnitX, Vec3.UnitY, Vec3.UnitZ);
             var sk = new Sketch();
-            var edges = SketchConvert.Face(sk, frame, gear.Solid.Native!, gear.Id, "F2.End");
+            var edges = SketchConvert.Face(sk, frame, gear.Solid.Native!, gear.Id, gearId + ".End");
             t.True(edges > 100 && sk.ConvertGroups?.Count == 1, $"{edges} edges in one group");
             var plane = doc.AddFeature(new PlaneFeature { Base = PlaneRef.Front, Offset = "30" });
             var s = doc.AddFeature(new SketchFeature { Plane = new PlaneRef { Feature = plane.Id }, Sketch = sk });
@@ -121,7 +122,7 @@ static class SketchConvertTests
                 t.True(!r.Status[s.Id].Warnings.Any(), $"z = {nz}: " + string.Join("; ", r.Status[s.Id].Warnings));
                 t.Eq(res.Solve?.Status, SketchStatus.FullyDefined);
                 // the face's outline as it is now: its edges converted again, one each
-                var faceEdges = r.State.Bodies.Single(b => b.Id == "F2").Solid.Native!.Faces.Where(f => f.Tag.Name == "F2.End").SelectMany(f => f.Coedges).Select(c => c.Edge).Distinct().Count();
+                var faceEdges = r.State.Bodies.Single(b => b.Id == gearId).Solid.Native!.Faces.Where(f => f.Tag.Name == gearId + ".End").SelectMany(f => f.Coedges).Select(c => c.Edge).Distinct().Count();
                 t.Eq(res.Sketch.Entities.Select(e => e.Link!.Key).Distinct().Count(), faceEdges);
                 count[nz] = faceEdges;
             }
@@ -134,10 +135,11 @@ static class SketchConvertTests
             while (dir != null && !Directory.Exists(Path.Combine(dir, "samples"))) dir = Path.GetDirectoryName(dir);
             var doc = CadDocument.Load(Path.Combine(dir!, "samples", "demos", "spur-gear.sprt"));
             var regen = new Regenerator();
-            var gear = regen.Rebuild(doc).State.Bodies.Single(b => b.Id == "F2");
+            var gearId = LegacyIds.Feature(doc.Id!, "F2"); // the gear body (saved before random ids)
+            var gear = regen.Rebuild(doc).State.Bodies.Single(b => b.Id == gearId);
             var frame = new Frame(new Vec3(0, 0, 30), Vec3.UnitX, Vec3.UnitY, Vec3.UnitZ);
             var sk = new Sketch();
-            SketchConvert.Face(sk, frame, gear.Solid.Native!, gear.Id, "F2.End");
+            SketchConvert.Face(sk, frame, gear.Solid.Native!, gear.Id, gearId + ".End");
             // the converted lines (none of them on a tooth: the bore and keyway): one gets a line of the user's
             // dimensioned off its end, another is deleted
             var lines = sk.Entities.OfType<SkLine>().ToList();

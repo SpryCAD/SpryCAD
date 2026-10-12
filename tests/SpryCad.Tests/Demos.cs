@@ -430,7 +430,7 @@ static partial class Demos
                     ("PCD", "118"), ("BoltD", "14"), ("N", "8"), ("Rfil", "5"), ("C", "1.5"));
         // half profile on the Front plane (XY), revolved about the Y axis
         var s = new Sk(d);
-        int a = s.P("ID/2", "0"), b = s.P("OD/2", "0"), c = s.P("OD/2", "T"), e = s.P("HubD/2", "T"),
+        long a = s.P("ID/2", "0"), b = s.P("OD/2", "0"), c = s.P("OD/2", "T"), e = s.P("HubD/2", "T"),
             f = s.P("HubD/2", "T+HubH"), g = s.P("ID/2", "T+HubH");
         var L = s.Poly(a, b, c, e, f, g); // bottom, rim, flange top, hub, hub top, bore
         s.Centerline(Sketch.OriginId, s.P("0", "T+HubH"));
@@ -445,7 +445,7 @@ static partial class Demos
         d.AddFeature(new CircularPatternFeature { Name = "Bolt circle", Seeds = { cut.Id }, Axis = new DirRef { Axis = "Y" }, Count = "N" });
 
         // blend the hub into the plate, break the outer and bore edges
-        string F(int i) => $"{rev.Id}.R.L{L[i]}";
+        string F(int i) => $"{rev.Id}.R.L{Ids.Name(L[i])}";
         double V(string e) => s.Eval(e);
         d.AddFeature(new FilletFeature { Name = "Hub fillet", Radius = "Rfil", Edges = { E(F(2), F(3), new Vec3(V("HubD/2"), V("T"), 0)) } });
         d.AddFeature(new ChamferFeature
@@ -473,7 +473,7 @@ static partial class Demos
         var L = s.Rect("-L/2", "-W/2", "L/2", "W/2");
         var sk = d.AddFeature(new SketchFeature { Name = "Footprint", Plane = PlaneRef.Front, Sketch = s.S });
         var box = d.AddFeature(new ExtrudeFeature { Name = "Box", SketchId = sk.Id, Depth = "H" });
-        string F(int i) => $"{box.Id}.S.L{L[i]}";
+        string F(int i) => $"{box.Id}.S.L{Ids.Name(L[i])}";
         double V(string e) => s.Eval(e);
         d.AddFeature(new FilletFeature
         {
@@ -530,7 +530,7 @@ static partial class Demos
         var L = s.Rect("-L/2", "-W/2", "L/2", "W/2");
         var sk = d.AddFeature(new SketchFeature { Name = "Base", Plane = PlaneRef.Front, Sketch = s.S });
         var basePlate = d.AddFeature(new ExtrudeFeature { Name = "Base plate", SketchId = sk.Id, Depth = "B" });
-        string F(int i) => $"{basePlate.Id}.S.L{L[i]}";
+        string F(int i) => $"{basePlate.Id}.S.L{Ids.Name(L[i])}";
         double V(string e) => s.Eval(e);
         d.AddFeature(new FilletFeature
         {
@@ -565,12 +565,12 @@ static partial class Demos
                     ("C", "1.5"), ("Rs", "1"), ("KeyW", "12"), ("KeyL", "40"), ("KeyT", "5"), ("CrossD", "6"));
         // half profile on the Front plane, revolved about its bottom edge (the X axis)
         var s = new Sk(d);
-        int p0 = Sketch.OriginId, p1 = s.P("0", "D1/2"), p2 = s.P("L1", "D1/2"), p3 = s.P("L1", "D2/2"), p4 = s.P("L1+L2", "D2/2"),
+        long p0 = Sketch.OriginId, p1 = s.P("0", "D1/2"), p2 = s.P("L1", "D1/2"), p3 = s.P("L1", "D2/2"), p4 = s.P("L1+L2", "D2/2"),
             p5 = s.P("L1+L2", "D3/2"), p6 = s.P("L1+L2+L3", "D3/2"), p7 = s.P("L1+L2+L3", "0");
         var L = s.Poly(p0, p1, p2, p3, p4, p5, p6, p7); // left end, D1, shoulder 1, D2, shoulder 2, D3, right end, axis
         var sk = d.AddFeature(new SketchFeature { Name = "Profile", Plane = PlaneRef.Front, Sketch = s.S });
         var rev = d.AddFeature(new RevolveFeature { Name = "Shaft", SketchId = sk.Id, AxisEntity = L[7], Angle = "360" });
-        string F(int i) => $"{rev.Id}.R.L{L[i]}";
+        string F(int i) => $"{rev.Id}.R.L{Ids.Name(L[i])}";
         double V(string e) => s.Eval(e);
         d.AddFeature(new FilletFeature
         {
@@ -589,9 +589,9 @@ static partial class Demos
         // keyway on the D2 section: a slot (two arcs) on a plane tangent to the top of the shaft (Top: sketch Y = -Z)
         var kp = d.AddFeature(new PlaneFeature { Name = "Keyway plane", Base = PlaneRef.Top, Offset = "D2/2" });
         var k = new Sk(d);
-        int c1 = k.P("L1+L2/2-(KeyL-KeyW)/2", "0"), c2 = k.P("L1+L2/2+(KeyL-KeyW)/2", "0");
-        int a1 = k.P("L1+L2/2-(KeyL-KeyW)/2", "KeyW/2"), a2 = k.P("L1+L2/2+(KeyL-KeyW)/2", "KeyW/2");
-        int b2 = k.P("L1+L2/2+(KeyL-KeyW)/2", "-KeyW/2"), b1 = k.P("L1+L2/2-(KeyL-KeyW)/2", "-KeyW/2");
+        long c1 = k.P("L1+L2/2-(KeyL-KeyW)/2", "0"), c2 = k.P("L1+L2/2+(KeyL-KeyW)/2", "0");
+        long a1 = k.P("L1+L2/2-(KeyL-KeyW)/2", "KeyW/2"), a2 = k.P("L1+L2/2+(KeyL-KeyW)/2", "KeyW/2");
+        long b2 = k.P("L1+L2/2+(KeyL-KeyW)/2", "-KeyW/2"), b1 = k.P("L1+L2/2-(KeyL-KeyW)/2", "-KeyW/2");
         k.Line(b1, b2); k.Arc(c2, b2, a2); k.Line(a2, a1); k.Arc(c1, a1, b1);
         var ks = d.AddFeature(new SketchFeature { Name = "Keyway", Plane = new PlaneRef { Feature = kp.Id }, Sketch = k.S });
         d.AddFeature(new ExtrudeFeature { Name = "Keyway", SketchId = ks.Id, IsCut = true, Reverse = true, Depth = "KeyT" });
@@ -611,11 +611,11 @@ static partial class Demos
         var d = Doc(("A", "70"), ("Bh", "50"), ("Wb", "60"), ("T", "6"), ("Rb", "6"), ("Gt", "5"), ("Gs", "28"),
                     ("HoleD", "6.6"), ("CbD", "11"), ("CbH", "4"), ("HoleSp", "34"));
         var s = new Sk(d);
-        int q0 = Sketch.OriginId, q1 = s.P("A", "0"), q2 = s.P("A", "T"), q3 = s.P("T", "T"), q4 = s.P("T", "Bh"), q5 = s.P("0", "Bh");
+        long q0 = Sketch.OriginId, q1 = s.P("A", "0"), q2 = s.P("A", "T"), q3 = s.P("T", "T"), q4 = s.P("T", "Bh"), q5 = s.P("0", "Bh");
         var L = s.Poly(q0, q1, q2, q3, q4, q5); // bottom, leg end, leg top, inner wall, top, back
         var sk = d.AddFeature(new SketchFeature { Name = "L profile", Plane = PlaneRef.Front, Sketch = s.S });
         var ex = d.AddFeature(new ExtrudeFeature { Name = "Bracket", SketchId = sk.Id, End = EndCondition.MidPlane, Depth = "Wb" });
-        string F(int i) => $"{ex.Id}.S.L{L[i]}";
+        string F(int i) => $"{ex.Id}.S.L{Ids.Name(L[i])}";
         // gusset in the inner corner, flush with the front side, mirrored to the back side
         var gp = d.AddFeature(new PlaneFeature { Name = "Gusset plane", Base = PlaneRef.Front, Offset = "Wb/2-Gt" });
         var g = new Sk(d);
@@ -669,9 +669,9 @@ static partial class Demos
         static string Rho(double frac) => $"(rs+(re-rs)*{frac * frac:0.######})"; // denser near the base circle
         string X(string rho) => $"{rho}*cos({Phi(rho)})";
         string Y(string rho) => $"{rho}*sin({Phi(rho)})";
-        int[] Flank(bool upper)
+        long[] Flank(bool upper)
         {
-            var pts = new List<int>();
+            var pts = new List<long>();
             // the lower flank's outer end only gets its height: the closing arc (centred on the axis, through the
             // upper end) fixes its radius, a second full dimension would be redundant
             for (int k = 0; k <= 3; k++) pts.Add(g.P(X(Rho(k / 3.0)), (upper ? "" : "-") + "(" + Y(Rho(k / 3.0)) + ")", dimX: upper || k < 3));
@@ -746,7 +746,7 @@ static partial class Demos
 
         // one spoke: centreline sketch, plane normal to it at the hub end, circle, extrude along the line
         var cl = new Sk(d);
-        int a = cl.P("SpokeIn", "Dish"), b = cl.P("D/2", "0");
+        long a = cl.P("SpokeIn", "Dish"), b = cl.P("D/2", "0");
         var line = cl.Centerline(a, b);
         var clSk = d.AddFeature(new SketchFeature { Name = "Spoke centreline", Plane = PlaneRef.Front, Sketch = cl.S });
         var sp = d.AddFeature(new PlaneFeature
@@ -761,7 +761,7 @@ static partial class Demos
         d.AddFeature(new CircularPatternFeature { Name = "Spokes", Seeds = { spoke.Id }, Axis = new DirRef { Axis = "Y" }, Count = "NS" });
 
         // hub edges broken
-        string H(int i) => $"{hub.Id}.R.L{hl[i]}";
+        string H(int i) => $"{hub.Id}.R.L{Ids.Name(hl[i])}";
         double V(string e) => hs.Eval(e);
         d.AddFeature(new ChamferFeature
         {
@@ -781,7 +781,7 @@ static partial class Demos
         // spinner knob on the operator's side (away from the dished hub, i.e. towards -Y): pin into the rim,
         // collar, grip with a domed end, revolved about its own axis
         var kn = new Sk(d);
-        int k0 = kn.P("D/2", "0"), k1 = kn.P("D/2+PinD/2", "0"), k2 = kn.P("D/2+PinD/2", "-(RimT/2+2)"),
+        long k0 = kn.P("D/2", "0"), k1 = kn.P("D/2+PinD/2", "0"), k2 = kn.P("D/2+PinD/2", "-(RimT/2+2)"),
             k3 = kn.P("D/2+KnobNeck", "-(RimT/2+2)"), k4 = kn.P("D/2+KnobNeck", "-(RimT/2+5)"), k5 = kn.P("D/2+KnobR", "-(RimT/2+8)"),
             k6 = kn.P("D/2+KnobR", "-(RimT/2+KnobL-KnobR)"), kc = kn.P("D/2", "-(RimT/2+KnobL-KnobR)"), k7 = kn.P("D/2", "-(RimT/2+KnobL)");
         kn.Line(k0, k1); kn.Line(k1, k2); kn.Line(k2, k3); kn.Line(k3, k4); kn.Line(k4, k5); kn.Line(k5, k6);
@@ -824,7 +824,7 @@ static partial class Demos
         var gripFil = d.AddFeature(new FilletFeature
         {
             Name = "Grip edges", Radius = "Rg",
-            Edges = { E($"{rim.Id}.R.C{rimC}", $"{grip.Id}.S.C{gripC}", new Vec3(gr * Math.Cos(ga), g.Eval("RimT/4"), -gr * Math.Sin(ga))) },
+            Edges = { E($"{rim.Id}.R.C{Ids.Name(rimC)}", $"{grip.Id}.S.C{Ids.Name(gripC)}", new Vec3(gr * Math.Cos(ga), g.Eval("RimT/4"), -gr * Math.Sin(ga))) },
         });
         d.AddFeature(new CircularPatternFeature { Name = "Grips", Seeds = { grip.Id, gripFil.Id }, Axis = new DirRef { Axis = "Y" }, Count = "NS*NG" });
 
@@ -834,7 +834,7 @@ static partial class Demos
         hs.Centerline(Sketch.OriginId, hs.P("0", "HubL/2"));
         var hubSk = d.AddFeature(new SketchFeature { Name = "Hub section", Plane = PlaneRef.Front, Sketch = hs.S });
         var hub = d.AddFeature(new RevolveFeature { Name = "Hub", SketchId = hubSk.Id, Angle = "360" });
-        string H(int i) => $"{hub.Id}.R.L{hl[i]}";
+        string H(int i) => $"{hub.Id}.R.L{Ids.Name(hl[i])}";
         double V(string e) => hs.Eval(e);
         d.AddFeature(new FilletFeature
         {
@@ -853,7 +853,7 @@ static partial class Demos
         var spokeC = sc.Circle(Sketch.OriginId, "SpokeD");
         var scSk = d.AddFeature(new SketchFeature { Name = "Spoke section", Plane = new PlaneRef { Feature = sp.Id }, Sketch = sc.S });
         var spoke = d.AddFeature(new ExtrudeFeature { Name = "Spoke", SketchId = scSk.Id, Depth = "D/2-SpokeIn" });
-        string rimFace = $"{rim.Id}.R.C{rimC}", spokeFace = $"{spoke.Id}.S.C{spokeC}";
+        string rimFace = $"{rim.Id}.R.C{Ids.Name(rimC)}", spokeFace = $"{spoke.Id}.S.C{Ids.Name(spokeC)}";
         var rimFil = d.AddFeature(new FilletFeature
         {
             Name = "Spoke to rim", Radius = "Rf",
@@ -892,7 +892,7 @@ static partial class Demos
         var prof = d.AddFeature(new SketchFeature { Name = "Tube section", Plane = PlaneRef.Right, Sketch = p.S });
         // the path: along +x, a quarter turn about (L1, R), then along +y (Top: sketch y is world -z)
         var w = new Sk(d);
-        int a = w.P("L1", "0"), c = w.P("L1", "R"), b = w.P("L1+R", "R"), e = w.P("L1+R", "R+L2");
+        long a = w.P("L1", "0"), c = w.P("L1", "R"), b = w.P("L1+R", "R"), e = w.P("L1+R", "R+L2");
         w.Line(Sketch.OriginId, a); w.Arc(c, a, b); w.Line(b, e);
         var path = d.AddFeature(new SketchFeature { Name = "Centreline", Plane = PlaneRef.Top, Sketch = w.S });
         d.AddFeature(new SweepFeature { Name = "Tube", ProfileSketchId = prof.Id, PathSketchId = path.Id });
@@ -931,7 +931,7 @@ static partial class Demos
         d.AddFeature(new ThreadFeature
         {
             Name = "Bolt thread", End = ThreadEnd.UpToNext, Clearance = "Clr",
-            Face = new FaceRef { Name = $"{shank.Id}.S.C{shc}", Hint = new Vec3(V("D/2"), 0, V("HeadH+L-1")) },
+            Face = new FaceRef { Name = $"{shank.Id}.S.C{Ids.Name(shc)}", Hint = new Vec3(V("D/2"), 0, V("HeadH+L-1")) },
         });
         // nut: a separate body beside the bolt (a hexagon about a point Gap along X), its hole the thread's minor
         // diameter about the same point
@@ -944,7 +944,7 @@ static partial class Demos
         d.AddFeature(new ThreadFeature
         {
             Name = "Nut thread", End = ThreadEnd.ThroughAll, Clearance = "Clr",
-            Face = new FaceRef { Name = $"{nut.Id}.S.C{hole}", Hint = new Vec3(V("Gap+(D-1.0825*P)/2"), 0, V("NutH-0.5")) },
+            Face = new FaceRef { Name = $"{nut.Id}.S.C{Ids.Name(hole)}", Hint = new Vec3(V("Gap+(D-1.0825*P)/2"), 0, V("NutH-0.5")) },
         });
         return d;
     }
@@ -981,7 +981,7 @@ static partial class Demos
         d.AddFeature(new ChamferFeature
         {
             Name = "Lead-in", Distance = "P/2",
-            Edges = { E($"{rod.Id}.S.C{rc}", $"{rod.Id}.Start", new Vec3(V("D/2"), 0, 0)) },
+            Edges = { E($"{rod.Id}.S.C{Ids.Name(rc)}", $"{rod.Id}.Start", new Vec3(V("D/2"), 0, 0)) },
         });
         // the space between two teeth on Top (sketch y = -z), a pitch below the rod's free end: flat 0.3707 P at the
         // root (radius D/2 - P/2), flanks at 14.5° out past the surface; the centerline (the rod's axis) runs up +Z
@@ -1011,7 +1011,7 @@ static partial class Demos
         var bore = n.Circle(centre, "D-P+2*Clr");
         var ns = d.AddFeature(new SketchFeature { Name = "Nut", Plane = PlaneRef.Front, Sketch = n.S });
         var nut = d.AddFeature(new ExtrudeFeature { Name = "Nut", SketchId = ns.Id, Depth = "NutL", Merge = false });
-        string boreFace = $"{nut.Id}.S.C{bore}";
+        string boreFace = $"{nut.Id}.S.C{Ids.Name(bore)}";
         d.AddFeature(new ChamferFeature
         {
             Name = "Nut lead-ins", Distance = "P/2",
@@ -1058,8 +1058,8 @@ static partial class Demos
         readonly Func<string, double?> _lookup;
         bool _done;
         // coordinate expressions per point (null: determined otherwise, e.g. by an arc), lines between points
-        readonly Dictionary<int, (string? x, string? y)> _coord = new() { [Sketch.OriginId] = ("0", "0") };
-        readonly List<(int a, int b, int id)> _lines = new();
+        readonly Dictionary<long, (string? x, string? y)> _coord = new() { [Sketch.OriginId] = ("0", "0") };
+        readonly List<(long a, long b, long id)> _lines = new();
 
         public Sk(CadDocument d)
         {
@@ -1073,7 +1073,7 @@ static partial class Demos
         public double Eval(string e) => Expr.Eval(e, _lookup);
 
         /// <summary>Point at (x, y); a leading '-' means the negative side (the dimension is the magnitude).</summary>
-        public int P(string x, string y, bool dimX = true)
+        public long P(string x, string y, bool dimX = true)
         {
             var p = _s.AddPoint(new Vec2(Eval(x), Eval(y)));
             _coord[p.Id] = (dimX ? Norm(x) : null, Norm(y));
@@ -1082,20 +1082,20 @@ static partial class Demos
 
         static string Norm(string e) => e.Replace(" ", "");
 
-        public int Line(int a, int b) { var id = _s.Add(new SkLine { P1 = a, P2 = b }).Id; _lines.Add((a, b, id)); return id; }
-        public int Centerline(int a, int b) { var id = _s.Add(new SkLine { P1 = a, P2 = b, Construction = true }).Id; _lines.Add((a, b, id)); return id; }
+        public long Line(long a, long b) { var id = _s.Add(new SkLine { P1 = a, P2 = b }).Id; _lines.Add((a, b, id)); return id; }
+        public long Centerline(long a, long b) { var id = _s.Add(new SkLine { P1 = a, P2 = b, Construction = true }).Id; _lines.Add((a, b, id)); return id; }
 
         /// <summary>
         /// Axis-aligned rectangle; lines: bottom, right, top, left. Centred on the origin (x0 = -x1, y0 = -y1) it is
         /// drawn as a centre rectangle: diagonal with the origin at its midpoint, width and height dimensions.
         /// </summary>
-        public List<int> Rect(string x0, string y0, string x1, string y1)
+        public List<long> Rect(string x0, string y0, string x1, string y1)
         {
             bool Centred(string lo, string hi) => Norm(lo) == "-" + Norm(hi) || Norm(lo) == "-(" + Norm(hi) + ")";
             if (Centred(x0, x1) && Centred(y0, y1))
             {
                 double w = Eval(x1), h = Eval(y1);
-                int p0 = Free(-w, -h), p1 = Free(w, -h), p2 = Free(w, h), p3 = Free(-w, h);
+                long p0 = Free(-w, -h), p1 = Free(w, -h), p2 = Free(w, h), p3 = Free(-w, h);
                 var L = Poly(p0, p1, p2, p3);
                 _s.AddConstraint(CType.Horizontal, L[0]); _s.AddConstraint(CType.Horizontal, L[2]);
                 _s.AddConstraint(CType.Vertical, L[1]); _s.AddConstraint(CType.Vertical, L[3]);
@@ -1108,7 +1108,7 @@ static partial class Demos
         }
 
         /// <summary>Point whose position comes from relations only (no coordinate dimensions).</summary>
-        int Free(double x, double y)
+        long Free(double x, double y)
         {
             var p = _s.AddPoint(new Vec2(x, y));
             _coord[p.Id] = (null, null);
@@ -1116,7 +1116,7 @@ static partial class Demos
         }
 
         /// <summary>Length dimension of a line.</summary>
-        void Size(int line, string expr)
+        void Size(long line, string expr)
         {
             var c = _s.AddConstraint(CType.Distance, line);
             c.Expr = Simplify(expr); c.Value = Math.Abs(Eval(expr));
@@ -1125,9 +1125,9 @@ static partial class Demos
         static string Simplify(string e) => e.StartsWith("2*(") && e.EndsWith("/2)") && !e[3..^3].Contains('(') ? e[3..^3] : e;
 
         /// <summary>Closed polygon through the points.</summary>
-        public List<int> Poly(params int[] pts)
+        public List<long> Poly(params long[] pts)
         {
-            var ids = new List<int>();
+            var ids = new List<long>();
             for (int i = 0; i < pts.Length; i++) ids.Add(Line(pts[i], pts[(i + 1) % pts.Length]));
             return ids;
         }
@@ -1138,7 +1138,7 @@ static partial class Demos
         /// across the flats (between that side and the one opposite). Lines from the corner just above the right
         /// flat, counter-clockwise.
         /// </summary>
-        public List<int> Polygon(int center, int sides, string acrossFlats)
+        public List<long> Polygon(long center, int sides, string acrossFlats)
         {
             var c = _s.P(center);
             double af = Eval(acrossFlats), r = af / 2 / Math.Cos(Math.PI / sides);
@@ -1154,7 +1154,7 @@ static partial class Demos
             return L;
         }
 
-        public int Circle(int center, string diameter)
+        public long Circle(long center, string diameter)
         {
             var c = _s.Add(new SkCircle { Center = center, R = Eval(diameter) / 2 });
             var k = _s.AddConstraint(CType.Diameter, c.Id);
@@ -1163,18 +1163,18 @@ static partial class Demos
         }
 
         /// <summary>Arc from start to end (counter-clockwise) about center.</summary>
-        public int Arc(int center, int start, int end) => _s.Add(new SkArc { Center = center, Start = start, End = end }).Id;
+        public long Arc(long center, long start, long end) => _s.Add(new SkArc { Center = center, Start = start, End = end }).Id;
 
-        public void Point(int p) => _s.Add(new SkPointEntity { P = p });
+        public void Point(long p) => _s.Add(new SkPointEntity { P = p });
 
         /// <summary>Point lies on an arc/circle.</summary>
-        public void OnArc(int point, int arc) => _s.AddConstraint(CType.PointOnCircle, point, arc);
+        public void OnArc(long point, long arc) => _s.AddConstraint(CType.PointOnCircle, point, arc);
 
         /// <summary>
         /// Arc from a to b through m (counter-clockwise order chosen automatically); its centre is a free point
         /// placed at the circumcentre, fixed by the solver through a PointOnCircle relation on m.
         /// </summary>
-        public int ArcThrough(int a, int m, int b)
+        public long ArcThrough(long a, long m, long b)
         {
             Vec2 A = _s.P(a), M = _s.P(m), B = _s.P(b);
             var ab = B - A; var am = M - A;
@@ -1194,10 +1194,10 @@ static partial class Demos
             _done = true;
             foreach (var horizontal in new[] { false, true })
             {
-                string? C(int p) => _coord.TryGetValue(p, out var c) ? (horizontal ? c.y : c.x) : null;
+                string? C(long p) => _coord.TryGetValue(p, out var c) ? (horizontal ? c.y : c.x) : null;
                 // points joined by a line with the same coordinate expression share that coordinate by a relation
                 var parent = _coord.Keys.ToDictionary(k => k, k => k);
-                int Find(int x) { while (parent[x] != x) x = parent[x] = parent[parent[x]]; return x; }
+                long Find(long x) { while (parent[x] != x) x = parent[x] = parent[parent[x]]; return x; }
                 foreach (var (a, b, id) in _lines)
                 {
                     var ca = C(a); var cb = C(b);

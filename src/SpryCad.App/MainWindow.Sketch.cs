@@ -377,8 +377,8 @@ public partial class MainWindow
             if (ed.Selected.Count == 1)
             {
                 var r = ed.Selected[0];
-                int? pid = r.Kind == SkRefKind.Point ? r.Id : r.Kind == SkRefKind.Entity && ed.Sk.Entity(r.Id) is SkPointEntity pe ? pe.P : null;
-                if (pid is int id && id != Sketch.OriginId && ed.Sk.Point(id) is { } pt)
+                long? pid = r.Kind == SkRefKind.Point ? r.Id : r.Kind == SkRefKind.Entity && ed.Sk.Entity(r.Id) is SkPointEntity pe ? pe.P : null;
+                if (pid is long id && id != Sketch.OriginId && ed.Sk.Point(id) is { } pt)
                 {
                     var par = page.Section("Parameters");
                     page.Number(par, "X", () => Expr.Format(pt.X), v => { if (Expr.TryEval(v, Session.Lookup, out var x, out _) && Math.Abs(x - pt.X) > 1e-9) ed.SetPointPosition(id, new Vec2(x, pt.Y)); });
@@ -407,21 +407,14 @@ public partial class MainWindow
     {
         switch (r.Kind)
         {
-            case SkRefKind.Point: return r.Id == Sketch.OriginId ? "Origin" : $"Point{r.Id}";
+            case SkRefKind.Point: return DisplayNames.Of(ed.Sk, r.Id);
             case SkRefKind.Constraint:
                 {
                     var c = ed.Sk.Constraint(r.Id);
                     return c == null ? "" : c.IsDimension ? $"{c.Name ?? "Dimension"} = {Expr.Format(c.Value)}" : SketchEditor.RelationName(c.Type);
                 }
             default:
-                return ed.Sk.Entity(r.Id) switch
-                {
-                    SkLine l => (l.Construction ? "Centerline" : "Line") + r.Id,
-                    SkCircle => "Circle" + r.Id,
-                    SkArc => "Arc" + r.Id,
-                    SkPointEntity => "Point" + r.Id,
-                    _ => "Entity" + r.Id,
-                };
+                return DisplayNames.Of(ed.Sk, r.Id);
         }
     }
 

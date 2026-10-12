@@ -53,9 +53,9 @@ public static class SketchConvert
     /// Converts one edge; false when it adds nothing (seen end on, or there already). With the body it is on (and an
     /// edge between two named faces) the geometry is linked to it; otherwise it is fixed where the edge is now.
     /// </summary>
-    public static bool Edge(Sketch sk, Frame frame, NEdge e, string? bodyId = null, int? group = null) => Edge(new Index(sk), frame, e, bodyId, group);
+    public static bool Edge(Sketch sk, Frame frame, NEdge e, string? bodyId = null, long? group = null) => Edge(new Index(sk), frame, e, bodyId, group);
 
-    static bool Edge(Index ix, Frame frame, NEdge e, string? bodyId = null, int? group = null)
+    static bool Edge(Index ix, Frame frame, NEdge e, string? bodyId = null, long? group = null)
     {
         var pieces = Pieces(frame, e);
         var link = bodyId != null && e.Uses.Count == 2 ? RefOf(e, bodyId) : null;
@@ -118,7 +118,7 @@ public static class SketchConvert
     static int AddGroup(Index ix, Frame frame, SkConvertGroup g, List<NEdge> edges)
     {
         var sk = ix.Sketch;
-        g.Id = (sk.ConvertGroups?.Max(x => x.Id) ?? 0) + 1;
+        g.Id = sk.NewId();
         g.Known = edges.Where(e => e.Uses.Count == 2).Select(e => RefOf(e, g.Body)).ToList();
         (sk.ConvertGroups ??= new()).Add(g);
         var n = edges.Count(e => Edge(ix, frame, e, g.Body, g.Id));
@@ -183,8 +183,8 @@ public static class SketchConvert
         }
         // placed on its edge, the link following the edge (where it is now: found by it next time)
         var pointsById = sk.Points.ToDictionary(p => p.Id);
-        var wants = new Dictionary<int, List<(SkEntity e, Vec2 at)>>();
-        void Want(int id, SkEntity x, Vec2 at) => (wants.TryGetValue(id, out var l) ? l : wants[id] = new()).Add((x, at));
+        var wants = new Dictionary<long, List<(SkEntity e, Vec2 at)>>();
+        void Want(long id, SkEntity x, Vec2 at) => (wants.TryGetValue(id, out var l) ? l : wants[id] = new()).Add((x, at));
         void PlaceAll(List<SkEntity> ents, EdgeRef r, List<Piece> pieces)
         {
             foreach (var x in ents)
@@ -199,7 +199,7 @@ public static class SketchConvert
         // what goes, and the edges converted (again) in its place: after the others are placed, so their ends are
         // found where the neighbours now are
         var remove = new List<SkEntity>();
-        var add = new List<(NEdge e, string? body, int? group)>();
+        var add = new List<(NEdge e, string? body, long? group)>();
         foreach (var x in sk.Entities) x.Dangling = false;
         int missing = 0;
         foreach (var g in singles)
@@ -302,7 +302,7 @@ public static class SketchConvert
     };
 
     /// <summary>Where a piece wants each of its entity's points (and a circle's radius, set).</summary>
-    static void Place(Action<int, SkEntity, Vec2> want, SkEntity x, Piece p)
+    static void Place(Action<long, SkEntity, Vec2> want, SkEntity x, Piece p)
     {
         switch (x)
         {
@@ -316,7 +316,7 @@ public static class SketchConvert
     /// Points placed where their pieces want them. A point the pieces sharing it want in different places (pieces
     /// that met, on edges that no longer do: a tooth between them now) becomes one point per place. How many split.
     /// </summary>
-    static int PlacePoints(Sketch sk, Dictionary<int, SkPoint> pts, Dictionary<int, List<(SkEntity e, Vec2 at)>> wants)
+    static int PlacePoints(Sketch sk, Dictionary<long, SkPoint> pts, Dictionary<long, List<(SkEntity e, Vec2 at)>> wants)
     {
         int split = 0;
         foreach (var (id, list) in wants)
@@ -324,7 +324,7 @@ public static class SketchConvert
             if (id == Sketch.OriginId || !pts.TryGetValue(id, out var pt)) continue;
             var at = list[0].at;
             pt.X = at.X; pt.Y = at.Y; pt.Fixed = true;
-            var others = new List<(Vec2 at, int id)>();
+            var others = new List<(Vec2 at, long id)>();
             foreach (var (e, w) in list.Skip(1))
             {
                 if (Vec2.Distance(w, at) < 1e-6) continue;
@@ -367,9 +367,9 @@ public static class SketchConvert
         public readonly Sketch Sketch;
         const double Tol = 1e-6;
         readonly Dictionary<(long, long), List<SkPoint>> _grid = new();
-        readonly HashSet<(int, int)> _lines = new();
-        readonly HashSet<(int, int, int)> _arcs = new();
-        readonly HashSet<(int, long)> _circles = new();
+        readonly HashSet<(long, long)> _lines = new();
+        readonly HashSet<(long, long, long)> _arcs = new();
+        readonly HashSet<(long, long)> _circles = new();
 
         public Index(Sketch sk)
         {
@@ -393,7 +393,7 @@ public static class SketchConvert
         }
 
         /// <summary>A fixed point at p: the one there already, else a new one.</summary>
-        public int Point(Vec2 p)
+        public long Point(Vec2 p)
         {
             var (kx, ky) = Key(p);
             for (long dx = -1; dx <= 1; dx++)
@@ -413,21 +413,21 @@ public static class SketchConvert
             {
                 case PieceKind.Line:
                     {
-                        int pa = Point(p.A), pb = Point(p.B);
+                        long pa = Point(p.A), pb = Point(p.B);
                         if (_lines.Contains((Math.Min(pa, pb), Math.Max(pa, pb)))) return false;
                         made = Sketch.Add(new SkLine { P1 = pa, P2 = pb, Link = link });
                         break;
                     }
                 case PieceKind.Arc:
                     {
-                        int c = Point(p.C), s = Point(p.A), e = Point(p.B);
+                        long c = Point(p.C), s = Point(p.A), e = Point(p.B);
                         if (_arcs.Contains((c, s, e))) return false;
                         made = Sketch.Add(new SkArc { Center = c, Start = s, End = e, Link = link });
                         break;
                     }
                 default:
                     {
-                        int c = Point(p.C);
+                        long c = Point(p.C);
                         if (_circles.Contains((c, RKey(p.R)))) return false;
                         var ci = Sketch.Add(new SkCircle { Center = c, R = p.R, Link = link });
                         // not linked: its radius held by a dimension (a linked one takes it from the model)

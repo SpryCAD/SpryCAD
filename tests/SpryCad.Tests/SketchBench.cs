@@ -13,9 +13,9 @@ namespace SpryCad.Tests;
 /// </summary>
 static class SketchBench
 {
-    static int P(Sketch sk, double x, double y) => sk.AddPoint(new Vec2(x, y)).Id;
+    static long P(Sketch sk, double x, double y) => sk.AddPoint(new Vec2(x, y)).Id;
 
-    static void Dim(Sketch sk, CType type, double value, params int[] refs)
+    static void Dim(Sketch sk, CType type, double value, params long[] refs)
     {
         var c = sk.AddConstraint(type, refs);
         c.Value = value; c.Expr = value.ToString(System.Globalization.CultureInfo.InvariantCulture);
@@ -26,12 +26,12 @@ static class SketchBench
     internal static Sketch Grid(int k)
     {
         var sk = new Sketch();
-        int prev = Sketch.OriginId;
+        long prev = Sketch.OriginId;
         for (int i = 0; i < k; i++)
             for (int j = 0; j < k; j++)
             {
                 double x0 = 10 + i * 40, y0 = 10 + j * 30;
-                int a = P(sk, x0 + 0.3, y0), b = P(sk, x0 + 25, y0 + 0.2), c = P(sk, x0 + 25.4, y0 + 15), d = P(sk, x0, y0 + 15.3);
+                long a = P(sk, x0 + 0.3, y0), b = P(sk, x0 + 25, y0 + 0.2), c = P(sk, x0 + 25.4, y0 + 15), d = P(sk, x0, y0 + 15.3);
                 var l1 = sk.Add(new SkLine { P1 = a, P2 = b }); var l2 = sk.Add(new SkLine { P1 = b, P2 = c });
                 var l3 = sk.Add(new SkLine { P1 = c, P2 = d }); var l4 = sk.Add(new SkLine { P1 = d, P2 = a });
                 sk.AddConstraint(CType.Horizontal, l1.Id); sk.AddConstraint(CType.Horizontal, l3.Id);
@@ -93,7 +93,7 @@ static class SketchBench
         var drag = free < 0 ? 0 : Time(sk, rounds, s =>
         {
             var at = s.P(free);
-            for (int i = 1; i <= 10; i++) SketchSolver.Solve(s, new Dictionary<int, Vec2> { [free] = at + new Vec2(0.3 * i, 0.2 * i) }, analyze: false);
+            for (int i = 1; i <= 10; i++) SketchSolver.Solve(s, new Dictionary<long, Vec2> { [free] = at + new Vec2(0.3 * i, 0.2 * i) }, analyze: false);
         });
         // the over-define check of a new relation (a horizontal on the first line)
         var line = sk.Entities.OfType<SkLine>().FirstOrDefault();

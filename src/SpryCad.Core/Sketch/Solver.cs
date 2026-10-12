@@ -8,9 +8,9 @@ public sealed class SolveResult
     public double Residual { get; init; }
     public SketchStatus Status { get; init; }
     /// <summary>Point ids whose position is not fully determined.</summary>
-    public HashSet<int> FreePoints { get; init; } = new();
+    public HashSet<long> FreePoints { get; init; } = new();
     /// <summary>Circle ids whose radius is not determined.</summary>
-    public HashSet<int> FreeRadii { get; init; } = new();
+    public HashSet<long> FreeRadii { get; init; } = new();
     public int Dof { get; init; }
 }
 
@@ -44,21 +44,21 @@ public static class SketchSolver
         public int[] Vars = Array.Empty<int>();
         public Func<double[], double> F = null!;
         public double Weight = 1;
-        public int ConstraintId = -1;
+        public long ConstraintId = -1;
     }
 
     sealed class System
     {
         public readonly List<double> X = new();
-        public readonly Dictionary<int, (int ix, int iy)> PointVars = new();
-        public readonly Dictionary<int, int> RadiusVars = new();
+        public readonly Dictionary<long, (int ix, int iy)> PointVars = new();
+        public readonly Dictionary<long, int> RadiusVars = new();
         public readonly List<Eq> Eqs = new();
         public Sketch Sketch = null!;
-        public Dictionary<int, PRef> PRefs = new();
-        public Dictionary<int, RRef> RRefs = new();
+        public Dictionary<long, PRef> PRefs = new();
+        public Dictionary<long, RRef> RRefs = new();
     }
 
-    static System Build(Sketch sk, IReadOnlyDictionary<int, Vec2>? fixedOverride, bool includeDragAsFixed)
+    static System Build(Sketch sk, IReadOnlyDictionary<long, Vec2>? fixedOverride, bool includeDragAsFixed)
     {
         var s = new System { Sketch = sk };
         foreach (var p in sk.Points)
@@ -105,9 +105,9 @@ public static class SketchSolver
         return s;
     }
 
-    static void AddEq(System s, int cid, Func<double[], double> f, params PRef[] pts) => AddEqV(s, cid, f, pts, Array.Empty<RRef>());
+    static void AddEq(System s, long cid, Func<double[], double> f, params PRef[] pts) => AddEqV(s, cid, f, pts, Array.Empty<RRef>());
 
-    static void AddEqV(System s, int cid, Func<double[], double> f, PRef[] pts, RRef[] rads)
+    static void AddEqV(System s, long cid, Func<double[], double> f, PRef[] pts, RRef[] rads)
     {
         var vars = new List<int>();
         foreach (var p in pts) { if (p.Ix >= 0) vars.Add(p.Ix); if (p.Iy >= 0) vars.Add(p.Iy); }
@@ -119,17 +119,17 @@ public static class SketchSolver
         s.Eqs.Add(new Eq { Vars = vars.Distinct().ToArray(), F = f, ConstraintId = cid });
     }
 
-    static (PRef a, PRef b) Line(System s, int id)
+    static (PRef a, PRef b) Line(System s, long id)
     {
         var l = (SkLine)s.Sketch.Entity(id)!;
         return (s.PRefs[l.P1], s.PRefs[l.P2]);
     }
 
-    static bool IsPoint(System s, int id) => s.PRefs.ContainsKey(id);
-    static bool IsLine(System s, int id) => s.Sketch.Entity(id) is SkLine;
-    static bool IsRound(System s, int id) => s.Sketch.Entity(id) is SkCircle or SkArc;
+    static bool IsPoint(System s, long id) => s.PRefs.ContainsKey(id);
+    static bool IsLine(System s, long id) => s.Sketch.Entity(id) is SkLine;
+    static bool IsRound(System s, long id) => s.Sketch.Entity(id) is SkCircle or SkArc;
 
-    static PRef CenterOf(System s, int id) => s.Sketch.Entity(id) switch
+    static PRef CenterOf(System s, long id) => s.Sketch.Entity(id) switch
     {
         SkCircle c => s.PRefs[c.Center],
         SkArc a => s.PRefs[a.Center],
@@ -148,11 +148,11 @@ public static class SketchSolver
     /// </summary>
     static void AddOffset(System s, SkConstraint c)
     {
-        var sk = s.Sketch; var r = c.Refs; int id = c.Id; var d = c.Value;
+        var sk = s.Sketch; var r = c.Refs; long id = c.Id; var d = c.Value;
         var sides = c.Sides ?? Array.Empty<int>();
         // per copy point: its original point and the pairs it belongs to
-        var at = new Dictionary<int, (int orig, List<(SkEntity o, SkEntity q, int side)> pairs)>();
-        void Map(int q, int o, SkEntity oe, SkEntity qe, int side)
+        var at = new Dictionary<long, (long orig, List<(SkEntity o, SkEntity q, int side)> pairs)>();
+        void Map(long q, long o, SkEntity oe, SkEntity qe, int side)
         {
             if (!at.TryGetValue(q, out var v)) at[q] = v = (o, new());
             v.pairs.Add((oe, qe, side));
@@ -174,28 +174,28 @@ public static class SketchSolver
             }
         }
         // the equations, by kind
-        void LineDist(int qp, SkLine o, int side)
+        void LineDist(long qp, SkLine o, int side)
         {
             var a = s.PRefs[o.P1]; var b = s.PRefs[o.P2]; var q = s.PRefs[qp];
             AddEq(s, id, x => { var u = b.Get(x) - a.Get(x); return Vec2.Cross(u, q.Get(x) - a.Get(x)) / Math.Max(u.Length, 1e-12) - side * d; }, a, b, q);
         }
-        void Square(int qp, int op, SkLine o)
+        void Square(long qp, long op, SkLine o)
         {
             var a = s.PRefs[o.P1]; var b = s.PRefs[o.P2]; var q = s.PRefs[qp]; var p = s.PRefs[op];
             AddEq(s, id, x => { var u = b.Get(x) - a.Get(x); return Vec2.Dot(u, q.Get(x) - p.Get(x)) / Math.Max(u.Length, 1e-12); }, a, b, q, p);
         }
-        void Radius(int qp, SkArc o, int side)
+        void Radius(long qp, SkArc o, int side)
         {
             var cen = s.PRefs[o.Center]; var st = s.PRefs[o.Start]; var q = s.PRefs[qp];
             AddEq(s, id, x => (q.Get(x) - cen.Get(x)).Length - ((st.Get(x) - cen.Get(x)).Length + side * d), cen, st, q);
         }
-        void Radial(int qp, int op, SkArc o)
+        void Radial(long qp, long op, SkArc o)
         {
             var cen = s.PRefs[o.Center]; var q = s.PRefs[qp]; var p = s.PRefs[op];
             AddEq(s, id, x => { var w = p.Get(x) - cen.Get(x); return Vec2.Cross(q.Get(x) - cen.Get(x), w) / Math.Max(w.Length, 1e-12); }, cen, q, p);
         }
         // smooth joins, judged on the originals as they are
-        bool Smooth(SkEntity e1, SkEntity e2, int op)
+        bool Smooth(SkEntity e1, SkEntity e2, long op)
         {
             var p = sk.P(op);
             Vec2 Normal(SkEntity e) => e switch
@@ -245,7 +245,7 @@ public static class SketchSolver
 
     static void AddConstraint(System s, SkConstraint c)
     {
-        var r = c.Refs; int id = c.Id;
+        var r = c.Refs; long id = c.Id;
         switch (c.Type)
         {
             case CType.Offset:
@@ -447,7 +447,7 @@ public static class SketchSolver
     }
 
     /// <summary>Solves the sketch in place. Optional drag targets move the given points.</summary>
-    public static SolveResult Solve(Sketch sk, IReadOnlyDictionary<int, Vec2>? drag = null, bool analyze = true)
+    public static SolveResult Solve(Sketch sk, IReadOnlyDictionary<long, Vec2>? drag = null, bool analyze = true)
     {
         // fixed points (the origin, points on the model) stay where they are, dragged with the rest or not: held at
         // the pointer they would move the sketch about them, while they themselves are never moved
@@ -485,7 +485,7 @@ public static class SketchSolver
     /// One drag step: the dragged points held at the pointer, else pulled toward it as far as the relations let them
     /// (everything else held lightly where it is), then the relations met exactly. Applied when the shape is kept.
     /// </summary>
-    static bool TryDrag(Sketch sk, System s0, double[] x0, IReadOnlyDictionary<int, Vec2> drag)
+    static bool TryDrag(Sketch sk, System s0, double[] x0, IReadOnlyDictionary<long, Vec2> drag)
     {
         // 1) dragged points fixed at the cursor
         var s1 = Build(sk, drag, includeDragAsFixed: true);
@@ -591,7 +591,7 @@ public static class SketchSolver
         return w;
     }
 
-    static void Apply(System s, double[] x, IReadOnlyDictionary<int, Vec2>? drag)
+    static void Apply(System s, double[] x, IReadOnlyDictionary<long, Vec2>? drag)
     {
         foreach (var p in s.Sketch.Points)
         {
@@ -817,7 +817,7 @@ public static class SketchSolver
         var x = s.X.ToArray();
         int m = s.Eqs.Count, n = x.Length;
         var (rank, free) = Reduce(s, x, wantFree: true);
-        var fp = new HashSet<int>(); var fr = new HashSet<int>();
+        var fp = new HashSet<long>(); var fr = new HashSet<long>();
         foreach (var (pid, (ix, iy)) in s.PointVars) if (free![ix] || free[iy]) fp.Add(pid);
         foreach (var (cid, ir) in s.RadiusVars) if (free[ir]) fr.Add(cid);
         var resid = m > 0 ? MaxAbs(Eval(s, x)) : 0;
@@ -978,9 +978,9 @@ public static class SketchSolver
     public static double Measure(Sketch sk, SkConstraint c)
     {
         var r = c.Refs;
-        Vec2 P(int id) => sk.P(id);
-        (Vec2 a, Vec2 b) L(int id) { var l = (SkLine)sk.Entity(id)!; return (P(l.P1), P(l.P2)); }
-        bool IsPt(int id) => sk.Point(id) != null;
+        Vec2 P(long id) => sk.P(id);
+        (Vec2 a, Vec2 b) L(long id) { var l = (SkLine)sk.Entity(id)!; return (P(l.P1), P(l.P2)); }
+        bool IsPt(long id) => sk.Point(id) != null;
         switch (c.Type)
         {
             case CType.Distance:
@@ -1029,9 +1029,9 @@ public static class SketchSolver
     public static void CaptureSign(Sketch sk, SkConstraint c)
     {
         var r = c.Refs;
-        Vec2 P(int id) => sk.P(id);
-        (Vec2 a, Vec2 b) L(int id) { var l = (SkLine)sk.Entity(id)!; return (P(l.P1), P(l.P2)); }
-        bool IsPt(int id) => sk.Point(id) != null;
+        Vec2 P(long id) => sk.P(id);
+        (Vec2 a, Vec2 b) L(long id) { var l = (SkLine)sk.Entity(id)!; return (P(l.P1), P(l.P2)); }
+        bool IsPt(long id) => sk.Point(id) != null;
         int Sg(double v) => v < 0 ? -1 : 1;
         switch (c.Type)
         {

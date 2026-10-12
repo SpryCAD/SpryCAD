@@ -21,14 +21,14 @@ public enum SketchTool
 
 public enum SkRefKind { Point, Entity, Constraint }
 
-public readonly record struct SkRef(SkRefKind Kind, int Id);
+public readonly record struct SkRef(SkRefKind Kind, long Id);
 
 enum SnapKind { None, Point, Origin, Midpoint, OnLine, OnCircle, Center, ModelVertex, ModelEdge, ModelMidpoint, ModelCenter }
 
 /// <summary>Model edge a snap refers to (projected into the sketch as reference geometry on click).</summary>
 sealed record ModelHit(Body Body, TopoEdge Edge, Vec3 Point);
 
-readonly record struct Snap(SnapKind Kind, Vec2 P, int Id = -1, bool H = false, bool V = false, int AlignId = -1, ModelHit? Model = null,
+readonly record struct Snap(SnapKind Kind, Vec2 P, long Id = -1, bool H = false, bool V = false, long AlignId = -1, ModelHit? Model = null,
     Vec2? AlignX = null, Vec2? AlignY = null);
 
 /// <summary>
@@ -64,10 +64,10 @@ public sealed partial class SketchEditor : IViewportMode
     Vec2 _mouse; Snap _snap; SkRef? _hover;
     readonly List<Vec2> _clicks = new();
     readonly List<Snap> _clickSnaps = new();
-    int _chainPoint = -1, _chainStartPoint = -1;
+    long _chainPoint = -1, _chainStartPoint = -1;
     double _arcSweep; Vec2 _arcLast;
     Point _downScreen; bool _down; bool _dragging; Vec2 _downSketch;
-    Dictionary<int, Vec2>? _dragOrigins; int _dragCircle = -1; SkRef? _dragLabel;
+    Dictionary<long, Vec2>? _dragOrigins; long _dragCircle = -1; SkRef? _dragLabel;
     Rect? _boxSel;
     Vec3? _hoverVertex;
     // smart dimension state
@@ -137,7 +137,7 @@ public sealed partial class SketchEditor : IViewportMode
     /// Solves the sketch with dimension values evaluated from their expressions. Without <paramref name="analyze"/>
     /// (each move of a drag) the definition (the colors) is kept as it was: the drag's end analyses it again.
     /// </summary>
-    public void Resolve(IReadOnlyDictionary<int, Vec2>? drag = null, bool analyze = true)
+    public void Resolve(IReadOnlyDictionary<long, Vec2>? drag = null, bool analyze = true)
     {
         foreach (var c in Sk.Constraints)
             if (c.IsDimension && !c.Driven && !string.IsNullOrWhiteSpace(c.Expr) && Expr.TryEval(c.Expr, Lookup, out var v, out _))
@@ -219,7 +219,7 @@ public sealed partial class SketchEditor : IViewportMode
     // ---- relations ----
 
     public IEnumerable<SkEntity> SelectedEntities => Selected.Where(r => r.Kind == SkRefKind.Entity).Select(r => Sk.Entity(r.Id)).OfType<SkEntity>();
-    public IEnumerable<int> SelectedPoints => Selected.Where(r => r.Kind == SkRefKind.Point).Select(r => r.Id);
+    public IEnumerable<long> SelectedPoints => Selected.Where(r => r.Kind == SkRefKind.Point).Select(r => r.Id);
 
     /// <summary>Relations applicable to the current selection.</summary>
     public List<CType> ApplicableRelations()
@@ -285,7 +285,7 @@ public sealed partial class SketchEditor : IViewportMode
         pts.AddRange(ents.OfType<SkPointEntity>().Select(p => p.P));
         Snapshot();
         var added = new List<SkConstraint>();
-        SkConstraint New(CType t, params int[] refs) { var c = new SkConstraint { Id = Sk.NewId(), Type = t, Refs = refs }; SketchSolver.CaptureSign(Sk, c); added.Add(c); return c; }
+        SkConstraint New(CType t, params long[] refs) { var c = new SkConstraint { Id = Sk.NewId(), Type = t, Refs = refs }; SketchSolver.CaptureSign(Sk, c); added.Add(c); return c; }
         switch (type)
         {
             case CType.Horizontal:
@@ -352,15 +352,15 @@ public sealed partial class SketchEditor : IViewportMode
     /// <summary>Relations involving the selected items (for the "Existing Relations" list).</summary>
     public IEnumerable<SkConstraint> RelationsOfSelection()
     {
-        var ids = new HashSet<int>(Selected.Where(s => s.Kind != SkRefKind.Constraint).Select(s => s.Id));
+        var ids = new HashSet<long>(Selected.Where(s => s.Kind != SkRefKind.Constraint).Select(s => s.Id));
         foreach (var e in SelectedEntities) foreach (var p in e.PointIds) ids.Add(p);
         return Sk.Constraints.Where(c => !c.IsDimension && c.Refs.Any(ids.Contains));
     }
 
-    public void SetPointPosition(int id, Vec2 p)
+    public void SetPointPosition(long id, Vec2 p)
     {
         Snapshot();
-        Resolve(new Dictionary<int, Vec2> { [id] = p });
+        Resolve(new Dictionary<long, Vec2> { [id] = p });
         _vp.Redraw();
     }
 
@@ -788,7 +788,7 @@ public sealed partial class SketchEditor : IViewportMode
         return list;
     }
 
-    int ResolvePoint(Snap s)
+    long ResolvePoint(Snap s)
     {
         switch (s.Kind)
         {
@@ -880,9 +880,9 @@ public sealed partial class SketchEditor : IViewportMode
         var start = _clicks[^1];
         if (Vec2.Distance(start, s.P) < Px * 2) return;
         Snapshot();
-        int a = _chainPoint >= 0 ? _chainPoint : ResolvePoint(_clickSnaps[^1]);
+        long a = _chainPoint >= 0 ? _chainPoint : ResolvePoint(_clickSnaps[^1]);
         if (_chainStartPoint < 0) _chainStartPoint = a;
-        int b = ResolvePoint(s);
+        long b = ResolvePoint(s);
         if (a == b) return;
         var l = Sk.Add(new SkLine { P1 = a, P2 = b, Construction = Tool == SketchTool.Centerline });
         if (s.H || s.V)
@@ -908,10 +908,10 @@ public sealed partial class SketchEditor : IViewportMode
     {
         var p1 = _clicks[0]; var p3 = _clicks[1];
         if (Math.Abs(p1.X - p3.X) < 1e-9 || Math.Abs(p1.Y - p3.Y) < 1e-9) return;
-        int a = ResolvePoint(_clickSnaps[0]);
-        int c = ResolvePoint(_clickSnaps[1]);
-        int b = Sk.AddPoint(new Vec2(p3.X, p1.Y)).Id;
-        int d = Sk.AddPoint(new Vec2(p1.X, p3.Y)).Id;
+        long a = ResolvePoint(_clickSnaps[0]);
+        long c = ResolvePoint(_clickSnaps[1]);
+        long b = Sk.AddPoint(new Vec2(p3.X, p1.Y)).Id;
+        long d = Sk.AddPoint(new Vec2(p1.X, p3.Y)).Id;
         var l1 = Sk.Add(new SkLine { P1 = a, P2 = b }); var l2 = Sk.Add(new SkLine { P1 = b, P2 = c });
         var l3 = Sk.Add(new SkLine { P1 = c, P2 = d }); var l4 = Sk.Add(new SkLine { P1 = d, P2 = a });
         Sk.AddConstraint(CType.Horizontal, l1.Id); Sk.AddConstraint(CType.Horizontal, l3.Id);
@@ -923,11 +923,11 @@ public sealed partial class SketchEditor : IViewportMode
         var c = _clicks[0]; var p = _clicks[1];
         var dx = p.X - c.X; var dy = p.Y - c.Y;
         if (Math.Abs(dx) < 1e-9 || Math.Abs(dy) < 1e-9) return;
-        int center = ResolvePoint(_clickSnaps[0]);
-        int a = Sk.AddPoint(new Vec2(c.X - dx, c.Y - dy)).Id;
-        int b = Sk.AddPoint(new Vec2(c.X + dx, c.Y - dy)).Id;
-        int cc = ResolvePoint(_clickSnaps[1]);
-        int d = Sk.AddPoint(new Vec2(c.X - dx, c.Y + dy)).Id;
+        long center = ResolvePoint(_clickSnaps[0]);
+        long a = Sk.AddPoint(new Vec2(c.X - dx, c.Y - dy)).Id;
+        long b = Sk.AddPoint(new Vec2(c.X + dx, c.Y - dy)).Id;
+        long cc = ResolvePoint(_clickSnaps[1]);
+        long d = Sk.AddPoint(new Vec2(c.X - dx, c.Y + dy)).Id;
         var l1 = Sk.Add(new SkLine { P1 = a, P2 = b }); var l2 = Sk.Add(new SkLine { P1 = b, P2 = cc });
         var l3 = Sk.Add(new SkLine { P1 = cc, P2 = d }); var l4 = Sk.Add(new SkLine { P1 = d, P2 = a });
         Sk.AddConstraint(CType.Horizontal, l1.Id); Sk.AddConstraint(CType.Horizontal, l3.Id);
@@ -942,7 +942,7 @@ public sealed partial class SketchEditor : IViewportMode
     {
         var r = Vec2.Distance(_clicks[0], _clicks[1]);
         if (r < 1e-9) return;
-        int c = ResolvePoint(_clickSnaps[0]);
+        long c = ResolvePoint(_clickSnaps[0]);
         var ci = Sk.Add(new SkCircle { Center = c, R = r });
         if (_clickSnaps[1].Kind is SnapKind.Point or SnapKind.Origin) Sk.AddConstraint(CType.PointOnCircle, _clickSnaps[1].Id, ci.Id);
     }
@@ -953,9 +953,9 @@ public sealed partial class SketchEditor : IViewportMode
         var r = Vec2.Distance(c, s);
         if (r < 1e-9) return;
         e = c + (e - c).Normalized * r;
-        int ci = ResolvePoint(_clickSnaps[0]);
-        int si = ResolvePoint(_clickSnaps[1]);
-        int ei = _clickSnaps[2].Kind is SnapKind.Point or SnapKind.Origin ? _clickSnaps[2].Id : Sk.AddPoint(e).Id;
+        long ci = ResolvePoint(_clickSnaps[0]);
+        long si = ResolvePoint(_clickSnaps[1]);
+        long ei = _clickSnaps[2].Kind is SnapKind.Point or SnapKind.Origin ? _clickSnaps[2].Id : Sk.AddPoint(e).Id;
         if (_arcSweep >= 0) Sk.Add(new SkArc { Center = ci, Start = si, End = ei });
         else Sk.Add(new SkArc { Center = ci, Start = ei, End = si });
     }
@@ -974,8 +974,8 @@ public sealed partial class SketchEditor : IViewportMode
         var s = _clicks[0]; var e = _clicks[1]; var m = _clicks[2];
         var cc = Circumcenter(s, e, m);
         if (cc == null) return;
-        int si = ResolvePoint(_clickSnaps[0]);
-        int ei = ResolvePoint(_clickSnaps[1]);
+        long si = ResolvePoint(_clickSnaps[0]);
+        long ei = ResolvePoint(_clickSnaps[1]);
         var c = Sk.AddPoint(cc.Value).Id;
         // is m on the ccw arc from s to e?
         bool ccw = Vec2.Cross(e - s, m - s) < 0;
@@ -983,7 +983,7 @@ public sealed partial class SketchEditor : IViewportMode
     }
 
     /// <summary>Tangent direction at an end point (pointing away from the existing entity).</summary>
-    (int point, Vec2 dir)? TangentAt(Snap s)
+    (long point, Vec2 dir)? TangentAt(Snap s)
     {
         if (s.Kind != SnapKind.Point) return null;
         foreach (var e in Sk.EntitiesUsing(s.Id))
@@ -1016,7 +1016,7 @@ public sealed partial class SketchEditor : IViewportMode
         if (Math.Abs(denom) < 1e-12) return;
         var k = se.LengthSq / denom;
         var c = s + n * k;
-        int ei = ResolvePoint(_clickSnaps[1]);
+        long ei = ResolvePoint(_clickSnaps[1]);
         var ci = Sk.AddPoint(c).Id;
         // ccw if turning left
         var arc = k > 0 ? new SkArc { Center = ci, Start = pid, End = ei } : new SkArc { Center = ci, Start = ei, End = pid };
@@ -1032,10 +1032,10 @@ public sealed partial class SketchEditor : IViewportMode
         var r = Vec2.Distance(c, v);
         if (r < 1e-9) return;
         int n = Math.Clamp(PolygonSides, 3, 64);
-        int ci = ResolvePoint(_clickSnaps[0]);
+        long ci = ResolvePoint(_clickSnaps[0]);
         var circ = Sk.Add(new SkCircle { Center = ci, R = r, Construction = true });
         var a0 = (v - c).Angle;
-        var ids = new List<int>();
+        var ids = new List<long>();
         for (int i = 0; i < n; i++) ids.Add(Sk.AddPoint(c + Vec2.FromAngle(a0 + 2 * Math.PI * i / n, r)).Id);
         var lines = new List<SkLine>();
         for (int i = 0; i < n; i++) lines.Add(Sk.Add(new SkLine { P1 = ids[i], P2 = ids[(i + 1) % n] }));
@@ -1051,9 +1051,9 @@ public sealed partial class SketchEditor : IViewportMode
         var u = axis / len; var n = u.Perp;
         var r = Math.Abs(Vec2.Dot(w - a, n));
         if (r < 1e-9) return;
-        int ca = ResolvePoint(_clickSnaps[0]); int cb = ResolvePoint(_clickSnaps[1]);
+        long ca = ResolvePoint(_clickSnaps[0]); long cb = ResolvePoint(_clickSnaps[1]);
         var axisLine = Sk.Add(new SkLine { P1 = ca, P2 = cb, Construction = true });
-        int p1 = Sk.AddPoint(a + n * r).Id, p2 = Sk.AddPoint(b + n * r).Id, p3 = Sk.AddPoint(b - n * r).Id, p4 = Sk.AddPoint(a - n * r).Id;
+        long p1 = Sk.AddPoint(a + n * r).Id, p2 = Sk.AddPoint(b + n * r).Id, p3 = Sk.AddPoint(b - n * r).Id, p4 = Sk.AddPoint(a - n * r).Id;
         var top = Sk.Add(new SkLine { P1 = p1, P2 = p2 });
         var bot = Sk.Add(new SkLine { P1 = p3, P2 = p4 });
         var arcB = Sk.Add(new SkArc { Center = cb, Start = p3, End = p2 });
@@ -1112,7 +1112,7 @@ public sealed partial class SketchEditor : IViewportMode
         Resolve();
     }
 
-    void ReplaceEnd(SkLine l, int oldPoint, int newPoint)
+    void ReplaceEnd(SkLine l, long oldPoint, long newPoint)
     {
         if (l.P1 == oldPoint) l.P1 = newPoint; else l.P2 = newPoint;
         Sk.Constraints.RemoveAll(c => c.Refs.Contains(oldPoint) && c.Refs.Contains(l.Id));
@@ -1288,12 +1288,12 @@ public sealed partial class SketchEditor : IViewportMode
         {
             var p1 = _dimPicks[1];
             var e1 = p1.Kind == SkRefKind.Entity ? Sk.Entity(p1.Id) : null;
-            int Pt(SkRef r, SkEntity? e) => r.Kind == SkRefKind.Point ? r.Id : e is SkCircle cc ? cc.Center : e is SkArc aa ? aa.Center : -1;
+            long Pt(SkRef r, SkEntity? e) => r.Kind == SkRefKind.Point ? r.Id : e is SkCircle cc ? cc.Center : e is SkArc aa ? aa.Center : -1;
             bool isPt0 = p0.Kind == SkRefKind.Point || e0 is SkCircle or SkArc;
             bool isPt1 = p1.Kind == SkRefKind.Point || e1 is SkCircle or SkArc;
             if (isPt0 && isPt1)
             {
-                int a = Pt(p0, e0), b = Pt(p1, e1);
+                long a = Pt(p0, e0), b = Pt(p1, e1);
                 if (a != b && a >= 0 && b >= 0)
                     c = new SkConstraint { Type = TwoPointType(Sk.P(a), Sk.P(b), mouse), Refs = new[] { a, b } };
             }
@@ -1419,7 +1419,7 @@ public sealed partial class SketchEditor : IViewportMode
     // ---------------------------------------------------------------------------------------
     // drawing
 
-    Rgba ColorOfPoint(int id) => Status.Status == SketchStatus.OverDefined ? Over : Status.FreePoints.Contains(id) ? Under : Full;
+    Rgba ColorOfPoint(long id) => Status.Status == SketchStatus.OverDefined ? Over : Status.FreePoints.Contains(id) ? Under : Full;
 
     Rgba ColorOf(SkEntity e)
     {
@@ -1636,7 +1636,7 @@ public sealed partial class SketchEditor : IViewportMode
         catch { return Vec2.Zero; }
     }
 
-    (Vec2, Vec2) LinePts(int id) { var l = (SkLine)Sk.Entity(id)!; return (Sk.P(l.P1), Sk.P(l.P2)); }
+    (Vec2, Vec2) LinePts(long id) { var l = (SkLine)Sk.Entity(id)!; return (Sk.P(l.P1), Sk.P(l.P2)); }
 
     static Vec2? Intersect(Vec2 a, Vec2 b, Vec2 c, Vec2 d)
     {
@@ -1778,11 +1778,11 @@ public sealed partial class SketchEditor : IViewportMode
     // overlay labels (dimension values and relation glyphs)
 
     public Canvas? Overlay { get; set; }
-    readonly Dictionary<int, Border> _labels = new();
+    readonly Dictionary<long, Border> _labels = new();
     // the overlay's marks, kept from one update to the next (an update repositions them; creating, styling and
     // attaching new controls on every mouse move was most of its cost): relations by constraint id, On Edge marks by
     // entity id, anchors by point id
-    readonly Dictionary<int, Border> _relGlyphs = new(), _linkGlyphs = new(), _anchorGlyphs = new();
+    readonly Dictionary<long, Border> _relGlyphs = new(), _linkGlyphs = new(), _anchorGlyphs = new();
     static readonly IBrush RelBack = new ImmutableSolidColorBrush(Color.FromArgb(230, 200, 240, 200));
     static readonly IBrush RelBackSelected = new ImmutableSolidColorBrush(Color.FromRgb(120, 170, 255));
     static readonly IBrush RelBorder = new ImmutableSolidColorBrush(Color.FromRgb(60, 140, 60));
@@ -1797,7 +1797,7 @@ public sealed partial class SketchEditor : IViewportMode
     static Cursor HandCursor => _handCursor ??= new Cursor(StandardCursorType.Hand);
 
     /// <summary>Removes the marks whose ids were not seen in this update.</summary>
-    void Prune(Dictionary<int, Border> marks, HashSet<int> seen)
+    void Prune(Dictionary<long, Border> marks, HashSet<long> seen)
     {
         foreach (var id in marks.Keys.Where(k => !seen.Contains(k)).ToList()) { Overlay!.Children.Remove(marks[id]); marks.Remove(id); }
     }
@@ -1839,7 +1839,7 @@ public sealed partial class SketchEditor : IViewportMode
     public void UpdateOverlay(ViewportControl vp)
     {
         if (Overlay == null) return;
-        var live = new HashSet<int>();
+        var live = new HashSet<long>();
         var dims = Sk.Constraints.Where(c => c.IsDimension).ToList();
         foreach (var c in dims)
         {
@@ -1871,10 +1871,10 @@ public sealed partial class SketchEditor : IViewportMode
         else if (_previewLabel != null) _previewLabel.IsVisible = false;
 
         // relation glyphs
-        var seenRel = new HashSet<int>(); var seenLink = new HashSet<int>(); var seenAnchor = new HashSet<int>();
+        var seenRel = new HashSet<long>(); var seenLink = new HashSet<long>(); var seenAnchor = new HashSet<long>();
         if (ShowRelations)
         {
-            var perEntity = new Dictionary<int, int>();
+            var perEntity = new Dictionary<long, int>();
             foreach (var c in Sk.Constraints.Where(c => !c.IsDimension))
             {
                 var pos = GlyphPos(c, perEntity);
@@ -1981,11 +1981,11 @@ public sealed partial class SketchEditor : IViewportMode
         return null;
     }
 
-    Vec2? GlyphPos(SkConstraint c, Dictionary<int, int> perEntity)
+    Vec2? GlyphPos(SkConstraint c, Dictionary<long, int> perEntity)
     {
         try
         {
-            int key = c.Refs.Length > 0 ? c.Refs[^1] : 0;
+            long key = c.Refs.Length > 0 ? c.Refs[^1] : 0;
             int k = perEntity.GetValueOrDefault(key);
             perEntity[key] = k + 1;
             var shift = new Vec2(k * Px * 16, 0);

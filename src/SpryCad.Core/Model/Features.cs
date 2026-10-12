@@ -120,7 +120,7 @@ public sealed class RevolveFeature : Feature
     public string SketchId { get; set; } = "";
     public bool IsCut { get; set; }
     /// <summary>Sketch line used as axis (0 = first centerline).</summary>
-    public int AxisEntity { get; set; }
+    public long AxisEntity { get; set; }
     /// <summary>
     /// An axis from the model instead (a cylindrical or conical face, a straight or circular edge, X / Y / Z): it must
     /// lie in the sketch's plane. Null: the sketch line <see cref="AxisEntity"/>.
@@ -174,7 +174,7 @@ public sealed class HelicalSweepFeature : Feature
     public override string Kind => IsCut ? "Cut-Helical" : "Helical";
     public string SketchId { get; set; } = "";
     /// <summary>Sketch line used as axis (0 = first centerline).</summary>
-    public int AxisEntity { get; set; }
+    public long AxisEntity { get; set; }
     /// <summary>An axis from the model instead of the sketch: a cylindrical face, a straight or circular edge, or X / Y / Z.</summary>
     public DirRef? Axis { get; set; }
     public string Pitch { get; set; } = "5";
@@ -377,7 +377,7 @@ public sealed class CurveRef
 {
     public EdgeRef? Edge { get; set; }
     public string? Sketch { get; set; }
-    public int SketchEntity { get; set; }
+    public long SketchEntity { get; set; }
     public CurveRef Clone() => new() { Edge = Edge?.Clone(), Sketch = Sketch, SketchEntity = SketchEntity };
 }
 
@@ -391,7 +391,7 @@ public sealed class PointRef
     /// <summary>The center of a circular edge (a circle or an arc of one): a hole's, a boss's.</summary>
     public EdgeRef? Center { get; set; }
     public string? Sketch { get; set; }
-    public int SketchPoint { get; set; }
+    public long SketchPoint { get; set; }
     public PointRef Clone() => new() { Vertex = Vertex?.Clone(), Center = Center?.Clone(), Sketch = Sketch, SketchPoint = SketchPoint };
 }
 

@@ -22,6 +22,8 @@ public static class Warmup
         var s1 = doc.AddFeature(new SketchFeature { Plane = PlaneRef.Front, Sketch = Rect(100, 60) });
         var e1 = doc.AddFeature(new ExtrudeFeature { SketchId = s1.Id, Depth = "20" });
         var top = new FaceRef { Name = e1.Id + ".End", Hint = new Vec3(50, 30, 20), Normal = Vec3.UnitZ };
+        // the side faces of the rectangle's right and top lines
+        string right = e1.Id + ".S." + ProfileExtractor.FaceName(s1.Sketch.Entities[1]), back = e1.Id + ".S." + ProfileExtractor.FaceName(s1.Sketch.Entities[2]);
 
         var sk2 = new Sketch();
         var cp = sk2.AddPoint(new Vec2(30, 30));
@@ -29,14 +31,14 @@ public static class Warmup
         var s2 = doc.AddFeature(new SketchFeature { Plane = new PlaneRef { Face = top }, Sketch = sk2 });
         doc.AddFeature(new ExtrudeFeature { SketchId = s2.Id, IsCut = true, End = EndCondition.ThroughAll, Reverse = true });
 
-        doc.AddFeature(new FilletFeature { Radius = "5", Edges = { new EdgeRef { A = e1.Id + ".S.L5", B = e1.Id + ".S.L6", Hint = new Vec3(100, 60, 10) } } });
+        doc.AddFeature(new FilletFeature { Radius = "5", Edges = { new EdgeRef { A = right, B = back, Hint = new Vec3(100, 60, 10) } } });
 
         var hs = new Sketch(); var hp = hs.AddPoint(new Vec2(70, 30)); hs.Add(new SkPointEntity { P = hp.Id });
         var s3 = doc.AddFeature(new SketchFeature { Plane = new PlaneRef { Face = top }, Sketch = hs });
         var hole = doc.AddFeature(new HoleFeature { SketchId = s3.Id, Type = HoleType.Counterbore, Diameter = "6.6", ThroughAll = true });
         doc.AddFeature(new LinearPatternFeature { Seeds = { hole.Id }, Direction = new DirRef { Axis = "Y" }, Spacing = "-20", Count = "2" });
         doc.AddFeature(new ShellFeature { Thickness = "2", Faces = { new FaceRef { Name = e1.Id + ".Start", Hint = new Vec3(50, 30, 0), Normal = -Vec3.UnitZ } } });
-        doc.AddFeature(new ChamferFeature { Distance = "1", Edges = { new EdgeRef { A = e1.Id + ".End", B = e1.Id + ".S.L6", Hint = new Vec3(50, 60, 20) } } });
+        doc.AddFeature(new ChamferFeature { Distance = "1", Edges = { new EdgeRef { A = e1.Id + ".End", B = back, Hint = new Vec3(50, 60, 20) } } });
 
         var r = new Regenerator().Rebuild(doc);
         foreach (var b in r.State.Bodies)

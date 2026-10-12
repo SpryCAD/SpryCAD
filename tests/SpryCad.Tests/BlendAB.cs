@@ -33,7 +33,7 @@ static class BlendAB
             if (verbose) Console.WriteLine("      " + m);
             var k = m[(m.IndexOf('(') + 1)..].TrimEnd(')');
             // the reason without the face names
-            k = System.Text.RegularExpressions.Regex.Replace(k, @"F[0-9][0-9A-Za-z.]*", "F");
+            k = System.Text.RegularExpressions.Regex.Replace(k, @"F(?:[0-9a-z]{12}|[0-9])[0-9A-Za-z.]*", "F");
             lock (why) why[k] = why.GetValueOrDefault(k) + 1;
         };
         if (Environment.GetEnvironmentVariable("FC_BLENDAB_NB") != null) NativeBlend.Debug = m => { if (m.StartsWith("blend ")) Console.WriteLine("      " + m); };
@@ -41,8 +41,10 @@ static class BlendAB
         foreach (var (name, load) in docs)
         {
             if (filter != null && !name.Contains(filter, StringComparison.OrdinalIgnoreCase)) continue;
-            var b = Build(load, false);
-            var a = Build(load, true);
+            // one part for both (a part built by code gets new random ids each time: its face names would differ)
+            var part = load();
+            var b = Build(() => part.Clone(), false);
+            var a = Build(() => part.Clone(), true);
             tDirect += a.ms; tBool += b.ms;
             var diffs = new List<string>();
             for (int i = 0; i < a.feats.Count; i++)

@@ -33,12 +33,13 @@ public static class MeshCache
         public bool Current => Version == GeometryVersion.Current;
     }
 
-    public static byte[] Write(DisplayMesh m, double[] color, IReadOnlyList<CosmeticThread>? threads = null)
+    /// <param name="version">The geometry version to record (null: this code's): a cache rewritten as it was keeps its own.</param>
+    public static byte[] Write(DisplayMesh m, double[] color, IReadOnlyList<CosmeticThread>? threads = null, int? version = null)
     {
         using var ms = new MemoryStream();
         using var w = new BinaryWriter(ms, Encoding.UTF8);
         w.Write(Encoding.ASCII.GetBytes(Magic));
-        w.Write(GeometryVersion.Current);
+        w.Write(version ?? GeometryVersion.Current);
         for (int i = 0; i < 3; i++) w.Write((float)(i < color.Length ? color[i] : 0.75));
         foreach (var v in new[] { m.Bounds.Min, m.Bounds.Max }) { w.Write(v.X); w.Write(v.Y); w.Write(v.Z); }
         w.Write(m.Volume);
@@ -127,6 +128,14 @@ public static class MeshCache
             }
         }
         return new Entry(m, color, threads, version);
+    }
+
+    /// <summary>A cache with its faces renamed (a part re-id'd: <see cref="Model.LegacyIds"/>), made by the same geometry version.</summary>
+    public static byte[] Renamed(byte[] data, Func<string, string> rename)
+    {
+        var e = Read(data);
+        for (int i = 0; i < e.Mesh.Faces.Count; i++) e.Mesh.Faces[i] = e.Mesh.Faces[i] with { Name = rename(e.Mesh.Faces[i].Name) };
+        return Write(e.Mesh, e.Color, e.Threads, e.Version);
     }
 
     static void Floats(BinaryWriter w, float[] a) { w.Write(a.Length); foreach (var f in a) w.Write(f); }

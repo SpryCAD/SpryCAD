@@ -370,7 +370,7 @@ public partial class MainWindow
         // a pick as SolidWorks lists it (Face<…>@Component), what it is in its tooltip
         string Label(MateRef r) => r.Component == null ? $"{r.Face} Plane"
             : a.Model.Find(r.Component) is { Component.IsAssembly: true } ? $"{r.Face} Plane@{a.Model.NameAt(r.Component)}"
-            : $"{(r.End != null ? "Center" : r.Kind == MateGeomKind.Axis ? "Axis" : "Face")}<{r.Face}>@{a.Model.NameAt(r.Component)}";
+            : $"{(r.End != null ? "Center" : r.Kind == MateGeomKind.Axis ? "Axis" : "Face")}<{a.Model.FaceName(r)}>@{a.Model.NameAt(r.Component)}";
         string Describe(MateRef r) => r.Component == null ? $"The assembly's {r.Face} plane" : r.Kind switch
         {
             MateGeomKind.Plane => "A planar face",

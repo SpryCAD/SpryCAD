@@ -85,7 +85,7 @@ static partial class Demos
         d.AddFeature(new ThreadFeature
         {
             Name = "Thread", End = ThreadEnd.UpToNext, Cosmetic = true, SuppressWhen = "not Threaded",
-            Face = new FaceRef { Name = $"{shank.Id}.S.C{shc}", Hint = new Vec3(sh.Eval("D/2"), 0, sh.Eval("k+L-1")) },
+            Face = new FaceRef { Name = $"{shank.Id}.S.C{Ids.Name(shc)}", Hint = new Vec3(sh.Eval("D/2"), 0, sh.Eval("k+L-1")) },
         });
         d.Color = new[] { 0.30, 0.31, 0.34 };
         return d;
