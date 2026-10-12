@@ -101,7 +101,8 @@ static class Bench
                 // edit cost per feature: change a numeric parameter of feature k to a new value (best of 3)
                 Console.WriteLine("  edit cost (change a parameter of the feature):");
                 int bump = 0;
-                for (int k = 0; k < doc.Features.Count; k++)
+                // FC_NO_EDITS=1: skipped (on a large part they take minutes)
+                for (int k = 0; k < doc.Features.Count && Environment.GetEnvironmentVariable("FC_NO_EDITS") == null; k++)
                 {
                     var prop = NumericParam(doc.Features[k]);
                     if (prop == null) continue;

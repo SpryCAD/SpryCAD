@@ -76,20 +76,43 @@ public static class NIntersect
         var c = e.Curve;
         var count = Prof.Enabled;
         // (counted while profiling: the evaluations are the cost, a closest-point search each on a pipe or B-spline)
-        double F(double t) { if (count) Prof.Count("edgesurface.eval", 1); return s.F_(c.Eval(t)); }
+        int evals = 0;
+        double F(double t)
+        {
+            evals++;
+            if (count) Prof.Count("edgesurface.eval", 1);
+            if (!count) return s.F_(c.Eval(t));
+            var t0 = System.Diagnostics.Stopwatch.GetTimestamp();
+            var p = c.Eval(t);
+            var t1 = System.Diagnostics.Stopwatch.GetTimestamp();
+            var v = s.F_(p);
+            var t2 = System.Diagnostics.Stopwatch.GetTimestamp();
+            Prof.Add("es.curve." + c.GetType().Name, (t1 - t0) * 1000.0 / System.Diagnostics.Stopwatch.Frequency);
+            Prof.Add("es.surf." + s.Kind, (t2 - t1) * 1000.0 / System.Diagnostics.Stopwatch.Frequency);
+            return v;
+        }
         double lo = Math.Min(e.T0, e.T1), hi = Math.Max(e.T0, e.T1);
         var res = new List<double>();
+        if (count) Prof.Count("es.calls." + s.Kind, 1);
 
         // edge lying on the surface (fitted curves only within their fit tolerance: a boolean fits traced
         // sections within 50 tol of the exact intersection)
         const int probe = 16;
         bool allOn = true;
         var onTol = c is NSpline or NPolyline ? Math.Max(tol * 100, c is NSpline ns ? ns.FitTol * 2 : 0) : tol;
-        for (int i = 0; i <= probe && allOn; i++) if (Math.Abs(F(lo + (hi - lo) * i / probe)) > onTol) allOn = false;
+        // each value worked out once: the probe's points, the root search's first ones (every other probe point: the
+        // same parameters, as scaling by 2, 8 and 16 is exact) and the ends (the probe's last point is lo + (hi − lo),
+        // which need not be hi to the last bit: the hi end is its own)
+        Span<double> probed = stackalloc double[probe + 1];
+        probed.Fill(double.NaN);
+        double Probed(int i, Span<double> pv) => double.IsNaN(pv[i]) ? pv[i] = F(lo + (hi - lo) * i / probe) : pv[i];
+        for (int i = 0; i <= probe && allOn; i++) if (Math.Abs(Probed(i, probed)) > onTol) allOn = false;
         if (allOn) return new EdgeHits(res, true);
 
-        if (Math.Abs(F(e.T0)) < tol) res.Add(e.T0);
-        if (Math.Abs(F(e.T1)) < tol) res.Add(e.T1);
+        double fLo = Probed(0, probed), fHi = F(hi);
+        double fT0 = e.T0 == lo ? fLo : fHi, fT1 = e.T1 == lo ? fLo : fHi;
+        if (Math.Abs(fT0) < tol) res.Add(e.T0);
+        if (Math.Abs(fT1) < tol) res.Add(e.T1);
         var exact = AnalyticRoots(c, s, tol) ?? (s.Kind == SurfaceKind.Screw ? ScrewRoots(c, s.Screw!, lo, hi, tol) : null);
         if (exact != null)
         {
@@ -153,17 +176,17 @@ public static class NIntersect
                 Iso(m, tb, fm, fb, depth + 1);
             }
             // start from a few segments so the arc bound of curved edges stays tight
-            const int n = 8; double prevT = lo, prevF = F(lo);
+            const int n = 8; double prevT = lo, prevF = fLo;
             for (int i = 1; i <= n; i++)
             {
-                var t = lo + (hi - lo) * i / n; var f = F(t);
+                var t = lo + (hi - lo) * i / n; var f = Probed(i * (probe / n), probed);
                 Iso(prevT, t, prevF, f, 0);
                 prevT = t; prevF = f;
             }
         }
         res.Sort();
         // merge duplicates; an end point lying on the surface absorbs crossings right next to it (no micro edges)
-        bool startOn = Math.Abs(F(e.T0)) < tol, endOn = Math.Abs(F(e.T1)) < tol;
+        bool startOn = Math.Abs(fT0) < tol, endOn = Math.Abs(fT1) < tol;
         Vec3 p0 = e.V0.P, p1 = e.V1.P;
         var merged = new List<double>();
         foreach (var t in res)
@@ -172,6 +195,15 @@ public static class NIntersect
             bool isEnd = t == e.T0 || t == e.T1;
             if (!isEnd && ((startOn && Vec3.Distance(p, p0) < tol * 100) || (endOn && Vec3.Distance(p, p1) < tol * 100))) continue;
             if (merged.Count == 0 || Vec3.Distance(p, c.Eval(merged[^1])) > tol) merged.Add(t);
+        }
+        if (count && s.Kind is SurfaceKind.BSpline or SurfaceKind.Pipe)
+        {
+            Prof.Add($"es.n.{s.Kind}.{c.GetType().Name}", evals);
+            if (evals > 400)
+            {
+                double mx = 0; for (int i = 0; i <= 64; i++) mx = Math.Max(mx, Math.Abs(s.F_(c.Eval(lo + (hi - lo) * i / 64))));
+                Prof.Add($"es.big.{s.Kind}.{c.GetType().Name} roots {merged.Count} len {ArcBound(c, lo, hi):0} max|f| {mx:g2} onTol {onTol:g2} tol {tol:g2}", evals);
+            }
         }
         return new EdgeHits(merged, false);
     }
