@@ -108,6 +108,9 @@ public sealed class Regenerator
                 catch (Exception ex) { st.Error = "Rebuild error: " + ex.Message; }
             }
             st.Milliseconds = fsw.Elapsed.TotalMilliseconds;
+            // (messages name faces and bodies as the user knows them, not by their ids)
+            st.Error = DisplayNames.Text(doc, st.Error);
+            for (int w = 0; w < st.Warnings.Count; w++) st.Warnings[w] = DisplayNames.Text(doc, st.Warnings[w])!;
             rebuilt++;
             lock (_cache)
                 if (epoch == _epoch)
@@ -602,7 +605,7 @@ public sealed class Regenerator
                 SkLine? axis = h.AxisEntity != 0 ? sk.Sketch.Entity(h.AxisEntity) as SkLine : null;
                 axis ??= sk.Sketch.Entities.OfType<SkLine>().FirstOrDefault(l => l.Construction);
                 if (axis == null) throw new FeatureException("Select the helix's axis: a centerline in the profile's sketch, a cylindrical face or an edge.");
-                regions = axis.Construction ? sk.Regions : ProfileExtractor.Extract(sk.Sketch, out _, new HashSet<int> { axis.Id });
+                regions = axis.Construction ? sk.Regions : ProfileExtractor.Extract(sk.Sketch, out _, new HashSet<long> { axis.Id });
                 a = sk.Frame.ToWorld(sk.Sketch.P(axis.P1)); var b = sk.Frame.ToWorld(sk.Sketch.P(axis.P2));
                 dir = (b - a).Normalized;
             }

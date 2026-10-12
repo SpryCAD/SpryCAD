@@ -22,8 +22,10 @@ static class DirectBlendTests
             var before = DirectBlend.Counts;
             foreach (var (name, load) in models)
             {
-                var a = BlendAB.Build(load, direct: true, reps: 1).feats;
-                var b = BlendAB.Build(load, direct: false, reps: 1).feats;
+                // one part both ways (built again by code it would have other ids, so other face names)
+                var part = load();
+                var a = BlendAB.Build(() => part.Clone(), direct: true, reps: 1).feats;
+                var b = BlendAB.Build(() => part.Clone(), direct: false, reps: 1).feats;
                 for (int i = 0; i < a.Count; i++)
                 {
                     var (fa, fb) = (a[i], b[i]);
@@ -185,7 +187,7 @@ static class DirectBlendTests
                 try
                 {
                     var doc = CadDocument.Load(file);
-                    var f = doc.Features.First(x => x.Id == "F18");
+                    var f = doc.Features.First(x => x.Id == LegacyIds.Feature(doc.Id!, "F18")); // saved before random ids
                     var r0 = new Regenerator().Rebuild(doc, doc.Features.IndexOf(f));
                     var before = DirectBlend.Counts.declined;
                     Csg.ClearCache();
@@ -392,7 +394,7 @@ static class DirectBlendTests
                 t.True(r1.State.Bodies[0].Solid.Native?.Validate() == null, "valid");
                 return KernelTests.Vex(r1.State.Bodies[0].Solid) - KernelTests.Vex(r0.State.Bodies[0].Solid);
             }
-            var sockId = "F4";
+            var sockId = CadDocument.Load(path).Features.First(f => f.Name == "Socket" && f is ExtrudeFeature).Id; // the same every load
             bool Vert(Kernel.Native.NEdge e) => e.Uses.All(u => u.Face.Tag.Name.StartsWith(sockId + ".S"));
             bool Floor(Kernel.Native.NEdge e) => e.Uses.Any(u => u.Face.Tag.Name == sockId + ".End");
             bool Rim(Kernel.Native.NEdge e) => !Vert(e) && !Floor(e);
@@ -461,8 +463,9 @@ static class DirectBlendTests
             // mitred corner, not the ball's): 32 mm³ apart on a box filleted all round
             foreach (var name in new[] { "box, three edges at a corner", "box, all edges", "pocket, floor and corners", "casting foot, undrafted" })
             {
-                var a = BlendAB.Build(() => Demos.BlendCases.First(c => c.name == name).build(), direct: true, reps: 1).feats;
-                var b = BlendAB.Build(() => Demos.BlendCases.First(c => c.name == name).build(), direct: false, reps: 1).feats;
+                var part = Demos.BlendCases.First(c => c.name == name).build(); // one part both ways (the same face names)
+                var a = BlendAB.Build(() => part.Clone(), direct: true, reps: 1).feats;
+                var b = BlendAB.Build(() => part.Clone(), direct: false, reps: 1).feats;
                 for (int i = 0; i < a.Count; i++)
                 {
                     t.True(a[i].error == null && b[i].error == null, $"{name}, {a[i].name}: {a[i].error ?? b[i].error}");
@@ -506,10 +509,12 @@ static class DirectBlendTests
             // level with it (concave there): one edge picked on the block's own top rounds that edge only
             foreach (var direct in new[] { true, false })
             {
-                var f = BlendAB.Build(() => Demos.BlendCases.First(c => c.name == "drafted block, top edge under an overhang").build(), direct, reps: 1).feats.First(x => x.name == "Top edge");
+                var doc = Demos.BlendCases.First(c => c.name == "drafted block, top edge under an overhang").build();
+                var f = BlendAB.Build(() => doc, direct, reps: 1).feats.First(x => x.name == "Top edge");
+                var filletId = doc.Features.First(x => x.Name == "Top edge").Id;
                 t.True(f.error == null && f.valid == null, $"{f.error} {f.valid}");
                 var blends = f.names.Where(n => n.EndsWith(".S.F", StringComparison.Ordinal) || n.EndsWith(".Blend", StringComparison.Ordinal)).ToList();
-                t.True(blends.Count == 1 && blends[0].StartsWith("F6.0.", StringComparison.Ordinal), $"{(direct ? "direct" : "boolean")}: blend faces {string.Join(", ", blends)}");
+                t.True(blends.Count == 1 && blends[0].StartsWith(filletId + ".0.", StringComparison.Ordinal), $"{(direct ? "direct" : "boolean")}: blend faces {string.Join(", ", blends)}");
             }
         });
 

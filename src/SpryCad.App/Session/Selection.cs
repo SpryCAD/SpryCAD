@@ -42,7 +42,7 @@ public sealed class SelItem
     public string? FeatureId { get; init; }
     public Frame? Frame { get; init; }
     /// <summary>Sketch point id (Vertex picked in a sketch) or sketch entity id (SketchSegment).</summary>
-    public int SketchItem { get; init; } = -1;
+    public long SketchItem { get; init; } = -1;
     /// <summary>A Vertex that is the center of a circle or arc (no vertex of the model), with that circle's radius.</summary>
     public bool IsCenter { get; init; }
     public double CenterRadius { get; init; }
@@ -65,19 +65,22 @@ public sealed class SelItem
 
     public string Label(CadDocument doc) => Kind switch
     {
-        SelKind.Face => $"Face<{ShortName(Name)}>",
+        SelKind.Face => $"Face<{ShortName(DisplayNames.Face(doc, Name))}>",
         SelKind.Edge => $"Edge<{EdgeIndex + 1}>",
         SelKind.Plane => FeatureId != null ? doc.Find(FeatureId)?.Name ?? "Plane" : $"{Name} Plane",
         SelKind.Sketch => doc.Find(FeatureId!)?.Name ?? "Sketch",
         SelKind.Feature => doc.Find(FeatureId!)?.Name ?? "Feature",
-        SelKind.Body => $"Body<{BodyId}>",
-        SelKind.Vertex => FeatureId != null ? $"Point{SketchItem}@{doc.Find(FeatureId)?.Name}" : IsCenter ? $"Center<Ø{2 * CenterRadius:0.###}>" : "Vertex<" + $"{Point.X:0.##}, {Point.Y:0.##}, {Point.Z:0.##}>",
-        SelKind.SketchSegment => $"Line{SketchItem}@{doc.Find(FeatureId!)?.Name}",
-        SelKind.Axis => $"Axis<{ShortName(Name ?? Edge?.A)}>",
+        SelKind.Body => $"Body<{DisplayNames.Face(doc, BodyId)}>",
+        SelKind.Vertex => FeatureId != null ? $"{SketchItemName(doc)}@{doc.Find(FeatureId)?.Name}" : IsCenter ? $"Center<Ø{2 * CenterRadius:0.###}>" : "Vertex<" + $"{Point.X:0.##}, {Point.Y:0.##}, {Point.Z:0.##}>",
+        SelKind.SketchSegment => $"{SketchItemName(doc)}@{doc.Find(FeatureId!)?.Name}",
+        SelKind.Axis => $"Axis<{ShortName(DisplayNames.Face(doc, Name ?? Edge?.A))}>",
         _ => "Origin",
     };
 
-    static string ShortName(string? n) => n == null ? "" : n.Length > 24 ? n[..24] : n;
+    static string ShortName(string? n) => n == null ? "" : n.Length > 40 ? n[..40] : n;
+
+    /// <summary>The sketch point or entity picked, as the sketch lists it ("Line3").</summary>
+    string SketchItemName(CadDocument doc) => FeatureId != null && doc.Find(FeatureId) is SketchFeature sf ? DisplayNames.Of(sf.Sketch, SketchItem) : "Point";
 
     public FaceRef ToFaceRef() => new() { Name = Name ?? "", Body = BodyId, Hint = Point, Normal = Normal };
 

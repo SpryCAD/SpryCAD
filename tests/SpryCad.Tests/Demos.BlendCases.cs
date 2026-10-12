@@ -51,7 +51,7 @@ static partial class Demos
         if (baseDraft != null)
         {
             // the plate's corners rounded too (as the engine's casting)
-            string BF(int i) => $"{basePlate.Id}.S.L{bl[i]}";
+            string BF(int i) => $"{basePlate.Id}.S.L{Ids.Name(bl[i])}";
             double W(string e) => b.Eval(e);
             double zb = W("BaseT/2");
             d.AddFeature(new FilletFeature
@@ -70,7 +70,7 @@ static partial class Demos
         var ys = d.AddFeature(new SketchFeature { Name = "Boss", Plane = new PlaneRef { Feature = top.Id }, Sketch = y.S });
         var boss = d.AddFeature(new ExtrudeFeature { Name = "Boss", SketchId = ys.Id, Depth = "BossH", Draft = draft == "0" ? null : "Draft" });
         double V(string e) => y.Eval(e);
-        string F(int i) => $"{boss.Id}.S.L{yl[i]}";
+        string F(int i) => $"{boss.Id}.S.L{Ids.Name(yl[i])}";
         double zm = V("BaseT+BossH/2");
         d.AddFeature(new FilletFeature
         {
@@ -121,7 +121,7 @@ static partial class Demos
         var ss = d.AddFeature(new SketchFeature { Name = "Box", Plane = PlaneRef.Front, Sketch = s.S });
         var box = d.AddFeature(new ExtrudeFeature { Name = "Box", SketchId = ss.Id, Depth = "Z" });
         double V(string e) => s.Eval(e);
-        string F(int i) => $"{box.Id}.S.L{l[i]}";
+        string F(int i) => $"{box.Id}.S.L{Ids.Name(l[i])}";
         d.AddFeature(new FilletFeature
         {
             Name = "Corner", Radius = "R", TangentPropagation = false,
@@ -147,7 +147,7 @@ static partial class Demos
         var ss = d.AddFeature(new SketchFeature { Name = "Box", Plane = PlaneRef.Front, Sketch = s.S });
         var box = d.AddFeature(new ExtrudeFeature { Name = "Box", SketchId = ss.Id, Depth = "Z" });
         double V(string e) => s.Eval(e);
-        string F(int i) => $"{box.Id}.S.L{l[i]}";
+        string F(int i) => $"{box.Id}.S.L{Ids.Name(l[i])}";
         var corners = new[] { (V("X"), -V("Y")), (V("X"), V("Y")), (-V("X"), V("Y")), (-V("X"), -V("Y")) };
         var mids = new[] { (0.0, -V("Y")), (V("X"), 0.0), (0.0, V("Y")), (-V("X"), 0.0) };
         var fillet = new FilletFeature { Name = "All edges", Radius = "R", TangentPropagation = false };
@@ -176,7 +176,7 @@ static partial class Demos
         var ps = d.AddFeature(new SketchFeature { Name = "Pocket", Plane = new PlaneRef { Feature = top.Id }, Sketch = p.S });
         var pocket = d.AddFeature(new ExtrudeFeature { Name = "Pocket", SketchId = ps.Id, IsCut = true, Reverse = true, Depth = "PD" });
         double V(string e) => s.Eval(e);
-        string F(int i) => $"{pocket.Id}.S.L{pl[i]}";
+        string F(int i) => $"{pocket.Id}.S.L{Ids.Name(pl[i])}";
         double floor = V("Z-PD");
         var corners = new[] { (V("PX"), -V("PY")), (V("PX"), V("PY")), (-V("PX"), V("PY")), (-V("PX"), -V("PY")) };
         var mids = new[] { (0.0, -V("PY")), (V("PX"), 0.0), (0.0, V("PY")), (-V("PX"), 0.0) };
@@ -212,7 +212,7 @@ static partial class Demos
         d.AddFeature(new FilletFeature
         {
             Name = "Top edge", Radius = "R",
-            Edges = { E($"{block.Id}.S.L{l[0]}", $"{block.Id}.End", new Vec3(V("X/2"), y, V("H"))) },
+            Edges = { E($"{block.Id}.S.L{Ids.Name(l[0])}", $"{block.Id}.End", new Vec3(V("X/2"), y, V("H"))) },
         });
         return d;
     }
@@ -241,7 +241,7 @@ static partial class Demos
         d.AddFeature(new FilletFeature
         {
             Name = "Gap edge", Radius = "R", TangentPropagation = false,
-            Edges = { E($"{low.Id}.End", $"{low.Id}.S.L{l1[1]}", new Vec3(-V("G"), 0, V("H1"))) },
+            Edges = { E($"{low.Id}.End", $"{low.Id}.S.L{Ids.Name(l1[1])}", new Vec3(-V("G"), 0, V("H1"))) },
         });
         return d;
     }
@@ -264,8 +264,8 @@ static partial class Demos
         var boss = d.AddFeature(new ExtrudeFeature { Name = "Boss", SketchId = cs.Id, Depth = "H", Draft = "Draft" });
         double V(string e) => b.Eval(e);
         var rt = V("D/2") - V("H") * Math.Tan(V("Draft") * Math.PI / 180);
-        d.AddFeature(new FilletFeature { Name = "Boss top", Radius = "Rt", Edges = { E($"{boss.Id}.End", $"{boss.Id}.S.C{ci}", new Vec3(rt, 0, V("T+H"))) } });
-        d.AddFeature(new FilletFeature { Name = "Boss foot", Radius = "Rf", Edges = { E($"{plate.Id}.End", $"{boss.Id}.S.C{ci}", new Vec3(V("D/2"), 0, V("T"))) } });
+        d.AddFeature(new FilletFeature { Name = "Boss top", Radius = "Rt", Edges = { E($"{boss.Id}.End", $"{boss.Id}.S.C{Ids.Name(ci)}", new Vec3(rt, 0, V("T+H"))) } });
+        d.AddFeature(new FilletFeature { Name = "Boss foot", Radius = "Rf", Edges = { E($"{plate.Id}.End", $"{boss.Id}.S.C{Ids.Name(ci)}", new Vec3(V("D/2"), 0, V("T"))) } });
         return d;
     }
 
@@ -298,8 +298,8 @@ static partial class Demos
             Name = "Rib fillets", Radius = "R", TangentPropagation = false,
             Edges =
             {
-                E($"{rib.Id}.S.L{rl[0]}", $"{plate.Id}.End", new Vec3(xm, y0, 10)), E($"{rib.Id}.S.L{rl[2]}", $"{plate.Id}.End", new Vec3(xm, y1, 10)),
-                E($"{rib.Id}.S.L{rl[0]}", $"{walls.Id}.S.L{wl[1]}", new Vec3(xw, y0, zm)), E($"{rib.Id}.S.L{rl[2]}", $"{walls.Id}.S.L{wl[1]}", new Vec3(xw, y1, zm)),
+                E($"{rib.Id}.S.L{Ids.Name(rl[0])}", $"{plate.Id}.End", new Vec3(xm, y0, 10)), E($"{rib.Id}.S.L{Ids.Name(rl[2])}", $"{plate.Id}.End", new Vec3(xm, y1, 10)),
+                E($"{rib.Id}.S.L{Ids.Name(rl[0])}", $"{walls.Id}.S.L{Ids.Name(wl[1])}", new Vec3(xw, y0, zm)), E($"{rib.Id}.S.L{Ids.Name(rl[2])}", $"{walls.Id}.S.L{Ids.Name(wl[1])}", new Vec3(xw, y1, zm)),
             },
         });
         d.AddFeature(new MirrorFeature { Name = "Rib, other end", Seeds = { rib.Id, fil.Id }, Plane = PlaneRef.Right });
@@ -326,7 +326,7 @@ static partial class Demos
         var ys = d.AddFeature(new SketchFeature { Name = "Boss", Plane = new PlaneRef { Feature = top.Id }, Sketch = y.S });
         var boss = d.AddFeature(new ExtrudeFeature { Name = "Boss", SketchId = ys.Id, Depth = "BossH", Draft = "Draft" });
         double V(string e) => y.Eval(e);
-        string F(int i) => $"{boss.Id}.S.L{yl[i]}";
+        string F(int i) => $"{boss.Id}.S.L{Ids.Name(yl[i])}";
         double zm = V("20+BossH/2");
         d.AddFeature(new FilletFeature
         {
@@ -349,7 +349,7 @@ static partial class Demos
             d.AddFeature(new FilletFeature
             {
                 Name = "Lug corners", Radius = "Rl",
-                Edges = { E($"{lug.Id}.S.L{ll[3]}", $"{lug.Id}.End", new Vec3(10, 55, 65)), E($"{lug.Id}.S.L{ll[1]}", $"{lug.Id}.End", new Vec3(42, 55, 65)) },
+                Edges = { E($"{lug.Id}.S.L{Ids.Name(ll[3])}", $"{lug.Id}.End", new Vec3(10, 55, 65)), E($"{lug.Id}.S.L{Ids.Name(ll[1])}", $"{lug.Id}.End", new Vec3(42, 55, 65)) },
             });
         // (each picked against the boss's flat side, as a user would see it; the outer one lies on the round)
         d.AddFeature(new FilletFeature
@@ -357,9 +357,9 @@ static partial class Demos
             Name = "Lug foot", Radius = "R",
             Edges =
             {
-                E($"{lug.Id}.S.L{ll[3]}", F(2), new Vec3(10, SideY(65), 65)),
-                E($"{lug.Id}.S.L{ll[2]}", F(2), new Vec3(25, SideY(50), 50)),
-                E($"{lug.Id}.S.L{ll[1]}", F(2), new Vec3(42, SideY(65), 65)),
+                E($"{lug.Id}.S.L{Ids.Name(ll[3])}", F(2), new Vec3(10, SideY(65), 65)),
+                E($"{lug.Id}.S.L{Ids.Name(ll[2])}", F(2), new Vec3(25, SideY(50), 50)),
+                E($"{lug.Id}.S.L{Ids.Name(ll[1])}", F(2), new Vec3(42, SideY(65), 65)),
             },
         });
         if (topRound)
@@ -387,7 +387,7 @@ static partial class Demos
         var fil = d.AddFeature(new FilletFeature
         {
             Name = "Rib feet", Radius = "R", TangentPropagation = false,
-            Edges = { E($"{rib.Id}.S.L{rl[0]}", $"{plate.Id}.End", new Vec3(0, -V("RT"), 10)), E($"{rib.Id}.S.L{rl[2]}", $"{plate.Id}.End", new Vec3(0, V("RT"), 10)) },
+            Edges = { E($"{rib.Id}.S.L{Ids.Name(rl[0])}", $"{plate.Id}.End", new Vec3(0, -V("RT"), 10)), E($"{rib.Id}.S.L{Ids.Name(rl[2])}", $"{plate.Id}.End", new Vec3(0, V("RT"), 10)) },
         });
         d.AddFeature(new LinearPatternFeature { Name = "Ribs", Seeds = { rib.Id, fil.Id }, Direction = new DirRef { Axis = "Y" }, Spacing = "S", Count = "2" });
         return d;
@@ -419,7 +419,7 @@ static partial class Demos
         d.AddFeature(new ChamferFeature
         {
             Name = "Rim", Distance = "C",
-            Edges = { E($"{plate.Id}.End", $"{hole.Id}.S.C{c}", new Vec3(-s.Eval("D/2"), 0, s.Eval("T"))) },
+            Edges = { E($"{plate.Id}.End", $"{hole.Id}.S.C{Ids.Name(c)}", new Vec3(-s.Eval("D/2"), 0, s.Eval("T"))) },
         });
         return d;
     }
@@ -442,8 +442,8 @@ static partial class Demos
             Name = "Top rims", Radius = "R",
             Edges =
             {
-                E($"{plate.Id}.End", $"{holes.Id}.S.C{c1}", new Vec3(-V("P") + V("D/2"), 0, V("T"))),
-                E($"{plate.Id}.End", $"{holes.Id}.S.C{c2}", new Vec3(V("P") + V("D/2"), 0, V("T"))),
+                E($"{plate.Id}.End", $"{holes.Id}.S.C{Ids.Name(c1)}", new Vec3(-V("P") + V("D/2"), 0, V("T"))),
+                E($"{plate.Id}.End", $"{holes.Id}.S.C{Ids.Name(c2)}", new Vec3(V("P") + V("D/2"), 0, V("T"))),
             },
         });
         d.AddFeature(new ChamferFeature
@@ -451,8 +451,8 @@ static partial class Demos
             Name = "Bottom rims", Distance = "C",
             Edges =
             {
-                E($"{plate.Id}.Start", $"{holes.Id}.S.C{c1}", new Vec3(-V("P") - V("D/2"), 0, 0)),
-                E($"{plate.Id}.Start", $"{holes.Id}.S.C{c2}", new Vec3(V("P") - V("D/2"), 0, 0)),
+                E($"{plate.Id}.Start", $"{holes.Id}.S.C{Ids.Name(c1)}", new Vec3(-V("P") - V("D/2"), 0, 0)),
+                E($"{plate.Id}.Start", $"{holes.Id}.S.C{Ids.Name(c2)}", new Vec3(V("P") - V("D/2"), 0, 0)),
             },
         });
         return d;

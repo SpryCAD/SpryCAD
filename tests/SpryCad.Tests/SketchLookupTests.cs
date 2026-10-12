@@ -16,9 +16,13 @@ static class SketchLookupTests
                 var a = sk.AddPoint(new Vec2(i, 0)); var b = sk.AddPoint(new Vec2(i, 1));
                 sk.Add(new SkLine { P1 = a.Id, P2 = b.Id });
             }
+            // every id the sketch has held (removed ones must then miss), and some it never held
+            var known = new HashSet<long> { -2, -1, 0, 1, 2, 1L << 52 };
             void Check(string when)
             {
-                for (int id = -2; id <= sk.NextId + 2; id++)
+                known.UnionWith(sk.Points.Select(x => x.Id));
+                known.UnionWith(sk.Entities.Select(x => x.Id));
+                foreach (var id in known)
                 {
                     var p = sk.Points.FirstOrDefault(x => x.Id == id);
                     var e = sk.Entities.FirstOrDefault(x => x.Id == id);

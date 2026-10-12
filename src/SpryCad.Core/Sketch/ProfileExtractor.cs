@@ -11,20 +11,21 @@ public static class ProfileExtractor
 {
     sealed class GEdge
     {
-        public int A, B;              // point ids
+        public long A, B;              // point ids
         public List<ProfileVertex> Fwd = new(); // vertices from A (inclusive) to B (exclusive)
         public SkEntity Entity = null!;
     }
 
+    /// <summary>The name of the side face a sketch entity makes: its kind and id ("L" + <see cref="Model.Ids.Name"/>).</summary>
     public static string FaceName(SkEntity e) => e switch
     {
-        SkLine => "L" + e.Id,
-        SkArc => "A" + e.Id,
-        SkCircle => "C" + e.Id,
-        _ => "E" + e.Id,
-    };
+        SkLine => "L",
+        SkArc => "A",
+        SkCircle => "C",
+        _ => "E",
+    } + Model.Ids.Name(e.Id);
 
-    public static List<ProfileRegion> Extract(Sketch sk, out List<string> warnings, ISet<int>? excludeEntities = null)
+    public static List<ProfileRegion> Extract(Sketch sk, out List<string> warnings, ISet<long>? excludeEntities = null)
     {
         warnings = new List<string>();
         var loops = new List<ProfileLoop>();
@@ -60,7 +61,7 @@ public static class ProfileExtractor
         // prune dangling edges (degree 1 vertices) repeatedly
         while (true)
         {
-            var deg = new Dictionary<int, int>();
+            var deg = new Dictionary<long, int>();
             foreach (var e in edges) { deg[e.A] = deg.GetValueOrDefault(e.A) + 1; deg[e.B] = deg.GetValueOrDefault(e.B) + 1; }
             var before = edges.Count;
             edges.RemoveAll(e => deg[e.A] < 2 || deg[e.B] < 2);
@@ -77,8 +78,8 @@ public static class ProfileExtractor
     {
         // half edge h = 2*i (A->B) or 2*i+1 (B->A)
         int nh = edges.Count * 2;
-        int From(int h) => h % 2 == 0 ? edges[h / 2].A : edges[h / 2].B;
-        int To(int h) => h % 2 == 0 ? edges[h / 2].B : edges[h / 2].A;
+        long From(int h) => h % 2 == 0 ? edges[h / 2].A : edges[h / 2].B;
+        long To(int h) => h % 2 == 0 ? edges[h / 2].B : edges[h / 2].A;
         List<ProfileVertex> Verts(int h)
         {
             var e = edges[h / 2];
@@ -96,7 +97,7 @@ public static class ProfileExtractor
             var p1 = v.Count > 1 ? v[1].P : sk.P(To(h));
             return (p1 - p0).Normalized;
         }
-        var outgoing = new Dictionary<int, List<int>>();
+        var outgoing = new Dictionary<long, List<int>>();
         for (int h = 0; h < nh; h++)
         {
             if (!outgoing.TryGetValue(From(h), out var l)) outgoing[From(h)] = l = new List<int>();

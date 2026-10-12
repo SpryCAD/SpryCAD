@@ -77,6 +77,7 @@ public sealed partial class AssemblyModel
             if (g.First().IsAssembly) m.LoadSub(g.Key, defer);
             else m.LoadPart(g.Key, defer);
         }
+        if (doc.LegacyIds) doc.RenewLegacyIds(p => p.Contains('/') && m.Find(p) is { Component: { IsAssembly: false, Part.PartId: { } id } } ? id : null);
         return m;
     }
 

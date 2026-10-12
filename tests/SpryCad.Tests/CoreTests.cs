@@ -124,12 +124,13 @@ static class CoreTests
         t.Test("Solver: rectangle fully defined", () =>
         {
             var sk = Rect(80, 40);
-            // perturb
-            sk.Point(2)!.X = 50; sk.Point(3)!.Y = 70;
+            // perturb the corners (w, h) and (0, h): the points after the origin's (w, 0)
+            long p3 = sk.Points[2].Id, p4 = sk.Points[3].Id;
+            sk.Point(p3)!.X = 50; sk.Point(p4)!.Y = 70;
             var r = SketchSolver.Solve(sk);
             t.True(r.Converged, "converged");
             t.Eq(r.Status, SketchStatus.FullyDefined);
-            t.Near(sk.Point(2)!.X, 80, 1e-6); t.Near(sk.Point(2)!.Y, 40, 1e-6); t.Near(sk.Point(3)!.X, 0, 1e-6);
+            t.Near(sk.Point(p3)!.X, 80, 1e-6); t.Near(sk.Point(p3)!.Y, 40, 1e-6); t.Near(sk.Point(p4)!.X, 0, 1e-6);
         });
 
         t.Test("Solver: under defined + drag", () =>
@@ -141,7 +142,7 @@ static class CoreTests
             var r = SketchSolver.Solve(sk);
             t.Eq(r.Status, SketchStatus.UnderDefined);
             t.Near(sk.Point(a.Id)!.Y, sk.Point(b.Id)!.Y, 1e-9);
-            SketchSolver.Solve(sk, new Dictionary<int, Vec2> { [b.Id] = new Vec2(20, 5) });
+            SketchSolver.Solve(sk, new Dictionary<long, Vec2> { [b.Id] = new Vec2(20, 5) });
             t.Near(sk.Point(b.Id)!.X, 20, 1e-6);
             t.Near(sk.Point(a.Id)!.Y, 5, 1e-6);
         });
@@ -165,7 +166,7 @@ static class CoreTests
         {
             var sk = Rect(80, 40);
             SketchSolver.Solve(sk);
-            var extra = new SkConstraint { Id = 999, Type = CType.Distance, Refs = new[] { sk.Entities[2].Id }, Value = 80 };
+            var extra = new SkConstraint { Id = sk.NewId(), Type = CType.Distance, Refs = new[] { sk.Entities[2].Id }, Value = 80 };
             t.True(SketchSolver.WouldOverDefine(sk, extra), "length of opposite side is redundant");
         });
 
@@ -199,14 +200,14 @@ static class CoreTests
             var arcA = sk.Add(new SkArc { Center = ca.Id, Start = p1.Id, End = p4.Id });
             foreach (var (l, arc) in new[] { (top, arcB), (bot, arcA), (top, arcA), (bot, arcB) })
                 SketchSolver.CaptureSign(sk, sk.AddConstraint(CType.Tangent, l.Id, arc.Id));
-            var par = new SkConstraint { Id = 900, Type = CType.Parallel, Refs = new[] { top.Id, axis.Id } };
+            var par = new SkConstraint { Id = sk.NewId(), Type = CType.Parallel, Refs = new[] { top.Id, axis.Id } };
             t.True(!SketchSolver.WouldOverDefine(sk, par), "parallel side is not implied by the tangencies alone");
             var c = sk.AddConstraint(CType.Parallel, top.Id, axis.Id);
-            var second = new SkConstraint { Id = 901, Type = CType.Parallel, Refs = new[] { bot.Id, axis.Id } };
+            var second = new SkConstraint { Id = sk.NewId(), Type = CType.Parallel, Refs = new[] { bot.Id, axis.Id } };
             t.True(SketchSolver.WouldOverDefine(sk, second), "the other side then follows");
 
             // drag one corner of a side: the slot must stay a slot (parallel sides, equal ends)
-            var r = SketchSolver.Solve(sk, new Dictionary<int, Vec2> { [p2.Id] = new Vec2(32, 9) });
+            var r = SketchSolver.Solve(sk, new Dictionary<long, Vec2> { [p2.Id] = new Vec2(32, 9) });
             t.True(r.Converged, "converged");
             var u = (sk.P(cb.Id) - sk.P(ca.Id)).Normalized;
             t.Near(Vec2.Cross(u, (sk.P(p2.Id) - sk.P(p1.Id)).Normalized), 0, 1e-6);
@@ -384,7 +385,7 @@ static class CoreTests
             t.True(r.Status.Values.All(x => x.Ok), "rebuild: " + string.Join("; ", r.Status.Values.Select(x => x.Error)));
             t.Near(r.State.Bodies.Single().Mesh.Volume, (2 * 900 - 2 * Math.PI * 9) * 10, 5);
             // moving an original point moves its mirror image; the copied circle keeps the original's radius
-            SketchSolver.Solve(sk, new Dictionary<int, Vec2> { [p2.Id] = new Vec2(35, 25) });
+            SketchSolver.Solve(sk, new Dictionary<long, Vec2> { [p2.Id] = new Vec2(35, 25) });
             var image = sk.Points.Single(p => Math.Abs(p.X + sk.P(p2.Id).X) < 1e-6 && Math.Abs(p.Y - sk.P(p2.Id).Y) < 1e-6 && p.Id != p2.Id);
             t.True(image != null, "mirror image followed");
             var copyCircle = sk.Entities.OfType<SkCircle>().Single(c => c.Id != circle.Id);
@@ -456,7 +457,7 @@ static class CoreTests
             var json = File.ReadAllText(Path.Combine(models, "shelled-bracket.sprt"));
             // inside the shell: a 4 mm fillet around the boss foot runs past the 0.5 mm gap to the wall
             FilletFeature AddFillet(CadDocument d, bool overflow) => (FilletFeature)d.AddFeature(new FilletFeature
-            { Radius = "4", Overflow = overflow, Edges = { new EdgeRef { A = "F9.I.F2.End", B = "F9.I.F8.1.F7.0.R.CB", Hint = new Vec3(70, 2.5, 18) } } });
+            { Radius = "4", Overflow = overflow, Edges = { new EdgeRef { A = LegacyIds.Name(d.Id!, "F9.I.F2.End"), B = LegacyIds.Name(d.Id!, "F9.I.F8.1.F7.0.R.CB"), Hint = new Vec3(70, 2.5, 18) } } });
 
             // overflow (default): trimmed by the wall, adds material, stays exact and closed
             var doc = CadDocument.FromJson(json);
@@ -512,11 +513,14 @@ static class CoreTests
             doc.Equations.Add(new Equation { Name = "W", Expr = "100" });
             var s1 = doc.AddFeature(new SketchFeature { Plane = PlaneRef.Front, Sketch = Rect(100, 60, "W") });
             var e1 = doc.AddFeature(new ExtrudeFeature { SketchId = s1.Id, Depth = "20" });
+            // side faces of the box: right (x = W) and top (y = 60) lines of the rectangle
+            var s1Lines = s1.Sketch.Entities;
+            string right = e1.Id + ".S." + ProfileExtractor.FaceName(s1Lines[1]), top = e1.Id + ".S." + ProfileExtractor.FaceName(s1Lines[2]);
             // parallel to Right through the box corner (W, 60, 20): the vertex is the end of an edge between named faces
             var corner = doc.AddFeature(new PlaneFeature
             {
                 Mode = PlaneMode.ThroughPoint, Base = PlaneRef.Right,
-                Point = new PointRef { Vertex = new EdgeRef { A = e1.Id + ".End", B = e1.Id + ".S.L6", Hint = new Vec3(100, 60, 20) } },
+                Point = new PointRef { Vertex = new EdgeRef { A = e1.Id + ".End", B = top, Hint = new Vec3(100, 60, 20) } },
             });
             // through a sketch point
             var sk = new Sketch(); var sp = sk.AddPoint(new Vec2(30, 40));
@@ -557,8 +561,8 @@ static class CoreTests
             // normal to a model edge (the box's vertical edge at x=W, y=60) at its top end
             var en = doc.AddFeature(new PlaneFeature
             {
-                Mode = PlaneMode.NormalToCurve, Curve = new CurveRef { Edge = new EdgeRef { A = e1.Id + ".S.L5", B = e1.Id + ".S.L6", Hint = new Vec3(100, 60, 10) } },
-                Point = new PointRef { Vertex = new EdgeRef { A = e1.Id + ".End", B = e1.Id + ".S.L6", Hint = new Vec3(100, 60, 20) } },
+                Mode = PlaneMode.NormalToCurve, Curve = new CurveRef { Edge = new EdgeRef { A = right, B = top, Hint = new Vec3(100, 60, 10) } },
+                Point = new PointRef { Vertex = new EdgeRef { A = e1.Id + ".End", B = top, Hint = new Vec3(100, 60, 20) } },
             });
             r = regen.Rebuild(doc);
             t.True(r.Status[en.Id].Ok, r.Status[en.Id].Error ?? "");
@@ -673,8 +677,9 @@ static class CoreTests
             t.True(r.Status[cut.Id].Ok, r.Status[cut.Id].Error ?? "");
             t.Near(KernelTests.Vex(r.State.Bodies[0].Solid), 100 * 60 * 20 - Math.PI * 64 * 20, 1.5);
 
-            // fillet a vertical edge
-            var edge = r.State.Bodies[0].Solid.Topology.Edges.First(e => e.IsLinear && Math.Abs(e.Start.X - 100) < 1e-6 && Math.Abs(e.Start.Y - 60) < 1e-6);
+            // fillet a vertical edge (both ends at x = 100, y = 60: which way round edges run follows the face names)
+            var edge = r.State.Bodies[0].Solid.Topology.Edges.First(e => e.IsLinear && Math.Abs(e.Start.X - 100) < 1e-6 && Math.Abs(e.Start.Y - 60) < 1e-6
+                && Math.Abs(e.End.X - 100) < 1e-6 && Math.Abs(e.End.Y - 60) < 1e-6);
             var fil = doc.AddFeature(new FilletFeature { Radius = "5", Edges = { new EdgeRef { A = edge.FaceA, B = edge.FaceB, Hint = edge.Midpoint } } });
             // hole on top face
             var hs = new Sketch(); var hp = hs.AddPoint(new Vec2(70, 30)); hs.Add(new SkPointEntity { P = hp.Id });
@@ -940,7 +945,8 @@ static class CoreTests
             var topFace = new FaceRef { Name = e1.Id + ".End", Hint = new Vec3(50, 30, 10), Normal = Vec3.UnitZ };
             var frame = Resolver.ResolvePlane(new PlaneRef { Face = topFace }, r.State);
             // right edge of the top face (x = W) and bottom edge (y = 0)
-            var right = body.Solid.Topology.Edges.First(e => e.IsLinear && Math.Abs(e.Start.X - 100) < 1e-9 && Math.Abs(e.End.X - 100) < 1e-9 && Math.Abs(e.Start.Z - 10) < 1e-9);
+            // (both ends at z = 10: the vertical edge below also starts there when it runs down, as the face names decide)
+            var right = body.Solid.Topology.Edges.First(e => e.IsLinear && Math.Abs(e.Start.X - 100) < 1e-9 && Math.Abs(e.End.X - 100) < 1e-9 && Math.Abs(e.Start.Z - 10) < 1e-9 && Math.Abs(e.End.Z - 10) < 1e-9);
             var bottom = body.Solid.Topology.Edges.First(e => e.IsLinear && Math.Abs(e.Start.Y) < 1e-9 && Math.Abs(e.End.Y) < 1e-9 && Math.Abs(e.Start.Z - 10) < 1e-9 && Math.Abs(e.End.Z - 10) < 1e-9);
             var sk = new Sketch();
             var hp = sk.AddPoint(new Vec2(80, 20)); sk.Add(new SkPointEntity { P = hp.Id });
