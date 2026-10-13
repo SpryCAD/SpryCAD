@@ -1136,7 +1136,7 @@ public static class NIntersect
         return true;
     }
 
-    public static List<NPolyline> Trace(NFace fa, NSurface sb, double tol, NDomain? domain = null)
+    public static List<NPolyline> Trace(NFace fa, NSurface sb, double tol, NDomain? domain = null, Box3? within = null)
     {
         // (domain: fa's domain at max(tol, 1e-3), when the caller has it)
         var dom = domain ?? NDomain.Of(fa, Math.Max(tol, 1e-3));
@@ -1206,11 +1206,21 @@ public static class NIntersect
             }
             return Math.Abs(sb.F_(c)) <= r * 1.25 + 1e-9;
         }
+        // (within: only where the face comes near that box, the other face's: a surface traced past its face, a shell's
+        // inner wall's extension through a fillet outside it, gives long curves that are all cut away)
+        bool Near(int i0, int j0, int size)
+        {
+            if (within is not { } w) return true;
+            var bb = Box3.Empty;
+            foreach (var (ii, jj) in new[] { (i0, j0), (i0 + size, j0), (i0, j0 + size), (i0 + size, j0 + size), (i0 + size / 2, j0 + size / 2) }) bb.Add(At(ii, jj));
+            var pad = 0.5 * bb.Diagonal + tol;
+            return bb.Overlaps(w, pad);
+        }
         int nb = nu / block;
         Span<bool> active = stackalloc bool[nb * nb];
         for (int bi = 0; bi < nb; bi++)
             for (int bj = 0; bj < nb; bj++)
-                active[bi * nb + bj] = CanHoldZero(bi * block, bj * block, block);
+                active[bi * nb + bj] = Near(bi * block, bj * block, block) && CanHoldZero(bi * block, bj * block, block);
         pg.Dispose();
         var pm = Prof.Time("trace.march");
         bool jumps = sb.Kind is SurfaceKind.BSpline or SurfaceKind.Offset;

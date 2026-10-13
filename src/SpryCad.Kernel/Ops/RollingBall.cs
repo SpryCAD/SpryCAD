@@ -748,9 +748,13 @@ public static class RollingBall
             body.Faces.Add(MakeFace(pipe, false, new FaceTag(name + ".Blend", pipe.Def), loop, pipe.Project((qa + qb) * 0.5)));
             for (int q = 0; q <= 8 && fits; q++)
             {
+                // (not at an end where the ball switches faces: its foot there is on the seam between them, and taken as on
+                // the one it rolls onto only within the tolerance, so a hair off it reads as running past)
+                if (q == 0 && events[i].sw || q == 8 && events[(i + 1) % ne].sw) continue;
                 var c = sp.Eval(s0 + (s1 - s0) * q / 8);
                 var pa = SA.Project(c); var pb = Sup(support[i]).Project(c);
                 fits = faA.Any(f => onFaces(f, pa)) && bFaces.Any(f => Side(f, support[i]) && onFaces(f, pb));
+                if (!fits) Debug?.Invoke($"  overflows on segment {i} at {q}/8: A foot {pa} on A {faA.Any(f => onFaces(f, pa))}, B foot {pb} on B {bFaces.Any(f => Side(f, support[i]) && onFaces(f, pb))} ({support[i].Tag.Name})");
             }
         }
 
