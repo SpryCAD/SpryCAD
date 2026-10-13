@@ -360,32 +360,48 @@ public static class RollingBall
     }
 
     /// <summary>
-    /// A chain whose edges stay on one surface on one side (A) while the faces on the other side (B) change where
-    /// they meet tangentially (a groove's rim edge running from a torus onto a fillet and on onto a cylinder).
-    /// The ball rolls from one B face onto the next where its foot point crosses the boundary curve between them
-    /// (the switch): there the spine moves from one offset intersection to the next (both meet the offset of the
-    /// boundary curve, so the spine stays C1), and the tool's B side is split along the boundary curve from the
-    /// chain vertex to the foot point. The A side is one face between the chain ends (a band for a closed chain).
+    /// A chain whose faces change along it where they meet tangentially, on one side at a time: a groove's rim edge
+    /// running from a torus onto a fillet and on onto a cylinder (B changing), or a fillet rolling round earlier ones,
+    /// the top of a tube along the round it leaves the part by and on up a cut's side along a round there (each side
+    /// in turn). The ball rolls from one face onto the next where its foot point crosses the boundary curve between
+    /// them (the switch): there the spine moves from one offset intersection to the next (both meet the offset of the
+    /// boundary curve, so the spine stays C1), and the tool's side is split along the boundary curve from the chain
+    /// vertex to the foot point. A side with no switch is one face between the chain ends (a band for a closed chain).
     /// </summary>
     static Result BuildComposite(List<Piece> pieces, bool closed, double r, string name, Func<NFace, Vec3, bool> onFaces)
     {
         static Result Fail(string m) => new(null, false, false, m);
         int n = pieces.Count;
-        // the constant side: a surface every piece has a face on
-        NSurface? SA = null;
-        foreach (var cand in pieces[0].E.Uses.Select(u => u.Face.Surface))
-            if (pieces.All(p => p.E.Uses.Any(u => OnSurface(u.Face, cand)))) { SA = cand; break; }
-        if (SA == null) return Fail("the edges are not all between the same two faces.");
         var faA = new NFace[n]; var faB = new NFace[n];
-        for (int k = 0; k < n; k++)
+        // the faces on each side, followed along the chain: at each vertex the side whose face carries on keeps it, the
+        // other may switch. A: a surface every piece has a face on, where there is one (only B switching, as before)
+        NSurface? SA0 = null;
         {
-            var a = pieces[k].E.Uses.Select(u => u.Face).FirstOrDefault(f => OnSurface(f, SA));
-            var b = pieces[k].E.Uses.Select(u => u.Face).FirstOrDefault(f => !ReferenceEquals(f, a));
-            if (a == null || b == null || OnSurface(b, SA)) return Fail("the edges are not all between the same two faces.");
-            faA[k] = a; faB[k] = b;
+            foreach (var cand in pieces[0].E.Uses.Select(u => u.Face.Surface))
+                if (pieces.All(p => p.E.Uses.Any(u => OnSurface(u.Face, cand)))) { SA0 = cand; break; }
+            for (int k = 0; k < n; k++)
+            {
+                var fs = pieces[k].E.Uses.Select(u => u.Face).ToList();
+                if (fs.Count != 2 || ReferenceEquals(fs[0], fs[1])) return Fail("the edges are not all between the same two faces.");
+                NFace a, b;
+                if (SA0 != null)
+                {
+                    a = fs.FirstOrDefault(f => OnSurface(f, SA0))!;
+                    if (a == null) return Fail("the edges are not all between the same two faces.");
+                }
+                else if (k == 0) a = fs[0];
+                else if (fs.FirstOrDefault(f => Side(f, faA[k - 1])) is { } ka) a = ka;
+                else if (fs.FirstOrDefault(f => Side(f, faB[k - 1])) is { } kb) a = fs.First(f => !ReferenceEquals(f, kb));
+                else return Fail("the edges change faces on both sides at once: blend them separately.");
+                b = fs.First(f => !ReferenceEquals(f, a));
+                if (OnSurface(b, a.Surface)) return Fail("the edges are not all between the same two faces.");
+                faA[k] = a; faB[k] = b;
+            }
+            if (SA0 != null && faA.Any(f => f.Sense != faA[0].Sense)) return Fail("the edges are not all between the same two faces.");
+            if (closed && n > 1 && !Side(faA[0], faA[n - 1]) && !Side(faB[0], faB[n - 1])) return Fail("the edges change faces on both sides at once: blend them separately.");
         }
-        if (faA.Any(f => f.Sense != faA[0].Sense)) return Fail("the edges are not all between the same two faces.");
-        bool SameB(int k, int m) => Family(faB[k].Surface, faB[m].Surface) && faB[k].Sense == faB[m].Sense;
+        bool SameA(int k, int m) => Side(faA[k], faA[m]);
+        bool SameB(int k, int m) => Side(faB[k], faB[m]);
         // the surface a face's ball rolls on: a fillet's pieces merged into one pipe (the foot crosses from piece to
         // piece anywhere, not where the chain does)
         var merged = new Dictionary<NFace, NSurface>(ReferenceEqualityComparer.Instance);
@@ -407,9 +423,11 @@ public static class RollingBall
             return m;
         }
 
-        // a closed chain starts at a switch
+        // a closed chain starts at a switch (on B: a closed chain switching only on A taken the other way round)
         if (closed)
         {
+            bool anyB = Enumerable.Range(0, n).Any(k => !SameB((k + n - 1) % n, k));
+            if (!anyB && Enumerable.Range(0, n).Any(k => !SameA((k + n - 1) % n, k))) (faA, faB) = (faB, faA);
             int s0 = Enumerable.Range(0, n).FirstOrDefault(k => !SameB((k + n - 1) % n, k), -1);
             if (s0 < 0) return Fail("the edges are not all between the same two faces.");
             pieces = pieces.Skip(s0).Concat(pieces.Take(s0)).ToList();
@@ -418,6 +436,7 @@ public static class RollingBall
         int nj = closed ? n : n + 1;
         int Prev(int k) => closed ? (k + n - 1) % n : k - 1;     // piece before vertex k
         bool RawSwitch(int k) => (closed || k > 0 && k < n) && !SameB(Prev(k), k % n);
+        bool SwitchA(int k) => (closed || k > 0 && k < n) && !SameA(Prev(k), k % n);
         // (the edge's vertex nearest: an end run on past its vertex has a parameter of its own)
         static NVertex Nearest(NEdge e, double t) => Math.Abs(t - e.T0) <= Math.Abs(t - e.T1) ? e.V0 : e.V1;
         NVertex ChainVertex(int k) => k < n ? Nearest(pieces[k].E, pieces[k].Ta) : Nearest(pieces[n - 1].E, pieces[n - 1].Tb);
@@ -434,18 +453,60 @@ public static class RollingBall
         bool convex = Vec3.Dot(uB0, nA0) < 0;
         var rho = convex ? -r : r;
 
-        NSurface A2;
-        try { A2 = NShell.OffsetSurface(SA, rho * (faA[0].Sense ? 1 : -1)); }
-        catch (InvalidOperationException) { return Fail("the radius is larger than the curvature of a face it blends."); }
-
-        // the boundary curve between the B faces before and after a switch vertex, followed (over several edges if the
-        // faces are split further on) until the ball's foot reaches it, or until it comes back to the chain at another
-        // vertex: then the chain dips into the next face and out again while the ball rolls on (an island under the blend)
-        var walked = new List<NFace>();
-        var footEdge = new Dictionary<int, NEdge>();
-        (double? root, List<(NCurve c, double ta, double tb)> segs, int? back, string? err) Walk(int k)
+        var offsets = new Dictionary<NFace, NSurface>(ReferenceEqualityComparer.Instance);
+        NSurface Off(NFace f)
         {
-            var fb0 = faB[Prev(k)]; var fb1 = faB[k % n];
+            if (!offsets.TryGetValue(f, out var o)) offsets[f] = o = NShell.OffsetSurface(Sup(f), rho * (f.Sense ? 1 : -1));
+            return o;
+        }
+        // (A, where it is one surface along the whole chain: that surface itself, as before)
+        NSurface SupA(NFace f) => SA0 != null ? f.Surface : Sup(f);
+        var offsetsA = new Dictionary<NFace, NSurface>(ReferenceEqualityComparer.Instance);
+        NSurface OffA(NFace f)
+        {
+            if (!offsetsA.TryGetValue(f, out var o)) offsetsA[f] = o = NShell.OffsetSurface(SupA(f), rho * (f.Sense ? 1 : -1));
+            return o;
+        }
+
+        // the boundary curve between one side's faces before and after a switch vertex, followed (over several edges if
+        // the faces are split further on) until the ball's foot reaches it, or until it comes back to the chain at another
+        // vertex: then the chain dips into the next face and out again while the ball rolls on (an island under the
+        // blend, on B only). The other side keeps its face there
+        var walkedA = new List<NFace>(); var walkedB = new List<NFace>();
+        var footEdge = new Dictionary<int, NEdge>();
+        var walkOther = new Dictionary<int, NFace>();
+        // (the other side's face there: the one at the vertex, or, where the ball's foot on that side is not on it when this
+        // side's foot reaches the boundary, a neighbour it is on (a narrow face the chain crosses: the foot on it before or
+        // after the chain is))
+        (double? root, List<(NCurve c, double ta, double tb)> segs, int? back, string? err) Walk(int k, bool onB)
+        {
+            var fo = onB ? faA : faB; var fx = onB ? faB : faA;
+            var cands = new List<NFace> { fo[k % n] };
+            foreach (var q in new[] { Prev(k), closed ? (k + 1) % n : k + 1, closed ? (k + n - 2) % n : k - 2 })
+                if (q >= 0 && q < n && !cands.Any(c => Side(c, fo[q]))) cands.Add(fo[q]);
+            bool OnIt(NFace c, (double? root, List<(NCurve c, double ta, double tb)> segs, int? back, string? err) w)
+            {
+                var G = w.segs[^1].c.Eval(w.root!.Value); var fb0 = fx[Prev(k)];
+                var S = G + (onB ? Sup(fb0) : SupA(fb0)).Normal(G) * ((fb0.Sense ? 1 : -1) * rho);
+                return onFaces(c, (onB ? SupA(c) : Sup(c)).Project(S));
+            }
+            var w0 = WalkWith(k, onB, cands[0]);
+            walkOther[k] = cands[0];
+            if (w0.root != null && OnIt(cands[0], w0)) return w0;
+            foreach (var c in cands.Skip(1))
+            {
+                var w = WalkWith(k, onB, c);
+                if (w.root != null && OnIt(c, w)) { walkOther[k] = c; return w; }
+            }
+            walkOther[k] = cands[0];
+            return WalkWith(k, onB, cands[0]);
+        }
+        (double? root, List<(NCurve c, double ta, double tb)> segs, int? back, string? err) WalkWith(int k, bool onB, NFace otherFace)
+        {
+            var fx = onB ? faB : faA;
+            var fb0 = fx[Prev(k)]; var fb1 = fx[k % n];
+            var other = onB ? OffA(otherFace) : Off(otherFace);
+            var walked = onB ? walkedB : walkedA;
             var vtx = ChainVertex(k % n);
             var V = vtx.P;
             var segs = new List<(NCurve c, double ta, double tb)>();
@@ -456,16 +517,17 @@ public static class RollingBall
             // off, as the inside of a shell on a small round)
             if (Vec3.Dot(Outward(fb0, V), Outward(fb1, V)) < 1 - 1e-4 && Vec3.Dot(Outward(fb0, g.Mid), Outward(fb1, g.Mid)) < Math.Cos(2 * Math.PI / 180))
                 return (null, segs, null, "the edges turn a corner between two faces: blend them separately.");
-            var nsurf = Sup(fb0); bool sense = fb0.Sense;
+            var nsurf = onB ? Sup(fb0) : SupA(fb0); bool sense = fb0.Sense;
             Vec3 C(NCurve gc, double t) { var G = gc.Eval(t); return G + nsurf.Normal(G) * ((sense ? 1 : -1) * rho); }
             var from = vtx; var cur = g;
             for (int step = 0; step < 8; step++)
             {
                 foreach (var u in cur.Uses) if (!walked.Contains(u.Face)) walked.Add(u.Face);
-                // ball centres touching the boundary curve: C(t) = G(t) + rho n(G(t)); the switch is where C(t) is on A's offset
+                // ball centres touching the boundary curve: C(t) = G(t) + rho n(G(t)); the switch is where C(t) is on the
+                // other side's offset
                 var tv = ReferenceEquals(cur.V0, from) ? cur.T0 : cur.T1; var tfar = ReferenceEquals(cur.V0, from) ? cur.T1 : cur.T0;
                 var gc = cur.Curve;
-                double F(double t) => A2.F_(C(gc, t));
+                double F(double t) => other.F_(C(gc, t));
                 const int N = 64;
                 double tPrev = tv, fPrev = F(tv);
                 for (int i = 1; i <= N; i++)
@@ -499,6 +561,7 @@ public static class RollingBall
             return (null, segs, null, "the ball leaves the faces it blends before it reaches the next face.");
         }
         var walks = new Dictionary<int, (double? root, List<(NCurve c, double ta, double tb)> segs, int? back, string? err)>();
+        var onA = new HashSet<int>();   // switch vertices on A
         var islandEnd = new HashSet<int>();
         var islands = new Dictionary<int, (int m, List<(NCurve c, double ta, double tb)> segs)>();   // start vertex -> end vertex, boundary path
         // pieces a..m-1 lie in the island starting at vertex a; vertices strictly between a and m are inside it
@@ -520,21 +583,33 @@ public static class RollingBall
                 if (closed ? ((k - a + n) % n) < ((m - a + n) % n) : k >= a && k < m) return a;
             return -1;
         }
-        for (int k = 0; k < nj; k++)
+        try
         {
-            if (!RawSwitch(k) || islandEnd.Contains(k) || InsideIsland(k)) continue;
-            var wk = Walk(k);
-            if (wk.err != null) return Fail(wk.err);
-            walks[k] = wk;
-            if (wk.back is int m)
+            for (int k = 0; k < nj; k++)
             {
-                // the island ends where the chain comes back onto the face it left
-                if (!RawSwitch(m) || !Side(faB[m % n], faB[Prev(k)]) || m == k) return Fail("the ball leaves the faces it blends before it reaches the next face.");
-                islands[k] = (m, wk.segs);
-                islandEnd.Add(k); islandEnd.Add(m);
+                if (SwitchA(k))
+                {
+                    var wa = Walk(k, false);
+                    if (wa.err != null) return Fail(wa.err);
+                    if (wa.back != null) return Fail("the ball leaves the faces it blends before it reaches the next face.");
+                    walks[k] = wa; onA.Add(k);
+                    continue;
+                }
+                if (!RawSwitch(k) || islandEnd.Contains(k) || InsideIsland(k)) continue;
+                var wk = Walk(k, true);
+                if (wk.err != null) return Fail(wk.err);
+                walks[k] = wk;
+                if (wk.back is int m)
+                {
+                    // the island ends where the chain comes back onto the face it left
+                    if (!RawSwitch(m) || !Side(faB[m % n], faB[Prev(k)]) || m == k) return Fail("the ball leaves the faces it blends before it reaches the next face.");
+                    islands[k] = (m, wk.segs);
+                    islandEnd.Add(k); islandEnd.Add(m);
+                }
             }
         }
-        bool IsSwitch(int k) => RawSwitch(k) && !islandEnd.Contains(k) && !InsideIsland(k);
+        catch (InvalidOperationException) { return Fail("the radius is larger than the curvature of a face it blends."); }
+        bool IsSwitch(int k) => onA.Contains(k) || RawSwitch(k) && !islandEnd.Contains(k) && !InsideIsland(k);
 
         var box = Box3.Empty;
         foreach (var p in pieces) foreach (var q in p.E.Samples(1e-3)) box.Add(q);
@@ -589,28 +664,32 @@ public static class RollingBall
         var swJoint = new Dictionary<int, Joint>();
         var swAfter = new Dictionary<int, NFace>();
         var swBefore = new Dictionary<int, NFace>();
-        for (int k = 0; k < nj; k++)
+        try
         {
-            if (!IsSwitch(k)) continue;
-            var (root, segs, _, _) = walks[k];
-            var fb = faB[Prev(k)];
-            var last = segs[^1];
-            var G = last.c.Eval(root!.Value);
-            var Ss = G + Sup(fb).Normal(G) * ((fb.Sense ? 1 : -1) * rho);
-            NSurface Bb;
-            try { Bb = NShell.OffsetSurface(Sup(fb), rho * (fb.Sense ? 1 : -1)); }
-            catch (InvalidOperationException) { return Fail("the radius is larger than the curvature of a face it blends."); }
-            var Ts = Vec3.Cross(A2.Grad(Ss), Bb.Grad(Ss));
-            if (Ts.Length < 1e-9) return Fail("the faces meet tangentially.");
-            var dir = pieces[k % n].Dir(pieces[k % n].Ta);
-            Ts = Ts.Normalized; if (Vec3.Dot(Ts, dir) < 0) Ts = -Ts;
-            swJoint[k] = new Joint(ChainVertex(k % n).P, Ss, Ts, SA.Project(Ss), G);
-            // the face the foot moves onto: across the boundary edge it was found on
-            var fe = footEdge[k];
-            swAfter[k] = fe.Uses.Select(u => u.Face).FirstOrDefault(f => !Side(f, fb)) ?? faB[k % n];
-            swBefore[k] = fe.Uses.Select(u => u.Face).FirstOrDefault(f => Side(f, fb)) ?? fb;
-            events.Add((ChainPos(Ss, Ts, k), k, true));
+            for (int k = 0; k < nj; k++)
+            {
+                if (!IsSwitch(k)) continue;
+                bool a = onA.Contains(k);
+                var (root, segs, _, _) = walks[k];
+                var fb = (a ? faA : faB)[Prev(k)];
+                var last = segs[^1];
+                var G = last.c.Eval(root!.Value);
+                var Ss = G + (a ? SupA(fb) : Sup(fb)).Normal(G) * ((fb.Sense ? 1 : -1) * rho);
+                var other = a ? Off(walkOther[k]) : OffA(walkOther[k]);
+                var Ts = Vec3.Cross(other.Grad(Ss), (a ? OffA(fb) : Off(fb)).Grad(Ss));
+                if (Ts.Length < 1e-9) return Fail("the faces meet tangentially.");
+                var dir = pieces[k % n].Dir(pieces[k % n].Ta);
+                Ts = Ts.Normalized; if (Vec3.Dot(Ts, dir) < 0) Ts = -Ts;
+                var foot = (a ? Sup(walkOther[k]) : SupA(walkOther[k])).Project(Ss);
+                swJoint[k] = a ? new Joint(ChainVertex(k % n).P, Ss, Ts, G, foot) : new Joint(ChainVertex(k % n).P, Ss, Ts, foot, G);
+                // the face the foot moves onto: across the boundary edge it was found on
+                var fe = footEdge[k];
+                swAfter[k] = fe.Uses.Select(u => u.Face).FirstOrDefault(f => !Side(f, fb)) ?? (a ? faA : faB)[k % n];
+                swBefore[k] = fe.Uses.Select(u => u.Face).FirstOrDefault(f => Side(f, fb)) ?? fb;
+                events.Add((ChainPos(Ss, Ts, k), k, true));
+            }
         }
+        catch (InvalidOperationException) { return Fail("the radius is larger than the curvature of a face it blends."); }
         for (int k = 0; k < nj; k++)
             if (!IsSwitch(k)) events.Add((k < n ? cum[k] : total, k, false));
         // order along the chain; a closed chain starts at its first switch
@@ -619,26 +698,22 @@ public static class RollingBall
         events = events.OrderBy(e => Key(e.pos)).ThenBy(e => e.sw ? 1 : 0).ToList();
         int ne = events.Count;
         int nseg = closed ? ne : ne - 1;
-        Debug?.Invoke("  events: " + string.Join(" ", events.Select(e => $"{(e.sw ? "S" : "J")}{e.k}@{Key(e.pos):0.###}" + (e.sw ? $"[{swBefore[e.k].Surface.Kind}#{System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(swBefore[e.k].Surface) % 1000}->{swAfter[e.k].Surface.Kind}#{System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(swAfter[e.k].Surface) % 1000} edge {faB[Prev(e.k)].Surface.Kind}#{System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(faB[Prev(e.k)].Surface) % 1000}->{faB[e.k % n].Surface.Kind}#{System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(faB[e.k % n].Surface) % 1000}]" : ""))) + $" (chain {total:0.###})");
+        Debug?.Invoke("  events: " + string.Join(" ", events.Select(e => $"{(e.sw ? onA.Contains(e.k) ? "SA" : "S" : "J")}{e.k}@{Key(e.pos):0.###}" + (e.sw ? $"[{swBefore[e.k].Surface.Kind}#{System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(swBefore[e.k].Surface) % 1000}->{swAfter[e.k].Surface.Kind}#{System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(swAfter[e.k].Surface) % 1000}]" : ""))) + $" (chain {total:0.###})");
 
-        // the face the ball rolls on before the first event, then changed by each switch
-        var support = new NFace[ne];
+        // the faces the ball rolls on before the first event, then changed by each switch
+        var support = new NFace[ne]; var supportA = new NFace[ne];
         {
-            NFace cur = closed ? (events.Where(e => e.sw).Select(e => swAfter[e.k]).LastOrDefault() ?? faB[0]) : faB[0];
+            NFace cur = closed ? (events.Where(e => e.sw && !onA.Contains(e.k)).Select(e => swAfter[e.k]).LastOrDefault() ?? faB[0]) : faB[0];
+            NFace curA = closed ? (events.Where(e => e.sw && onA.Contains(e.k)).Select(e => swAfter[e.k]).LastOrDefault() ?? faA[0]) : faA[0];
             if (!closed && IslandStartOf(0) >= 0) cur = faB[0];
             for (int i = 0; i < ne; i++)
             {
-                if (events[i].sw) cur = swAfter[events[i].k];
+                if (events[i].sw) { if (onA.Contains(events[i].k)) curA = swAfter[events[i].k]; else cur = swAfter[events[i].k]; }
                 support[i] = cur;   // the face after event i
+                supportA[i] = curA;
             }
         }
-        var offsets = new Dictionary<NFace, NSurface>(ReferenceEqualityComparer.Instance);
-        NSurface Off(NFace f)
-        {
-            if (!offsets.TryGetValue(f, out var o)) offsets[f] = o = NShell.OffsetSurface(Sup(f), rho * (f.Sense ? 1 : -1));
-            return o;
-        }
-        // joints, with the face the ball rolls on there
+        // joints, with the faces the ball rolls on there
         var ev = new Joint[ne];
         try
         {
@@ -646,17 +721,17 @@ public static class RollingBall
             {
                 var (pos, k, sw) = events[i];
                 if (sw) { ev[i] = swJoint[k]; continue; }
-                var fbk = support[i];
+                var fbk = support[i]; var fak = supportA[i];
                 int kp = k < n ? k : n - 1;
                 var pc = pieces[kp];
                 var V = k < n ? pc.Start : pc.End;
                 var dir = pc.Dir(k < n ? pc.Ta : pc.Tb);
-                var na = Outward(faA[kp], V); var nb = Outward(fbk, V);
+                var na = Outward(fak, V); var nb = Outward(fbk, V);
                 var guess = V + (na + nb) * (rho / (1 + Vec3.Dot(na, nb)));
-                var j = SolveJoint(A2, Off(fbk), V, guess, dir, scale);
-                if (j == null) { Debug?.Invoke($"no joint at {V} along {dir} ({SA.Kind}/{Sup(fbk).Kind} {fbk.Tag.Name}), guess {guess}"); return Fail("the ball does not fit at an end of the edge (no centre at that distance from both faces)."); }
+                var j = SolveJoint(OffA(fak), Off(fbk), V, guess, dir, scale);
+                if (j == null) { Debug?.Invoke($"no joint at {V} along {dir} ({SupA(fak).Kind} {fak.Tag.Name}/{Sup(fbk).Kind} {fbk.Tag.Name}), guess {guess}"); return Fail("the ball does not fit at an end of the edge (no centre at that distance from both faces)."); }
                 var (S, T) = j.Value;
-                var a = SA.Project(S); var b = Sup(fbk).Project(S);
+                var a = SupA(fak).Project(S); var b = Sup(fbk).Project(S);
                 if (Vec3.Distance(a, V) < 1e-7 * scale || Vec3.Distance(b, V) < 1e-7 * scale) return Fail("the faces meet tangentially.");
                 ev[i] = new Joint(V, S, T, a, b);
             }
@@ -664,23 +739,24 @@ public static class RollingBall
         catch (InvalidOperationException) { return Fail("the radius is larger than the curvature of a face it blends."); }
 
         // every surface the ball rolls on along the chain (the boolean does not trace a segment's blend against them)
-        var rolls = support.Select(Sup).Distinct().ToList();
-        // spine segments between consecutive events, on A's offset and the offset of the face the ball rolls on
+        var rolls = support.Select(Sup).Concat(supportA.Select(SupA)).Distinct().ToList();
+        // spine segments between consecutive events, on the offsets of the faces the ball rolls on
         var spines = new PipeSpine[nseg]; var range = new (double s0, double s1)[nseg];
         for (int i = 0; i < nseg; i++)
         {
             var ja = ev[i]; var jb = ev[(i + 1) % ne];
             var len = Key(events[(i + 1) % ne].pos) - Key(events[i].pos);
             if (closed && i == ne - 1) len += total;
-            var m = March(A2, Off(support[i]), ja, jb, r, Math.Max(Math.Max(len, 0), Vec3.Distance(ja.S, jb.S)), tolS, scale);
+            var SAi = SupA(supportA[i]);
+            var m = March(OffA(supportA[i]), Off(support[i]), ja, jb, r, Math.Max(Math.Max(len, 0), Vec3.Distance(ja.S, jb.S)), tolS, scale);
             if (m == null)
             {
-                Debug?.Invoke($"march failed on segment {i}/{nseg} ({support[i].Tag.Name}) from {ja.S} to {jb.S}");
+                Debug?.Invoke($"march failed on segment {i}/{nseg} ({supportA[i].Tag.Name}/{support[i].Tag.Name}) from {ja.S} to {jb.S}");
                 return Fail("could not follow the rolling ball along the edge (the faces turn too sharply for this radius).");
             }
             var (P, D, i0, i1) = m.Value;
-            var sp = new PipeSpine(P, D, SA, Sup(support[i])) { Rolls = rolls };
-            if (Folds(sp, r, SA.Project, Sup(support[i]).Project)) { if (Debug != null) { var fam = walked.Concat(faB).Distinct().Where(f => Side(f, support[i])).ToList(); for (int q = 0; q <= 10; q++) { var c = sp.Eval(sp.S0 + (sp.S1 - sp.S0) * q / 10); var pb = Sup(support[i]).Project(c); Debug($"    foot {q}: {pb} on fillet faces {fam.Any(f => onFaces(f, pb))}, A {faA.Any(f => onFaces(f, SA.Project(c)))}"); } } Debug?.Invoke($"  sharpest at {string.Join(" ", Enumerable.Range(1, P.Count - 2).OrderByDescending(q => Math.Acos(Math.Clamp(Vec3.Dot(D[q - 1].Normalized, D[q + 1].Normalized), -1, 1)) / Math.Max(1e-12, Vec3.Distance(P[q - 1], P[q + 1]))).Take(3).Select(q => $"#{q} {P[q]} gap {Vec3.Distance(P[q - 1], P[q]):g2}/{Vec3.Distance(P[q], P[q + 1]):g2} turn {Math.Acos(Math.Clamp(Vec3.Dot(D[q - 1].Normalized, D[q + 1].Normalized), -1, 1)) * 180 / Math.PI:g3}°"))}"); Debug?.Invoke($"fold on segment {i}/{nseg} ({support[i].Tag.Name}:{support[i].Surface.Kind}) {ev[i].S} -> {ev[(i + 1) % ne].S}: min curvature radius {sp.MinCurvatureRadius:g3}, {P.Count} nodes"); return Fail("the radius is too large: the fillet would fold over itself."); }
+            var sp = new PipeSpine(P, D, SAi, Sup(support[i])) { Rolls = rolls };
+            if (Folds(sp, r, SAi.Project, Sup(support[i]).Project)) { if (Debug != null) { var fam = walkedB.Concat(faB).Distinct().Where(f => Side(f, support[i])).ToList(); for (int q = 0; q <= 10; q++) { var c = sp.Eval(sp.S0 + (sp.S1 - sp.S0) * q / 10); var pb = Sup(support[i]).Project(c); Debug($"    foot {q}: {pb} on fillet faces {fam.Any(f => onFaces(f, pb))}, A {faA.Any(f => onFaces(f, SAi.Project(c)))}"); } } Debug?.Invoke($"  sharpest at {string.Join(" ", Enumerable.Range(1, P.Count - 2).OrderByDescending(q => Math.Acos(Math.Clamp(Vec3.Dot(D[q - 1].Normalized, D[q + 1].Normalized), -1, 1)) / Math.Max(1e-12, Vec3.Distance(P[q - 1], P[q + 1]))).Take(3).Select(q => $"#{q} {P[q]} gap {Vec3.Distance(P[q - 1], P[q]):g2}/{Vec3.Distance(P[q], P[q + 1]):g2} turn {Math.Acos(Math.Clamp(Vec3.Dot(D[q - 1].Normalized, D[q + 1].Normalized), -1, 1)) * 180 / Math.PI:g3}°"))}"); Debug?.Invoke($"fold on segment {i}/{nseg} ({support[i].Tag.Name}:{support[i].Surface.Kind}) {ev[i].S} -> {ev[(i + 1) % ne].S}: min curvature radius {sp.MinCurvatureRadius:g3}, {P.Count} nodes"); return Fail("the radius is too large: the fillet would fold over itself."); }
             spines[i] = sp; range[i] = (sp.S[i0], sp.S[i1]);
         }
 
@@ -699,38 +775,39 @@ public static class RollingBall
             arc[i] = new NEdge(circle, 0, tb, AV[i], BV[i]);
         }
         int EvOf(int k, bool sw) => events.FindIndex(e => e.k == k && e.sw == sw);
-        // sections at the open ends, boundary paths at switches (chain vertex to foot point)
-        NEdge? secA0 = null, secA1 = null;
-        var bnd = new Dictionary<int, List<(NEdge e, bool fwd)>>();     // by chain vertex
+        // sections at the open ends, boundary paths at switches (chain vertex to foot point), on each side
+        var bndA = new Dictionary<int, List<(NEdge e, bool fwd)>>();     // by chain vertex
+        var bnd = new Dictionary<int, List<(NEdge e, bool fwd)>>();
         if (!closed)
             foreach (var k in new[] { 0, n })
             {
                 int i = EvOf(k, false);
                 var j = ev[i];
                 var plane = NSurface.FromPlane(Plane.FromPointNormal(j.S, j.T));
-                var sa = new NEdge(new NSection(SA, plane, j.V, j.A), 0, 1, VV[k], AV[i]);
-                if (k == 0) secA0 = sa; else secA1 = sa;
+                bndA[k] = new() { (new NEdge(new NSection(SupA(supportA[i]), plane, j.V, j.A), 0, 1, VV[k], AV[i]), true) };
                 bnd[k] = new() { (new NEdge(new NSection(Sup(support[i]), plane, j.V, j.B), 0, 1, VV[k], BV[i]), true) };
             }
         foreach (var (k, _) in swJoint)
         {
+            bool a = onA.Contains(k);
             var path = walks[k].segs;
             var list = new List<(NEdge, bool)>();
             var v0 = VV[k];
             for (int q = 0; q < path.Count; q++)
             {
                 var (gc, ga, gb) = path[q];
-                var v1 = q == path.Count - 1 ? BV[EvOf(k, true)] : new NVertex(gc.Eval(gb));
+                var v1 = q == path.Count - 1 ? (a ? AV : BV)[EvOf(k, true)] : new NVertex(gc.Eval(gb));
                 list.Add(ga < gb ? (new NEdge(gc, ga, gb, v0, v1), true) : (new NEdge(gc, gb, ga, v1, v0), false));
                 v0 = v1;
             }
-            bnd[k] = list;
+            (a ? bndA : bnd)[k] = list;
         }
         IEnumerable<(NEdge, bool)> Out(int k) => bnd[k];
         IEnumerable<(NEdge, bool)> In(int k) => Enumerable.Reverse(bnd[k]).Select(x => (x.e, !x.fwd));
+        IEnumerable<(NEdge, bool)> OutA(int k) => bndA[k];
+        IEnumerable<(NEdge, bool)> InA(int k) => Enumerable.Reverse(bndA[k]).Select(x => (x.e, !x.fwd));
 
         var body = new NBody();
-        var tagA = new FaceTag(name + ".A", SA.Kind == SurfaceKind.Plane ? SurfaceDef.PlaneDef : SA.Def);
         bool fits = true;
         var E = new NEdge[n]; var fwdE = new bool[n];
         for (int k = 0; k < n; k++)
@@ -754,7 +831,8 @@ public static class RollingBall
             return surf.Project(best);
         }
         var cA = new NEdge[nseg]; var cB = new NEdge[nseg];
-        var bFaces = walked.Concat(faB).Distinct().ToList();
+        var bFaces = walkedB.Concat(faB).Distinct().ToList();
+        var aFaces = walkedA.Concat(faA).Distinct().ToList();
         var oneBlendC = !closed && nseg > 1 && Joined(spines, range) is { } jsc ? NSurface.Pipe(jsc, r) : null;
         for (int i = 0; i < nseg; i++)
         {
@@ -764,7 +842,8 @@ public static class RollingBall
             cB[i] = new NEdge(new NContact(sp, true), s0, s1, BV[i], BV[i1]);
             // blend face
             var sm = 0.5 * (s0 + s1);
-            var qa = SA.Project(sp.Eval(sm)); var qb = Sup(support[i]).Project(sp.Eval(sm));
+            var SAi = SupA(supportA[i]);
+            var qa = SAi.Project(sp.Eval(sm)); var qb = Sup(support[i]).Project(sp.Eval(sm));
             var pipe = oneBlendC ?? NSurface.Pipe(sp, r);
             var nT = -pipe.Normal(qa);
             var loop = new List<(NEdge, bool)> { (cA[i], true), (arc[i1], true), (cB[i], false), (arc[i], false) };
@@ -776,9 +855,10 @@ public static class RollingBall
                 // the one it rolls onto only within the tolerance, so a hair off it reads as running past)
                 if (q == 0 && events[i].sw || q == 8 && events[(i + 1) % ne].sw) continue;
                 var c = sp.Eval(s0 + (s1 - s0) * q / 8);
-                var pa = SA.Project(c); var pb = Sup(support[i]).Project(c);
-                fits = faA.Any(f => onFaces(f, pa)) && bFaces.Any(f => Side(f, support[i]) && onFaces(f, pb));
-                if (!fits) Debug?.Invoke($"  overflows on segment {i} at {q}/8: A foot {pa} on A {faA.Any(f => onFaces(f, pa))}, B foot {pb} on B {bFaces.Any(f => Side(f, support[i]) && onFaces(f, pb))} ({support[i].Tag.Name})");
+                var pa = SAi.Project(c); var pb = Sup(support[i]).Project(c);
+                bool onAf = aFaces.Any(f => Side(f, supportA[i]) && onFaces(f, pa)), onBf = bFaces.Any(f => Side(f, support[i]) && onFaces(f, pb));
+                fits = onAf && onBf;
+                if (!fits) Debug?.Invoke($"  overflows on segment {i} at {q}/8: A foot {pa} on A {onAf}, B foot {pb} on B {onBf} ({supportA[i].Tag.Name}/{support[i].Tag.Name})");
             }
         }
 
@@ -811,22 +891,27 @@ public static class RollingBall
             body.Faces.Add(MakeFace(sI, convex ? fI.Sense : !fI.Sense, tagI, loop, sI.Project((Mp + qI) * 0.5)));
         }
 
-        // B side: one face per run between switches (or open ends): the chain edges from the run's first vertex to its
-        // last (the boundary curve across islands), the boundary at its end, the contact back, the boundary at its start
+        // each side: one face per run between its switches (or open ends): the chain edges from the run's first vertex
+        // to its last (on B, the boundary curve across islands), the boundary at its end, the contact back, the boundary
+        // at its start
+        foreach (var sideB in new[] { true, false })
         {
-            var cuts = events.Select((e, i) => (e, i)).Where(x => x.e.sw || !closed && (x.e.k == 0 || x.e.k == n)).ToList();
+            var cuts = events.Select((e, i) => (e, i)).Where(x => x.e.sw && onA.Contains(x.e.k) != sideB || !closed && !x.e.sw && (x.e.k == 0 || x.e.k == n)).ToList();
+            // (a closed chain's side with no switch: one band, below)
+            if (cuts.Count == 0) continue;
+            var sup = sideB ? support : supportA; var fx = sideB ? faB : faA; var cont = sideB ? cB : cA;
             for (int c = 0; c + (closed ? 0 : 1) < cuts.Count; c++)
             {
                 var (ea, ia) = cuts[c]; var (eb, ib) = cuts[(c + 1) % cuts.Count];
                 int ka = ea.k, kb = eb.k;
                 int vsteps = closed ? ((kb - ka + n) % n == 0 && cuts.Count == 1 ? n : (kb - ka + n) % n) : kb - ka;
                 int esteps = closed ? ((ib - ia + ne) % ne == 0 ? ne : (ib - ia + ne) % ne) : ib - ia;
-                var fS = support[ia];
+                var fS = sup[ia];
                 var loop = new List<(NEdge, bool)>();
                 for (int q = 0; q < vsteps; q++)
                 {
                     int k = (ka + q) % n;
-                    if (islandPath.TryGetValue(k, out var ip))
+                    if (sideB && islandPath.TryGetValue(k, out var ip))
                     {
                         // across an island the face follows the boundary curve, not the chain
                         loop.AddRange(ip.path);
@@ -835,22 +920,25 @@ public static class RollingBall
                     }
                     loop.Add((E[k], fwdE[k]));
                 }
-                loop.AddRange(Out(kb));
-                for (int q = esteps - 1; q >= 0; q--) loop.Add((cB[(ia + q) % ne], false));
-                loop.AddRange(In(ka));
+                loop.AddRange(sideB ? Out(kb) : OutA(kb));
+                for (int q = esteps - 1; q >= 0; q--) loop.Add((cont[(ia + q) % ne], false));
+                loop.AddRange(sideB ? In(ka) : InA(ka));
                 // orientation: the face lies on the side of the chain where the contact is
                 int kp = ka % n;
                 var Mp = pieces[kp].E.Curve.Eval(pieces[kp].Mid); var t = pieces[kp].Dir(pieces[kp].Mid);
-                var sS = Sup(fS);
+                var sS = sideB ? Sup(fS) : SupA(fS);
                 var qb = Foot(Mp, sS);
-                var nT = Outward(faB[kp], Mp) * (convex ? 1 : -1);
+                var nT = Outward(fx[kp], Mp) * (convex ? 1 : -1);
                 if (Vec3.Dot(Vec3.Cross(nT, t), qb - Mp) < 0) loop = Reverse(loop);
-                var tagB = new FaceTag($"{name}.B{c}", sS.Kind == SurfaceKind.Plane ? SurfaceDef.PlaneDef : sS.Def);
-                body.Faces.Add(MakeFace(sS, convex ? fS.Sense : !fS.Sense, tagB, loop, sS.Project((Mp + qb) * 0.5)));
+                var runs = cuts.Count - (closed ? 0 : 1);
+                var tag = new FaceTag(sideB ? $"{name}.B{c}" : runs == 1 ? name + ".A" : $"{name}.A{c}", sS.Kind == SurfaceKind.Plane ? SurfaceDef.PlaneDef : sS.Def);
+                body.Faces.Add(MakeFace(sS, convex ? fS.Sense : !fS.Sense, tag, loop, sS.Project((Mp + qb) * 0.5)));
             }
         }
-        // A side: one face (a band around a closed chain): the chain edges, and the contact back
+        // a closed chain's A side with no switch: one band, the chain edges and the contact back
+        if (closed && onA.Count == 0)
         {
+            var SA = SupA(faA[0]);
             var Mp = pieces[0].E.Curve.Eval(pieces[0].Mid); var t = pieces[0].Dir(pieces[0].Mid);
             var qa = Foot(Mp, SA);
             var nT = Outward(faA[0], Mp) * (convex ? 1 : -1);
@@ -859,25 +947,12 @@ public static class RollingBall
             var lo = Enumerable.Range(0, n).Select(k => (E[k], fwdE[k])).ToList();
             var li = Enumerable.Range(0, nseg).Select(i => (cA[i], true)).ToList();
             li = Reverse(li);
-            var face = new NFace(SA, sense, tagA, SA.Project((Mp + qa) * 0.5));
-            if (closed)
-            {
-                if (flip) { lo = Reverse(lo); li = Reverse(li); }
-                var outer = new NLoop(); var inner = new NLoop();
-                foreach (var (e, f) in lo) outer.Coedges.Add(new NCoedge(e, f));
-                foreach (var (e, f) in li) inner.Coedges.Add(new NCoedge(e, f));
-                face.Loops.Add(outer); face.Loops.Add(inner);
-            }
-            else
-            {
-                var loop = new List<(NEdge, bool)>(lo) { (secA1!, true) };
-                loop.AddRange(li);
-                loop.Add((secA0!, false));
-                if (flip) loop = Reverse(loop);
-                var l = new NLoop();
-                foreach (var (e, f) in loop) l.Coedges.Add(new NCoedge(e, f));
-                face.Loops.Add(l);
-            }
+            var face = new NFace(SA, sense, new FaceTag(name + ".A", SA.Kind == SurfaceKind.Plane ? SurfaceDef.PlaneDef : SA.Def), SA.Project((Mp + qa) * 0.5));
+            if (flip) { lo = Reverse(lo); li = Reverse(li); }
+            var outer = new NLoop(); var inner = new NLoop();
+            foreach (var (e, f) in lo) outer.Coedges.Add(new NCoedge(e, f));
+            foreach (var (e, f) in li) inner.Coedges.Add(new NCoedge(e, f));
+            face.Loops.Add(outer); face.Loops.Add(inner);
             body.Faces.Add(face);
         }
         if (!closed)
@@ -886,11 +961,11 @@ public static class RollingBall
                 int i = EvOf(k, false);
                 var j = ev[i];
                 var outward = j.T * sign;
-                var loop = new List<(NEdge, bool)> { (k == 0 ? secA0! : secA1!, true), (arc[i], true) };
+                var loop = new List<(NEdge, bool)>(OutA(k)) { (arc[i], true) };
                 loop.AddRange(In(k));
                 if (Vec3.Dot(LoopNormal(loop), outward) < 0) loop = Reverse(loop);
                 // (the way round the faces beside it already go: the A face's use of the section edge, the other way)
-                var secAk = k == 0 ? secA0! : secA1!;
+                var secAk = bndA[k][0].e;
                 if (body.Faces.SelectMany(f => f.Loops).SelectMany(l => l.Coedges).FirstOrDefault(c => ReferenceEquals(c.Edge, secAk)) is { } useA
                     && loop.First(x => ReferenceEquals(x.Item1, secAk)).Item2 == useA.Forward) loop = Reverse(loop);
                 var pl = NSurface.FromPlane(Plane.FromPointNormal(j.S, outward));

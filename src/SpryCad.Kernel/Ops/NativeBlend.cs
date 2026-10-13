@@ -616,6 +616,7 @@ public static class NativeBlend
             || EndPlane(x.v, x.dirOut, x.fa, x.fb, chain, sel, out _, nearSquare: true) != null || EndCutAt(x.v, x.dirOut, x.fa, x.fb, chain, sel) is { Plane: null }));
         if (rb.Fits && !skew) return JoinPivots(rb, rb.Tool, rb.Fits, pivots, chain);
         var cuts = new List<(Vec3 v, Plane pl)>();
+        var valleys = new Dictionary<Vec3, List<Valley>>();
         var corners = new List<RoundCornerCut>();
         // (ends on a round face, the only other face there: cut back to its cylinder)
         var rounds = new List<(Vec3 v, EndCut cut)>();
@@ -631,7 +632,7 @@ public static class NativeBlend
                 return run;
             }
             if (RoundCorner(v, fa, fb, chain, sel, pl, size, name) is { } rc) corners.Add(rc);
-            else cuts.Add((v.P, pl));
+            else { cuts.Add((v.P, pl)); valleys[v.P] = ValleysBeside(v, fa, fb, pl); }
             return run;
         }, p => cuts.Any(c => c.pl.Distance(p) < 1e-9 && Vec3.Distance(p, c.v) < run + 2 * size) || corners.Any(c => c.Beyond(p))
             || rounds.Any(c => c.cut.Distance(p) < 1e-9 && Vec3.Distance(p, c.v) < run + 2 * size),
@@ -648,7 +649,8 @@ public static class NativeBlend
             var t = on.Tool;
             // (only near the end: the plane may cut the tool elsewhere too, as a wall's underside in the plane of a
             // top the chain runs on along)
-            foreach (var (v, pl) in cuts) t = TrimNear(t, pl, v, run + 2 * size);
+            foreach (var (v, pl) in cuts) t = TrimNear(t, pl, v, run + 2 * size, valleys.GetValueOrDefault(v));
+            if (valleys.Values.Any(x => x.Count > 0)) Debug?.Invoke($"rolling ball {name}: ends kept under {valleys.Values.Sum(x => x.Count)} valley round(s) beside the cut");
             foreach (var (v, rc) in rounds) t = rc.TrimNear(t, v, run + 2 * size);
             // (a run-on still running past its faces is cut back again, or given up for its whole tangent chain's:
             // cut on the mitre plane, as cheaper; a fitting one cut to the other fillet)
@@ -839,13 +841,72 @@ public static class NativeBlend
     static bool Carried(NVertex v, IReadOnlyCollection<NEdge> mine) => _pivoted != null && _pivoted.TryGetValue(v, out var by) && !mine.Contains(by);
 
     /// <summary>The tool less what lies on the negative side of the plane within reach of p (a box about p).</summary>
-    static Solid TrimNear(Solid tool, Plane pl, Vec3 p, double reach)
+    static Solid TrimNear(Solid tool, Plane pl, Vec3 p, double reach, IReadOnlyList<Valley>? valleys = null)
     {
         var n = pl.Normal; var origin = pl.Project(p);
         var x = n.AnyPerpendicular(); var y = Vec3.Cross(n, x);
         var rect = ProfileLoop.Polygon(new[] { new Vec2(-reach, -reach), new Vec2(reach, -reach), new Vec2(reach, reach), new Vec2(-reach, reach) }, "trim");
         var slab = Builders.Extrude(new[] { new ProfileRegion(rect) }, new Frame(origin, x, y, n), -reach, 0, "trim");
+        // (beside a valley the plane's face runs on into, what lies under the valley's round kept: past the seam the
+        // face the blend ends on is the round, not the plane)
+        foreach (var vl in valleys ?? Array.Empty<Valley>())
+        {
+            var vy = Vec3.Cross(n, vl.U);
+            var span = ProfileLoop.Polygon(new[] { new Vec2(0, -2 * reach), new Vec2(vl.Width, -2 * reach), new Vec2(vl.Width, 2 * reach), new Vec2(0, 2 * reach) }, "trim");
+            var beyond = Builders.Extrude(new[] { new ProfileRegion(span) }, new Frame(vl.L0, vl.U, vy, n), -vl.Height, 0, "trim");
+            var ax = vl.Cyl.Axis; var h = Vec3.Dot(p - vl.Cyl.Origin, ax);
+            var round = Builders.Cylinder(vl.Cyl.Origin + ax * (h - 3 * reach), ax, vl.Cyl.R, 6 * reach, "trim", vl.Cyl.F.XDir);
+            slab = Csg.Subtract(slab, Csg.Subtract(beyond, round));
+        }
         return Csg.Subtract(tool, slab);
+    }
+
+    /// <summary>
+    /// A round face a plane runs on into tangentially along a straight seam, curving up off the plane's cut side (a
+    /// cut's floor running up a sketch fillet into its wall): the seam's point L0, the direction U across it in the
+    /// plane towards the round, how far the round reaches that way (Width) and up off the plane (Height).
+    /// </summary>
+    internal sealed record Valley(Vec3 L0, Vec3 U, double Width, double Height, NSurface Cyl);
+
+    /// <summary>
+    /// The valleys beside the faces in plane pl at vertex v (reached from the blended faces' edges there): see
+    /// <see cref="Valley"/>. pl is oriented with the kept side positive.
+    /// </summary>
+    static List<Valley> ValleysBeside(NVertex v, NFace fa, NFace fb, Plane pl)
+    {
+        var res = new List<Valley>();
+        var flats = new List<NFace>();
+        foreach (var face in new[] { fa, fb })
+            foreach (var c in face.Coedges)
+            {
+                if (!ReferenceEquals(c.Edge.V0, v) && !ReferenceEquals(c.Edge.V1, v)) continue;
+                foreach (var u in c.Edge.Uses)
+                    if (u.Face.Surface.Kind == SurfaceKind.Plane && Math.Abs(Vec3.Dot(u.Face.Surface.Plane!.Normal, pl.Normal)) > 1 - 1e-9
+                        && Math.Abs(pl.Distance(u.Face.Surface.Plane.Project(v.P))) < 1e-7 && !flats.Contains(u.Face)) flats.Add(u.Face);
+            }
+        foreach (var f in flats)
+            foreach (var c in f.Coedges)
+            {
+                var e = c.Edge;
+                if (e.Uses.Count != 2) continue;
+                var r = e.Uses.Select(u => u.Face).First(g => !ReferenceEquals(g, f));
+                if (r.Surface.Kind != SurfaceKind.Cylinder) continue;
+                // (tangent to the plane along a line, curving up off its cut side: its axis along the plane, a radius off
+                // it on that side. From the surfaces, not the edge: where they are tangent its vertices are solved points a
+                // little along it, and an offset body's is a fitted curve)
+                var cyl = r.Surface; var d = cyl.Axis.Normalized; var off = pl.Distance(cyl.Origin);
+                if (Math.Abs(Vec3.Dot(d, pl.Normal)) > 1e-6 || off >= 0 || Math.Abs(-off - cyl.R) > 1e-6 * Math.Max(1, cyl.R)) continue;
+                var foot = pl.Project(cyl.Origin);
+                var mid = foot + d * Vec3.Dot(e.Mid - foot, d);
+                var u0 = Vec3.Cross(pl.Normal, d).Normalized;
+                var pts = r.Coedges.SelectMany(x => new[] { x.Edge.V0.P, x.Edge.V1.P }).ToList();
+                double w = pts.Max(q => Vec3.Dot(q - mid, u0)), wn = pts.Max(q => Vec3.Dot(q - mid, -u0));
+                if (wn > w) { u0 = -u0; w = wn; }
+                var height = pts.Max(q => -pl.Distance(q));
+                if (w < 1e-6 || height < 1e-9) continue;
+                res.Add(new Valley(mid, u0, w, height, r.Surface));
+            }
+        return res;
     }
 
     /// <summary>The tools glued into one per group of them that touch (boxes overlapping); null if any group does not glue.</summary>
