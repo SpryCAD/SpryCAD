@@ -1073,18 +1073,29 @@ public static class RollingBall
         double h = hmax, travelled = 0;
         for (int iter = 0; ; iter++)
         {
-            if (iter > 200000 || travelled > length * 4 + 10 * hmax) return null;
+            if (iter > 200000 || travelled > length * 4 + 10 * hmax) { Debug?.Invoke($"    march lost: {travelled:g3} travelled for {length:g3}, at {cur}"); return null; }
             var toEnd = Vec3.Distance(cur, b.S);
             if (toEnd <= h * 1.5)
             {
-                if (Err(cur, ct, b.S, b.T) <= tol) { P.Add(b.S); D.Add(b.T); break; }
+                var eEnd = Err(cur, ct, b.S, b.T);
+                if (eEnd <= tol) { P.Add(b.S); D.Add(b.T); break; }
                 h = toEnd / 2;
-                if (h < hmin) return null;
+                if (h < hmin) { Debug?.Invoke($"    march stuck at {cur} short of the end {b.S}: error {eEnd:g3}"); return null; }
             }
             var nx = Node(cur + ct * h, ct);
-            if (nx == null || Vec3.Dot(nx.Value.p - cur, ct) <= 0) { h /= 2; if (h < hmin) return null; continue; }
+            if (nx == null || Vec3.Dot(nx.Value.p - cur, ct) <= 0)
+            {
+                h /= 2;
+                if (h < hmin)
+                {
+                    var pr = NSurface.ProjectToIntersection(A2, B2, cur + ct * h * 2);
+                    Debug?.Invoke($"    march stuck at {cur} after {travelled:g3} of {length:g3}: {(nx == null ? $"no node (off {A2.F_(pr):g3}/{B2.F_(pr):g3}, tangent {Vec3.Cross(A2.Grad(pr), B2.Grad(pr)).Length:g3})" : "backwards")}");
+                    return null;
+                }
+                continue;
+            }
             var e = Err(cur, ct, nx.Value.p, nx.Value.t);
-            if (e > tol) { h /= 2; if (h < hmin) return null; continue; }
+            if (e > tol) { h /= 2; if (h < hmin) { Debug?.Invoke($"    march stuck at {cur} after {travelled:g3} of {length:g3}: error {e:g3}"); return null; } continue; }
             P.Add(nx.Value.p); D.Add(nx.Value.t);
             travelled += Vec3.Distance(cur, nx.Value.p);
             (cur, ct) = nx.Value;
