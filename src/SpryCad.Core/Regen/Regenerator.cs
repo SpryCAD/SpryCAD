@@ -1483,6 +1483,7 @@ public sealed class Regenerator
                             if (errors.Count > 0) { ShellTrace?.Invoke($"{ff.Name} R{radius:g3} ({(convex ? "convex" : "concave")}, {group.Count} edges): {errors[0]}"); return null; }
                         }
                     }
+                    ShellTrace?.Invoke($"inner body: {inner.Native!.Faces.Count} faces, {inner.Native.Validate() ?? "valid"}");
                     var res = Kernel.Native.NShell.Hollow(outer, inner.Native!, open, f.Id);
                     if (res.Validate() is { } bad) { ShellTrace?.Invoke("hollowed: " + bad); return null; }
                     var sol = Kernel.Native.NTess.ToSolid(res);

@@ -194,7 +194,7 @@ public static class RollingBall
             var na = Outward(fa, V); var nb = Outward(fb, V);
             var guess = V + (na + nb) * (rho / (1 + Vec3.Dot(na, nb)));
             var j = SolveJoint(A2, B2, V, guess, dir, scale);
-            if (j == null) return Fail("the ball does not fit at an end of the edge (no centre at that distance from both faces).");
+            if (j == null) { Debug?.Invoke($"no joint at {V} along {dir} ({SA.Kind}/{SB.Kind}), guess {guess}"); return Fail("the ball does not fit at an end of the edge (no centre at that distance from both faces)."); }
             var (S, T) = j.Value;
             var a = SA.Project(S); var b = SB.Project(S);
             if (Vec3.Distance(a, V) < 1e-7 * scale || Vec3.Distance(b, V) < 1e-7 * scale) return Fail("the faces meet tangentially.");
@@ -420,7 +420,10 @@ public static class RollingBall
             var g = fb0.Coedges.Select(c => c.Edge).FirstOrDefault(x => (ReferenceEquals(x.V0, vtx) || ReferenceEquals(x.V1, vtx))
                        && x.Uses.Any(u => ReferenceEquals(u.Face, fb1)) && !pieces.Any(p => ReferenceEquals(p.E, x)));
             if (g == null) return (null, segs, null, "the edges change faces where the faces do not meet along an edge.");
-            if (Vec3.Dot(Outward(fb0, V), Outward(fb1, V)) < 1 - 1e-4) return (null, segs, null, "the edges turn a corner between two faces: blend them separately.");
+            // (smooth along the edge between them: at its middle where the corner itself is a solved point a few degrees
+            // off, as the inside of a shell on a small round)
+            if (Vec3.Dot(Outward(fb0, V), Outward(fb1, V)) < 1 - 1e-4 && Vec3.Dot(Outward(fb0, g.Mid), Outward(fb1, g.Mid)) < Math.Cos(2 * Math.PI / 180))
+                return (null, segs, null, "the edges turn a corner between two faces: blend them separately.");
             var nsurf = Sup(fb0); bool sense = fb0.Sense;
             Vec3 C(NCurve gc, double t) { var G = gc.Eval(t); return G + nsurf.Normal(G) * ((sense ? 1 : -1) * rho); }
             var from = vtx; var cur = g;
@@ -619,7 +622,7 @@ public static class RollingBall
                 var na = Outward(faA[kp], V); var nb = Outward(fbk, V);
                 var guess = V + (na + nb) * (rho / (1 + Vec3.Dot(na, nb)));
                 var j = SolveJoint(A2, Off(fbk), V, guess, dir, scale);
-                if (j == null) return Fail("the ball does not fit at an end of the edge (no centre at that distance from both faces).");
+                if (j == null) { Debug?.Invoke($"no joint at {V} along {dir} ({SA.Kind}/{Sup(fbk).Kind} {fbk.Tag.Name}), guess {guess}"); return Fail("the ball does not fit at an end of the edge (no centre at that distance from both faces)."); }
                 var (S, T) = j.Value;
                 var a = SA.Project(S); var b = Sup(fbk).Project(S);
                 if (Vec3.Distance(a, V) < 1e-7 * scale || Vec3.Distance(b, V) < 1e-7 * scale) return Fail("the faces meet tangentially.");
@@ -1066,6 +1069,10 @@ public static class RollingBall
         }
         var hmax = Math.Max(Math.Min(r, length / 6), 1e-6);
         var hmin = hmax * 1e-5;
+        // (no more exact than its ends: joints solved on a fitted surface, an offset of a shell's inside, sit up to
+        // ~1e-7 off the intersection, and a step from one is off by that however short)
+        double JointOff(Vec3 p) => Math.Max(Math.Abs(A2.F_(p)), Math.Abs(B2.F_(p)));
+        tol = Math.Max(tol, 4 * Math.Max(JointOff(a.S), JointOff(b.S)));
 
         // forward from a to b
         var P = new List<Vec3> { a.S }; var D = new List<Vec3> { a.T };

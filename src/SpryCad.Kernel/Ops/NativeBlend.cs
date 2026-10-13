@@ -553,6 +553,18 @@ public static class NativeBlend
                 pivots.Add((v, rc0, p0));
         Vec3? EndAt(NVertex v) => pivots.Where(x => ReferenceEquals(x.v, v)).Select(x => (Vec3?)x.p.QOwn).FirstOrDefault();
         var rb = RollingBall.Build(chain, size, name, OnFaces, endAt: pivots.Count > 0 ? EndAt : null);
+        // (a chain failing only for a sliver of an edge at an end, far shorter than the ball, on which it would have to
+        // roll backwards (a round the chain just touches, its last few thousandths): built without that piece, left sharp)
+        if (rb.Error != null && chain.Count > 1)
+            foreach (var (v, _, _, _) in ChainEnds(chain))
+            {
+                var end = chain.FirstOrDefault(x => ReferenceEquals(x.V0, v) || ReferenceEquals(x.V1, v));
+                if (end == null || end.Length > 0.05 * size) continue;
+                var shorter = chain.Where(x => !ReferenceEquals(x, end)).ToList();
+                var again = Ball(shorter, size, name, selected);
+                Debug?.Invoke($"rolling ball {name}: without its {end.Length:g3} end piece -> {again.Error ?? "ok"}");
+                if (again.Error == null) return again;
+            }
         if (rb.Error != null || rb.Tool?.Native == null) return rb;
         // (a tool running past its faces, or one that fits but ends on a face at an angle: its square end leans past
         // that face on one side and leaves a sliver on the other, as the tube's rim fillet on the plenum's end face.
@@ -869,7 +881,8 @@ public static class NativeBlend
                         if (Same(cb.Surface, ca.Surface) || Same(ob.Surface, oa.Surface)) continue;
                         joined = Vec3.Dot(Outward(cb, v.P), Outward(ob, v.P)) > 1 - 1e-4;
                     }
-                if (joined) res.Add(o);
+                // (or meeting smoothly along the edge between them, where the corner itself is a few degrees off)
+                if (joined || SmoothTurn(c, o, v.P)) res.Add(o);
             }
         }
         return res;
