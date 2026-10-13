@@ -558,23 +558,31 @@ public static class NativeBlend
         // that face on one side and leaves a sliver on the other, as the tube's rim fillet on the plenum's end face.
         // As the line tools, run on and cut back to the face; a fitting tool with square ends is left as it is)
         bool skew = rb.Fits && ChainEnds(chain).Any(x => !pivots.Any(p => ReferenceEquals(p.v, x.v))
-            && EndPlane(x.v, x.dirOut, x.fa, x.fb, chain, sel, out _, nearSquare: true) != null);
+            && (EndPlane(x.v, x.dirOut, x.fa, x.fb, chain, sel, out _, nearSquare: true) != null || EndCutAt(x.v, x.dirOut, x.fa, x.fb, chain, sel) is { Plane: null }));
         if (rb.Fits && !skew) return JoinPivots(rb, rb.Tool, rb.Fits, pivots, chain);
         var cuts = new List<(Vec3 v, Plane pl)>();
         var corners = new List<RoundCornerCut>();
+        // (ends on a round face, the only other face there: cut back to its cylinder)
+        var rounds = new List<(Vec3 v, EndCut cut)>();
         var run = 3 * size;
         var on = RollingBall.Build(chain, size, name, OnFaces, (v, dirOut, fa, fb) =>
         {
             if (pivots.Any(x => ReferenceEquals(x.v, v))) return 0;
-            if (EndPlane(v, dirOut, fa, fb, chain, sel, out _, nearSquare: true) is not { } pl) return 0;
+            if (EndPlane(v, dirOut, fa, fb, chain, sel, out _, nearSquare: true) is not { } pl)
+            {
+                if (EndCutAt(v, dirOut, fa, fb, chain, sel) is not { Plane: null } roundCut) return 0;
+                rounds.Add((v.P, roundCut));
+                return run;
+            }
             if (RoundCorner(v, fa, fb, chain, sel, pl, size, name) is { } rc) corners.Add(rc);
             else cuts.Add((v.P, pl));
             return run;
-        }, p => cuts.Any(c => c.pl.Distance(p) < 1e-9 && Vec3.Distance(p, c.v) < run + 2 * size) || corners.Any(c => c.Beyond(p)),
+        }, p => cuts.Any(c => c.pl.Distance(p) < 1e-9 && Vec3.Distance(p, c.v) < run + 2 * size) || corners.Any(c => c.Beyond(p))
+            || rounds.Any(c => c.cut.Distance(p) < 1e-9 && Vec3.Distance(p, c.v) < run + 2 * size),
             pivots.Count > 0 ? EndAt : null);
-        if (cuts.Count + corners.Count == 0 || on.Error != null || on.Tool?.Native == null)
+        if (cuts.Count + corners.Count + rounds.Count == 0 || on.Error != null || on.Tool?.Native == null)
         {
-            Debug?.Invoke($"rolling ball {name}: no cut back ({cuts.Count} planes, {corners.Count} corners, run on: {on.Error ?? (on.Tool?.Native == null ? "faceted" : "ok")})");
+            Debug?.Invoke($"rolling ball {name}: no cut back ({cuts.Count} planes, {rounds.Count} rounds, {corners.Count} corners, run on: {on.Error ?? (on.Tool?.Native == null ? "faceted" : "ok")})");
             return JoinPivots(rb, rb.Tool, rb.Fits, pivots, chain);
         }
         var old = Csg.NoFallback;
@@ -585,6 +593,7 @@ public static class NativeBlend
             // (only near the end: the plane may cut the tool elsewhere too, as a wall's underside in the plane of a
             // top the chain runs on along)
             foreach (var (v, pl) in cuts) t = TrimNear(t, pl, v, run + 2 * size);
+            foreach (var (v, rc) in rounds) t = rc.TrimNear(t, v, run + 2 * size);
             // (a run-on still running past its faces is cut back again, or given up for its whole tangent chain's:
             // cut on the mitre plane, as cheaper; a fitting one cut to the other fillet)
             foreach (var c in corners) t = on.Fits ? c.Trim(t) : c.TrimOnMiter(t);
@@ -596,7 +605,7 @@ public static class NativeBlend
                 Debug?.Invoke($"rolling ball {name}: not cut back ({(t.Native == null ? "faceted" : t.Native.Validate() ?? $"volume {v1:g4} for {v0:g4}, run on {vOn:g4}; cut at {string.Join(", ", cuts.Select(c => c.v + " n " + c.pl.Normal))}")})");
                 return JoinPivots(rb, rb.Tool, rb.Fits, pivots, chain);
             }
-            Debug?.Invoke($"rolling ball {name}: {cuts.Count + corners.Count} end(s) cut back ({(rb.Fits ? "fits" : "overflows")} -> {(on.Fits ? "fits" : "overflows")})");
+            Debug?.Invoke($"rolling ball {name}: {cuts.Count + corners.Count + rounds.Count} end(s) cut back ({(rb.Fits ? "fits" : "overflows")} -> {(on.Fits ? "fits" : "overflows")})");
             // (fitting but for what was cut off)
             return JoinPivots(rb, t, on.Fits, pivots, chain);
         }
@@ -1221,6 +1230,23 @@ public static class NativeBlend
             }
             var cyl = Builders.Cylinder(s.Origin + ax * (h0 - 1), ax, s.R, h1 - h0 + 2, "trim", s.F.XDir);
             return _sign > 0 ? Csg.Subtract(tool, cyl) : Csg.Intersect(tool, cyl);
+        }
+
+        /// <summary>
+        /// The tool less what lies past the cut within reach of p only (as <see cref="NativeBlend.TrimNear"/>): for a
+        /// round face, a stretch of its cylinder about p taken away (the kept side outside it), or a thick tube round it
+        /// (inside).
+        /// </summary>
+        public Solid TrimNear(Solid tool, Vec3 p, double reach)
+        {
+            if (Plane != null) return TrimOthers(NativeBlend.TrimNear(tool, Plane, p, reach));
+            var s = _face!.Surface; var ax = s.Axis;
+            var h = Vec3.Dot(p - s.Origin, ax);
+            var start = s.Origin + ax * (h - reach);
+            var inner = Builders.Cylinder(start, ax, s.R, 2 * reach, "trim", s.F.XDir);
+            if (_sign > 0) return Csg.Subtract(tool, inner);
+            var outer = Builders.Cylinder(start, ax, s.R + reach, 2 * reach, "trim", s.F.XDir);
+            return Csg.Subtract(tool, Csg.Subtract(outer, inner));
         }
 
         /// <summary>The tool less what lies past the other planes.</summary>

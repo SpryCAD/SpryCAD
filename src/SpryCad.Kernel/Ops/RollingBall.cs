@@ -1073,12 +1073,14 @@ public static class RollingBall
         double h = hmax, travelled = 0;
         for (int iter = 0; ; iter++)
         {
-            if (iter > 200000 || travelled > length * 4 + 10 * hmax) { Debug?.Invoke($"    march lost: {travelled:g3} travelled for {length:g3}, at {cur}"); return null; }
+            if (iter > 200000 || travelled > length * 4 + 10 * hmax) { Debug?.Invoke($"    march lost: {travelled:g3} travelled for {length:g3}, at {cur}; from {a.S} along {a.T} to {b.S} along {b.T}; path {string.Join(" ", P.Where((_, i) => i % 4 == 0).Take(30))}"); return null; }
             var toEnd = Vec3.Distance(cur, b.S);
             if (toEnd <= h * 1.5)
             {
                 var eEnd = Err(cur, ct, b.S, b.T);
-                if (eEnd <= tol) { P.Add(b.S); D.Add(b.T); break; }
+                // (right at the end, an error above the tolerance is the surfaces' noise, an offset of a fitted one such
+                // as another fillet's blend: stepping on would pass the end by and follow the curve on round)
+                if (eEnd <= tol || toEnd <= hmax / 64 && eEnd <= 1e-5 * scale) { P.Add(b.S); D.Add(b.T); break; }
                 h = toEnd / 2;
                 if (h < hmin) { Debug?.Invoke($"    march stuck at {cur} short of the end {b.S}: error {eEnd:g3}"); return null; }
             }

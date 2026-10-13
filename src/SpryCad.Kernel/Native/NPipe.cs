@@ -9,6 +9,8 @@ namespace SpryCad.Kernel.Native;
 public sealed class PipeSpine
 {
     public Vec3[] P { get; }
+    /// <summary>Points past the ends project onto the straight run-on there (off: onto the end point).</summary>
+    public static bool Extended = true;
     public Vec3[] D { get; }
     public double[] S { get; }
     public NSurface? SupportA { get; }
@@ -128,8 +130,16 @@ public sealed class PipeSpine
         return lo;
     }
 
+    // past its ends the spine runs straight on along its end tangents (the pipe then goes on as a cylinder, as other
+    // surfaces extend past their faces; a clamped end made it a sphere about the end point, and a ball rolling on the
+    // pipe near the end of its face followed that instead)
+    bool Before(double s) => s < S[0];
+    bool After(double s) => s > S[^1];
+
     public Vec3 Eval(double s)
     {
+        if (Before(s)) return P[0] + D[0] * (s - S[0]);
+        if (After(s)) return P[^1] + D[^1] * (s - S[^1]);
         int i = Seg(s); var h = S[i + 1] - S[i];
         var t = Math.Clamp((s - S[i]) / h, 0, 1);
         double t2 = t * t, t3 = t2 * t;
@@ -139,6 +149,8 @@ public sealed class PipeSpine
     /// <summary>d/ds of <see cref="Eval"/> (≈ unit tangent).</summary>
     public Vec3 Deriv(double s)
     {
+        if (Before(s)) return D[0];
+        if (After(s)) return D[^1];
         int i = Seg(s); var h = S[i + 1] - S[i];
         var t = Math.Clamp((s - S[i]) / h, 0, 1);
         double t2 = t * t;
@@ -147,6 +159,7 @@ public sealed class PipeSpine
 
     public Vec3 Deriv2(double s)
     {
+        if (Before(s) || After(s)) return Vec3.Zero;
         int i = Seg(s); var h = S[i + 1] - S[i];
         var t = Math.Clamp((s - S[i]) / h, 0, 1);
         return (P[i] * (12 * t - 6) + D[i] * (h * (6 * t - 4)) + P[i + 1] * (-12 * t + 6) + D[i + 1] * (h * (6 * t - 2))) / (h * h);
@@ -155,6 +168,7 @@ public sealed class PipeSpine
     /// <summary><see cref="Eval"/>, <see cref="Deriv"/> and <see cref="Deriv2"/> at once.</summary>
     void Derivs(double s, out Vec3 c, out Vec3 d1, out Vec3 d2)
     {
+        if (Before(s) || After(s)) { c = Eval(s); d1 = Deriv(s); d2 = Vec3.Zero; return; }
         int i = Seg(s); var h = S[i + 1] - S[i];
         var t = Math.Clamp((s - S[i]) / h, 0, 1);
         double t2 = t * t, t3 = t2 * t;
@@ -232,6 +246,12 @@ public sealed class PipeSpine
         // guard: Newton may stop at a bracket end that is worse than the best sample
         var cs = Eval(s);
         if ((cs - p).LengthSq > best) { s = _ss[bi]; cs = _sp[bi]; }
+        // past an end: on the straight run-on there
+        if (Extended)
+        {
+            if (s <= S[0] + 1e-12 && Vec3.Dot(p - P[0], D[0]) < 0) { s = S[0] + Vec3.Dot(p - P[0], D[0]) / Vec3.Dot(D[0], D[0]); cs = Eval(s); }
+            else if (s >= S[^1] - 1e-12 && Vec3.Dot(p - P[^1], D[^1]) > 0) { s = S[^1] + Vec3.Dot(p - P[^1], D[^1]) / Vec3.Dot(D[^1], D[^1]); cs = Eval(s); }
+        }
         return (s, cs, Vec3.Distance(cs, p));
     }
 
