@@ -483,7 +483,7 @@ public sealed class NBoolean
                     // is a long fruitless search, a shell's inner wall against a fillet outside it)
                     bool clear; using (Prof.Time("tr2.apart")) clear = fa.Surface.Kind is SurfaceKind.Offset or SurfaceKind.BSpline && Apart(fb, fa.Surface, _onTol, traceDoms[fb]);
                     if (!clear) using (Prof.Time(Prof.Enabled ? $"tr2.{fb.Surface.Kind}x{fa.Surface.Kind}" : ""))
-                        c = NIntersect.Trace(fb, fa.Surface, traceTol, traceDoms[fb], fa.Bounds()).Cast<NCurve>().ToList();
+                        c = NIntersect.Trace(fb, fa.Surface, traceTol, traceDoms[fb], fa.Bounds(), traceDoms[fa]).Cast<NCurve>().ToList();
                 }
                 pairCurves[i] = c;
                 if (Trace != null && Environment.GetEnvironmentVariable("FC_TRACE_SLOW") != null)
