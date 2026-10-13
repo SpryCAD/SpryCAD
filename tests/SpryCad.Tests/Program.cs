@@ -272,6 +272,7 @@ static class Program
             IdTests.Run(t);
             FeatureColorTests.Run(t);
             DirectBlendTests.Run(t);
+            BrakeDuctTests.Run(t);
             SweepTests.Run(t);
             SweepFeatureTests.Run(t);
             LoftTests.Run(t);
