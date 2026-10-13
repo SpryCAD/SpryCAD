@@ -653,6 +653,15 @@ public sealed class NBoolean
             Parallel.For(0, cand.Count, k =>
             {
                 var (e, f) = cand[k];
+                // an edge of a face on that very surface lies on it (a fitted surface, a blend's pipe, is only as exact as
+                // its fit: solved against it the edge strays off by its noise, and a spurious root near an end splits it on
+                // one side only, as where a fillet rolls onto another fillet's blend)
+                if (f.Surface.Kind is SurfaceKind.Pipe or SurfaceKind.BSpline or SurfaceKind.Offset
+                    && e.Uses.Any(u => ReferenceEquals(u.Face.Surface, f.Surface) || u.Face.Surface.Kind == f.Surface.Kind && u.Face.Surface.CoincidentWith(f.Surface, _onTol)))
+                {
+                    found[k] = new NIntersect.EdgeHits(new List<double>(), true);
+                    return;
+                }
                 using (Prof.Time(Prof.Enabled ? $"split.{e.Curve.GetType().Name}x{f.Surface.Kind}" : "")) found[k] = NIntersect.EdgeSurface(e, f.Surface, _tol);
             });
         using var pa = Prof.Time("split.apply");

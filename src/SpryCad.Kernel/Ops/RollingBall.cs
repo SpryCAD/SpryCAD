@@ -239,6 +239,8 @@ public static class RollingBall
         var tagA = new FaceTag(name + ".A", SA.Kind == SurfaceKind.Plane ? SurfaceDef.PlaneDef : SA.Def);
         var tagB = new FaceTag(name + ".B", SB.Kind == SurfaceKind.Plane ? SurfaceDef.PlaneDef : SB.Def);
         bool fits = true;
+        // (one surface for the blend of the whole chain: see Joined)
+        var oneBlend = !closed && n > 1 && Joined(spines, range) is { } js ? NSurface.Pipe(js, r) : null;
         for (int k = 0; k < n; k++)
         {
             var pc = pieces[k]; var sp = spines[k]; var (s0, s1) = range[k];
@@ -247,7 +249,7 @@ public static class RollingBall
             var E = fwd ? new NEdge(pc.E.Curve, pc.Ta, pc.Tb, VV[k0], VV[k1]) : new NEdge(pc.E.Curve, pc.Tb, pc.Ta, VV[k1], VV[k0]);
             var cAe = new NEdge(new NContact(sp, false), s0, s1, AV[k0], AV[k1]);
             var cBe = new NEdge(new NContact(sp, true), s0, s1, BV[k0], BV[k1]);
-            var pipe = NSurface.Pipe(sp, r);
+            var pipe = oneBlend ?? NSurface.Pipe(sp, r);
             var faA = FaceOn(pc.E, SA)!; var faB = FaceOn(pc.E, SB)!;
 
             var Mp = pc.E.Curve.Eval(pc.Mid); var t = pc.Dir(pc.Mid);
@@ -369,7 +371,7 @@ public static class RollingBall
                         if (!fam.Contains(u.Face) && u.Face.Surface.Kind == SurfaceKind.Pipe && Family(u.Face.Surface, f.Surface)) fam.Add(u.Face);
             var spines = fam.Select(x => x.Surface.Spine!).Distinct().ToList();
             var sp = spines.Count == 1 ? spines[0] : MergeSpines(spines, f.Surface.Spine!);
-            m = sp == null ? f.Surface : NSurface.Pipe(sp, f.Surface.R);
+            m = sp == null || spines.Count == 1 ? f.Surface : NSurface.Pipe(sp, f.Surface.R);
             Debug?.Invoke($"  merged {fam.Count} faces, {spines.Count} spines ({string.Join(",", spines.Select(x => x.MinCurvatureRadius.ToString("g3")))}) -> {(sp == null ? "none" : sp.MinCurvatureRadius.ToString("g3") + " over " + sp.P.Length + " nodes")}");
             foreach (var x in fam) merged[x] = m;
             return m;
@@ -723,6 +725,7 @@ public static class RollingBall
         }
         var cA = new NEdge[nseg]; var cB = new NEdge[nseg];
         var bFaces = walked.Concat(faB).Distinct().ToList();
+        var oneBlendC = !closed && nseg > 1 && Joined(spines, range) is { } jsc ? NSurface.Pipe(jsc, r) : null;
         for (int i = 0; i < nseg; i++)
         {
             var sp = spines[i]; var (s0, s1) = range[i];
@@ -732,7 +735,7 @@ public static class RollingBall
             // blend face
             var sm = 0.5 * (s0 + s1);
             var qa = SA.Project(sp.Eval(sm)); var qb = Sup(support[i]).Project(sp.Eval(sm));
-            var pipe = NSurface.Pipe(sp, r);
+            var pipe = oneBlendC ?? NSurface.Pipe(sp, r);
             var nT = -pipe.Normal(qa);
             var loop = new List<(NEdge, bool)> { (cA[i], true), (arc[i1], true), (cB[i], false), (arc[i], false) };
             if (Vec3.Dot(Vec3.Cross(nT, sp.Deriv(sm).Normalized), qb - qa) < 0) loop = Reverse(loop);
@@ -884,6 +887,38 @@ public static class RollingBall
     /// One spine through the spines of a fillet's pieces (they share their joint nodes exactly), starting from
     /// <paramref name="seed"/>; null if they do not chain up.
     /// </summary>
+    /// <summary>
+    /// The spines of a chain's segments (each between its range, with the run-on past the chain's two ends) as one
+    /// spine: the same curve (each piece is Hermite between the same nodes), so the blend of the whole chain is one
+    /// surface. Its pieces as separate surfaces part by their run-ons' noise where they meet, and a fillet rolling on
+    /// that blend later (on the pieces merged) sat a few hundred-thousandths off them. Null where they do not join.
+    /// </summary>
+    static PipeSpine? Joined(PipeSpine[] spines, (double s0, double s1)[] range)
+    {
+        var P = new List<Vec3>(); var D = new List<Vec3>();
+        for (int i = 0; i < spines.Length; i++)
+        {
+            var sp = spines[i]; var (s0, s1) = range[i];
+            for (int j = 0; j < sp.P.Length; j++)
+            {
+                var s = sp.S[j];
+                // (inside the range; the first segment's run-on before it, the last's after it)
+                if (i > 0 && s < s0 - 1e-12 || i < spines.Length - 1 && s > s1 + 1e-12) continue;
+                if (P.Count > 0)
+                {
+                    var d = Vec3.Distance(P[^1], sp.P[j]);
+                    if (d < 1e-9) continue;
+                    // (consecutive pieces meet at the same joint, along the same tangent)
+                    if (i > 0 && s <= s0 + 1e-12) { if (d > 1e-6 || Vec3.Dot(D[^1], sp.D[j]) < 1 - 1e-6) { Debug?.Invoke($"  not joined at segment {i}: {d:g3} apart, tangents {Vec3.Dot(D[^1], sp.D[j]):R}"); return null; } }
+                }
+                P.Add(sp.P[j]); D.Add(sp.D[j]);
+            }
+        }
+        Debug?.Invoke($"  joined {spines.Length} spines into {P.Count} nodes");
+        try { return P.Count >= 2 ? new PipeSpine(P, D, spines[0].SupportA, null) : null; }
+        catch (ArgumentException) { return null; }
+    }
+
     static PipeSpine? MergeSpines(List<PipeSpine> spines, PipeSpine seed)
     {
         var P = seed.P.ToList(); var D = seed.D.ToList();
