@@ -17,6 +17,60 @@ static class FilletRepro
     {
         var doc = CadDocument.Load(file);
         int si = doc.Features.FindIndex(f => f is ShellFeature);
+        // (fillet: the part as it is, a fillet added on the edges nearest the points given (x,y,z;x,y,z…) after the
+        // feature named in FILLET_AFTER, of FILLET_R, chained or not by FILLET_CHAIN, added to the mirror's seeds by
+        // FILLET_MIRROR)
+        if (kase == "mirrorfillet")
+        {
+            // the last fillet (the second tab's) dropped; the first tab's fillet mirrored across Front instead
+            if (Environment.GetEnvironmentVariable("BEND_CHAIN") == "0") doc.Features.OfType<FilletFeature>().First(f => f.Name == "Tube bend").TangentPropagation = false;
+            var f3 = doc.Features.OfType<FilletFeature>().Last(); doc.Features.Remove(f3);
+            var f2 = doc.Features.OfType<FilletFeature>().Last();
+            if (Environment.GetEnvironmentVariable("IN_TAB_MIRROR") != null)
+            {
+                // Fillet2 moved before the tab mirror, and mirrored with the tab and its slot
+                var tm = doc.Features.OfType<MirrorFeature>().First(m => m.Name == "Tab mirror");
+                doc.Features.Remove(f2); doc.Features.Insert(doc.Features.IndexOf(tm), f2); tm.Seeds.Add(f2.Id);
+            }
+            else doc.AddFeature(new MirrorFeature { Name = "Fillet mirror", Seeds = { f2.Id }, Plane = PlaneRef.Front });
+            return doc;
+        }
+        if (kase == "dump")
+        {
+            foreach (var f in doc.Features.Where(f => f is FilletFeature or MirrorFeature or ShellFeature))
+                Console.WriteLine($"  {f.Name}: {CadDocument.JsonOf(f)}");
+            Environment.Exit(0);
+        }
+        if (kase == "fillet")
+        {
+            if (Environment.GetEnvironmentVariable("BEND_CHAIN") == "0") doc.Features.OfType<FilletFeature>().First(f => f.Name == "Tube bend").TangentPropagation = false;
+            var after = Environment.GetEnvironmentVariable("FILLET_AFTER")!;
+            int k = doc.Features.FindIndex(f => f.Name == after);
+            var st = new Regenerator().Rebuild(doc, k + 1).State;
+            var body = st.Bodies.Single().Solid.Native!;
+            var fi = new FilletFeature { Name = "Repro fillet", Radius = Environment.GetEnvironmentVariable("FILLET_R") ?? "0.06", TangentPropagation = Environment.GetEnvironmentVariable("FILLET_CHAIN") != "0" };
+            if (Environment.GetEnvironmentVariable("FILLET_FACE") is { } ff)
+                foreach (var x in body.Edges.Where(x => x.Uses.Count == 2 && x.Uses.Any(u => u.Face.Tag.Name == ff)))
+                {
+                    var (fa, fb) = (x.Uses[0].Face, x.Uses[1].Face);
+                    var angs = Enumerable.Range(0, 5).Select(i => x.At(i / 4.0)).Select(q => Math.Acos(Math.Clamp(Vec3.Dot(fa.Surface.Normal(q) * (fa.Sense ? 1 : -1), fb.Surface.Normal(q) * (fb.Sense ? 1 : -1)), -1, 1)) * 180 / Math.PI);
+                    Console.WriteLine($"  face edge {x.Curve.GetType().Name} {x.V0.P}->{x.V1.P} [{fa.Tag.Name}|{fb.Tag.Name}] convex {NativeBlend.IsConvex(x)} angles {string.Join(" ", angs.Select(v => v.ToString("0.##")))}");
+                }
+            foreach (var pt in radius!.Split(';'))
+            {
+                var c = pt.Split(',').Select(double.Parse).ToArray(); var p = new Vec3(c[0], c[1], c[2]);
+                if (Environment.GetEnvironmentVariable("FILLET_LIST") != null)
+                    foreach (var x in body.Edges.Where(x => x.Uses.Count == 2).OrderBy(x => Enumerable.Range(0, 9).Min(i => Vec3.Distance(x.At(i / 8.0), p))).Take(8))
+                        Console.WriteLine($"  near: {x.Curve.GetType().Name} {x.V0.P}->{x.V1.P} [{x.Uses[0].Face.Tag.Name}|{x.Uses[1].Face.Tag.Name}] convex {NativeBlend.IsConvex(x)}");
+                var e = body.Edges.Where(x => x.Uses.Count == 2).MinBy(x => Enumerable.Range(0, 9).Min(i => Vec3.Distance(x.At(i / 8.0), p)))!;
+                Console.WriteLine($"  edge {e.Curve.GetType().Name} {e.V0.P}->{e.V1.P} [{e.Uses[0].Face.Tag.Name}|{e.Uses[1].Face.Tag.Name}]");
+                fi.Edges.Add(new EdgeRef { A = e.Uses[0].Face.Tag.Name, B = e.Uses[1].Face.Tag.Name, Hint = e.Mid });
+            }
+            doc.AddFeature(fi, k + 1);
+            if (Environment.GetEnvironmentVariable("FILLET_MIRROR") is { } mname)
+                doc.Features.OfType<MirrorFeature>().First(m => m.Name == mname).Seeds.Add(fi.Id);
+            return doc;
+        }
         // (shell: the part as it is, its wall the thickness given)
         if (kase == "shell")
         {
@@ -117,7 +171,14 @@ static class FilletRepro
             SpryCad.Kernel.Native.NBoolean.Trace = null;
             return 0;
         }
+        bool prof = Environment.GetEnvironmentVariable("PROF") != null;
+        if (prof) { Prof.Reset(); Prof.Enabled = true; }
         var r = new Regenerator().Rebuild(doc);
+        if (prof)
+        {
+            Prof.Enabled = false;
+            foreach (var (name, pms, calls) in Prof.Results().OrderByDescending(x => x.ms).Take(25)) Console.WriteLine($"      {name,-32} {pms,9:0.0} ms  x{calls}");
+        }
         foreach (var f in doc.Features)
             Console.WriteLine($"  {f.Name,-22} {(r.Status[f.Id].Ok ? "ok" : "FAILED: " + r.Status[f.Id].Error)} ({r.Status[f.Id].Milliseconds:0} ms){string.Concat(r.Status[f.Id].Warnings.Select(w => " [" + w + "]"))}");
         foreach (var b in r.State.Bodies)

@@ -283,7 +283,10 @@ public static class RollingBall
                 var j = joints[k];
                 var outward = j.T * sign;
                 var loop = new List<(NEdge, bool)> { (secA[k], true), (arc[k], true), (secB[k], false) };
-                if (Vec3.Dot(Vec3.Cross(j.A - j.V, j.B - j.V), outward) < 0) loop = Reverse(loop);
+                if (Vec3.Dot(LoopNormal(loop), outward) < 0) loop = Reverse(loop);
+                // (the way round the faces beside it already go: the A face's use of the section edge, the other way)
+                if (body.Faces.SelectMany(f => f.Loops).SelectMany(l => l.Coedges).FirstOrDefault(c => ReferenceEquals(c.Edge, secA[k])) is { } useA
+                    && loop.First(x => ReferenceEquals(x.Item1, secA[k])).Item2 == useA.Forward) loop = Reverse(loop);
                 var pl = NSurface.FromPlane(Plane.FromPointNormal(j.S, outward));
                 body.Faces.Add(MakeFace(pl, true, new FaceTag($"{name}.End{(k == 0 ? 0 : 1)}", SurfaceDef.PlaneDef), loop, null));
             }
@@ -307,14 +310,17 @@ public static class RollingBall
         for (int i = 0; i <= n; i++)
         {
             var s = sp.S0 + (sp.S1 - sp.S0) * i / n;
-            var d1 = sp.Deriv(s); var d2 = sp.Deriv2(s);
-            var l2 = Vec3.Dot(d1, d1);
-            if (!(l2 > 1e-300)) continue;
-            var T = d1 / Math.Sqrt(l2);
-            var kv = (d2 - T * Vec3.Dot(T, d2)) / l2;
-            var k = kv.Length;
-            if (k * r < 0.98) continue;
-            var N = kv / k;
+            // (the turn over a quarter of the ball either way: what folds the blend is the spine bending at the ball's
+            // scale; its second derivative at a point also has the wiggles of tangents solved on a fitted surface, between
+            // nodes a few thousandths apart)
+            var dl = 0.25 * r;
+            double sa = Math.Max(sp.S0, s - dl), sb = Math.Min(sp.S1, s + dl);
+            if (sb - sa < 1e-12) continue;
+            var ta = sp.Deriv(sa).Normalized; var tb = sp.Deriv(sb).Normalized;
+            var turn = Math.Acos(Math.Clamp(Vec3.Dot(ta, tb), -1, 1));
+            var k = turn / Vec3.Distance(sp.Eval(sa), sp.Eval(sb));
+            if (k * r < 0.98 || turn < 1e-12) continue;
+            var N = (tb - ta).Normalized;
             var c = sp.Eval(s);
             var ua = (contactA(c) - c).Normalized; var ub = (contactB(c) - c).Normalized;
             // (the shorter arc between the contacts: a fillet's)
@@ -650,7 +656,7 @@ public static class RollingBall
             }
             var (P, D, i0, i1) = m.Value;
             var sp = new PipeSpine(P, D, SA, Sup(support[i])) { Rolls = rolls };
-            if (Folds(sp, r, SA.Project, Sup(support[i]).Project)) { if (Debug != null) { var fam = walked.Concat(faB).Distinct().Where(f => Side(f, support[i])).ToList(); for (int q = 0; q <= 10; q++) { var c = sp.Eval(sp.S0 + (sp.S1 - sp.S0) * q / 10); var pb = Sup(support[i]).Project(c); Debug($"    foot {q}: {pb} on fillet faces {fam.Any(f => onFaces(f, pb))}, A {faA.Any(f => onFaces(f, SA.Project(c)))}"); } } Debug?.Invoke($"fold on segment {i}/{nseg} ({support[i].Tag.Name}:{support[i].Surface.Kind}) {ev[i].S} -> {ev[(i + 1) % ne].S}: min curvature radius {sp.MinCurvatureRadius:g3}, {P.Count} nodes"); return Fail("the radius is too large: the fillet would fold over itself."); }
+            if (Folds(sp, r, SA.Project, Sup(support[i]).Project)) { if (Debug != null) { var fam = walked.Concat(faB).Distinct().Where(f => Side(f, support[i])).ToList(); for (int q = 0; q <= 10; q++) { var c = sp.Eval(sp.S0 + (sp.S1 - sp.S0) * q / 10); var pb = Sup(support[i]).Project(c); Debug($"    foot {q}: {pb} on fillet faces {fam.Any(f => onFaces(f, pb))}, A {faA.Any(f => onFaces(f, SA.Project(c)))}"); } } Debug?.Invoke($"  sharpest at {string.Join(" ", Enumerable.Range(1, P.Count - 2).OrderByDescending(q => Math.Acos(Math.Clamp(Vec3.Dot(D[q - 1].Normalized, D[q + 1].Normalized), -1, 1)) / Math.Max(1e-12, Vec3.Distance(P[q - 1], P[q + 1]))).Take(3).Select(q => $"#{q} {P[q]} gap {Vec3.Distance(P[q - 1], P[q]):g2}/{Vec3.Distance(P[q], P[q + 1]):g2} turn {Math.Acos(Math.Clamp(Vec3.Dot(D[q - 1].Normalized, D[q + 1].Normalized), -1, 1)) * 180 / Math.PI:g3}°"))}"); Debug?.Invoke($"fold on segment {i}/{nseg} ({support[i].Tag.Name}:{support[i].Surface.Kind}) {ev[i].S} -> {ev[(i + 1) % ne].S}: min curvature radius {sp.MinCurvatureRadius:g3}, {P.Count} nodes"); return Fail("the radius is too large: the fillet would fold over itself."); }
             spines[i] = sp; range[i] = (sp.S[i0], sp.S[i1]);
         }
 
@@ -854,7 +860,11 @@ public static class RollingBall
                 var outward = j.T * sign;
                 var loop = new List<(NEdge, bool)> { (k == 0 ? secA0! : secA1!, true), (arc[i], true) };
                 loop.AddRange(In(k));
-                if (Vec3.Dot(Vec3.Cross(j.A - j.V, j.B - j.V), outward) < 0) loop = Reverse(loop);
+                if (Vec3.Dot(LoopNormal(loop), outward) < 0) loop = Reverse(loop);
+                // (the way round the faces beside it already go: the A face's use of the section edge, the other way)
+                var secAk = k == 0 ? secA0! : secA1!;
+                if (body.Faces.SelectMany(f => f.Loops).SelectMany(l => l.Coedges).FirstOrDefault(c => ReferenceEquals(c.Edge, secAk)) is { } useA
+                    && loop.First(x => ReferenceEquals(x.Item1, secAk)).Item2 == useA.Forward) loop = Reverse(loop);
                 var pl = NSurface.FromPlane(Plane.FromPointNormal(j.S, outward));
                 body.Faces.Add(MakeFace(pl, true, new FaceTag($"{name}.End{(k == 0 ? 0 : 1)}", SurfaceDef.PlaneDef), loop, null));
             }
@@ -995,6 +1005,21 @@ public static class RollingBall
                 foreach (var u in x.Uses) if (!faces.Contains(u.Face)) faces.Add(u.Face);
             }
         return edges;
+    }
+
+    /// <summary>
+    /// The loop's area normal (Newell's, over points along every edge, in its direction): an end face's outline, whose
+    /// corner and contact points alone make a sliver of a triangle where the faces are nearly tangent and its sign
+    /// unreliable, the arc between the contacts giving it its area.
+    /// </summary>
+    static Vec3 LoopNormal(List<(NEdge e, bool f)> loop)
+    {
+        var pts = new List<Vec3>();
+        foreach (var (e, f) in loop)
+            for (int i = 0; i < 8; i++) pts.Add(e.At(f ? i / 8.0 : 1 - i / 8.0));
+        var n = Vec3.Zero;
+        for (int i = 0; i < pts.Count; i++) n += Vec3.Cross(pts[i], pts[(i + 1) % pts.Count]);
+        return n;
     }
 
     static List<(NEdge, bool)> Reverse(List<(NEdge e, bool f)> loop)
@@ -1139,7 +1164,9 @@ public static class RollingBall
                 continue;
             }
             var e = Err(cur, ct, nx.Value.p, nx.Value.t);
-            if (e > tol) { h /= 2; if (h < hmin) { Debug?.Invoke($"    march stuck at {cur} after {travelled:g3} of {length:g3}: error {e:g3}"); return null; } continue; }
+            // (a step already short, off by more than the tolerance only by the surfaces' noise, not by the curve bending:
+            // an offset of a fitted surface, a loft's, is only as exact as its fit, and halving the step does not help)
+            if (e > tol && !(h <= hmax / 64 && e <= 1e-6 * scale)) { h /= 2; if (h < hmin) { Debug?.Invoke($"    march stuck at {cur} after {travelled:g3} of {length:g3}: error {e:g3}"); return null; } continue; }
             P.Add(nx.Value.p); D.Add(nx.Value.t);
             travelled += Vec3.Distance(cur, nx.Value.p);
             (cur, ct) = nx.Value;

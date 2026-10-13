@@ -75,6 +75,20 @@ public sealed class NBoolean
     /// the two radii (with a margin for the spine polylines' chord error) keep the surfaces apart. Proving that by
     /// tracing samples the whole overlap of the faces' boxes.
     /// </summary>
+    /// <summary>
+    /// Whether the surfaces are offsets of one another (an offset surface and its base, or two offsets of one base) at
+    /// distances more than a tolerance apart: parallel, they never meet (a shell's inner wall against the loft it is
+    /// offset from: traced, a long fruitless search).
+    /// </summary>
+    static bool OffsetsApart(NSurface a, NSurface b, double tol)
+    {
+        static (NSurface baseS, double d) Of(NSurface s) => s.Kind == SurfaceKind.Offset && s.Base is { } bs ? (bs, s.R) : (s, 0);
+        var (ba, da) = Of(a); var (bb, db) = Of(b);
+        if (Math.Abs(da - db) <= tol || (da == 0 && db == 0)) return false;
+        if (ba.Kind != SurfaceKind.BSpline || bb.Kind != SurfaceKind.BSpline) return false;
+        return ReferenceEquals(ba, bb) || ReferenceEquals(ba.Nurbs, bb.Nurbs) || ba.CoincidentWith(bb, tol);
+    }
+
     static bool PipesApart(NSurface a, NSurface b)
     {
         if (a.Spine is not { } sa || b.Spine is not { } sb) return false;
@@ -354,7 +368,8 @@ public sealed class NBoolean
                 // a blend and the surface its ball rolls on touch along the contact curve, which is an edge of the
                 // blend face (imprinted as an edge lying on the other face): tracing that tangency is slow and noisy
                 if (RollsOn(pairs[i].fa, pairs[i].fb.Surface) || RollsOn(pairs[i].fb, pairs[i].fa.Surface)
-                    || Continues(pairs[i].fa.Surface, pairs[i].fb.Surface) || PipesApart(pairs[i].fa.Surface, pairs[i].fb.Surface)) { pairCurves[i] = new(); continue; }
+                    || Continues(pairs[i].fa.Surface, pairs[i].fb.Surface) || PipesApart(pairs[i].fa.Surface, pairs[i].fb.Surface)
+                    || OffsetsApart(pairs[i].fa.Surface, pairs[i].fb.Surface, _onTol)) { pairCurves[i] = new(); continue; }
                 var an = NIntersect.Analytic(pairs[i].fa.Surface, pairs[i].fb.Surface, _tol * 10, _sampleTol * 50 * 0.25);
                 if (an != null) pairCurves[i] = an; else toTrace.Add(i);
             }
@@ -418,7 +433,8 @@ public sealed class NBoolean
                     c = NIntersect.Trace(fb, NSurface.FromPlane(mq), traceTol, traceDoms[fb]).Cast<NCurve>().ToList();
                     if (apart) c = OnSurface(c, fa.Surface, traceTol);
                 }
-                else if (c.Count == 0 && fa.Surface.Kind != SurfaceKind.Screw && (!onSpline || fb.Bounds().Diagonal < 0.25 * fa.Bounds().Diagonal)) c = Traced(fb, fa.Surface);
+                else if (c.Count == 0 && fa.Surface.Kind != SurfaceKind.Screw && (!onSpline || fb.Bounds().Diagonal < 0.25 * fa.Bounds().Diagonal))
+                    using (Prof.Time(Prof.Enabled ? $"tr2.{fb.Surface.Kind}x{fa.Surface.Kind}" : "")) c = Traced(fb, fa.Surface);
                 pairCurves[i] = c;
                 if (Trace != null && Environment.GetEnvironmentVariable("FC_TRACE_SLOW") != null)
                     T($"  trace {fa.Tag.Name}({fa.Surface.Kind}) x {fb.Tag.Name}({fb.Surface.Kind}): {c.Count} curves, {string.Join(" ", c.Select(x => x is NPolyline pl ? pl.Pts.Length + "pts" : x.GetType().Name))} in {swt.ElapsedMilliseconds} ms");

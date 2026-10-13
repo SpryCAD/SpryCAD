@@ -319,6 +319,49 @@ static class CoreTests
             t.Eq(copy.Sketch.Entities.OfType<SkLine>().Count(e => e.External?.Axis == "H"), 1);
         });
 
+        t.Test("Fillet round a collar where a loft leaves it tangentially: the chain fades out where the faces turn tangent", () =>
+        {
+            // a 2.5 collar (along X, x 0..0.5) and a loft from its end to a 5.25 x 1 rectangle at x 3, its bottom guided by a
+            // curve level at the collar: the edge round the collar's end is concave above and turns convex at the bottom,
+            // tangent between. A fillet chained round it from the top rounds the concave part, fading out where the
+            // faces turn tangent, and leaves the bottom sharp
+            var doc = new CadDocument();
+            var end = doc.AddFeature(new PlaneFeature { Base = PlaneRef.Right, Offset = "0.5" });
+            var right = Resolver.StdPlane("Right");
+            Vec2 R(double x, double y, double z) => right.ToLocal(new Vec3(x, y, z));
+            var cs = new Sketch(); var cc = cs.AddPoint(R(0.5, -0.5, 0)); cs.Add(new SkCircle { Center = cc.Id, R = 1.25 });
+            var inSk = doc.AddFeature(new SketchFeature { Plane = new PlaneRef { Feature = end.Id }, Sketch = cs });
+            doc.AddFeature(new ExtrudeFeature { SketchId = inSk.Id, Depth = "0.5", Reverse = right.Normal.X > 0 });
+            var box = doc.AddFeature(new PlaneFeature { Base = PlaneRef.Right, Offset = "3" });
+            var rs = new Sketch();
+            var rp = new[] { R(3, 0, -2.625), R(3, 0, 2.625), R(3, 1, 2.625), R(3, 1, -2.625) }.Select(p => rs.AddPoint(p).Id).ToArray();
+            for (int i = 0; i < 4; i++) rs.Add(new SkLine { P1 = rp[i], P2 = rp[(i + 1) % 4] });
+            var boxSk = doc.AddFeature(new SketchFeature { Plane = new PlaneRef { Feature = box.Id }, Sketch = rs });
+            var gs = new Sketch();
+            var g0 = gs.AddPoint(new Vec2(0.5, -1.75)); var g1 = gs.AddPoint(new Vec2(1.75, -0.875)); var g2 = gs.AddPoint(new Vec2(3, 0));
+            gs.Add(new SkSpline { Points = { g0.Id, g1.Id, g2.Id }, StartDir = new Vec2(3, 0), EndDir = new Vec2(3, 0) });
+            var guide = doc.AddFeature(new SketchFeature { Plane = PlaneRef.Front, Sketch = gs });
+            var loft = doc.AddFeature(new LoftFeature { SectionSketchIds = { inSk.Id, boxSk.Id }, GuideSketchIds = { guide.Id } });
+            var r0 = new Regenerator().Rebuild(doc);
+            foreach (var f in doc.Features) t.True(r0.Status[f.Id].Ok, $"{f.Name}: {r0.Status[f.Id].Error}");
+            // the edge at the collar's top (x 0.5, y 0.75)
+            var body0 = r0.State.Bodies.Single().Solid.Native!;
+            var top = body0.Edges.Where(e => e.Uses.Count == 2).MinBy(e => Vec3.Distance(e.Mid, new Vec3(0.5, 0.75, 0)))!;
+            var fi = doc.AddFeature(new FilletFeature
+            {
+                Radius = "0.1", TangentPropagation = true,
+                Edges = { new EdgeRef { A = top.Uses[0].Face.Tag.Name, B = top.Uses[1].Face.Tag.Name, Hint = top.Mid } },
+            });
+            var r = new Regenerator().Rebuild(doc);
+            t.True(r.Status[fi.Id].Ok, r.Status[fi.Id].Error ?? "");
+            var b = r.State.Bodies.Single();
+            t.Eq(b.Solid.Native!.Validate(), null);
+            t.Eq(b.Solid.Topology.OpenHalfEdges, 0);
+            // (a concave fillet adds a little)
+            var added = KernelTests.Vex(b.Solid) - KernelTests.Vex(r0.State.Bodies.Single().Solid);
+            t.True(added > 0 && added < 2 * Math.PI * 1.25 * 0.1 * 0.1, $"added {added}");
+        });
+
         t.Test("Shell thicker than the rounds before it: the inside from the part before them, rounded again (or sharp)", () =>
         {
             // a block (40 x 30 x 20) with its top edges rounded R1, shelled 2 open at the bottom: offset as it is, the

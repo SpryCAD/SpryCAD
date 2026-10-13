@@ -24,6 +24,9 @@ public static class NativeBlend
         bool buildOnly = false, System.Runtime.CompilerServices.StrongBox<bool>? trimmedOut = null)
     {
         if (size <= 0) { errors.Add("Size must be greater than zero."); return body; }
+        // (edges turning from concave to convex along their length split where their faces are tangent, only the part
+        // running on from the rest of the blend kept: the blend fades out there)
+        if (fillet && SplitFlips(body, edges) is { } split) (body, edges) = split;
         // blends of both kinds meeting at a vertex (a hex socket's inside corners, concave, and its rim, convex): the odd
         // one out at each such vertex first, then the others on the body it leaves, running on round what it blended
         // (as two features would). At once, their tools can collide where they meet
@@ -551,8 +554,8 @@ public static class NativeBlend
         foreach (var (v, dirOut, fa, fb) in ChainEnds(chain))
             if (EndPlane(v, dirOut, fa, fb, chain, sel) is { } pl0 && RoundCorner(v, fa, fb, chain, sel, pl0, size, name) is { } rc0 && rc0.Patch() is { } p0)
                 pivots.Add((v, rc0, p0));
-        Vec3? EndAt(NVertex v) => pivots.Where(x => ReferenceEquals(x.v, v)).Select(x => (Vec3?)x.p.QOwn).FirstOrDefault();
-        var rb = RollingBall.Build(chain, size, name, OnFaces, endAt: pivots.Count > 0 ? EndAt : null);
+        Vec3? EndAt(NVertex v) => pivots.Where(x => ReferenceEquals(x.v, v)).Select(x => (Vec3?)x.p.QOwn).FirstOrDefault() ?? TangentStop(v, chain);
+        var rb = RollingBall.Build(chain, size, name, OnFaces, endAt: EndAt);
         // (a chain failing only for a sliver of an edge at an end, far shorter than the ball, on which it would have to
         // roll backwards (a round the chain just touches, its last few thousandths): built without that piece, left sharp)
         if (rb.Error != null && chain.Count > 1)
@@ -591,7 +594,7 @@ public static class NativeBlend
             return run;
         }, p => cuts.Any(c => c.pl.Distance(p) < 1e-9 && Vec3.Distance(p, c.v) < run + 2 * size) || corners.Any(c => c.Beyond(p))
             || rounds.Any(c => c.cut.Distance(p) < 1e-9 && Vec3.Distance(p, c.v) < run + 2 * size),
-            pivots.Count > 0 ? EndAt : null);
+            EndAt);
         if (cuts.Count + corners.Count + rounds.Count == 0 || on.Error != null || on.Tool?.Native == null)
         {
             Debug?.Invoke($"rolling ball {name}: no cut back ({cuts.Count} planes, {rounds.Count} rounds, {corners.Count} corners, run on: {on.Error ?? (on.Tool?.Native == null ? "faceted" : "ok")})");
@@ -1643,6 +1646,106 @@ public static class NativeBlend
     /// Whether the edge is convex (the material's angle between its faces under 180°) near point p on it (null: the
     /// faces tangent there, or the edge not between two faces).
     /// </summary>
+    /// <summary>The angle between the edge's two faces' outward normals at parameter t (0 where they are tangent).</summary>
+    static double NormalsAngle(NEdge e, double t)
+    {
+        var q = e.Curve.Eval(t);
+        var nA = Outward(e.Uses[0].Face, q); var nB = Outward(e.Uses[1].Face, q);
+        return Math.Acos(Math.Clamp(Vec3.Dot(nA.Normalized, nB.Normalized), -1, 1));
+    }
+
+    /// <summary>Signed convexity at parameter t: negative convex, positive concave, zero where the faces are tangent.</summary>
+    static double ConvexityAt(NEdge e, double t)
+    {
+        var q = e.Curve.Eval(t);
+        var cA = e.Uses[0]; var cB = e.Uses[1];
+        var nA = Outward(cA.Face, q); var nB = Outward(cB.Face, q);
+        var uB = Vec3.Cross(nB, e.Curve.Deriv(t) * (cB.Forward ? 1 : -1));
+        return uB.Length < 1e-12 ? 0 : Vec3.Dot(uB.Normalized, nA);
+    }
+
+    /// <summary>Where along the edge it turns from concave to convex (its faces tangent there), well inside it; null if it does not.</summary>
+    static double? FlipAt(NEdge e)
+    {
+        if (e.Uses.Count != 2 || ReferenceEquals(e.V0, e.V1)) return null;
+        const int n = 32;
+        double lo = e.T0, hi = e.T1, prev = ConvexityAt(e, lo + (hi - lo) * 0.5 / n);
+        for (int i = 1; i < n; i++)
+        {
+            double t0 = lo + (hi - lo) * (i - 0.5) / n, t1 = lo + (hi - lo) * (i + 0.5) / n;
+            var c = ConvexityAt(e, t1);
+            if (Math.Sign(c) != Math.Sign(prev) && prev != 0 && c != 0)
+            {
+                double a = t0, b = t1, fa = prev;
+                for (int it = 0; it < 60; it++)
+                {
+                    var m = 0.5 * (a + b); var fm = ConvexityAt(e, m);
+                    if (Math.Sign(fm) == Math.Sign(fa)) { a = m; fa = fm; } else b = m;
+                }
+                return 0.5 * (a + b);
+            }
+            prev = c;
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// The body (a copy) with the edges to blend that turn from concave to convex along their length split where they
+    /// do, and the edges to blend: of each split edge the parts that run on from another edge to blend of the same kind
+    /// at their other end (a fillet round a collar where a loft leaves it tangentially at the bottom: round the rest,
+    /// fading out where the faces become tangent, the bottom left sharp). Null where no edge turns.
+    /// </summary>
+    static (Solid body, IReadOnlyList<NEdge> edges)? SplitFlips(Solid body, IReadOnlyList<NEdge> edges)
+    {
+        if (body.Native == null || !edges.Any(e => FlipAt(e) != null)) return null;
+        var nb = body.Native.Clone(out var emap);
+        nb.Link();
+        var mapped = edges.Select(e => emap[e]).ToList();
+        var flips = new HashSet<NVertex>(ReferenceEqualityComparer.Instance);
+        var parts = new List<NEdge>();
+        var whole = new List<NEdge>();
+        foreach (var e in mapped)
+        {
+            if (FlipAt(e) is not { } t) { whole.Add(e); continue; }
+            var e2 = NSeamSplit.SplitEdge(e, t);
+            flips.Add(e.V1);
+            parts.Add(e); parts.Add(e2);
+        }
+        nb.Link();
+        var res = new List<NEdge>(whole);
+        foreach (var p in parts)
+        {
+            var outer = flips.Contains(p.V0) ? p.V1 : p.V0;
+            var mine = Convex(p, outer.P);
+            if (whole.Any(w => (ReferenceEquals(w.V0, outer) || ReferenceEquals(w.V1, outer)) && Convex(w, outer.P) == mine)) res.Add(p);
+        }
+        Debug?.Invoke($"split {parts.Count / 2} edge(s) where they turn from concave to convex; blending {res.Count} of {mapped.Count + parts.Count / 2}");
+        return (NTess.ToSolid(nb), res);
+    }
+
+    /// <summary>
+    /// Where a chain ending at v, a vertex where its edge's faces are tangent (a blend fading out), stops: on that edge,
+    /// where the faces are a few degrees from tangent (the ball there a sliver; at the vertex itself it has no
+    /// centre). Null for any other end.
+    /// </summary>
+    static Vec3? TangentStop(NVertex v, List<NEdge> chain)
+    {
+        var e = chain.FirstOrDefault(x => ReferenceEquals(x.V0, v) || ReferenceEquals(x.V1, v));
+        if (e == null || e.Uses.Count != 2 || chain.Count(x => ReferenceEquals(x.V0, v) || ReferenceEquals(x.V1, v)) != 1) return null;
+        double tv = ReferenceEquals(e.V0, v) ? e.T0 : e.T1, tf = ReferenceEquals(e.V0, v) ? e.T1 : e.T0;
+        const double stop = 10 * Math.PI / 180;
+        if (NormalsAngle(e, tv) > 0.5 * stop) return null;
+        // (from the vertex towards the far end, the first place the faces open to the stop angle)
+        double a = tv, b = tf;
+        if (NormalsAngle(e, b) < stop) return null;
+        for (int it = 0; it < 60; it++)
+        {
+            var m = 0.5 * (a + b);
+            if (NormalsAngle(e, m) < stop) a = m; else b = m;
+        }
+        return e.Curve.Eval(0.5 * (a + b));
+    }
+
     static bool? Convex(NEdge e, Vec3 p)
     {
         if (e.Uses.Count != 2) return null;
