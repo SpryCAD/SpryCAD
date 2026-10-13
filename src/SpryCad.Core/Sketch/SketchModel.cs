@@ -199,6 +199,11 @@ public sealed class SkConstraint
     public int Flip { get; set; }
     /// <summary>Reference (driven) dimension: displays the value but does not constrain.</summary>
     public bool Driven { get; set; }
+    /// <summary>
+    /// A distance to a centerline placed across it (on its far side from the geometry): a diameter, the value twice
+    /// the distance, as a revolved part is dimensioned. Placed between them, it is the distance itself.
+    /// </summary>
+    public bool Doubled { get; set; }
     /// <summary>Offset: the side of each copy (+1 / -1; for a line, left of its direction; for an arc or circle, outward).</summary>
     public int[]? Sides { get; set; }
     /// <summary>Dimension label offset in sketch coordinates relative to the anchor.</summary>

@@ -1305,6 +1305,7 @@ public sealed partial class SketchEditor : IViewportMode
             var anchor = DimAnchor(dc);
             dc.LabelX = m.X - anchor.X; dc.LabelY = m.Y - anchor.Y;
             dc.LabelPlaced = true;
+            UpdateDoubled(dc, m); // dragged across its centerline: a diameter, or back
             UpdateOverlay(_vp);
             _vp.Redraw();
             return;
@@ -1487,6 +1488,8 @@ public sealed partial class SketchEditor : IViewportMode
         if (c == null) return null;
         var anchor = DimAnchor(c);
         c.LabelX = mouse.X - anchor.X; c.LabelY = mouse.Y - anchor.Y;
+        // to a centerline, placed across it: a diameter (SketchEditor.CenterlineDims.cs)
+        if (DoubledAt(c, mouse) == true) c.Doubled = true;
         if (c.Type == CType.Angle)
         {
             // measure the sector the dimension is being placed in
@@ -2029,7 +2032,7 @@ public sealed partial class SketchEditor : IViewportMode
                 case CType.VDistance:
                 case CType.Offset:
                     {
-                        var (a, b) = DimPoints(c);
+                        var (a, b) = DoubledPoints(c) ?? DimPoints(c); // a diameter: the geometry to its mirror
                         Vec2 dir, nrm;
                         if (c.Type == CType.HDistance) { dir = new Vec2(1, 0); nrm = new Vec2(0, 1); }
                         else if (c.Type == CType.VDistance) { dir = new Vec2(0, 1); nrm = new Vec2(1, 0); }
@@ -2384,7 +2387,7 @@ public sealed partial class SketchEditor : IViewportMode
     static string DimText(SkConstraint c)
     {
         var v = Expr.Format(c.Value);
-        var prefix = c.Type switch { CType.Diameter => "⌀", CType.Radius => "R", CType.Length => "L ", _ => "" };
+        var prefix = c.Doubled ? "⌀" : c.Type switch { CType.Diameter => "⌀", CType.Radius => "R", CType.Length => "L ", _ => "" };
         var suffix = c.Type == CType.Angle ? "°" : "";
         var txt = prefix + v + suffix;
         if (c.Driven) txt = "(" + txt + ")";

@@ -458,7 +458,8 @@ public static class SketchSolver
                 }
             case CType.Distance:
                 {
-                    var v = c.Value;
+                    // a diameter to a centerline (Doubled) holds half its value
+                    var v = c.Doubled ? c.Value / 2 : c.Value;
                     if (r.Length == 1)
                     {
                         var (a, b) = Line(s, r[0]);
@@ -1059,6 +1060,8 @@ public static class SketchSolver
 
     public static double Measure(Sketch sk, SkConstraint c)
     {
+        // a diameter to a centerline: twice the distance
+        if (c.Doubled && c.Type == CType.Distance) { var single = c.Clone(); single.Doubled = false; return 2 * Measure(sk, single); }
         var r = c.Refs;
         Vec2 P(long id) => sk.P(id);
         (Vec2 a, Vec2 b) L(long id) { var l = (SkLine)sk.Entity(id)!; return (P(l.P1), P(l.P2)); }
