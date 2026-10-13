@@ -44,6 +44,21 @@ static class OpenEdges
             var name = doc.Features[i - 1].Name;
             int open = r.State.Bodies.Sum(b => b.Solid.Topology.OpenHalfEdges);
             Console.WriteLine($"after {name}: open={open}{(r.Status[doc.Features[i - 1].Id].Ok ? "" : " FAILED " + SpryCad.Kernel.Csg.LastFallbackReason)}");
+            // FACES=text: at the named feature, the loops of the faces whose name holds the text, and its short edges
+            if (feature == name && Environment.GetEnvironmentVariable("FACES") is { } want)
+                foreach (var nb in r.State.Bodies.Select(b => b.Solid.Native).OfType<SpryCad.Kernel.Native.NBody>())
+                {
+                    nb.Link();
+                    foreach (var e in nb.Edges.Where(e => e.Length < 0.02))
+                        Console.WriteLine($"   short {e.Length:g3} {e.Curve.GetType().Name} {e.V0.P}->{e.V1.P} [{string.Join(" | ", e.Uses.Select(u => u.Face.Tag.Name))}]");
+                    foreach (var nf in nb.Faces.Where(x => x.Tag.Name.Contains(want)))
+                    {
+                        Console.WriteLine($"   face {nf.Tag.Name} {nf.Surface.Kind}");
+                        foreach (var nl in nf.Loops)
+                            foreach (var c in nl.Coedges)
+                                Console.WriteLine($"     {c.Start.P} -> {c.End.P} {c.Edge.Curve.GetType().Name} len {c.Edge.Length:g3} [{string.Join(" | ", c.Edge.Uses.Select(u => u.Face.Tag.Name))}]");
+                    }
+                }
             if (open > prev && (feature == null || feature == name) || feature == name)
             {
                 foreach (var b in r.State.Bodies.Where(b => b.Solid.Topology.OpenHalfEdges > 0))
@@ -103,6 +118,13 @@ static class OpenEdges
                                     }
                                 }
                         Console.WriteLine($"      {crossings} self-crossings");
+                        if (Environment.GetEnvironmentVariable("LOOPS") != null)
+                            foreach (var nl in nf.Loops)
+                            {
+                                Console.WriteLine($"      loop of {nl.Coedges.Count}:");
+                                foreach (var c in nl.Coedges)
+                                    Console.WriteLine($"        {c.Start.P} -> {c.End.P} {c.Edge.Curve.GetType().Name}{(c.Forward ? "+" : "-")} e#{System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(c.Edge) % 100000} faces {string.Join(" / ", c.Edge.Uses.Select(x => x.Face?.Tag.Name ?? "?"))}");
+                            }
                         Console.WriteLine($"   face {nf.Tag.Name} {nf.Surface.Kind}{(nf.Surface.Base is { } bs ? "(" + bs.Kind + ")" : "")}: {facets.Count} facets, boundary {total - missing}/{total} covered, loops {dom.Loops.Count}, uv area {area / 2:g4}");
                     }
                 }

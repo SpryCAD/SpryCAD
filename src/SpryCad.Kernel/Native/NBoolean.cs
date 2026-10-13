@@ -592,6 +592,7 @@ public sealed class NBoolean
         MergeEdges(result);
         RemoveSpurs(result);
         result.Link();
+        if (RemoveSlivers(result)) result.Link();
         Lap("merge edges");
         var err = _far.Count == 0 ? result.Validate() : result.Validate(ActiveFaces(result).ToList(), NearEdges(ActiveFaces(result)));
         Lap("validate");
@@ -628,6 +629,89 @@ public sealed class NBoolean
             f.Loops.RemoveAll(l => l.Coedges.Count == 0);
         }
         body.Faces.RemoveAll(f => f.Loops.Count == 0);
+    }
+
+    /// <summary>
+    /// Removes zero-width slivers between two faces: where a face's loop runs along one edge they share and straight
+    /// back along another (two traces of one tangent meeting, each ending at a different vertex), the far vertex
+    /// bounding nothing. The shorter edge lies on the longer: the longer one is cut back to the shorter one's other
+    /// end and the shorter one dropped, in both faces' loops. Needs <see cref="NBody.Link"/> done.
+    /// </summary>
+    static bool RemoveSlivers(NBody body)
+    {
+        bool any = false;
+        var ends = new Dictionary<NVertex, int>(ReferenceEqualityComparer.Instance);
+        foreach (var e in body.Edges)
+        {
+            ends[e.V0] = ends.GetValueOrDefault(e.V0) + 1;
+            ends[e.V1] = ends.GetValueOrDefault(e.V1) + 1;
+        }
+        foreach (var f in body.Faces)
+            foreach (var l in f.Loops)
+            {
+                for (int i = 0; l.Coedges.Count > 2 && i < l.Coedges.Count; i++)
+                {
+                    var c1 = l.Coedges[i]; var c2 = l.Coedges[(i + 1) % l.Coedges.Count];
+                    NEdge e1 = c1.Edge, e2 = c2.Edge;
+                    if (ReferenceEquals(e1, e2) || e1.Uses.Count != 2 || e2.Uses.Count != 2) continue;
+                    var o1 = e1.Uses.First(u => !ReferenceEquals(u, c1)); var o2 = e2.Uses.First(u => !ReferenceEquals(u, c2));
+                    if (!ReferenceEquals(o1.Face, o2.Face) || ReferenceEquals(o1.Face, f)) continue;
+                    // the tip: only these two edges end there, and they leave it the same way
+                    var q = c1.End;
+                    if (!ReferenceEquals(q, c2.Start) || ends.GetValueOrDefault(q) != 2) continue;
+                    if (ReferenceEquals(c1.Start, c2.End)) continue;
+                    // the shorter edge lies on the longer: that one goes on from the shorter one's other end
+                    var (keep, drop, keepC, from) = e1.Length <= e2.Length ? (e2, e1, c2, c1.Start) : (e1, e2, c1, c2.End);
+                    if (!Along(drop, keep, out double tFrom)) continue;
+                    if (!InRange(keep, tFrom) || ReferenceEquals(from, q)) continue;
+                    // the kept edge from the far end of the dropped one to its own other end
+                    bool qAt0 = ReferenceEquals(keep.V0, q);
+                    var cut = qAt0 ? new NEdge(keep.Curve, tFrom, keep.T1, from, keep.V1) : new NEdge(keep.Curve, keep.T0, tFrom, keep.V0, from);
+                    if (Trace != null) T($"  sliver: {drop.Curve.GetType().Name} {c1.Start.P}..{c2.End.P} tip {q.P} on {f.Tag.Name} / {o1.Face.Tag.Name}");
+                    Replace(l, c1, c2, new NCoedge(cut, keepC.Forward) { Face = f });
+                    var ol = o1.Face.Loops.First(x => x.Coedges.Contains(o1));
+                    var oKeep = ReferenceEquals(keep, e1) ? o1 : o2;
+                    // in the other face the two run the other way: o2 then o1
+                    Replace(ol, o2, o1, new NCoedge(cut, oKeep.Forward) { Face = o1.Face });
+                    cut.Uses.Clear();
+                    foreach (var c in l.Coedges.Concat(ol.Coedges)) if (ReferenceEquals(c.Edge, cut)) cut.Uses.Add(c);
+                    ends[q] = 0;
+                    any = true;
+                    i = -1;
+                }
+            }
+        return any;
+
+        static void Replace(NLoop l, NCoedge a, NCoedge b, NCoedge with)
+        {
+            int ia = l.Coedges.IndexOf(a), ib = l.Coedges.IndexOf(b);
+            l.Coedges[ia] = with;
+            l.Coedges.RemoveAt(ib);
+        }
+        static bool InRange(NEdge e, double t)
+        {
+            double lo = Math.Min(e.T0, e.T1), hi = Math.Max(e.T0, e.T1), m = 1e-9 * Math.Max(1, hi - lo);
+            return t > lo + m && t < hi - m;
+        }
+        // every point of the dropped edge on the kept one; the parameter there of the dropped edge's end away from
+        // the kept one
+        static bool Along(NEdge drop, NEdge keep, out double t)
+        {
+            t = 0;
+            var far = ReferenceEquals(drop.V0, keep.V0) || ReferenceEquals(drop.V0, keep.V1) ? drop.V1 : drop.V0;
+            double len = Math.Max(drop.Length, 1e-9), tol = Math.Max(1e-6, 2 * Math.Max(FitTol(drop.Curve), FitTol(keep.Curve)));
+            double worst = 0;
+            for (int k = 0; k <= 8; k++)
+            {
+                var p = drop.At(k / 8.0);
+                double tp = keep.Curve.Param(p);
+                worst = Math.Max(worst, Vec3.Distance(keep.Curve.Eval(tp), p));
+            }
+            if (Trace != null) T($"  sliver? {drop.Curve.GetType().Name} length {len:g3} off {keep.Curve.GetType().Name} by {worst:g3} (tol {tol:g3})");
+            if (worst > tol) return false;
+            t = keep.Curve.Param(far.P);
+            return true;
+        }
     }
 
     // ------------------------------------------------------------------------------------------
