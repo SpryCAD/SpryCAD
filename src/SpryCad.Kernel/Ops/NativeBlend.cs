@@ -26,7 +26,25 @@ public static class NativeBlend
         if (size <= 0) { errors.Add("Size must be greater than zero."); return body; }
         // (edges turning from concave to convex along their length split where their faces are tangent, only the part
         // running on from the rest of the blend kept: the blend fades out there)
-        if (fillet && SplitFlips(body, edges) is { } split) (body, edges) = split;
+        if (fillet && SplitFlips(body, edges) is { } split)
+        {
+            (body, edges) = (split.body, split.edges);
+            // the parts of the other kind, running on only from each other (round a collar a loft leaves from below,
+            // the stretch where it turns convex): filleted after the rest, on what that leaves, fading out at both ends
+            // too. Where that fails, left sharp as before
+            if (split.others.Count > 0)
+            {
+                var nb1 = Apply(body, edges, size, fillet, prefix, errors, overflow, problemEdges, applied, chamfer, buildOnly, trimmedOut);
+                if (buildOnly || errors.Count > 0 || nb1.Native == null) return nb1;
+                var rest = Rest(body.Native!, nb1.Native, split.others.ToList(), prefix, size, joins: false);
+                var errs = new List<string>(); var app = applied == null ? null : new List<(Solid, bool)>();
+                var nb2 = rest.Count == 0 ? nb1 : Apply(nb1, rest, size, fillet, prefix + ".f", errs, overflow, null, app, chamfer, false, null);
+                Debug?.Invoke($"the other kind's {split.others.Count} part(s): {rest.Count} on the result, {(errs.Count == 0 ? "blended" : "left: " + errs[0])}");
+                if (errs.Count > 0 || nb2.Native == null) return nb1;
+                if (app != null) applied!.AddRange(app);
+                return nb2;
+            }
+        }
         // blends of both kinds meeting at a vertex (a hex socket's inside corners, concave, and its rim, convex): the odd
         // one out at each such vertex first, then the others on the body it leaves, running on round what it blended
         // (as two features would). At once, their tools can collide where they meet
@@ -157,7 +175,7 @@ public static class NativeBlend
     /// nearest its middle), and the new edges between their faces and the first blends' faces, near where they
     /// met (a fillet's arcs round a rounded corner, a chamfer's short lines across it).
     /// </summary>
-    static List<NEdge> Rest(NBody before, NBody after, List<NEdge> edges, string firstPrefix, double size)
+    static List<NEdge> Rest(NBody before, NBody after, List<NEdge> edges, string firstPrefix, double size, bool joins = true)
     {
         after.Link();
         var res = new List<NEdge>();
@@ -174,6 +192,7 @@ public static class NativeBlend
             var best = after.Edges.Where(x => Between(x, a, b)).OrderBy(x => x.Samples(1e-3).Min(q => Vec3.Distance(q, mid))).FirstOrDefault();
             if (best != null && best.Samples(1e-3).Min(q => Vec3.Distance(q, mid)) < Math.Max(1e-3, 0.5 * Vec3.Distance(e.V0.P, e.V1.P)) && !res.Contains(best)) res.Add(best);
         }
+        if (!joins) return res;
         // the remains' faces against the first blends' faces, near the vertices they shared
         var names = new HashSet<string>(edges.SelectMany(e => e.Uses.Select(u => u.Face.Tag.Name)));
         var ends = edges.SelectMany(e => new[] { e.V0.P, e.V1.P }).ToList();
@@ -1715,9 +1734,10 @@ public static class NativeBlend
     /// The body (a copy) with the edges to blend that turn from concave to convex along their length split where they
     /// do, and the edges to blend: of each split edge the parts that run on from another edge to blend of the same kind
     /// at their other end (a fillet round a collar where a loft leaves it tangentially at the bottom: round the rest,
-    /// fading out where the faces become tangent, the bottom left sharp). Null where no edge turns.
+    /// fading out where the faces become tangent), and the other parts (the bottom: blended after them, see
+    /// <see cref="Apply"/>). Null where no edge turns.
     /// </summary>
-    static (Solid body, IReadOnlyList<NEdge> edges)? SplitFlips(Solid body, IReadOnlyList<NEdge> edges)
+    static (Solid body, IReadOnlyList<NEdge> edges, IReadOnlyList<NEdge> others)? SplitFlips(Solid body, IReadOnlyList<NEdge> edges)
     {
         if (body.Native == null || !edges.Any(e => FlipAt(e) != null)) return null;
         var nb = body.Native.Clone(out var emap);
@@ -1742,7 +1762,7 @@ public static class NativeBlend
             if (whole.Any(w => (ReferenceEquals(w.V0, outer) || ReferenceEquals(w.V1, outer)) && Convex(w, outer.P) == mine)) res.Add(p);
         }
         Debug?.Invoke($"split {parts.Count / 2} edge(s) where they turn from concave to convex; blending {res.Count} of {mapped.Count + parts.Count / 2}");
-        return (NTess.ToSolid(nb), res);
+        return (NTess.ToSolid(nb), res, parts.Where(p => !res.Contains(p)).ToList());
     }
 
     /// <summary>

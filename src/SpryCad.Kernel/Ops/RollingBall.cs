@@ -1161,6 +1161,10 @@ public static class RollingBall
         // ~1e-7 off the intersection, and a step from one is off by that however short)
         double JointOff(Vec3 p) => Math.Max(Math.Abs(A2.F_(p)), Math.Abs(B2.F_(p)));
         tol = Math.Max(tol, 4 * Math.Max(JointOff(a.S), JointOff(b.S)));
+        // (off the intersection itself, where the surfaces meet at a shallow angle, a few degrees, many times as far as
+        // off either surface: a step from such a joint, however short, is off by that. Only a short step's noise)
+        double JointAway(Vec3 p) => Vec3.Distance(p, NSurface.ProjectToIntersection(A2, B2, p));
+        var noise = Math.Max(1e-6 * scale, 4 * Math.Max(JointAway(a.S), JointAway(b.S)));
 
         // forward from a to b
         var P = new List<Vec3> { a.S }; var D = new List<Vec3> { a.T };
@@ -1194,7 +1198,7 @@ public static class RollingBall
             var e = Err(cur, ct, nx.Value.p, nx.Value.t);
             // (a step already short, off by more than the tolerance only by the surfaces' noise, not by the curve bending:
             // an offset of a fitted surface, a loft's, is only as exact as its fit, and halving the step does not help)
-            if (e > tol && !(h <= hmax / 64 && e <= 1e-6 * scale)) { h /= 2; if (h < hmin) { Debug?.Invoke($"    march stuck at {cur} after {travelled:g3} of {length:g3}: error {e:g3}"); return null; } continue; }
+            if (e > tol && !(h <= hmax / 64 && e <= noise)) { h /= 2; if (h < hmin) { Debug?.Invoke($"    march stuck at {cur} after {travelled:g3} of {length:g3}: error {e:g3}"); return null; } continue; }
             P.Add(nx.Value.p); D.Add(nx.Value.t);
             travelled += Vec3.Distance(cur, nx.Value.p);
             (cur, ct) = nx.Value;
