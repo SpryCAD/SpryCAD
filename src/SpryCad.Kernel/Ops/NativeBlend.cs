@@ -1603,6 +1603,7 @@ public static class NativeBlend
         // obstacles: faces (other than the two blended ones) the tool reaches through. The tool is trimmed by
         // the far side of each, never by the blended faces themselves: the blend surface is tangent to those,
         // and a boolean against them would be degenerate exactly where the obstacle cuts that tangency.
+        var besides = new List<Plane>();
         var cutters = new List<Solid>();
         var box = tool.Bounds;
         var pad = box.Diagonal + 1;
@@ -1617,6 +1618,21 @@ public static class NativeBlend
             double Side(Vec3 p) => f.Surface.F_(p) * (f.Sense ? 1 : -1) * (convex ? 1 : -1);
             var dom = NDomain.Of(f, 1e-3);
             // an obstacle stands in front of the edge (the edge is on its open side) and the tool reaches behind it
+            // (a plane beside a face it blends, across that face's edge, the blended edge on one side of it: the strip
+            // running off the face over the edge, past the plane where the face ends (a rib a little in from a plate's
+            // edge, its fillet wider than that). Cut back to the plane, the edge's side kept: else a lip of the tool hangs
+            // past the face beyond the edge)
+            if (f.Surface.Kind == SurfaceKind.Plane && f.Coedges.Any(c => c.Edge.Uses.Any(u => blended.Contains(u.Face))))
+            {
+                var fp = f.Surface.Plane!;
+                var sd = pts.Select(p => fp.Distance(p)).ToList();
+                if (sd.All(d => d < -1e-6) || sd.All(d => d > 1e-6))
+                {
+                    var keep = sd[0] > 0 ? fp : Plane.FromPointNormal(fp.Project(pts[0]), -fp.Normal);
+                    if (samples.Any(p => keep.Distance(p) < -1e-4)) { besides.Add(keep); Debug?.Invoke($"beside {f.Tag.Name}: cut back to its plane"); }
+                    continue;
+                }
+            }
             if (pts.Any(p => Side(p) > 1e-6)) continue;
             if (!samples.Any(p => Side(p) > 1e-4 && dom.Classify(f.Surface.Project(p), 1e-4) >= 0)) continue;
             var cutter = FarSide(f, convex, box, pad);
@@ -1626,6 +1642,7 @@ public static class NativeBlend
         }
         Solid part = tool;
         if (cutters.Count > 0) part = Csg.Subtract(tool, cutters.Count == 1 ? cutters[0] : Csg.UnionAll(cutters));
+        foreach (var pl in besides) part = Trim(part, pl);
         Debug?.Invoke($"trimmed tool: native={part.Native != null} empty={part.IsEmpty} ({Csg.LastFallbackReason})");
         if (part.Native == null || part.IsEmpty) return null;
         var lumps = part.Native.Lumps();

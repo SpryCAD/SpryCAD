@@ -558,6 +558,22 @@ static class DirectBlendTests
             t.True(Math.Abs(mirrored - beforeRib - 2 * (filleted - beforeRib)) < 1e-6 * mirrored, $"the copy adds {mirrored - filleted:R}, the rib and its fillets {filleted - beforeRib:R}");
         });
 
+        t.Test("Fillet running off a face over its edge: cut back to the plane beyond, no lip past the plate, applied directly", () =>
+        {
+            // the rib stands 2 in from the plate's edge (Y 30), its fillets R3: the outer one's tool ran past the edge,
+            // a lip of it left hanging past the plate's side; the face beside it was no obstacle (the lip is beyond it)
+            var doc = Demos.BlendCases.First(c => c.name == "rib against a wall, filleted and mirrored").build();
+            var fil = doc.Features.First(f => f.Name == "Rib fillets");
+            var before = DirectBlend.Counts;
+            var res = new Regenerator().Rebuild(doc, doc.Features.IndexOf(fil) + 1);
+            t.True(res.Status[fil.Id].Ok, res.Status[fil.Id].Error ?? "");
+            var nb = res.State.Bodies[0].Solid.Native!;
+            t.True(nb.Validate() == null, $"valid: {nb.Validate()}");
+            var maxY = nb.Faces.SelectMany(f => f.Coedges).Max(c => c.Start.P.Y);
+            t.True(maxY < 30 + 1e-6, $"reaches Y {maxY:R}, past the plate's edge");
+            t.True(DirectBlend.Counts.declined == before.declined, "all its tools applied directly");
+        });
+
         t.Test("Mirror with a seed suppressed: the others mirrored, said; with its seed failed: the seed's error", () =>
         {
             // the mirror used to be suppressed with its seed (it uses it), so the rib was silently not mirrored
