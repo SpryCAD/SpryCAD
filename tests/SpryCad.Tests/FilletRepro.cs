@@ -17,6 +17,8 @@ static class FilletRepro
     {
         var doc = CadDocument.Load(file);
         int si = doc.Features.FindIndex(f => f is ShellFeature);
+        // (shell: the part as it is, its wall the thickness given)
+        if (kase == "shell") { if (si >= 0) ((ShellFeature)doc.Features[si]).Thickness = radius ?? "0.125"; return doc; }
         if (si >= 0) doc.Features.RemoveRange(si, doc.Features.Count - si);
         var dropSk = doc.Features.OfType<SketchFeature>().First(f => f.Name == "Top drop");
         var drop = doc.Features.OfType<ExtrudeFeature>().First(f => f.Name == "Top drop");

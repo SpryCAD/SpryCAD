@@ -123,7 +123,7 @@ public static class NShell
             }
             var p = Solve(ss, v.P, tol, out var res);
             Debug?.Invoke($"vertex {v.P} -> {p} res {res:g2} on {string.Join(",", ss.Select(x => x.Kind))}");
-            if (res > 1e-6 * scale) throw new InvalidOperationException(what + ": a corner has no solution");
+            if (res > 1e-6 * scale) throw new InvalidOperationException(what + $": a corner has no solution (at {v.P}, {res:g2} off, on {string.Join(", ", ss.Select(x => x.Kind))})");
             vmap[v] = new NVertex(p);
         }
 
