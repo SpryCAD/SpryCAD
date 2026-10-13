@@ -1733,8 +1733,10 @@ public static class NativeBlend
         var e = chain.FirstOrDefault(x => ReferenceEquals(x.V0, v) || ReferenceEquals(x.V1, v));
         if (e == null || e.Uses.Count != 2 || chain.Count(x => ReferenceEquals(x.V0, v) || ReferenceEquals(x.V1, v)) != 1) return null;
         double tv = ReferenceEquals(e.V0, v) ? e.T0 : e.T1, tf = ReferenceEquals(e.V0, v) ? e.T1 : e.T0;
-        const double stop = 10 * Math.PI / 180;
-        if (NormalsAngle(e, tv) > 0.5 * stop) return null;
+        // (at 5° the end cap of a ball of radius r is about r/11 across; much nearer tangent the cap's edges are too
+        // short to join)
+        const double stop = 5 * Math.PI / 180;
+        if (NormalsAngle(e, tv) > 0.9 * stop) return null;
         // (from the vertex towards the far end, the first place the faces open to the stop angle)
         double a = tv, b = tf;
         if (NormalsAngle(e, b) < stop) return null;
