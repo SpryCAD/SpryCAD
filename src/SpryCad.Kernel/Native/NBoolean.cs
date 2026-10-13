@@ -89,6 +89,50 @@ public sealed class NBoolean
         return ReferenceEquals(ba, bb) || ReferenceEquals(ba.Nurbs, bb.Nurbs) || ba.CoincidentWith(bb, tol);
     }
 
+    /// <summary>
+    /// Whether face f's surface patch (its parameter rectangle) stays clear of surface s: a grid of points on it, spaced in
+    /// each direction by its length there, all on one side of s and each farther from it than the spacing (s's distance
+    /// grows no faster than one moves, so nothing between the points reaches it). The spacing set from the nearest
+    /// point of a coarse grid first; false when that would take too many points, or a point is that near.
+    /// </summary>
+    static bool Apart(NFace f, NSurface s, double tol, NDomain dom)
+    {
+        if (dom.UMax < dom.UMin || dom.VMax < dom.VMin) return false;
+        Vec3 P(double a, double b) => dom.Eval(new Vec2(dom.UMin + (dom.UMax - dom.UMin) * a, dom.VMin + (dom.VMax - dom.VMin) * b));
+        // the patch's lengths across its two directions (along lines through its middle)
+        double Len(bool u) { double l = 0; var p = P(u ? 0 : 0.5, u ? 0.5 : 0); for (int i = 1; i <= 16; i++) { var q = u ? P(i / 16.0, 0.5) : P(0.5, i / 16.0); l += Vec3.Distance(p, q); p = q; } return l; }
+        double lu = Len(true), lv = Len(false);
+        int sign = 0;
+        double Check(int nu, int nv, out double h)
+        {
+            double minF = double.MaxValue; h = 0;
+            var prev = new Vec3[nv + 1];
+            for (int i = 0; i <= nu; i++)
+                for (int j = 0; j <= nv; j++)
+                {
+                    var p = P((double)i / nu, (double)j / nv);
+                    var fv = s.F_(p);
+                    if (!double.IsFinite(fv) || Math.Abs(fv) <= tol) return -1;
+                    var sg = Math.Sign(fv);
+                    if (sign == 0) sign = sg; else if (sg != sign) return -1;
+                    minF = Math.Min(minF, Math.Abs(fv));
+                    if (i > 0) h = Math.Max(h, Vec3.Distance(p, prev[j]));
+                    if (j > 0) h = Math.Max(h, Vec3.Distance(p, P((double)i / nu, (j - 1.0) / nv)));
+                    prev[j] = p;
+                }
+            return minF;
+        }
+        var m0 = Check(8, 8, out var h0);
+        if (m0 < 0) return false;
+        if (m0 > h0) return true;
+        // spaced at most about the nearest distance found
+        var step = 0.7 * m0;
+        int nu2 = Math.Max(2, (int)Math.Ceiling(lu / step)), nv2 = Math.Max(2, (int)Math.Ceiling(lv / step));
+        if ((long)(nu2 + 1) * (nv2 + 1) > 3000) return false;
+        var m1 = Check(nu2, nv2, out var h1);
+        return m1 > 0 && m1 > h1;
+    }
+
     static bool PipesApart(NSurface a, NSurface b)
     {
         if (a.Spine is not { } sa || b.Spine is not { } sb) return false;
@@ -434,7 +478,12 @@ public sealed class NBoolean
                     if (apart) c = OnSurface(c, fa.Surface, traceTol);
                 }
                 else if (c.Count == 0 && fa.Surface.Kind != SurfaceKind.Screw && (!onSpline || fb.Bounds().Diagonal < 0.25 * fa.Bounds().Diagonal))
-                    using (Prof.Time(Prof.Enabled ? $"tr2.{fb.Surface.Kind}x{fa.Surface.Kind}" : "")) c = Traced(fb, fa.Surface);
+                {
+                    // (a slow distance, an offset's or a B-spline's, against a face proved clear of it first: tracing it
+                    // is a long fruitless search, a shell's inner wall against a fillet outside it)
+                    bool clear; using (Prof.Time("tr2.apart")) clear = fa.Surface.Kind is SurfaceKind.Offset or SurfaceKind.BSpline && Apart(fb, fa.Surface, _onTol, traceDoms[fb]);
+                    if (!clear) using (Prof.Time(Prof.Enabled ? $"tr2.{fb.Surface.Kind}x{fa.Surface.Kind}" : "")) c = Traced(fb, fa.Surface);
+                }
                 pairCurves[i] = c;
                 if (Trace != null && Environment.GetEnvironmentVariable("FC_TRACE_SLOW") != null)
                     T($"  trace {fa.Tag.Name}({fa.Surface.Kind}) x {fb.Tag.Name}({fb.Surface.Kind}): {c.Count} curves, {string.Join(" ", c.Select(x => x is NPolyline pl ? pl.Pts.Length + "pts" : x.GetType().Name))} in {swt.ElapsedMilliseconds} ms");
