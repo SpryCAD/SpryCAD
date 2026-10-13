@@ -1420,8 +1420,10 @@ public sealed class Regenerator
             {
                 // the fillets just before the shell made faces the offset cannot take: the inner side made from the body
                 // before them, filleted again
-                bodies = ShellByHistory(t, byBody) ?? throw new FeatureException(ex.Message);
-                status.Warnings.Add("The inner side was made from the part before its last fillets, those filleted again inside (their radii less the wall where convex, more where concave).");
+                var skipped = new List<string>();
+                bodies = ShellByHistory(t, byBody, skipped) ?? throw new FeatureException(ex.Message);
+                status.Warnings.Add("The inner side was made from the part before its last fillets, those filleted again inside (their radii less the wall where convex, more where concave)."
+                    + (skipped.Count == 0 ? "" : $" Not inside {string.Join(", ", skipped)} (concave: the wall is thicker there)."));
             }
             State = State.With(bodies);
         }
@@ -1433,7 +1435,7 @@ public sealed class Regenerator
         /// on a concave one (a rolling-ball fillet's offset is the rolling-ball fillet of the offset faces), left out
         /// where that leaves none. Null when there are no such fillets or that fails too.
         /// </summary>
-        List<Body>? ShellByHistory(double t, Dictionary<string, HashSet<string>> byBody)
+        List<Body>? ShellByHistory(double t, Dictionary<string, HashSet<string>> byBody, List<string> skipped)
         {
             int i = doc.Features.IndexOf(f);
             if (i <= 0 || EarlierStates.Count < i) return null;
@@ -1480,11 +1482,18 @@ public sealed class Regenerator
                             if (group.Count == 0 || radius <= 1e-6 * Math.Max(1, inner.Bounds.Diagonal)) continue;
                             var errors = new List<string>();
                             inner = NativeBlend.Apply(inner, group, radius, true, f.Id + ".I." + ff.Id, errors, ff.Overflow);
-                            if (errors.Count > 0) { ShellTrace?.Invoke($"{ff.Name} R{radius:g3} ({(convex ? "convex" : "concave")}, {group.Count} edges): {errors[0]}"); return null; }
+                            if (errors.Count > 0)
+                            {
+                                ShellTrace?.Invoke($"{ff.Name} R{radius:g3} ({(convex ? "convex" : "concave")}, {group.Count} edges): {errors[0]}");
+                                // (a concave one left out leaves the inside sharp there, the wall thicker than the rest: never
+                                // thinner, never through. A convex one left out would thin it)
+                                if (convex) return null;
+                                if (!skipped.Contains(ff.Name)) skipped.Add(ff.Name);
+                            }
                         }
                     }
                     ShellTrace?.Invoke($"inner body: {inner.Native!.Faces.Count} faces, {inner.Native.Validate() ?? "valid"}");
-                    var res = Kernel.Native.NShell.Hollow(outer, inner.Native!, open, f.Id);
+                    var res = Kernel.Native.NShell.Hollow(outer, inner.Native!, open, f.Id, offsetInner: false);
                     if (res.Validate() is { } bad) { ShellTrace?.Invoke("hollowed: " + bad); return null; }
                     var sol = Kernel.Native.NTess.ToSolid(res);
                     if (sol.IsEmpty) return null;

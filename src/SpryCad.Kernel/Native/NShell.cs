@@ -31,8 +31,11 @@ public static class NShell
     }
 
     /// <summary>The body less an inner body (see <see cref="Inner"/>, or one made otherwise with its faces so named).</summary>
-    public static NBody Hollow(NBody body, NBody inner, ISet<string> openFaces, string prefix)
+    public static NBody Hollow(NBody body, NBody inner, ISet<string> openFaces, string prefix, bool offsetInner = true)
     {
+        // (an inner body made otherwise, from the part's history, may touch the outer one elsewhere too: a fillet's end
+        // cap in the plane of the outer fillet's: every pair of faces then)
+        if (!offsetInner) return NBoolean.Run(body, inner, BoolOp.Subtract);
         // the inner body runs a wall's thickness inside the outer one and breaks out only through the open faces:
         // only an open face and an inner face, or an outer face and an open face's (outward) offset, can meet
         var openInner = openFaces.Select(n => prefix + ".I." + n).ToHashSet();
