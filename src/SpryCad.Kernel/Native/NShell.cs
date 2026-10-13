@@ -11,7 +11,14 @@ public static class NShell
     /// <summary>Diagnostics (tests/tools).</summary>
     public static Action<string>? Debug;
 
-    public static NBody Apply(NBody body, ISet<string> openFaces, double thickness, string prefix)
+    public static NBody Apply(NBody body, ISet<string> openFaces, double thickness, string prefix) =>
+        Hollow(body, Inner(body, openFaces, thickness, prefix), openFaces, prefix);
+
+    /// <summary>
+    /// The shell's inner body: every face offset a wall's thickness inward (the open faces outward, so the inner body
+    /// breaks out through them), its faces named prefix.I.(the face's name). Throws where that cannot be made.
+    /// </summary>
+    public static NBody Inner(NBody body, ISet<string> openFaces, double thickness, string prefix)
     {
         var inner = Offset(body, f => openFaces.Contains(f.Tag.Name) ? thickness : -thickness, prefix + ".I.");
         var err = inner.Validate();
@@ -20,6 +27,12 @@ public static class NShell
         // narrower than it) turns inside out instead, and its neighbours fold over it: its outline runs the other
         // way round, or crosses itself where it did not. Valid as topology, but the skin passes through itself.
         if (Folded(body, inner) is { } bad) throw new InvalidOperationException($"shell: the inner face of {bad} turns inside out at this thickness");
+        return inner;
+    }
+
+    /// <summary>The body less an inner body (see <see cref="Inner"/>, or one made otherwise with its faces so named).</summary>
+    public static NBody Hollow(NBody body, NBody inner, ISet<string> openFaces, string prefix)
+    {
         // the inner body runs a wall's thickness inside the outer one and breaks out only through the open faces:
         // only an open face and an inner face, or an outer face and an open face's (outward) offset, can meet
         var openInner = openFaces.Select(n => prefix + ".I." + n).ToHashSet();

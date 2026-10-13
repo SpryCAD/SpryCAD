@@ -82,6 +82,7 @@ static class FilletRepro
     {
         var doc = Make(file, kase, radius);
         if (Environment.GetEnvironmentVariable("REPRO_SAVE") is { } path) doc.Save(path);
+        Regenerator.ShellTrace = m => Console.WriteLine("  shell from history: " + m);
         if (Environment.GetEnvironmentVariable("BLEND_DEBUG") != null)
         {
             SpryCad.Kernel.NativeBlend.Debug = m => Console.WriteLine("NB " + m);
@@ -99,7 +100,7 @@ static class FilletRepro
         }
         var r = new Regenerator().Rebuild(doc);
         foreach (var f in doc.Features)
-            Console.WriteLine($"  {f.Name,-22} {(r.Status[f.Id].Ok ? "ok" : "FAILED: " + r.Status[f.Id].Error)} ({r.Status[f.Id].Milliseconds:0} ms)");
+            Console.WriteLine($"  {f.Name,-22} {(r.Status[f.Id].Ok ? "ok" : "FAILED: " + r.Status[f.Id].Error)} ({r.Status[f.Id].Milliseconds:0} ms){string.Concat(r.Status[f.Id].Warnings.Select(w => " [" + w + "]"))}");
         foreach (var b in r.State.Bodies)
             Console.WriteLine($"  body: valid={b.Solid.Native?.Validate() ?? "ok"} open={b.Solid.Topology.OpenHalfEdges}");
         return 0;

@@ -319,6 +319,31 @@ static class CoreTests
             t.Eq(copy.Sketch.Entities.OfType<SkLine>().Count(e => e.External?.Axis == "H"), 1);
         });
 
+        t.Test("Shell thicker than the rounds before it: the inside from the part before them, rounded again (or sharp)", () =>
+        {
+            // a block (40 x 30 x 20) with its top edges rounded R1, shelled 2 open at the bottom: offset as it is, the
+            // rounds would need a radius of -1; the inside is the block's, sharp
+            var doc = new CadDocument();
+            var s1 = doc.AddFeature(new SketchFeature { Plane = PlaneRef.Front, Sketch = Rect(40, 30) });
+            var e1 = doc.AddFeature(new ExtrudeFeature { SketchId = s1.Id, Depth = "20" });
+            var lines = s1.Sketch.Entities;
+            string Side(int i) => e1.Id + ".S." + ProfileExtractor.FaceName(lines[i]);
+            var round = doc.AddFeature(new FilletFeature { Radius = "1", Edges = { new EdgeRef { A = e1.Id + ".End", B = Side(0), Hint = new Vec3(20, 0, 20) } } });
+            var shell = doc.AddFeature(new ShellFeature { Thickness = "2", Faces = { new FaceRef { Name = e1.Id + ".Start", Hint = new Vec3(20, 15, 0), Normal = -Vec3.UnitZ } } });
+            var r = new Regenerator().Rebuild(doc);
+            foreach (var f in doc.Features) t.True(r.Status[f.Id].Ok, $"{f.Name}: {r.Status[f.Id].Error}");
+            t.True(r.Status[shell.Id].Warnings.Any(w => w.Contains("before its last fillets")), "made from the part before the rounds");
+            var b = r.State.Bodies.Single();
+            t.Eq(b.Solid.Native!.Validate(), null);
+            t.Eq(b.Solid.Topology.OpenHalfEdges, 0);
+            var rounded = KernelTests.Vex(new Regenerator().Rebuild(doc, doc.Features.IndexOf(shell)).State.Bodies.Single().Solid);
+            t.Near(KernelTests.Vex(b.Solid), rounded - 36 * 26 * 18, 1e-3 * rounded);
+            // thinner than the rounds: the inside rounded R1 - 0.5 (made as it always was)
+            shell.Thickness = "0.5";
+            r = new Regenerator().Rebuild(doc);
+            t.True(r.Status[shell.Id].Ok && r.Status[shell.Id].Warnings.Count == 0, r.Status[shell.Id].Error ?? string.Join("; ", r.Status[shell.Id].Warnings));
+        });
+
         t.Test("Shell a pyramid on a rectangle: its apex's four faces offset meet in two corners, not one", () =>
         {
             // (a square base's would meet at one point; on a 40 x 20 base the four offset planes do not, and the inner

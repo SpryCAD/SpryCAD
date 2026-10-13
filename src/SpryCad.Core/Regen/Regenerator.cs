@@ -103,6 +103,7 @@ public sealed class Regenerator
                         Cancel = cancel,
                         ThreadMode = ThreadOverride,
                         Earlier = status,
+                        EarlierStates = states,
                         Detail = progress == null ? null : d => progress(new RegenProgress(i, count, f.Id, f.Name, d)),
                     };
                     // (the kernel's long operations stop between their stages too)
@@ -369,6 +370,9 @@ public sealed class Regenerator
     // ------------------------------------------------------------------------------------------
 
     /// <summary>Tests: whether unions of touching pattern copies may reuse a rotated earlier union, and how many did.</summary>
+    /// <summary>Diagnostics: why a shell made from history (see ShellByHistory) gave up.</summary>
+    public static Action<string>? ShellTrace;
+
     public static bool ReusePatternUnions = true;
     public static int PatternUnionsReused;
 
@@ -379,6 +383,8 @@ public sealed class Regenerator
         public ThreadDisplay ThreadMode;
         /// <summary>The features before this one: whether each was built, and why not.</summary>
         public IReadOnlyDictionary<string, FeatureStatus> Earlier = new Dictionary<string, FeatureStatus>();
+        /// <summary>The model after each feature before this one (in the document's order).</summary>
+        public IReadOnlyList<ModelState> EarlierStates = Array.Empty<ModelState>();
         /// <summary>Progress within the feature (e.g. "instance 7 of 24").</summary>
         public Action<string>? Detail;
 
@@ -1410,8 +1416,82 @@ public sealed class Regenerator
                 bodies = State.Bodies.Select(b => byBody.TryGetValue(b.Id, out var names)
                     ? new Body { Id = b.Id, Solid = ShellOp.Apply(b.Solid, names, t, f.Id) } : b).ToList();
             }
-            catch (ShellFailedException ex) { throw new FeatureException(ex.Message); }
+            catch (ShellFailedException ex)
+            {
+                // the fillets just before the shell made faces the offset cannot take: the inner side made from the body
+                // before them, filleted again
+                bodies = ShellByHistory(t, byBody) ?? throw new FeatureException(ex.Message);
+                status.Warnings.Add("The inner side was made from the part before its last fillets, those filleted again inside (their radii less the wall where convex, more where concave).");
+            }
             State = State.With(bodies);
+        }
+
+        /// <summary>
+        /// The shell when the fillets just before it (only fillets, and features adding no body) made faces the offset
+        /// cannot take, a round tighter than the wall or a sliver between fillets: the inner body made from the body
+        /// before those fillets, then the fillets made again on it, each radius less the wall on a convex edge and more
+        /// on a concave one (a rolling-ball fillet's offset is the rolling-ball fillet of the offset faces), left out
+        /// where that leaves none. Null when there are no such fillets or that fails too.
+        /// </summary>
+        List<Body>? ShellByHistory(double t, Dictionary<string, HashSet<string>> byBody)
+        {
+            int i = doc.Features.IndexOf(f);
+            if (i <= 0 || EarlierStates.Count < i) return null;
+            var fillets = new List<FilletFeature>();
+            int j = i - 1;
+            for (; j >= 0; j--)
+            {
+                var g = doc.Features[j];
+                var gs = Earlier.GetValueOrDefault(g.Id);
+                if (g is FilletFeature ff && gs is { Ok: true, Suppressed: false }) { fillets.Insert(0, ff); continue; }
+                // (not built, or a sketch or plane: the bodies as they were)
+                if (gs == null || gs.Suppressed || !gs.Ok || g is SketchFeature or PlaneFeature) continue;
+                break;
+            }
+            if (fillets.Count == 0 || fillets.Any(x => x.WholeBody || x.Features.Count > 0)) return null;
+            int first = doc.Features.IndexOf(fillets[0]);
+            var before = first > 0 ? EarlierStates[first - 1] : null;
+            if (before == null) return null;
+            var bodies = new List<Body>();
+            foreach (var b in State.Bodies)
+            {
+                if (!byBody.TryGetValue(b.Id, out var open)) { bodies.Add(b); continue; }
+                if (before.FindBody(b.Id)?.Solid.Native is not { } b0 || b.Solid.Native is not { } outer) return null;
+                try
+                {
+                    var inner = Kernel.Native.NTess.ToSolid(Kernel.Native.NShell.Inner(b0, open, t, f.Id));
+                    foreach (var ff in fillets)
+                    {
+                        var r = Num(ff.Radius, "Radius");
+                        // its edges on the inner body: between the same faces' offsets
+                        var probe = State.With(new List<Body> { new() { Id = b.Id, Solid = inner } });
+                        var seeds = new List<Kernel.Native.NEdge>();
+                        foreach (var er in ff.Edges)
+                        {
+                            var mapped = new EdgeRef { A = f.Id + ".I." + er.A, B = f.Id + ".I." + er.B, Body = b.Id, Hint = er.Hint };
+                            if (Resolver.ResolveNativeEdge(mapped, probe) is not { } hit) { ShellTrace?.Invoke($"{ff.Name}: edge {mapped.A} / {mapped.B} not on the inner body"); return null; }
+                            seeds.Add(hit.Item2);
+                        }
+                        var edges = NativeBlend.Expand(inner.Native!, seeds, ff.TangentPropagation);
+                        foreach (var convex in new[] { true, false })
+                        {
+                            var group = edges.Where(e => NativeBlend.IsConvex(e) == convex).ToList();
+                            var radius = convex ? r - t : r + t;
+                            if (group.Count == 0 || radius <= 1e-6 * Math.Max(1, inner.Bounds.Diagonal)) continue;
+                            var errors = new List<string>();
+                            inner = NativeBlend.Apply(inner, group, radius, true, f.Id + ".I." + ff.Id, errors, ff.Overflow);
+                            if (errors.Count > 0) { ShellTrace?.Invoke($"{ff.Name} R{radius:g3} ({(convex ? "convex" : "concave")}, {group.Count} edges): {errors[0]}"); return null; }
+                        }
+                    }
+                    var res = Kernel.Native.NShell.Hollow(outer, inner.Native!, open, f.Id);
+                    if (res.Validate() is { } bad) { ShellTrace?.Invoke("hollowed: " + bad); return null; }
+                    var sol = Kernel.Native.NTess.ToSolid(res);
+                    if (sol.IsEmpty) return null;
+                    bodies.Add(new Body { Id = b.Id, Solid = sol });
+                }
+                catch (Exception ex) when (ex is InvalidOperationException or Kernel.Native.NBooleanException or NotSupportedException or FeatureException) { ShellTrace?.Invoke("failed: " + ex.Message); return null; }
+            }
+            return bodies;
         }
 
         void DoDraft(DraftFeature d)

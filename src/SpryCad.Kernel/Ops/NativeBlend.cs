@@ -1659,6 +1659,45 @@ public static class NativeBlend
     /// Edges reachable from the seeds through vertices where the curves continue tangentially, plus the
     /// other arcs of seam-split circles (always: they are the same model edge).
     /// </summary>
+    /// <summary>
+    /// An edge's direction (along its curve) at its start or end: square to both its faces' normals there where they are
+    /// not parallel, the exact tangent of their intersection (a fitted curve's own end tangent can be some degrees off:
+    /// a shell's inner edges, splines through solved points, met at 5 to 7 degrees where they run on tangentially).
+    /// </summary>
+    static Vec3 EndDir(NEdge e, bool atStart)
+    {
+        var d = e.Curve.Deriv(atStart ? e.T0 : e.T1).Normalized;
+        if (e.Curve is NLine or NCircle or NEllipse || e.Uses.Count != 2) return d;
+        var p = atStart ? e.V0.P : e.V1.P;
+        var c = Vec3.Cross(e.Uses[0].Face.Surface.Normal(p), e.Uses[1].Face.Surface.Normal(p));
+        if (c.Length < 1e-3) return d;
+        c = c.Normalized;
+        return Vec3.Dot(c, d) < 0 ? -c : c;
+    }
+
+    /// <summary>
+    /// Whether edges e and o (meeting at p) share a face, their other faces meeting smoothly along the edge between them
+    /// from p (normals within 2°, facing the same way): the second edge then runs on from the first tangentially.
+    /// </summary>
+    static bool SmoothTurn(NEdge e, NEdge o, Vec3 p)
+    {
+        if (e.Uses.Count != 2 || o.Uses.Count != 2) return false;
+        foreach (var ue in e.Uses)
+            foreach (var uo in o.Uses)
+            {
+                if (!ReferenceEquals(ue.Face, uo.Face)) continue;
+                var a = e.Uses.First(u => !ReferenceEquals(u, ue)).Face; var b = o.Uses.First(u => !ReferenceEquals(u, uo)).Face;
+                if (ReferenceEquals(a, b)) return false;
+                // (along the edge between them from p, at its middle: the corner itself is a solved point, a few
+                // thousandths off on a small round, where the normals already differ by degrees)
+                var g = a.Coedges.Select(c => c.Edge).FirstOrDefault(x => x.Uses.Any(u => ReferenceEquals(u.Face, b))
+                    && (Vec3.Distance(x.V0.P, p) < 1e-6 || Vec3.Distance(x.V1.P, p) < 1e-6));
+                var q = g?.Mid ?? p;
+                return Vec3.Dot(Outward(a, q).Normalized, Outward(b, q).Normalized) > Math.Cos(2 * Math.PI / 180);
+            }
+        return false;
+    }
+
     public static List<NEdge> Expand(NBody body, IEnumerable<NEdge> seeds, bool tangent)
     {
         body.Link();
@@ -1682,7 +1721,7 @@ public static class NativeBlend
             foreach (var atStart in new[] { true, false })
             {
                 var v = atStart ? e.V0 : e.V1;
-                var dirOut = atStart ? -e.Curve.Deriv(e.T0).Normalized : e.Curve.Deriv(e.T1).Normalized;
+                var dirOut = EndDir(e, atStart) * (atStart ? -1 : 1);
                 if (!at.TryGetValue(v, out var others)) continue;
                 foreach (var o in others)
                 {
@@ -1696,8 +1735,12 @@ public static class NativeBlend
                         foreach (var oStart in new[] { true, false })
                         {
                             if (!ReferenceEquals(oStart ? o.V0 : o.V1, v)) continue;
-                            var dirIn = oStart ? o.Curve.Deriv(o.T0).Normalized : -o.Curve.Deriv(o.T1).Normalized;
+                            var dirIn = EndDir(o, oStart) * (oStart ? 1 : -1);
                             if (Vec3.Dot(dirOut, dirIn) > 0.9999) cont = true;
+                            // (or on along a face both edges are on, from one face onto another it runs on into
+                            // smoothly there: a tangent run on by construction, whatever the corner's few degrees of
+                            // noise, as at the inner corners of a shell where a round meets a flat)
+                            else if (Vec3.Dot(dirOut, dirIn) > 0.98 && SmoothTurn(e, o, v.P)) cont = true;
                         }
                     if (sibling || cont) { seen.Add(o); result.Add(o); queue.Enqueue(o); }
                 }
