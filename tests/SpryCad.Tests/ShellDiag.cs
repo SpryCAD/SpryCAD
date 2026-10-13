@@ -22,7 +22,7 @@ static class ShellDiag
         var body = r.State.Bodies.Single().Solid.Native!;
         body.Link();
         Console.WriteLine($"{body.Faces.Count} faces, open: {string.Join(", ", open)}");
-        NShell.Debug = m => { if (m.StartsWith("split")) Console.WriteLine("  " + m); };
+        NShell.Debug = m => { if (m.StartsWith("split") || Environment.GetEnvironmentVariable("NEAR") is { } nr && m.Contains(nr)) Console.WriteLine("  " + m); };
         NBody inner;
         try { inner = NShell.Offset(body, f => open.Contains(f.Tag.Name) ? t : -t, "I."); }
         catch (Exception ex)
@@ -40,7 +40,7 @@ static class ShellDiag
             double sa = a.SignedArea(), sb = b.SignedArea();
             int ca = Crossings(a), cb = Crossings(b);
             if (Math.Sign(sa) == Math.Sign(sb) && cb <= ca) continue;
-            if (Environment.GetEnvironmentVariable("CROSS") is { } who && f.Tag.Name.Contains(who)) { Print = true; Crossings(b); Print = false; Console.WriteLine($"       (of {b.Loops.Sum(x => x.Length)} points; original {a.Loops.Sum(x => x.Length)})"); }
+            if (Environment.GetEnvironmentVariable("CROSS") is { } who && f.Tag.Name.Contains(who)) { Print = true; Crossings(b); Print = false; foreach (var c in inner.Faces[i].Coedges) Console.WriteLine($"       coedge {c.Edge.Curve.GetType().Name} {c.Start.P:R}->{c.End.P:R} fwd={c.Forward} samples {c.Points(1e-3).Count}"); Console.WriteLine($"       (of {b.Loops.Sum(x => x.Length)} points; original {a.Loops.Sum(x => x.Length)})"); }
             var bx = f.Bounds();
             var nb = f.Coedges.SelectMany(c => c.Edge.Uses.Select(u => u.Face)).Where(g => !ReferenceEquals(g, f)).Select(g => g.Tag.Name).Distinct();
             Console.WriteLine($"  {f.Tag.Name} {f.Surface.Kind} R={f.Surface.R:0.###}: area {sa:g3} -> {sb:g3}, crossings {ca} -> {cb}, size {bx.Max - bx.Min}");
@@ -56,7 +56,9 @@ static class ShellDiag
     static int Crossings(NDomain d)
     {
         int n = 0;
-        foreach (var l in d.Loops)
+        for (int li = 0; li < d.Loops.Count; li++)
+        {
+            var l = d.Loops[li];
             for (int i = 0; i < l.Length; i++)
                 for (int j = i + 2; j < l.Length; j++)
                 {
@@ -66,9 +68,10 @@ static class ShellDiag
                     if (O(a0, a1, b0) * O(a0, a1, b1) < 0 && O(b0, b1, a0) * O(b0, b1, a1) < 0)
                     {
                         n++;
-                        if (Print) Console.WriteLine($"       crossing: seg {i} {a0}->{a1} x seg {j} {b0}->{b1} of {l.Length}");
+                        if (Print) Console.WriteLine($"       crossing: seg {i} {a0}->{a1} x seg {j} {b0}->{b1} of {l.Length}; 3d {string.Join(" ", Enumerable.Range(i - 1, j - i + 4).Select(q => d.Loops3[li][((q % l.Length) + l.Length) % l.Length]))}");
                     }
                 }
+        }
         return n;
     }
 }

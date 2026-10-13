@@ -348,11 +348,20 @@ public static class NShell
         // a transversal (non-tangent) intersection is followed continuously from vertex to vertex instead: solving
         // each sample on its own can jump between branches (e.g. the near and far side of a tube cut by a plane)
         bool marched = false;
-        if (!nearTangent && e.Curve is not NLine && Vec3.Cross(sa.Grad(v0.P), sb.Grad(v0.P)).Length > 1e-3)
+        if (!nearTangent && e.Curve is not NLine)
         {
-            var dir0 = e.Curve.Deriv(e.T0).Normalized;
             var length = Math.Max(e.Length, Vec3.Distance(v0.P, v1.P));
-            if (March(sa, sb, v0.P, v1.P, dir0, length, scale) is { } m) { pts = m; marched = true; }
+            if (Vec3.Cross(sa.Grad(v0.P), sb.Grad(v0.P)).Length > 1e-3)
+            {
+                if (March(sa, sb, v0.P, v1.P, e.Curve.Deriv(e.T0).Normalized, length, scale) is { } m) { pts = m; marched = true; }
+            }
+            // (from the other end where the faces are tangent at this one, as a loft leaving a collar: points solved
+            // one by one there go back and forth along the curve where the surfaces cross at a shallow angle)
+            else if (Vec3.Cross(sa.Grad(v1.P), sb.Grad(v1.P)).Length > 1e-3
+                && March(sa, sb, v1.P, v0.P, -e.Curve.Deriv(e.T1).Normalized, length, scale) is { } m)
+            {
+                m.Reverse(); pts = m; marched = true;
+            }
         }
         if (sa.Kind == SurfaceKind.Pipe || sb.Kind == SurfaceKind.Pipe)
             Debug?.Invoke($"edge {e.Curve.GetType().Name} {sa.Kind}/{sb.Kind}: " + string.Join(" ", pts.Select(p => p.ToString())));
