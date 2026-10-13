@@ -84,6 +84,13 @@ static class FilletRepro
                 dc.Value = double.Parse(dy); dc.Expr = dy;
                 SketchSolver.Solve(dsk);
             }
+            // (RAMP_R: the drop's sketch fillets another radius)
+            if (Environment.GetEnvironmentVariable("RAMP_R") is { } rr0)
+            {
+                var dsk = doc.Features.OfType<SketchFeature>().First(f => f.Name == "Top drop").Sketch;
+                foreach (var dc in dsk.Constraints.Where(x => x.Type == CType.Radius)) { dc.Value = double.Parse(rr0); dc.Expr = rr0; }
+                SketchSolver.Solve(dsk);
+            }
             // (PROPAGATE: the tube fillets run on along tangent edges)
             if (Environment.GetEnvironmentVariable("PROPAGATE") != null) foreach (var tf in doc.Features.OfType<FilletFeature>().Where(f => f.Name.StartsWith("Tube"))) tf.TangentPropagation = true;
             if (Environment.GetEnvironmentVariable("RIM_R") is { } rr) doc.Features.OfType<FilletFeature>().First(f => f.Name == "Tube rim").Radius = rr;

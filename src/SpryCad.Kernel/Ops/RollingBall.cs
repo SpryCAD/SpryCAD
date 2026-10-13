@@ -1028,7 +1028,10 @@ public static class RollingBall
             }
         }
         Debug?.Invoke($"  joined {spines.Length} spines into {P.Count} nodes");
-        try { return P.Count >= 2 ? new PipeSpine(P, D, spines[0].SupportA, null) : null; }
+        // (every surface the pieces' balls roll on: the boolean does not trace the blend against them, where it only
+        // touches them, tangentially, along its contact)
+        var rolls = spines.SelectMany(s => new[] { s.SupportA, s.SupportB }.Concat(s.Rolls)).OfType<NSurface>().Distinct().ToList();
+        try { return P.Count >= 2 ? new PipeSpine(P, D, spines[0].SupportA, null) { Rolls = rolls } : null; }
         catch (ArgumentException) { return null; }
     }
 

@@ -646,33 +646,47 @@ public static class NativeBlend
         Csg.NoFallback = true;
         try
         {
-            var t = on.Tool;
+            // (kept under the valley rounds beside the cuts where there are any, else, or where that fails, on the
+            // planes alone)
+            bool anyValley = valleys.Values.Any(x => x.Count > 0);
+            foreach (var withValleys in anyValley ? new[] { true, false } : new[] { false })
+            {
+                Solid t;
+                try { t = CutBack(withValleys); }
+                catch (Exception ex) when (ex is InvalidOperationException or NBooleanException)
+                {
+                    Debug?.Invoke($"rolling ball {name}: not cut back{(withValleys ? " under the valley rounds" : "")} ({ex.Message})");
+                    continue;
+                }
+                double v0 = rb.Tool.Volume(), v1 = t.Volume(), vOn = on.Tool.Volume();
+                // (cut back at all: an intersection the boolean misses leaves the run-on whole, as if nothing were there)
+                if (t.IsEmpty || t.Native == null || t.Native.Validate() != null || Math.Abs(v1 - v0) > 0.25 * Math.Abs(v0)
+                    || Math.Abs(vOn - v1) < 1e-3 * Math.Abs(vOn - v0))
+                {
+                    Debug?.Invoke($"rolling ball {name}: not cut back{(withValleys ? " under the valley rounds" : "")} ({(t.Native == null ? "faceted" : t.Native.Validate() ?? $"volume {v1:g4} for {v0:g4}, run on {vOn:g4}; cut at {string.Join(", ", cuts.Select(c => c.v + " n " + c.pl.Normal))}")})");
+                    continue;
+                }
+                if (withValleys) Debug?.Invoke($"rolling ball {name}: ends kept under {valleys.Values.Sum(x => x.Count)} valley round(s) beside the cut");
+                Debug?.Invoke($"rolling ball {name}: {cuts.Count + corners.Count + rounds.Count} end(s) cut back ({(rb.Fits ? "fits" : "overflows")} -> {(on.Fits ? "fits" : "overflows")}; {t.Bounds.Min}..{t.Bounds.Max}, cut at {string.Join(", ", cuts.Select(c => c.v + " n " + c.pl.Normal))})");
+                // (fitting but for what was cut off)
+                return JoinPivots(rb, t, on.Fits, pivots, chain);
+            }
+            return JoinPivots(rb, rb.Tool, rb.Fits, pivots, chain);
+        }
+        finally { Csg.NoFallback = old; }
+
+        Solid CutBack(bool withValleys)
+        {
+            var t = on.Tool!;
             // (only near the end: the plane may cut the tool elsewhere too, as a wall's underside in the plane of a
             // top the chain runs on along)
-            foreach (var (v, pl) in cuts) t = TrimNear(t, pl, v, run + 2 * size, valleys.GetValueOrDefault(v));
-            if (valleys.Values.Any(x => x.Count > 0)) Debug?.Invoke($"rolling ball {name}: ends kept under {valleys.Values.Sum(x => x.Count)} valley round(s) beside the cut");
+            foreach (var (v, pl) in cuts) t = TrimNear(t, pl, v, run + 2 * size, withValleys ? valleys.GetValueOrDefault(v) : null);
             foreach (var (v, rc) in rounds) t = rc.TrimNear(t, v, run + 2 * size);
             // (a run-on still running past its faces is cut back again, or given up for its whole tangent chain's:
             // cut on the mitre plane, as cheaper; a fitting one cut to the other fillet)
             foreach (var c in corners) t = on.Fits ? c.Trim(t) : c.TrimOnMiter(t);
-            double v0 = rb.Tool.Volume(), v1 = t.Volume(), vOn = on.Tool.Volume();
-            // (cut back at all: an intersection the boolean misses leaves the run-on whole, as if nothing were there)
-            if (t.IsEmpty || t.Native == null || t.Native.Validate() != null || Math.Abs(v1 - v0) > 0.25 * Math.Abs(v0)
-                || Math.Abs(vOn - v1) < 1e-3 * Math.Abs(vOn - v0))
-            {
-                Debug?.Invoke($"rolling ball {name}: not cut back ({(t.Native == null ? "faceted" : t.Native.Validate() ?? $"volume {v1:g4} for {v0:g4}, run on {vOn:g4}; cut at {string.Join(", ", cuts.Select(c => c.v + " n " + c.pl.Normal))}")})");
-                return JoinPivots(rb, rb.Tool, rb.Fits, pivots, chain);
-            }
-            Debug?.Invoke($"rolling ball {name}: {cuts.Count + corners.Count + rounds.Count} end(s) cut back ({(rb.Fits ? "fits" : "overflows")} -> {(on.Fits ? "fits" : "overflows")}; {t.Bounds.Min}..{t.Bounds.Max}, cut at {string.Join(", ", cuts.Select(c => c.v + " n " + c.pl.Normal))})");
-            // (fitting but for what was cut off)
-            return JoinPivots(rb, t, on.Fits, pivots, chain);
+            return t;
         }
-        catch (Exception ex) when (ex is InvalidOperationException or NBooleanException)
-        {
-            Debug?.Invoke($"rolling ball {name}: not cut back ({ex.Message})");
-            return JoinPivots(rb, rb.Tool, rb.Fits, pivots, chain);
-        }
-        finally { Csg.NoFallback = old; }
     }
 
     /// <summary>The open chain's ends: their vertex, the direction out of the chain there, the edge's faces.</summary>
@@ -853,7 +867,10 @@ public static class NativeBlend
         {
             var vy = Vec3.Cross(n, vl.U);
             var span = ProfileLoop.Polygon(new[] { new Vec2(0, -2 * reach), new Vec2(vl.Width, -2 * reach), new Vec2(vl.Width, 2 * reach), new Vec2(0, 2 * reach) }, "trim");
-            var beyond = Builders.Extrude(new[] { new ProfileRegion(span) }, new Frame(vl.L0, vl.U, vy, n), -vl.Height, 0, "trim");
+            // (a little into the kept side and past the round's top: not touching the round where it is tangent to the
+            // plane, nor meeting it at its far end, where the boolean would have to find those touches exactly; under
+            // the plane, and inside the round above it, nothing changes)
+            var beyond = Builders.Extrude(new[] { new ProfileRegion(span) }, new Frame(vl.L0, vl.U, vy, n), -1.25 * vl.Height, 0.01 * vl.Cyl.R, "trim");
             var ax = vl.Cyl.Axis; var h = Vec3.Dot(p - vl.Cyl.Origin, ax);
             var round = Builders.Cylinder(vl.Cyl.Origin + ax * (h - 3 * reach), ax, vl.Cyl.R, 6 * reach, "trim", vl.Cyl.F.XDir);
             slab = Csg.Subtract(slab, Csg.Subtract(beyond, round));
