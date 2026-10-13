@@ -1494,7 +1494,7 @@ public sealed class Regenerator
                         }
                     }
                     ShellTrace?.Invoke($"inner body: {inner.Native!.Faces.Count} faces, {inner.Native.Validate() ?? "valid"}");
-                    var res = Kernel.Native.NShell.Hollow(outer, inner.Native!, open, f.Id, offsetInner: false);
+                    var res = Kernel.Native.NShell.Hollow(outer, inner.Native!, open, f.Id, offsetInner: false, offsetFrom: b0.Faces.Select(x => x.Tag.Name).ToHashSet());
                     if (res.Validate() is { } bad) { ShellTrace?.Invoke("hollowed: " + bad); return null; }
                     var sol = Kernel.Native.NTess.ToSolid(res);
                     if (sol.IsEmpty) return null;

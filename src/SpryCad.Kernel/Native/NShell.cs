@@ -31,14 +31,22 @@ public static class NShell
     }
 
     /// <summary>The body less an inner body (see <see cref="Inner"/>, or one made otherwise with its faces so named).</summary>
-    public static NBody Hollow(NBody body, NBody inner, ISet<string> openFaces, string prefix, bool offsetInner = true)
+    public static NBody Hollow(NBody body, NBody inner, ISet<string> openFaces, string prefix, bool offsetInner = true, ISet<string>? offsetFrom = null)
     {
-        // (an inner body made otherwise, from the part's history, may touch the outer one elsewhere too: a fillet's end
-        // cap in the plane of the outer fillet's: every pair of faces then)
-        if (!offsetInner) return NBoolean.Run(body, inner, BoolOp.Subtract);
         // the inner body runs a wall's thickness inside the outer one and breaks out only through the open faces:
         // only an open face and an inner face, or an outer face and an open face's (outward) offset, can meet
         var openInner = openFaces.Select(n => prefix + ".I." + n).ToHashSet();
+        if (!offsetInner)
+        {
+            // (an inner body made otherwise, from the part's history, may touch the outer one elsewhere too: a fillet's
+            // end cap in the plane of the outer fillet's. Only its offsets of the faces it was made from, given, are a
+            // wall from those faces as before: its other faces, and the outer one's others, tried against every face.
+            // A loft's face against the offset of the next one, traced, is a long search for a curve off both)
+            if (offsetFrom == null) return NBoolean.Run(body, inner, BoolOp.Subtract);
+            var offsets = offsetFrom.Select(n => prefix + ".I." + n).ToHashSet();
+            return NBoolean.Run(body, inner, BoolOp.Subtract,
+                (a, b) => openFaces.Contains(a) || openInner.Contains(b) || !offsetFrom.Contains(a) || !offsets.Contains(b));
+        }
         return NBoolean.Run(body, inner, BoolOp.Subtract, (a, b) => openFaces.Contains(a) || openInner.Contains(b));
     }
 
