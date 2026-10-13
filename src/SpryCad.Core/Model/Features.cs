@@ -379,6 +379,34 @@ public enum PlaneMode
     Angle,
     /// <summary>Normal to a curve (model edge or sketch line/arc) at a point on it, e.g. its end.</summary>
     NormalToCurve,
+    /// <summary>Up to three references, each with a relation to the plane (as SolidWorks' plane): <see cref="PlaneFeature.Refs"/>.</summary>
+    References,
+}
+
+/// <summary>How a plane relates to one of its references.</summary>
+public enum PlaneRelation { Coincident, Parallel, Perpendicular, Offset, Angle, MidPlane, Tangent }
+
+/// <summary>
+/// One reference of a plane and its relation to it: a plane or flat face, a line (edge, sketch line or axis), a
+/// round face, a curve or a point. A straight edge or sketch line is both a line and a curve: perpendicular to it is
+/// at a point on it, its end nearest <see cref="Hint"/> when nothing else places the plane.
+/// </summary>
+public sealed class PlaneReference
+{
+    public PlaneRef? Plane { get; set; }
+    /// <summary>A straight line, or the axis of a round face or circular edge.</summary>
+    public DirRef? Line { get; set; }
+    /// <summary>A round face (tangent to it; its axis is <see cref="Line"/>).</summary>
+    public FaceRef? Round { get; set; }
+    public CurveRef? Curve { get; set; }
+    public PointRef? Point { get; set; }
+    public PlaneRelation Relation { get; set; }
+    /// <summary>The distance (Offset) or the angle in degrees (Angle).</summary>
+    public string Value { get; set; } = "10";
+    /// <summary>The other side: of the offset, of the angle, or of the round face (Tangent).</summary>
+    public bool Flip { get; set; }
+    /// <summary>Where it was picked: which end of a curve, which side of a round face.</summary>
+    public Vec3 Hint { get; set; }
 }
 
 public sealed class PlaneFeature : Feature
@@ -396,9 +424,11 @@ public sealed class PlaneFeature : Feature
     /// <summary>The curve the plane is normal to (NormalToCurve); the plane passes through <see cref="Point"/>.</summary>
     public CurveRef? Curve { get; set; }
     public bool Flip { get; set; }
+    /// <summary>The references and how the plane relates to each (References).</summary>
+    public List<PlaneReference> Refs { get; set; } = new();
 }
 
-/// <summary>A curve: a model edge (between named faces) or a line/arc of a sketch.</summary>
+/// <summary>A curve:a model edge (between named faces) or a line/arc of a sketch.</summary>
 public sealed class CurveRef
 {
     public EdgeRef? Edge { get; set; }

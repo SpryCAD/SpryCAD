@@ -1963,6 +1963,12 @@ public sealed class Regenerator
 
         void DoPlane(PlaneFeature p)
         {
+            if (p.Mode == PlaneMode.References)
+            {
+                var rf = PlaneSolver.Solve(p.Refs, State, Num);
+                State.Planes[f.Id] = p.Flip ? rf.Flipped() : rf;
+                return;
+            }
             if (p.Mode == PlaneMode.NormalToCurve)
             {
                 if (p.Curve == null) throw new FeatureException("Select the curve (edge or sketch line/arc) the plane is normal to.");

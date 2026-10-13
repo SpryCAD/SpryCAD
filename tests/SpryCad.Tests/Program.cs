@@ -288,6 +288,7 @@ static class Program
             ConfigTests.Run(t);
             AxisCenterTests.Run(t);
             PlaneSectionTests.Run(t);
+            PlaneReferenceTests.Run(t);
             SlotDragTests.Run(t);
             SketchFuzz.Check(t);
             Console.WriteLine("Core");
