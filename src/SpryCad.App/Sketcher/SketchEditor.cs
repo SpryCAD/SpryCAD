@@ -1946,6 +1946,30 @@ public sealed partial class SketchEditor : IViewportMode
         return lines;
     }
 
+    /// <summary>
+    /// Where an extension line from <paramref name="p"/> toward the dimension line (direction <paramref name="u"/>,
+    /// reaching it at <paramref name="dimAt"/>) starts: a small gap past <paramref name="p"/>, or past the end of a
+    /// sketch line through it running the same way (the line itself shows that stretch); null when such a line
+    /// reaches the dimension line already, so no extension line is needed.
+    /// </summary>
+    Vec2? ExtensionStart(Vec2 p, Vec2 u, Vec2 dimAt)
+    {
+        var px = Px;
+        double reach = 0;
+        foreach (var e in Sk.Entities)
+        {
+            if (e is not SkLine l) continue;
+            var p1 = Sk.P(l.P1); var p2 = Sk.P(l.P2); var d = p2 - p1;
+            if (d.LengthSq < 1e-18) continue;
+            var dn = d.Normalized;
+            if (Math.Abs(Vec2.Cross(dn, u)) > 1e-6 || Math.Abs(Vec2.Cross(p - p1, dn)) > px * 0.5) continue; // not along the extension
+            reach = Math.Max(reach, Math.Max(Vec2.Dot(p1 - p, u), Vec2.Dot(p2 - p, u)));
+        }
+        var start = reach + px * 3;
+        if (start >= Vec2.Dot(dimAt - p, u) - px) return null;
+        return p + u * start;
+    }
+
     /// <param name="ends">mark the points the dimension measures (a selected one), so where it stops shows even
     /// with another dimension drawn over it</param>
     /// <param name="collect">instead of drawing, gather the lines (for hit testing)</param>
@@ -2017,9 +2041,12 @@ public sealed partial class SketchEditor : IViewportMode
                         var off = Vec2.Dot(label - a, nrm);
                         var offB = Vec2.Dot(label - b, nrm);
                         var da = a + nrm * off; var db = b + nrm * offB;
-                        var ext = Math.Sign(off == 0 ? 1 : off) * px * 4;
-                        L(a + nrm * Math.Sign(off) * px * 2, da + nrm * ext);
-                        L(b + nrm * Math.Sign(offB) * px * 2, db + nrm * Math.Sign(offB) * px * 4);
+                        // extension lines: from just past the geometry (a small gap after the end of a line running
+                        // their way, so they never run over it) to a little past the dimension line; none where the
+                        // geometry reaches the dimension line itself
+                        var ua = nrm * Math.Sign(off == 0 ? 1 : off); var ub = nrm * Math.Sign(offB == 0 ? 1 : offB);
+                        if (ExtensionStart(a, ua, da) is { } sa) L(sa, da + ua * px * 4);
+                        if (ExtensionStart(b, ub, db) is { } sb) L(sb, db + ub * px * 4);
                         L(da, db);
                         // extend dim line to the label if it sits outside
                         var t = Vec2.Dot(label - da, dir); var tb = Vec2.Dot(db - da, dir);
