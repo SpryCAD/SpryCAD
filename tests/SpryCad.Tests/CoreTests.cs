@@ -319,6 +319,27 @@ static class CoreTests
             t.Eq(copy.Sketch.Entities.OfType<SkLine>().Count(e => e.External?.Axis == "H"), 1);
         });
 
+        t.Test("Shell a pyramid on a rectangle: its apex's four faces offset meet in two corners, not one", () =>
+        {
+            // (a square base's would meet at one point; on a 40 x 20 base the four offset planes do not, and the inner
+            // apex is a short ridge between the two long sides' planes)
+            var doc = new CadDocument();
+            var s1 = doc.AddFeature(new SketchFeature { Plane = PlaneRef.Front, Sketch = Rect(40, 20) });
+            var p = doc.AddFeature(new PlaneFeature { Base = PlaneRef.Front, Offset = "30" });
+            var sk = new Sketch(); sk.Add(new SkPointEntity { P = sk.AddPoint(new Vec2(20, 10)).Id });
+            var s2 = doc.AddFeature(new SketchFeature { Plane = new PlaneRef { Feature = p.Id }, Sketch = sk });
+            var loft = doc.AddFeature(new LoftFeature { SectionSketchIds = { s1.Id, s2.Id } });
+            var shell = doc.AddFeature(new ShellFeature { Thickness = "2", Faces = { new FaceRef { Name = loft.Id + ".Start", Hint = new Vec3(20, 10, 0), Normal = -Vec3.UnitZ } } });
+            var r = new Regenerator().Rebuild(doc);
+            foreach (var f in doc.Features) t.True(r.Status[f.Id].Ok, $"{f.Name}: {r.Status[f.Id].Error}");
+            var b = r.State.Bodies.Single();
+            t.Eq(b.Solid.Native!.Validate(), null);
+            t.Eq(b.Solid.Topology.OpenHalfEdges, 0);
+            // the walls: less than the pyramid, more than its faces' area times the wall less the corners' overlap
+            double outer = 40 * 20 * 30 / 3.0, v = KernelTests.Vex(b.Solid);
+            t.True(v > 0.15 * outer && v < 0.6 * outer, $"walls {v} of {outer}");
+        });
+
         t.Test("Fillet along a round boss ending on a slanted face", () =>
         {
             // a block with a slanted end (Front: x 0..40 at the bottom, 0..30 at the top y 10), a bar along X (radius 4,

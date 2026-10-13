@@ -593,7 +593,7 @@ public static class NativeBlend
             if (t.IsEmpty || t.Native == null || t.Native.Validate() != null || Math.Abs(v1 - v0) > 0.25 * Math.Abs(v0)
                 || Math.Abs(vOn - v1) < 1e-3 * Math.Abs(vOn - v0))
             {
-                Debug?.Invoke($"rolling ball {name}: not cut back ({(t.Native == null ? "faceted" : t.Native.Validate() ?? $"volume {v1:g4} for {v0:g4}")})");
+                Debug?.Invoke($"rolling ball {name}: not cut back ({(t.Native == null ? "faceted" : t.Native.Validate() ?? $"volume {v1:g4} for {v0:g4}, run on {vOn:g4}; cut at {string.Join(", ", cuts.Select(c => c.v + " n " + c.pl.Normal))}")})");
                 return JoinPivots(rb, rb.Tool, rb.Fits, pivots, chain);
             }
             Debug?.Invoke($"rolling ball {name}: {cuts.Count + corners.Count} end(s) cut back ({(rb.Fits ? "fits" : "overflows")} -> {(on.Fits ? "fits" : "overflows")})");

@@ -88,7 +88,7 @@ public static class NShell
     /// <paramref name="what"/> in the message) where a corner or an edge has no solution, i.e. where the new
     /// surfaces would change the topology.
     /// </summary>
-    public static NBody Rebuild(NBody body, Func<NFace, NSurface> surfaceOf, Func<NFace, NSurface, FaceTag> tagOf, string what)
+    public static NBody Rebuild(NBody body, Func<NFace, NSurface> surfaceOf, Func<NFace, NSurface, FaceTag> tagOf, string what, bool splitCorners = true)
     {
         body.Link();
         var scale = Math.Max(body.Bounds.Diagonal, 1e-9);
@@ -109,6 +109,7 @@ public static class NShell
                 }
         var vmap = new Dictionary<NVertex, NVertex>(ReferenceEqualityComparer.Instance);
         var pv = Prof.Time("shell.vertices");
+        string? cornerFail = null; var unsolved = new List<NVertex>();
         foreach (var (v, all) in vFaces)
         {
             // surfaces tangent at the corner (within a degree) count once: there their offsets share the corner's
@@ -123,8 +124,22 @@ public static class NShell
             }
             var p = Solve(ss, v.P, tol, out var res);
             Debug?.Invoke($"vertex {v.P} -> {p} res {res:g2} on {string.Join(",", ss.Select(x => x.Kind))}");
-            if (res > 1e-6 * scale) throw new InvalidOperationException(what + $": a corner has no solution (at {v.P}, {res:g2} off, on {string.Join(", ", ss.Select(x => x.Kind))})");
+            if (res > 1e-6 * scale)
+            {
+                cornerFail ??= what + $": a corner has no solution (at {v.P}, {res:g2} off, on {string.Join(", ", ss.Select(x => x.Kind))}: {string.Join(", ", body.Faces.Where(f => f.Coedges.Any(c => ReferenceEquals(c.Start, v))).Select(f => f.Tag.Name))})";
+                if (ss.Count >= 4) unsolved.Add(v);
+                continue;
+            }
             vmap[v] = new NVertex(p);
+        }
+        if (cornerFail != null)
+        {
+            // where four faces meet at a corner their new surfaces need not meet at one point: the corner becomes two,
+            // joined by a short new edge between two faces that did not meet (the offset changes the topology there)
+            pv.Dispose();
+            if (splitCorners && unsolved.Count > 0 && SplitCorners(body, unsolved, surf, tol, scale) is { } split)
+                return Rebuild(split, surfaceOf, tagOf, what, splitCorners: false);
+            throw new InvalidOperationException(cornerFail);
         }
 
         pv.Dispose();
@@ -158,6 +173,90 @@ public static class NShell
         }
         res2.Link();
         return res2;
+    }
+
+    /// <summary>
+    /// A copy of the body with each corner of four faces whose new surfaces have no common point split in two: two
+    /// opposite faces round it (Fa, Fc) made to meet along a new (for now zero-length) edge from a corner on Fa, Fb, Fc
+    /// to one on Fc, Fd, Fa. Of the two ways, the one whose new corners each lie behind the new surface of the face
+    /// it leaves out (inside what the faces bound). Null when no corner can be split.
+    /// </summary>
+    static NBody? SplitCorners(NBody body, List<NVertex> corners, Dictionary<NFace, NSurface> surf, double tol, double scale)
+    {
+        var copy = body.Clone(out var emap);
+        copy.Link();
+        var faceOf = new Dictionary<NFace, NFace>(ReferenceEqualityComparer.Instance);
+        for (int i = 0; i < body.Faces.Count; i++) faceOf[copy.Faces[i]] = body.Faces[i];
+        int done = 0;
+        foreach (var v0 in corners)
+        {
+            // the corner in the copy
+            var e0 = body.Edges.FirstOrDefault(e => ReferenceEquals(e.V0, v0) || ReferenceEquals(e.V1, v0));
+            if (e0 == null) continue;
+            var v = ReferenceEquals(e0.V0, v0) ? emap[e0].V0 : emap[e0].V1;
+            // the faces round it in order, with the edge from each to the next: (face, its coedge arriving at v, its
+            // coedge leaving v)
+            var ring = new List<(NFace f, NLoop l, int iIn)>();
+            NCoedge? Leaving(NFace f, out NLoop? loop, out int iIn)
+            {
+                foreach (var l in f.Loops)
+                    for (int i = 0; i < l.Coedges.Count; i++)
+                        if (ReferenceEquals(l.Coedges[i].End, v) && ReferenceEquals(l.Coedges[(i + 1) % l.Coedges.Count].Start, v))
+                        { loop = l; iIn = i; return l.Coedges[(i + 1) % l.Coedges.Count]; }
+                loop = null; iIn = -1; return null;
+            }
+            var start = copy.Faces.FirstOrDefault(f => f.Coedges.Any(c => ReferenceEquals(c.End, v)));
+            if (start == null) continue;
+            var cur = start; bool ok = true;
+            for (int guard = 0; guard < 8; guard++)
+            {
+                var outC = Leaving(cur, out var loop, out var iIn);
+                if (outC == null || loop == null || cur.Coedges.Count(c => ReferenceEquals(c.End, v)) != 1) { ok = false; break; }
+                ring.Add((cur, loop, iIn));
+                var next = outC.Edge.Uses.Where(u => !ReferenceEquals(u, outC)).Select(u => u.Face).FirstOrDefault();
+                if (next == null || outC.Edge.Uses.Count != 2) { ok = false; break; }
+                if (ReferenceEquals(next, start)) break;
+                cur = next;
+            }
+            if (!ok || ring.Count != 4 || ring.Select(x => x.f).Distinct().Count() != 4) continue;
+            NSurface S(int i) => surf[faceOf[ring[i % 4].f]];
+            // behind face i's new surface (its outward side away), within the tolerance
+            bool Behind(int i, Vec3 p) { var f = ring[i % 4].f; return S(i).F_(p) * (f.Sense ? 1 : -1) <= 1e-9 * scale; }
+            (int a, Vec3 pa, Vec3 pb)? best = null;
+            for (int a = 0; a < 2; a++)
+            {
+                var pa = Solve(new[] { S(a), S(a + 1), S(a + 2) }, v.P, tol, out var ra);
+                var pb = Solve(new[] { S(a + 2), S(a + 3), S(a) }, v.P, tol, out var rb);
+                Debug?.Invoke($"split corner {v.P} across faces {a},{a + 2}: {pa} ({ra:g2}) / {pb} ({rb:g2}), behind {Behind(a + 3, pa)}/{Behind(a + 1, pb)} ({S(a + 3).F_(pa) * (ring[(a + 3) % 4].f.Sense ? 1 : -1):g3}/{S(a + 1).F_(pb) * (ring[(a + 1) % 4].f.Sense ? 1 : -1):g3}) faces {string.Join(", ", ring.Select(x => x.f.Tag.Name + ":" + x.f.Surface.Kind))}");
+                if (ra > 1e-6 * scale || rb > 1e-6 * scale || !Behind(a + 3, pa) || !Behind(a + 1, pb)) continue;
+                if (best == null || Vec3.Distance(pa, pb) < Vec3.Distance(best.Value.pa, best.Value.pb)) best = (a, pa, pb);
+            }
+            if (best is not { } b) continue;
+            // the corner into two: va on faces a, a+1, a+2 (the edges a→a+1, a+1→a+2), vb on a+2, a+3, a
+            var va = new NVertex(v.P); var vb = new NVertex(v.P);
+            // the edge leaving face i (towards face i+1) is the one face i+1 arrives on
+            NEdge Between(int i) { var (f, l, k) = ring[i % 4]; return l.Coedges[(k + 1) % l.Coedges.Count].Edge; }
+            var toA = new[] { Between(b.a), Between(b.a + 1) };
+            var toB = new[] { Between(b.a + 2), Between(b.a + 3) };
+            // where each face's loop passes the corner, before the edges are moved
+            var at = ring.Select(x => (x.f, x.l, x.iIn)).ToList();
+            foreach (var e in toA) { if (ReferenceEquals(e.V0, v)) e.V0 = va; if (ReferenceEquals(e.V1, v)) e.V1 = va; }
+            foreach (var e in toB) { if (ReferenceEquals(e.V0, v)) e.V0 = vb; if (ReferenceEquals(e.V1, v)) e.V1 = vb; }
+            var d = b.pb - b.pa;
+            var ne = new NEdge(new NLine(v.P, d.Length > 1e-300 ? d : Vec3.UnitX), 0, 1e-9 * scale, va, vb);
+            // faces a and a+2 take the new edge between their arriving and leaving coedges (from the one corner to the other)
+            foreach (var i in new[] { b.a, b.a + 2 })
+            {
+                var (f, l, k) = at[i % 4];
+                var cin = l.Coedges[k];
+                var from = cin.End;
+                l.Coedges.Insert(k + 1, new NCoedge(ne, ReferenceEquals(from, va)));
+            }
+            copy.Link();
+            if (copy.Validate() is { } bad) { Debug?.Invoke($"split corner {v.P}: {bad}"); return null; }
+            done++;
+        }
+        return done > 0 ? copy : null;
     }
 
     public static NSurface OffsetSurface(NSurface s, double d)

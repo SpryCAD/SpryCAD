@@ -22,6 +22,7 @@ static class ShellDiag
         var body = r.State.Bodies.Single().Solid.Native!;
         body.Link();
         Console.WriteLine($"{body.Faces.Count} faces, open: {string.Join(", ", open)}");
+        NShell.Debug = m => { if (m.StartsWith("split")) Console.WriteLine("  " + m); };
         NBody inner;
         try { inner = NShell.Offset(body, f => open.Contains(f.Tag.Name) ? t : -t, "I."); }
         catch (Exception ex)

@@ -22,6 +22,8 @@ static class FilletRepro
         {
             if (si >= 0) ((ShellFeature)doc.Features[si]).Thickness = radius ?? "0.125";
             // (RIM_R: the tube rim fillet another size)
+            // (PROPAGATE: the tube fillets run on along tangent edges)
+            if (Environment.GetEnvironmentVariable("PROPAGATE") != null) foreach (var tf in doc.Features.OfType<FilletFeature>().Where(f => f.Name.StartsWith("Tube"))) tf.TangentPropagation = true;
             if (Environment.GetEnvironmentVariable("RIM_R") is { } rr) doc.Features.OfType<FilletFeature>().First(f => f.Name == "Tube rim").Radius = rr;
             return doc;
         }

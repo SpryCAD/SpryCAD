@@ -32,6 +32,7 @@ public static class RollingBall
         pts[0] = pc.Start; pts[^1] = pc.End;
         var cur = atStart ? pc.Start : pc.End;
         var d = pc.Dir(atStart ? pc.Ta : pc.Tb) * (atStart ? -1 : 1);
+        var d0 = d;
         var tol = 1e-9 * Math.Max(1, len);
         const int steps = 12;
         var more = new List<Vec3>();
@@ -47,6 +48,9 @@ public static class RollingBall
             }
             d = (nx - cur).Normalized;
             more.Add(nx); cur = nx;
+            // (on along the way the end was going only: a curve turning back, over a round and down its far side,
+            // would carry the tool back past the face it is cut to)
+            if (Vec3.Dot(d, d0) < 0.5) break;
         }
         if (atStart) { more.Reverse(); pts.InsertRange(0, more); } else pts.AddRange(more);
         // (the new curve runs as the edge does)
