@@ -17,6 +17,48 @@ public static class RollingBall
     public sealed record Result(Solid? Tool, bool Convex, bool Fits, string? Error);
 
     /// <summary>A piece of an edge, traversed from Ta to Tb.</summary>
+    /// <summary>
+    /// A chain's end piece on a curve that cannot be evaluated past its end (an intersection spline), run on by
+    /// <paramref name="len"/> at one end: a new curve through the old one and points marched on along the intersection
+    /// of its two faces' surfaces, in the edge's direction, standing in for the edge (its faces, the same uses). Null
+    /// when the surfaces cannot be followed that far.
+    /// </summary>
+    static Piece? RunOn(Piece pc, bool atStart, double len)
+    {
+        var e = pc.E;
+        NSurface sa = e.Uses[0].Face.Surface, sb = e.Uses[1].Face.Surface;
+        // the piece's points in its own direction
+        var pts = Enumerable.Range(0, 25).Select(i => e.Curve.Eval(pc.Ta + (pc.Tb - pc.Ta) * i / 24.0)).ToList();
+        pts[0] = pc.Start; pts[^1] = pc.End;
+        var cur = atStart ? pc.Start : pc.End;
+        var d = pc.Dir(atStart ? pc.Ta : pc.Tb) * (atStart ? -1 : 1);
+        var tol = 1e-9 * Math.Max(1, len);
+        const int steps = 12;
+        var more = new List<Vec3>();
+        for (int i = 0; i < steps; i++)
+        {
+            var nx = NSurface.ProjectToIntersection(sa, sb, cur + d * (len / steps));
+            if (!(Math.Abs(sa.F_(nx)) < tol && Math.Abs(sb.F_(nx)) < tol) || Vec3.Dot(nx - cur, d) <= 0.5 * len / steps)
+            {
+                // (as far as they can be followed, if that is some way: past the face cutting the end back, usually)
+                Debug?.Invoke($"  run on {len:g3} from {cur}: lost the surfaces after {i} steps");
+                if (i < 2) return null;
+                break;
+            }
+            d = (nx - cur).Normalized;
+            more.Add(nx); cur = nx;
+        }
+        if (atStart) { more.Reverse(); pts.InsertRange(0, more); } else pts.AddRange(more);
+        // (the new curve runs as the edge does)
+        bool rev = pc.Tb < pc.Ta;
+        if (rev) pts.Reverse();
+        var c = new NSpline(BSplineCurve.Interpolate(pts, 3));
+        NVertex At(Vec3 p) => Vec3.Distance(p, e.V0.P) < 1e-9 ? e.V0 : Vec3.Distance(p, e.V1.P) < 1e-9 ? e.V1 : new NVertex(p);
+        var ne = new NEdge(c, 0, 1, At(pts[0]), At(pts[^1]));
+        ne.Uses.AddRange(e.Uses);
+        return rev ? new Piece(ne, 1, 0) : new Piece(ne, 0, 1);
+    }
+
     readonly record struct Piece(NEdge E, double Ta, double Tb)
     {
         public Vec3 Start => Ta == E.T0 ? E.V0.P : Ta == E.T1 ? E.V1.P : E.Curve.Eval(Ta);
@@ -80,7 +122,14 @@ public static class RollingBall
                     pieces[k] = atStart ? pc with { Ta = tq } : pc with { Tb = tq };
                     continue;
                 }
-                if (runOn == null || pc.E.Curve is not (NLine or NCircle or NEllipse) || pc.E.Uses.Count != 2) continue;
+                if (runOn == null || pc.E.Uses.Count != 2) continue;
+                if (pc.E.Curve is not (NLine or NCircle or NEllipse))
+                {
+                    // another curve (an intersection spline): made again, run on along its two faces' surfaces
+                    var lenS = runOn(v, pc.Dir(t) * (atStart ? -1 : 1), pc.E.Uses[0].Face, pc.E.Uses[1].Face);
+                    if (lenS > 0 && RunOn(pc, atStart, lenS) is { } longer) pieces[k] = longer;
+                    continue;
+                }
                 var len = runOn(v, pc.Dir(t) * (atStart ? -1 : 1), pc.E.Uses[0].Face, pc.E.Uses[1].Face);
                 if (!(len > 0)) continue;
                 var dt = len / Math.Max(pc.E.Curve.Deriv(t).Length, 1e-12) * Math.Sign(pc.Tb - pc.Ta);
@@ -155,7 +204,11 @@ public static class RollingBall
         {
             var ja = J(k); var jb = J(k + 1);
             var m = March(A2, B2, ja, jb, r, Math.Max(pieces[k].Length, Vec3.Distance(ja.S, jb.S)), tolS, scale);
-            if (m == null) return Fail("could not follow the rolling ball along the edge (the faces turn too sharply for this radius).");
+            if (m == null)
+            {
+                Debug?.Invoke($"march failed on piece {k}/{n} ({pieces[k].E.Curve.GetType().Name} {pieces[k].Start}->{pieces[k].End}, {SA.Kind}/{SB.Kind}) from {ja.S} to {jb.S}");
+                return Fail("could not follow the rolling ball along the edge (the faces turn too sharply for this radius).");
+            }
             var (P, D, i0, i1) = m.Value;
             var sp = new PipeSpine(P, D, SA, SB);
             if (Folds(sp, r, SA.Project, SB.Project)) return Fail("the radius is too large: the fillet would fold over itself.");

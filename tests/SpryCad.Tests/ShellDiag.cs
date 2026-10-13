@@ -39,6 +39,7 @@ static class ShellDiag
             double sa = a.SignedArea(), sb = b.SignedArea();
             int ca = Crossings(a), cb = Crossings(b);
             if (Math.Sign(sa) == Math.Sign(sb) && cb <= ca) continue;
+            if (Environment.GetEnvironmentVariable("CROSS") is { } who && f.Tag.Name.Contains(who)) { Print = true; Crossings(b); Print = false; Console.WriteLine($"       (of {b.Loops.Sum(x => x.Length)} points; original {a.Loops.Sum(x => x.Length)})"); }
             var bx = f.Bounds();
             var nb = f.Coedges.SelectMany(c => c.Edge.Uses.Select(u => u.Face)).Where(g => !ReferenceEquals(g, f)).Select(g => g.Tag.Name).Distinct();
             Console.WriteLine($"  {f.Tag.Name} {f.Surface.Kind} R={f.Surface.R:0.###}: area {sa:g3} -> {sb:g3}, crossings {ca} -> {cb}, size {bx.Max - bx.Min}");
@@ -48,6 +49,8 @@ static class ShellDiag
         }
         return 0;
     }
+
+    static bool Print;
 
     static int Crossings(NDomain d)
     {
@@ -59,7 +62,11 @@ static class ShellDiag
                     if (i == 0 && j == l.Length - 1) continue;
                     Vec2 a0 = l[i], a1 = l[(i + 1) % l.Length], b0 = l[j], b1 = l[(j + 1) % l.Length];
                     static double O(Vec2 p, Vec2 q, Vec2 r) => (q.X - p.X) * (r.Y - p.Y) - (q.Y - p.Y) * (r.X - p.X);
-                    if (O(a0, a1, b0) * O(a0, a1, b1) < 0 && O(b0, b1, a0) * O(b0, b1, a1) < 0) n++;
+                    if (O(a0, a1, b0) * O(a0, a1, b1) < 0 && O(b0, b1, a0) * O(b0, b1, a1) < 0)
+                    {
+                        n++;
+                        if (Print) Console.WriteLine($"       crossing: seg {i} {a0}->{a1} x seg {j} {b0}->{b1} of {l.Length}");
+                    }
                 }
         return n;
     }

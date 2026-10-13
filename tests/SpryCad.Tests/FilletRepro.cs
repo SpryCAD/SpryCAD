@@ -18,7 +18,13 @@ static class FilletRepro
         var doc = CadDocument.Load(file);
         int si = doc.Features.FindIndex(f => f is ShellFeature);
         // (shell: the part as it is, its wall the thickness given)
-        if (kase == "shell") { if (si >= 0) ((ShellFeature)doc.Features[si]).Thickness = radius ?? "0.125"; return doc; }
+        if (kase == "shell")
+        {
+            if (si >= 0) ((ShellFeature)doc.Features[si]).Thickness = radius ?? "0.125";
+            // (RIM_R: the tube rim fillet another size)
+            if (Environment.GetEnvironmentVariable("RIM_R") is { } rr) doc.Features.OfType<FilletFeature>().First(f => f.Name == "Tube rim").Radius = rr;
+            return doc;
+        }
         if (si >= 0) doc.Features.RemoveRange(si, doc.Features.Count - si);
         var dropSk = doc.Features.OfType<SketchFeature>().First(f => f.Name == "Top drop");
         var drop = doc.Features.OfType<ExtrudeFeature>().First(f => f.Name == "Top drop");
@@ -66,6 +72,11 @@ static class FilletRepro
     {
         var doc = Make(file, kase, radius);
         if (Environment.GetEnvironmentVariable("REPRO_SAVE") is { } path) doc.Save(path);
+        if (Environment.GetEnvironmentVariable("BLEND_DEBUG") != null)
+        {
+            SpryCad.Kernel.NativeBlend.Debug = m => Console.WriteLine("NB " + m);
+            SpryCad.Kernel.RollingBall.Debug = m => Console.WriteLine("RB " + m);
+        }
         if (Environment.GetEnvironmentVariable("REPRO_STOP") is { } stop)
         {
             // the part up to the feature named, then that feature alone with the boolean traced

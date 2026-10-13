@@ -566,13 +566,17 @@ public static class NativeBlend
         var on = RollingBall.Build(chain, size, name, OnFaces, (v, dirOut, fa, fb) =>
         {
             if (pivots.Any(x => ReferenceEquals(x.v, v))) return 0;
-            if (EndPlane(v, dirOut, fa, fb, chain, sel, out _, nearSquare: skew) is not { } pl) return 0;
+            if (EndPlane(v, dirOut, fa, fb, chain, sel, out _, nearSquare: true) is not { } pl) return 0;
             if (RoundCorner(v, fa, fb, chain, sel, pl, size, name) is { } rc) corners.Add(rc);
             else cuts.Add((v.P, pl));
             return run;
         }, p => cuts.Any(c => c.pl.Distance(p) < 1e-9 && Vec3.Distance(p, c.v) < run + 2 * size) || corners.Any(c => c.Beyond(p)),
             pivots.Count > 0 ? EndAt : null);
-        if (cuts.Count + corners.Count == 0 || on.Error != null || on.Tool?.Native == null) return JoinPivots(rb, rb.Tool, rb.Fits, pivots, chain);
+        if (cuts.Count + corners.Count == 0 || on.Error != null || on.Tool?.Native == null)
+        {
+            Debug?.Invoke($"rolling ball {name}: no cut back ({cuts.Count} planes, {corners.Count} corners, run on: {on.Error ?? (on.Tool?.Native == null ? "faceted" : "ok")})");
+            return JoinPivots(rb, rb.Tool, rb.Fits, pivots, chain);
+        }
         var old = Csg.NoFallback;
         Csg.NoFallback = true;
         try
@@ -1310,10 +1314,10 @@ public static class NativeBlend
                     var f = u.Face;
                     if (ReferenceEquals(f, fa) || ReferenceEquals(f, fb)) continue;
                     if (f.Surface.CoincidentWith(fa.Surface, 1e-9) || f.Surface.CoincidentWith(fb.Surface, 1e-9)) continue;
-                    if (f.Surface.Kind != SurfaceKind.Plane) return null;
+                    if (f.Surface.Kind != SurfaceKind.Plane) { Debug?.Invoke($"end plane at {v.P}: {f.Tag.Name} is a {f.Surface.Kind}"); return null; }
                     var n = f.Surface.Plane!.Normal;
                     var cos = Math.Abs(Vec3.Dot(n, dirOut.Normalized));
-                    if (cos < 0.05) return null; // a face along the edge
+                    if (cos < 0.05) { Debug?.Invoke($"end plane at {v.P}: {f.Tag.Name} along the edge ({cos:g3})"); return null; } // a face along the edge
                     var pl = Plane.FromPointNormal(v.P, n);
                     if (pl.Distance(inside) < 0) pl = Plane.FromPointNormal(v.P, -n);
                     // (nearSquare: only a face exactly square to the edge counts as square; one a fraction of a degree
@@ -1330,7 +1334,7 @@ public static class NativeBlend
             if (Vec3.Dot(planes[1].pl.Normal, w) - Vec3.Dot(planes[0].pl.Normal, w) < 1e-6) return null;
         }
         // (a face square to the edge: the tool's square end already matches it)
-        if (planes.Count == 0 || planes[0].square) return null;
+        if (planes.Count == 0 || planes[0].square) { Debug?.Invoke($"end plane at {v.P}: {planes.Count} planes{(planes.Count > 0 ? " square" : "")}"); return null; }
         others = planes.Skip(1).Select(q => q.pl).ToList();
         return planes[0].pl;
     }
