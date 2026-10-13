@@ -49,7 +49,9 @@ public sealed class DirRef
     public PlaneRef? Plane { get; set; }
     /// <summary>A sketch line (from its first point to its second).</summary>
     public CurveRef? Curve { get; set; }
-    public DirRef Clone() => new() { Axis = Axis, Edge = Edge?.Clone(), Face = Face?.Clone(), Plane = Plane?.Clone(), Curve = Curve?.Clone() };
+    /// <summary>Id of a reference axis (AxisFeature).</summary>
+    public string? Feature { get; set; }
+    public DirRef Clone() => new() { Axis = Axis, Edge = Edge?.Clone(), Face = Face?.Clone(), Plane = Plane?.Clone(), Curve = Curve?.Clone(), Feature = Feature };
 }
 
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "$type")]
@@ -69,6 +71,7 @@ public sealed class DirRef
 [JsonDerivedType(typeof(CircularPatternFeature), "circularPattern")]
 [JsonDerivedType(typeof(MirrorFeature), "mirror")]
 [JsonDerivedType(typeof(PlaneFeature), "plane")]
+[JsonDerivedType(typeof(AxisFeature), "axis")]
 [JsonDerivedType(typeof(CombineFeature), "combine")]
 [JsonDerivedType(typeof(ImportFeature), "import")]
 [JsonDerivedType(typeof(FlatPatternFeature), "flatPattern")]
@@ -426,6 +429,24 @@ public sealed class PlaneFeature : Feature
     public bool Flip { get; set; }
     /// <summary>The references and how the plane relates to each (References).</summary>
     public List<PlaneReference> Refs { get; set; } = new();
+}
+
+/// <summary>One reference of an axis: a plane or flat face, a line (edge, sketch line, round face's axis), or a point.</summary>
+public sealed class AxisReference
+{
+    public PlaneRef? Plane { get; set; }
+    public DirRef? Line { get; set; }
+    public PointRef? Point { get; set; }
+}
+
+/// <summary>
+/// A reference axis, as SolidWorks': along a line, edge or round face, where two planes meet, through two points, or
+/// square to a plane through a point; which of them follows from what is picked.
+/// </summary>
+public sealed class AxisFeature : Feature
+{
+    public override string Kind => "Axis";
+    public List<AxisReference> Refs { get; set; } = new();
 }
 
 /// <summary>A curve:a model edge (between named faces) or a line/arc of a sketch.</summary>

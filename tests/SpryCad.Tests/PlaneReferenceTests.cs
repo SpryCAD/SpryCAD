@@ -126,5 +126,62 @@ static class PlaneReferenceTests
             // saved and read again
             t.True(CadDocument.FromJson(doc.ToJson()).Features.OfType<PlaneFeature>().Any(p => p.Refs.Any(r => r.Round != null && r.Relation == PlaneRelation.Tangent)), "kept");
         });
+
+        t.Test("Reference axes: along a line or round face, where two planes meet, through two points, square to a plane through a point", () =>
+        {
+            var doc = new CadDocument();
+            var sk = new Sketch();
+            var pt = sk.AddPoint(new Vec2(3, 4));
+            var a = sk.AddPoint(new Vec2(0, 0)); var b = sk.AddPoint(new Vec2(10, 0));
+            var line = sk.Add(new SkLine { P1 = a.Id, P2 = b.Id });
+            var skf = doc.AddFeature(new SketchFeature { Plane = PlaneRef.Front, Sketch = sk });
+            var cs = new Sketch();
+            var cc = cs.AddPoint(new Vec2(40, 0));
+            cs.Add(new SkCircle { Center = cc.Id, R = 5 });
+            var csf = doc.AddFeature(new SketchFeature { Plane = PlaneRef.Front, Sketch = cs });
+            doc.AddFeature(new ExtrudeFeature { SketchId = csf.Id, Depth = "20" });
+            var regen = new Regenerator();
+            var st0 = regen.Rebuild(doc).State;
+            var cyl = st0.Bodies[0].Solid.Native!.Faces.First(f => f.Surface.Kind == SurfaceKind.Cylinder);
+            var cylRef = new FaceRef { Name = cyl.Tag.Name, Body = st0.Bodies[0].Id, Hint = new Vec3(45, 0, 10) };
+            PointRef P(long id) => new() { Sketch = skf.Id, SketchPoint = id };
+
+            (Vec3 o, Vec3 d) Axis(string what, params AxisReference[] refs)
+            {
+                var af = doc.AddFeature(new AxisFeature { Name = what, Refs = refs.ToList() });
+                var r = regen.Rebuild(doc);
+                t.True(r.Status[af.Id].Ok, $"{what}: {r.Status[af.Id].Error}");
+                return Resolver.ResolveDir(new DirRef { Feature = af.Id }, r.State);
+            }
+            // off the axis (o, d): how far p is
+            static double Off(Vec3 o, Vec3 d, Vec3 p) { var v = p - o; return (v - d * Vec3.Dot(v, d)).Length; }
+
+            var (o1, d1) = Axis("two planes", new AxisReference { Plane = PlaneRef.Front }, new AxisReference { Plane = PlaneRef.Top });
+            t.True(Math.Abs(Math.Abs(d1.X) - 1) < 1e-9 && Off(o1, d1, Vec3.Zero) < 1e-9, "Front and Top meet along X");
+            var (o2, d2) = Axis("two points", new AxisReference { Point = P(a.Id) }, new AxisReference { Point = P(pt.Id) });
+            t.True(Off(o2, d2, new Vec3(3, 4, 0)) < 1e-9 && Off(o2, d2, Vec3.Zero) < 1e-9, "through both points");
+            var (o3, d3) = Axis("point and plane", new AxisReference { Point = P(pt.Id) }, new AxisReference { Plane = PlaneRef.Front });
+            t.True(Math.Abs(Math.Abs(d3.Z) - 1) < 1e-9 && Off(o3, d3, new Vec3(3, 4, 0)) < 1e-9, "square to Front through the point");
+            var (o4, d4) = Axis("line", new AxisReference { Line = new DirRef { Curve = new CurveRef { Sketch = skf.Id, SketchEntity = line.Id } } });
+            t.True(Math.Abs(Math.Abs(d4.X) - 1) < 1e-9 && Off(o4, d4, new Vec3(5, 0, 0)) < 1e-9, "along the sketch line");
+            var (o5, d5) = Axis("round face", new AxisReference { Line = new DirRef { Face = cylRef } });
+            t.True(Math.Abs(Math.Abs(d5.Z) - 1) < 1e-9 && Off(o5, d5, new Vec3(40, 0, 0)) < 1e-9, "the cylinder's axis");
+
+            // a plane through the axis where Front and Top meet, square to Top: Front
+            var x = doc.Features.OfType<AxisFeature>().First(f => f.Name == "two planes");
+            var pf = doc.AddFeature(new PlaneFeature
+            {
+                Mode = PlaneMode.References,
+                Refs = [new() { Line = new DirRef { Feature = x.Id }, Relation = PlaneRelation.Coincident }, new() { Plane = PlaneRef.Top, Relation = PlaneRelation.Perpendicular }],
+            });
+            var r = regen.Rebuild(doc);
+            t.True(r.Status[pf.Id].Ok && Math.Abs(Math.Abs(r.State.Planes[pf.Id].Normal.Z) - 1) < 1e-9, $"a plane through the axis: {r.Status[pf.Id].Error}");
+
+            // too few, or what makes no axis
+            var bad = doc.AddFeature(new AxisFeature { Refs = [new() { Plane = PlaneRef.Front }] });
+            r = regen.Rebuild(doc);
+            t.True(!r.Status[bad.Id].Ok, "one plane makes no axis");
+            t.True(CadDocument.FromJson(doc.ToJson()).Features.OfType<AxisFeature>().Count() == 6, "kept");
+        });
     }
 }

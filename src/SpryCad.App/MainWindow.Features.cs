@@ -188,6 +188,7 @@ public partial class MainWindow
             case CircularPatternFeature cp: OpenCircularPatternPage((CircularPatternFeature)cp.Clone(), false); break;
             case MirrorFeature m: OpenMirrorPage((MirrorFeature)m.Clone(), false); break;
             case PlaneFeature p: OpenPlanePage((PlaneFeature)p.Clone(), false); break;
+            case AxisFeature ax: OpenAxisPage((AxisFeature)ax.Clone(), false); break;
             case CombineFeature c: OpenCombinePage((CombineFeature)c.Clone(), false); break;
             case FlatPatternFeature fp: OpenFlatPatternPage((FlatPatternFeature)fp.Clone(), false); break;
         }
@@ -231,6 +232,10 @@ public partial class MainWindow
     static SelItem? DirItem(DirRef? d, ModelState st)
     {
         if (d == null || d.Axis != null) return null;
+        if (d.Feature is { } af)
+            return st.Axes.TryGetValue(af, out var ax)
+                ? new SelItem { Kind = SelKind.Axis, FeatureId = af, Point = (ax.A + ax.B) / 2, Normal = (ax.B - ax.A).Normalized, AxisHalfLength = Vec3.Distance(ax.A, ax.B) / 2 }
+                : new SelItem { Kind = SelKind.Axis, FeatureId = af };
         // a round face or circular edge: shown as its axis, as it was picked
         if (d.Face is { } rf && st.Bodies.OrderBy(b => b.Id == rf.Body ? 0 : 1).Select(b => ViewportControl.FaceAxis(b, rf.Name)).FirstOrDefault(a => a != null) is { } fa) return fa;
         if (d.Edge is { } re && EdgeItem(re, st) is { EdgeCircular: true, BodyId: { } eb } && st.FindBody(eb) is { } body && ViewportControl.EdgeAxis(body, re) is { } ea) return ea;

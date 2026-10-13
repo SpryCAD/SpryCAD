@@ -197,7 +197,8 @@ public partial class MainWindow
                 Item("_Circular Pattern...", CircularPatternCommand, null, "cpattern"),
                 Item("_Mirror...", MirrorCommand, null, "mirror")),
             Sub("_Reference Geometry",
-                Item("_Plane...", PlaneCommand, null, "plane")),
+                Item("_Plane...", PlaneCommand, null, "plane"),
+                Item("_Axis...", AxisCommand, null, "axis")),
             Sub("Sheet _Metal",
                 Item("_Flat Pattern...", FlatPatternCommand, null, "flatpattern"),
                 Item("Fla_tten", ToggleFlatten, null, "flatten"))));
@@ -297,6 +298,7 @@ public partial class MainWindow
                 Cmd("mirror", "Mirror", MirrorCommand);
                 Sep();
                 Cmd("plane", "Reference\nPlane", PlaneCommand);
+                Cmd("axis", "Reference\nAxis", AxisCommand);
                 Cmd("combine", "Combine", CombineCommand);
                 break;
             case "Sketch":

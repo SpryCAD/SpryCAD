@@ -18,7 +18,7 @@ public static class FeatureColors
     }
 
     /// <summary>Whether a feature gets a color (sketches and planes make no faces).</summary>
-    public static bool Colored(Feature f) => f is not (SketchFeature or PlaneFeature);
+    public static bool Colored(Feature f) => f is not (SketchFeature or PlaneFeature or AxisFeature);
 
     /// <summary>The color (RGB in 0..1) of each feature that gets one, by id.</summary>
     public static Dictionary<string, double[]> Of(CadDocument doc)

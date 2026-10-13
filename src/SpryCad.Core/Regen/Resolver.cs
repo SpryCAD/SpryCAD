@@ -379,6 +379,11 @@ public static class Resolver
                 "Z" => (Vec3.Zero, Vec3.UnitZ),
                 _ => throw new FeatureException("Bad axis"),
             };
+        if (r.Feature != null)
+        {
+            if (!st.Axes.TryGetValue(r.Feature, out var ax)) throw new FeatureException("The reference axis is missing.");
+            return (ax.A, (ax.B - ax.A).Normalized);
+        }
         if (r.Curve is { Sketch: { } skId } cr)
         {
             if (!st.Sketches.TryGetValue(skId, out var sr)) throw new FeatureException("The sketch of the axis is missing.");

@@ -65,6 +65,8 @@ public sealed class ModelState
 {
     public List<Body> Bodies { get; init; } = new();
     public Dictionary<string, Frame> Planes { get; init; } = new();
+    /// <summary>Reference axes by feature id: the stretch of each that is drawn (it runs on both ways).</summary>
+    public Dictionary<string, (Vec3 A, Vec3 B)> Axes { get; init; } = new();
     public Dictionary<string, ToolInfo> Tools { get; init; } = new();
     public Dictionary<string, SketchResult> Sketches { get; init; } = new();
     /// <summary>Flat patterns by body id (made by a Flat Pattern feature, whether the part shows flat or folded).</summary>
@@ -78,6 +80,7 @@ public sealed class ModelState
     {
         Bodies = bodies ?? Bodies,
         Planes = Planes,
+        Axes = Axes,
         Tools = Tools,
         Sketches = Sketches,
         Flats = Flats,
@@ -88,6 +91,7 @@ public sealed class ModelState
     {
         Bodies = new List<Body>(Bodies),
         Planes = new Dictionary<string, Frame>(Planes),
+        Axes = new Dictionary<string, (Vec3 A, Vec3 B)>(Axes),
         Tools = new Dictionary<string, ToolInfo>(Tools),
         Sketches = new Dictionary<string, SketchResult>(Sketches),
         Flats = new Dictionary<string, FlatPattern>(Flats),

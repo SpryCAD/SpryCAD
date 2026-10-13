@@ -35,6 +35,8 @@ public interface IViewportMode
 
 /// <summary>A reference plane shown in the viewport.</summary>
 public sealed record PlaneDisplay(string Name, string? FeatureId, Frame Frame, double HalfSize);
+/// <summary>A reference axis as drawn: the stretch from A to B.</summary>
+public sealed record AxisDisplay(string Name, string FeatureId, Vec3 A, Vec3 B);
 
 /// <summary>A sketch shown (not being edited) in the viewport.</summary>
 public sealed record SketchDisplay(string FeatureId, SketchResult Result);
@@ -60,6 +62,7 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
     /// <summary>Feature preview drawn as a translucent overlay (fillet, chamfer, shell...).</summary>
     public IReadOnlyList<Body> PreviewBodies { get; set; } = Array.Empty<Body>();
     public IReadOnlyList<PlaneDisplay> Planes { get; set; } = Array.Empty<PlaneDisplay>();
+    public IReadOnlyList<AxisDisplay> Axes { get; set; } = Array.Empty<AxisDisplay>();
     public IReadOnlyList<SketchDisplay> Sketches { get; set; } = Array.Empty<SketchDisplay>();
     /// <summary>Placed meshes (an assembly's components), drawn in the display style with their own colors.</summary>
     public IReadOnlyList<MeshInstance> Instances { get; set; } = Array.Empty<MeshInstance>();
@@ -254,6 +257,7 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         if (RenderProfile) tDyn0 = Stopwatch.GetTimestamp();
         _dyn.Clear();
         DrawPlanes(_dyn, hl);
+        DrawRefAxes(_dyn, hl);
         DrawSketches(_dyn, hl);
         if (ShowOrigin) DrawOrigin(_dyn);
         long tm0 = RenderProfile ? Stopwatch.GetTimestamp() : 0;
@@ -586,6 +590,28 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
             g.Quad(a, b, c, d, fill, transparent: true);
             g.Line(a, b, edge); g.Line(b, c, edge); g.Line(c, d, edge); g.Line(d, a, edge);
         }
+    }
+
+    /// <summary>Reference axes: dash-dot, as a temporary axis, in the plane colour unless hovered or selected.</summary>
+    void DrawRefAxes(DynamicGeometry g, Highlights hl)
+    {
+        foreach (var a in Axes)
+            DrawAxis(g, a.A, a.B, hl.Of(new SelItem { Kind = SelKind.Axis, FeatureId = a.FeatureId }.Key) ?? new Rgba(0.35f, 0.45f, 0.6f, 0.9f));
+    }
+
+    /// <summary>The reference axis under the cursor (drawn over the model, so picked through it).</summary>
+    SelItem? PickRefAxis(double x, double y)
+    {
+        double bestPx = 6; SelItem? best = null;
+        foreach (var a in Axes)
+        {
+            var (d, wp) = ScreenDistance(a.A, a.B, x, y);
+            if (d >= bestPx) continue;
+            bestPx = d;
+            var dir = (a.B - a.A).Normalized;
+            best = new SelItem { Kind = SelKind.Axis, FeatureId = a.FeatureId, Name = a.Name, Point = (a.A + a.B) / 2, Normal = dir, AxisHalfLength = Vec3.Distance(a.A, a.B) / 2, At = wp };
+        }
+        return best;
     }
 
     void DrawSketches(DynamicGeometry g, Highlights hl)
@@ -1436,6 +1462,8 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         _faceMemo = (faceKey, best, bestT);
         var faceHit = best;
         var faceDepth = bestT;
+        // reference axes, where an axis or a line is asked for
+        if ((filter & (SelFilter.Axis | SelFilter.Edge)) != 0 && PickRefAxis(x, y) is { } refAxis) return refAxis;
         if ((filter & (SelFilter.Face | SelFilter.PlanarFace | SelFilter.Body | SelFilter.Feature)) == 0) best = null;
         else if ((filter & SelFilter.PlanarFace) != 0 && (filter & SelFilter.Face) == 0 && best is { Planar: false }) best = null;
 
@@ -1538,7 +1566,7 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
                         {
                             Kind = SelKind.Edge, BodyId = b.Id, EdgeIndex = er.EdgeIndex, Point = te.Midpoint,
                             Edge = new Core.Model.EdgeRef { A = te.FaceA, B = te.FaceB, Body = b.Id, Hint = te.Midpoint },
-                            EdgeLinear = te.IsLinear, EdgeCircular = te.Closed,
+                            EdgeLinear = te.IsLinear, EdgeCircular = te.Closed, At = wp,
                         };
                     }
                 }

@@ -34,7 +34,7 @@ public partial class MainWindow
     /// <summary>A pick as a plane reference: what it is decides what it offers.</summary>
     PlaneReference? PlaneRefOf(SelItem s)
     {
-        var r = new PlaneReference { Hint = s.Point };
+        var r = new PlaneReference { Hint = s.At ?? s.Point };
         switch (s.Kind)
         {
             case SelKind.Plane or SelKind.Sketch:

@@ -48,6 +48,8 @@ public sealed class SelItem
     public double CenterRadius { get; init; }
     /// <summary>An Axis: half its length to draw (along <see cref="Normal"/>, either side of <see cref="Point"/>).</summary>
     public double AxisHalfLength { get; init; }
+    /// <summary>Where on it it was clicked (an edge's <see cref="Point"/> is its midpoint).</summary>
+    public Vec3? At { get; init; }
 
     public string Key => Kind switch
     {
@@ -59,7 +61,7 @@ public sealed class SelItem
         SelKind.Body => $"B:{BodyId}",
         SelKind.Vertex => FeatureId != null ? $"V:{FeatureId}:{SketchItem}" : $"V:{BodyId}:{Point.X:0.######},{Point.Y:0.######},{Point.Z:0.######}",
         SelKind.SketchSegment => $"G:{FeatureId}:{SketchItem}",
-        SelKind.Axis => $"A:{BodyId}:{Name}:{Edge?.A}:{Edge?.B}",
+        SelKind.Axis => FeatureId != null ? $"A:{FeatureId}" : $"A:{BodyId}:{Name}:{Edge?.A}:{Edge?.B}",
         _ => "O",
     };
 
@@ -73,7 +75,7 @@ public sealed class SelItem
         SelKind.Body => $"Body<{DisplayNames.Face(doc, BodyId)}>",
         SelKind.Vertex => FeatureId != null ? $"{SketchItemName(doc)}@{doc.Find(FeatureId)?.Name}" : IsCenter ? $"Center<Ø{2 * CenterRadius:0.###}>" : "Vertex<" + $"{Point.X:0.##}, {Point.Y:0.##}, {Point.Z:0.##}>",
         SelKind.SketchSegment => $"{SketchItemName(doc)}@{doc.Find(FeatureId!)?.Name}",
-        SelKind.Axis => $"Axis<{ShortName(DisplayNames.Face(doc, Name ?? Edge?.A))}>",
+        SelKind.Axis => FeatureId != null ? doc.Find(FeatureId)?.Name ?? "Axis" : $"Axis<{ShortName(DisplayNames.Face(doc, Name ?? Edge?.A))}>",
         _ => "Origin",
     };
 
@@ -113,6 +115,7 @@ public sealed class SelItem
     public DirRef? ToDirRef()
     {
         // an axis: of its round face, else of its circular edge
+        if (Kind == SelKind.Axis && FeatureId != null) return new DirRef { Feature = FeatureId };
         if (Kind == SelKind.Axis) return Name != null ? new DirRef { Face = ToFaceRef() } : Edge != null ? new DirRef { Edge = Edge.Clone() } : null;
         if (Kind == SelKind.Edge && Edge != null) return new DirRef { Edge = Edge.Clone() };
         if (Kind == SelKind.Face) return new DirRef { Face = ToFaceRef() };

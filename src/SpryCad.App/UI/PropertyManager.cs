@@ -308,7 +308,8 @@ public sealed class PmPage
         SelKind.Body => (f & SelFilter.Body) != 0,
         SelKind.Vertex => s.IsCenter ? (f & SelFilter.Center) != 0 : (f & SelFilter.Vertex) != 0,
         SelKind.SketchSegment => (f & SelFilter.SketchSegment) != 0,
-        SelKind.Axis => (f & SelFilter.Axis) != 0,
+        // (a reference axis also where edges are asked for: a line)
+        SelKind.Axis => (f & SelFilter.Axis) != 0 || s.FeatureId != null && (f & SelFilter.Edge) != 0,
         _ => false,
     };
 

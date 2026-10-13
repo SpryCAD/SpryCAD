@@ -66,6 +66,8 @@ public static class Icons
         ["isolate"] = ("M3 15h5v5H3z M16 4h5v5h-5z", "M9 9h6v6H9z"),
         ["appearance"] = ("M12 3a9 9 0 1 0 0 18c1.5 0 2-1 2-2s-1-2 0-3 2 0 4 0 3-2 3-4c0-5-4-9-9-9z", "M7 11a1 1 0 1 0 0.01 0z M11 7a1 1 0 1 0 0.01 0z M16 9a1 1 0 1 0 0.01 0z"),
         ["plane"] = ("M2 17l5-10h15l-5 10z", null),
+        // a reference axis: dash-dot as a centerline, a stroke across each end
+        ["axis"] = ("M5 19l4-4 M11 13l1-1 M14 10l4-4", "M2 16l5 5 M17 2l5 5"),
         ["combine"] = ("M9 12m-6 0a6 6 0 1 0 12 0a6 6 0 1 0-12 0 M15 12m-6 0a6 6 0 1 0 12 0a6 6 0 1 0-12 0", null),
         // sheet metal: a bent sheet unrolled flat, its bend line dashed; flatten: folded and flat with an arrow
         ["flatpattern"] = ("M2 17h20v3H2z", "M8 17v3 M16 17v3 M4 4v7a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3V4"),

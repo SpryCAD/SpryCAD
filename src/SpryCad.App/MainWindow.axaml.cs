@@ -287,6 +287,14 @@ public partial class MainWindow : Window
         if (_edit?.Feature is PlaneFeature pf && Session.PreviewActive && Session.PreviewResult?.State.Planes.TryGetValue(pf.Id, out var pfr) == true)
             planes.Add(new PlaneDisplay(pf.Name, pf.Id, pfr, half * 0.8));
         Viewport.Planes = planes;
+        // reference axes, and the one being made (its live preview)
+        var axes = new List<AxisDisplay>();
+        foreach (var f in doc.Features.Take(doc.ActiveCount).OfType<AxisFeature>())
+            if (state.Axes.TryGetValue(f.Id, out var ax) && !f.Suppressed && _edit?.Feature.Id != f.Id)
+                axes.Add(new AxisDisplay(f.Name, f.Id, ax.A, ax.B));
+        if (_edit?.Feature is AxisFeature af && Session.PreviewActive && Session.PreviewResult?.State.Axes.TryGetValue(af.Id, out var afx) == true)
+            axes.Add(new AxisDisplay(af.Name, af.Id, afx.A, afx.B));
+        Viewport.Axes = axes;
         Viewport.ShowPlanes = _showPlanes || editingPlane || state.Bodies.Count == 0 && _sketch == null;
 
         // visible sketches: as shown/hidden in the tree, else while no active feature uses them; also the selected
@@ -412,6 +420,7 @@ public partial class MainWindow : Window
                 var f = Session.Doc.Find(id);
                 if (f is SketchFeature) Selection.Set(new SelItem { Kind = SelKind.Sketch, FeatureId = id, Frame = Session.Result?.State.Sketches.GetValueOrDefault(id)?.Frame });
                 else if (f is PlaneFeature) Selection.Set(new SelItem { Kind = SelKind.Plane, Name = f.Name, FeatureId = id, Frame = Session.Result?.State.Planes.GetValueOrDefault(id) });
+                else if (f is AxisFeature) Selection.Set(new SelItem { Kind = SelKind.Axis, Name = f.Name, FeatureId = id });
                 else if (f != null) Selection.Set(new SelItem { Kind = SelKind.Feature, FeatureId = id });
                 break;
         }
@@ -427,6 +436,7 @@ public partial class MainWindow : Window
             {
                 SketchFeature => new SelItem { Kind = SelKind.Sketch, FeatureId = id },
                 PlaneFeature pf => new SelItem { Kind = SelKind.Plane, Name = pf.Name, FeatureId = id },
+                AxisFeature axf => new SelItem { Kind = SelKind.Axis, Name = axf.Name, FeatureId = id },
                 Feature => new SelItem { Kind = SelKind.Feature, FeatureId = id },
                 _ => null,
             },

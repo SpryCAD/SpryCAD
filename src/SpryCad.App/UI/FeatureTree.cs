@@ -186,6 +186,7 @@ public sealed class FeatureTree : UserControl
         CircularPatternFeature => "cpattern",
         MirrorFeature => "mirror",
         PlaneFeature => "plane",
+        AxisFeature => "axis",
         CombineFeature => "combine",
         FlatPatternFeature => "flatpattern",
         _ => "part",

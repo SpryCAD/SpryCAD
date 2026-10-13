@@ -424,6 +424,7 @@ public sealed class Regenerator
                 case CircularPatternFeature cp: DoCircularPattern(cp); break;
                 case MirrorFeature m: DoMirror(m); break;
                 case PlaneFeature p: DoPlane(p); break;
+                case AxisFeature ax: State.Axes[f.Id] = AxisSolver.Solve(ax.Refs, State); break;
                 case CombineFeature c: DoCombine(c); break;
                 case ImportFeature im: DoImport(im); break;
                 case FlatPatternFeature fp: DoFlatPattern(fp); break;
@@ -1446,8 +1447,8 @@ public sealed class Regenerator
                 var g = doc.Features[j];
                 var gs = Earlier.GetValueOrDefault(g.Id);
                 if (g is FilletFeature ff && gs is { Ok: true, Suppressed: false }) { fillets.Insert(0, ff); continue; }
-                // (not built, or a sketch or plane: the bodies as they were)
-                if (gs == null || gs.Suppressed || !gs.Ok || g is SketchFeature or PlaneFeature) continue;
+                // (not built, or a sketch, plane or axis: the bodies as they were)
+                if (gs == null || gs.Suppressed || !gs.Ok || g is SketchFeature or PlaneFeature or AxisFeature) continue;
                 break;
             }
             if (fillets.Count == 0 || fillets.Any(x => x.WholeBody || x.Features.Count > 0)) return null;
