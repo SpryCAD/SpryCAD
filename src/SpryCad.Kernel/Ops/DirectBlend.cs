@@ -464,7 +464,9 @@ public static class DirectBlend
                     if (Math.Abs(n) > 1) { why = $"an edge of {F.Tag.Name} twice in one direction"; return null; }
                     kept.Add((x.e, n > 0, x.tool));
                 }
-                var loops = Trace(kept.Select(x => (x.e, x.fwd)).ToList());
+                // (on a plane, pieces of the face touching at a point told apart: see Trace)
+                Vec3? fn = F.Surface.Kind == SurfaceKind.Plane ? F.Surface.Plane!.Normal * (F.Sense ? 1 : -1) : null;
+                var loops = Trace(kept.Select(x => (x.e, x.fwd)).ToList(), fn);
                 if (loops == null || loops.Count == 0) { why = $"the boundary of {F.Tag.Name} does not close into loops"; return null; }
 
                 // other geometry of this face close to the blend: the boolean decides
@@ -484,14 +486,19 @@ public static class DirectBlend
                     }
                 }
 
-                var nf = new NFace(F.Surface, F.Sense, F.Tag, F.Anchor);
-                foreach (var l in loops)
+                // (each piece a face of its own, as the boolean leaves it: a corner cut off by the blend's end)
+                var parts = fn != null && loops.Count > 1 ? Pieces(loops, fn.Value) : null;
+                foreach (var part in parts ?? new() { loops })
                 {
-                    var nl = new NLoop();
-                    foreach (var (e, fwd) in l) nl.Coedges.Add(new NCoedge(e, fwd));
-                    nf.Loops.Add(nl);
+                    var nf = new NFace(F.Surface, F.Sense, F.Tag, parts == null ? F.Anchor : null);
+                    foreach (var l in part)
+                    {
+                        var nl = new NLoop();
+                        foreach (var (e, fwd) in l) nl.Coedges.Add(new NCoedge(e, fwd));
+                        nf.Loops.Add(nl);
+                    }
+                    newFaces.Add(nf);
                 }
-                newFaces.Add(nf);
                 removed.Add(F);
             }
         }
@@ -715,19 +722,26 @@ public static class DirectBlend
 
     /// <summary>
     /// Closed loops of oriented edges, each continuing at the vertex the last one ends at; null when an end has no
-    /// continuation or more than one (an ambiguous touch).
+    /// continuation, or more than one (an ambiguous touch) and no <paramref name="normal"/>. With the face's outward
+    /// normal, at a vertex where two pieces of the face touch (a corner of it cut off by a blend's end, meeting the rest
+    /// at a point) each loop turns furthest left there, keeping to its own piece.
     /// </summary>
-    static List<List<(NEdge e, bool fwd)>>? Trace(List<(NEdge e, bool fwd)> co)
+    static List<List<(NEdge e, bool fwd)>>? Trace(List<(NEdge e, bool fwd)> co, Vec3? normal = null)
     {
         static NVertex S((NEdge e, bool fwd) x) => x.fwd ? x.e.V0 : x.e.V1;
         static NVertex E((NEdge e, bool fwd) x) => x.fwd ? x.e.V1 : x.e.V0;
+        static Vec3 Dir((NEdge e, bool fwd) x, bool atStart)
+        {
+            var t = atStart == x.fwd ? x.e.T0 : x.e.T1;
+            return (x.e.Curve.Deriv(t) * (x.fwd ? 1 : -1)).Normalized;
+        }
         var from = new Dictionary<NVertex, List<int>>(Ref);
         for (int i = 0; i < co.Count; i++)
         {
             if (!from.TryGetValue(S(co[i]), out var l)) from[S(co[i])] = l = new();
             l.Add(i);
         }
-        if (from.Values.Any(l => l.Count > 1)) return null;
+        if (normal == null && from.Values.Any(l => l.Count > 1)) return null;
         var used = new bool[co.Count];
         var loops = new List<List<(NEdge, bool)>>();
         for (int i = 0; i < co.Count; i++)
@@ -739,11 +753,57 @@ public static class DirectBlend
             {
                 used[k] = true; loop.Add(co[k]);
                 if (!from.TryGetValue(E(co[k]), out var nx)) return null;
-                k = nx[0];
+                if (nx.Count == 1) { k = nx[0]; continue; }
+                // (the one turning furthest left from the way in, of those not taken; the loop's start when it closes)
+                var din = Dir(co[k], false);
+                int best = -1; double ba = double.MinValue;
+                foreach (var j in nx)
+                {
+                    if (used[j] && j != i) continue;
+                    var dout = Dir(co[j], true);
+                    var a = Math.Atan2(Vec3.Dot(normal!.Value, Vec3.Cross(din, dout)), Vec3.Dot(din, dout));
+                    if (a > ba) { ba = a; best = j; }
+                }
+                if (best < 0) return null;
+                k = best;
             }
             if (k != i) return null;
             loops.Add(loop);
         }
         return loops;
+    }
+
+    /// <summary>
+    /// A plane's loops as faces: each outer loop (anticlockwise about the normal) a face of its own, with the holes inside
+    /// it. Null where that is not clear (no outer loop, or a hole in none).
+    /// </summary>
+    static List<List<List<(NEdge e, bool fwd)>>>? Pieces(List<List<(NEdge e, bool fwd)>> loops, Vec3 normal)
+    {
+        static List<Vec3> Pts(List<(NEdge e, bool fwd)> l) => l.SelectMany(x => Enumerable.Range(0, 8).Select(i => x.e.At(x.fwd ? i / 8.0 : 1 - i / 8.0))).ToList();
+        double Area(List<Vec3> p) { var s = Vec3.Zero; for (int i = 0; i < p.Count; i++) s += Vec3.Cross(p[i], p[(i + 1) % p.Count]); return 0.5 * Vec3.Dot(s, normal); }
+        var outer = new List<(List<(NEdge, bool)> l, List<Vec3> p)>(); var holes = new List<(List<(NEdge, bool)> l, List<Vec3> p)>();
+        foreach (var l in loops) { var p = Pts(l); (Area(p) > 0 ? outer : holes).Add((l, p)); }
+        if (outer.Count == 0) return null;
+        // (inside: a point of the hole within the outer loop's polygon, about the normal)
+        var u = normal.AnyPerpendicular(); var v = Vec3.Cross(normal, u);
+        bool Inside(List<Vec3> poly, Vec3 q)
+        {
+            bool c = false; double qx = Vec3.Dot(q, u), qy = Vec3.Dot(q, v);
+            for (int i = 0, j = poly.Count - 1; i < poly.Count; j = i++)
+            {
+                double xi = Vec3.Dot(poly[i], u), yi = Vec3.Dot(poly[i], v), xj = Vec3.Dot(poly[j], u), yj = Vec3.Dot(poly[j], v);
+                if (yi > qy != yj > qy && qx < (xj - xi) * (qy - yi) / (yj - yi) + xi) c = !c;
+            }
+            return c;
+        }
+        var res = outer.Select(o => new List<List<(NEdge, bool)>> { o.l }).ToList();
+        foreach (var h in holes)
+        {
+            var q = h.p[h.p.Count / 2];
+            int k = outer.FindIndex(o => Inside(o.p, q));
+            if (k < 0) return null;
+            res[k].Add(h.l);
+        }
+        return res;
     }
 }
