@@ -475,6 +475,9 @@ public static class RollingBall
         var walkedA = new List<NFace>(); var walkedB = new List<NFace>();
         var footEdge = new Dictionary<int, NEdge>();
         var walkOther = new Dictionary<int, NFace>();
+        // (a second switch at a vertex, through a face beside the boundary's end: its root on the edge from there, the path
+        // past the boundary's end, the face it rolls through, the edge its foot reaches the next face on)
+        var second = new Dictionary<int, (double root, List<(NCurve c, double ta, double tb)> segs, NFace mid, NEdge foot)>();
         // (the other side's face there: the one at the vertex, or, where the ball's foot on that side is not on it when this
         // side's foot reaches the boundary, a neighbour it is on (a narrow face the chain crosses: the foot on it before or
         // after the chain is))
@@ -503,6 +506,7 @@ public static class RollingBall
         }
         (double? root, List<(NCurve c, double ta, double tb)> segs, int? back, string? err) WalkWith(int k, bool onB, NFace otherFace)
         {
+            second.Remove(k);
             var fx = onB ? faB : faA;
             var fb0 = fx[Prev(k)]; var fb1 = fx[k % n];
             var other = onB ? OffA(otherFace) : Off(otherFace);
@@ -554,11 +558,64 @@ public static class RollingBall
                 // on along the boundary: the next edge at the far vertex between faces of the same two surfaces
                 var next = EdgesAt(w, cur).FirstOrDefault(x => !ReferenceEquals(x, cur) && x.Uses.Count == 2
                     && (Side(x.Uses[0].Face, fb0) && Side(x.Uses[1].Face, fb1) || Side(x.Uses[0].Face, fb1) && Side(x.Uses[1].Face, fb0)));
-                if (next == null) break;
+                if (next == null)
+                {
+                    // (the boundary ends where a third face meets both, smoothly (a flat under the round the ball
+                    // rolls onto, both tangent to the fillet it leaves): the ball, too wide to touch the boundary here,
+                    // rolls onto that face first and on from it onto the next. Two switches at this vertex)
+                    foreach (var e1 in EdgesAt(w, cur))
+                    {
+                        if (ReferenceEquals(e1, cur) || e1.Uses.Count != 2 || !e1.Uses.Any(u => Side(u.Face, fb0))) continue;
+                        var mid = e1.Uses.Select(u => u.Face).FirstOrDefault(f => !Side(f, fb0));
+                        if (mid == null || Side(mid, fb1) || !Smooth(fb0, mid, e1)) continue;
+                        var e2 = EdgesAt(w, cur).FirstOrDefault(x => x.Uses.Count == 2 && x.Uses.Any(u => ReferenceEquals(u.Face, mid))
+                            && x.Uses.Any(u => Side(u.Face, fb1)) && Smooth(mid, fb1, x));
+                        if (e2 == null) continue;
+                        var t1v = ReferenceEquals(e1.V0, w) ? e1.T0 : e1.T1; var t1f = ReferenceEquals(e1.V0, w) ? e1.T1 : e1.T0;
+                        var r1 = Root(t1v, t1f, t => other.F_(C(e1.Curve, t)));
+                        if (r1 == null) continue;
+                        var ms = onB ? Sup(mid) : SupA(mid); bool msense = mid.Sense;
+                        Vec3 C2(double t) { var G = e2.Curve.Eval(t); return G + ms.Normal(G) * ((msense ? 1 : -1) * rho); }
+                        var t2v = ReferenceEquals(e2.V0, w) ? e2.T0 : e2.T1; var t2f = ReferenceEquals(e2.V0, w) ? e2.T1 : e2.T0;
+                        var r2 = Root(t2v, t2f, t => other.F_(C2(t)));
+                        if (r2 == null) continue;
+                        if (!walked.Contains(mid)) walked.Add(mid);
+                        footEdge[k] = e1;
+                        second[k] = (r2.Value, new() { (e2.Curve, t2v, r2.Value) }, mid, e2);
+                        Debug?.Invoke($"  switch at {V}: through {mid.Tag.Name} beside the boundary's end {w.P}");
+                        segs.Add((e1.Curve, t1v, r1.Value));
+                        return (r1, segs, null, null);
+                    }
+                    break;
+                }
                 from = w; cur = next;
             }
             Debug?.Invoke($"switch at {V}: no centre along the boundary from {g.V0.P}->{g.V1.P} ({fb0.Tag.Name}/{fb1.Tag.Name}, {segs.Count} edges)");
             return (null, segs, null, "the ball leaves the faces it blends before it reaches the next face.");
+        }
+        // (two faces meeting smoothly along an edge, at its middle)
+        static bool Smooth(NFace a, NFace b, NEdge e) => Vec3.Dot(Outward(a, e.Mid), Outward(b, e.Mid)) > Math.Cos(2 * Math.PI / 180);
+        // (where f changes sign on [t0, t1], sampled then bisected)
+        static double? Root(double t0, double t1, Func<double, double> f)
+        {
+            const int N = 64;
+            double tPrev = t0, fPrev = f(t0);
+            for (int i = 1; i <= N; i++)
+            {
+                var t = t0 + (t1 - t0) * i / N; var fv = f(t);
+                if (Math.Sign(fv) != Math.Sign(fPrev) || fv == 0)
+                {
+                    double lo = tPrev, hi = t, flo = fPrev;
+                    for (int it = 0; it < 100 && Math.Abs(hi - lo) > 1e-15 * Math.Max(1, Math.Abs(hi)); it++)
+                    {
+                        var m = 0.5 * (lo + hi); var fm = f(m);
+                        if (Math.Sign(fm) == Math.Sign(flo)) { lo = m; flo = fm; } else hi = m;
+                    }
+                    return 0.5 * (lo + hi);
+                }
+                tPrev = t; fPrev = fv;
+            }
+            return null;
         }
         var walks = new Dictionary<int, (double? root, List<(NCurve c, double ta, double tb)> segs, int? back, string? err)>();
         var onA = new HashSet<int>();   // switch vertices on A
@@ -664,6 +721,8 @@ public static class RollingBall
         var swJoint = new Dictionary<int, Joint>();
         var swAfter = new Dictionary<int, NFace>();
         var swBefore = new Dictionary<int, NFace>();
+        var shared = new Dictionary<int, int>();   // a second switch: how many pieces of its path are the first's
+        int VK(int key) => key >= nj ? key - nj : key;   // the chain vertex of a switch's key
         try
         {
             for (int k = 0; k < nj; k++)
@@ -687,6 +746,26 @@ public static class RollingBall
                 swAfter[k] = fe.Uses.Select(u => u.Face).FirstOrDefault(f => !Side(f, fb)) ?? (a ? faA : faB)[k % n];
                 swBefore[k] = fe.Uses.Select(u => u.Face).FirstOrDefault(f => Side(f, fb)) ?? fb;
                 events.Add((ChainPos(Ss, Ts, k), k, true));
+                // (and on from the face beside the boundary's end, a second switch (keyed past the vertices), its path
+                // the first's but for its last piece)
+                if (second.TryGetValue(k, out var s2))
+                {
+                    int k2 = k + nj;
+                    var mid = s2.mid;
+                    var G2 = s2.segs[^1].c.Eval(s2.root);
+                    var S2 = G2 + (a ? SupA(mid) : Sup(mid)).Normal(G2) * ((mid.Sense ? 1 : -1) * rho);
+                    var T2 = Vec3.Cross(other.Grad(S2), (a ? OffA(mid) : Off(mid)).Grad(S2));
+                    if (T2.Length < 1e-9) return Fail("the faces meet tangentially.");
+                    T2 = T2.Normalized; if (Vec3.Dot(T2, dir) < 0) T2 = -T2;
+                    var foot2 = (a ? Sup(walkOther[k]) : SupA(walkOther[k])).Project(S2);
+                    swJoint[k2] = a ? new Joint(ChainVertex(k % n).P, S2, T2, G2, foot2) : new Joint(ChainVertex(k % n).P, S2, T2, foot2, G2);
+                    swAfter[k2] = s2.foot.Uses.Select(u => u.Face).FirstOrDefault(f => !Side(f, mid)) ?? (a ? faA : faB)[k % n];
+                    swBefore[k2] = mid;
+                    if (a) onA.Add(k2);
+                    walks[k2] = (s2.root, segs.Take(segs.Count - 1).Concat(s2.segs).ToList(), null, null);
+                    shared[k2] = segs.Count - 1;
+                    events.Add((ChainPos(S2, T2, k), k2, true));
+                }
             }
         }
         catch (InvalidOperationException) { return Fail("the radius is larger than the curvature of a face it blends."); }
@@ -792,8 +871,17 @@ public static class RollingBall
             bool a = onA.Contains(k);
             var path = walks[k].segs;
             var list = new List<(NEdge, bool)>();
-            var v0 = VV[k];
-            for (int q = 0; q < path.Count; q++)
+            var v0 = VV[VK(k)];
+            // (a second switch's path: the first's edges as far as they are the same)
+            int q0 = shared.GetValueOrDefault(k);
+            if (q0 > 0)
+            {
+                var firstPath = (a ? bndA : bnd)[VK(k)];
+                for (int q = 0; q < q0; q++) list.Add(firstPath[q]);
+                var (le, lf) = firstPath[q0 - 1];
+                v0 = lf ? le.V1 : le.V0;
+            }
+            for (int q = q0; q < path.Count; q++)
             {
                 var (gc, ga, gb) = path[q];
                 var v1 = q == path.Count - 1 ? (a ? AV : BV)[EvOf(k, true)] : new NVertex(gc.Eval(gb));
@@ -903,11 +991,28 @@ public static class RollingBall
             for (int c = 0; c + (closed ? 0 : 1) < cuts.Count; c++)
             {
                 var (ea, ia) = cuts[c]; var (eb, ib) = cuts[(c + 1) % cuts.Count];
-                int ka = ea.k, kb = eb.k;
+                int ka = VK(ea.k), kb = VK(eb.k);
                 int vsteps = closed ? ((kb - ka + n) % n == 0 && cuts.Count == 1 ? n : (kb - ka + n) % n) : kb - ka;
                 int esteps = closed ? ((ib - ia + ne) % ne == 0 ? ne : (ib - ia + ne) % ne) : ib - ia;
                 var fS = sup[ia];
                 var loop = new List<(NEdge, bool)>();
+                // (the face the ball rolls through between a vertex's two switches: beside the chain, between the two
+                // paths where they part)
+                if (ka == kb && eb.k == ea.k + nj && shared.TryGetValue(eb.k, out var sh))
+                {
+                    loop.AddRange((sideB ? Out(eb.k) : OutA(eb.k)).Skip(sh));
+                    for (int q = esteps - 1; q >= 0; q--) loop.Add((cont[(ia + q) % ne], false));
+                    var back = (sideB ? In(ea.k) : InA(ea.k)).ToList();
+                    loop.AddRange(back.Take(back.Count - sh));
+                    var sM = sideB ? Sup(fS) : SupA(fS);
+                    bool mSense = convex ? fS.Sense : !fS.Sense;
+                    var ln = LoopNormal(loop);
+                    var anchor = loop[0].Item1.Mid;
+                    if (Vec3.Dot(ln, sM.Normal(sM.Project(anchor)) * (mSense ? 1 : -1)) < 0) loop = Reverse(loop);
+                    var tagM = new FaceTag(sideB ? $"{name}.B{c}" : $"{name}.A{c}", sM.Kind == SurfaceKind.Plane ? SurfaceDef.PlaneDef : sM.Def);
+                    body.Faces.Add(MakeFace(sM, mSense, tagM, loop, sM.Project(anchor)));
+                    continue;
+                }
                 for (int q = 0; q < vsteps; q++)
                 {
                     int k = (ka + q) % n;
@@ -920,9 +1025,9 @@ public static class RollingBall
                     }
                     loop.Add((E[k], fwdE[k]));
                 }
-                loop.AddRange(sideB ? Out(kb) : OutA(kb));
+                loop.AddRange(sideB ? Out(eb.k) : OutA(eb.k));
                 for (int q = esteps - 1; q >= 0; q--) loop.Add((cont[(ia + q) % ne], false));
-                loop.AddRange(sideB ? In(ka) : InA(ka));
+                loop.AddRange(sideB ? In(ea.k) : InA(ea.k));
                 // orientation: the face lies on the side of the chain where the contact is
                 int kp = ka % n;
                 var Mp = pieces[kp].E.Curve.Eval(pieces[kp].Mid); var t = pieces[kp].Dir(pieces[kp].Mid);
