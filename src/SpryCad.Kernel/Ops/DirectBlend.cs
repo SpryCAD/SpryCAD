@@ -230,7 +230,10 @@ public static class DirectBlend
         var caps = new List<NFace>();
         foreach (var t in tb.Faces)
         {
-            var on = near.Where(f => f.Surface.CoincidentWith(t.Surface, 1e-9)).ToList();
+            // (or a fillet's pieces where the tool lies on them all, one pipe: a blend rolling over an earlier fillet
+            // rolls on its pieces merged)
+            var on = near.Where(f => f.Surface.CoincidentWith(t.Surface, 1e-9)
+                || t.Surface.Kind == SurfaceKind.Pipe && f.Surface.Kind == SurfaceKind.Pipe && RollingBall.Family(t.Surface, f.Surface)).ToList();
             if (on.Count > 0) onBody[t] = on;
             else if (IsBlendFace(t)) blends.Add(t);
             else if (IsCap(t)) caps.Add(t);
@@ -464,9 +467,8 @@ public static class DirectBlend
                     if (Math.Abs(n) > 1) { why = $"an edge of {F.Tag.Name} twice in one direction"; return null; }
                     kept.Add((x.e, n > 0, x.tool));
                 }
-                // (on a plane, pieces of the face touching at a point told apart: see Trace)
-                Vec3? fn = F.Surface.Kind == SurfaceKind.Plane ? F.Surface.Plane!.Normal * (F.Sense ? 1 : -1) : null;
-                var loops = Trace(kept.Select(x => (x.e, x.fwd)).ToList(), fn);
+                // (pieces of the face touching at a point told apart: see Trace)
+                var loops = Trace(kept.Select(x => (x.e, x.fwd)).ToList(), p => (F.Surface.Normal(p) * (F.Sense ? 1 : -1)).Normalized);
                 if (loops == null || loops.Count == 0) { why = $"the boundary of {F.Tag.Name} does not close into loops"; return null; }
 
                 // other geometry of this face close to the blend: the boolean decides
@@ -487,7 +489,7 @@ public static class DirectBlend
                 }
 
                 // (each piece a face of its own, as the boolean leaves it: a corner cut off by the blend's end)
-                var parts = fn != null && loops.Count > 1 ? Pieces(loops, fn.Value) : null;
+                var parts = loops.Count > 1 ? (F.Surface.Kind == SurfaceKind.Plane ? Pieces(loops, F.Surface.Plane!.Normal * (F.Sense ? 1 : -1)) : PiecesOn(F, loops)) : null;
                 foreach (var part in parts ?? new() { loops })
                 {
                     var nf = new NFace(F.Surface, F.Sense, F.Tag, parts == null ? F.Anchor : null);
@@ -726,7 +728,7 @@ public static class DirectBlend
     /// normal, at a vertex where two pieces of the face touch (a corner of it cut off by a blend's end, meeting the rest
     /// at a point) each loop turns furthest left there, keeping to its own piece.
     /// </summary>
-    static List<List<(NEdge e, bool fwd)>>? Trace(List<(NEdge e, bool fwd)> co, Vec3? normal = null)
+    static List<List<(NEdge e, bool fwd)>>? Trace(List<(NEdge e, bool fwd)> co, Func<Vec3, Vec3>? normal = null)
     {
         static NVertex S((NEdge e, bool fwd) x) => x.fwd ? x.e.V0 : x.e.V1;
         static NVertex E((NEdge e, bool fwd) x) => x.fwd ? x.e.V1 : x.e.V0;
@@ -761,7 +763,8 @@ public static class DirectBlend
                 {
                     if (used[j] && j != i) continue;
                     var dout = Dir(co[j], true);
-                    var a = Math.Atan2(Vec3.Dot(normal!.Value, Vec3.Cross(din, dout)), Vec3.Dot(din, dout));
+                    var nv = normal!(E(co[k]).P);
+                    var a = Math.Atan2(Vec3.Dot(nv, Vec3.Cross(din, dout)), Vec3.Dot(din, dout));
                     if (a > ba) { ba = a; best = j; }
                 }
                 if (best < 0) return null;
@@ -771,6 +774,49 @@ public static class DirectBlend
             loops.Add(loop);
         }
         return loops;
+    }
+
+    /// <summary>
+    /// <see cref="Pieces"/> on a curved face: outer loops told from holes by their area in the surface's parameters,
+    /// the same way round as the face's own outer loop. Null where that is not clear.
+    /// </summary>
+    static List<List<List<(NEdge e, bool fwd)>>>? PiecesOn(NFace F, List<List<(NEdge e, bool fwd)>> loops)
+    {
+        try
+        {
+            static double Area(Vec2[] l) { double a = 0; for (int i = 0, j = l.Length - 1; i < l.Length; j = i++) a += l[j].X * l[i].Y - l[i].X * l[j].Y; return a / 2; }
+            var own = NDomain.Of(F);
+            var outerSign = Math.Sign(own.Loops.Select(Area).OrderByDescending(Math.Abs).First());
+            var probe = new NFace(F.Surface, F.Sense, F.Tag, null);
+            foreach (var l in loops)
+            {
+                var nl = new NLoop();
+                foreach (var (e, fwd) in l) nl.Coedges.Add(new NCoedge(e, fwd));
+                probe.Loops.Add(nl);
+            }
+            var dom = NDomain.Of(probe);
+            if (dom.Loops.Count != loops.Count || outerSign == 0) return null;
+            var outer = new List<int>(); var holes = new List<int>();
+            for (int i = 0; i < loops.Count; i++) (Math.Sign(Area(dom.Loops[i])) == outerSign ? outer : holes).Add(i);
+            if (outer.Count == 0) return null;
+            static bool Inside(Vec2[] poly, Vec2 q)
+            {
+                bool c = false;
+                for (int i = 0, j = poly.Length - 1; i < poly.Length; j = i++)
+                    if (poly[i].Y > q.Y != poly[j].Y > q.Y && q.X < (poly[j].X - poly[i].X) * (q.Y - poly[i].Y) / (poly[j].Y - poly[i].Y) + poly[i].X) c = !c;
+                return c;
+            }
+            var res = outer.Select(o => new List<List<(NEdge, bool)>> { loops[o] }).ToList();
+            foreach (var h in holes)
+            {
+                var q = dom.Loops[h][dom.Loops[h].Length / 2];
+                int k = outer.FindIndex(o => Inside(dom.Loops[o], q));
+                if (k < 0) return null;
+                res[k].Add(loops[h]);
+            }
+            return res;
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException) { return null; }
     }
 
     /// <summary>

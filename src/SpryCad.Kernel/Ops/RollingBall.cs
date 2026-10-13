@@ -1090,7 +1090,7 @@ public static class RollingBall
     }
 
     /// <summary>One surface for the ball: coincident, or pieces of one fillet (pipes of a radius whose spines join).</summary>
-    static bool Family(NSurface a, NSurface b)
+    internal static bool Family(NSurface a, NSurface b)
     {
         if (ReferenceEquals(a, b) || a.CoincidentWith(b, 1e-9)) return true;
         if (a.Spine is not { } sa || b.Spine is not { } sb || Math.Abs(a.R - b.R) > 1e-9 * Math.Max(1, a.R)) return false;
