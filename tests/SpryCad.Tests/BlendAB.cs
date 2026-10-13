@@ -21,7 +21,7 @@ static class BlendAB
             if (file.EndsWith(".sprt", StringComparison.Ordinal)) docs.Add(("demo " + file, build));
         foreach (var (name, build) in Demos.BlendCases) docs.Add(("case " + name, build));
         foreach (var f in Directory.GetFiles(Path.Combine(dir!, "samples"), "*.sprt", SearchOption.AllDirectories)
-                     .Concat(Directory.GetFiles(Path.Combine(dir!, "tests", "SpryCad.Tests", "models"), "*.sprt")))
+                     .Concat(Directory.GetFiles(Path.Combine(dir!, "tests", "SpryCad.Tests", "models"), "*.sprt", SearchOption.AllDirectories)))
         {
             var path = f;
             docs.Add((Path.GetRelativePath(dir!, f), () => CadDocument.Load(path)));

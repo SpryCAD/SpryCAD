@@ -194,6 +194,14 @@ public static class DirectBlend
         return n.EndsWith(".Blend", StringComparison.Ordinal) || n.EndsWith(".S.F", StringComparison.Ordinal) || n.EndsWith(".R.F", StringComparison.Ordinal);
     }
 
+    /// <summary>A planar end of a blend's tool (its square ends, a line tool's start and end).</summary>
+    static bool IsCap(NFace t)
+    {
+        var n = t.Tag.Name;
+        return t.Surface.Kind == SurfaceKind.Plane && (n.EndsWith(".End", StringComparison.Ordinal) || n.EndsWith(".Start", StringComparison.Ordinal)
+            || n.EndsWith(".End0", StringComparison.Ordinal) || n.EndsWith(".End1", StringComparison.Ordinal));
+    }
+
     /// <summary>
     /// The tool applied to the body (edited in place, or a new body after splitting faces at their seams); null and
     /// the reason when it cannot be (the body is then as it was).
@@ -217,14 +225,21 @@ public static class DirectBlend
         var near = body.Faces.Where(f => f.Bounds().Overlaps(box, tol)).ToList();
         var onBody = new Dictionary<NFace, List<NFace>>(Ref);
         var blends = new List<NFace>();
+        // (an end of the tool on no face of the body (a fillet stopping short, fading out, or squared off where it meets
+        // nothing): a face of the result, as the boolean leaves it, put in between as the blend faces are)
+        var caps = new List<NFace>();
         foreach (var t in tb.Faces)
         {
             var on = near.Where(f => f.Surface.CoincidentWith(t.Surface, 1e-9)).ToList();
             if (on.Count > 0) onBody[t] = on;
             else if (IsBlendFace(t)) blends.Add(t);
+            else if (IsCap(t)) caps.Add(t);
             else { why = $"its face {t.Tag.Name} lies on no face of the body"; return null; }
         }
         if (blends.Count == 0 || onBody.Count == 0) { why = "not a blend's tool"; return null; }
+        foreach (var t in caps)
+            if (t.Coedges.Any(c => c.Edge.Uses.Count != 2 || c.Edge.Uses.Select(u => u.Face).Where(f => !ReferenceEquals(f, t)).Any(f => !onBody.ContainsKey(f) && !blends.Contains(f))))
+            { why = $"its face {t.Tag.Name} lies on no face of the body"; return null; }
         var support = tb.Faces.Where(onBody.ContainsKey).ToList();
         var candidates = onBody.Values.SelectMany(x => x).Distinct(Ref).Cast<NFace>().ToList();
 
@@ -486,7 +501,7 @@ public static class DirectBlend
         // region the tool replaces through the blend faces (through the strips it would meet the blended faces along
         // an edge, which the check above finds) or by lying wholly inside it
         foreach (var f in near)
-            if (!removed.Contains(f) && f.Bounds().Overlaps(box, -pad) && Intrudes(f, tb, blends, tol, pad))
+            if (!removed.Contains(f) && f.Bounds().Overlaps(box, -pad) && Intrudes(f, tb, blends.Concat(caps).ToList(), tol, pad))
             {
                 why = $"the face {f.Tag.Name} runs into the blend"; return null;
             }
@@ -512,7 +527,7 @@ public static class DirectBlend
 
         Lap("touched");
         // ---- the blend faces (turned inside out for a convex blend: the tool's outside is the body's)
-        foreach (var t in blends)
+        foreach (var t in blends.Concat(caps))
         {
             var nf = new NFace(t.Surface, convex ? !t.Sense : t.Sense, t.Tag, t.Anchor);
             foreach (var l in t.Loops)
