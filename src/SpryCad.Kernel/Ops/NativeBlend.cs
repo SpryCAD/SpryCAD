@@ -545,7 +545,8 @@ public static class NativeBlend
     /// the tool run on past that end and cut back to that plane near it. Ended square there, it leans past on one
     /// side and falls short on the other. As it was where cutting back fails.
     /// </summary>
-    static RollingBall.Result Ball(List<NEdge> chain, double size, string name, IReadOnlyList<NEdge> selected)
+    static RollingBall.Result Ball(List<NEdge> chain, double size, string name, IReadOnlyList<NEdge> selected, Dictionary<NVertex, Plane>? endCuts = null,
+        bool retry = true)
     {
         var sel = selected as IReadOnlyCollection<NEdge> ?? selected.ToList();
         // the ends where the ball pivots round a corner: the tool ending exactly where the pivot starts (its end then
@@ -558,22 +559,42 @@ public static class NativeBlend
         var rb = RollingBall.Build(chain, size, name, OnFaces, endAt: EndAt);
         // (a chain failing only for a sliver of an edge at an end, far shorter than the ball, on which it would have to
         // roll backwards (a round the chain just touches, its last few thousandths): built without that piece, left sharp)
-        if (rb.Error != null && chain.Count > 1)
-            foreach (var (v, _, _, _) in ChainEnds(chain))
+        // First run on over the piece and cut back where it ended (on the face it ran into there): the piece covered,
+        // not left as a sharp stub beside the tool's end. Each end alone, then both (tried once, not again within)
+        if (rb.Error != null && chain.Count > 1 && retry)
+        {
+            var shortEnds = new List<(NEdge end, NVertex near, Plane? past)>();
+            foreach (var (v, dirOut, fa, fb) in ChainEnds(chain))
             {
                 var end = chain.FirstOrDefault(x => ReferenceEquals(x.V0, v) || ReferenceEquals(x.V1, v));
-                if (end == null || end.Length > 0.05 * size) continue;
-                var shorter = chain.Where(x => !ReferenceEquals(x, end)).ToList();
-                var again = Ball(shorter, size, name, selected);
-                Debug?.Invoke($"rolling ball {name}: without its {end.Length:g3} end piece -> {again.Error ?? "ok"}");
+                if (end == null || end.Length > 0.05 * size || shortEnds.Any(s => ReferenceEquals(s.end, end))) continue;
+                shortEnds.Add((end, ReferenceEquals(end.V0, v) ? end.V1 : end.V0, EndPlane(v, dirOut, fa, fb, chain, sel)));
+            }
+            var tries = shortEnds.Select(s => new[] { s }).ToList();
+            if (shortEnds.Count == 2 && chain.Count > 2) tries.Add(shortEnds.ToArray());
+            foreach (var ends in tries)
+            {
+                var shorter = chain.Where(x => !ends.Any(s => ReferenceEquals(s.end, x))).ToList();
+                var what = $"{string.Join(" and ", ends.Select(s => s.end.Length.ToString("g3")))} end piece{(ends.Length > 1 ? "s" : "")}";
+                if (ends.All(s => s.past != null))
+                {
+                    var cutsAt = new Dictionary<NVertex, Plane>(ReferenceEqualityComparer.Instance);
+                    foreach (var s in ends) cutsAt[s.near] = s.past!;
+                    var over = Ball(shorter, size, name, selected, cutsAt, retry: false);
+                    Debug?.Invoke($"rolling ball {name}: over its {what} -> {over.Error ?? "ok"}");
+                    if (over.Error == null) return over;
+                }
+                var again = Ball(shorter, size, name, selected, retry: false);
+                Debug?.Invoke($"rolling ball {name}: without its {what} -> {again.Error ?? "ok"}");
                 if (again.Error == null) return again;
             }
+        }
         if (rb.Error != null || rb.Tool?.Native == null) return rb;
         // (a tool running past its faces, or one that fits but ends on a face at an angle: its square end leans past
         // that face on one side and leaves a sliver on the other, as the tube's rim fillet on the plenum's end face.
         // As the line tools, run on and cut back to the face; a fitting tool with square ends is left as it is)
-        bool skew = rb.Fits && ChainEnds(chain).Any(x => !pivots.Any(p => ReferenceEquals(p.v, x.v))
-            && (EndPlane(x.v, x.dirOut, x.fa, x.fb, chain, sel, out _, nearSquare: true) != null || EndCutAt(x.v, x.dirOut, x.fa, x.fb, chain, sel) is { Plane: null }));
+        bool skew = rb.Fits && ChainEnds(chain).Any(x => !pivots.Any(p => ReferenceEquals(p.v, x.v)) && (endCuts?.ContainsKey(x.v) == true
+            || EndPlane(x.v, x.dirOut, x.fa, x.fb, chain, sel, out _, nearSquare: true) != null || EndCutAt(x.v, x.dirOut, x.fa, x.fb, chain, sel) is { Plane: null }));
         if (rb.Fits && !skew) return JoinPivots(rb, rb.Tool, rb.Fits, pivots, chain);
         var cuts = new List<(Vec3 v, Plane pl)>();
         var corners = new List<RoundCornerCut>();
@@ -583,6 +604,7 @@ public static class NativeBlend
         var on = RollingBall.Build(chain, size, name, OnFaces, (v, dirOut, fa, fb) =>
         {
             if (pivots.Any(x => ReferenceEquals(x.v, v))) return 0;
+            if (endCuts != null && endCuts.TryGetValue(v, out var given)) { cuts.Add((v.P, given)); return run; }
             if (EndPlane(v, dirOut, fa, fb, chain, sel, out _, nearSquare: true) is not { } pl)
             {
                 if (EndCutAt(v, dirOut, fa, fb, chain, sel) is not { Plane: null } roundCut) return 0;
@@ -620,7 +642,7 @@ public static class NativeBlend
                 Debug?.Invoke($"rolling ball {name}: not cut back ({(t.Native == null ? "faceted" : t.Native.Validate() ?? $"volume {v1:g4} for {v0:g4}, run on {vOn:g4}; cut at {string.Join(", ", cuts.Select(c => c.v + " n " + c.pl.Normal))}")})");
                 return JoinPivots(rb, rb.Tool, rb.Fits, pivots, chain);
             }
-            Debug?.Invoke($"rolling ball {name}: {cuts.Count + corners.Count + rounds.Count} end(s) cut back ({(rb.Fits ? "fits" : "overflows")} -> {(on.Fits ? "fits" : "overflows")})");
+            Debug?.Invoke($"rolling ball {name}: {cuts.Count + corners.Count + rounds.Count} end(s) cut back ({(rb.Fits ? "fits" : "overflows")} -> {(on.Fits ? "fits" : "overflows")}; {t.Bounds.Min}..{t.Bounds.Max}, cut at {string.Join(", ", cuts.Select(c => c.v + " n " + c.pl.Normal))})");
             // (fitting but for what was cut off)
             return JoinPivots(rb, t, on.Fits, pivots, chain);
         }

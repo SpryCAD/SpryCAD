@@ -819,7 +819,7 @@ public sealed class NBoolean
         {
             var (e, f) = cand[k];
             var hits = found[k];
-            if (Trace != null && Environment.GetEnvironmentVariable("FC_TRACE_EDGE") is { } te && e.Mid.ToString().Contains(te))
+            if (Trace != null && Environment.GetEnvironmentVariable("FC_TRACE_EDGE") is { } te && (e.Mid.ToString() + e.V0.P + e.V1.P).Contains(te))
                 T($"    edge {e.V0.P}->{e.V1.P} x {f.Tag.Name} ({f.Surface.Kind}): on={hits.OnSurface} hits {string.Join(" ", hits.Params.Select(t => $"{e.Curve.Eval(t)}/cls{Dom(f).Classify(f.Surface.Project(e.Curve.Eval(t)), _onTol)}"))}");
             if (hits.OnSurface) { onSurface.Add((e, f)); continue; }
             foreach (var t in hits.Params)
@@ -1253,6 +1253,7 @@ public sealed class NBoolean
         using (Prof.Time("sec.domains")) { domA = Dom(fa); domB = Dom(fb); }
         var dbgPair = Trace != null && Environment.GetEnvironmentVariable("FC_TRACE_PAIR") is { } tp && (fa.Tag.Name + "|" + fb.Tag.Name).Contains(tp);
         if (dbgPair) T($"  pair {fa.Tag.Name} x {fb.Tag.Name}: {curves.Count} curves ({string.Join(",", curves.Select(c => c.GetType().Name))}), breakpoints {string.Join(" ", bps.Select(v => v.P))}");
+        if (dbgPair) foreach (var v in vtol.Keys.Where(v => !bps.Contains(v))) T($"    not a breakpoint: {v.P} off {sa.F_(v.P):g3} / {sb.F_(v.P):g3} (tol {vtol[v]:g3})");
         if (dbgPair) foreach (var c in curves.OfType<NPolyline>()) T($"    polyline {c.Pts[0]} .. {c.Pts[^1]} ({c.Pts.Length} pts, closed={c.IsClosed}), breakpoint tolerance {PolylineOnTol}, breakpoint distances {string.Join(" ", bps.Select(v => Vec3.Distance(c.Eval(c.Param(v.P)), v.P).ToString("0.######")))}");
         foreach (var c in curves)
         {

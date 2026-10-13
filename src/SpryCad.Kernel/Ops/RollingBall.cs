@@ -34,7 +34,20 @@ public static class RollingBall
         var d = pc.Dir(atStart ? pc.Ta : pc.Tb) * (atStart ? -1 : 1);
         var d0 = d;
         var tol = 1e-9 * Math.Max(1, len);
-        const int steps = 12;
+        // (the old stretch as the edge is, fit noise and all: the body's edge, the tool's lying on it. But the end it
+        // runs on from, no longer a vertex, on both surfaces, as the points marched on from it: past it the curve
+        // follows them, not the noise)
+        {
+            int k = atStart ? 0 : pts.Count - 1;
+            var q = NSurface.ProjectToIntersection(sa, sb, pts[k]);
+            if (Math.Abs(sa.F_(q)) < 1e-7 * Math.Max(1, len) && Math.Abs(sb.F_(q)) < 1e-7 * Math.Max(1, len) && Vec3.Distance(q, pts[k]) < 1e-3 * Math.Max(1, len))
+                pts[k] = cur = q;
+        }
+        // (spaced about as the old stretch's points: a spline through points far apart after close ones swings off)
+        double spacing = 0;
+        for (int i = 1; i < pts.Count; i++) spacing += Vec3.Distance(pts[i - 1], pts[i]);
+        spacing /= pts.Count - 1;
+        int steps = (int)Math.Clamp(Math.Ceiling(len / Math.Max(spacing, 1e-9)), 12, 96);
         var more = new List<Vec3>();
         for (int i = 0; i < steps; i++)
         {
@@ -56,7 +69,18 @@ public static class RollingBall
         // (the new curve runs as the edge does)
         bool rev = pc.Tb < pc.Ta;
         if (rev) pts.Reverse();
-        var c = new NSpline(BSplineCurve.Interpolate(pts, 3));
+        var bs = BSplineCurve.Interpolate(pts, 3);
+        var raw = new NSpline(bs);
+        // (how far it strays from the surfaces, the old stretch's noise included, as fitted curves carry: points on it a
+        // boolean splits it at are taken as on them within that)
+        double off = 0;
+        for (int i = 0, n = 4 * pts.Count; i <= n; i++)
+        {
+            var m = raw.Eval((double)i / n);
+            off = Math.Max(off, Vec3.Distance(m, NSurface.ProjectToIntersection(sa, sb, m)));
+        }
+        Debug?.Invoke($"  run on {len:g3}: {more.Count} steps, the curve within {off:g3} of the surfaces");
+        var c = new NSpline(bs) { FitTol = Math.Max(off, (e.Curve as NSpline)?.FitTol ?? 0) };
         NVertex At(Vec3 p) => Vec3.Distance(p, e.V0.P) < 1e-9 ? e.V0 : Vec3.Distance(p, e.V1.P) < 1e-9 ? e.V1 : new NVertex(p);
         var ne = new NEdge(c, 0, 1, At(pts[0]), At(pts[^1]));
         ne.Uses.AddRange(e.Uses);
