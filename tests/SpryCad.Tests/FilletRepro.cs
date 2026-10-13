@@ -88,6 +88,25 @@ static class FilletRepro
             SpryCad.Kernel.NativeBlend.Debug = m => Console.WriteLine("NB " + m);
             SpryCad.Kernel.RollingBall.Debug = m => Console.WriteLine("RB " + m);
         }
+        if (Environment.GetEnvironmentVariable("SEAMS") is { } upto)
+        {
+            // the edges between two faces named (substrings), the angle between their normals along each
+            var parts = upto.Split('|');
+            int k = doc.Features.FindIndex(f => f.Name == parts[0]);
+            var st = new Regenerator().Rebuild(doc, k + 1).State;
+            foreach (var b in st.Bodies)
+                foreach (var e in b.Solid.Native!.Edges)
+                {
+                    if (e.Uses.Count != 2) continue;
+                    var (fa, fb) = (e.Uses[0].Face, e.Uses[1].Face);
+                    bool Has(string x) => fa.Tag.Name.Contains(x) || fb.Tag.Name.Contains(x);
+                    if (!Has(parts[1]) || !Has(parts[2])) continue;
+                    var angs = Enumerable.Range(0, 5).Select(i => e.At(i / 4.0)).Select(p =>
+                        Math.Acos(Math.Clamp(Vec3.Dot(fa.Surface.Normal(p) * (fa.Sense ? 1 : -1), fb.Surface.Normal(p) * (fb.Sense ? 1 : -1)), -1, 1)) * 180 / Math.PI);
+                    Console.WriteLine($"  {e.Curve.GetType().Name} {e.V0.P}->{e.V1.P} [{fa.Tag.Name}|{fb.Tag.Name}] angles {string.Join(" ", angs.Select(x => x.ToString("0.###")))}");
+                }
+            return 0;
+        }
         if (Environment.GetEnvironmentVariable("REPRO_STOP") is { } stop)
         {
             // the part up to the feature named, then that feature alone with the boolean traced
