@@ -321,7 +321,7 @@ public partial class MainWindow
                 Sep();
                 Cmd("trim", "Trim\nEntities", () => SetSketchTool(SketchTool.Trim), SketchTool.Trim);
                 Cmd("sketchfillet", "Sketch\nFillet", () => { if (_sketch == null) { SetSketchTool(SketchTool.Fillet); return; } _sketch.StartFillet(); UpdateToolButtons(); BuildSketchPage(); }, SketchTool.Fillet);
-                Cmd("mirror", "Mirror\nEntities", MirrorEntities);
+                Cmd("sketchmirror", "Mirror\nEntities", MirrorEntities);
                 Cmd("offset", "Offset\nEntities", OffsetEntities);
                 Cmd("convert", "Convert\nEntities", ConvertEntities);
                 Cmd("construction", "Construction\nGeometry", ToggleConstruction);

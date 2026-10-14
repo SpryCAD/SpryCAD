@@ -45,6 +45,7 @@ public static class Icons
         ["lpattern"] = ("M10 3h5v5h-5z M17 3h5v5h-5z M3 10h5v5H3z M10 10h5v5h-5z M17 10h5v5h-5z M3 20h19 M19 18l3 2-3 2", "M3 3h5v5H3z"),
         ["cpattern"] = ("M20 10a2 2 0 1 0 0.01 0z M12 18a2 2 0 1 0 0.01 0z M4 10a2 2 0 1 0 0.01 0z M12 12m-1 0a1 1 0 1 0 2 0a1 1 0 1 0-2 0", "M12 2a2 2 0 1 0 0.01 0z"),
         ["mirror"] = ("M3 18L10 6v12z M21 18L14 6v12z", "M12 2v20"),
+        ["sketchmirror"] = ("M3 18L10 6v12z M21 18L14 6v12z", "M12 2v20"),
         // assemblies: two blocks stacked; a block with an arrow in; a block with arrows out (floating); a block with a light outline
         ["assembly"] = ("M3 13h9v8H3z M12 9h9v8h-9z", "M7 5h9v4"),
         ["insertcomp"] = ("M10 10h11v11H10z", "M2 3l6 6 M8 4v5H3"),

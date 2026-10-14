@@ -27,7 +27,7 @@ public partial class MainWindow
     {
         if (_sketch is not { } ed) { Status("Mirror Entities works in a sketch: edit or start a sketch first."); return; }
         if (InEntityPage) EndEntityPage();
-        var page = new PmPage("Mirror Entities", "mirror");
+        var page = new PmPage("Mirror Entities", "sketchmirror");
         var what = page.Section("Entities to Mirror");
         var ents = page.Selection(what, "Entities", SelFilter.SketchSegment,
             "Click the sketch entities to mirror. Click one again (or Delete in the box) to take it out.",

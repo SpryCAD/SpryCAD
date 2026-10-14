@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Mirror entities (sketch): a line and its mirrored copy (accent) either side of a dash-dot centerline (accent).
+       Points (accent): the ends of each line -->
+  <path d="M16 2V30" fill="none" stroke="#2F7BD6" stroke-width="2" stroke-dasharray="6 3 2 3"/>
+  <path d="M5 25L11 7" fill="none" stroke="#24364F" stroke-width="2"/>
+  <path d="M27 25L21 7" fill="none" stroke="#2F7BD6" stroke-width="2"/>
+  <path d="M3 23h4v4H3z M9 5h4v4H9z M25 23h4v4h-4z M19 5h4v4h-4z" fill="#2F7BD6"/>
+</svg>

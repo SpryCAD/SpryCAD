@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <!-- Helical cut, 16 px: bold helical grooves (dark blue) cut round a steel bar -->
+  <defs>
+    <linearGradient id="gt" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#F1F3F6"/><stop offset="1" stop-color="#D5DBE3"/></linearGradient>
+    <linearGradient id="gc" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#A9B4C2"/><stop offset=".3" stop-color="#EEF1F5"/><stop offset=".55" stop-color="#C9D0DA"/><stop offset="1" stop-color="#7A8899"/></linearGradient>
+    <clipPath id="body"><path d="M3.5 3.5V12.5A5 2.5 0 0 0 13.5 12.5V3.5Z"/></clipPath>
+  </defs>
+  <g stroke-linejoin="miter" stroke-linecap="square">
+    <path d="M3.5 3.5V12.5A5 2.5 0 0 0 13.5 12.5V3.5Z" fill="url(#gc)"/>
+    <g clip-path="url(#body)" fill="none" stroke="#162B4D" stroke-width="2" stroke-linecap="butt">
+      <path d="M2 8.5Q8.5 9.5 15 3"/>
+      <path d="M2 13Q8.5 14 15 7.5"/>
+      <path d="M2 17.5Q8.5 18.5 15 12"/>
+    </g>
+    <ellipse cx="8.5" cy="3.5" rx="5" ry="2.5" fill="url(#gt)"/>
+    <path d="M3.5 3.5V12.5A5 2.5 0 0 0 13.5 12.5V3.5" fill="none" stroke="#24364F"/>
+    <ellipse cx="8.5" cy="3.5" rx="5" ry="2.5" fill="none" stroke="#24364F"/>
+  </g>
+</svg>

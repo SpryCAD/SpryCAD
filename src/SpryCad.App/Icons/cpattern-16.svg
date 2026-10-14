@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <!-- Circular pattern, 16 px: the seed boss (blue, in front) and three copies (grey) round a circle (accent) -->
+  <defs>
+    <linearGradient id="gt" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#F1F3F6"/><stop offset="1" stop-color="#D5DBE3"/></linearGradient>
+    <linearGradient id="bt" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#E4F0FD"/><stop offset="1" stop-color="#B9D6F6"/></linearGradient>
+    <linearGradient id="gc" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#A9B4C2"/><stop offset=".3" stop-color="#EEF1F5"/><stop offset=".55" stop-color="#C9D0DA"/><stop offset="1" stop-color="#7A8899"/></linearGradient>
+    <linearGradient id="bc" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#8CB6EA"/><stop offset=".35" stop-color="#E6F1FD"/><stop offset=".55" stop-color="#B5D3F5"/><stop offset="1" stop-color="#3F73B8"/></linearGradient>
+  </defs>
+  <g stroke-linejoin="miter" stroke-linecap="square">
+    <ellipse cx="8.5" cy="10" rx="6" ry="3" fill="none" stroke="#2F7BD6"/>
+    <path d="M6.5 4.5V7A2 1 0 0 0 10.5 7V4.5Z" fill="url(#gc)"/>
+    <ellipse cx="8.5" cy="4.5" rx="2" ry="1" fill="url(#gt)"/>
+    <path d="M6.5 4.5V7A2 1 0 0 0 10.5 7V4.5" fill="none" stroke="#24364F"/>
+    <ellipse cx="8.5" cy="4.5" rx="2" ry="1" fill="none" stroke="#24364F"/>
+    <path d="M1.5 7.5V10A2 1 0 0 0 5.5 10V7.5Z" fill="url(#gc)"/>
+    <ellipse cx="3.5" cy="7.5" rx="2" ry="1" fill="url(#gt)"/>
+    <path d="M1.5 7.5V10A2 1 0 0 0 5.5 10V7.5" fill="none" stroke="#24364F"/>
+    <ellipse cx="3.5" cy="7.5" rx="2" ry="1" fill="none" stroke="#24364F"/>
+    <path d="M11.5 7.5V10A2 1 0 0 0 15.5 10V7.5Z" fill="url(#gc)"/>
+    <ellipse cx="13.5" cy="7.5" rx="2" ry="1" fill="url(#gt)"/>
+    <path d="M11.5 7.5V10A2 1 0 0 0 15.5 10V7.5" fill="none" stroke="#24364F"/>
+    <ellipse cx="13.5" cy="7.5" rx="2" ry="1" fill="none" stroke="#24364F"/>
+    <path d="M6.5 10.5V13A2 1 0 0 0 10.5 13V10.5Z" fill="url(#bc)"/>
+    <ellipse cx="8.5" cy="10.5" rx="2" ry="1" fill="url(#bt)"/>
+    <path d="M6.5 10.5V13A2 1 0 0 0 10.5 13V10.5" fill="none" stroke="#24364F"/>
+    <ellipse cx="8.5" cy="10.5" rx="2" ry="1" fill="none" stroke="#24364F"/>
+  </g>
+</svg>

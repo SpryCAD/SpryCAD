@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
-  <!-- Circular pattern: the seed boss (blue) and its copies (grey) set round a circle about the centre (accent) -->
+  <!-- Circular pattern: the seed boss (blue, in front) and its copies (grey) set round a circle (accent, dashed) -->
   <defs>
     <linearGradient id="gt" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#F1F3F6"/><stop offset="1" stop-color="#D5DBE3"/></linearGradient>
     <linearGradient id="bt" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#E4F0FD"/><stop offset="1" stop-color="#B9D6F6"/></linearGradient>
@@ -7,32 +7,23 @@
     <linearGradient id="bc" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#8CB6EA"/><stop offset=".35" stop-color="#E6F1FD"/><stop offset=".55" stop-color="#B5D3F5"/><stop offset="1" stop-color="#3F73B8"/></linearGradient>
   </defs>
   <g stroke-linejoin="miter" stroke-linecap="square">
-    <ellipse cx="16.5" cy="18" rx="11" ry="5.5" fill="none" stroke="#2F7BD6" stroke-dasharray="2 1.5"/>
-    <path d="M14.5 18H18.5 M16.5 16.5V19.5" fill="none" stroke="#2F7BD6" stroke-linecap="butt"/>
-    <path d="M13.5 9.5V13A3 1.5 0 0 0 19.5 13V9.5Z" fill="url(#gc)"/>
-    <ellipse cx="16.5" cy="9.5" rx="3" ry="1.5" fill="url(#gt)"/>
-    <path d="M13.5 9.5V13A3 1.5 0 0 0 19.5 13V9.5" fill="none" stroke="#24364F"/>
-    <ellipse cx="16.5" cy="9.5" rx="3" ry="1.5" fill="none" stroke="#24364F"/>
-    <path d="M23.5 12.5V16A3 1.5 0 0 0 29.5 16V12.5Z" fill="url(#gc)"/>
-    <ellipse cx="26.5" cy="12.5" rx="3" ry="1.5" fill="url(#gt)"/>
-    <path d="M23.5 12.5V16A3 1.5 0 0 0 29.5 16V12.5" fill="none" stroke="#24364F"/>
-    <ellipse cx="26.5" cy="12.5" rx="3" ry="1.5" fill="none" stroke="#24364F"/>
-    <path d="M3.5 12.5V16A3 1.5 0 0 0 9.5 16V12.5Z" fill="url(#gc)"/>
-    <ellipse cx="6.5" cy="12.5" rx="3" ry="1.5" fill="url(#gt)"/>
-    <path d="M3.5 12.5V16A3 1.5 0 0 0 9.5 16V12.5" fill="none" stroke="#24364F"/>
-    <ellipse cx="6.5" cy="12.5" rx="3" ry="1.5" fill="none" stroke="#24364F"/>
-    <path d="M3.5 17.5V21A3 1.5 0 0 0 9.5 21V17.5Z" fill="url(#gc)"/>
-    <ellipse cx="6.5" cy="17.5" rx="3" ry="1.5" fill="url(#gt)"/>
-    <path d="M3.5 17.5V21A3 1.5 0 0 0 9.5 21V17.5" fill="none" stroke="#24364F"/>
-    <ellipse cx="6.5" cy="17.5" rx="3" ry="1.5" fill="none" stroke="#24364F"/>
-    <path d="M23.5 17.5V21A3 1.5 0 0 0 29.5 21V17.5Z" fill="url(#gc)"/>
-    <ellipse cx="26.5" cy="17.5" rx="3" ry="1.5" fill="url(#gt)"/>
-    <path d="M23.5 17.5V21A3 1.5 0 0 0 29.5 21V17.5" fill="none" stroke="#24364F"/>
-    <ellipse cx="26.5" cy="17.5" rx="3" ry="1.5" fill="none" stroke="#24364F"/>
-    <path d="M13.5 20.5V24A3 1.5 0 0 0 19.5 24V20.5Z" fill="url(#bc)"/>
-    <ellipse cx="16.5" cy="20.5" rx="3" ry="1.5" fill="url(#bt)"/>
-    <path d="M14.5 20.5A2 1 0 0 0 16.5 21.5" fill="none" stroke="#FFFFFF" stroke-opacity=".8"/>
-    <path d="M13.5 20.5V24A3 1.5 0 0 0 19.5 24V20.5" fill="none" stroke="#24364F"/>
-    <ellipse cx="16.5" cy="20.5" rx="3" ry="1.5" fill="none" stroke="#24364F"/>
+    <ellipse cx="16.5" cy="18" rx="10" ry="5" fill="none" stroke="#2F7BD6" stroke-dasharray="2.5 1.5" stroke-linecap="butt"/>
+    <path d="M12.5 8V13A4 2 0 0 0 20.5 13V8Z" fill="url(#gc)"/>
+    <ellipse cx="16.5" cy="8" rx="4" ry="2" fill="url(#gt)"/>
+    <path d="M12.5 8V13A4 2 0 0 0 20.5 13V8" fill="none" stroke="#24364F"/>
+    <ellipse cx="16.5" cy="8" rx="4" ry="2" fill="none" stroke="#24364F"/>
+    <path d="M2.5 13V18A4 2 0 0 0 10.5 18V13Z" fill="url(#gc)"/>
+    <ellipse cx="6.5" cy="13" rx="4" ry="2" fill="url(#gt)"/>
+    <path d="M2.5 13V18A4 2 0 0 0 10.5 18V13" fill="none" stroke="#24364F"/>
+    <ellipse cx="6.5" cy="13" rx="4" ry="2" fill="none" stroke="#24364F"/>
+    <path d="M22.5 13V18A4 2 0 0 0 30.5 18V13Z" fill="url(#gc)"/>
+    <ellipse cx="26.5" cy="13" rx="4" ry="2" fill="url(#gt)"/>
+    <path d="M22.5 13V18A4 2 0 0 0 30.5 18V13" fill="none" stroke="#24364F"/>
+    <ellipse cx="26.5" cy="13" rx="4" ry="2" fill="none" stroke="#24364F"/>
+    <path d="M12.5 18V23A4 2 0 0 0 20.5 23V18Z" fill="url(#bc)"/>
+    <ellipse cx="16.5" cy="18" rx="4" ry="2" fill="url(#bt)"/>
+    <path d="M13.5 18A3 1.5 0 0 0 16.5 19.5" fill="none" stroke="#FFFFFF" stroke-opacity=".8"/>
+    <path d="M12.5 18V23A4 2 0 0 0 20.5 23V18" fill="none" stroke="#24364F"/>
+    <ellipse cx="16.5" cy="18" rx="4" ry="2" fill="none" stroke="#24364F"/>
   </g>
 </svg>
