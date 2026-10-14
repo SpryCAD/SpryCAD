@@ -273,65 +273,62 @@ public partial class MainWindow
         foreach (var (n, t) in _tabs) t.IsChecked = n == name;
         CommandBar.Children.Clear();
         _toolButtons.Clear();
+        _cmdLabels.Clear();
+        _dropGroups.Clear();
+        Command T(string icon, string label, SketchTool tool) => new(icon, label, () => SetSketchTool(tool), tool);
         switch (name)
         {
             case "Assembly":
                 AssemblyCommands();
                 break;
             case "Features":
-                Cmd("extrude", "Extruded\nBoss/Base", () => ExtrudeCommand(false));
-                Cmd("revolve", "Revolved\nBoss/Base", () => RevolveCommand(false));
-                Cmd("sweep", "Swept\nBoss/Base", () => SweepCommand(false));
-                Cmd("loft", "Lofted\nBoss/Base", () => LoftCommand(false));
-                Cmd("helical", "Helical\nBoss/Base", () => HelicalCommand(false));
+                // the families on split buttons (each shows the one used last)
+                Family("Boss",
+                    new("extrude", "Extruded Boss/Base", () => ExtrudeCommand(false)),
+                    new("revolve", "Revolved Boss/Base", () => RevolveCommand(false)),
+                    new("sweep", "Swept Boss/Base", () => SweepCommand(false)),
+                    new("loft", "Lofted Boss/Base", () => LoftCommand(false)),
+                    new("helical", "Helical Boss/Base", () => HelicalCommand(false)));
+                Family("Cut",
+                    new("cut", "Extruded Cut", () => ExtrudeCommand(true)),
+                    new("cutrevolve", "Revolved Cut", () => RevolveCommand(true)),
+                    new("cutsweep", "Swept Cut", () => SweepCommand(true)),
+                    new("cutloft", "Lofted Cut", () => LoftCommand(true)),
+                    new("cuthelical", "Helical Cut", () => HelicalCommand(true)));
+                Family("Hole", new("hole", "Hole Wizard", HoleCommand), new("thread", "Thread", ThreadCommand));
                 Sep();
-                Cmd("cut", "Extruded\nCut", () => ExtrudeCommand(true));
-                Cmd("cutrevolve", "Revolved\nCut", () => RevolveCommand(true));
-                Cmd("cutsweep", "Swept\nCut", () => SweepCommand(true));
-                Cmd("cutloft", "Lofted\nCut", () => LoftCommand(true));
-                Cmd("cuthelical", "Helical\nCut", () => HelicalCommand(true));
-                Cmd("hole", "Hole\nWizard", HoleCommand);
-                Cmd("thread", "Thread", ThreadCommand);
+                Family("Fillet", new("fillet", "Fillet", () => BlendCommand(true)), new("chamfer", "Chamfer", () => BlendCommand(false)));
+                Family("Shell", new("shell", "Shell", ShellCommand), new("draft", "Draft", DraftCommand));
                 Sep();
-                Cmd("fillet", "Fillet", () => BlendCommand(true));
-                Cmd("chamfer", "Chamfer", () => BlendCommand(false));
-                Cmd("shell", "Shell", ShellCommand);
-                Cmd("draft", "Draft", DraftCommand);
-                Sep();
-                Cmd("lpattern", "Linear\nPattern", LinearPatternCommand);
-                Cmd("cpattern", "Circular\nPattern", CircularPatternCommand);
-                Cmd("mirror", "Mirror", MirrorCommand);
-                Sep();
-                Cmd("plane", "Reference\nPlane", PlaneCommand);
-                Cmd("axis", "Reference\nAxis", AxisCommand);
+                Family("Pattern",
+                    new("lpattern", "Linear Pattern", LinearPatternCommand),
+                    new("cpattern", "Circular Pattern", CircularPatternCommand),
+                    new("mirror", "Mirror", MirrorCommand));
+                Family("Reference", new("plane", "Reference Plane", PlaneCommand), new("axis", "Reference Axis", AxisCommand));
                 Cmd("combine", "Combine", CombineCommand);
                 break;
             case "Sketch":
                 if (_sketch == null) Cmd("sketch", "Sketch", () => StartSketchCommand());
-                else Cmd("exitsketch", "Exit\nSketch", () => ExitSketch(true));
-                Cmd("dimension", "Smart\nDimension", () => SetSketchTool(SketchTool.SmartDimension), SketchTool.SmartDimension);
+                else Cmd("exitsketch", "Exit Sketch", () => ExitSketch(true));
+                Cmd("dimension", "Smart Dimension", () => SetSketchTool(SketchTool.SmartDimension), SketchTool.SmartDimension);
                 Sep();
-                Cmd("line", "Line", () => SetSketchTool(SketchTool.Line), SketchTool.Line);
-                Cmd("centerline", "Centerline", () => SetSketchTool(SketchTool.Centerline), SketchTool.Centerline);
-                Cmd("rect", "Corner\nRectangle", () => SetSketchTool(SketchTool.Rectangle), SketchTool.Rectangle);
-                Cmd("centerrect", "Center\nRectangle", () => SetSketchTool(SketchTool.CenterRectangle), SketchTool.CenterRectangle);
+                // the kinds of a shape on one button, named by the kind shown
+                Family(null, T("line", "Line", SketchTool.Line), T("centerline", "Centerline", SketchTool.Centerline));
+                Family(null, T("rect", "Corner Rectangle", SketchTool.Rectangle), T("centerrect", "Center Rectangle", SketchTool.CenterRectangle));
                 Cmd("circle", "Circle", () => SetSketchTool(SketchTool.Circle), SketchTool.Circle);
-                Cmd("centerarc", "Centerpoint\nArc", () => SetSketchTool(SketchTool.CenterArc), SketchTool.CenterArc);
-                Cmd("arc3", "3 Point\nArc", () => SetSketchTool(SketchTool.ThreePointArc), SketchTool.ThreePointArc);
-                Cmd("tangentarc", "Tangent\nArc", () => SetSketchTool(SketchTool.TangentArc), SketchTool.TangentArc);
-                Cmd("polygon", "Polygon", () => SetSketchTool(SketchTool.Polygon), SketchTool.Polygon);
-                Cmd("slot", "Straight\nSlot", () => SetSketchTool(SketchTool.Slot), SketchTool.Slot);
+                Family(null, T("centerarc", "Centerpoint Arc", SketchTool.CenterArc), T("arc3", "3 Point Arc", SketchTool.ThreePointArc),
+                    T("tangentarc", "Tangent Arc", SketchTool.TangentArc));
+                Family(null, T("slot", "Straight Slot", SketchTool.Slot), T("polygon", "Polygon", SketchTool.Polygon));
                 Cmd("spline", "Spline", () => SetSketchTool(SketchTool.Spline), SketchTool.Spline);
                 Cmd("point", "Point", () => SetSketchTool(SketchTool.Point), SketchTool.Point);
                 Sep();
-                Cmd("trim", "Trim\nEntities", () => SetSketchTool(SketchTool.Trim), SketchTool.Trim);
-                Cmd("sketchfillet", "Sketch\nFillet", () => { if (_sketch == null) { SetSketchTool(SketchTool.Fillet); return; } _sketch.StartFillet(); UpdateToolButtons(); BuildSketchPage(); }, SketchTool.Fillet);
-                Cmd("sketchmirror", "Mirror\nEntities", MirrorEntities);
-                Cmd("offset", "Offset\nEntities", OffsetEntities);
-                Cmd("convert", "Convert\nEntities", ConvertEntities);
-                Cmd("construction", "Construction\nGeometry", ToggleConstruction);
-                Cmd("relations", "Add\nRelations", AddRelationCommand);
-                Cmd("normalto", "Normal\nTo", NormalTo);
+                Cmd("trim", "Trim Entities", () => SetSketchTool(SketchTool.Trim), SketchTool.Trim);
+                Cmd("sketchfillet", "Sketch Fillet", () => { if (_sketch == null) { SetSketchTool(SketchTool.Fillet); return; } _sketch.StartFillet(); UpdateToolButtons(); BuildSketchPage(); }, SketchTool.Fillet);
+                Family(null, new("offset", "Offset Entities", OffsetEntities), new("sketchmirror", "Mirror Entities", MirrorEntities),
+                    new("convert", "Convert Entities", ConvertEntities));
+                Cmd("construction", "Construction Geometry", ToggleConstruction);
+                Cmd("relations", "Add Relations", AddRelationCommand);
+                Cmd("normalto", "Normal To", NormalTo);
                 break;
             case "Sheet Metal":
                 Cmd("flatpattern", "Flat\nPattern", FlatPatternCommand);
@@ -355,15 +352,14 @@ public partial class MainWindow
                 break;
         }
         UpdateToolButtons();
+        FitCommandRow();
     }
 
+    /// <summary>A command's button on the row: its icon and its name beside it (a "\n" in the name is a space).</summary>
     void Cmd(string icon, string label, Action click, SketchTool? tool = null)
     {
-        var sp = new StackPanel { Spacing = 1, HorizontalAlignment = HorizontalAlignment.Center };
-        sp.Children.Add(Icons.Make(icon, 26));
-        sp.Children.Add(new TextBlock { Text = label });
-        var b = new Button { Classes = { "cmd" }, Content = sp };
         var name = label.Replace('\n', ' ');
+        var b = new Button { Classes = { "cmd" }, Content = RowContent(icon, name) };
         var key = tool is { } st && SketchToolKeys.TryGetValue(st, out var k) ? $" ({k})" : "";
         ToolTip.SetTip(b, CommandHelp.TryGetValue(name, out var help) ? $"{name}{key}\n{help}" : name + key);
         b.Click += (_, _) => click();
@@ -425,6 +421,7 @@ public partial class MainWindow
 
     void UpdateToolButtons()
     {
+        UpdateDropGroups();
         // tool buttons stay enabled: picking a sketch tool outside a sketch starts one (then pick a plane/face)
         foreach (var (t, b) in _toolButtons)
             if (_sketch != null && _sketch.Tool == t) b.Classes.Add("active"); else b.Classes.Remove("active");

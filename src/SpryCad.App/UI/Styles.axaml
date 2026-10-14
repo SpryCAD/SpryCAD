@@ -7,9 +7,9 @@
     <Setter Property="Background" Value="Transparent" />
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="BorderBrush" Value="Transparent" />
-    <Setter Property="Padding" Value="5,3" />
+    <Setter Property="Padding" Value="6,2" />
     <Setter Property="Margin" Value="1,0" />
-    <Setter Property="MinWidth" Value="54" />
+    <Setter Property="MinWidth" Value="0" />
     <Setter Property="VerticalAlignment" Value="Stretch" />
     <Setter Property="CornerRadius" Value="3" />
   </Style>
@@ -22,8 +22,8 @@
     <Setter Property="BorderBrush" Value="{DynamicResource Spry.SelectedBorder}" />
   </Style>
   <Style Selector="Button.cmd TextBlock">
-    <Setter Property="FontSize" Value="{x:Static ui:TypeScale.Small}" />
-    <Setter Property="TextAlignment" Value="Center" />
+    <Setter Property="FontSize" Value="{x:Static ui:TypeScale.Body}" />
+    <Setter Property="VerticalAlignment" Value="Center" />
     <Setter Property="Foreground" Value="{DynamicResource Spry.Text}" />
   </Style>
   <Style Selector="Button.cmd:disabled TextBlock">
@@ -32,6 +32,28 @@
   <Style Selector="Button.cmd:disabled /template/ ContentPresenter">
     <Setter Property="Background" Value="Transparent" />
     <Setter Property="BorderBrush" Value="Transparent" />
+  </Style>
+  <!-- a command family's split button (MainWindow.CommandLayout.cs): the button and its arrow, one outlined box -->
+  <Style Selector="Button.cmd.split, Button.cmd.drop">
+    <Setter Property="Margin" Value="0" />
+    <Setter Property="CornerRadius" Value="0" />
+    <Setter Property="BorderThickness" Value="0" />
+  </Style>
+  <Style Selector="Button.cmd.drop">
+    <Setter Property="Padding" Value="4,2" />
+  </Style>
+  <Style Selector="Border.splitbox">
+    <Setter Property="BorderBrush" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="3" />
+    <Setter Property="Margin" Value="1,0" />
+    <Setter Property="ClipToBounds" Value="True" />
+  </Style>
+  <Style Selector="Border.splitbox:pointerover">
+    <Setter Property="BorderBrush" Value="{DynamicResource Spry.HoverBorder}" />
+  </Style>
+  <Style Selector="Border.splitbox:pointerover Border.splitdivider">
+    <Setter Property="Background" Value="{DynamicResource Spry.HoverBorder}" />
   </Style>
 
   <!-- small toolbar buttons -->
