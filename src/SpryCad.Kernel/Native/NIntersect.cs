@@ -428,7 +428,42 @@ public static class NIntersect
             if (w > 1e-12) roots.Add(phi - w);
             return roots;
         }
+        if (c is NCircle cs && s.Kind is SurfaceKind.Cylinder or SurfaceKind.Cone && Vec3.Cross(cs.Axis, s.Axis).Length < 1e-12)
+            return CircleAcrossRound(cs, s, tol);
         return null;
+    }
+
+    /// <summary>
+    /// A circle square to a cylinder's or cone's axis (a gear's rims, bores and chamfer edges against its teeth's round
+    /// faces): in the circle's plane the surface is a circle too (a cone's section at that height, on its nappe), so
+    /// the crossings are two circles', in closed form. Concentric: none (on it all the way is the caller's probe); a
+    /// touch within tol: one exact point, as for a plane.
+    /// </summary>
+    static List<double> CircleAcrossRound(NCircle c, NSurface s, double tol)
+    {
+        var roots = new List<double>();
+        var a = s.Axis;
+        var h = Vec3.Dot(c.C - s.Origin, a);
+        var r2 = s.Kind == SurfaceKind.Cylinder ? s.R : s.R + h * Math.Tan(s.R2);
+        if (r2 < -tol) return roots; // past the cone's apex: no surface there
+        r2 = Math.Max(r2, 0);
+        // the section's centre in the circle's frame
+        var o = s.Origin + a * h - c.C;
+        double dx = Vec3.Dot(o, c.X), dy = Vec3.Dot(o, c.Y), r1 = c.R;
+        var d = Math.Sqrt(dx * dx + dy * dy);
+        if (d < 1e-12 * (1 + r1)) return roots;
+        var phi = Math.Atan2(dy, dx);
+        // along the line of centres, a = (r1² − r2² + d²) / 2d; the crossings at ± acos(a / r1) from it
+        var x = (r1 * r1 - r2 * r2 + d * d) / (2 * d * r1);
+        if (Math.Abs(x) > 1 || Math.Abs(Math.Abs(x) - 1) < 1e-12)
+        {
+            if (TouchesSurface && (Math.Abs(d - (r1 + r2)) < tol || Math.Abs(d - Math.Abs(r1 - r2)) < tol)) roots.Add(x > 0 ? phi : phi + Math.PI);
+            return roots;
+        }
+        var w = Math.Acos(x);
+        roots.Add(phi + w);
+        if (w > 1e-12) roots.Add(phi - w);
+        return roots;
     }
 
     /// <summary>Real roots of a t² + b t + c (touches within tol included), via the stable formula.</summary>
