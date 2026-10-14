@@ -718,10 +718,10 @@ public partial class MainWindow
             var sk = f.Consumes.FirstOrDefault(c => Session.Doc.Find(c) is SketchFeature);
             if (sk != null && f is not HoleFeature) menu.Items.Add(Item("Edit Sketch", () => EditFeature(sk), null, "sketch"));
             if (f is HoleFeature hf) menu.Items.Add(Item("Edit Hole Positions", () => EditFeature(hf.SketchId), null, "sketch"));
-            // a sketch shown or hidden in the graphics area (e.g. one a feature uses, to pick it again for a sweep)
-            if (f is SketchFeature)
+            // a sketch, plane or axis shown or hidden in the graphics area (e.g. one a feature uses, to pick it again)
+            if (f is SketchFeature or PlaneFeature or AxisFeature)
             {
-                var shown = Session.Doc.SketchShown(id, Session.Doc.ConsumedByActive().Contains(id));
+                var shown = Session.Doc.SketchShown(id, UsedByActive().Contains(id));
                 menu.Items.Add(Item(shown ? "Hide" : "Show", () => SetSketchShown(id, !shown), null, shown ? "hide" : "show"));
             }
             menu.Items.Add(new Separator());

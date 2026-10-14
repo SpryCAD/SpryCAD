@@ -127,6 +127,20 @@ static class PlaneReferenceTests
             t.True(CadDocument.FromJson(doc.ToJson()).Features.OfType<PlaneFeature>().Any(p => p.Refs.Any(r => r.Round != null && r.Relation == PlaneRelation.Tangent)), "kept");
         });
 
+        t.Test("Reference planes and axes are used (so hidden unless shown) once a sketch is on them or a feature refers to them", () =>
+        {
+            var doc = new CadDocument();
+            var p1 = doc.AddFeature(new PlaneFeature { Base = PlaneRef.Front, Offset = "10" });
+            var p2 = doc.AddFeature(new PlaneFeature { Base = PlaneRef.Front, Offset = "20" });
+            var ax = doc.AddFeature(new AxisFeature { Refs = [new() { Plane = PlaneRef.Front }, new() { Plane = PlaneRef.Top }] });
+            t.True(doc.UsedByActive().Count == 0, "nothing uses them yet");
+            doc.AddFeature(new SketchFeature { Plane = new PlaneRef { Feature = p1.Id }, Sketch = CoreTests.Rect(10, 10) });
+            doc.AddFeature(new PlaneFeature { Mode = PlaneMode.References, Refs = [new() { Line = new DirRef { Feature = ax.Id }, Relation = PlaneRelation.Coincident }, new() { Plane = PlaneRef.Top, Relation = PlaneRelation.Perpendicular }] });
+            var used = doc.UsedByActive();
+            t.True(used.Contains(p1.Id) && used.Contains(ax.Id) && !used.Contains(p2.Id), "the sketch's plane and the axis a plane goes through: " + string.Join(",", used));
+            t.True(!doc.SketchShown(p1.Id, true) && doc.SketchShown(p2.Id, false), "used hidden, unused shown");
+        });
+
         t.Test("Reference axes: along a line or round face, where two planes meet, through two points, square to a plane through a point", () =>
         {
             var doc = new CadDocument();

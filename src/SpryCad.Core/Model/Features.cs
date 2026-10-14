@@ -429,6 +429,17 @@ public sealed class PlaneFeature : Feature
     public bool Flip { get; set; }
     /// <summary>The references and how the plane relates to each (References).</summary>
     public List<PlaneReference> Refs { get; set; } = new();
+    /// <summary>The size it is drawn, as dragged by its handles (in its own X and Y); null: to fit what is sketched on it.</summary>
+    public PlaneExtent? Size { get; set; }
+}
+
+/// <summary>The rectangle a plane is drawn as, in the plane's own coordinates (about its origin).</summary>
+public sealed class PlaneExtent
+{
+    public double MinX { get; set; }
+    public double MinY { get; set; }
+    public double MaxX { get; set; }
+    public double MaxY { get; set; }
 }
 
 /// <summary>One reference of an axis: a plane or flat face, a line (edge, sketch line, round face's axis), or a point.</summary>

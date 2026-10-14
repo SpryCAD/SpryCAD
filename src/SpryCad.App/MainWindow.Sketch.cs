@@ -54,11 +54,28 @@ public partial class MainWindow
         };
         page.OnCancel = () => { _pendingAfterSketch = null; _pendingTool = null; ShowPage(null); };
         page.OnOk = page.OnCancel;
+        // a reference plane just made and not used yet: offered (OK sketches on it; clicking another plane takes that)
+        if (UnusedLastPlane() is { } offered)
+        {
+            box.Items.Add(offered);
+            box.Refresh();
+            page.Info(s, $"{offered.Name} is not used yet: OK (Enter) sketches on it.");
+            page.OnOk = () => { if (TryPlaneOf(box.Items.FirstOrDefault(), out var p3, out var f3)) { ShowPage(null); StartSketch(p3!, f3); } else page.OnCancel!(); };
+        }
         ShowPage(page);
         _planePickPage = page; // the planes show while it is open (ShowPage restores them when it goes)
         Viewport.ShowPlanes = true;
         Viewport.Redraw();
         Status("Select a plane or planar face for the sketch.");
+    }
+
+    /// <summary>The last feature, when it is a reference plane nothing uses yet (made for the sketch that comes next), as a pick.</summary>
+    SelItem? UnusedLastPlane()
+    {
+        var doc = Session.Doc;
+        if (doc.Features.Take(doc.ActiveCount).LastOrDefault() is not PlaneFeature { Suppressed: false } pf || UsedByActive().Contains(pf.Id)) return null;
+        if (Session.Result?.State.Planes.TryGetValue(pf.Id, out var fr) != true) return null;
+        return new SelItem { Kind = SelKind.Plane, Name = pf.Name, FeatureId = pf.Id, Frame = fr };
     }
 
     // the "select a plane for the sketch" page, while open: it shows the planes, even when they are hidden

@@ -33,10 +33,18 @@ public interface IViewportMode
     Cursor? Cursor { get; }
 }
 
-/// <summary>A reference plane shown in the viewport.</summary>
-public sealed record PlaneDisplay(string Name, string? FeatureId, Frame Frame, double HalfSize);
-/// <summary>A reference axis as drawn: the stretch from A to B.</summary>
-public sealed record AxisDisplay(string Name, string FeatureId, Vec3 A, Vec3 B);
+/// <summary>
+/// A reference plane in the viewport: drawn (and picked) when <paramref name="Shown"/>, or when all planes are shown,
+/// or while hovered or selected; a square about its origin, or the rectangle <paramref name="Min"/> to <paramref name="Max"/>
+/// (in its own X and Y).
+/// </summary>
+public sealed record PlaneDisplay(string Name, string? FeatureId, Frame Frame, double HalfSize, bool Shown = true, Vec2? Min = null, Vec2? Max = null, Rgba? Tint = null)
+{
+    public Vec2 Lo => Min ?? new Vec2(-HalfSize, -HalfSize);
+    public Vec2 Hi => Max ?? new Vec2(HalfSize, HalfSize);
+}
+/// <summary>A reference axis as drawn: the stretch from A to B (when shown, or hovered or selected).</summary>
+public sealed record AxisDisplay(string Name, string FeatureId, Vec3 A, Vec3 B, bool Shown = true);
 
 /// <summary>A sketch shown (not being edited) in the viewport.</summary>
 public sealed record SketchDisplay(string FeatureId, SketchResult Result);
@@ -582,21 +590,99 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         {
             var key = new SelItem { Kind = SelKind.Plane, Name = p.Name, FeatureId = p.FeatureId }.Key;
             var hc = hl.Of(key);
-            if (!ShowPlanes && hc == null) continue;
-            var f = p.Frame; var s = p.HalfSize;
-            var a = f.ToWorld(-s, -s); var b = f.ToWorld(s, -s); var c = f.ToWorld(s, s); var d = f.ToWorld(-s, s);
-            var edge = hc ?? new Rgba(0.35f, 0.45f, 0.6f, 0.9f);
-            var fill = (hc ?? new Rgba(0.55f, 0.68f, 0.85f)).WithAlpha(hc != null ? 0.25f : 0.10f);
+            if (!ShowPlanes && !p.Shown && hc == null) continue;
+            var f = p.Frame;
+            var (lo, hi) = SizeOf(p);
+            var a = f.ToWorld(lo.X, lo.Y); var b = f.ToWorld(hi.X, lo.Y); var c = f.ToWorld(hi.X, hi.Y); var d = f.ToWorld(lo.X, hi.Y);
+            // (the origin planes lightly in the colour of the axis square to them, as the triad)
+            Rgba edgeBase = new(0.35f, 0.45f, 0.6f, 0.9f), fillBase = new(0.55f, 0.68f, 0.85f);
+            if (p.Tint is { } tint) { edgeBase = Mix(edgeBase, tint, 0.45f).WithAlpha(0.9f); fillBase = Mix(fillBase, tint, 0.35f); }
+            var edge = hc ?? edgeBase;
+            var fill = (hc ?? fillBase).WithAlpha(hc != null ? 0.25f : 0.10f);
             g.Quad(a, b, c, d, fill, transparent: true);
             g.Line(a, b, edge); g.Line(b, c, edge); g.Line(c, d, edge); g.Line(d, a, edge);
+            if (p.FeatureId != null && p.FeatureId == HandlesOn)
+            {
+                // the size handles: a small square at each corner and the middle of each side
+                var r = Camera.PixelSize * 4;
+                foreach (var h in HandlePoints(lo, hi))
+                {
+                    var q = f.ToWorld(h);
+                    Vec3 P(double x, double y) => q + f.XDir * x + f.YDir * y;
+                    g.Quad(P(-r, -r), P(r, -r), P(r, r), P(-r, r), new Rgba(1, 1, 1, 1), top: true);
+                    g.Line(P(-r, -r), P(r, -r), edge, top: true); g.Line(P(r, -r), P(r, r), edge, top: true);
+                    g.Line(P(r, r), P(-r, r), edge, top: true); g.Line(P(-r, r), P(-r, -r), edge, top: true);
+                }
+            }
         }
+    }
+
+    /// <summary>The tint of an origin plane: the triad colour of the axis square to it (Front: Z, Top: Y, Right: X); null for any other.</summary>
+    public static Rgba? OriginPlaneTint(string name) => name switch
+    {
+        "Front" => new Rgba(0.1f, 0.2f, 0.9f),
+        "Top" => new Rgba(0.1f, 0.65f, 0.1f),
+        "Right" => new Rgba(0.85f, 0.1f, 0.1f),
+        _ => null,
+    };
+
+    // ---- plane size handles (on the plane being added or edited) ----
+
+    /// <summary>The feature id of the plane whose size handles show; null: none.</summary>
+    public string? HandlesOn { get; set; }
+    /// <summary>A handle let go: the plane's new size (its own X and Y, about its origin).</summary>
+    public Action<Vec2, Vec2>? PlaneSized { get; set; }
+    int _handle = -1;
+    (Vec2 lo, Vec2 hi)? _sizing; // the size while a handle is dragged
+
+    (Vec2 lo, Vec2 hi) SizeOf(PlaneDisplay p) => _sizing is { } s && _handle >= 0 && p.FeatureId == HandlesOn ? s : (p.Lo, p.Hi);
+
+    /// <summary>The handles: corners (0-3, counter-clockwise from lower left), then the middles of the sides (4-7, from the bottom).</summary>
+    static Vec2[] HandlePoints(Vec2 lo, Vec2 hi)
+    {
+        var m = (lo + hi) / 2;
+        return [lo, new(hi.X, lo.Y), hi, new(lo.X, hi.Y), new(m.X, lo.Y), new(hi.X, m.Y), new(m.X, hi.Y), new(lo.X, m.Y)];
+    }
+
+    PlaneDisplay? HandlePlane => HandlesOn == null ? null : Planes.FirstOrDefault(p => p.FeatureId == HandlesOn);
+
+    /// <summary>The handle under the cursor (within a few pixels), or -1.</summary>
+    int HandleAt(double x, double y)
+    {
+        if (HandlePlane is not { } p) return -1;
+        var pts = HandlePoints(p.Lo, p.Hi);
+        for (int i = 0; i < pts.Length; i++) if (ScreenPx(p.Frame.ToWorld(pts[i]), x, y) <= 7) return i;
+        return -1;
+    }
+
+    /// <summary>A handle dragged to (x, y): its corner or side follows, where the cursor's ray meets the plane; never smaller than a few pixels.</summary>
+    void DragHandle(double x, double y)
+    {
+        if (HandlePlane is not { } p) return;
+        var (ro, rd) = Camera.Ray(x, y);
+        var t = p.Frame.Plane.IntersectRay(ro, rd);
+        if (double.IsNaN(t)) return;
+        var at = p.Frame.ToLocal(ro + rd * t);
+        var (lo, hi) = (p.Lo, p.Hi);
+        var min = Camera.PixelSize * 12;
+        double lx = lo.X, ly = lo.Y, hx = hi.X, hy = hi.Y;
+        if (_handle is 0 or 3 or 7) lx = Math.Min(at.X, hx - min);
+        if (_handle is 1 or 2 or 5) hx = Math.Max(at.X, lx + min);
+        if (_handle is 0 or 1 or 4) ly = Math.Min(at.Y, hy - min);
+        if (_handle is 2 or 3 or 6) hy = Math.Max(at.Y, ly + min);
+        _sizing = (new Vec2(lx, ly), new Vec2(hx, hy));
+        Redraw();
     }
 
     /// <summary>Reference axes: dash-dot, as a temporary axis, in the plane colour unless hovered or selected.</summary>
     void DrawRefAxes(DynamicGeometry g, Highlights hl)
     {
         foreach (var a in Axes)
-            DrawAxis(g, a.A, a.B, hl.Of(new SelItem { Kind = SelKind.Axis, FeatureId = a.FeatureId }.Key) ?? new Rgba(0.35f, 0.45f, 0.6f, 0.9f));
+        {
+            var hc = hl.Of(new SelItem { Kind = SelKind.Axis, FeatureId = a.FeatureId }.Key);
+            if (!a.Shown && hc == null) continue;
+            DrawAxis(g, a.A, a.B, hc ?? new Rgba(0.35f, 0.45f, 0.6f, 0.9f));
+        }
     }
 
     /// <summary>The reference axis under the cursor (drawn over the model, so picked through it).</summary>
@@ -605,6 +691,7 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         double bestPx = 6; SelItem? best = null;
         foreach (var a in Axes)
         {
+            if (!a.Shown) continue;
             var (d, wp) = ScreenDistance(a.A, a.B, x, y);
             if (d >= bestPx) continue;
             bestPx = d;
@@ -1207,6 +1294,8 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
                 e.Pointer.Capture(this);
                 return;
             }
+            // a size handle of the plane being made: dragged, not a pick
+            if (HandleAt(pt.Position.X, pt.Position.Y) is var h and >= 0) { _handle = h; _sizing = null; e.Pointer.Capture(this); e.Handled = true; return; }
             _leftDown = true;
             e.Pointer.Capture(this);
             Mode?.PointerDown(this, Info(e, e.ClickCount));
@@ -1280,6 +1369,7 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
             return;
         }
         _navLast = pos;
+        if (_handle >= 0) { DragHandle(pos.X, pos.Y); return; }
         Mode?.PointerMove(this, Info(e));
     }
 
@@ -1301,6 +1391,15 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
             if (!_rightDragged) ContextRequested?.Invoke(Info(e));
             else GestureEnded?.Invoke(e.GetPosition(this));
             _rightDragged = false;
+            return;
+        }
+        if (e.InitialPressMouseButton == MouseButton.Left && _handle >= 0)
+        {
+            e.Pointer.Capture(null);
+            _handle = -1;
+            if (_sizing is { } s) PlaneSized?.Invoke(s.lo, s.hi);
+            _sizing = null;
+            Redraw();
             return;
         }
         if (e.InitialPressMouseButton == MouseButton.Left && _leftDown)
@@ -1471,11 +1570,11 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         if ((filter & SelFilter.Plane) != 0)
             foreach (var p in Planes)
             {
-                if (!ShowPlanes) continue;
+                if (!ShowPlanes && !p.Shown) continue;
                 var t = p.Frame.Plane.IntersectRay(ro, rd);
                 if (double.IsNaN(t) || t <= 0 || t >= faceDepth - 1e-6) continue;
                 var local = p.Frame.ToLocal(ro + rd * t);
-                if (Math.Abs(local.X) > p.HalfSize || Math.Abs(local.Y) > p.HalfSize) continue;
+                if (local.X < p.Lo.X || local.X > p.Hi.X || local.Y < p.Lo.Y || local.Y > p.Hi.Y) continue;
                 // prefer plane borders slightly: always accept but faces nearer win
                 if (best == null || t < bestT)
                 {

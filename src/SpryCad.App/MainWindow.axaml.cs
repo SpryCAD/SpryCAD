@@ -270,28 +270,43 @@ public partial class MainWindow : Window
             if (_tab.FitAfterLoad != null) { _tab.FitAfterLoad = null; Viewport.StandardView("Trimetric", fit: true, animate: false); }
         }
 
-        // planes
+        // planes: the origin planes (tinted as the triad's axes) when planes are shown; reference planes shown or
+        // hidden as sketches are (shown while nothing uses them, unless set in the tree), and those the feature or
+        // sketch being edited refers to; any of them while hovered or selected
         var b = state.Bounds;
         var half = b.IsEmpty ? 50 : Math.Max(30, b.Diagonal * 0.55);
-        var planes = new List<PlaneDisplay>
+        var used = UsedByActive();
+        var editRefs = RefersTo(_edit?.Feature ?? _sketch?.Feature);
+        var planes = new List<PlaneDisplay>();
+        foreach (var std in new[] { "Front", "Top", "Right" })
+            planes.Add(new PlaneDisplay(std, null, Resolver.StdPlane(std), half, editRefs.Contains(std), Tint: ViewportControl.OriginPlaneTint(std)));
+        PlaneDisplay Reference(PlaneFeature f, Frame fr)
         {
-            new("Front", null, Frame.Front, half),
-            new("Top", null, Frame.Top, half),
-            new("Right", null, Frame.Right, half),
-        };
+            var (lo, hi) = f.Size is { } sz ? (new Vec2(sz.MinX, sz.MinY), new Vec2(sz.MaxX, sz.MaxY)) : PlaneFit(f.Id, fr, state, half * 0.8);
+            var shown = doc.SketchShown(f.Id, used.Contains(f.Id)) || editRefs.Contains(f.Id) || _edit?.Feature.Id == f.Id;
+            return new PlaneDisplay(f.Name, f.Id, fr, half * 0.8, shown, lo, hi);
+        }
         foreach (var f in doc.Features.Take(doc.ActiveCount).OfType<PlaneFeature>())
             if (state.Planes.TryGetValue(f.Id, out var fr) && !f.Suppressed && !(_edit?.Feature is PlaneFeature { } ep && ep.Id == f.Id))
-                planes.Add(new PlaneDisplay(f.Name, f.Id, fr, half * 0.8));
-        // the plane being created/edited: its live preview (a new plane is not in the document yet)
+                planes.Add(Reference(f, fr));
+        // the plane being created/edited: its live preview (a new plane is not in the document yet), with its size handles
         var editingPlane = _edit?.Feature is PlaneFeature;
         if (_edit?.Feature is PlaneFeature pf && Session.PreviewActive && Session.PreviewResult?.State.Planes.TryGetValue(pf.Id, out var pfr) == true)
-            planes.Add(new PlaneDisplay(pf.Name, pf.Id, pfr, half * 0.8));
+            planes.Add(Reference(pf, pfr));
         Viewport.Planes = planes;
+        Viewport.HandlesOn = (_edit?.Feature as PlaneFeature)?.Id;
+        Viewport.PlaneSized = (lo, hi) =>
+        {
+            if (_edit?.Feature is not PlaneFeature ef) return;
+            ef.Size = new PlaneExtent { MinX = lo.X, MinY = lo.Y, MaxX = hi.X, MaxY = hi.Y };
+            _page?.RaiseChanged();
+            RefreshScene();
+        };
         // reference axes, and the one being made (its live preview)
         var axes = new List<AxisDisplay>();
         foreach (var f in doc.Features.Take(doc.ActiveCount).OfType<AxisFeature>())
             if (state.Axes.TryGetValue(f.Id, out var ax) && !f.Suppressed && _edit?.Feature.Id != f.Id)
-                axes.Add(new AxisDisplay(f.Name, f.Id, ax.A, ax.B));
+                axes.Add(new AxisDisplay(f.Name, f.Id, ax.A, ax.B, doc.SketchShown(f.Id, used.Contains(f.Id)) || editRefs.Contains(f.Id)));
         if (_edit?.Feature is AxisFeature af && Session.PreviewActive && Session.PreviewResult?.State.Axes.TryGetValue(af.Id, out var afx) == true)
             axes.Add(new AxisDisplay(af.Name, af.Id, afx.A, afx.B));
         Viewport.Axes = axes;
@@ -316,14 +331,14 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Shows or hides a sketch in the graphics area (null: the other way round from now), e.g. a sketch a feature
+    /// Shows or hides a sketch, reference plane or axis in the graphics area (null: the other way round from now), e.g. a sketch a feature
     /// uses, to pick it again for a sweep; saved with the part, undoable, nothing rebuilt.
     /// </summary>
     void SetSketchShown(string id, bool? shown)
     {
         var doc = Session.Doc;
-        if (doc.Find(id) is not SketchFeature) return;
-        var consumed = doc.ConsumedByActive().Contains(id);
+        if (doc.Find(id) is not (SketchFeature or PlaneFeature or AxisFeature)) return;
+        var consumed = UsedByActive().Contains(id);
         var show = shown ?? !doc.SketchShown(id, consumed);
         if (show == doc.SketchShown(id, consumed)) return;
         Session.Change(() => doc.SetSketchShown(id, show, consumed));

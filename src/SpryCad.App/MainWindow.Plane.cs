@@ -22,6 +22,50 @@ public partial class MainWindow
 {
     static readonly string[] RefTitles = ["First Reference", "Second Reference", "Third Reference"];
 
+    // what the active features use (sketches, reference planes and axes), worked out once per rebuild
+    (object? result, int active, HashSet<string> used)? _usedMemo;
+
+    HashSet<string> UsedByActive()
+    {
+        var doc = Session.Doc;
+        if (_usedMemo is { } m && ReferenceEquals(m.result, Session.Result) && m.active == doc.ActiveCount) return m.used;
+        var used = doc.UsedByActive();
+        _usedMemo = (Session.Result, doc.ActiveCount, used);
+        return used;
+    }
+
+    /// <summary>The origin planes, reference planes and axes a feature refers to (a sketch: the plane it is on).</summary>
+    HashSet<string> RefersTo(Feature? f)
+    {
+        var set = new HashSet<string>();
+        if (f == null) return set;
+        if (f is SketchFeature s) { if (s.Plane.Std is { } std) set.Add(std); if (s.Plane.Feature is { } pf) set.Add(pf); return set; }
+        var json = CadDocument.JsonOf(f);
+        foreach (var std in new[] { "Front", "Top", "Right" }) if (json.Contains($"\"{std}\"")) set.Add(std);
+        foreach (var g in Session.Doc.Features)
+            if (g is PlaneFeature or AxisFeature && g.Id != f.Id && CadDocument.Refers(json, g.Id)) set.Add(g.Id);
+        return set;
+    }
+
+    /// <summary>
+    /// The size a reference plane is drawn: around what is sketched on it (a little past it), so a plane with a small
+    /// sketch is small; with nothing on it, a square of <paramref name="half"/> about its origin.
+    /// </summary>
+    (Vec2 lo, Vec2 hi) PlaneFit(string planeId, Frame fr, ModelState state, double half)
+    {
+        double lx = double.MaxValue, ly = double.MaxValue, hx = double.MinValue, hy = double.MinValue;
+        foreach (var sf in Session.Doc.Features.Take(Session.Doc.ActiveCount).OfType<SketchFeature>())
+        {
+            if (sf.Plane.Feature != planeId || !state.Sketches.TryGetValue(sf.Id, out var sr)) continue;
+            foreach (var (a, c) in SpryCad.App.Viewport.SketchDrawing.Segments(sr))
+                foreach (var p in new[] { fr.ToLocal(a), fr.ToLocal(c) })
+                { lx = Math.Min(lx, p.X); ly = Math.Min(ly, p.Y); hx = Math.Max(hx, p.X); hy = Math.Max(hy, p.Y); }
+        }
+        if (lx > hx) return (new Vec2(-half, -half), new Vec2(half, half));
+        var more = Math.Max(Math.Max(hx - lx, hy - ly) * 0.15, half * 0.02);
+        return (new Vec2(lx - more, ly - more), new Vec2(hx + more, hy + more));
+    }
+
     void PlaneCommand()
     {
         var f = new PlaneFeature { Mode = PlaneMode.References };
@@ -188,6 +232,9 @@ public partial class MainWindow
 
         var opts = page.Section("Options");
         page.Check(opts, "Flip normal", () => f.Flip, v => f.Flip = v);
+        // its size: dragged by the handles on it, or around what is sketched on it
+        page.ButtonRow(opts, "Size to Fit", () => { f.Size = null; page.RaiseChanged(); RefreshScene(); }, "fit");
+        page.Info(opts, "Drag the handles on the plane to size it; Size to Fit sizes it around what is sketched on it.");
 
         // the relations each reference offers, its value and its side
         sync = () =>

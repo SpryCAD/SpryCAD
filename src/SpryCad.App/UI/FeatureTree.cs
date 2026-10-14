@@ -113,9 +113,9 @@ public sealed class FeatureTree : UserControl
             foreach (var c in f.Consumes)
                 if (!string.IsNullOrEmpty(c)) consumedBy[c] = f.Id;
 
-        // sketches: an eye shows whether each is shown in the graphics area (as set, else while unused)
-        var consumedActive = doc.ConsumedByActive();
-        bool? ShownOf(Feature f) => f is SketchFeature ? doc.SketchShown(f.Id, consumedActive.Contains(f.Id)) : null;
+        // sketches, reference planes and axes: an eye shows whether each is shown in the graphics area (as set, else while unused)
+        var consumedActive = doc.UsedByActive();
+        bool? ShownOf(Feature f) => f is SketchFeature or PlaneFeature or AxisFeature ? doc.SketchShown(f.Id, consumedActive.Contains(f.Id)) : null;
 
         // suppressed by the user, by a Suppress When condition, or with a suppressed feature used
         bool Off(Feature f) => f.Suppressed || result?.Status.GetValueOrDefault(f.Id)?.Suppressed == true;

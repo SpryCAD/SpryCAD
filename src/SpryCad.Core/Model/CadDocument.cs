@@ -48,8 +48,8 @@ public sealed class CadDocument
     /// <summary>How bends unfold in this part (null: K-factor 0.5); a Flat Pattern may override it.</summary>
     public SheetMetalSettings? SheetMetal { get; set; }
     /// <summary>
-    /// Sketches shown (true) or hidden (false) by the user, by feature id; a sketch not listed is shown while no
-    /// feature uses it. Display only: kept out of the features, so showing or hiding a sketch rebuilds nothing.
+    /// Sketches, reference planes and axes shown (true) or hidden (false) by the user, by feature id; one not listed is shown while no
+    /// feature uses it. Display only: kept out of the features, so showing or hiding one rebuilds nothing.
     /// Null when nothing is set.
     /// </summary>
     public Dictionary<string, bool>? SketchVisibility { get; set; }
@@ -63,6 +63,26 @@ public sealed class CadDocument
         if (shown == !consumed) SketchVisibility?.Remove(id);
         else (SketchVisibility ??= new())[id] = shown;
         if (SketchVisibility is { Count: 0 }) SketchVisibility = null;
+    }
+
+    /// <summary>
+    /// What an active, unsuppressed feature uses: the sketches it consumes, and the reference planes and axes it refers
+    /// to (a sketch on a plane, a plane offset from one, an extrude up to one). Used ones are hidden unless shown.
+    /// </summary>
+    public HashSet<string> UsedByActive()
+    {
+        var used = ConsumedByActive();
+        var refs = Features.Take(ActiveCount).Where(f => f is PlaneFeature or AxisFeature && !f.Suppressed).Select(f => f.Id).ToHashSet();
+        if (refs.Count == 0) return used;
+        foreach (var f in Features.Take(ActiveCount))
+        {
+            if (f.Suppressed) continue;
+            if (f is SketchFeature s) { if (s.Plane.Feature is { } pf && refs.Contains(pf)) used.Add(pf); continue; } // (a sketch's own geometry refers to no plane)
+            if (refs.All(used.Contains)) break;
+            var json = JsonOf(f);
+            foreach (var id in refs) if (id != f.Id && Refers(json, id)) used.Add(id);
+        }
+        return used;
     }
 
     /// <summary>The features an active, unsuppressed feature uses (sketches hidden by default).</summary>
