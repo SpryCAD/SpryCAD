@@ -1316,8 +1316,17 @@ public static class RollingBall
         // tangents: the cap's at the start (the main blend's section there), differences between, the edge's at v
         var D = new List<Vec3> { T0 };
         for (int k = 1; k < P.Count - 1; k++) D.Add((P[k + 1] - P[k - 1]).Normalized);
-        var tvd = e.Curve.Deriv(tv).Normalized;
-        D.Add(Vec3.Dot(tvd, P[^1] - P[^2]) < 0 ? -tvd : tvd);
+        // (at v the way the centres come in: the edge's own direction there where they come in along it, but where the
+        // centres' curve meets the edge at an angle (two offsets touching there) that turns the spine through it at its
+        // very end, a kink no fit follows. From the last three, a parabola's)
+        if (P.Count < 3) D.Add((P[^1] - P[^2]).Normalized);
+        else
+        {
+            Vec3 a0 = P[^3], a1 = P[^2], a2 = P[^1];
+            double h1 = Vec3.Distance(a1, a0), h2 = Vec3.Distance(a2, a1);
+            var tEnd = (a2 - a1) * ((2 * h2 + h1) / (h2 * (h1 + h2))) - (a1 - a0) * (h2 / (h1 * (h1 + h2)));
+            D.Add(tEnd.Normalized);
+        }
         for (int k = 1; k < P.Count; k++) if (Vec3.Distance(P[k], P[k - 1]) < 1e-9 * scale) return null;
         PipeSpine sp;
         try { sp = new PipeSpine(P, D, SA, SB) { Rolls = mainSpine.Rolls.Concat(new[] { SA, SB }).Distinct().ToList() }; }

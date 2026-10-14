@@ -53,10 +53,60 @@ public sealed record BSplineSurface(int DegreeU, int DegreeV, Vec3[,] Poles, dou
         }
     }
 
-    static BSplineSurface Interpolate(Func<double, double, Vec3> f, double u0, double u1, double v0, double v1, int nu, int nv, int degree)
+    /// <summary>
+    /// <see cref="Fit"/> with the interpolation sites along v placed where they are needed: uniform across u (doubled
+    /// while the error across is above tol), along v refined locally, each interval whose error is above tol halved
+    /// (a surface only C1 along v at places, as a fillet's blend where its ball switches faces and its spine's
+    /// curvature jumps: uniform sites would have to be fine everywhere). vs: the first sites along v (in v0..v1).
+    /// </summary>
+    public static BSplineSurface FitAdaptiveV(Func<double, double, Vec3> f, double u0, double u1, double v0, double v1, double tol, int nu,
+        IEnumerable<double> vs0, int degree = 3, int maxU = 128, int maxSites = 800)
     {
-        var us = Enumerable.Range(0, nu + 1).Select(i => (double)i / nu).ToArray();
-        var vs = Enumerable.Range(0, nv + 1).Select(j => (double)j / nv).ToArray();
+        // (sites a hair apart, as a computed end next to the end itself, make the system singular: one of them)
+        var vs = new List<double>();
+        foreach (var x in vs0.Select(v => Math.Clamp((v - v0) / (v1 - v0), 0, 1)).Append(0).Append(1).OrderBy(x => x))
+            if (vs.Count == 0 || x - vs[^1] > 1e-9) vs.Add(x);
+        vs[0] = 0; vs[^1] = 1;
+        nu = Math.Max(nu, degree);
+        while (vs.Count <= degree) { var j = Enumerable.Range(0, vs.Count - 1).MaxBy(k => vs[k + 1] - vs[k]); vs.Insert(j + 1, 0.5 * (vs[j] + vs[j + 1])); }
+        while (true)
+        {
+            var us = Enumerable.Range(0, nu + 1).Select(i => (double)i / nu).ToArray();
+            var s = Interpolate(f, u0, u1, v0, v1, us, vs.ToArray(), degree);
+            double eu = 0, ev = 0;
+            var bad = new List<int>();
+            for (int j = 0; j + 1 < vs.Count; j++)
+            {
+                double worst = 0;
+                var vm = v0 + (v1 - v0) * 0.5 * (vs[j] + vs[j + 1]); var vj = v0 + (v1 - v0) * vs[j];
+                for (int i = 0; i < nu; i++)
+                {
+                    double um = u0 + (u1 - u0) * (i + 0.5) / nu, ui = u0 + (u1 - u0) * i / nu;
+                    var dc = Vec3.Distance(s.Eval(um, vm), f(um, vm));
+                    var da = Vec3.Distance(s.Eval(um, vj), f(um, vj));
+                    var db = Vec3.Distance(s.Eval(ui, vm), f(ui, vm));
+                    eu = Math.Max(eu, da); ev = Math.Max(ev, db);
+                    worst = Math.Max(worst, Math.Max(dc, db));
+                }
+                if (worst > tol) bad.Add(j);
+            }
+            Debug?.Invoke($"fit {nu}x{vs.Count - 1} (adaptive): err u {eu:g2} v {ev:g2}, {bad.Count} intervals over");
+            bool refU = eu > tol && nu < maxU;
+            if (!refU && (bad.Count == 0 || vs.Count + bad.Count > maxSites)) return s;
+            if (refU) nu = Math.Min(maxU, nu * 2);
+            if (vs.Count + bad.Count <= maxSites)
+                foreach (var j in Enumerable.Reverse(bad)) vs.Insert(j + 1, 0.5 * (vs[j] + vs[j + 1]));
+        }
+    }
+
+    static BSplineSurface Interpolate(Func<double, double, Vec3> f, double u0, double u1, double v0, double v1, int nu, int nv, int degree)
+        => Interpolate(f, u0, u1, v0, v1, Enumerable.Range(0, nu + 1).Select(i => (double)i / nu).ToArray(),
+            Enumerable.Range(0, nv + 1).Select(j => (double)j / nv).ToArray(), degree);
+
+    /// <summary>Interpolation of f at the sites us × vs (each 0 .. 1, increasing), knots by averaging them.</summary>
+    static BSplineSurface Interpolate(Func<double, double, Vec3> f, double u0, double u1, double v0, double v1, double[] us, double[] vs, int degree)
+    {
+        int nu = us.Length - 1, nv = vs.Length - 1;
         int pu = Math.Min(degree, nu), pv = Math.Min(degree, nv);
         var ku = Knots(us, pu); var kv = Knots(vs, pv);
         var Au = new Lu(Matrix(us, pu, ku)); var Av = new Lu(Matrix(vs, pv, kv));

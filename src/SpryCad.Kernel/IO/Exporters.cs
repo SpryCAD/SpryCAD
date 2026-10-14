@@ -608,8 +608,29 @@ public static class StepWriter
             nodes.Clear();
         }
         double sa = nodes.Count > 0 ? sp.S[nodes[0]] : Math.Max(sp.S0, s0 - pad), sb = nodes.Count > 0 ? sp.S[nodes[^1]] : Math.Min(sp.S1, s1 + pad);
-        var pts = nodes.Count > 0 ? nodes.Select(i => sp.P[i]).ToList() : Enumerable.Range(0, 9).Select(k => sp.Eval(sa + (sb - sa) * k / 8)).ToList();
-        var c2 = BSplineCurve.Interpolate(pts, 3);
+        var ss = nodes.Count > 0 ? nodes.Select(i => sp.S[i]).ToList() : Enumerable.Range(0, 9).Select(k => sa + (sb - sa) * k / 8).ToList();
+        // (more points where the C2 curve strays from the spine: a composite fillet's spine is only G1 where the ball
+        // switches faces, its curvature jumping, and a C2 curve through nodes a few hundredths apart misses it there by
+        // ~1e-3, the surface written then off its own edges)
+        BSplineCurve c2;
+        for (int round = 0; ; round++)
+        {
+            // (its ends along the spine's: a face ending square across the pipe, as a fillet's end or where its tip
+            // takes over, is the section square to the spine there, and a tilted end is off it by the radius times the
+            // tilt)
+            c2 = BSplineCurve.InterpolateWithEnds(ss.Select(sp.Eval).ToList(), sp.Deriv(ss[0]), sp.Deriv(ss[^1]));
+            if (round == 12) break;
+            var add = new List<double>();
+            double t = 0;
+            for (int i = 0; i + 1 < ss.Count; i++)
+            {
+                var sm = 0.5 * (ss[i] + ss[i + 1]); var q = sp.Eval(sm);
+                t = c2.ClosestParam(q, 0, 1, Math.Clamp((sm - sa) / (sb - sa), 0, 1));
+                if (Vec3.Distance(c2.Eval(t), q) > 1e-7 * Math.Max(1, rad)) add.Add(sm);
+            }
+            if (add.Count == 0) break;
+            ss = ss.Concat(add).OrderBy(x => x).ToList();
+        }
         // chord-length parameters of the interpolation ≈ spine arc length: s ↦ t linear
         double T(double s) => Math.Clamp((s - sa) / (sb - sa), 0, 1);
         Vec3 C(double s) => c2.Eval(T(s));
@@ -622,6 +643,7 @@ public static class StepWriter
         (Vec3 n1, Vec3 n2) Frame(double s) { var t = Tan(s); var n = (refv - t * Vec3.Dot(refv, t)).Normalized; return (n, Vec3.Cross(t, n)); }
         Vec3 Surface(double th, double s) { var (n1, n2) = Frame(s); return C(s) + (n1 * Math.Cos(th) + n2 * Math.Sin(th)) * rad; }
         double u0 = double.MaxValue, u1 = double.MinValue, v0 = double.MaxValue, v1 = double.MinValue, hint = double.NaN;
+        var samples = new List<(double s, double th)>();
         foreach (var p in BoundaryPoints(f, b))
         {
             var s = sp.Closest(p).s;
@@ -629,6 +651,7 @@ public static class StepWriter
             var th = Math.Atan2(Vec3.Dot(r, n2), Vec3.Dot(r, n1));
             if (!double.IsNaN(hint)) th = Native.NCurve.Wrap(th, hint);
             hint = th;
+            samples.Add((s, th));
             u0 = Math.Min(u0, th); u1 = Math.Max(u1, th); v0 = Math.Min(v0, s); v1 = Math.Max(v1, s);
         }
         var du = (u1 - u0) * 0.02 + 1e-4; var dv = (v1 - v0) * 0.02 + 1e-4;
@@ -639,9 +662,63 @@ public static class StepWriter
         var du0 = Math.Pow(384 * fitTol / Math.Max(rad, 1e-3), 0.25);
         var bend = Math.Max(Math.Min(sp.MinCurvatureRadius - rad, 1e6), rad * 0.25);
         var dv0 = Math.Pow(384 * fitTol * bend * bend * bend, 0.25);
-        // quintic, from a third of the cubic's spans (its error falls as h⁶, not h⁴): far fewer control points
-        return BSplineSurface.Fit(Surface, u0, u1, v0, v1, fitTol,
-            Math.Max(5, (int)Math.Ceiling((u1 - u0) / du0 / 3)), Math.Clamp((int)Math.Ceiling((v1 - v0) / dv0 / 3), 5, 192), degree: 5);
+        int nv0 = Math.Clamp((int)Math.Ceiling((v1 - v0) / dv0 / 3), 5, 192);
+        // (sites along the spine uniform at first, then refined where the fit is off: dense where the spine is only G1
+        // (its curvature jumping where a composite fillet's ball switches faces); a uniform grid fine enough there
+        // would be fine everywhere)
+        var sites = Enumerable.Range(0, nv0 + 1).Select(k => v0 + (v1 - v0) * k / nv0).ToList();
+        // quintic, from a third of the cubic's spans (its error falls as h⁶, not h⁴): far fewer control points.
+        // (Over the band the face takes up around the pipe at each place along it, between its contact edges, rather
+        // than the angles it takes up anywhere along it: a long fillet turning round, as a rim rolling up a cut's side,
+        // takes up a different band at each end, and all of them at once take in the pipe's inner side where its spine
+        // bends tighter than its radius, where it folds over itself)
+        if (Band(samples, v0, v1, rad) is { } band)
+        {
+            Vec3 OnBand(double u, double s) { var (l, h) = band(s); return Surface(l + (h - l) * u, s); }
+            var width = Enumerable.Range(0, 65).Max(k => { var (l, h) = band(v0 + (v1 - v0) * k / 64); return h - l; });
+            return BSplineSurface.FitAdaptiveV(OnBand, 0, 1, v0, v1, fitTol, Math.Max(5, (int)Math.Ceiling(width / du0 / 3)), sites, degree: 5);
+        }
+        return BSplineSurface.FitAdaptiveV(Surface, u0, u1, v0, v1, fitTol, Math.Max(5, (int)Math.Ceiling((u1 - u0) / du0 / 3)), sites, degree: 5);
+    }
+
+    /// <summary>
+    /// A pipe face's band of angles at each place along its spine, from its boundary's (s, angle) samples: the least
+    /// and greatest angle near each place (a window of a quarter of the radius each way along the spine), a margin
+    /// out, as smooth functions of s. Null where the band goes all the way round (a band that wraps).
+    /// </summary>
+    static Func<double, (double lo, double hi)>? Band(List<(double s, double th)> samples, double v0, double v1, double rad)
+    {
+        if (samples.Count < 4 || v1 <= v0) return null;
+        int nb = Math.Clamp((int)Math.Ceiling((v1 - v0) / (rad * 0.25)), 4, 256);
+        var h = (v1 - v0) / nb;
+        var sorted = samples.OrderBy(x => x.s).ToList();
+        var keys = sorted.Select(x => x.s).ToList();
+        var pts = new List<Vec3>(); var uk = new List<double>();
+        for (int i = 0; i <= nb; i++)
+        {
+            var s = v0 + h * i;
+            // (both contacts within the window: a fillet's are sampled at their own places along it)
+            double w = Math.Max(1.5 * h, 1e-9), lo = double.MaxValue, hi = double.MinValue;
+            int at = keys.BinarySearch(s - w); if (at < 0) at = ~at;
+            for (int k = at; k < sorted.Count && sorted[k].s <= s + w; k++) { lo = Math.Min(lo, sorted[k].th); hi = Math.Max(hi, sorted[k].th); }
+            if (lo > hi) continue;
+            pts.Add(new Vec3(lo, hi, 0)); uk.Add((s - v0) / (v1 - v0));
+        }
+        if (pts.Count < 2) return null;
+        if (pts.Any(p => p.Y - p.X > 2 * Math.PI - 0.2)) return null;
+        // (the parameters from 0 to 1: the windows at the ends hold the end values)
+        var u = uk.ToArray(); var ua = u[0]; var ub = u[^1];
+        if (ub - ua < 1e-12) return null;
+        for (int i = 0; i < u.Length; i++) u[i] = (u[i] - ua) / (ub - ua);
+        var curve = BSplineCurve.Interpolate(pts, u, Math.Min(3, pts.Count - 1));
+        var widest = pts.Max(p => p.Y - p.X);
+        var margin = 0.02 * widest + 0.02;
+        return s =>
+        {
+            var t = Math.Clamp(((s - v0) / (v1 - v0) - ua) / (ub - ua), 0, 1);
+            var q = curve.Eval(t);
+            return (q.X - margin, Math.Max(q.Y, q.X) + margin);
+        };
     }
 
     /// <summary>A B-spline surface as it is (rational ones as the complex entity STEP uses).</summary>

@@ -318,6 +318,51 @@ public sealed record BSplineCurve(int Degree, Vec3[] Poles, double[] Knots) : Ex
         return Interpolate(pts, uk, degree);
     }
 
+    /// <summary>
+    /// Cubic interpolation through points with the curve's directions at both ends given (Piegl &amp; Tiller 9.2.2),
+    /// chord-length parameters: unit directions t0, t1, scaled by the chord length (the curve's speed in them).
+    /// </summary>
+    public static BSplineCurve InterpolateWithEnds(IReadOnlyList<Vec3> pts, Vec3 t0, Vec3 t1)
+    {
+        const int p = 3;
+        int n = pts.Count - 1;
+        if (n < 1) throw new ArgumentException("need at least two points");
+        var uk = new double[n + 1];
+        double total = 0;
+        for (int k = 1; k <= n; k++) total += Vec3.Distance(pts[k], pts[k - 1]);
+        if (total < 1e-15) total = 1;
+        for (int k = 1; k <= n; k++) uk[k] = uk[k - 1] + Vec3.Distance(pts[k], pts[k - 1]) / total;
+        uk[n] = 1;
+        // n + 3 control points; knots by averaging the parameters (P&T 9.22)
+        int nc = n + 3;
+        var U = new double[nc + p + 1];
+        for (int i = nc; i < U.Length; i++) U[i] = 1;
+        for (int j = 0; j <= n - p + 1; j++)
+        {
+            double s = 0;
+            for (int i = j; i <= j + p - 1; i++) s += uk[Math.Min(i, n)];
+            U[j + p + 1] = s / p;
+        }
+        var d0 = t0.Normalized * total; var d1 = t1.Normalized * total;
+        // rows: the two control points at each end fixed (the end points, and along the end derivatives), the points
+        // between interpolated; each row's p + 1 entries from column span - p (a fixed point's: a unit entry there)
+        var spans = new int[nc]; var basis = new double[nc][]; var rhs = new Vec3[nc];
+        double[] Unit(int at) { var b = new double[p + 1]; b[at] = 1; return b; }
+        spans[0] = p; basis[0] = Unit(0); rhs[0] = pts[0];
+        spans[1] = p + 1; basis[1] = Unit(p); rhs[1] = pts[0] + d0 * (U[p + 1] / p);
+        for (int k = 1; k < n; k++)
+        {
+            spans[k + 1] = FindSpan(nc - 1, p, uk[k], U);
+            basis[k + 1] = Basis(spans[k + 1], uk[k], p, U);
+            rhs[k + 1] = pts[k];
+        }
+        // (P[n+1] = Q[n] - (1 - U[m-p-1]) / p · D, U[m-p-1] = U[nc-1] the last interior knot)
+        spans[n + 1] = nc - 1; basis[n + 1] = Unit(p - 1); rhs[n + 1] = pts[n] - d1 * ((1 - U[nc - 1]) / p);
+        spans[n + 2] = nc - 1; basis[n + 2] = Unit(p); rhs[n + 2] = pts[n];
+        var P = SolveBanded(spans, basis, rhs, nc, p);
+        return new BSplineCurve(p, P, U);
+    }
+
     /// <summary>Global interpolation through points at the given parameters (0 .. 1, increasing).</summary>
     public static BSplineCurve Interpolate(IReadOnlyList<Vec3> pts, IReadOnlyList<double> uk, int degree = 3)
     {

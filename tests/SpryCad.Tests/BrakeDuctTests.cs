@@ -77,23 +77,27 @@ static class BrakeDuctTests
         {
             // the rim rolling round the tube bend: its edges split off longer curves (cut back, split where crossed)
             // were written as the whole curve, running on past their vertices, as Inventor drew them
-            var doc = Part();
-            var rim = Feature<FilletFeature>(doc, "Tube rim");
-            rim.Radius = "0.2"; rim.TangentPropagation = true;
-            Feature<ShellFeature>(doc, "Shell").Thickness = "0.03";
-            var r = new Regenerator().Rebuild(doc);
-            var b = ExactBrepFactory.FromNative(Built(t, doc, r, "R0.2"));
-            int splines = 0;
-            foreach (var e in b.Edges)
+            // (and the part as saved: R0.3, shelled 0.125)
+            foreach (var (radius, wall) in new[] { ("0.2", "0.03"), ("0.3", "0.125") })
             {
-                if (e.Curve is not BSplineCurve bs) continue;
-                splines++;
-                var (s, f) = (bs.Eval(bs.Knots[0]), bs.Eval(bs.Knots[^1]));
-                var (v0, v1) = (b.Vertices[e.V0], b.Vertices[e.V1]);
-                var off = Math.Min(Math.Max(Vec3.Distance(s, v0), Vec3.Distance(f, v1)), Math.Max(Vec3.Distance(s, v1), Vec3.Distance(f, v0)));
-                t.True(off < 1e-4, $"an edge's curve ends {off:g3} from its vertices ({v0} .. {v1})");
+                var doc = Part();
+                var rim = Feature<FilletFeature>(doc, "Tube rim");
+                rim.Radius = radius; rim.TangentPropagation = true;
+                Feature<ShellFeature>(doc, "Shell").Thickness = wall;
+                var r = new Regenerator().Rebuild(doc);
+                var b = ExactBrepFactory.FromNative(Built(t, doc, r, $"R{radius}"));
+                int splines = 0;
+                foreach (var e in b.Edges)
+                {
+                    if (e.Curve is not BSplineCurve bs) continue;
+                    splines++;
+                    var (s, f) = (bs.Eval(bs.Knots[0]), bs.Eval(bs.Knots[^1]));
+                    var (v0, v1) = (b.Vertices[e.V0], b.Vertices[e.V1]);
+                    var off = Math.Min(Math.Max(Vec3.Distance(s, v0), Vec3.Distance(f, v1)), Math.Max(Vec3.Distance(s, v1), Vec3.Distance(f, v0)));
+                    t.True(off < 1e-4, $"R{radius}: an edge's curve ends {off:g3} from its vertices ({v0} .. {v1}), runs {s} .. {f}");
+                }
+                t.True(splines > 0, "spline edges");
             }
-            t.True(splines > 0, "spline edges");
         });
 
         t.Test("Brake duct: the tube bend ends flush under the drop's ramp, no shelf beside it", () =>
@@ -143,6 +147,35 @@ static class BrakeDuctTests
             t.True(r.Status[shell.Id].Warnings.All(w => !w.Contains("Not inside")), string.Join("; ", r.Status[shell.Id].Warnings));
             // (up both sides of the drop: no end caps, the tool runs to a point at the plenum's top)
             t.True(!b.Faces.Any(f => Capped(f, rim.Id)), "a cap at the rim's end");
+        });
+
+        // (Inventor drew the rim's blend with spikes: its surface was written as a fit through the pipe off its own edges
+        // by up to 0.001, by a C2 spine through the nodes of a spine only G1 where the ball switches faces and a uniform
+        // fit along it, and the tip's spine kinked at its point; no parameter curves for those edges)
+        t.Test("Brake duct: the part as saved, written as STEP, its fillets' surfaces hold their edges", () =>
+        {
+            var doc = Part();
+            var x = ExactBrepFactory.FromNative(new Regenerator().Rebuild(doc).State.Bodies.Single().Solid.Native!);
+            // (the writer's own fit and parameter search, as it writes each edge's parameter curve: within 1e-4)
+            var flags = System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static;
+            var pipeFit = typeof(StepWriter).GetMethod("PipeFit", flags)!;
+            var psType = typeof(StepWriter).GetNestedType("ParamSurface", System.Reflection.BindingFlags.NonPublic)!;
+            var of = psType.GetMethod("Of")!; var find = psType.GetMethod("Find")!;
+            int pipes = 0;
+            foreach (var f in x.Faces.Where(f => f.Surface.Kind == SurfaceKind.Pipe && f.Name.StartsWith("Fzcxyb9zxvjgt.", StringComparison.Ordinal)))
+            {
+                pipes++;
+                var srf = (BSplineSurface)pipeFit.Invoke(null, new object[] { f, x })!;
+                var ps = of.Invoke(null, new object[] { srf })!;
+                foreach (var (ei, _) in f.Loops.SelectMany(l => l.Edges))
+                {
+                    object? hint = null; int missed = 0;
+                    foreach (var p in x.Edges[ei].Points)
+                        if (find.Invoke(ps, new object?[] { p, hint, 1e-4, false }) is { } uv) hint = uv; else missed++;
+                    t.True(missed == 0, $"{f.Name}: {missed} of edge {ei}'s points off its written surface");
+                }
+            }
+            t.True(pipes > 0, "the rim's blend faces");
         });
 
         t.Test("Brake duct: a fillet round the intake collar's base goes all the way round, concave and convex", () =>

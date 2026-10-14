@@ -191,6 +191,38 @@ static class FilletRepro
             Console.WriteLine($"  {f.Name,-22} {(r.Status[f.Id].Ok ? "ok" : "FAILED: " + r.Status[f.Id].Error)} ({r.Status[f.Id].Milliseconds:0} ms){string.Concat(r.Status[f.Id].Warnings.Select(w => " [" + w + "]"))}");
         foreach (var b in r.State.Bodies)
             Console.WriteLine($"  body: valid={b.Solid.Native?.Validate() ?? "ok"} open={b.Solid.Topology.OpenHalfEdges}");
+        // (STEP_CHECK: each fillet face's surface as STEP writes it, its edges' points found on it within 1e-4, as the
+        // writer finds them for their parameter curves; those not, listed)
+        if (Environment.GetEnvironmentVariable("STEP_CHECK") != null)
+            foreach (var b in r.State.Bodies)
+            {
+                var x = ExactBrepFactory.FromNative(b.Solid.Native!);
+                var flags = System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static;
+                var pipeFit = typeof(StepWriter).GetMethod("PipeFit", flags)!;
+                var psType = typeof(StepWriter).GetNestedType("ParamSurface", System.Reflection.BindingFlags.NonPublic)!;
+                var of = psType.GetMethod("Of")!; var find = psType.GetMethod("Find")!;
+                int faces = 0, bad = 0;
+                foreach (var f in x.Faces.Where(f => f.Surface.Kind == SurfaceKind.Pipe))
+                {
+                    faces++;
+                    var ps = of.Invoke(null, new[] { pipeFit.Invoke(null, new object[] { f, x })! })!;
+                    foreach (var (ei, _) in f.Loops.SelectMany(l => l.Edges))
+                    {
+                        object? hint = null; int missed = 0;
+                        foreach (var p in x.Edges[ei].Points)
+                            if (find.Invoke(ps, new object?[] { p, hint, 1e-4, false }) is { } uv) hint = uv; else missed++;
+                        if (missed > 0) { bad++; Console.WriteLine($"  off its written surface: {f.Name} edge {ei} ({missed} of {x.Edges[ei].Points.Count} points)"); }
+                    }
+                }
+                Console.WriteLine($"  step check: {faces} fillet faces, {bad} edges off");
+            }
+        // (STEP_OUT: the part written as STEP there)
+        if (Environment.GetEnvironmentVariable("STEP_OUT") is { } step)
+        {
+            using var fs = File.Create(step);
+            StepWriter.Write(fs, r.State.Bodies.Select((b, i) => ($"body{i}", b.Solid)), "brake-duct");
+            Console.WriteLine($"  written {step}{(StepWriter.LastError is { } ex ? " (" + ex.Message + ")" : "")}");
+        }
         return 0;
     }
 }
