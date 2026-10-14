@@ -67,6 +67,29 @@ static class BrakeDuctTests
             }
         });
 
+        t.Test("Brake duct: exported, every spline edge's curve ends at its vertices (no run on past them)", () =>
+        {
+            // the rim rolling round the tube bend: its edges split off longer curves (cut back, split where crossed)
+            // were written as the whole curve, running on past their vertices, as Inventor drew them
+            var doc = Part();
+            var rim = Feature<FilletFeature>(doc, "Tube rim");
+            rim.Radius = "0.2"; rim.TangentPropagation = true;
+            Feature<ShellFeature>(doc, "Shell").Thickness = "0.03";
+            var r = new Regenerator().Rebuild(doc);
+            var b = ExactBrepFactory.FromNative(Built(t, doc, r, "R0.2"));
+            int splines = 0;
+            foreach (var e in b.Edges)
+            {
+                if (e.Curve is not BSplineCurve bs) continue;
+                splines++;
+                var (s, f) = (bs.Eval(bs.Knots[0]), bs.Eval(bs.Knots[^1]));
+                var (v0, v1) = (b.Vertices[e.V0], b.Vertices[e.V1]);
+                var off = Math.Min(Math.Max(Vec3.Distance(s, v0), Vec3.Distance(f, v1)), Math.Max(Vec3.Distance(s, v1), Vec3.Distance(f, v0)));
+                t.True(off < 1e-4, $"an edge's curve ends {off:g3} from its vertices ({v0} .. {v1})");
+            }
+            t.True(splines > 0, "spline edges");
+        });
+
         t.Test("Brake duct: the tube bend ends flush under the drop's ramp, no shelf beside it", () =>
         {
             var doc = Part();

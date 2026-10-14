@@ -61,6 +61,72 @@ public sealed record BSplineCurve(int Degree, Vec3[] Poles, double[] Knots) : Ex
         return (vals.ToArray(), mults.ToArray());
     }
 
+    /// <summary>
+    /// The piece of the curve between parameters a and b (a &lt; b), exactly the same curve there: knots inserted at
+    /// both to the degree's multiplicity (the curve then passes through a pole at each), the poles between kept, the
+    /// end knots clamped.
+    /// </summary>
+    public BSplineCurve Segment(double a, double b)
+    {
+        int p = Degree;
+        double lo = Knots[p], hi = Knots[Poles.Length];
+        a = Math.Clamp(a, lo, hi); b = Math.Clamp(b, lo, hi);
+        if (b <= a) throw new ArgumentException("empty segment");
+        var c = a > lo ? Insert(a, p) : this;
+        if (b < hi) c = c.Insert(b, p);
+        var K = c.Knots;
+        const double eps = 1e-14;
+        int lastA = Array.FindLastIndex(K, k => Math.Abs(k - a) <= eps * Math.Max(1, Math.Abs(a)));
+        int firstB = Array.FindIndex(K, k => Math.Abs(k - b) <= eps * Math.Max(1, Math.Abs(b)));
+        int start = lastA - p, end = firstB - 1;
+        var poles = c.Poles[start..(end + 1)];
+        var knots = new List<double>();
+        for (int i = 0; i <= p; i++) knots.Add(a);
+        for (int i = lastA + 1; i < firstB; i++) knots.Add(K[i]);
+        for (int i = 0; i <= p; i++) knots.Add(b);
+        return new BSplineCurve(p, poles, knots.ToArray());
+    }
+
+    /// <summary>The curve the other way round, over the same parameter range.</summary>
+    public BSplineCurve Reversed()
+    {
+        double lo = Knots[0], hi = Knots[^1];
+        return new BSplineCurve(Degree, Poles.Reverse().ToArray(), Knots.Reverse().Select(k => lo + hi - k).ToArray());
+    }
+
+    /// <summary>The knot u inserted until its multiplicity is r at most the degree (Piegl &amp; Tiller A5.1).</summary>
+    BSplineCurve Insert(double u, int mult)
+    {
+        int p = Degree, n = Poles.Length - 1;
+        var U = Knots; var P = Poles;
+        int k = FindSpan(n, p, u, U);
+        int s = U.Count(x => Math.Abs(x - u) <= 1e-14 * Math.Max(1, Math.Abs(u)));
+        int r = Math.Min(mult, p) - s;
+        if (r <= 0) return this;
+        var UQ = new double[U.Length + r]; var Q = new Vec3[P.Length + r];
+        for (int i = 0; i <= k; i++) UQ[i] = U[i];
+        for (int i = 1; i <= r; i++) UQ[k + i] = u;
+        for (int i = k + 1; i < U.Length; i++) UQ[i + r] = U[i];
+        for (int i = 0; i <= k - p; i++) Q[i] = P[i];
+        for (int i = k - s; i <= n; i++) Q[i + r] = P[i];
+        var R = new Vec3[p + 1];
+        for (int i = 0; i <= p - s; i++) R[i] = P[k - p + i];
+        int L = 0;
+        for (int j = 1; j <= r; j++)
+        {
+            L = k - p + j;
+            for (int i = 0; i <= p - j - s; i++)
+            {
+                var alpha = (u - U[L + i]) / (U[i + k + 1] - U[L + i]);
+                R[i] = R[i + 1] * alpha + R[i] * (1 - alpha);
+            }
+            Q[L] = R[0];
+            Q[k + r - j - s] = R[p - j - s];
+        }
+        for (int i = L + 1; i < k - s; i++) Q[i] = R[i - L];
+        return new BSplineCurve(p, Q, UQ);
+    }
+
     public Vec3 Eval(double u)
     {
         int p = Degree, n = Poles.Length - 1;

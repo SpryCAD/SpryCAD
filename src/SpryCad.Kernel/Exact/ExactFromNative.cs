@@ -164,8 +164,22 @@ public sealed partial class ExactBrepFactory
                     var clean = new List<Vec3> { pts[0] };
                     foreach (var p in pts.Skip(1)) if (Vec3.Distance(p, clean[^1]) > 1e-9) clean.Add(p);
                     if (clean.Count < 2) clean.Add(pts[^1]);
+                    // (only the edge's stretch of the spline, exactly: an edge split off a longer one (a fillet's run on
+                    // cut back, a face split where something crosses it) written whole ran on past its vertices, which
+                    // some readers draw; the other way round, reversed exactly, not refitted)
                     if (e.Curve is NSpline sp && run.Count == 1)
-                        return run[0].Forward ? sp.S : BSplineCurve.Interpolate(clean, 3);
+                    {
+                        try
+                        {
+                            double lo = sp.S.Knots[sp.S.Degree], hi = sp.S.Knots[sp.S.Poles.Length];
+                            double a = Math.Min(e.T0, e.T1), b2 = Math.Max(e.T0, e.T1);
+                            var seg = a <= lo + 1e-12 && b2 >= hi - 1e-12 ? sp.S : sp.S.Segment(a, b2);
+                            // (the curve's direction along the run: from the run's start vertex)
+                            bool along = Vec3.Distance(seg.Eval(seg.Knots[0]), pts[0]) <= Vec3.Distance(seg.Eval(seg.Knots[^1]), pts[0]);
+                            return along ? seg : seg.Reversed();
+                        }
+                        catch (ArgumentException) { return BSplineCurve.Interpolate(clean, 3); }
+                    }
                     return BSplineCurve.Interpolate(clean, 3);
                 }
         }
