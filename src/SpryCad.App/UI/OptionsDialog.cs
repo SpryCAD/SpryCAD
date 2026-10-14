@@ -290,11 +290,11 @@ public static class OptionsDialog
         }
         checkNow.Click += (_, _) => _ = Check();
         channel.SelectionChanged += (_, _) => { if (can && Updater.PendingVersion == null) _ = Check(); };
-        update.Click += async (_, _) =>
+        // (a download already under way, started here or from the update card, is joined: never a second one)
+        async Task Get(Updater.Release r)
         {
-            if (found is not { } r) return;
-            // the channel the update came from is the one followed from now on, even if Options is cancelled
-            if (Picked() != Updater.Channel) { UserSettings.UpdateChannel = Picked(); UserSettings.SkippedUpdate = null; UserSettings.Save(); }
+            update.Content = $"Update to {r.Version}";
+            update.IsVisible = true;
             update.IsEnabled = checkNow.IsEnabled = channel.IsEnabled = false;
             try { await Updater.Download(r, new Progress<double>(p => latest.Text = $"Downloading {r.Version}... {p:P0}")); }
             catch (Exception ex)
@@ -305,10 +305,18 @@ public static class OptionsDialog
                 return;
             }
             Ready(r.Version);
+        }
+        update.Click += (_, _) =>
+        {
+            if (found is not { } r) return;
+            // the channel the update came from is the one followed from now on, even if Options is cancelled
+            if (Picked() != Updater.Channel) { UserSettings.UpdateChannel = Picked(); UserSettings.SkippedUpdate = null; UserSettings.Save(); }
+            _ = Get(r);
         };
         restart.Click += (_, _) => { (TopLevel.GetTopLevel(restart) as Window)?.Close(); Updater.RestartNow(c.Owner); };
 
         if (Updater.PendingVersion is { } pending) Ready(pending);
+        else if (Updater.Downloading is { } dl) { found = dl; _ = Get(dl); }
         else if (can) _ = Check();
         else latest.Text = "Not checked: this copy cannot update itself.";
 

@@ -106,6 +106,8 @@ static class Updater
             return;
         }
         if (_pending != null) { await Dialogs.Message(w, "Check for Updates", "An update is ready: it installs when SpryCAD closes."); return; }
+        // already downloading (Update clicked, its window hidden): its progress again, not a second download
+        if (Downloading is { } dl) { await ShowProgress(w, dl); return; }
         w.Status("Checking for updates...");
         Release? r;
         try { r = await Fetch(); }
@@ -139,7 +141,10 @@ static class Updater
         try
         {
             var progress = new Progress<double>(f => w.Status($"Downloading SpryCAD {r.Version}... {f:P0}"));
-            await Download(r, progress);
+            var download = Download(r, progress);
+            // its progress in a window (hidden, the download goes on: the status bar shows it, and the ready card follows)
+            _ = ShowProgress(w, r);
+            await download;
         }
         catch (Exception ex)
         {
@@ -215,11 +220,66 @@ static class Updater
     internal static bool IsNewer(string candidate, string current) =>
         Key(candidate) is { } a && Key(current) is { } b && a.CompareTo(b) > 0;
 
+    // the download under way (one at a time: a second Update joins it, rather than writing the same file again)
+    static Task? _download;
+    static Release? _downloadRelease;
+    static double _downloaded;
+    static event Action<double>? DownloadProgress;
+
+    /// <summary>The version being downloaded, if a download is under way.</summary>
+    internal static Release? Downloading => _download is { IsCompleted: false } ? _downloadRelease : null;
+
     /// <summary>
     /// Downloads the installer into a temporary folder, checks its size and SHA-256 against the feed, and queues it to
-    /// install when SpryCAD closes.
+    /// install when SpryCAD closes. Asked again while it downloads, it joins that download; once downloaded, it is done.
     /// </summary>
-    internal static async Task Download(Release r, IProgress<double> progress)
+    internal static Task Download(Release r, IProgress<double> progress)
+    {
+        if (_pending != null && _release?.Version == r.Version) return Task.CompletedTask;
+        if (Downloading?.Version != r.Version)
+        {
+            _downloadRelease = r; _downloaded = 0;
+            _download = DownloadFile(r);
+        }
+        void On(double f) => progress.Report(f);
+        DownloadProgress += On;
+        progress.Report(_downloaded);
+        return Joined(_download!, On);
+
+        static async Task Joined(Task t, Action<double> on)
+        {
+            try { await t; }
+            finally { DownloadProgress -= on; }
+        }
+    }
+
+    static void Report(double f) { _downloaded = f; DownloadProgress?.Invoke(f); }
+
+    /// <summary>
+    /// A download's progress in a small window, until it is done (or hidden: the download goes on). Nothing to click
+    /// that would start it again.
+    /// </summary>
+    static async Task ShowProgress(Window owner, Release r)
+    {
+        var text = new TextBlock { Text = $"Downloading SpryCAD {r.Version}...", TextWrapping = TextWrapping.Wrap };
+        var bar = new ProgressBar { Minimum = 0, Maximum = 1, Height = 8, Margin = new Thickness(0, 10, 0, 0) };
+        var note = new TextBlock { Text = "It installs when SpryCAD closes. Hide this and the download goes on.", Foreground = Palette.TextMuted, FontSize = TypeScale.Small, Margin = new Thickness(0, 8, 0, 0), TextWrapping = TextWrapping.Wrap };
+        var hide = new Button { Content = "Hide", IsDefault = true, IsCancel = true, MinWidth = 80, HorizontalContentAlignment = HorizontalAlignment.Center,
+            HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 12, 0, 0) };
+        var root = new StackPanel { Children = { text, bar, note, hide } };
+        var w = Dialogs.MakeWindow("Updating SpryCAD", root, 420);
+        void Show(double f) { bar.Value = f; text.Text = $"Downloading SpryCAD {r.Version}... {f:P0}"; }
+        Show(_downloaded);
+        DownloadProgress += Show;
+        hide.Click += (_, _) => w.Close();
+        var t = _download;
+        // done (or failed: the one who started it says so): the window goes
+        _ = t?.ContinueWith(_ => w.Close(), TaskScheduler.FromCurrentSynchronizationContext());
+        try { if (t is { IsCompleted: false }) await w.ShowDialog(owner); }
+        finally { DownloadProgress -= Show; }
+    }
+
+    static async Task DownloadFile(Release r)
     {
         var dir = Path.Combine(Path.GetTempPath(), "SpryCAD-update");
         Directory.CreateDirectory(dir);
@@ -237,7 +297,7 @@ static class Updater
                 await dst.WriteAsync(buf.AsMemory(0, n));
                 got += n;
                 if (got > r.Size) break;
-                progress.Report((double)got / r.Size);
+                Report((double)got / r.Size);
             }
         }
         if (!Matches(file, r)) { File.Delete(file); throw new InvalidDataException("the download does not match the published checksum."); }
