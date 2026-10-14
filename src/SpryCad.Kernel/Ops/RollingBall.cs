@@ -1089,6 +1089,131 @@ public static class RollingBall
         return new Result(NTess.ToSolid(body), convex, fits, null);
     }
 
+    /// <summary>
+    /// The tool with its end cap at a run out replaced by the fillet carried on to a point: where the blended edge's
+    /// faces turn tangent at its end vertex v (a round fading out where a cut's side runs up into its top), the tool
+    /// stops short at stop point q on edge e (its faces a few degrees apart there, as far as the ball marches) and is
+    /// capped. From q to v the ball's centre is solved in each section across the edge directly (sliding its contact
+    /// along one face until it is the radius from the other: well posed however near tangent the faces are), and is
+    /// on the faces' common normal at v itself, where it touches both at v. The tip's blend surface narrows to
+    /// nothing there, its contact edges meeting at v; it takes the cap's edges, so the tool runs on through without a
+    /// seam. Null where it cannot be made (the capped tool stands).
+    /// </summary>
+    internal static Solid? Tip(Solid tool, NEdge e, NVertex v, Vec3 q, double r, bool convex)
+    {
+        if (tool.Native == null) return null;
+        var nb = tool.Native.Clone(out var emap);
+        nb.Link();
+        var scale = Math.Max(1, nb.Bounds.Diagonal);
+        var tol = 1e-7 * scale;
+        // the cap: a planar end with a corner at q
+        var cap = nb.Faces.FirstOrDefault(f => f.Surface.Kind == SurfaceKind.Plane && (f.Tag.Name.EndsWith(".End0", StringComparison.Ordinal) || f.Tag.Name.EndsWith(".End1", StringComparison.Ordinal))
+            && f.Coedges.Count() == 3 && f.Coedges.Any(c => Vec3.Distance(c.Start.P, q) < 1e-6 * scale));
+        if (cap == null) return null;
+        var arcCo = cap.Coedges.FirstOrDefault(c => c.Edge.Curve is NCircle);
+        if (arcCo == null) return null;
+        var arc = arcCo.Edge; var circle = (NCircle)arc.Curve;
+        NFace Other(NEdge x, NFace not) => x.Uses.Select(u => u.Face).First(f => !ReferenceEquals(f, not));
+        var blendT = Other(arc, cap);
+        if (blendT.Surface.Spine is not { } mainSpine) return null;
+        var secs = cap.Coedges.Where(c => !ReferenceEquals(c.Edge, arc)).Select(c => c.Edge).ToList();
+        var vq = cap.Coedges.Select(c => c.Start).First(x => Vec3.Distance(x.P, q) < 1e-6 * scale);
+        // which section is on which support: the face beside it, and the body face of e on that surface
+        var (fa, fb) = (e.Uses[0].Face, e.Uses[1].Face);
+        var sideA = Other(secs[0], cap); var sideB = Other(secs[1], cap);
+        if (!sideA.Surface.CoincidentWith(fa.Surface, 1e-9) && !Family(sideA.Surface, fa.Surface)) { (sideA, sideB) = (sideB, sideA); (secs[0], secs[1]) = (secs[1], secs[0]); }
+        if (!sideA.Surface.CoincidentWith(fa.Surface, 1e-9) && !Family(sideA.Surface, fa.Surface)) return null;
+        var (secA, secB) = (secs[0], secs[1]);
+        NVertex Far(NEdge x) => ReferenceEquals(x.V0, vq) ? x.V1 : x.V0;
+        var vA0 = Far(secA); var vB0 = Far(secB);
+        NSurface SA = sideA.Surface, SB = sideB.Surface;
+        double rho = convex ? -r : r;
+        Vec3 OutA(Vec3 p) => SA.Normal(p).Normalized * (fa.Sense ? 1 : -1);
+        double DistB(Vec3 p) => SB.F_(p) * (fb.Sense ? 1 : -1);
+
+        // the edge from q to v, and the ball's centres along it
+        double tq = e.Curve.Param(q, e.Curve.Periodic ? 0.5 * (e.T0 + e.T1) : null);
+        double tv = ReferenceEquals(e.V0, v) ? e.T0 : e.T1;
+        if (Math.Abs(tv - tq) < 1e-12) return null;
+        var S0 = circle.C;
+        var T0 = circle.Axis.Normalized;
+        if (Vec3.Dot(T0, v.P - q) < 0) T0 = -T0;
+        var P = new List<Vec3> { S0 };
+        var dPrev = (vA0.P - q).Normalized;
+        const int N = 24;
+        for (int k = 1; k < N; k++)
+        {
+            // (closer together towards v, where the blend narrows fastest)
+            var f = 1 - Math.Pow(1 - (double)k / N, 2);
+            var ek = e.Curve.Eval(tq + (tv - tq) * f);
+            var tan = e.Curve.Deriv(tq + (tv - tq) * f).Normalized;
+            var nA = OutA(ek);
+            var dA = Vec3.Cross(tan, nA).Normalized;
+            if (Vec3.Dot(dA, dPrev) < 0) dA = -dA;
+            dPrev = dA;
+            Vec3 Centre(double lam) { var qa = SA.Project(ek + dA * lam); return qa + OutA(qa) * rho; }
+            double G(double lam) => DistB(Centre(lam)) - rho;
+            double lo = 0, glo = G(0), hi = 1e-4 * r, ghi = G(hi);
+            while (Math.Sign(ghi) == Math.Sign(glo) && hi < 4 * r) { hi *= 2; ghi = G(hi); }
+            if (Math.Sign(ghi) == Math.Sign(glo)) return null;
+            for (int it = 0; it < 100; it++)
+            {
+                var m = 0.5 * (lo + hi); var gm = G(m);
+                if (Math.Sign(gm) == Math.Sign(glo)) { lo = m; glo = gm; } else hi = m;
+            }
+            P.Add(Centre(0.5 * (lo + hi)));
+        }
+        // at v: touching both faces there
+        P.Add(v.P + OutA(v.P) * rho);
+        // tangents: the cap's at the start (the main blend's section there), differences between, the edge's at v
+        var D = new List<Vec3> { T0 };
+        for (int k = 1; k < P.Count - 1; k++) D.Add((P[k + 1] - P[k - 1]).Normalized);
+        var tvd = e.Curve.Deriv(tv).Normalized;
+        D.Add(Vec3.Dot(tvd, P[^1] - P[^2]) < 0 ? -tvd : tvd);
+        for (int k = 1; k < P.Count; k++) if (Vec3.Distance(P[k], P[k - 1]) < 1e-9 * scale) return null;
+        PipeSpine sp;
+        try { sp = new PipeSpine(P, D, SA, SB) { Rolls = mainSpine.Rolls.Concat(new[] { SA, SB }).Distinct().ToList() }; }
+        catch (ArgumentException) { return null; }
+        var pipe = NSurface.Pipe(sp, r);
+        double s0 = sp.S[0], s1 = sp.S[^1];
+
+        // the tip's edges and faces: the edge's piece q..v, the contacts from the cap's corners to v
+        var vV = new NVertex(v.P);
+        var eTip = tq < tv ? new NEdge(e.Curve, tq, tv, vq, vV) : new NEdge(e.Curve, tv, tq, vV, vq);
+        var cA = new NEdge(new NContact(sp, false), s0, s1, vA0, vV);
+        var cB = new NEdge(new NContact(sp, true), s0, s1, vB0, vV);
+        // each face's loop: from a cap edge, the way round opposite to the main tool's face's use of it, then on by
+        // the vertex it ends at
+        List<(NEdge, bool)>? Loop(NEdge first, NFace mainUser, params NEdge[] rest)
+        {
+            var use = mainUser.Coedges.First(c => ReferenceEquals(c.Edge, first));
+            var loop = new List<(NEdge, bool)> { (first, !use.Forward) };
+            var end = use.Forward ? first.V0 : first.V1;
+            var left = rest.ToList();
+            while (left.Count > 0)
+            {
+                var nx = left.FirstOrDefault(x => ReferenceEquals(x.V0, end) || ReferenceEquals(x.V1, end));
+                if (nx == null) return null;
+                var fwd = ReferenceEquals(nx.V0, end);
+                loop.Add((nx, fwd));
+                end = fwd ? nx.V1 : nx.V0;
+                left.Remove(nx);
+            }
+            return ReferenceEquals(end, loop[0].Item2 ? loop[0].Item1.V0 : loop[0].Item1.V1) ? loop : null;
+        }
+        var la = Loop(secA, sideA, eTip, cA); var lb = Loop(secB, sideB, eTip, cB); var lt = Loop(arc, blendT, cB, cA);
+        if (la == null || lb == null || lt == null) return null;
+        var tipA = MakeFace(SA, sideA.Sense, sideA.Tag, la, null);
+        var tipB = MakeFace(SB, sideB.Sense, sideB.Tag, lb, null);
+        var tipT = MakeFace(pipe, blendT.Sense, blendT.Tag, lt, null);
+        nb.Faces.Remove(cap);
+        nb.Faces.Add(tipA); nb.Faces.Add(tipB); nb.Faces.Add(tipT);
+        nb.Link();
+        var err = nb.Validate();
+        if (err != null) { Debug?.Invoke($"tip at {v.P}: {err}"); return null; }
+        return NTess.ToSolid(nb);
+    }
+
     /// <summary>One surface for the ball: coincident, or pieces of one fillet (pipes of a radius whose spines join).</summary>
     internal static bool Family(NSurface a, NSurface b)
     {

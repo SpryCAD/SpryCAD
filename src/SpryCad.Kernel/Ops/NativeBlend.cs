@@ -614,7 +614,7 @@ public static class NativeBlend
         // As the line tools, run on and cut back to the face; a fitting tool with square ends is left as it is)
         bool skew = rb.Fits && ChainEnds(chain).Any(x => !pivots.Any(p => ReferenceEquals(p.v, x.v)) && (endCuts?.ContainsKey(x.v) == true
             || EndPlane(x.v, x.dirOut, x.fa, x.fb, chain, sel, out _, nearSquare: true) != null || EndCutAt(x.v, x.dirOut, x.fa, x.fb, chain, sel) is { Plane: null }));
-        if (rb.Fits && !skew) return JoinPivots(rb, rb.Tool, rb.Fits, pivots, chain);
+        if (rb.Fits && !skew) return JoinPivots(rb, rb.Tool, rb.Fits, pivots, chain, size);
         var cuts = new List<(Vec3 v, Plane pl)>();
         var valleys = new Dictionary<Vec3, List<Valley>>();
         var corners = new List<RoundCornerCut>();
@@ -640,7 +640,7 @@ public static class NativeBlend
         if (cuts.Count + corners.Count + rounds.Count == 0 || on.Error != null || on.Tool?.Native == null)
         {
             Debug?.Invoke($"rolling ball {name}: no cut back ({cuts.Count} planes, {rounds.Count} rounds, {corners.Count} corners, run on: {on.Error ?? (on.Tool?.Native == null ? "faceted" : "ok")})");
-            return JoinPivots(rb, rb.Tool, rb.Fits, pivots, chain);
+            return JoinPivots(rb, rb.Tool, rb.Fits, pivots, chain, size);
         }
         var old = Csg.NoFallback;
         Csg.NoFallback = true;
@@ -669,9 +669,9 @@ public static class NativeBlend
                 if (withValleys) Debug?.Invoke($"rolling ball {name}: ends kept under {valleys.Values.Sum(x => x.Count)} valley round(s) beside the cut");
                 Debug?.Invoke($"rolling ball {name}: {cuts.Count + corners.Count + rounds.Count} end(s) cut back ({(rb.Fits ? "fits" : "overflows")} -> {(on.Fits ? "fits" : "overflows")}; {t.Bounds.Min}..{t.Bounds.Max}, cut at {string.Join(", ", cuts.Select(c => c.v + " n " + c.pl.Normal))})");
                 // (fitting but for what was cut off)
-                return JoinPivots(rb, t, on.Fits, pivots, chain);
+                return JoinPivots(rb, t, on.Fits, pivots, chain, size);
             }
-            return JoinPivots(rb, rb.Tool, rb.Fits, pivots, chain);
+            return JoinPivots(rb, rb.Tool, rb.Fits, pivots, chain, size);
         }
         finally { Csg.NoFallback = old; }
 
@@ -701,10 +701,23 @@ public static class NativeBlend
             }
     }
 
-    /// <summary>A rolling-ball tool, the pivots at its ends joined to it unless another tool carries them.</summary>
-    static RollingBall.Result JoinPivots(RollingBall.Result rb, Solid tool, bool fits, List<(NVertex v, RoundCornerCut c, CornerPatch.Result p)> pivots, List<NEdge> chain)
+    /// <summary>
+    /// A rolling-ball tool, its ends fading out where its faces turn tangent carried on to a point there
+    /// (<see cref="RollingBall.Tip"/>), the pivots at its ends joined to it unless another tool carries them.
+    /// </summary>
+    static RollingBall.Result JoinPivots(RollingBall.Result rb, Solid tool, bool fits, List<(NVertex v, RoundCornerCut c, CornerPatch.Result p)> pivots, List<NEdge> chain, double size)
     {
         var t = tool;
+        if (t != null && t.Native != null)
+            foreach (var (v, _, _, _) in ChainEnds(chain))
+            {
+                if (pivots.Any(x => ReferenceEquals(x.v, v)) || TangentStop(v, chain) is not { } q) continue;
+                var e = chain.First(x => ReferenceEquals(x.V0, v) || ReferenceEquals(x.V1, v));
+                Solid? tipped;
+                using (Prof.Time("blend.tip")) tipped = RollingBall.Tip(t, e, v, q, size, rb.Convex);
+                Debug?.Invoke($"tip at {v.P}: {(tipped == null ? "not made, capped" : "to a point")}");
+                if (tipped != null) t = tipped;
+            }
         var carried = new List<(NVertex, NEdge)>();
         foreach (var (v, c, p) in pivots)
         {

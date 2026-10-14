@@ -44,6 +44,10 @@ static class BrakeDuctTests
             && Vec3.Dot(Out(e.Uses[0].Face, e.Mid), Out(e.Uses[1].Face, e.Mid)) < Math.Cos(6 * Math.PI / 180));
     static Vec3 Out(NFace f, Vec3 p) => (f.Surface.Normal(p) * (f.Sense ? 1 : -1)).Normalized;
 
+    /// <summary>A fillet's end cap (a rolling-ball tool's square end), of the fillet feature with the id.</summary>
+    static bool Capped(NFace f, string fillet) => f.Tag.Name.Contains(fillet + ".", StringComparison.Ordinal)
+        && (f.Tag.Name.EndsWith(".End0", StringComparison.Ordinal) || f.Tag.Name.EndsWith(".End1", StringComparison.Ordinal));
+
     public static void Run(TestRunner t)
     {
         t.Test("Brake duct: the tube's rim rolls round the tube bend and up the drop's sides, shelled", () =>
@@ -64,6 +68,8 @@ static class BrakeDuctTests
                 // round the corner and up the drop's sides: no sharp edge left between them and the side rounds
                 t.Eq(EdgesBetween(body, n => n.StartsWith(Drop, StringComparison.Ordinal) && !n.Contains(".I."),
                     n => n.StartsWith(SideRounds, StringComparison.Ordinal) && !n.Contains(".I.")), 0);
+                // and to a point where it fades out at the top of the drop, inside and out: no end cap left short of it
+                t.True(!body.Faces.Any(f => Capped(f, rim.Id)), $"{what}: a fade-out end capped short of the point");
             }
         });
 
@@ -141,6 +147,10 @@ static class BrakeDuctTests
             t.True(r.Status[collar.Id].Warnings.Count == 0, string.Join("; ", r.Status[collar.Id].Warnings));
             // no sharp stretch of the seam left between the collar and the loft
             t.Eq(EdgesBetween(body, n => n == "F9ykg06njewzt.S.C63kc9mekgs5", n => n.StartsWith("Fbqb9zpmy19f8.", StringComparison.Ordinal)), 0);
+            // each stretch fading out to a point where the seam turns tangent: no end cap left short of it (outside: inside,
+            // the concave stretch made again at R0.13 does not join, and the convex one staged round it keeps its ends)
+            var caps = body.Faces.Where(f => Capped(f, collar.Id) && !f.Tag.Name.Contains(".I.", StringComparison.Ordinal)).ToList();
+            t.True(caps.Count == 0, "a fade-out end capped short of the point: " + string.Join(", ", caps.Select(f => f.Tag.Name + " at " + f.Coedges.First().Start.P)));
         });
     }
 }
