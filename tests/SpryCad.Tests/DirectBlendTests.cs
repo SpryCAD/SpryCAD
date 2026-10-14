@@ -574,6 +574,26 @@ static class DirectBlendTests
             t.True(DirectBlend.Counts.declined == before.declined, "all its tools applied directly");
         });
 
+        t.Test("Fillet strip crossed by an edge in its plane (a barrel coming out under it): applied directly, as by boolean", () =>
+        {
+            // the end's rounds: their strips on the end and on the box's bottom cross the barrel's edges there; the part
+            // of each strip off the face (over the barrel) a face of its own, where the round leaves the barrel's end
+            // (one part both ways: built again by code it would have other ids, so other face names)
+            var part = Demos.BlendCases.First(c => c.name.StartsWith("box on a barrel", StringComparison.Ordinal)).build();
+            var a = BlendAB.Build(() => part.Clone(), direct: true, reps: 1).feats;
+            var b = BlendAB.Build(() => part.Clone(), direct: false, reps: 1).feats;
+            var before = DirectBlend.Counts;
+            var doc = Demos.BlendCases.First(c => c.name.StartsWith("box on a barrel", StringComparison.Ordinal)).build();
+            var fil = doc.Features.First(f => f.Name == "End corners");
+            var res = new Regenerator().Rebuild(doc, doc.Features.IndexOf(fil) + 1);
+            t.True(res.Status[fil.Id].Ok, res.Status[fil.Id].Error ?? "");
+            t.True(DirectBlend.Counts.declined == before.declined, "all its tools applied directly");
+            var fa = a.First(x => x.name == "End corners"); var fb = b.First(x => x.name == "End corners");
+            t.True(fa.valid == null, $"valid: {fa.valid}");
+            t.True(Math.Abs(fa.vol - fb.vol) <= 1e-7 * Math.Max(1, fb.vol), $"volume {fa.vol:R} vs {fb.vol:R}");
+            t.True(fa.names.SetEquals(fb.names), $"faces +[{string.Join(",", fa.names.Except(fb.names))}] -[{string.Join(",", fb.names.Except(fa.names))}]");
+        });
+
         t.Test("Mirror with a seed suppressed: the others mirrored, said; with its seed failed: the seed's error", () =>
         {
             // the mirror used to be suppressed with its seed (it uses it), so the rib was silently not mirrored

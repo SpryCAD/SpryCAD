@@ -37,6 +37,9 @@ static class BlendAB
             lock (why) why[k] = why.GetValueOrDefault(k) + 1;
         };
         if (Environment.GetEnvironmentVariable("FC_BLENDAB_NB") != null) NativeBlend.Debug = m => { if (m.StartsWith("blend ")) Console.WriteLine("      " + m); };
+        // (FC_BLENDAB_PROF: the profile of the stages, at the end)
+        bool prof = Environment.GetEnvironmentVariable("FC_BLENDAB_PROF") != null;
+        if (prof) { Prof.Reset(); Prof.Enabled = true; }
         int bad = 0; double tDirect = 0, tBool = 0;
         foreach (var (name, load) in docs)
         {
@@ -63,6 +66,7 @@ static class BlendAB
         Console.WriteLine($"blend features: {tDirect:0} ms direct, {tBool:0} ms boolean; tools {DirectBlend.Counts.applied} direct, {DirectBlend.Counts.declined} by boolean");
         foreach (var (k, n) in why.OrderByDescending(x => x.Value)) Console.WriteLine($"  {n,5}  {k}");
         DirectBlend.Debug = null;
+        if (prof) foreach (var (n, ms, c) in Prof.Results().Where(x => x.name.StartsWith("direct.", StringComparison.Ordinal) || x.name.StartsWith("blend.", StringComparison.Ordinal)).Take(20)) Console.WriteLine($"  {n,-28} {ms,8:0} ms {c,7}");
         return bad == 0 ? 0 : 1;
     }
 

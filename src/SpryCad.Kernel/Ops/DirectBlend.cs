@@ -280,6 +280,28 @@ public static class DirectBlend
         foreach (var w in bodyVerts)
             if (!taken.Contains(w))
                 foreach (var e in toolEdges) SplitAt(e, w);
+        // ---- the body's edges crossing the tool's in a plane they share (a barrel coming out through the face a strip
+        // lies on, its edge across the strip; an earlier fillet's edge across it): both split where they cross, those
+        // faces traced by side, not by cancelling, and the part of the strip off the face made a face where it leaves
+        // material on one side only (see below)
+        var crossed = new HashSet<NFace>(Ref);
+        foreach (var t in support)
+        {
+            if (t.Surface.Kind != SurfaceKind.Plane) continue;
+            var n = t.Surface.Plane!.Normal;
+            var tes = t.Coedges.Select(c => c.Edge).Distinct(Ref).Cast<NEdge>().ToList();
+            var tbox = t.Bounds();
+            foreach (var f in onBody[t])
+                foreach (var be in f.Coedges.Select(c => c.Edge).Distinct(Ref).Cast<NEdge>().Where(e => e.Bounds().Overlaps(tbox, tol)))
+                    foreach (var te in tes)
+                        foreach (var p in Crossings(be, te, n, tol))
+                        {
+                            var v = new NVertex(p);
+                            SplitAt(be, v); SplitAt(te, v);
+                            crossed.Add(f);
+                        }
+        }
+        Lap("crossings");
 
         var pieces = new Dictionary<NEdge, List<NEdge>>(Ref);
         List<NEdge> PiecesOf(NEdge e)
@@ -412,13 +434,13 @@ public static class DirectBlend
             // well clear of the boundary sampling (1e-3: nearer, a domain resamples the boundary finely), well inside
             // the strip (the blend's size wide)
             var delta = Math.Min(Math.Max(4e-3, 0.05 * tool.Size), 0.25 * tool.Size);
-            Vec3 Beside(NEdge e, bool fwd, NFace face, bool left)
+            Vec3 Beside(NEdge e, bool fwd, NFace face, bool left, double? by = null)
             {
                 var tm = 0.5 * (e.T0 + e.T1);
                 var m = e.Curve.Eval(tm);
                 var tan = (e.Curve.Deriv(tm) * (fwd ? 1 : -1)).Normalized;
                 var d = Vec3.Cross(face.Surface.Normal(m) * (face.Sense ? 1 : -1), tan).Normalized;
-                return m + d * (left ? delta : -delta);
+                return m + d * ((left ? 1 : -1) * (by ?? delta));
             }
             // a concave blend's end on a face it meets (the same side out) adds to the face; everything else takes away
             static Vec3 Out(NFace f, Vec3 p) => f.Surface.Normal(p) * (f.Sense ? 1 : -1);
@@ -427,7 +449,7 @@ public static class DirectBlend
             foreach (var F in gb)
             {
                 var chain = new List<(NEdge e, bool fwd, bool tool)>();
-                if (gb.Count == 1)
+                if (gb.Count == 1 && !crossed.Contains(F))
                 {
                     foreach (var c in F.Coedges) foreach (var x in Expand(c)) chain.Add((x.e, x.fwd, false));
                     foreach (var x in toolCo) chain.Add((x.e, x.fwd, true));
@@ -503,6 +525,55 @@ public static class DirectBlend
                 }
                 removed.Add(F);
             }
+
+            // ---- the strip's part off the faces, where the body's edges crossed it (the barrel's end under the strip):
+            // a face where the blend leaves material on one side of it only, as the boolean leaves it
+            if (gb.Any(crossed.Contains))
+                foreach (var t in gt)
+                {
+                    if (t.Surface.Kind != SurfaceKind.Plane) continue;
+                    var outT = Out(t, t.Coedges.First().Edge.Mid).Normalized;
+                    // (every face of the body in the plane: the strip may lie on several, one of them in another group)
+                    var fds = onBody[t].Select(f => (f, d: NDomain.Cached(f, 1e-3))).ToList();
+                    bool InAnyF(Vec3 p) => fds.Any(x => x.d.Classify(x.f.Surface.Project(p), tol) > 0);
+                    var tdom = NDomain.Cached(t, 1e-3);
+                    // (just beside: the strip off a face can be a sliver, narrower than the strip)
+                    var hair = Math.Max(4e-3, 1e-3 * tool.Size);
+                    var rco = new List<(NEdge e, bool fwd)>();
+                    // the tool's edges with the strip off the faces on their left (about its outward normal)
+                    foreach (var c in t.Coedges)
+                        foreach (var x in Expand(c).Select(Map))
+                            if (!InAnyF(Beside(x.e, x.fwd, t, left: true, hair))) rco.Add(x);
+                    // the faces' edges inside the strip, the other way round
+                    foreach (var f in gb)
+                        foreach (var c in f.Coedges)
+                            foreach (var x in Expand(c))
+                            {
+                                if (tdom.Classify(t.Surface.Project(x.e.Mid), tol) <= 0) continue;
+                                rco.Add(Vec3.Dot(Out(f, x.e.Mid), outT) > 0 ? (x.e, !x.fwd) : (x.e, x.fwd));
+                            }
+                    if (rco.Count == 0) continue;
+                    var rl = Trace(rco, _ => outT);
+                    if (rl == null) { why = $"the part of {t.Tag.Name} off the face does not close into loops"; return null; }
+                    foreach (var part in (rl.Count > 1 ? Pieces(rl, outT) : null) ?? new() { rl })
+                    {
+                        // material beyond the tool's face, and in the tool after it (taken away: none; added: all)
+                        var (e0, f0) = part[0][0];
+                        var pIn = Beside(e0, f0, t, left: true, hair);
+                        bool far = NativeBlend.PointInside(body, pIn + outT * delta);
+                        if (far == !convex) continue;
+                        var outward = far ? -outT : outT;
+                        var nf = new NFace(t.Surface, Vec3.Dot(t.Surface.Plane!.Normal, outward) > 0, t.Tag, null);
+                        foreach (var l in part)
+                        {
+                            var ol = Vec3.Dot(outward, outT) > 0 ? l : Enumerable.Reverse(l).Select(x => (x.e, !x.fwd)).ToList();
+                            var nl = new NLoop();
+                            foreach (var (e, fwd) in ol) nl.Coedges.Add(new NCoedge(e, fwd));
+                            nf.Loops.Add(nl);
+                        }
+                        newFaces.Add(nf);
+                    }
+                }
         }
 
         Lap("loops");
@@ -564,6 +635,80 @@ public static class DirectBlend
             return null;
         }
         return body;
+    }
+
+    /// <summary>
+    /// Where edges a and b, both in a plane of normal n, cross each other: their sampled polylines' crossings, put on
+    /// both curves (projected onto each in turn), at an angle (not running along each other), strictly inside both.
+    /// </summary>
+    // (an edge's samples, once: an edge is tried against each of the tool's)
+    static readonly System.Runtime.CompilerServices.ConditionalWeakTable<NEdge, List<Vec3>> _samples = new();
+    // (coarse: a crossing found on them is then put on both curves)
+    static List<Vec3> Sampled(NEdge e) => _samples.GetValue(e, x => x.Samples(1e-2));
+
+    static List<Vec3> Crossings(NEdge a, NEdge b, Vec3 n, double tol)
+    {
+        var res = new List<Vec3>();
+        if (!a.Bounds().Overlaps(b.Bounds(), tol)) return res;
+        var u = n.AnyPerpendicular(); var w = Vec3.Cross(n, u);
+        Vec2 P(Vec3 p) => new(Vec3.Dot(p, u), Vec3.Dot(p, w));
+        var pa = Sampled(a); var pb = Sampled(b);
+        static double Cr(Vec2 x, Vec2 y) => x.X * y.Y - x.Y * y.X;
+        // (only the segments within the other edge's box: a long edge, a flange's rim, is thousands of them)
+        static List<int> Within(List<Vec3> p, Box3 box)
+        {
+            var l = new List<int>();
+            for (int i = 0; i + 1 < p.Count; i++)
+            {
+                Vec3 a = p[i], b = p[i + 1];
+                if (Math.Max(a.X, b.X) < box.Min.X - 1e-6 || Math.Min(a.X, b.X) > box.Max.X + 1e-6 || Math.Max(a.Y, b.Y) < box.Min.Y - 1e-6
+                    || Math.Min(a.Y, b.Y) > box.Max.Y + 1e-6 || Math.Max(a.Z, b.Z) < box.Min.Z - 1e-6 || Math.Min(a.Z, b.Z) > box.Max.Z + 1e-6) continue;
+                l.Add(i);
+            }
+            return l;
+        }
+        var ia = Within(pa, b.Bounds()); if (ia.Count == 0) return res;
+        var ib = Within(pb, a.Bounds()); if (ib.Count == 0) return res;
+        foreach (var i in ia)
+        {
+            Vec2 a0 = P(pa[i]), a1 = P(pa[i + 1]);
+            foreach (var j in ib)
+            {
+                Vec2 b0 = P(pb[j]), b1 = P(pb[j + 1]);
+                Vec2 r = a1 - a0, s = b1 - b0;
+                var den = Cr(r, s);
+                if (Math.Abs(den) < 1e-14) continue;
+                var ta = Cr(b0 - a0, s) / den; var tb = Cr(b0 - a0, r) / den;
+                if (ta < 0 || ta > 1 || tb < 0 || tb > 1) continue;
+                // on both curves: projected onto each in turn
+                var p = pa[i] + (pa[i + 1] - pa[i]) * ta;
+                Vec3 q = p;
+                for (int it = 0; it < 30; it++)
+                {
+                    q = b.Curve.Eval(On(b, p));
+                    var p2 = a.Curve.Eval(On(a, q));
+                    var moved = Vec3.Distance(p2, p); p = p2;
+                    if (moved < 1e-3 * tol) break;
+                }
+                if (Vec3.Distance(p, q) > 10 * tol) continue;
+                p = 0.5 * (p + q);
+                if (!Inside(a, p, tol, out var sa) || !Inside(b, p, tol, out var sb)) continue;
+                // (at an angle: an edge along the other's is the same boundary, not a crossing)
+                var da = a.Curve.Deriv(sa).Normalized; var db = b.Curve.Deriv(sb).Normalized;
+                if (Math.Abs(Vec3.Dot(da, db)) > Math.Cos(2 * Math.PI / 180)) continue;
+                if (!res.Any(x => Vec3.Distance(x, p) < 10 * tol)) res.Add(p);
+            }
+        }
+        return res;
+
+        // (the parameter of the curve's point nearest x, within the edge: a periodic one's wrapped into its range first)
+        static double On(NEdge e, Vec3 x)
+        {
+            double lo = Math.Min(e.T0, e.T1), hi = Math.Max(e.T0, e.T1);
+            var t = e.Curve.Param(x, e.Curve.Periodic ? 0.5 * (lo + hi) : null);
+            if (e.Curve.Periodic) { var per = e.Curve.Period; while (t < lo) t += per; while (t > hi) t -= per; }
+            return Math.Clamp(t, lo, hi);
+        }
     }
 
     /// <summary>Whether p lies on e strictly between its ends (the curve parameter there in t).</summary>
