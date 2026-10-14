@@ -586,6 +586,7 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
 
     void DrawPlanes(DynamicGeometry g, Highlights hl)
     {
+        var drawn = new List<(Frame f, Vec2 lo, Vec2 hi)>();
         foreach (var p in Planes)
         {
             var key = new SelItem { Kind = SelKind.Plane, Name = p.Name, FeatureId = p.FeatureId }.Key;
@@ -593,6 +594,7 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
             if (!ShowPlanes && !p.Shown && hc == null) continue;
             var f = p.Frame;
             var (lo, hi) = SizeOf(p);
+            drawn.Add((f, lo, hi));
             var a = f.ToWorld(lo.X, lo.Y); var b = f.ToWorld(hi.X, lo.Y); var c = f.ToWorld(hi.X, hi.Y); var d = f.ToWorld(lo.X, hi.Y);
             // (the origin planes lightly in the colour of the axis square to them, as the triad)
             Rgba edgeBase = new(0.35f, 0.45f, 0.6f, 0.9f), fillBase = new(0.55f, 0.68f, 0.85f);
@@ -615,6 +617,41 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
                 }
             }
         }
+
+        // where two planes drawn cross: a thin line, across either of them
+        var lineColor = new Rgba(0.30f, 0.36f, 0.45f, 0.8f);
+        for (int i = 0; i < drawn.Count; i++)
+            for (int j = i + 1; j < drawn.Count; j++)
+                if (Crossing(drawn[i], drawn[j]) is { } seg) g.Line(seg.a, seg.b, lineColor);
+    }
+
+    /// <summary>The line where two planes meet, over the stretch where it lies on either rectangle; null when parallel or not on them.</summary>
+    static (Vec3 a, Vec3 b)? Crossing((Frame f, Vec2 lo, Vec2 hi) p, (Frame f, Vec2 lo, Vec2 hi) q)
+    {
+        var d = Vec3.Cross(p.f.Normal, q.f.Normal);
+        if (d.Length < 1e-6) return null;
+        d = d.Normalized;
+        double d1 = Vec3.Dot(p.f.Normal, p.f.Origin), d2 = Vec3.Dot(q.f.Normal, q.f.Origin);
+        var o = Vec3.Cross(q.f.Normal, d) * d1 + Vec3.Cross(d, p.f.Normal) * d2; // on both, nearest the world origin
+        // the stretch of the line inside one rectangle (its own X and Y), or null
+        (double, double)? Inside((Frame f, Vec2 lo, Vec2 hi) r)
+        {
+            var u0 = r.f.ToLocal(o); var u1 = r.f.ToLocal(o + d) - u0;
+            double t0 = double.NegativeInfinity, t1 = double.PositiveInfinity;
+            foreach (var (s, v, lo, hi) in new[] { (u0.X, u1.X, r.lo.X, r.hi.X), (u0.Y, u1.Y, r.lo.Y, r.hi.Y) })
+            {
+                if (Math.Abs(v) < 1e-12) { if (s < lo || s > hi) return null; continue; }
+                var (a, b) = ((lo - s) / v, (hi - s) / v);
+                if (a > b) (a, b) = (b, a);
+                t0 = Math.Max(t0, a); t1 = Math.Min(t1, b);
+            }
+            return t0 < t1 ? (t0, t1) : null;
+        }
+        var ip = Inside(p); var iq = Inside(q);
+        // (the rectangles must meet: a plane beside another, not reaching it, has no line)
+        if (ip is not { } a1 || iq is not { } b1 || a1.Item2 < b1.Item1 || b1.Item2 < a1.Item1) return null;
+        double lo = Math.Min(a1.Item1, b1.Item1), hi = Math.Max(a1.Item2, b1.Item2);
+        return (o + d * lo, o + d * hi);
     }
 
     /// <summary>The tint of an origin plane: the triad colour of the axis square to it (Front: Z, Top: Y, Right: X); null for any other.</summary>
