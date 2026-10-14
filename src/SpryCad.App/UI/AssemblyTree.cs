@@ -121,7 +121,7 @@ public sealed class AssemblyTree : DockPanel
                     var err = m.LastSolve?.Errors.GetValueOrDefault(mate.Id) ?? 0;
                     var why = broken.GetValueOrDefault(mate);
                     var off = why != null || !mate.Suppressed && err > 1e-6;
-                    AddRow("mate:" + mate.Id, 2, IconFor(mate.Type), mate.Name + ValueOf(mate), note: why != null ? $"reference missing: {why}" : $"{NameOf(mate.A)}, {NameOf(mate.B)}",
+                    AddRow("mate:" + mate.Id, 2, IconFor(mate.Type), mate.Name + ValueOf(mate, m.Doc.Units), note: why != null ? $"reference missing: {why}" : $"{NameOf(mate.A)}, {NameOf(mate.B)}",
                         bad: off, dim: mate.Suppressed, menu: MenuFor(mate, why != null),
                         tip: why != null ? $"A reference is missing ({why}): right-click, Repair, to pick it again.\n{NameOf(mate.A)}, {NameOf(mate.B)}"
                             : off ? $"Not satisfied: off by {err:0.######} (it conflicts with other mates, or cannot be reached)"
@@ -139,7 +139,7 @@ public sealed class AssemblyTree : DockPanel
                     var seeds = string.Join(", ", p.Seeds.Select(id => m.Doc.Find(id)?.Name ?? id));
                     var what = p.Kind switch
                     {
-                        PatternKind.Linear => $"{p.Count} × {p.Spacing:0.###} mm",
+                        PatternKind.Linear => $"{p.Count} × {m.Doc.Units.Length(p.Spacing)}",
                         PatternKind.Circular => $"{p.Count} × {p.Spacing:0.###}°",
                         _ => "mirrored",
                     };
@@ -272,14 +272,14 @@ public sealed class AssemblyTree : DockPanel
     static string IconFor(MateType t) => MainWindow.MateIcon(t);
 
     /// <summary>A mate's values as the tree shows them (distance, angle or their limits; ratio; lead).</summary>
-    static string ValueOf(Mate m) => m.Type switch
+    static string ValueOf(Mate m, UnitSystem u) => m.Type switch
     {
-        MateType.Coincident when m.Min is { } lo && m.Max is { } hi => $" ({lo:0.###} to {hi:0.###} mm)",
-        MateType.Coincident when m.Value != 0 => $" ({m.Value:0.###} mm)",
+        MateType.Coincident when m.Min is { } lo && m.Max is { } hi => $" ({u.Number(lo)} to {u.Length(hi)})",
+        MateType.Coincident when m.Value != 0 => $" ({u.Length(m.Value)})",
         MateType.Angle when m.Min is { } lo && m.Max is { } hi => $" ({lo:0.###} to {hi:0.###}°)",
         MateType.Angle => $" ({m.Value:0.###}°)",
         MateType.Gear => $" ({m.RatioA:0.###}:{m.RatioB:0.###}" + (m.Reverse ? " reversed)" : ")"),
-        MateType.Screw => $" ({m.Value:0.###} mm/turn" + (m.Reverse ? " left hand)" : ")"),
+        MateType.Screw => $" ({u.Length(m.Value)}/turn" + (m.Reverse ? " left hand)" : ")"),
         _ => "",
     };
 

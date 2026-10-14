@@ -7,6 +7,7 @@ using Avalonia.Platform.Storage;
 using SpryCad.App.Session;
 using SpryCad.App.UI;
 using SpryCad.Core.Assembly;
+using SpryCad.Core.Model;
 using SpryCad.Kernel;
 using Transform = SpryCad.Kernel.Transform;
 
@@ -543,8 +544,9 @@ public partial class MainWindow
         var opts = page.Section(kind == PatternKind.Mirror ? "Copies" : "Spacing and Instances");
         if (kind != PatternKind.Mirror)
         {
-            page.Number(opts, kind == PatternKind.Linear ? "Spacing" : "Angle", () => p.Spacing.ToString(CultureInfo.InvariantCulture),
-                v => { if (Core.Expr.TryEval(v, _ => null, out var x, out _)) p.Spacing = x; }, null, kind == PatternKind.Linear ? "mm" : "°");
+            var vk = kind == PatternKind.Linear ? ValueKind.Length : ValueKind.Angle;
+            page.Number(opts, kind == PatternKind.Linear ? "Spacing" : "Angle", () => Units.Entry(p.Spacing, vk),
+                v => { if (Core.Expr.TryEvaluate(v, null, out var x, out _)) p.Spacing = x.Value; }, null, kind == PatternKind.Linear ? null : "°");
             page.Number(opts, "Instances", () => p.Count.ToString(CultureInfo.InvariantCulture),
                 v => { if (int.TryParse(v, out var n) && n >= 2 && n <= 500) p.Count = n; });
         }
@@ -662,7 +664,7 @@ public partial class MainWindow
                     Children =
                     {
                         del,
-                        new TextBlock { Text = $"{i + 1}. {names}: {step.Distance:0.#} mm", TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 4, 0) },
+                        new TextBlock { Text = $"{i + 1}. {names}: {Units.Length(step.Distance)}", TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 4, 0) },
                     },
                 });
                 DockPanel.SetDock(del, Dock.Right);
@@ -673,7 +675,7 @@ public partial class MainWindow
         var add = page.Section("Add a Step");
         var dir = "Z"; double dist = 50;
         page.Combo(add, "Direction", new List<(string, string)> { ("X", "+X"), ("-X", "-X"), ("Y", "+Y"), ("-Y", "-Y"), ("Z", "+Z"), ("-Z", "-Z") }, () => dir, x => dir = x);
-        page.Number(add, "Distance", () => dist.ToString(CultureInfo.InvariantCulture), x => { if (Core.Expr.TryEval(x, _ => null, out var d, out _)) dist = d; }, null, "mm");
+        page.Number(add, "Distance", () => Units.Entry(dist), x => { if (UnitFormat.TryLength(x, null, out var d, out _)) dist = d; });
         page.ButtonRow(add, "Add Step for the Selected Component", () =>
         {
             if (a.Selected is not { } sel) { Status("Select a component (click it, or its row in the tree) first."); return; }

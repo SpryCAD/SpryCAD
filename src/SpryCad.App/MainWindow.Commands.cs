@@ -1015,8 +1015,7 @@ public partial class MainWindow
         if (path == null) return;
         try
         {
-            // documents in IPS store inches; exports are written in millimetres
-            var scale = Session.Doc.Units == UnitSystem.IPS ? 25.4 : 1.0;
+            // (written in millimetres, as the model is)
             var bodies = r.State.Bodies.ToList();
             Status($"Exporting {Path.GetFileName(path)}...");
             var sw = System.Diagnostics.Stopwatch.StartNew();
@@ -1029,8 +1028,8 @@ public partial class MainWindow
             {
                 if (snapshot != null) bodies = session.RebuildForExport(snapshot).State.Bodies.ToList();
                 using var fs = File.Create(path);
-                if (kind == "step") StepWriter.Write(fs, bodies.Select(b => (b.Id, b.Solid)), baseName, scale);
-                else StlWriter.Write(fs, bodies.Select(b => b.Solid), scale);
+                if (kind == "step") StepWriter.Write(fs, bodies.Select(b => (b.Id, b.Solid)), baseName);
+                else StlWriter.Write(fs, bodies.Select(b => b.Solid));
             });
             Status($"Exported {path} ({sw.ElapsedMilliseconds} ms)");
         }
@@ -1058,14 +1057,13 @@ public partial class MainWindow
         if (path == null) return;
         try
         {
-            var scale = Session.Doc.Units == UnitSystem.IPS ? 25.4 : 1.0;
             var written = new List<string>();
             foreach (var (bodyId, flat) in flats)
             {
                 // one file per body: the chosen name for a single body, the body id added for several
                 var p = flats.Count == 1 ? path : Path.Combine(Path.GetDirectoryName(path)!, $"{Path.GetFileNameWithoutExtension(path)}-{bodyId}.dxf");
                 using var fs = File.Create(p);
-                DxfWriter.Write(fs, flat, scale);
+                DxfWriter.Write(fs, flat);
                 written.Add(p);
             }
             Status($"Exported {string.Join(", ", written)}");

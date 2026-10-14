@@ -41,7 +41,9 @@ public sealed partial class SketchEditor : IViewportMode
     public SketchFeature Feature { get; }
     public Sketch Sk => Feature.Sketch;
     public Frame Frame { get; }
-    public Func<string, double?> Lookup { get; set; }
+    public Func<string, Quantity?> Lookup { get; set; }
+    /// <summary>The part's units: what dimensions show in, and what a value typed without a unit is in.</summary>
+    public UnitSystem Units { get; set; }
     public SolveResult Status { get; private set; } = new();
     public SketchTool Tool { get; private set; } = SketchTool.Select;
     public List<SkRef> Selected { get; } = new();
@@ -86,7 +88,7 @@ public sealed partial class SketchEditor : IViewportMode
     public static readonly Rgba DimSelectedColor = new(0.255f, 0.412f, 0.882f);
     public static readonly Rgba RefColor = new(0.55f, 0.25f, 0.65f);
 
-    public SketchEditor(ViewportControl vp, SketchFeature feature, Frame frame, Func<string, double?> lookup)
+    public SketchEditor(ViewportControl vp, SketchFeature feature, Frame frame, Func<string, Quantity?> lookup)
     {
         _vp = vp; Feature = feature; Frame = frame; Lookup = lookup;
         Resolve();
@@ -120,7 +122,7 @@ public sealed partial class SketchEditor : IViewportMode
             SketchTool.Slot => "Straight Slot: click the first center, the second center, then the width.",
             SketchTool.SmartDimension => "Smart Dimension: select one or two entities (the origin's red axis stubs too: an angle to the axis), then click to place the dimension.",
             SketchTool.Trim => "Trim: click the part of an entity to delete (between intersections).",
-            SketchTool.Fillet => $"Sketch Fillet (R {Expr.Format(FilletRadius)}): click corners where two lines or arcs meet, or the two of them. Deleting a fillet's arc restores the corner.",
+            SketchTool.Fillet => $"Sketch Fillet (R {Units.Length(FilletRadius)}): click corners where two lines or arcs meet, or the two of them. Deleting a fillet's arc restores the corner.",
             _ => "Select sketch entities. Drag to move; double-click a dimension to edit it.",
         });
         _vp.Cursor = Cursor;
@@ -143,7 +145,7 @@ public sealed partial class SketchEditor : IViewportMode
     public void Resolve(IReadOnlyDictionary<long, Vec2>? drag = null, bool analyze = true)
     {
         foreach (var c in Sk.Constraints)
-            if (c.IsDimension && !c.Driven && !string.IsNullOrWhiteSpace(c.Expr) && Expr.TryEval(c.Expr, Lookup, out var v, out _))
+            if (c.IsDimension && !c.Driven && !string.IsNullOrWhiteSpace(c.Expr) && Evaluate(c, c.Expr) is { } v)
                 c.Value = v;
         var status = SketchSolver.Solve(Sk, drag, analyze);
         if (analyze) Status = status;
@@ -1519,7 +1521,7 @@ public sealed partial class SketchEditor : IViewportMode
         Snapshot();
         c.Id = Sk.NewId();
         SketchSolver.CaptureSign(Sk, c);
-        c.Expr = Expr.Format(c.Value);
+        c.Expr = Units.Entry(c.Value, c.ValueKind);
         c.Name = "D" + (Sk.Constraints.Count(x => x.IsDimension) + 1);
         c.LabelPlaced = true; // where it was clicked
         if (SketchSolver.WouldOverDefine(Sk, c))
@@ -1544,13 +1546,13 @@ public sealed partial class SketchEditor : IViewportMode
         var pos = Screen(LabelPos(c));
         var tb = new TextBox
         {
-            Text = c.Expr ?? Expr.Format(c.Value),
+            Text = UnitFormat.Show(c.Expr ?? Units.Entry(c.Value, c.ValueKind), c.ValueKind),
             Width = 120, FontSize = 13,
             Background = Brushes.White,
             BorderBrush = new SolidColorBrush(Color.FromRgb(60, 120, 220)),
             BorderThickness = new Thickness(2),
         };
-        ToolTip.SetTip(tb, "Enter a value or an expression (e.g. 25, W/2, 1in). Enter = OK, Esc = cancel.");
+        ToolTip.SetTip(tb, $"Enter a value or an expression (e.g. 25, W/2, 1in, 10mm); with no unit, {Units.Symbol()}. Enter = OK, Esc = cancel.");
         Canvas.SetLeft(tb, pos.X - 60); Canvas.SetTop(tb, pos.Y - 14);
         tb.KeyDown += (_, e) =>
         {
@@ -1582,11 +1584,13 @@ public sealed partial class SketchEditor : IViewportMode
     public bool SetDimensionValue(SkConstraint c, string? text)
     {
         text = text?.Trim();
-        if (string.IsNullOrEmpty(text) || text == c.Expr) return false;
-        if (!Expr.TryEval(text, Lookup, out var v, out var err)) { Message?.Invoke("Invalid value: " + err); return false; }
+        if (string.IsNullOrEmpty(text)) return false;
+        if (!Units.TryEnter(text, c.ValueKind, Lookup, out var kept, out var q, out var err)) { Message?.Invoke("Invalid value: " + err); return false; }
+        if (kept == c.Expr) return false;
+        var v = q.Value;
         if (v <= 0 && c.Type != CType.Angle && c.Type != CType.HDistance && c.Type != CType.VDistance) { Message?.Invoke("Value must be greater than zero."); return false; }
         Snapshot();
-        c.Expr = text; c.Value = v;
+        c.Expr = kept; c.Value = v;
         Resolve();
         if (Status.Status == SketchStatus.OverDefined) Message?.Invoke("The sketch cannot be solved with that value.");
         _vp.Redraw();
@@ -2384,14 +2388,22 @@ public sealed partial class SketchEditor : IViewportMode
         b.Arrange(new Rect(s.X - sz.Width / 2, s.Y - sz.Height / 2, sz.Width, sz.Height));
     }
 
-    static string DimText(SkConstraint c)
+    /// <summary>A dimension's value from its expression (millimetres or degrees), null when it does not evaluate.</summary>
+    double? Evaluate(SkConstraint c, string expr)
     {
-        var v = Expr.Format(c.Value);
+        try { return c.ValueKind == ValueKind.Angle ? Expr.Angle(expr, Lookup) : Expr.Length(expr, Lookup); }
+        catch (Expr.ExprException) { return null; }
+    }
+
+    string DimText(SkConstraint c)
+    {
+        // in the part's units, or in its own where typed so ("10in" in a millimetre part)
+        var v = c.Type == CType.Angle ? Expr.Format(c.Value) : Units.Label(c.Value, c.Expr);
         var prefix = c.Doubled ? "⌀" : c.Type switch { CType.Diameter => "⌀", CType.Radius => "R", CType.Length => "L ", _ => "" };
         var suffix = c.Type == CType.Angle ? "°" : "";
         var txt = prefix + v + suffix;
         if (c.Driven) txt = "(" + txt + ")";
-        if (!string.IsNullOrEmpty(c.Expr) && !double.TryParse(c.Expr, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out _))
+        if (!string.IsNullOrEmpty(c.Expr) && !Expr.IsLiteral(c.Expr, out _))
             txt = "Σ " + txt;
         return txt;
     }

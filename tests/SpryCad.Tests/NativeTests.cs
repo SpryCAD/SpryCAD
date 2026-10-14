@@ -323,9 +323,9 @@ static class NativeBoolTests
             int gi = doc.Features.FindIndex(f => f.Name == "Grips");
             var grips = (CircularPatternFeature)doc.Features[gi];
             var before = full.States[gi - 1];
-            var lookup = new Func<string, double?>(n => full.EquationValues.TryGetValue(n, out var v) ? v : null);
+            var lookup = new Func<string, SpryCad.Core.Quantity?>(n => full.EquationValues.TryGetValue(n, out var v) ? v : null);
             var ts = Regenerator.PatternTransforms(grips, before, lookup)!;
-            t.Eq(ts.Count, (int)Math.Round(lookup("NS")!.Value * lookup("NG")!.Value) - 1);
+            t.Eq(ts.Count, (int)Math.Round(lookup("NS")!.Value.Value * lookup("NG")!.Value.Value) - 1);
             var c = before.Tools[grips.Seeds[0]].Tool.Bounds.Center;
             foreach (var tr in ts) t.Near(new Vec3(tr.Point(c).X, 0, tr.Point(c).Z).Length, new Vec3(c.X, 0, c.Z).Length, 1e-9);
         });

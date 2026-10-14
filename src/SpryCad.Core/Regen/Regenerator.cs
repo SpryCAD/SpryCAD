@@ -55,12 +55,12 @@ public sealed class Regenerator
         int epoch;
         lock (_cache) epoch = _epoch;
         var (eqValues, eqErrors) = EvaluateEquations(doc);
-        Func<string, double?> lookup = name => eqValues.TryGetValue(name, out var v) ? v : null;
+        Func<string, Quantity?> lookup = name => eqValues.TryGetValue(name, out var v) ? v : null;
 
         // features see the equations (and design tables) only through their values: a description, a variable made
         // user-facing or an expression giving the same value rebuilds nothing
         ulong key = Hash(0xcbf29ce484222325UL, string.Join(";", eqValues.OrderBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase)
-            .Select(kv => kv.Key.ToLowerInvariant() + "=" + kv.Value.ToString("R", System.Globalization.CultureInfo.InvariantCulture))));
+            .Select(kv => kv.Key.ToLowerInvariant() + "=" + kv.Value.Value.ToString("R", System.Globalization.CultureInfo.InvariantCulture) + "," + kv.Value.Length + "," + kv.Value.Angle)));
         key = Hash(key, string.Join(";", eqErrors.Keys.Order(StringComparer.OrdinalIgnoreCase)));
         var state = ModelState.Initial();
         var states = new List<ModelState>();
@@ -166,13 +166,13 @@ public sealed class Regenerator
     /// (converted model edges of a suppressed feature are left dangling). A condition that cannot be
     /// evaluated is an error (the feature is not built either).
     /// </summary>
-    static (bool suppressed, string? by, string? error) SuppressionOf(Feature f, string json, Dictionary<string, string> off, Func<string, double?> lookup)
+    static (bool suppressed, string? by, string? error) SuppressionOf(Feature f, string json, Dictionary<string, string> off, Func<string, Quantity?> lookup)
     {
         if (f.Suppressed) return (true, null, null);
         if (!string.IsNullOrWhiteSpace(f.SuppressWhen))
         {
-            if (!Expr.TryEval(f.SuppressWhen, lookup, out var v, out var err)) return (false, null, "Suppress when: " + err);
-            if (Expr.Truthy(v)) return (true, "condition", null);
+            if (!Expr.TryEvaluate(f.SuppressWhen, lookup, out var v, out var err)) return (false, null, "Suppress when: " + err);
+            if (Expr.Truthy(v.Value)) return (true, "condition", null);
         }
         if (off.Count == 0) return (false, null, null);
         // a sketch goes with the plane or face it is on; geometry it took from the model stays, dangling
@@ -203,7 +203,7 @@ public sealed class Regenerator
     /// Which features are not built, and why (null: by the user; "condition"; or the suppressed feature used),
     /// without rebuilding: for the tree and dialogs before a rebuild has run.
     /// </summary>
-    public static Dictionary<string, string?> SuppressedFeatures(CadDocument doc, Func<string, double?>? lookup = null)
+    public static Dictionary<string, string?> SuppressedFeatures(CadDocument doc, Func<string, Quantity?>? lookup = null)
     {
         lookup ??= EquationLookup(doc);
         var off = new Dictionary<string, string>();
@@ -218,7 +218,7 @@ public sealed class Regenerator
     }
 
     /// <summary>The document's equation values as an expression lookup.</summary>
-    public static Func<string, double?> EquationLookup(CadDocument doc)
+    public static Func<string, Quantity?> EquationLookup(CadDocument doc)
     {
         var values = EvaluateEquations(doc).values;
         return n => values.TryGetValue(n, out var v) ? v : null;
@@ -243,13 +243,9 @@ public sealed class Regenerator
     /// against the model state before the pattern; null for other features. Throws <see cref="FeatureException"/>
     /// for invalid parameters.
     /// </summary>
-    public static List<Transform>? PatternTransforms(Feature f, ModelState state, Func<string, double?> lookup)
+    public static List<Transform>? PatternTransforms(Feature f, ModelState state, Func<string, Quantity?> lookup)
     {
-        double Num(string? expr, string what)
-        {
-            if (!Expr.TryEval(expr, lookup, out var v, out var err)) throw new FeatureException($"{what}: {err}");
-            return v;
-        }
+        double Num(string? expr, string what, ValueKind kind = ValueKind.Number) => Value(expr, what, kind, lookup);
         var ts = new List<Transform>();
         switch (f)
         {
@@ -257,13 +253,13 @@ public sealed class Regenerator
                 {
                     var (_, d1) = Resolver.ResolveDir(lp.Direction, state);
                     if (lp.Reverse) d1 = -d1;
-                    var s1 = Num(lp.Spacing, "Spacing"); var n1 = (int)Math.Round(Num(lp.Count, "Instances"));
+                    var s1 = Num(lp.Spacing, "Spacing", ValueKind.Length); var n1 = (int)Math.Round(Num(lp.Count, "Instances"));
                     int n2 = 1; double s2 = 0; Vec3 d2 = Vec3.Zero;
                     if (lp.Direction2 != null)
                     {
                         (_, d2) = Resolver.ResolveDir(lp.Direction2, state);
                         if (lp.Reverse2) d2 = -d2;
-                        s2 = Num(lp.Spacing2, "Spacing 2"); n2 = (int)Math.Round(Num(lp.Count2, "Instances 2"));
+                        s2 = Num(lp.Spacing2, "Spacing 2", ValueKind.Length); n2 = (int)Math.Round(Num(lp.Count2, "Instances 2"));
                     }
                     if (n1 < 1 || n2 < 1 || n1 * n2 > 2000) throw new FeatureException("Instance count must be between 1 and 2000.");
                     for (int i = 0; i < n1; i++)
@@ -276,7 +272,7 @@ public sealed class Regenerator
                     var (o, ax) = Resolver.ResolveDir(cp.Axis, state);
                     if (cp.Reverse) ax = -ax;
                     var n = (int)Math.Round(Num(cp.Count, "Instances"));
-                    var total = Num(cp.Angle, "Angle") * Math.PI / 180;
+                    var total = Num(cp.Angle, "Angle", ValueKind.Angle) * Math.PI / 180;
                     if (n < 2 || n > 2000) throw new FeatureException("Instance count must be between 2 and 2000.");
                     // equal spacing spreads the instances over the total angle: past a full turn the last instance would
                     // land on (or just past) the seed
@@ -290,6 +286,25 @@ public sealed class Regenerator
         }
     }
 
+    /// <summary>
+    /// A feature's value of the given kind: a length in millimetres, an angle in degrees, a plain number. A bare number
+    /// for a length or an angle is millimetres or degrees. Throws <see cref="FeatureException"/> naming the value.
+    /// </summary>
+    static double Value(string? expr, string what, ValueKind kind, Func<string, Quantity?> lookup)
+    {
+        if (string.IsNullOrWhiteSpace(expr)) throw new FeatureException($"{what}: Empty value");
+        try
+        {
+            return kind switch
+            {
+                ValueKind.Length => Expr.Length(expr, lookup),
+                ValueKind.Angle => Expr.Angle(expr, lookup),
+                _ => Expr.Number(expr, lookup),
+            };
+        }
+        catch (Expr.ExprException ex) { throw new FeatureException($"{what}: {ex.Message}"); }
+    }
+
     static ulong Hash(ulong h, string s)
     {
         foreach (var c in s) { h ^= c; h *= 0x100000001b3UL; }
@@ -297,9 +312,13 @@ public sealed class Regenerator
         return h;
     }
 
-    public static (Dictionary<string, double> values, Dictionary<string, string> errors) EvaluateEquations(CadDocument doc)
+    /// <summary>
+    /// The equations' (and design tables') values, each with its units ("W = 50mm" a length, "N = 6" a plain number),
+    /// and the errors of those that do not evaluate, by name.
+    /// </summary>
+    public static (Dictionary<string, Quantity> values, Dictionary<string, string> errors) EvaluateEquations(CadDocument doc)
     {
-        var values = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+        var values = new Dictionary<string, Quantity>(StringComparer.OrdinalIgnoreCase);
         var errors = new Dictionary<string, string>();
         // design tables first: each its row number, and its columns the row's values; then the equations. A name
         // given twice is an error at the second (the first keeps its value).
@@ -332,7 +351,7 @@ public sealed class Regenerator
             foreach (var e in pending)
             {
                 if (!last && uses[e].Any(n => waiting.Contains(n) && !values.ContainsKey(n))) { next.Add(e); continue; }
-                if (Expr.TryEval(e.Expr, n => values.TryGetValue(n, out var v) ? v : null, out var val, out var err))
+                if (Expr.TryEvaluate(e.Expr, n => values.TryGetValue(n, out var v) ? v : null, out var val, out var err))
                 {
                     values[e.Name.Trim()] = val;
                     waiting.Remove(e.Name.Trim());
@@ -376,7 +395,7 @@ public sealed class Regenerator
     public static bool ReusePatternUnions = true;
     public static int PatternUnionsReused;
 
-    sealed class Ctx(CadDocument doc, ModelState state, Func<string, double?> lookup, FeatureStatus status, Feature f)
+    sealed class Ctx(CadDocument doc, ModelState state, Func<string, Quantity?> lookup, FeatureStatus status, Feature f)
     {
         public ModelState State = state;
         public CancellationToken Cancel;
@@ -388,18 +407,15 @@ public sealed class Regenerator
         /// <summary>Progress within the feature (e.g. "instance 7 of 24").</summary>
         public Action<string>? Detail;
 
-        double Num(string? expr, string what)
-        {
-            if (!Expr.TryEval(expr, lookup, out var v, out var err)) throw new FeatureException($"{what}: {err}");
-            return v;
-        }
+        // a value: a length in millimetres, an angle in degrees, a plain number (a count, a ratio)
+        double Len(string? expr, string what) => Value(expr, what, ValueKind.Length, lookup);
+        double Ang(string? expr, string what) => Value(expr, what, ValueKind.Angle, lookup);
+        double Num(string? expr, string what) => Value(expr, what, ValueKind.Number, lookup);
 
-        double Positive(string? expr, string what)
-        {
-            var v = Num(expr, what);
-            if (v <= 0) throw new FeatureException($"{what} must be greater than zero.");
-            return v;
-        }
+        double Positive(double v, string what) => v > 0 ? v : throw new FeatureException($"{what} must be greater than zero.");
+        double PosLen(string? expr, string what) => Positive(Len(expr, what), what);
+        double PosAng(string? expr, string what) => Positive(Ang(expr, what), what);
+        double PosNum(string? expr, string what) => Positive(Num(expr, what), what);
 
         public void Execute()
         {
@@ -413,7 +429,7 @@ public sealed class Regenerator
                 case LoftFeature lf: DoLoft(lf); break;
                 case ThreadFeature th: DoThread(th); break;
                 case FilletFeature fi:
-                    DoBlend(fi.Edges, Positive(fi.Radius, "Radius"), true, fi.TangentPropagation, fi.Overflow,
+                    DoBlend(fi.Edges, PosLen(fi.Radius, "Radius"), true, fi.TangentPropagation, fi.Overflow,
                         scope: fi.WholeBody || fi.Features.Count > 0 ? (fi.Features.Count > 0 ? fi.Features : null, fi.ScopeKind) : null);
                     break;
                 case ChamferFeature ch: { var cs = ChamferSizeOf(ch); DoBlend(ch.Edges, cs.D1, false, ch.TangentPropagation, ch.Overflow, cs); break; }
@@ -424,7 +440,7 @@ public sealed class Regenerator
                 case CircularPatternFeature cp: DoCircularPattern(cp); break;
                 case MirrorFeature m: DoMirror(m); break;
                 case PlaneFeature p: DoPlane(p); break;
-                case AxisFeature ax: State.Axes[f.Id] = AxisSolver.Solve(ax.Refs, State, doc.Units == UnitSystem.IPS ? 1 / 25.4 : 1); break;
+                case AxisFeature ax: State.Axes[f.Id] = AxisSolver.Solve(ax.Refs, State); break;
                 case CombineFeature c: DoCombine(c); break;
                 case ImportFeature im: DoImport(im); break;
                 case FlatPatternFeature fp: DoFlatPattern(fp); break;
@@ -433,18 +449,17 @@ public sealed class Regenerator
 
         // ---- imported solids ----
 
-        static readonly Lru<(string hash, string prefix, double scale), StepImportResult> ImportCache = new(4);
+        static readonly Lru<(string hash, string prefix), StepImportResult> ImportCache = new(4);
 
         void DoImport(ImportFeature im)
         {
             if (!doc.Files.TryGetValue(im.File, out var data))
                 throw new FeatureException($"The imported file \"{im.File}\" is not stored in this part.");
             var hash = DocumentContainer.Hash(data);
-            var scale = doc.Units == UnitSystem.IPS ? 1 / 25.4 : 1;
-            var key = (hash, f.Id + ".", scale);
+            var key = (hash, f.Id + ".");
             if (!ImportCache.TryGet(key, out var r))
             {
-                try { r = StepImport.Read(data, f.Id + ".", scale); }
+                try { r = StepImport.Read(data, f.Id + "."); }
                 catch (InvalidDataException ex) { throw new FeatureException(ex.Message); }
                 ImportCache.Add(key, r);
             }
@@ -466,7 +481,7 @@ public sealed class Regenerator
             foreach (var c in sk.Constraints)
             {
                 if (!c.IsDimension || c.Driven || string.IsNullOrWhiteSpace(c.Expr)) continue;
-                c.Value = Num(c.Expr, "Dimension");
+                c.Value = c.Type == CType.Angle ? Ang(c.Expr, "Dimension") : Len(c.Expr, "Dimension");
             }
             var res = SketchSolver.Solve(sk);
             if (res.Status == SketchStatus.OverDefined) status.Warnings.Add("Sketch is over defined or cannot be solved.");
@@ -516,27 +531,27 @@ public sealed class Regenerator
             double z0, z1;
             switch (e.End)
             {
-                case EndCondition.Blind: z0 = 0; z1 = Positive(e.Depth, "Depth") * dir; break;
-                case EndCondition.MidPlane: { var d = Positive(e.Depth, "Depth"); z0 = -d / 2; z1 = d / 2; break; }
+                case EndCondition.Blind: z0 = 0; z1 = PosLen(e.Depth, "Depth") * dir; break;
+                case EndCondition.MidPlane: { var d = PosLen(e.Depth, "Depth"); z0 = -d / 2; z1 = d / 2; break; }
                 case EndCondition.ThroughAll: case EndCondition.UpToSurface: case EndCondition.UpToBody: z0 = 0; z1 = BigDepth(sk.Frame) * dir; break;
                 default: { var d = BigDepth(sk.Frame); z0 = -d; z1 = d; break; }
             }
             if (!string.IsNullOrWhiteSpace(e.Depth2) && e.End == EndCondition.Blind)
             {
-                var d2 = Num(e.Depth2, "Depth (direction 2)");
+                var d2 = Len(e.Depth2, "Depth (direction 2)");
                 if (d2 > 0) z0 = -d2 * dir;
             }
             var tool = Builders.Extrude(sk.Regions, sk.Frame, Math.Min(z0, z1), Math.Max(z0, z1), f.Id);
             if (e.End is EndCondition.UpToSurface or EndCondition.UpToBody)
             {
-                if (!string.IsNullOrWhiteSpace(e.Draft) && Num(e.Draft, "Draft angle") != 0)
+                if (!string.IsNullOrWhiteSpace(e.Draft) && Ang(e.Draft, "Draft angle") != 0)
                     throw new FeatureException("A draft cannot be combined with Up To Surface or Up To Body.");
                 tool = UpTo(e, sk, tool, dir);
             }
             // a draft: the side walls tapered from the sketch plane, narrowing along the extrusion (outward: widening);
             // in two directions (Mid Plane, a second depth, Through All - Both) each side narrowing away from the sketch
             // plane: the two halves drafted on their own and joined there
-            if (!string.IsNullOrWhiteSpace(e.Draft) && Num(e.Draft, "Draft angle") is var draft && draft != 0)
+            if (!string.IsNullOrWhiteSpace(e.Draft) && Ang(e.Draft, "Draft angle") is var draft && draft != 0)
             {
                 if (Math.Abs(draft) >= 89) throw new FeatureException("The draft angle must be below 89 degrees.");
                 // Through All: just past the far side of the part (drafted walls taken far enough would meet and cross)
@@ -683,7 +698,7 @@ public sealed class Regenerator
                 dir = (sk.Sketch.P(axis.P2) - a).Normalized;
             }
             if (regions.Count == 0) throw new FeatureException("The sketch has no closed profile.");
-            var ang = Positive(r.Angle, "Angle") * Math.PI / 180;
+            var ang = PosAng(r.Angle, "Angle") * Math.PI / 180;
             if (r.Reverse) dir = -dir;
             // profile must stay on one side of the axis
             double minS = double.MaxValue, maxS = double.MinValue;
@@ -717,8 +732,8 @@ public sealed class Regenerator
                 dir = (b - a).Normalized;
             }
             if (regions.Count == 0) throw new FeatureException("The sketch has no closed profile.");
-            var pitch = Positive(h.Pitch, "Pitch");
-            var turns = Positive(h.Revolutions, "Revolutions");
+            var pitch = PosLen(h.Pitch, "Pitch");
+            var turns = PosNum(h.Revolutions, "Revolutions");
             if (h.Reverse) dir = -dir;
             Solid tool;
             try
@@ -727,7 +742,7 @@ public sealed class Regenerator
                 double exitR = 0, exitL = 0;
                 if (h.RunOut)
                 {
-                    if (!string.IsNullOrWhiteSpace(h.RunOutLength)) exitL = Positive(h.RunOutLength, "Run-out length");
+                    if (!string.IsNullOrWhiteSpace(h.RunOutLength)) exitL = PosLen(h.RunOutLength, "Run-out length");
                     else if (!h.IsCut) exitL = pitch; // a boss has nothing to run out of: a pitch long
                     else
                     {
@@ -771,7 +786,7 @@ public sealed class Regenerator
             double major, pitch;
             if (t.Size == "Custom")
             {
-                pitch = Positive(t.Pitch, "Pitch");
+                pitch = PosLen(t.Pitch, "Pitch");
                 major = external ? surfaceR : surfaceR + 5 * Threads.H(pitch) / 8;
             }
             else
@@ -784,7 +799,7 @@ public sealed class Regenerator
                     status.Warnings.Add($"The shaft is {2 * surfaceR:0.###} mm across, {std.name} is {std.d:0.###} mm: the thread follows the shaft.");
                 if (external) major = surfaceR;
             }
-            var clearance = Num(t.Clearance, "Clearance");
+            var clearance = Len(t.Clearance, "Clearance");
             if (clearance < 0) throw new FeatureException("The clearance cannot be negative.");
             var faceLen = hmax - hmin;
             // from the end nearest the picked point (or the other one), running into the face
@@ -827,7 +842,7 @@ public sealed class Regenerator
             double threadLen = t.End switch
             {
                 ThreadEnd.ThroughAll => faceLen + pitch,
-                ThreadEnd.Blind when !string.IsNullOrWhiteSpace(t.Length) => Positive(t.Length, "Length"),
+                ThreadEnd.Blind when !string.IsNullOrWhiteSpace(t.Length) => PosLen(t.Length, "Length"),
                 _ => upTo,
             };
             if (threadLen <= 0) throw new FeatureException("The face is too short for this thread.");
@@ -974,9 +989,9 @@ public sealed class Regenerator
             foreach (var id in l.GuideSketchIds) guides.AddRange(SweepPath.Guides(GetSketch(id), l.Closed));
             var opt = new Kernel.Native.NLoft.Options(
                 l.StartTangency == LoftTangency.Normal ? Kernel.Native.NLoft.Tangency.Normal : Kernel.Native.NLoft.Tangency.None,
-                l.StartTangency == LoftTangency.Normal ? Positive(l.StartLength, "Start tangent length") : 1,
+                l.StartTangency == LoftTangency.Normal ? PosNum(l.StartLength, "Start tangent length") : 1,
                 l.EndTangency == LoftTangency.Normal ? Kernel.Native.NLoft.Tangency.Normal : Kernel.Native.NLoft.Tangency.None,
-                l.EndTangency == LoftTangency.Normal ? Positive(l.EndLength, "End tangent length") : 1, l.Closed);
+                l.EndTangency == LoftTangency.Normal ? PosNum(l.EndLength, "End tangent length") : 1, l.Closed);
             if (centerline != null)
             {
                 var chains = SweepPath.Guides(GetSketch(centerline), l.Closed);
@@ -1072,15 +1087,15 @@ public sealed class Regenerator
             {
                 case ChamferType.AngleDistance:
                     {
-                        var d = Positive(ch.Distance, "Distance");
-                        var a = Num(ch.Angle, "Angle");
+                        var d = PosLen(ch.Distance, "Distance");
+                        var a = Ang(ch.Angle, "Angle");
                         if (a <= 0 || a >= 180) throw new FeatureException("Angle must be between 0 and 180 degrees.");
                         return new ChamferSize(d, 0, a * Math.PI / 180, ch.Flip);
                     }
                 case ChamferType.DistanceDistance:
-                    return new ChamferSize(Positive(ch.Distance, "Distance 1"), Positive(ch.Distance2, "Distance 2"), 0, ch.Flip);
+                    return new ChamferSize(PosLen(ch.Distance, "Distance 1"), PosLen(ch.Distance2, "Distance 2"), 0, ch.Flip);
                 default:
-                    return ChamferSize.Equal(Positive(ch.Distance, "Distance"));
+                    return ChamferSize.Equal(PosLen(ch.Distance, "Distance"));
             }
         }
 
@@ -1332,8 +1347,8 @@ public sealed class Regenerator
             var sk = GetSketch(h.SketchId);
             var pts = sk.Sketch.Entities.OfType<SkPointEntity>().Where(p => !p.Construction).Select(p => sk.Sketch.P(p.P)).ToList();
             if (pts.Count == 0) throw new FeatureException("Place at least one hole position point.");
-            var d = Positive(h.Diameter, "Diameter"); var r = d / 2;
-            double depth = h.ThroughAll ? BigDepth(sk.Frame) : Positive(h.Depth, "Depth");
+            var d = PosLen(h.Diameter, "Diameter"); var r = d / 2;
+            double depth = h.ThroughAll ? BigDepth(sk.Frame) : PosLen(h.Depth, "Depth");
             // the tool starts on the sketch plane, as an extruded cut does: a start just above it (it was 1e-3) lay within the
             // boolean's tolerance of the face, so where the hole met other faces near it some points welded to the tool's edge and
             // some did not (a hole breaking out through a fillet: its wall left uncut, the result invalid)
@@ -1345,8 +1360,8 @@ public sealed class Regenerator
             {
                 case HoleType.Counterbore:
                     {
-                        var cbr = Positive(h.CbDiameter, "Counterbore diameter") / 2;
-                        var cbd = Positive(h.CbDepth, "Counterbore depth");
+                        var cbr = PosLen(h.CbDiameter, "Counterbore diameter") / 2;
+                        var cbd = PosLen(h.CbDepth, "Counterbore depth");
                         if (cbr <= r) throw new FeatureException("Counterbore diameter must be larger than the hole.");
                         V(0, -lift, "Top"); V(cbr, -lift, "CB"); V(cbr, cbd, "CBF"); V(r, cbd, "Hole");
                         topR = cbr;
@@ -1354,8 +1369,8 @@ public sealed class Regenerator
                     }
                 case HoleType.Countersink:
                     {
-                        var csr = Positive(h.CsDiameter, "Countersink diameter") / 2;
-                        var ang = Positive(h.CsAngle, "Countersink angle") * Math.PI / 180;
+                        var csr = PosLen(h.CsDiameter, "Countersink diameter") / 2;
+                        var ang = PosAng(h.CsAngle, "Countersink angle") * Math.PI / 180;
                         if (csr <= r) throw new FeatureException("Countersink diameter must be larger than the hole.");
                         var csDepth = (csr - r) / Math.Tan(ang / 2);
                         var liftR = csr + lift * Math.Tan(ang / 2);
@@ -1402,7 +1417,7 @@ public sealed class Regenerator
 
         void DoShell(ShellFeature s)
         {
-            var t = Positive(s.Thickness, "Thickness");
+            var t = PosLen(s.Thickness, "Thickness");
             if (s.Faces.Count == 0) throw new FeatureException("Select the faces to remove.");
             var byBody = new Dictionary<string, HashSet<string>>();
             foreach (var fr in s.Faces)
@@ -1465,7 +1480,7 @@ public sealed class Regenerator
                     var inner = Kernel.Native.NTess.ToSolid(Kernel.Native.NShell.Inner(b0, open, t, f.Id));
                     foreach (var ff in fillets)
                     {
-                        var r = Num(ff.Radius, "Radius");
+                        var r = Len(ff.Radius, "Radius");
                         // its edges on the inner body: between the same faces' offsets
                         var probe = State.With(new List<Body> { new() { Id = b.Id, Solid = inner } });
                         var seeds = new List<Kernel.Native.NEdge>();
@@ -1507,7 +1522,7 @@ public sealed class Regenerator
 
         void DoDraft(DraftFeature d)
         {
-            var angle = Positive(d.Angle, "Angle");
+            var angle = PosAng(d.Angle, "Angle");
             if (angle >= 89) throw new FeatureException("The draft angle must be below 89 degrees.");
             if (d.Faces.Count == 0) throw new FeatureException("Select the faces to draft.");
             var frame = Resolver.ResolvePlane(d.Neutral, State);
@@ -1975,7 +1990,7 @@ public sealed class Regenerator
         {
             if (p.Mode == PlaneMode.References)
             {
-                var rf = PlaneSolver.Solve(p.Refs, State, Num);
+                var rf = PlaneSolver.Solve(p.Refs, State, Len, Ang);
                 State.Planes[f.Id] = p.Flip ? rf.Flipped() : rf;
                 return;
             }
@@ -1995,7 +2010,7 @@ public sealed class Regenerator
             switch (p.Mode)
             {
                 case PlaneMode.Offset:
-                    frame = frame.Offset(Num(p.Offset, "Offset"));
+                    frame = frame.Offset(Len(p.Offset, "Offset"));
                     break;
                 case PlaneMode.ThroughPoint:
                     if (p.Point == null) throw new FeatureException("Select a vertex or sketch point for the plane to pass through.");
@@ -2005,7 +2020,7 @@ public sealed class Regenerator
                     {
                         if (p.Axis == null) throw new FeatureException("Select the axis (an edge, a sketch line, or X, Y or Z) to rotate the plane about.");
                         var (o, axis) = Resolver.ResolveDir(p.Axis, State);
-                        var rot = Transform.Rotation(o, axis, Num(p.Angle, "Angle") * Math.PI / 180);
+                        var rot = Transform.Rotation(o, axis, Ang(p.Angle, "Angle") * Math.PI / 180);
                         frame = new Frame(rot.Point(frame.Origin), rot.Vector(frame.XDir), rot.Vector(frame.YDir), rot.Vector(frame.Normal));
                         if (p.Point != null) frame = Through(frame, Resolver.ResolvePoint(p.Point, State));
                         break;

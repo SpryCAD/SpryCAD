@@ -101,14 +101,14 @@ static partial class Demos
         AcmeNut(nut, "0");
         screw.Color = new[] { 0.62, 0.64, 0.68 }; nut.Color = new[] { 0.80, 0.62, 0.30 };
         var r = new Regenerator().Rebuild(screw);
-        double lead = r.EquationValues["P"] * r.EquationValues["N"], j = r.EquationValues["J"];
+        double lead = r.EquationValues["P"].Value * r.EquationValues["N"].Value, j = r.EquationValues["J"].Value;
         return Embedded(new[] { ("Screw", screw), ("Nut", nut) }, (m, paths) =>
         {
             var s = m.Insert(paths["Screw"], Transform.Identity, embed: true);
             // both parts on their origins: the nut, where it is, is on the screw where it fits
             var n = m.Insert(paths["Nut"], Transform.Identity, embed: true);
             var journal = FaceRef(m, s, f => f.Surface.Kind == SurfaceKind.Cylinder && Math.Abs(f.Surface.Radius - j / 2) < 1e-6);
-            var bore = FaceRef(m, n, f => f.Surface.Kind == SurfaceKind.Cylinder && f.Surface.Radius < r.EquationValues["D"] / 2);
+            var bore = FaceRef(m, n, f => f.Surface.Kind == SurfaceKind.Cylinder && f.Surface.Radius < r.EquationValues["D"].Value / 2);
             m.AddMate(SpryCad.Core.Assembly.MateType.Screw, journal, bore, lead);
         });
     }
@@ -124,7 +124,7 @@ static partial class Demos
         gear.Color = new[] { 0.55, 0.62, 0.72 };
         var r = new Regenerator().Rebuild(gear);
         // the pitch diameter apart plus 0.1 mm of backlash (printable: the teeth do not rub)
-        double z = r.EquationValues["z"], centre = 2 * r.EquationValues["r"] + 0.1, bore = r.EquationValues["Bore"];
+        double z = r.EquationValues["z"].Value, centre = 2 * r.EquationValues["r"].Value + 0.1, bore = r.EquationValues["Bore"].Value;
         return Embedded(new[] { ("Gear", gear) }, (m, paths) =>
         {
             var g1 = m.Insert(paths["Gear"], Transform.Identity, embed: true);
@@ -348,7 +348,7 @@ static partial class Demos
     public static double FlankDeviation(CadDocument doc, RegenResult r)
     {
         var (v, _) = Regenerator.EvaluateEquations(doc);
-        double rb = v["rb"], rs = v["rs"], re = v["re"], z = v["z"], inva = v["inva"];
+        double rb = v["rb"].Value, rs = v["rs"].Value, re = v["re"].Value, z = v["z"].Value, inva = v["inva"].Value;
         var gap = doc.Features.OfType<SketchFeature>().First(f => f.Name == "Tooth gap");
         var sk = r.State.Sketches[gap.Id].Sketch;
         var arcs = sk.Entities.OfType<SkArc>().Where(a => a.Center != Sketch.OriginId).ToList();
@@ -1109,7 +1109,7 @@ static partial class Demos
         public Sk(CadDocument d)
         {
             var (vals, _) = Regenerator.EvaluateEquations(d);
-            _lookup = n => vals.TryGetValue(n, out var v) ? v : null;
+            _lookup = n => vals.TryGetValue(n, out var v) ? v.Value : null;
         }
 
         /// <summary>The finished sketch (relations and dimensions added on first access).</summary>

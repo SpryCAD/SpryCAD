@@ -6,6 +6,7 @@ using Avalonia.Layout;
 using SpryCad.App.UI;
 using SpryCad.App.Viewport;
 using SpryCad.Core.Assembly;
+using SpryCad.Core.Model;
 
 namespace SpryCad.App;
 
@@ -317,17 +318,19 @@ public partial class MainWindow
         mech.Children.Add(TypeList(MechanicalMates));
         page.Info(mech, "Gear: two round faces turning together at a ratio (their radii unless set). Screw: one turning moves the other along the axis, the lead per turn.");
 
-        // a number field: a label and a box (Enter or leaving it applies); its Tag shows the value again
-        StackPanel Field(string label, Func<double?> get, Action<double?> set, bool optional = false, bool signed = false)
+        // a number field: a label and a box (Enter or leaving it applies); its Tag shows the value again. A length or an
+        // angle (kind) is shown with its unit, and one typed without gets the assembly's (lengths are millimetres)
+        StackPanel Field(string label, Func<double?> get, Action<double?> set, Func<ValueKind>? kind = null, bool optional = false, bool signed = false)
         {
             var tb = new TextBox { Width = 90 };
             var lbl = new TextBlock { Text = label, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0), MinWidth = 96 };
             var row = new StackPanel { Orientation = Orientation.Horizontal, Children = { lbl, tb }, Margin = new Thickness(0, 2) };
-            row.Tag = (Action)(() => tb.Text = get() is { } v ? v.ToString("0.####", CultureInfo.InvariantCulture) : "");
+            ValueKind K() => kind?.Invoke() ?? ValueKind.Number;
+            row.Tag = (Action)(() => tb.Text = get() is { } v ? Units.Entry(v, K()) : "");
             void Read()
             {
                 if (string.IsNullOrWhiteSpace(tb.Text) && optional) { if (get() != null) { set(null); st.Update?.Invoke(); } return; }
-                if (double.TryParse(tb.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out var v) && (signed || v >= 0) && v != get()) { set(v); st.Update?.Invoke(); }
+                if (Units.TryEnter(tb.Text, K(), null, out string _, out var q, out string? _) && (signed || q.Value >= 0) && q.Value != get()) { set(q.Value); st.Update?.Invoke(); }
             }
             tb.LostFocus += (_, _) => Read();
             tb.KeyDown += (_, e) => { if (e.Key == Avalonia.Input.Key.Enter) { Read(); e.Handled = true; } };
@@ -340,15 +343,16 @@ public partial class MainWindow
             return c;
         }
         var opts = page.Section("Options");
-        var offsetRow = Field("Offset (mm)", () => st.Offset, v => st.Offset = v ?? st.Offset, signed: true);
+        var offsetRow = Field("Offset", () => st.Offset, v => st.Offset = v ?? st.Offset, () => ValueKind.Length, signed: true);
         ToolTip.SetTip(offsetRow, "How far apart the references are held: 0 touching; a negative offset puts it on the other side");
-        var angleRow = Field("Angle (deg)", () => st.Angle, v => st.Angle = Math.Min(180, v ?? st.Angle));
+        var angleRow = Field("Angle", () => st.Angle, v => st.Angle = Math.Min(180, v ?? st.Angle), () => ValueKind.Angle);
         var limits = Check("Limits (it may move between)", () => st.Limits, v => st.Limits = v);
-        var minRow = Field("Minimum", () => st.Min, v => st.Min = v ?? st.Min);
-        var maxRow = Field("Maximum", () => st.Max, v => st.Max = v ?? st.Max);
+        ValueKind Limit() => st.Type == MateType.Angle ? ValueKind.Angle : ValueKind.Length;
+        var minRow = Field("Minimum", () => st.Min, v => st.Min = v ?? st.Min, Limit);
+        var maxRow = Field("Maximum", () => st.Max, v => st.Max = v ?? st.Max, Limit);
         var ratioA = Field("Ratio: first", () => st.RatioA, v => st.RatioA = v, optional: true);
         var ratioB = Field("Ratio: second", () => st.RatioB, v => st.RatioB = v, optional: true);
-        var lead = Field("Lead (mm/turn)", () => st.Lead, v => st.Lead = v ?? st.Lead);
+        var lead = Field("Lead per turn", () => st.Lead, v => st.Lead = v ?? st.Lead, () => ValueKind.Length);
         var reverse = Check("Reverse", () => st.Reverse, v => st.Reverse = v);
         // mate alignment: the second reference's normal (or axis) the same way as the first's, or against it
         var alignSame = new ToggleButton { Content = Icons.Make("align-same", 18), Padding = new Thickness(4), MinHeight = 0, Classes = { "matetype", "framed" } };

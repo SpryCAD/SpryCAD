@@ -1,4 +1,5 @@
 using Avalonia.Threading;
+using SpryCad.Core;
 using SpryCad.Core.Assembly;
 using SpryCad.Core.Model;
 using SpryCad.Core.Regen;
@@ -527,8 +528,8 @@ public sealed class DocumentSession
     /// <summary>The result that should be displayed (preview when active).</summary>
     public RegenResult? DisplayResult => PreviewActive && PreviewResult != null ? PreviewResult : Result;
 
-    /// <summary>Equation values for expression evaluation in the UI.</summary>
-    public Func<string, double?> Lookup
+    /// <summary>Equation values (with their units) for expression evaluation in the UI.</summary>
+    public Func<string, Quantity?> Lookup
     {
         get
         {

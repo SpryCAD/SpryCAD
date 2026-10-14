@@ -457,9 +457,9 @@ public partial class MainWindow
         var opts = page.Section("Start/End Constraints");
         var tangency = new List<(LoftTangency, string)> { (LoftTangency.None, "None"), (LoftTangency.Normal, "Normal to profile") };
         page.Combo(opts, "Start", tangency, () => f.StartTangency, v => f.StartTangency = v);
-        page.Number(opts, "Start tangent length", () => f.StartLength, v => f.StartLength = v);
+        page.Number(opts, "Start tangent length", () => f.StartLength, v => f.StartLength = v, unit: "×");
         page.Combo(opts, "End", tangency, () => f.EndTangency, v => f.EndTangency = v);
-        page.Number(opts, "End tangent length", () => f.EndLength, v => f.EndLength = v);
+        page.Number(opts, "End tangent length", () => f.EndLength, v => f.EndLength = v, unit: "×");
         var osec = page.Section("Options");
         page.Check(osec, "Close loft (back to the first profile)", () => f.Closed, v => f.Closed = v);
         if (!f.IsCut) page.Check(osec, "Merge result", () => f.Merge, v => f.Merge = v);
@@ -521,7 +521,7 @@ public partial class MainWindow
         };
         var h = page.Section("Helix");
         page.Number(h, "Pitch", () => f.Pitch, v => f.Pitch = v, "dimension");
-        page.Number(h, "Revolutions", () => f.Revolutions, v => f.Revolutions = v, "helical");
+        page.Number(h, "Revolutions", () => f.Revolutions, v => f.Revolutions = v, "helical", "");
         page.Check(h, "Left hand", () => f.LeftHand, v => f.LeftHand = v);
         page.Check(h, "Reverse direction", () => f.Reverse, v => f.Reverse = v);
         page.Info(h, "The profile must not reach the axis, and (in a plane through the axis) must be shorter along it than the pitch.");
@@ -715,12 +715,13 @@ public partial class MainWindow
         var sizes = new List<(string, string)>
         {
             ("custom", "Custom"),
-            ("M3", "M3 clearance (3.4)"), ("M4", "M4 clearance (4.5)"), ("M5", "M5 clearance (5.5)"), ("M6", "M6 clearance (6.6)"),
-            ("M8", "M8 clearance (9)"), ("M10", "M10 clearance (11)"), ("M12", "M12 clearance (13.5)"),
+            ("M3", "M3 clearance (3.4 mm)"), ("M4", "M4 clearance (4.5 mm)"), ("M5", "M5 clearance (5.5 mm)"), ("M6", "M6 clearance (6.6 mm)"),
+            ("M8", "M8 clearance (9 mm)"), ("M10", "M10 clearance (11 mm)"), ("M12", "M12 clearance (13.5 mm)"),
         };
         TextBox? dia = null, cbd = null, cbdp = null, csd = null;
         // shows the standard size matching the current diameter (editing an M6 hole shows M6, not Custom)
-        string CurrentStd() => sizes.Skip(1).FirstOrDefault(s => s.Item2.Contains($"({f.Diameter})")).Item1 ?? "custom";
+        string CurrentStd() => UnitFormat.TryLength(f.Diameter, Session.Lookup, out var d, out _)
+            ? sizes.Skip(1).FirstOrDefault(s => s.Item2.Contains($"({Core.Expr.Format(d)} mm)")).Item1 ?? "custom" : "custom";
         page.Combo(std, "Standard", sizes, CurrentStd, v =>
         {
             var spec = v switch
@@ -729,10 +730,9 @@ public partial class MainWindow
                 "M8" => (9.0, 15.0, 8.6, 16.4), "M10" => (11.0, 18.0, 10.8, 20.4), "M12" => (13.5, 20.0, 13.0, 24.4), _ => (0, 0, 0, 0),
             };
             if (spec.Item1 == 0) return;
-            dia!.Text = spec.Item1.ToString(System.Globalization.CultureInfo.InvariantCulture);
-            cbd!.Text = spec.Item2.ToString(System.Globalization.CultureInfo.InvariantCulture);
-            cbdp!.Text = spec.Item3.ToString(System.Globalization.CultureInfo.InvariantCulture);
-            csd!.Text = spec.Item4.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            // (metric sizes: in millimetres in an inch part too)
+            static string Mm(double v) => Core.Expr.Format(v) + "mm";
+            dia!.Text = Mm(spec.Item1); cbd!.Text = Mm(spec.Item2); cbdp!.Text = Mm(spec.Item3); csd!.Text = Mm(spec.Item4);
         });
         dia = page.Number(std, "Diameter", () => f.Diameter, v => f.Diameter = v, "hole");
         var end = page.Section("End Condition");

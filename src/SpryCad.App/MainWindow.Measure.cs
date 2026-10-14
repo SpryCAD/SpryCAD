@@ -5,6 +5,7 @@ using Avalonia.Media;
 using SpryCad.App.Session;
 using SpryCad.App.UI;
 using SpryCad.App.Viewport;
+using SpryCad.Core.Model;
 using SpryCad.Core.Regen;
 using SpryCad.Kernel;
 using SpryCad.Kernel.Native;
@@ -187,8 +188,9 @@ public partial class MainWindow
         var lines = new List<(Vec3, Vec3, ViewportControl.MeasureStyle)>();
         _measureLabelAt = null;
         string? labelText = null;
-        var u = UnitLabel;
-        string L(double v) => F(v) + " " + u;
+        // (the model is in millimetres; shown in the part's units)
+        var u = Units.Symbol(); var k = 1 / Units.MmPer();
+        string L(double v) => F(v * k) + " " + u;
 
         if (items.Count == 0) rows.Add(("", "Select faces, edges or vertices."));
         else if (items.Any(i => i == null)) rows.Add(("", "An item could not be measured (it is no longer in the model)."));
@@ -201,12 +203,12 @@ public partial class MainWindow
                 lines.Add((rl.center, rl.onIt, ViewportControl.MeasureStyle.Radius));
                 _measureLabelAt = (rl.center + rl.onIt) * 0.5;
                 var it = items[0]!;
-                labelText = "R " + L(it.Radius!.Value) + (it.Kind is "Circle" or "Cylinder" ? $"  (Ø {F(2 * it.Radius.Value)})" : "");
+                labelText = "R " + L(it.Radius!.Value) + (it.Kind is "Circle" or "Cylinder" ? $"  (Ø {F(2 * it.Radius.Value * k)})" : "");
             }
             else if (items[0] is { Kind: "Torus", Radius: { } R, TubeRadius: { } r })
             {
                 _measureLabelAt = items[0]!.Item.Point;
-                labelText = $"Inner R {L(Math.Abs(R - r))}  (Ø {F(2 * Math.Abs(R - r))})\nOuter R {L(R + r)}  (Ø {F(2 * (R + r))})";
+                labelText = $"Inner R {L(Math.Abs(R - r))}  (Ø {F(2 * Math.Abs(R - r) * k)})\nOuter R {L(R + r)}  (Ø {F(2 * (R + r) * k)})";
             }
         }
         else if (items.Count == 2)
@@ -227,7 +229,7 @@ public partial class MainWindow
                 {
                     _measureLabelAt = (c.p + c.q) * 0.5; labelText = L(c.d);
                     var cv = c.q - c.p;
-                    rows.Add(("dX / dY / dZ", $"{F(Math.Abs(cv.X))}, {F(Math.Abs(cv.Y))}, {F(Math.Abs(cv.Z))} {u}"));
+                    rows.Add(("dX / dY / dZ", $"{F(Math.Abs(cv.X) * k)}, {F(Math.Abs(cv.Y) * k)}, {F(Math.Abs(cv.Z) * k)} {u}"));
                 }
             }
             if (centersFirst) Centers();
@@ -237,7 +239,7 @@ public partial class MainWindow
                 if (!centersFirst)
                 {
                     var dv = pb - pa;
-                    rows.Add(("dX / dY / dZ", $"{F(Math.Abs(dv.X))}, {F(Math.Abs(dv.Y))}, {F(Math.Abs(dv.Z))} {u}"));
+                    rows.Add(("dX / dY / dZ", $"{F(Math.Abs(dv.X) * k)}, {F(Math.Abs(dv.Y) * k)}, {F(Math.Abs(dv.Z) * k)} {u}"));
                     if (d > 1e-9) { lines.Add((pa, pb, ViewportControl.MeasureStyle.Distance)); _measureLabelAt = (pa + pb) * 0.5; labelText = L(d); }
                 }
             }
@@ -245,7 +247,7 @@ public partial class MainWindow
             if (!centersFirst) Centers();
             if (Angle(a, b) is { } ang) rows.Add(("Angle", F(ang) + "°"));
             if (a.IsEdge && b.IsEdge) rows.Add(("Total length", L(a.Length + b.Length)));
-            if (a.IsFace && b.IsFace) rows.Add(("Total area", F(a.Area + b.Area) + " " + u + "²"));
+            if (a.IsFace && b.IsFace) rows.Add(("Total area", F((a.Area + b.Area) * k * k) + " " + u + "²"));
         }
         else
         {
@@ -253,7 +255,7 @@ public partial class MainWindow
             var faces = items.Where(i => i!.IsFace).ToList();
             rows.Add(("Items", items.Count.ToString(CultureInfo.InvariantCulture)));
             if (edges.Count > 0) rows.Add(($"Total length ({edges.Count} edges)", L(edges.Sum(e => e!.Length))));
-            if (faces.Count > 0) rows.Add(($"Total area ({faces.Count} faces)", F(faces.Sum(f => f!.Area)) + " " + u + "²"));
+            if (faces.Count > 0) rows.Add(($"Total area ({faces.Count} faces)", F(faces.Sum(f => f!.Area) * k * k) + " " + u + "²"));
             rows.Add(("", "Select two items for the distance between them."));
         }
 
@@ -312,9 +314,9 @@ public partial class MainWindow
 
     void Single(MeasureItem it, List<(string, string)> rows, Func<double, string> L)
     {
-        var u = UnitLabel;
-        string Pt(Vec3 p) => $"{F(p.X)}, {F(p.Y)}, {F(p.Z)} {u}";
-        string RD(double r) => $"R {L(r)}  (Ø {F(2 * r)})";
+        var u = Units.Symbol(); var k = 1 / Units.MmPer();
+        string Pt(Vec3 p) => $"{F(p.X * k)}, {F(p.Y * k)}, {F(p.Z * k)} {u}";
+        string RD(double r) => $"R {L(r)}  (Ø {F(2 * r * k)})";
         switch (it.Kind)
         {
             case "Vertex": rows.Add(("X, Y, Z", Pt(it.Center!.Value))); return;
@@ -334,19 +336,19 @@ public partial class MainWindow
                 break;
             case "Curve": rows.Add(("Length", L(it.Length))); break;
             case "Plane":
-                rows.Add(("Area", F(it.Area) + " " + u + "²"));
+                rows.Add(("Area", F(it.Area * k * k) + " " + u + "²"));
                 var n = it.Plane!.Normal;
                 rows.Add(("Normal", $"{F(n.X)}, {F(n.Y)}, {F(n.Z)}"));
                 break;
             case "Cylinder":
                 rows.Add(("Diameter", L(2 * it.Radius!.Value)));
                 rows.Add(("Radius", L(it.Radius.Value)));
-                rows.Add(("Area", F(it.Area) + " " + u + "²"));
+                rows.Add(("Area", F(it.Area * k * k) + " " + u + "²"));
                 break;
             case "Sphere":
                 rows.Add(("Radius", L(it.Radius!.Value)));
                 rows.Add(("Center", Pt(it.Center!.Value)));
-                rows.Add(("Area", F(it.Area) + " " + u + "²"));
+                rows.Add(("Area", F(it.Area * k * k) + " " + u + "²"));
                 break;
             case "Torus":
                 {
@@ -357,14 +359,14 @@ public partial class MainWindow
                     rows.Add(("Centerline", RD(R)));
                     rows.Add(("Tube", RD(r)));
                     rows.Add(("Center", Pt(it.Center!.Value)));
-                    rows.Add(("Area", F(it.Area) + " " + u + "²"));
+                    rows.Add(("Area", F(it.Area * k * k) + " " + u + "²"));
                     break;
                 }
             case "Cone":
                 rows.Add(("Half angle", F(it.ConeAngle!.Value) + "°"));
-                rows.Add(("Area", F(it.Area) + " " + u + "²"));
+                rows.Add(("Area", F(it.Area * k * k) + " " + u + "²"));
                 break;
-            default: rows.Add(("Area", F(it.Area) + " " + u + "²")); break;
+            default: rows.Add(("Area", F(it.Area * k * k) + " " + u + "²")); break;
         }
         rows.Insert(0, ("Type", it.Kind));
     }
