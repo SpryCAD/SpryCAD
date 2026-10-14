@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Polygon: a regular hexagon about its centre (accent) -->
+  <path d="M10 5H22L28 16L22 27H10L4 16Z" fill="none" stroke="#24364F" stroke-width="2" stroke-linejoin="miter"/>
+  <path d="M14 14h4v4h-4z" fill="#2F7BD6"/>
+</svg>

@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Combine: two overlapping solids, a block and a cylinder, joined into one (the result blue) -->
+  <defs>
+    <linearGradient id="bt" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#E4F0FD"/><stop offset="1" stop-color="#B9D6F6"/></linearGradient>
+    <linearGradient id="bl" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#7FAAE0"/><stop offset="1" stop-color="#9FC2EC"/></linearGradient>
+    <linearGradient id="br" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#5F92D2"/><stop offset="1" stop-color="#4A7DC0"/></linearGradient>
+    <linearGradient id="bc" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#8CB6EA"/><stop offset=".35" stop-color="#E6F1FD"/><stop offset=".55" stop-color="#B5D3F5"/><stop offset="1" stop-color="#3F73B8"/></linearGradient>
+    <clipPath id="out"><path d="M0 0H32V32H0Z M2.5 18.5L14.5 24.5L26.5 18.5L14.5 12.5Z" clip-rule="evenodd"/></clipPath>
+    <clipPath id="topf"><path d="M2.5 18.5L14.5 24.5L26.5 18.5L14.5 12.5Z"/></clipPath>
+  </defs>
+  <g stroke-linejoin="miter" stroke-linecap="square">
+    <path d="M2.5 18.5L14.5 12.5L26.5 18.5L14.5 24.5Z" fill="url(#bt)"/>
+    <path d="M2.5 18.5L14.5 24.5L14.5 31.5L2.5 25.5Z" fill="url(#bl)"/>
+    <path d="M14.5 24.5L26.5 18.5L26.5 25.5L14.5 31.5Z" fill="url(#br)"/>
+    <path d="M3.5 18.5L14.5 24" fill="none" stroke="#FFFFFF" stroke-opacity=".85"/>
+    <path d="M14.5 24L25.5 18.5" fill="none" stroke="#FFFFFF" stroke-opacity=".5"/>
+    <path d="M2.5 18.5L14.5 12.5L26.5 18.5V25.5L14.5 31.5L2.5 25.5Z M2.5 18.5L14.5 24.5L26.5 18.5 M14.5 24.5V31.5" fill="none" stroke="#24364F"/>
+    <g clip-path="url(#out)"><path d="M12.5 7.5V22A7 3.5 0 0 0 26.5 22V7.5Z" fill="url(#bc)"/></g>
+    <path d="M12.5 7.5V16.5A7 3.5 0 0 0 26.5 16.5V7.5Z" fill="url(#bc)"/>
+    <g clip-path="url(#topf)"><path d="M12.5 16.5A7 3.5 0 0 0 26.5 16.5" fill="none" stroke="#24364F"/></g>
+    <path d="M12.5 7.5V16.5 M26.5 7.5V22" fill="none" stroke="#24364F"/>
+    <ellipse cx="19.5" cy="7.5" rx="7" ry="3.5" fill="url(#bt)"/>
+    <path d="M13.5 7.5A6 3 0 0 0 19.5 10.5" fill="none" stroke="#FFFFFF" stroke-opacity=".8"/>
+    <ellipse cx="19.5" cy="7.5" rx="7" ry="3.5" fill="none" stroke="#24364F"/>
+  </g>
+</svg>

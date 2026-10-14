@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Fix: a component held where it is, an anchor under it -->
+  <defs>
+    <linearGradient id="gt" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#F1F3F6"/><stop offset="1" stop-color="#D5DBE3"/></linearGradient>
+    <linearGradient id="gl" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#AEB8C5"/><stop offset="1" stop-color="#C5CDD7"/></linearGradient>
+    <linearGradient id="gr" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#8E9BAC"/><stop offset="1" stop-color="#7A8899"/></linearGradient>
+  </defs>
+  <g stroke-linejoin="miter" stroke-linecap="square">
+    <path d="M16.5 1.5 L26.5 6.5 L16.5 11.5 L6.5 6.5Z" fill="url(#gt)"/>
+    <path d="M6.5 6.5 L16.5 11.5 L16.5 16.5 L6.5 11.5Z" fill="url(#gl)"/>
+    <path d="M16.5 11.5 L26.5 6.5 L26.5 11.5 L16.5 16.5Z" fill="url(#gr)"/>
+    <path d="M7.5 6.5 L16.5 11" fill="none" stroke="#FFFFFF" stroke-opacity=".8"/>
+    <path d="M16.5 11 L25.5 6.5" fill="none" stroke="#FFFFFF" stroke-opacity=".5"/>
+    <path d="M16.5 1.5 L26.5 6.5 L26.5 11.5 L16.5 16.5 L6.5 11.5 L6.5 6.5Z M6.5 6.5 L16.5 11.5 L26.5 6.5 M16.5 11.5 L16.5 16.5" fill="none" stroke="#24364F"/>
+    <path d="M16.5 17V29.5 M11.5 19.5H21.5 M7.5 24.5Q9 29.5 16.5 29.5Q24 29.5 25.5 24.5" fill="none" stroke="#2F7BD6" stroke-width="2" stroke-linecap="butt"/>
+    <path d="M5 26L7.5 22L10 25.5Z M28 26L25.5 22L23 25.5Z" fill="#2F7BD6"/>
+  </g>
+</svg>

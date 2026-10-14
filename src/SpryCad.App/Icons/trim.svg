@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Trim: a line cut back to the lines it crosses, the piece removed dashed red -->
+  <path d="M9 5V27 M23 5V27 M3 15H9 M23 15H29" fill="none" stroke="#24364F" stroke-width="2"/>
+  <path d="M11 15H21" fill="none" stroke="#D64545" stroke-width="2" stroke-dasharray="3 2"/>
+</svg>

@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Rebuild: a refresh arrow round the circle, its head green -->
+  <path d="M25 16A9 9 0 1 1 17.56 7.14" fill="none" stroke="#24364F" stroke-width="2"/>
+  <path d="M18.4 2.2L24.9 8.4L16.7 12.1Z" fill="#2E9E5B" stroke="#1E7A45" stroke-width="1" stroke-linejoin="miter"/>
+</svg>

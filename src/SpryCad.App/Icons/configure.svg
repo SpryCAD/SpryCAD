@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Configure: sliders, their knobs (accent) set -->
+  <path d="M4 7H28 M4 15H28 M4 23H28" fill="none" stroke="#24364F" stroke-width="2"/>
+  <path d="M10 4h4v6h-4z M18 12h4v6h-4z M7 20h4v6h-4z" fill="#2F7BD6"/>
+</svg>

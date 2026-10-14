@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Gear mate: two parts turning together at a ratio, as gears -->
+  <g fill="none" stroke-width="2" stroke-linejoin="miter" stroke-linecap="square">
+    <path d="M13.86 6.74 L12.96 2.85 L19.04 2.85 L18.14 6.74 L22.95 9.52 L25.87 6.79 L28.91 12.05 L25.08 13.22 L25.08 18.78 L28.91 19.95 L25.87 25.21 L22.95 22.48 L18.14 25.26 L19.04 29.15 L12.96 29.15 L13.86 25.26 L9.05 22.48 L6.13 25.21 L3.09 19.95 L6.92 18.78 L6.92 13.22 L3.09 12.05 L6.13 6.79 L9.05 9.52Z" fill="#D5DBE3" stroke="#24364F" stroke-linejoin="round"/>
+    <circle cx="16" cy="16" r="4" fill="#FFFFFF" stroke="#2F7BD6"/>
+  </g>
+</svg>

@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Lofted cut: a tapered pocket (shaded dark blue) narrowing from its square opening to a small floor -->
+  <defs>
+    <linearGradient id="gt" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#F1F3F6"/><stop offset="1" stop-color="#D5DBE3"/></linearGradient>
+    <linearGradient id="gl" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#AEB8C5"/><stop offset="1" stop-color="#C5CDD7"/></linearGradient>
+    <linearGradient id="gr" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#8E9BAC"/><stop offset="1" stop-color="#7A8899"/></linearGradient>
+    <linearGradient id="wd" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2C5592"/><stop offset="1" stop-color="#3D6AA8"/></linearGradient>
+    <linearGradient id="wl" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5A8CD0"/><stop offset="1" stop-color="#9CC2EE"/></linearGradient>
+  </defs>
+  <g stroke-linejoin="miter" stroke-linecap="square">
+    <path d="M2.5 13.5L16.5 6.5L30.5 13.5L16.5 20.5Z" fill="url(#gt)"/>
+    <path d="M2.5 13.5L16.5 20.5L16.5 29.5L2.5 22.5Z" fill="url(#gl)"/>
+    <path d="M16.5 20.5L30.5 13.5L30.5 22.5L16.5 29.5Z" fill="url(#gr)"/>
+    <path d="M3.5 13.5L16.5 20" fill="none" stroke="#FFFFFF" stroke-opacity=".85"/>
+    <path d="M16.5 20L29.5 13.5" fill="none" stroke="#FFFFFF" stroke-opacity=".5"/>
+    <path d="M2.5 13.5L16.5 6.5L30.5 13.5V22.5L16.5 29.5L2.5 22.5Z M2.5 13.5L16.5 20.5L30.5 13.5 M16.5 20.5V29.5" fill="none" stroke="#24364F"/>
+    <path d="M8.5 13.5L16.5 9.5L16.5 16L14.5 17Z" fill="url(#wd)"/>
+    <path d="M16.5 9.5L24.5 13.5L18.5 17L16.5 16Z" fill="url(#wl)"/>
+    <path d="M16.5 17.5L8.5 13.5L14.5 17L16.5 18Z" fill="#8DB6EA"/>
+    <path d="M24.5 13.5L16.5 17.5L16.5 18L18.5 17Z" fill="#C9DFF8"/>
+    <path d="M14.5 17L16.5 16L18.5 17L16.5 18Z" fill="#162B4D"/>
+    <path d="M8.5 13.5L14.5 17 M16.5 9.5L16.5 16 M24.5 13.5L18.5 17 M16.5 17.5L16.5 18" fill="none" stroke="#1D4E8F" stroke-opacity=".8"/>
+    <path d="M8.5 13.5L16.5 9.5L24.5 13.5L16.5 17.5Z" fill="none" stroke="#1D4E8F"/>
+  </g>
+</svg>

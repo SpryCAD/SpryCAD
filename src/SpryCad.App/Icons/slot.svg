@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Slot: two arcs joined by lines, its centres (accent) on the dashed centre line -->
+  <path d="M11 9H21A8 8 0 0 1 21 25H11A8 8 0 0 1 11 9Z" fill="none" stroke="#24364F" stroke-width="2"/>
+  <path d="M11 17H21" fill="none" stroke="#24364F" stroke-width="1.5" stroke-dasharray="3 2"/>
+  <path d="M9 15h4v4h-4z M19 15h4v4h-4z" fill="#2F7BD6"/>
+</svg>

@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Thread: a steel shank (grey) with its helical thread ridges (blue) on its lower part -->
+  <defs>
+    <linearGradient id="gt" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#F1F3F6"/><stop offset="1" stop-color="#D5DBE3"/></linearGradient>
+    <linearGradient id="gc" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#A9B4C2"/><stop offset=".3" stop-color="#EEF1F5"/><stop offset=".55" stop-color="#C9D0DA"/><stop offset="1" stop-color="#7A8899"/></linearGradient>
+    <clipPath id="shank"><path d="M9.5 12V27.5A7 3.5 0 0 0 23.5 27.5V12Z"/></clipPath>
+  </defs>
+  <g stroke-linejoin="miter" stroke-linecap="square">
+    <path d="M9.5 5.5V27.5A7 3.5 0 0 0 23.5 27.5V5.5Z" fill="url(#gc)"/>
+    <ellipse cx="16.5" cy="5.5" rx="7" ry="3.5" fill="url(#gt)"/>
+    <path d="M10.5 5.5A6 3 0 0 0 16.5 8.5" fill="none" stroke="#FFFFFF" stroke-opacity=".8"/>
+    <path d="M9.5 5.5V27.5A7 3.5 0 0 0 23.5 27.5V5.5" fill="none" stroke="#24364F"/>
+    <ellipse cx="16.5" cy="5.5" rx="7" ry="3.5" fill="none" stroke="#24364F"/>
+    <g clip-path="url(#shank)">
+    <path d="M9 12.5L9.14 13.32L9.57 14.12L10.26 14.87L11.2 15.54L12.33 16.11L13.63 16.58L15.04 16.92L16.5 17.12L17.96 17.2L19.37 17.14L20.67 16.96L21.8 16.66L22.74 16.27L23.43 15.81L23.86 15.29L24 14.75" fill="none" stroke="#1D4E8F" stroke-width="3.6" stroke-linecap="butt"/>
+    <path d="M9 17L9.14 17.82L9.57 18.62L10.26 19.37L11.2 20.04L12.33 20.61L13.63 21.08L15.04 21.42L16.5 21.62L17.96 21.7L19.37 21.64L20.67 21.46L21.8 21.16L22.74 20.77L23.43 20.31L23.86 19.79L24 19.25" fill="none" stroke="#1D4E8F" stroke-width="3.6" stroke-linecap="butt"/>
+    <path d="M9 21.5L9.14 22.32L9.57 23.12L10.26 23.87L11.2 24.54L12.33 25.11L13.63 25.58L15.04 25.92L16.5 26.12L17.96 26.2L19.37 26.14L20.67 25.96L21.8 25.66L22.74 25.27L23.43 24.81L23.86 24.29L24 23.75" fill="none" stroke="#1D4E8F" stroke-width="3.6" stroke-linecap="butt"/>
+    <path d="M9 26L9.14 26.82L9.57 27.62L10.26 28.37L11.2 29.04L12.33 29.61L13.63 30.08L15.04 30.42L16.5 30.62L17.96 30.7L19.37 30.64L20.67 30.46L21.8 30.16L22.74 29.77L23.43 29.31L23.86 28.79L24 28.25" fill="none" stroke="#1D4E8F" stroke-width="3.6" stroke-linecap="butt"/>
+    <path d="M9 12.3L9.14 13.12L9.57 13.92L10.26 14.67L11.2 15.34L12.33 15.91L13.63 16.38L15.04 16.72L16.5 16.93L17.96 17L19.37 16.94L20.67 16.76L21.8 16.46L22.74 16.07L23.43 15.61L23.86 15.09L24 14.55" fill="none" stroke="#6E9FDC" stroke-width="2.4" stroke-linecap="butt"/>
+    <path d="M9.57 13.22L10.26 13.97L11.2 14.64L12.33 15.21L13.63 15.68L15.04 16.02L16.5 16.23L17.96 16.3" fill="none" stroke="#D6E7FA" stroke-width=".9" stroke-linecap="butt"/>
+    <path d="M9 16.8L9.14 17.62L9.57 18.42L10.26 19.17L11.2 19.84L12.33 20.41L13.63 20.88L15.04 21.22L16.5 21.43L17.96 21.5L19.37 21.44L20.67 21.26L21.8 20.96L22.74 20.57L23.43 20.11L23.86 19.59L24 19.05" fill="none" stroke="#6E9FDC" stroke-width="2.4" stroke-linecap="butt"/>
+    <path d="M9.57 17.72L10.26 18.47L11.2 19.14L12.33 19.71L13.63 20.18L15.04 20.52L16.5 20.73L17.96 20.8" fill="none" stroke="#D6E7FA" stroke-width=".9" stroke-linecap="butt"/>
+    <path d="M9 21.3L9.14 22.12L9.57 22.92L10.26 23.67L11.2 24.34L12.33 24.91L13.63 25.38L15.04 25.72L16.5 25.93L17.96 26L19.37 25.94L20.67 25.76L21.8 25.46L22.74 25.07L23.43 24.61L23.86 24.09L24 23.55" fill="none" stroke="#6E9FDC" stroke-width="2.4" stroke-linecap="butt"/>
+    <path d="M9.57 22.22L10.26 22.97L11.2 23.64L12.33 24.21L13.63 24.68L15.04 25.02L16.5 25.23L17.96 25.3" fill="none" stroke="#D6E7FA" stroke-width=".9" stroke-linecap="butt"/>
+    <path d="M9 25.8L9.14 26.62L9.57 27.42L10.26 28.17L11.2 28.84L12.33 29.41L13.63 29.88L15.04 30.22L16.5 30.43L17.96 30.5L19.37 30.44L20.67 30.26L21.8 29.96L22.74 29.57L23.43 29.11L23.86 28.59L24 28.05" fill="none" stroke="#6E9FDC" stroke-width="2.4" stroke-linecap="butt"/>
+    <path d="M9.57 26.72L10.26 27.47L11.2 28.14L12.33 28.71L13.63 29.18L15.04 29.52L16.5 29.73L17.96 29.8" fill="none" stroke="#D6E7FA" stroke-width=".9" stroke-linecap="butt"/>
+    </g>
+    <path d="M9.5 11L7.5 12.5L9.5 14Z" fill="#7FAAE0" stroke="#24364F"/>
+    <path d="M23.5 13.25L25.5 14.75L23.5 16.25Z" fill="#4A7DC0" stroke="#24364F"/>
+    <path d="M9.5 15.5L7.5 17L9.5 18.5Z" fill="#7FAAE0" stroke="#24364F"/>
+    <path d="M23.5 17.75L25.5 19.25L23.5 20.75Z" fill="#4A7DC0" stroke="#24364F"/>
+    <path d="M9.5 20L7.5 21.5L9.5 23Z" fill="#7FAAE0" stroke="#24364F"/>
+    <path d="M23.5 22.25L25.5 23.75L23.5 25.25Z" fill="#4A7DC0" stroke="#24364F"/>
+    <path d="M9.5 24.5L7.5 26L9.5 27.5Z" fill="#7FAAE0" stroke="#24364F"/>
+    <path d="M23.5 26.75L25.5 28.25L23.5 29.75Z" fill="#4A7DC0" stroke="#24364F"/>
+    <path d="M9.5 5.5V27.5A7 3.5 0 0 0 23.5 27.5V5.5" fill="none" stroke="#24364F"/>
+  </g>
+</svg>

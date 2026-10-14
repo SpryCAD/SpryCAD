@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Flatten: the folded sheet-metal part (grey) laid out flat (blue); the amber arrow between -->
+  <defs>
+    <linearGradient id="gt" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#F1F3F6"/><stop offset="1" stop-color="#D5DBE3"/></linearGradient>
+    <linearGradient id="gl" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#AEB8C5"/><stop offset="1" stop-color="#C5CDD7"/></linearGradient>
+    <linearGradient id="gr" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#8E9BAC"/><stop offset="1" stop-color="#7A8899"/></linearGradient>
+    <linearGradient id="bt" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#E4F0FD"/><stop offset="1" stop-color="#B9D6F6"/></linearGradient>
+    <linearGradient id="bl" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#7FAAE0"/><stop offset="1" stop-color="#9FC2EC"/></linearGradient>
+    <linearGradient id="br" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#5F92D2"/><stop offset="1" stop-color="#4A7DC0"/></linearGradient>
+    <linearGradient id="am" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#FFC45C"/><stop offset="1" stop-color="#EE9A22"/></linearGradient>
+  </defs>
+  <g stroke-linejoin="miter" stroke-linecap="square">
+    <path d="M2.5 5.5L9.5 2L12.5 3.5L5.5 7Z" fill="url(#gt)" stroke="#24364F"/>
+    <path d="M2.5 13.5L5.5 15L5.5 7L2.5 5.5Z" fill="url(#gl)" stroke="#24364F"/>
+    <path d="M5.5 13.5L12.5 10L12.5 3.5L5.5 7Z" fill="url(#gr)" stroke="#24364F"/>
+    <path d="M5.5 13.5L12.5 10L19.5 13.5L12.5 17Z" fill="url(#gt)" stroke="#24364F"/>
+    <path d="M5.5 15L12.5 18.5L12.5 17L5.5 13.5Z" fill="url(#gl)" stroke="#24364F"/>
+    <path d="M12.5 18.5L19.5 15L19.5 13.5L12.5 17Z" fill="url(#gr)" stroke="#24364F"/>
+    <path d="M12.5 23.5L24.5 29.5L24.5 31L12.5 25Z" fill="url(#bl)" stroke="#24364F"/>
+    <path d="M24.5 29.5L30.5 26.5L30.5 28L24.5 31Z" fill="url(#br)" stroke="#24364F"/>
+    <path d="M12.5 23.5L24.5 29.5L30.5 26.5L18.5 20.5Z" fill="url(#bt)" stroke="#24364F"/>
+    <path d="M17.5 26L23.5 23" fill="none" stroke="#2F7BD6" stroke-dasharray="2 1.5" stroke-linecap="butt"/>
+    <path d="M15.5 5.5C23.5 5.5 27.5 8 27.5 15" fill="none" stroke="#8A5200" stroke-width="4" stroke-linecap="butt"/>
+    <path d="M15.5 5.5C23.5 5.5 27.5 8 27.5 15" fill="none" stroke="url(#am)" stroke-width="2" stroke-linecap="butt"/>
+    <path d="M24.3 15L27.5 19.5L30.7 15Z" fill="url(#am)" stroke="#8A5200"/>
+  </g>
+</svg>

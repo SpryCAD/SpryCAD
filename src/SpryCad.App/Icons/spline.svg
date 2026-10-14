@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Spline: a smooth curve through its points (accent) -->
+  <path d="M4 26C6 14 10 9 14 12S19 24 23 21S27 10 28 6" fill="none" stroke="#24364F" stroke-width="2"/>
+  <path d="M2 24h4v4h-4z M14 14h4v4h-4z M26 4h4v4h-4z" fill="#2F7BD6"/>
+</svg>

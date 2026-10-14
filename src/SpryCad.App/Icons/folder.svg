@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Folder: a closed folder -->
+  <g fill="none" stroke="#24364F" stroke-width="2" stroke-linejoin="miter" stroke-linecap="square">
+    <path d="M3 11V5H11L14 8H29V11" fill="#D5DBE3"/>
+    <path d="M3 11H29V27H3Z" fill="#E4F0FD"/>
+  </g>
+</svg>

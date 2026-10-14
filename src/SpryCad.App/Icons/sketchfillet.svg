@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Sketch fillet: two lines meeting at a corner, the corner replaced by a round (accent) tangent to both; the old
+       corner faint and dashed. Points: where the round meets the lines -->
+  <path d="M5 17V5H17" fill="none" stroke="#24364F" stroke-opacity=".45" stroke-width="1.5" stroke-dasharray="3 2"/>
+  <path d="M5 29V17 M17 5H29" fill="none" stroke="#24364F" stroke-width="2"/>
+  <path d="M5 17A12 12 0 0 1 17 5" fill="none" stroke="#2F7BD6" stroke-width="2"/>
+  <path d="M3 15h4v4h-4z M15 3h4v4h-4z" fill="#2F7BD6"/>
+</svg>

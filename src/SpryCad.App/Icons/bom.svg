@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Bill of materials: a parts list, the quantity column in the accent -->
+  <g fill="none" stroke-width="2" stroke-linejoin="miter" stroke-linecap="square">
+    <path d="M4 5H28V27H4Z" fill="#FFFFFF" stroke="#24364F"/>
+    <path d="M5 6H27V10H5Z" fill="#E4F0FD" stroke="none"/>
+    <path d="M4 11H28 M4 16.5H28 M4 22H28 M21 5V27" stroke="#24364F" stroke-width="1"/>
+    <path d="M7 14H16 M7 19.5H14 M7 25H17" stroke="#8E9BAC"/>
+    <path d="M24 13V15 M23 19.5H26 M24 23.5V26" stroke="#2F7BD6"/>
+    <path d="M4 5H28V27H4Z M4 11H28" stroke="#24364F"/>
+  </g>
+</svg>

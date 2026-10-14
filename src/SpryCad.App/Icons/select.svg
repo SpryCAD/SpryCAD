@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Select: the arrow pointer -->
+  <g fill="none" stroke="#24364F" stroke-width="2" stroke-linejoin="miter" stroke-linecap="square">
+    <path d="M7 3V25L12 20L16 29L19 28L15 19H22Z" fill="#FFFFFF"/>
+  </g>
+</svg>

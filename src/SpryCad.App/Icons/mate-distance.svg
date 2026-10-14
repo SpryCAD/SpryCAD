@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Distance mate: two faces held a set distance apart -->
+  <g fill="none" stroke-width="2" stroke-linejoin="miter" stroke-linecap="square">
+    <path d="M5 4V28 M27 4V28" stroke="#24364F"/>
+    <path d="M8 16H24" stroke="#2F7BD6" stroke-linecap="butt"/>
+    <path d="M12 12L8 16L12 20 M20 12L24 16L20 20" stroke="#2F7BD6"/>
+  </g>
+</svg>

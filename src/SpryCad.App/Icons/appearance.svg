@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Appearance: a paint palette, its colours -->
+  <g fill="none" stroke-width="2" stroke-linejoin="miter" stroke-linecap="square">
+    <path d="M16 4C9 4 4 9.5 4 16C4 22.5 9 28 15.5 28C17.5 28 18.5 27 18.5 25.5C18.5 24 17.5 23.5 17.5 22C17.5 20.5 19 19.5 20.5 19.5H23C26 19.5 28 17.5 28 14.5C28 8.5 22.5 4 16 4Z" fill="#F1F3F6" stroke="#24364F" stroke-linejoin="round"/>
+    <circle cx="10" cy="15" r="2.5" fill="#D64545" stroke="none"/>
+    <circle cx="12.5" cy="9" r="2.5" fill="#EE9A22" stroke="none"/>
+    <circle cx="19" cy="8.5" r="2.5" fill="#2E9E5B" stroke="none"/>
+    <circle cx="23.5" cy="13" r="2.5" fill="#2F7BD6" stroke="none"/>
+    <circle cx="10.5" cy="21.5" r="2" fill="#FFFFFF" stroke="#24364F" stroke-width="1.5"/>
+  </g>
+</svg>

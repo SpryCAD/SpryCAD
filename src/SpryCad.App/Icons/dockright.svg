@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Dock right: a window with a panel at its right, an arrow going into it -->
+  <g fill="none" stroke="#24364F" stroke-width="2" stroke-linejoin="miter" stroke-linecap="square">
+    <path d="M3 5H29V27H3Z" fill="#FFFFFF"/>
+    <path d="M21 6V26"/>
+  </g>
+  <rect x="22" y="6" width="6" height="20" fill="#E4F0FD"/>
+  <path d="M7 16H17 M13 12L17 16L13 20" fill="none" stroke="#2F7BD6" stroke-width="2" stroke-linejoin="miter" stroke-linecap="square"/>
+</svg>

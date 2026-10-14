@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Mid plane: a plane (dashed, accent) halfway between two planes -->
+  <g stroke="#24364F" stroke-linejoin="miter">
+    <path d="M2.5 9.5L7.5 3.5H29.5L24.5 9.5Z" fill="#B9D6F6" fill-opacity=".8"/>
+    <path d="M2.5 28.5L7.5 22.5H29.5L24.5 28.5Z" fill="#B9D6F6" fill-opacity=".8"/>
+  </g>
+  <path d="M3 19L8 13H29L24 19Z" fill="#2F7BD6" fill-opacity=".15" stroke="#2F7BD6" stroke-width="2" stroke-dasharray="4 2" stroke-linejoin="miter"/>
+</svg>

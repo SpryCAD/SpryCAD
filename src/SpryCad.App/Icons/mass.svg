@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Mass properties: a steel weight, its lit side picked out in blue -->
+  <defs>
+    <linearGradient id="gt" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#F1F3F6"/><stop offset="1" stop-color="#D5DBE3"/></linearGradient>
+    <linearGradient id="gc" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#A9B4C2"/><stop offset=".3" stop-color="#EEF1F5"/><stop offset=".55" stop-color="#C9D0DA"/><stop offset="1" stop-color="#7A8899"/></linearGradient>
+  </defs>
+  <g stroke-linejoin="miter" stroke-linecap="square">
+    <path d="M12.5 12.5V9A4 4 0 0 1 20.5 9V12.5" fill="none" stroke="#24364F" stroke-width="4" stroke-linecap="butt"/>
+    <path d="M12.5 12.5V9A4 4 0 0 1 20.5 9V12.5" fill="none" stroke="url(#gc)" stroke-width="2" stroke-linecap="butt"/>
+    <path d="M10.5 12.5L4.5 26.5A12 3.5 0 0 0 28.5 26.5L22.5 12.5Z" fill="url(#gc)"/>
+    <ellipse cx="16.5" cy="12.5" rx="6" ry="1.75" fill="url(#gt)"/>
+    <path d="M11 15L7.2 25.5" fill="none" stroke="#6FA4E6" stroke-width="2.2" stroke-linecap="butt"/>
+    <path d="M10.5 12.5L4.5 26.5A12 3.5 0 0 0 28.5 26.5L22.5 12.5Z" fill="none" stroke="#24364F"/>
+    <ellipse cx="16.5" cy="12.5" rx="6" ry="1.75" fill="none" stroke="#24364F"/>
+  </g>
+</svg>

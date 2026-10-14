@@ -206,8 +206,52 @@ public static class Icons
         return g;
     }
 
+    // ---- SVG icons (Icons/*.svg, embedded): drawn with Svg.Skia, the theme's colours swapped in ----
+
+    /// <summary>The display scale (1 at 100%): at 100% an icon's 16 px drawing (name-16.svg), if it has one, is used for small sizes.</summary>
+    public static double Scaling { get; set; } = 1;
+
+    // the colours the SVGs are drawn with that the app replaces: outlines and line strokes, the accent
+    const string OutlineToken = "#24364F", AccentToken = "#2F7BD6";
+
+    static readonly Dictionary<string, string?> _svgText = new();
+    static readonly Dictionary<(string, string, string), Avalonia.Svg.Skia.SvgSource?> _svgSources = new();
+
+    /// <summary>An embedded SVG's text (Icons/name.svg), or null when there is none.</summary>
+    static string? SvgText(string file)
+    {
+        if (_svgText.TryGetValue(file, out var t)) return t;
+        using var s = typeof(Icons).Assembly.GetManifestResourceStream("Icons/" + file);
+        t = s == null ? null : new StreamReader(s).ReadToEnd();
+        return _svgText[file] = t;
+    }
+
+    static string Hex(IBrush b) => b is ISolidColorBrush sc ? $"#{sc.Color.R:X2}{sc.Color.G:X2}{sc.Color.B:X2}" : OutlineToken;
+
+    /// <summary>The icon from its SVG, in the given (else the theme's) outline and accent colours; null when it has no SVG.</summary>
+    static Control? SvgIcon(string name, double size, IBrush? stroke, IBrush? accent)
+    {
+        var file = size * Scaling <= 18 && SvgText(name + "-16.svg") != null ? name + "-16.svg" : name + ".svg";
+        var key = (file, Hex(stroke ?? Stroke), Hex(accent ?? Accent));
+        if (!_svgSources.TryGetValue(key, out var src))
+        {
+            var text = SvgText(file);
+            if (text != null)
+            {
+                text = System.Text.RegularExpressions.Regex.Replace(text, OutlineToken, key.Item2, System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                text = System.Text.RegularExpressions.Regex.Replace(text, AccentToken, key.Item3, System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                try { src = Avalonia.Svg.Skia.SvgSource.LoadFromSvg(text); }
+                catch (Exception ex) { App.Log(ex, $"Loading the icon {file}"); src = null; }
+            }
+            _svgSources[key] = src;
+        }
+        if (src == null) return null;
+        return new Image { Width = size, Height = size, Source = new Avalonia.Svg.Skia.SvgImage { Source = src } };
+    }
+
     public static Control Make(string name, double size = 20, IBrush? stroke = null, IBrush? accent = null)
     {
+        if (SvgIcon(name, size, stroke, accent) is { } svg) return svg;
         var canvas = new Canvas { Width = 24, Height = 24 };
         if (Fills.TryGetValue(name, out var fills))
             foreach (var (path, tint) in fills)

@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Extrude: the body the command makes (blue), rising from its sketch; the amber arrow is the direction -->
+  <defs>
+    <linearGradient id="top" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#E4F0FD"/><stop offset="1" stop-color="#B9D6F6"/></linearGradient>
+    <linearGradient id="left" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#7FAAE0"/><stop offset="1" stop-color="#9FC2EC"/></linearGradient>
+    <linearGradient id="right" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#5F92D2"/><stop offset="1" stop-color="#4A7DC0"/></linearGradient>
+    <linearGradient id="arrow" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#FFC45C"/><stop offset="1" stop-color="#EE9A22"/></linearGradient>
+  </defs>
+  <g stroke-linejoin="miter" stroke-linecap="square">
+    <path d="M4.5 17.5L16.5 11.5L28.5 17.5L16.5 23.5Z" fill="url(#top)"/>
+    <path d="M4.5 17.5L16.5 23.5V30.5L4.5 24.5Z" fill="url(#left)"/>
+    <path d="M16.5 23.5L28.5 17.5V24.5L16.5 30.5Z" fill="url(#right)"/>
+    <!-- lit edges -->
+    <path d="M5.5 17.5L16.5 23" fill="none" stroke="#FFFFFF" stroke-opacity=".85"/>
+    <path d="M16.5 23L27.5 17.5" fill="none" stroke="#FFFFFF" stroke-opacity=".5"/>
+    <!-- outline -->
+    <path d="M4.5 17.5L16.5 11.5L28.5 17.5V24.5L16.5 30.5L4.5 24.5Z M4.5 17.5L16.5 23.5L28.5 17.5 M16.5 23.5V30.5" fill="none" stroke="#24364F"/>
+    <!-- direction -->
+    <path d="M14.5 17.5V8.5H11.5L16.5 2.5L21.5 8.5H18.5V17.5Z" fill="url(#arrow)" stroke="#8A5200"/>
+  </g>
+</svg>

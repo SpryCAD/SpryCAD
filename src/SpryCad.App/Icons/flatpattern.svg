@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Flat pattern: a sheet-metal part (blue) unfolded flat; the bend lines dashed in accent -->
+  <defs>
+    <linearGradient id="bt" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#E4F0FD"/><stop offset="1" stop-color="#B9D6F6"/></linearGradient>
+    <linearGradient id="bl" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#7FAAE0"/><stop offset="1" stop-color="#9FC2EC"/></linearGradient>
+    <linearGradient id="br" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#5F92D2"/><stop offset="1" stop-color="#4A7DC0"/></linearGradient>
+  </defs>
+  <g stroke-linejoin="miter" stroke-linecap="square">
+    <path d="M7.5 20.5L13.5 23.5L13.5 25.5L7.5 22.5Z" fill="url(#bl)" stroke="#24364F"/>
+    <path d="M13.5 23.5L16.5 22L16.5 24L13.5 25.5Z" fill="url(#br)" stroke="#24364F"/>
+    <path d="M16.5 22L21.5 24.5L21.5 26.5L16.5 24Z" fill="url(#bl)" stroke="#24364F"/>
+    <path d="M21.5 24.5L27.5 21.5L27.5 23.5L21.5 26.5Z" fill="url(#br)" stroke="#24364F"/>
+    <path d="M22.5 19L25.5 17.5L25.5 19.5L22.5 21Z" fill="url(#br)" stroke="#24364F"/>
+    <path d="M5.5 16.5L10.5 19L10.5 21L5.5 18.5Z" fill="url(#bl)" stroke="#24364F"/>
+    <path d="M7.5 20.5L13.5 23.5L16.5 22L21.5 24.5L27.5 21.5L22.5 19L25.5 17.5L19.5 14.5L16.5 16L11.5 13.5L5.5 16.5L10.5 19Z" fill="url(#bt)" stroke="#24364F"/>
+    <path d="M6.8 16.55L11.6 14.15" fill="none" stroke="#FFFFFF" stroke-opacity=".85"/>
+    <path d="M10.5 19L16.5 16 M16.5 22L22.5 19 M10.5 19L16.5 22 M16.5 16L22.5 19" fill="none" stroke="#2F7BD6" stroke-dasharray="2 1.5" stroke-linecap="butt"/>
+  </g>
+</svg>

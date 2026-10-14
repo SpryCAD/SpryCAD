@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Sweep: a tube (blue) carried along a bent path; its circular profile shows at the near end -->
+  <defs>
+    <linearGradient id="bt" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#E4F0FD"/><stop offset="1" stop-color="#B9D6F6"/></linearGradient>
+  </defs>
+  <g stroke-linejoin="miter" stroke-linecap="square">
+    <path d="M9.5 27V20C9.5 11.5 15 7.5 26.5 7.5" fill="none" stroke="#24364F" stroke-width="9" stroke-linecap="butt"/>
+    <path d="M9.5 27V20C9.5 11.5 15 7.5 26.5 7.5" fill="none" stroke="#4A7DC0" stroke-width="7" stroke-linecap="butt"/>
+    <path d="M8.5 27V20C8.5 10.5 14 6.5 26.5 6.5" fill="none" stroke="#8CB6EA" stroke-width="4" stroke-linecap="butt"/>
+    <path d="M7.5 27V20C7.5 9.5 13 5 26.5 5" fill="none" stroke="#E6F1FD" stroke-width="1.5" stroke-linecap="butt"/>
+    <path d="M26.5 3V12" fill="none" stroke="#24364F"/>
+    <ellipse cx="9.5" cy="27" rx="4" ry="2" fill="url(#bt)" stroke="#24364F"/>
+    <path d="M26.5 7.5H30.5" fill="none" stroke="#2F7BD6" stroke-dasharray="2 1"/>
+  </g>
+</svg>

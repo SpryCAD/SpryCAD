@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Design table: a grid, its header row (accent) -->
+  <path d="M3 5H29V11H3Z" fill="#E4F0FD"/>
+  <path d="M3 5H29V27H3Z M3 19H29 M11 11V27 M21 11V27" fill="none" stroke="#24364F" stroke-width="2" stroke-linejoin="miter"/>
+  <path d="M3 11H29" fill="none" stroke="#2F7BD6" stroke-width="2"/>
+</svg>

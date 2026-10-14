@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Pack and Go: the assembly's files going into one box (amber arrow in) -->
+  <defs>
+    <linearGradient id="gl" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#AEB8C5"/><stop offset="1" stop-color="#C5CDD7"/></linearGradient>
+    <linearGradient id="gr" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#8E9BAC"/><stop offset="1" stop-color="#7A8899"/></linearGradient>
+    <linearGradient id="arrowv" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFC45C"/><stop offset="1" stop-color="#EE9A22"/></linearGradient>
+    <linearGradient id="inside" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5E6B7C"/><stop offset="1" stop-color="#8E9BAC"/></linearGradient>
+  </defs>
+  <g stroke-linejoin="miter" stroke-linecap="square">
+    <path d="M16.5 12.5 L28.5 18.5 L16.5 24.5 L4.5 18.5Z" fill="url(#inside)"/>
+    <path d="M4.5 18.5 L16.5 12.5 L28.5 18.5" fill="none" stroke="#24364F"/>
+    <path d="M8.5 3.5H15.5L18.5 6.5V22.5H8.5Z" fill="#FFFFFF" stroke="#24364F"/>
+    <path d="M15.5 3.5V6.5H18.5" fill="none" stroke="#24364F"/>
+    <path d="M10.5 9.5H16.5 M10.5 12.5H16.5 M10.5 15.5H14.5" fill="none" stroke="#AEB8C5"/>
+    <path d="M4.5 18.5 L16.5 24.5 L16.5 31.5 L4.5 25.5Z" fill="url(#gl)"/>
+    <path d="M16.5 24.5 L28.5 18.5 L28.5 25.5 L16.5 31.5Z" fill="url(#gr)"/>
+    <path d="M5.5 19.5 L16.5 25" fill="none" stroke="#FFFFFF" stroke-opacity=".8"/>
+    <path d="M4.5 18.5 L16.5 24.5 L28.5 18.5 L28.5 25.5 L16.5 31.5 L4.5 25.5Z M16.5 24.5 L16.5 31.5" fill="none" stroke="#24364F"/>
+    <path d="M22.5 2.5V7.5H20.5L23.5 11.5L26.5 7.5H24.5V2.5Z" fill="url(#arrowv)" stroke="#8A5200"/>
+  </g>
+</svg>

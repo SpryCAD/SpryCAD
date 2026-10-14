@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Hide: the eye struck through -->
+  <path d="M3 16C7 9.5 11.5 7 16 7S25 9.5 29 16C25 22.5 20.5 25 16 25S7 22.5 3 16Z" fill="#FFFFFF" stroke="#24364F" stroke-width="2" stroke-linejoin="miter"/>
+  <circle cx="16" cy="16" r="4.5" fill="none" stroke="#24364F" stroke-width="2"/>
+  <path d="M6 6L26 26" stroke="#2F7BD6" stroke-width="2" stroke-linecap="square"/>
+</svg>

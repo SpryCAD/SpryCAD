@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Center point arc: its centre and its two ends (accent), the radius dashed -->
+  <path d="M5 23A11 11 0 0 1 27 23" fill="none" stroke="#24364F" stroke-width="2"/>
+  <path d="M7 23H25" fill="none" stroke="#24364F" stroke-width="1.5" stroke-dasharray="3 2"/>
+  <path d="M3 21h4v4h-4z M14 21h4v4h-4z M25 21h4v4h-4z" fill="#2F7BD6"/>
+</svg>

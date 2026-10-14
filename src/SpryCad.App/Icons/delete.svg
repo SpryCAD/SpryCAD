@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Delete: a bin -->
+  <g fill="none" stroke="#24364F" stroke-width="2" stroke-linejoin="miter" stroke-linecap="square">
+    <path d="M3 7H29"/>
+    <path d="M11 7V3H21V7"/>
+    <path d="M7 8V29H25V8" fill="#E4F0FD"/>
+    <path d="M13 12V24 M19 12V24" stroke="#2F7BD6"/>
+  </g>
+</svg>

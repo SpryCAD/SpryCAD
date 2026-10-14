@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Play: run the motion (amber) -->
+  <defs>
+    <linearGradient id="arrowv" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFC45C"/><stop offset="1" stop-color="#EE9A22"/></linearGradient>
+  </defs>
+  <g fill="none" stroke-width="2" stroke-linejoin="miter" stroke-linecap="square">
+    <path d="M8.5 4.5L26.5 16L8.5 27.5Z" fill="url(#arrowv)" stroke="#8A5200" stroke-width="1"/>
+  </g>
+</svg>

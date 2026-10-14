@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Rename: a name field and its text cursor -->
+  <g fill="none" stroke="#24364F" stroke-width="2" stroke-linejoin="miter" stroke-linecap="square">
+    <path d="M3 9H29V23H3Z" fill="#FFFFFF"/>
+    <path d="M7 17H15"/>
+    <path d="M21 6V26 M18 5H24 M18 27H24" stroke="#2F7BD6"/>
+  </g>
+</svg>

@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Mirror: a steel solid (grey) and its mirror image (blue) either side of the mirror plane (accent) -->
+  <defs>
+    <linearGradient id="gt" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#F1F3F6"/><stop offset="1" stop-color="#D5DBE3"/></linearGradient>
+    <linearGradient id="gl" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#AEB8C5"/><stop offset="1" stop-color="#C5CDD7"/></linearGradient>
+    <linearGradient id="gr" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#8E9BAC"/><stop offset="1" stop-color="#7A8899"/></linearGradient>
+    <linearGradient id="bt" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#E4F0FD"/><stop offset="1" stop-color="#B9D6F6"/></linearGradient>
+    <linearGradient id="bl" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#7FAAE0"/><stop offset="1" stop-color="#9FC2EC"/></linearGradient>
+    <linearGradient id="br" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#5F92D2"/><stop offset="1" stop-color="#4A7DC0"/></linearGradient>
+  </defs>
+  <g stroke-linejoin="miter" stroke-linecap="square">
+    <path d="M12.5 13.5L19.5 10L11.5 12L4.5 15.5Z" fill="url(#gt)"/>
+    <path d="M4.5 18.5L12.5 22.5L12.5 13.5L4.5 15.5Z" fill="url(#gl)"/>
+    <path d="M12.5 22.5L19.5 19L19.5 10L12.5 13.5Z" fill="url(#gr)"/>
+    <path d="M5.5 15.8L12.5 14" fill="none" stroke="#FFFFFF" stroke-opacity=".8"/>
+    <path d="M4.5 18.5L12.5 22.5L12.5 13.5L4.5 15.5Z" fill="none" stroke="#24364F"/>
+    <path d="M12.5 22.5L19.5 19L19.5 10L12.5 13.5Z" fill="none" stroke="#24364F"/>
+    <path d="M12.5 13.5L19.5 10L11.5 12L4.5 15.5Z" fill="none" stroke="#24364F"/>
+    <path d="M12.5 25.5L24.5 19.5L24.5 7.5L12.5 13.5Z" fill="#2F7BD6" fill-opacity=".2"/>
+    <path d="M12.5 25.5L24.5 19.5L24.5 7.5L12.5 13.5Z" fill="none" stroke="#2F7BD6"/>
+    <path d="M16.5 15.5L23.5 12L31.5 22L24.5 25.5Z" fill="url(#bt)"/>
+    <path d="M24.5 28.5L16.5 24.5L16.5 15.5L24.5 25.5Z" fill="url(#bl)"/>
+    <path d="M24.5 28.5L31.5 25L31.5 22L24.5 25.5Z" fill="url(#br)"/>
+    <path d="M17.5 15.8L24.5 26" fill="none" stroke="#FFFFFF" stroke-opacity=".8"/>
+    <path d="M24.5 28.5L16.5 24.5L16.5 15.5L24.5 25.5Z" fill="none" stroke="#24364F"/>
+    <path d="M24.5 28.5L31.5 25L31.5 22L24.5 25.5Z" fill="none" stroke="#24364F"/>
+    <path d="M16.5 15.5L23.5 12L31.5 22L24.5 25.5Z" fill="none" stroke="#24364F"/>
+  </g>
+</svg>

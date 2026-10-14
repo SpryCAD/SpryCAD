@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Tangent mate: a round face touching a flat one -->
+  <g fill="none" stroke-width="2" stroke-linejoin="miter" stroke-linecap="square">
+    <circle cx="16" cy="12" r="9" fill="#F1F3F6" stroke="#24364F"/>
+    <path d="M3 22H29" stroke="#2F7BD6"/>
+  </g>
+</svg>

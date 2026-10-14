@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Insert component: the blue block the command brings in, along the amber arrow -->
+  <defs>
+    <linearGradient id="bt" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#E4F0FD"/><stop offset="1" stop-color="#B9D6F6"/></linearGradient>
+    <linearGradient id="bl" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#7FAAE0"/><stop offset="1" stop-color="#9FC2EC"/></linearGradient>
+    <linearGradient id="br" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#5F92D2"/><stop offset="1" stop-color="#4A7DC0"/></linearGradient>
+    <linearGradient id="arrow" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#FFC45C"/><stop offset="1" stop-color="#EE9A22"/></linearGradient>
+  </defs>
+  <g stroke-linejoin="miter" stroke-linecap="square">
+    <path d="M21.5 9.5 L31.5 14.5 L21.5 19.5 L11.5 14.5Z" fill="url(#bt)"/>
+    <path d="M11.5 14.5 L21.5 19.5 L21.5 26.5 L11.5 21.5Z" fill="url(#bl)"/>
+    <path d="M21.5 19.5 L31.5 14.5 L31.5 21.5 L21.5 26.5Z" fill="url(#br)"/>
+    <path d="M12.5 14.5 L21.5 19" fill="none" stroke="#FFFFFF" stroke-opacity=".8"/>
+    <path d="M21.5 19 L30.5 14.5" fill="none" stroke="#FFFFFF" stroke-opacity=".5"/>
+    <path d="M21.5 9.5 L31.5 14.5 L31.5 21.5 L21.5 26.5 L11.5 21.5 L11.5 14.5Z M11.5 14.5 L21.5 19.5 L31.5 14.5 M21.5 19.5 L21.5 26.5" fill="none" stroke="#24364F"/>
+    <path d="M1.5 15.5H5.5V12.5L10.5 17.5L5.5 22.5V19.5H1.5Z" fill="url(#arrow)" stroke="#8A5200"/>
+  </g>
+</svg>

@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Section view: a steel block cut through by the section plane (translucent accent); the cut face blue -->
+  <defs>
+    <linearGradient id="gt" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#F1F3F6"/><stop offset="1" stop-color="#D5DBE3"/></linearGradient>
+    <linearGradient id="gl" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#AEB8C5"/><stop offset="1" stop-color="#C5CDD7"/></linearGradient>
+    <linearGradient id="cutf" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#6E9FDC"/><stop offset="1" stop-color="#4A7DC0"/></linearGradient>
+  </defs>
+  <g stroke-linejoin="miter" stroke-linecap="square">
+    <path d="M2.5 11.5L16.5 4.5L24.5 8.5L10.5 15.5Z" fill="url(#gt)"/>
+    <path d="M2.5 11.5L10.5 15.5L10.5 24.5L2.5 20.5Z" fill="url(#gl)"/>
+    <path d="M10.5 15.5L24.5 8.5L24.5 17.5L10.5 24.5Z" fill="url(#cutf)"/>
+    <path d="M3.5 11.5L10.5 15" fill="none" stroke="#FFFFFF" stroke-opacity=".85"/>
+    <path d="M11.5 15.5L23.5 8.8" fill="none" stroke="#FFFFFF" stroke-opacity=".6"/>
+    <path d="M2.5 11.5L16.5 4.5L24.5 8.5L24.5 17.5L10.5 24.5L2.5 20.5Z" fill="none" stroke="#24364F"/>
+    <path d="M2.5 11.5L10.5 15.5L24.5 8.5" fill="none" stroke="#24364F"/>
+    <path d="M10.5 15.5L10.5 24.5" fill="none" stroke="#24364F"/>
+    <path d="M5.5 18L28.5 6.5L28.5 18L5.5 29.5Z M10.5 15.5L24.5 8.5L24.5 17.5L10.5 24.5Z" fill="#2F7BD6" fill-opacity=".25" fill-rule="evenodd"/>
+    <path d="M5.5 18L28.5 6.5L28.5 18L5.5 29.5Z" fill="none" stroke="#2F7BD6"/>
+  </g>
+</svg>

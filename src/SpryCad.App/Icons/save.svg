@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Save: a floppy disk (shutter at the top, label below) -->
+<g fill="none" stroke="#24364F" stroke-width="2" stroke-linejoin="miter" stroke-linecap="square">
+    <path d="M5 5H23L27 9V27H5Z" fill="#E4F0FD"/>
+    <path d="M11 5V11H21V5" fill="#D5DBE3"/>
+    <path d="M9 27V17H23V27" fill="#FFFFFF"/>
+  </g>
+  <rect x="16" y="6" width="2" height="4" fill="#24364F"/>
+</svg>

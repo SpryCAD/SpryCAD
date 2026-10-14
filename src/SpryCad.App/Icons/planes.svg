@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Origin planes: the front (blue), right (red) and top (green) planes meeting at the origin, as the inside corner of a box -->
+  <g stroke="#24364F" stroke-linejoin="miter" fill-opacity=".5">
+    <path d="M4.5 20.5L16.5 14.5L28.5 20.5L16.5 26.5Z" fill="#2E9E5B"/>
+    <path d="M4.5 20.5V7.5L16.5 1.5V14.5Z" fill="#3B82D9"/>
+    <path d="M16.5 14.5V1.5L28.5 7.5V20.5Z" fill="#D64545"/>
+  </g>
+  <path d="M15 15h3v3h-3z" fill="#FFFFFF" stroke="#24364F" stroke-width="1"/>
+</svg>

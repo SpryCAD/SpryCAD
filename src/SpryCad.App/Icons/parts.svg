@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Parts: open documents, sheets stacked -->
+  <g fill="none" stroke="#24364F" stroke-width="2" stroke-linejoin="miter" stroke-linecap="square">
+    <path d="M11 3H27V23H11Z" fill="#D5DBE3"/>
+    <path d="M5 9H21V29H5Z" fill="#FFFFFF"/>
+  </g>
+</svg>

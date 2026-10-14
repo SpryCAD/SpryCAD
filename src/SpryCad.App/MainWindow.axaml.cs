@@ -35,6 +35,7 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         Instance = this;
+        Icons.Scaling = Screens.Primary?.Scaling ?? 1; // (before any icon is made: at 100% the 16 px drawings are used where there are any)
         _modelMode = new ModelMode(Selection);
         Viewport.Mode = _modelMode;
         UserSettings.Load();

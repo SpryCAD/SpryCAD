@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Export STEP: a steel solid with the amber arrow leaving it -->
+  <defs>
+    <linearGradient id="gt" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#F1F3F6"/><stop offset="1" stop-color="#D5DBE3"/></linearGradient>
+    <linearGradient id="gl" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#AEB8C5"/><stop offset="1" stop-color="#C5CDD7"/></linearGradient>
+    <linearGradient id="gr" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#8E9BAC"/><stop offset="1" stop-color="#7A8899"/></linearGradient>
+    <linearGradient id="am" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#FFC45C"/><stop offset="1" stop-color="#EE9A22"/></linearGradient>
+  </defs>
+  <g stroke-linejoin="miter" stroke-linecap="square">
+    <path d="M2.5 20.5L11.5 16L20.5 20.5L11.5 25Z" fill="url(#gt)"/>
+    <path d="M2.5 20.5L11.5 25L11.5 31L2.5 26.5Z" fill="url(#gl)"/>
+    <path d="M11.5 25L20.5 20.5L20.5 26.5L11.5 31Z" fill="url(#gr)"/>
+    <path d="M3.5 20.5L11.5 24.5" fill="none" stroke="#FFFFFF" stroke-opacity=".85"/>
+    <path d="M11.5 24.5L19.5 20.5" fill="none" stroke="#FFFFFF" stroke-opacity=".5"/>
+    <path d="M2.5 20.5L11.5 16L20.5 20.5V26.5L11.5 31L2.5 26.5Z M2.5 20.5L11.5 25L20.5 20.5 M11.5 25V31" fill="none" stroke="#24364F"/>
+    <path d="M12.95 16.78L19.32 10.42L17.27 8.37L24.69 7.31L23.63 14.73L21.58 12.68L15.22 19.05Z" fill="url(#am)" stroke="#8A5200"/>
+  </g>
+</svg>

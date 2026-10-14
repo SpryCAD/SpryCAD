@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Plane: a translucent blue plane, its 1 px edge -->
+  <defs><linearGradient id="p" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#B9D6F6"/><stop offset="1" stop-color="#7FAAE0"/></linearGradient></defs>
+  <path d="M2.5 23.5L9.5 9.5H29.5L22.5 23.5Z" fill="url(#p)" fill-opacity=".8"/>
+  <path d="M11 10.5H28" fill="none" stroke="#FFFFFF" stroke-opacity=".8"/>
+  <path d="M2.5 23.5L9.5 9.5H29.5L22.5 23.5Z" fill="none" stroke="#24364F" stroke-linejoin="miter"/>
+</svg>

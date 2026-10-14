@@ -29,11 +29,14 @@
     <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.22" />
     <PackageReference Include="Avalonia.Fonts.Inter" Version="11.3.22" />
     <PackageReference Include="Silk.NET.OpenGL" Version="2.23.0" />
+    <PackageReference Include="Svg.Controls.Skia.Avalonia" Version="11.3.9.5" />
   </ItemGroup>
 
   <ItemGroup>
     <!-- Drawn by build/make-icon.ps1 -->
     <AvaloniaResource Include="Assets\**" />
+    <!-- the icons (Icons/README.md): drawn as SVG, read by UI/Icons.cs -->
+    <EmbeddedResource Include="Icons\*.svg" LogicalName="Icons/%(Filename)%(Extension)" />
   </ItemGroup>
 
   <ItemGroup>

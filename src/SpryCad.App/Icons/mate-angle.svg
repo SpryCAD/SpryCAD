@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Angle mate: two faces held at an angle, the angle in the accent -->
+  <g fill="none" stroke-width="2" stroke-linejoin="miter" stroke-linecap="square">
+    <path d="M4 27H29 M4 27L16.5 5.3" stroke="#24364F"/>
+    <path d="M17 27A12 12 0 0 0 10 16.61" stroke="#2F7BD6" stroke-linecap="butt"/>
+  </g>
+</svg>

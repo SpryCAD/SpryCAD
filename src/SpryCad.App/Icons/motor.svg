@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Motor: a shaft and its disc turned, the amber arrow the rotation -->
+  <defs>
+    <linearGradient id="gt" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#F1F3F6"/><stop offset="1" stop-color="#D5DBE3"/></linearGradient>
+    <linearGradient id="cyl" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#AEB8C5"/><stop offset=".35" stop-color="#E3E7EC"/><stop offset="1" stop-color="#7A8899"/></linearGradient>
+    <linearGradient id="shaft" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#7FAAE0"/><stop offset=".35" stop-color="#D6E7FB"/><stop offset="1" stop-color="#4A7DC0"/></linearGradient>
+  </defs>
+  <g stroke-linejoin="miter" stroke-linecap="square">
+    <path d="M6.5 21.5V25.5A10 5 0 0 0 26.5 25.5V21.5Z" fill="url(#cyl)"/>
+    <ellipse cx="16.5" cy="21.5" rx="10" ry="5" fill="url(#gt)"/>
+    <path d="M6.5 21.5V25.5A10 5 0 0 0 26.5 25.5V21.5" fill="none" stroke="#24364F"/>
+    <ellipse cx="16.5" cy="21.5" rx="10" ry="5" fill="none" stroke="#24364F"/>
+    <path d="M13.5 6.5V21.5A3 1.5 0 0 0 19.5 21.5V6.5Z" fill="url(#shaft)"/>
+    <ellipse cx="16.5" cy="6.5" rx="3" ry="1.5" fill="#E4F0FD"/>
+    <path d="M13.5 6.5V21.5A3 1.5 0 0 0 19.5 21.5V6.5" fill="none" stroke="#24364F"/>
+    <ellipse cx="16.5" cy="6.5" rx="3" ry="1.5" fill="none" stroke="#24364F"/>
+    <path d="M5 12.5A11.5 4.5 0 0 0 26.5 14.2" fill="none" stroke="#8A5200" stroke-width="4" stroke-linecap="butt"/>
+    <path d="M5 12.5A11.5 4.5 0 0 0 26.5 14.2" fill="none" stroke="#F4AC3A" stroke-width="2" stroke-linecap="butt"/>
+    <path d="M24.5 10.5L30.5 10.5L28.5 16.5Z" fill="#F4AC3A" stroke="#8A5200"/>
+  </g>
+</svg>

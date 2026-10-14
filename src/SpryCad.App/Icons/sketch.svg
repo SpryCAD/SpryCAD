@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Sketch: a pencil over the sketch it draws (accent) -->
+  <path d="M3 3H17V13H3Z" fill="#E4F0FD" stroke="#2F7BD6" stroke-width="2" stroke-linejoin="miter"/>
+  <g stroke="#24364F" stroke-width="2" stroke-linejoin="miter">
+    <path d="M5 27L7 21L22 6L26 10L11 25Z" fill="#FFFFFF"/>
+    <path d="M7 21L11 25 M19 9L23 13" fill="none"/>
+  </g>
+  <path d="M5 27L6 24L8 26Z" fill="#24364F" stroke="#24364F" stroke-linejoin="miter"/>
+</svg>

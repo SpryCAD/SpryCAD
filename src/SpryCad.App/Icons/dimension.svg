@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Dimension: extension lines and the dimension line with its arrows (accent) -->
+  <path d="M5 7V27 M27 7V27" fill="none" stroke="#24364F" stroke-width="2"/>
+  <path d="M11 17H21" fill="none" stroke="#2F7BD6" stroke-width="2"/>
+  <path d="M6 17L12 13V21Z M26 17L20 13V21Z" fill="#2F7BD6"/>
+</svg>

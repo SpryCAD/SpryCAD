@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Concentric mate: two round faces on one axis -->
+  <g fill="none" stroke-width="2" stroke-linejoin="miter" stroke-linecap="square">
+    <circle cx="16" cy="16" r="12" fill="#F1F3F6" stroke="#24364F"/>
+    <circle cx="16" cy="16" r="5.5" fill="#E4F0FD" stroke="#2F7BD6"/>
+    <path d="M16 14.5V17.5 M14.5 16H17.5" stroke="#24364F" stroke-width="1"/>
+  </g>
+</svg>

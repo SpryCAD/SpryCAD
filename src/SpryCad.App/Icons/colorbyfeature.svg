@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Colour by feature: a steel part with one of its features picked out in its own colour (blue) -->
+  <defs>
+    <linearGradient id="gt" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#F1F3F6"/><stop offset="1" stop-color="#D5DBE3"/></linearGradient>
+    <linearGradient id="gl" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#AEB8C5"/><stop offset="1" stop-color="#C5CDD7"/></linearGradient>
+    <linearGradient id="gr" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#8E9BAC"/><stop offset="1" stop-color="#7A8899"/></linearGradient>
+    <linearGradient id="bt" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#E4F0FD"/><stop offset="1" stop-color="#B9D6F6"/></linearGradient>
+    <linearGradient id="bl" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#7FAAE0"/><stop offset="1" stop-color="#9FC2EC"/></linearGradient>
+    <linearGradient id="br" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#5F92D2"/><stop offset="1" stop-color="#4A7DC0"/></linearGradient>
+  </defs>
+  <g stroke-linejoin="miter" stroke-linecap="square">
+    <path d="M2.5 15.5L16.5 8.5L30.5 15.5L16.5 22.5Z" fill="url(#gt)"/>
+    <path d="M2.5 15.5L16.5 22.5L16.5 31.5L2.5 24.5Z" fill="url(#gl)"/>
+    <path d="M16.5 22.5L30.5 15.5L30.5 24.5L16.5 31.5Z" fill="url(#gr)"/>
+    <path d="M3.5 15.5L16.5 22" fill="none" stroke="#FFFFFF" stroke-opacity=".85"/>
+    <path d="M16.5 22L29.5 15.5" fill="none" stroke="#FFFFFF" stroke-opacity=".5"/>
+    <path d="M2.5 15.5L16.5 8.5L30.5 15.5V24.5L16.5 31.5L2.5 24.5Z M2.5 15.5L16.5 22.5L30.5 15.5 M16.5 22.5V31.5" fill="none" stroke="#24364F"/>
+    <path d="M9.5 13.5L16.5 10L23.5 13.5L16.5 17Z" fill="url(#bt)"/>
+    <path d="M9.5 13.5L16.5 17L16.5 23L9.5 19.5Z" fill="url(#bl)"/>
+    <path d="M16.5 17L23.5 13.5L23.5 19.5L16.5 23Z" fill="url(#br)"/>
+    <path d="M10.5 13.5L16.5 16.5" fill="none" stroke="#FFFFFF" stroke-opacity=".85"/>
+    <path d="M16.5 16.5L22.5 13.5" fill="none" stroke="#FFFFFF" stroke-opacity=".5"/>
+    <path d="M9.5 13.5L16.5 10L23.5 13.5V19.5L16.5 23L9.5 19.5Z M9.5 13.5L16.5 17L23.5 13.5 M16.5 17V23" fill="none" stroke="#24364F"/>
+  </g>
+</svg>

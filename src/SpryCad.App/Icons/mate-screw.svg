@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Screw mate: one part turning as the other moves along it, as a screw -->
+  <g fill="none" stroke-width="2" stroke-linejoin="miter" stroke-linecap="square">
+    <path d="M7 3V29 M15 3V29" stroke="#24364F"/>
+    <path d="M7 6L15 10 M7 12L15 16 M7 18L15 22 M7 24L15 28" stroke="#24364F" stroke-width="1.5" stroke-linecap="butt"/>
+    <path d="M24 5V26" stroke="#2F7BD6" stroke-linecap="butt"/>
+    <path d="M20 22L24 26L28 22" stroke="#2F7BD6"/>
+  </g>
+</svg>

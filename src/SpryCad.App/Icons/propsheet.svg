@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Property sheet: a sheet of labels and their value fields -->
+  <g fill="none" stroke="#24364F" stroke-width="2" stroke-linejoin="miter" stroke-linecap="square">
+    <path d="M5 3H27V31H5Z" fill="#FFFFFF"/>
+    <path d="M15 7H23V11H15Z M15 15H23V19H15Z M15 23H23V27H15Z" stroke="#2F7BD6" fill="#FFFFFF"/>
+  </g>
+  <path d="M8 8H12V10H8Z M8 16H12V18H8Z M8 24H12V26H8Z" fill="#24364F"/>
+</svg>

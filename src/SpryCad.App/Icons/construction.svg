@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Construction geometry: a line made construction (dashed, accent) beside a solid circle -->
+  <circle cx="11" cy="21" r="6" fill="none" stroke="#24364F" stroke-width="2"/>
+  <path d="M5 27L27 5" fill="none" stroke="#2F7BD6" stroke-width="2" stroke-dasharray="4 3"/>
+</svg>

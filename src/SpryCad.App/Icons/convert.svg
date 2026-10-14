@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Convert entities: a model face's edge projected (amber arrow) into the sketch as a line (accent) -->
+  <defs><linearGradient id="arrow" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#FFC45C"/><stop offset="1" stop-color="#EE9A22"/></linearGradient></defs>
+  <path d="M5 5H21V15H5Z" fill="#D5DBE3" stroke="#24364F" stroke-width="2" stroke-linejoin="miter"/>
+  <path d="M5 27H21" fill="none" stroke="#2F7BD6" stroke-width="2"/>
+  <path d="M3 25h4v4h-4z M19 25h4v4h-4z" fill="#2F7BD6"/>
+  <path d="M25.5 6.5V18.5H22.5L27 24.5L31.5 18.5H28.5V6.5Z" fill="url(#arrow)" stroke="#8A5200" stroke-linejoin="miter"/>
+</svg>

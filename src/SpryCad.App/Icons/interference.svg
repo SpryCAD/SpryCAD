@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Interference: two components overlapping, the volume they share in red -->
+  <defs>
+    <linearGradient id="gt" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#F1F3F6"/><stop offset="1" stop-color="#D5DBE3"/></linearGradient>
+    <linearGradient id="gl" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#AEB8C5"/><stop offset="1" stop-color="#C5CDD7"/></linearGradient>
+    <linearGradient id="gr" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#8E9BAC"/><stop offset="1" stop-color="#7A8899"/></linearGradient>
+    <linearGradient id="rt" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#F4A8A8"/><stop offset="1" stop-color="#E26565"/></linearGradient>
+    <linearGradient id="rl" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#C23A3A"/><stop offset="1" stop-color="#D64545"/></linearGradient>
+  </defs>
+  <g stroke-linejoin="miter" stroke-linecap="square">
+    <path d="M12.5 8.5 L22.5 13.5 L12.5 18.5 L2.5 13.5Z" fill="url(#gt)"/>
+    <path d="M2.5 13.5 L12.5 18.5 L12.5 25.5 L2.5 20.5Z" fill="url(#gl)"/>
+    <path d="M12.5 18.5 L22.5 13.5 L22.5 20.5 L12.5 25.5Z" fill="url(#gr)"/>
+    <path d="M3.5 13.5 L12.5 18" fill="none" stroke="#FFFFFF" stroke-opacity=".8"/>
+    <path d="M12.5 18 L21.5 13.5" fill="none" stroke="#FFFFFF" stroke-opacity=".5"/>
+    <path d="M12.5 8.5 L22.5 13.5 L22.5 20.5 L12.5 25.5 L2.5 20.5 L2.5 13.5Z M2.5 13.5 L12.5 18.5 L22.5 13.5 M12.5 18.5 L12.5 25.5" fill="none" stroke="#24364F"/>
+    <path d="M16.5 10.5 L26.5 15.5 L16.5 20.5 L6.5 15.5Z" fill="url(#gt)"/>
+    <path d="M6.5 15.5 L16.5 20.5 L16.5 27.5 L6.5 22.5Z" fill="url(#gl)"/>
+    <path d="M16.5 20.5 L26.5 15.5 L26.5 22.5 L16.5 27.5Z" fill="url(#gr)"/>
+    <path d="M7.5 15.5 L16.5 20" fill="none" stroke="#FFFFFF" stroke-opacity=".8"/>
+    <path d="M16.5 20 L25.5 15.5" fill="none" stroke="#FFFFFF" stroke-opacity=".5"/>
+    <path d="M16.5 10.5 L22.5 13.5 L12.5 18.5 L6.5 15.5Z" fill="url(#rt)"/>
+    <path d="M6.5 15.5 L12.5 18.5 L12.5 25.5 L6.5 22.5Z" fill="url(#rl)"/>
+    <path d="M7.5 15.5 L12.5 18" fill="none" stroke="#FFFFFF" stroke-opacity=".6"/>
+    <path d="M16.5 10.5 L26.5 15.5 L26.5 22.5 L16.5 27.5 L6.5 22.5 L6.5 15.5Z M6.5 15.5 L16.5 20.5 L26.5 15.5 M16.5 20.5 L16.5 27.5 M22.5 13.5 L12.5 18.5 L12.5 25.5" fill="none" stroke="#24364F"/>
+  </g>
+</svg>

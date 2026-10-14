@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Offset: a shape and its copy a set distance out (accent) -->
+  <path d="M11 27V19A6 6 0 0 1 17 13H27" fill="none" stroke="#24364F" stroke-width="2"/>
+  <path d="M5 27V19A12 12 0 0 1 17 7H27" fill="none" stroke="#2F7BD6" stroke-width="2"/>
+</svg>

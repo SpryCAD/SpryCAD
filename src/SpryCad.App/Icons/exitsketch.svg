@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Exit sketch: the pencil and a green check (sketch finished) -->
+  <g stroke="#24364F" stroke-width="2" stroke-linejoin="miter">
+    <path d="M5 27L7 21L22 6L26 10L11 25Z" fill="#FFFFFF"/>
+    <path d="M7 21L11 25 M19 9L23 13" fill="none"/>
+  </g>
+  <path d="M5 27L6 24L8 26Z" fill="#24364F" stroke="#24364F" stroke-linejoin="miter"/>
+  <path d="M17 22L21 26L29 16" fill="none" stroke="#2E9E5B" stroke-width="3" stroke-linejoin="miter" stroke-linecap="square"/>
+</svg>

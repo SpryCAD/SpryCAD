@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Center rectangle: drawn from its centre out to a corner (the construction diagonal dashed) -->
+  <path d="M5 9H27V23H5Z" fill="none" stroke="#24364F" stroke-width="2" stroke-linejoin="miter"/>
+  <path d="M16 16L27 23" fill="none" stroke="#24364F" stroke-width="1.5" stroke-dasharray="3 2"/>
+  <path d="M14 14h4v4h-4z M25 21h4v4h-4z" fill="#2F7BD6"/>
+</svg>
