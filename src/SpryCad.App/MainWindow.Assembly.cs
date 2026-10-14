@@ -304,6 +304,9 @@ public partial class MainWindow : IAssemblyHost
         (float)t.M02, (float)t.M12, (float)t.M22, 0,
         (float)t.T.X, (float)t.T.Y, (float)t.T.Z, 1);
 
+    /// <summary>What makes two components the same part for Color by Part: the part they use, in the configuration they show.</summary>
+    static string PartKey(Component c) => ComponentResolver.Key(c.Part) + "|" + c.Configuration;
+
     static Rgba MixColor(Rgba a, Rgba b, float t) => new(a.R + (b.R - a.R) * t, a.G + (b.G - a.G) * t, a.B + (b.B - a.B) * t, 1);
 
     /// <summary>The components placed in the graphics area (selected and hovered ones tinted), with the standard planes.</summary>
@@ -317,10 +320,20 @@ public partial class MainWindow : IAssemblyHost
         // (a component, or a sub-assembly with all it holds)
         static bool Under(string path, string? of) => of != null && (path == of || path.StartsWith(of + "/", StringComparison.Ordinal));
         var explode = ShownExplode(a);
+        // Color by Part (the Color by Feature button, in an assembly): each part, in each configuration, a color of
+        // its own, the same on every instance of it; in the order the parts first appear (hidden ones too), so hiding
+        // or adding a component leaves the others' colors as they were
+        Dictionary<string, int>? partColor = null;
+        if (_colorByFeature)
+        {
+            partColor = new();
+            foreach (var (o, _) in a.Model.PlacedParts(hidden: true))
+                partColor.TryAdd(PartKey(o.Component), partColor.Count);
+        }
         foreach (var (o, pd) in a.Model.PlacedParts())
         {
             if (pd.Mesh.Indices.Length == 0 || IsolatedOut(o.Path)) continue;
-            var col = o.Color ?? pd.Color;
+            var col = partColor != null ? FeatureColors.Color(partColor[PartKey(o.Component)]) : o.Color ?? pd.Color;
             var rgba = new Rgba((float)col[0], (float)col[1], (float)col[2]);
             // while faces are picked (Mate, Motor) the components keep their colors: the faces are highlighted
             if (_clashes?.Contains(o.Path) == true) rgba = MixColor(rgba, new Rgba(0.95f, 0.15f, 0.1f), 0.75f);

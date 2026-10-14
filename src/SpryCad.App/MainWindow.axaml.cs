@@ -231,6 +231,7 @@ public partial class MainWindow : Window
 
     public void RefreshScene()
     {
+        UpdateColorByLabels();
         if (Asm != null) { RefreshAssemblyScene(); return; }
         Viewport.Instances = Array.Empty<MeshInstance>();
         var doc = Session.Doc;

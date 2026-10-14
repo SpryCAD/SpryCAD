@@ -159,7 +159,7 @@ public partial class MainWindow
                 StyleItem("Shaded", DisplayStyle.Shaded),
                 StyleItem("Hidden Lines Visible", DisplayStyle.HiddenLinesVisible),
                 StyleItem("Wireframe", DisplayStyle.Wireframe)),
-            Toggle("Color by _Feature", () => _colorByFeature, ToggleColorByFeature),
+            _colorByMenu = Toggle("Color by _Feature", () => _colorByFeature, ToggleColorByFeature),
             Toggle("Perspective", () => Viewport.Camera.Perspective, () => { Viewport.Camera.Perspective = !Viewport.Camera.Perspective; Viewport.Redraw(); }),
             Sub("_Threads",
                 Toggle("As Set in Each Thread", () => ThreadMode == ThreadDisplay.AsSet, () => _ = SetThreadMode(ThreadDisplay.AsSet), radio: true),
@@ -523,7 +523,7 @@ public partial class MainWindow
         df.Items.Add(StyleItem("Wireframe", DisplayStyle.Wireframe));
         disp.Flyout = df;
         H("planes", "Hide/Show Planes", TogglePlanes);
-        H("colorbyfeature", "Color by Feature", ToggleColorByFeature);
+        _colorByButton = H("colorbyfeature", "Color by Feature", ToggleColorByFeature);
     }
 
     Flyout OrientationFlyout()
@@ -551,6 +551,16 @@ public partial class MainWindow
 
     /// <summary>View > Color by Feature: each face in its feature's color, with a swatch of it on the feature's tree row.</summary>
     bool _colorByFeature;
+    // the button and menu item (in an assembly they color by part: each part its own color, on all its instances)
+    Button? _colorByButton;
+    MenuItem? _colorByMenu;
+
+    /// <summary>Color by Feature in a part, Color by Part in an assembly: the button's tip and the menu item say which.</summary>
+    void UpdateColorByLabels()
+    {
+        if (_colorByButton != null) ToolTip.SetTip(_colorByButton, Asm != null ? "Color by Part" : "Color by Feature");
+        if (_colorByMenu != null) _colorByMenu.Header = Asm != null ? "Color by _Part" : "Color by _Feature";
+    }
 
     void ToggleColorByFeature()
     {
