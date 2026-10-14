@@ -127,12 +127,11 @@ public sealed unsafe class GlRenderer : IDisposable
     readonly bool _es;
     uint _lit, _flat, _vcol;
     int _litVP, _litView, _litColor, _litPersp, _flatVP, _flatColor, _vcolVP;
-    int _litClip, _litCap, _flatClip;
+    int _litClip, _flatClip;
 
     /// <summary>
     /// The section plane (a, b, c, d in world coordinates: what is past it, where ax + by + cz + d > 0, is cut away), or
-    /// null for none. Faces and edges are cut; while there is one, a solid's inside faces (seen through the cut) are
-    /// filled flat in their own color, darker, so the cut reads as solid.
+    /// null for none. Faces and edges are cut; the cut faces are filled by <see cref="DrawCap"/>.
     /// </summary>
     public Vector4? Clip { get; set; }
     /// <summary>Where the meshes drawn next are placed (an assembly instance's placement; identity for a part's bodies): the clip plane is moved into them.</summary>
@@ -167,16 +166,13 @@ public sealed unsafe class GlRenderer : IDisposable
             """;
         const string litFs = """
             in vec3 vN; in vec3 vPosV; in float vClip;
-            uniform vec4 uColor; uniform float uPersp; uniform float uCap;
+            uniform vec4 uColor; uniform float uPersp;
             out vec4 oColor;
             void main() {
               // the section: past the plane cut away
               if (vClip > 0.0) discard;
               vec3 n = normalize(vN);
               vec3 v = uPersp > 0.5 ? normalize(-vPosV) : vec3(0.0, 0.0, 1.0);
-              // a solid's inside seen through the cut (its outward normal turned away from the eye: the winding is
-              // not to be trusted, the normals are): filled flat, as the cut face
-              if (uCap > 0.5 && dot(n, v) < 0.0) { oColor = vec4(uColor.rgb * 0.72, uColor.a); return; }
               if (dot(n, v) < 0.0) n = -n;
               // camera attached lights: a headlight slightly above/left plus two fills
               vec3 l1 = normalize(vec3(-0.15, 0.25, 1.0));
@@ -222,7 +218,6 @@ public sealed unsafe class GlRenderer : IDisposable
         _flatColor = _gl.GetUniformLocation(_flat, "uColor");
         _vcolVP = _gl.GetUniformLocation(_vcol, "uViewProj");
         _litClip = _gl.GetUniformLocation(_lit, "uClip");
-        _litCap = _gl.GetUniformLocation(_lit, "uCap");
         _flatClip = _gl.GetUniformLocation(_flat, "uClip");
 
         _dynVao = _gl.GenVertexArray();
@@ -279,8 +274,9 @@ public sealed unsafe class GlRenderer : IDisposable
             _gl.FramebufferRenderbuffer(FramebufferTarget.Framebuffer, FramebufferAttachment.ColorAttachment0, RenderbufferTarget.Renderbuffer, _colorRb);
             _depthRb = _gl.GenRenderbuffer();
             _gl.BindRenderbuffer(RenderbufferTarget.Renderbuffer, _depthRb);
-            _gl.RenderbufferStorageMultisample(RenderbufferTarget.Renderbuffer, (uint)_samples, InternalFormat.DepthComponent24, (uint)w, (uint)h);
-            _gl.FramebufferRenderbuffer(FramebufferTarget.Framebuffer, FramebufferAttachment.DepthAttachment, RenderbufferTarget.Renderbuffer, _depthRb);
+            // (with a stencil: the section's caps)
+            _gl.RenderbufferStorageMultisample(RenderbufferTarget.Renderbuffer, (uint)_samples, InternalFormat.Depth24Stencil8, (uint)w, (uint)h);
+            _gl.FramebufferRenderbuffer(FramebufferTarget.Framebuffer, FramebufferAttachment.DepthStencilAttachment, RenderbufferTarget.Renderbuffer, _depthRb);
         }
         _gl.BindFramebuffer(FramebufferTarget.Framebuffer, _fbo);
         _gl.Viewport(0, 0, (uint)w, (uint)h);
@@ -333,7 +329,6 @@ public sealed unsafe class GlRenderer : IDisposable
         _gl.Uniform1(_litPersp, persp ? 1f : 0f);
         var clip = ModelClip;
         _gl.Uniform4(_litClip, clip.X, clip.Y, clip.Z, clip.W);
-        _gl.Uniform1(_litCap, Clip != null ? 1f : 0f);
         _gl.BindVertexArray(m.Vao);
         if (count < 0) count = m.IndexCount;
         _gl.DrawElements(PrimitiveType.Triangles, (uint)count, DrawElementsType.UnsignedInt, (void*)(start * 4));
@@ -364,6 +359,38 @@ public sealed unsafe class GlRenderer : IDisposable
         _gl.BindVertexArray(m.EdgeVao);
         _gl.DrawArrays(PrimitiveType.Lines, start, (uint)(count < 0 ? m.EdgeVertexCount : count));
         _gl.BindVertexArray(0);
+    }
+
+    /// <summary>
+    /// A closed mesh's cap where the section cuts it: its surface left by the cut drawn into the stencil, each pixel
+    /// flipped once for each crossing, so a pixel left odd is one where the section plane is inside the solid; there
+    /// <paramref name="cap"/> (triangles on the plane, in world coordinates, colored, as <see cref="DrawDynamic(float[], PrimitiveType, Matrix4x4)"/>
+    /// takes them) is drawn, depth tested like any face. <paramref name="meshViewProj"/> places the mesh (its
+    /// <see cref="Model"/> set to match, so the cut follows it).
+    /// </summary>
+    public void DrawCap(GpuMesh m, Matrix4x4 meshViewProj, float[] cap, Matrix4x4 viewProj)
+    {
+        if (m.IndexCount == 0 || Clip == null) return;
+        _gl.Enable(EnableCap.StencilTest);
+        _gl.StencilMask(0xFF);
+        _gl.ClearStencil(0);
+        _gl.Clear(ClearBufferMask.StencilBufferBit);
+        // the count: every remaining surface, nothing drawn, nothing hidden
+        _gl.StencilFunc(StencilFunction.Always, 0, 1);
+        _gl.StencilOp(StencilOp.Keep, StencilOp.Keep, StencilOp.Invert);
+        _gl.ColorMask(false, false, false, false);
+        _gl.DepthMask(false);
+        _gl.Disable(EnableCap.DepthTest);
+        DrawMeshFlat(m, new Rgba(0, 0, 0, 1), meshViewProj, 0, m.IndexCount);
+        // the cap where it came out odd
+        _gl.ColorMask(true, true, true, true);
+        _gl.Enable(EnableCap.DepthTest);
+        _gl.DepthMask(true);
+        _gl.DepthFunc(DepthFunction.Lequal);
+        _gl.StencilFunc(StencilFunction.Equal, 1, 1);
+        _gl.StencilOp(StencilOp.Keep, StencilOp.Keep, StencilOp.Keep);
+        DrawDynamic(cap, PrimitiveType.Triangles, viewProj);
+        _gl.Disable(EnableCap.StencilTest);
     }
 
     public void PolygonOffset(bool on, float factor = 1, float units = 1)

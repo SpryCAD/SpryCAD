@@ -242,6 +242,7 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         }
         if (ghost) _r.Blend(false);
         DrawInstances(vp, view);
+        DrawSectionCaps(vp);
         if (Style == DisplayStyle.HiddenLinesVisible)
         {
             // hidden edges, faint, on top
@@ -414,6 +415,37 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
                 if (i.Color.A >= 1) _r.DrawEdges(_gpu[i.Mesh], EdgeColor, i.Model * vp);
                 else if (i.Color.A > 0) { _r.Blend(true); _r.DrawEdges(_gpu[i.Mesh], EdgeColor.WithAlpha(i.Color.A), i.Model * vp); _r.Blend(false); }
             }
+        _r.Model = Matrix4x4.Identity;
+    }
+
+    /// <summary>
+    /// The section's caps: each body (and each placed component) filled where the section plane is inside it, in its
+    /// own color a little darker, so the cut reads as solid material (not in wireframe or hidden lines).
+    /// </summary>
+    void DrawSectionCaps(Matrix4x4 vp)
+    {
+        if (_r == null || Section is not { } s || Style is DisplayStyle.Wireframe or DisplayStyle.HiddenLinesVisible) return;
+        // one quad on the plane, as big as the scene, for every cap (the stencil keeps each to its own solid)
+        var b = SceneBounds();
+        var c = b.IsEmpty ? Vec3.Zero : b.Center;
+        var size = Math.Max(b.IsEmpty ? 100 : b.Diagonal, 1) * 2;
+        var f = Frame.FromPlane(s);
+        var o = c - s.Normal * s.Distance(c);
+        Vec3 Corner(double x, double y) => o + f.XDir * (x * size) + f.YDir * (y * size);
+        float[] Quad(Rgba col)
+        {
+            var k = new[] { Corner(-1, -1), Corner(1, -1), Corner(1, 1), Corner(-1, -1), Corner(1, 1), Corner(-1, 1) };
+            var d = new float[k.Length * 7];
+            for (int i = 0; i < k.Length; i++)
+            {
+                d[i * 7] = (float)k[i].X; d[i * 7 + 1] = (float)k[i].Y; d[i * 7 + 2] = (float)k[i].Z;
+                d[i * 7 + 3] = col.R * 0.7f; d[i * 7 + 4] = col.G * 0.7f; d[i * 7 + 5] = col.B * 0.7f; d[i * 7 + 6] = 1;
+            }
+            return d;
+        }
+        foreach (var body in Bodies) { _r.Model = Matrix4x4.Identity; _r.DrawCap(_gpu[body.Mesh], vp, Quad(PartColor), vp); }
+        foreach (var i in Instances)
+            if (i.Color.A >= 1) { _r.Model = i.Model; _r.DrawCap(_gpu[i.Mesh], i.Model * vp, Quad(i.Color), vp); }
         _r.Model = Matrix4x4.Identity;
     }
 
