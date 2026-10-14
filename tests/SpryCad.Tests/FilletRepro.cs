@@ -63,7 +63,7 @@ static class FilletRepro
                     foreach (var x in body.Edges.Where(x => x.Uses.Count == 2).OrderBy(x => Enumerable.Range(0, 9).Min(i => Vec3.Distance(x.At(i / 8.0), p))).Take(8))
                         Console.WriteLine($"  near: {x.Curve.GetType().Name} {x.V0.P}->{x.V1.P} [{x.Uses[0].Face.Tag.Name}|{x.Uses[1].Face.Tag.Name}] convex {NativeBlend.IsConvex(x)}");
                 var e = body.Edges.Where(x => x.Uses.Count == 2).MinBy(x => Enumerable.Range(0, 9).Min(i => Vec3.Distance(x.At(i / 8.0), p)))!;
-                Console.WriteLine($"  edge {e.Curve.GetType().Name} {e.V0.P}->{e.V1.P} [{e.Uses[0].Face.Tag.Name}|{e.Uses[1].Face.Tag.Name}]");
+                Console.WriteLine($"  edge {e.Curve.GetType().Name} {e.V0.P}->{e.V1.P} [{e.Uses[0].Face.Tag.Name}|{e.Uses[1].Face.Tag.Name}] convex {NativeBlend.IsConvex(e)}");
                 fi.Edges.Add(new EdgeRef { A = e.Uses[0].Face.Tag.Name, B = e.Uses[1].Face.Tag.Name, Hint = e.Mid });
             }
             doc.AddFeature(fi, k + 1);

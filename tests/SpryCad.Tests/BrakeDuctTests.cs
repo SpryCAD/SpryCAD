@@ -128,6 +128,23 @@ static class BrakeDuctTests
             }
         });
 
+        // (R0.3 the ball touching the plenum's side round is held within 0.075 of its axis: its foot on the drop's side
+        // reaches the ramp before the plenum side's reaches that round, though the chain meets them the other way
+        // round; and where the chain ends, the round and the ramp's top round both tangent to the plenum's top, their
+        // offsets touch near the end's centre)
+        t.Test("Brake duct: the part as saved (the tube's rim R0.3 rolling on up the drop's sides) builds, shelled", () =>
+        {
+            var doc = Part();
+            var rim = Feature<FilletFeature>(doc, "Tube rim");
+            t.Eq(rim.Radius, "0.3"); t.True(rim.TangentPropagation, "the rim runs on along tangent edges");
+            var r = new Regenerator().Rebuild(doc);
+            var b = Built(t, doc, r, "as saved");
+            var shell = Feature<ShellFeature>(doc, "Shell");
+            t.True(r.Status[shell.Id].Warnings.All(w => !w.Contains("Not inside")), string.Join("; ", r.Status[shell.Id].Warnings));
+            // (up both sides of the drop: no end caps, the tool runs to a point at the plenum's top)
+            t.True(!b.Faces.Any(f => Capped(f, rim.Id)), "a cap at the rim's end");
+        });
+
         t.Test("Brake duct: a fillet round the intake collar's base goes all the way round, concave and convex", () =>
         {
             var doc = Part();
