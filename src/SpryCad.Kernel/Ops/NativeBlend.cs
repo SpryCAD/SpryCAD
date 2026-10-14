@@ -1491,7 +1491,16 @@ public static class NativeBlend
                     // standing out of a drafted or round face, the bisector's leaves one blend's edge past the corner
                     // (edges running on tangentially: square to them, as before)
                     var shared = g.Uses.Any(u => ReferenceEquals(u.Face, fa)) ? fa : fb;
-                    if (CornerEdge(v, shared, new[] { fa, fb }.Concat(g.Uses.Select(w => w.Face)), blended, selected) is { } cd && (a + b).Length > 1e-3 && Vec3.Cross((a + b).Normalized, cd) is var m && m.Length > 1e-3)
+                    // (both blends convex, round a convex corner (the edges of a face, a block's angled one, filleted or
+                    // chamfered all round, the corner edge between the faces beside it left sharp): each ends on the
+                    // face it runs into, as at any other end; what the two take off then overlaps, meeting where they
+                    // cross. A mitre holding the corner edge is that only where the edge stands square to the shared
+                    // face; leaning, it leaves a wing of each beside the other)
+                    var faces3 = new[] { fa, fb }.Concat(g.Uses.Select(w => w.Face)).ToList();
+                    if (blended.All(x => IsConvex(x) == true) && IsConvex(g) == true
+                        && CornerEdgeOf(v, shared, faces3, blended, selected) is { } ce && IsConvex(ce) == true)
+                        continue;
+                    if (CornerEdge(v, shared, faces3, blended, selected) is { } cd && (a + b).Length > 1e-3 && Vec3.Cross((a + b).Normalized, cd) is var m && m.Length > 1e-3)
                         n = Vec3.Dot(m, a) < 0 ? -m : m;
                     count++;
                     miter = Plane.FromPointNormal(v.P, n.Normalized);

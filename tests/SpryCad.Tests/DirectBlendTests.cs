@@ -9,6 +9,33 @@ static class DirectBlendTests
 {
     public static void Run(TestRunner t)
     {
+        // (a block's angled face blended all round, the edges between the faces beside it left sharp: both blends at a
+        // corner convex, round a convex corner edge leaning to the angled face. Each ended on a mitre holding that edge,
+        // which is not where they cross: a wing of each, its square end, standing beside the other)
+        foreach (var chamfer in new[] { false, true })
+            t.Test($"{(chamfer ? "Chamfer" : "Fillet")} all round a block's angled face: the corners clean, no wing", () =>
+            {
+                var dir = AppContext.BaseDirectory;
+                while (dir != null && !Directory.Exists(Path.Combine(dir, "samples"))) dir = Path.GetDirectoryName(dir);
+                var doc = CadDocument.Load(Path.Combine(dir!, "tests", "SpryCad.Tests", "models", "parts", "face-fillet.sprt"));
+                Feature blend = doc.Features.OfType<FilletFeature>().Single();
+                if (chamfer)
+                {
+                    var fi = (FilletFeature)blend;
+                    var ch = new ChamferFeature { Name = "Chamfer", Distance = "2mm", Edges = fi.Edges, TangentPropagation = fi.TangentPropagation };
+                    doc.Features[doc.Features.IndexOf(fi)] = ch;
+                    blend = ch;
+                }
+                var r = new Regenerator().Rebuild(doc);
+                foreach (var f in doc.Features) t.True(r.Status[f.Id].Ok, $"{f.Name}: {r.Status[f.Id].Error}");
+                var b = r.State.Bodies.Single().Solid;
+                t.True(b.Native?.Validate() == null, $"invalid: {b.Native?.Validate()}");
+                t.Eq(b.Topology.OpenHalfEdges, 0);
+                var caps = b.Native!.Faces.Where(f => f.Tag.Name.StartsWith(blend.Id + ".", StringComparison.Ordinal)
+                    && (f.Tag.Name.EndsWith(".End", StringComparison.Ordinal) || f.Tag.Name.EndsWith(".Start", StringComparison.Ordinal))).Select(f => f.Tag.Name).ToList();
+                t.True(caps.Count == 0, $"tool ends left standing: {string.Join(", ", caps)}");
+            });
+
         t.Test("Direct blend: the blend cases and sample parts as by boolean (volume, faces), valid, most tools direct", () =>
         {
             var dir = AppContext.BaseDirectory;
