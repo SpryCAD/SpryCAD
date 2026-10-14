@@ -152,7 +152,8 @@ public static class Dialogs
         var info = new TextBlock
         {
             FontSize = TypeScale.Small, Foreground = Palette.TextMuted, TextWrapping = TextWrapping.Wrap,
-            Text = "Global variables usable in any dimension or feature value, e.g. W = 100, H = W/2. Trig functions use degrees; units like 1in are converted to mm. "
+            Text = "Global variables usable in any dimension or feature value, e.g. W = 100mm, H = W/2, N = 6. A value with a unit (10mm, 2in, 30deg) is a length or an angle "
+                + "wherever it is used; one without is a plain number, which a length or angle field takes in the part's units. Trig functions use degrees. "
                 + "Conditions (Teeth < 30 and not Slots) give 1 or 0, for Suppress When. "
                 + "User-facing variables are what Configure shows (an assembly sets them per instance); the others are internal.",
         };
@@ -165,14 +166,15 @@ public static class Dialogs
         };
         const string cols = "120,*,90,44,150,56,56,30";
         var valueCells = new List<(Equation row, TextBlock cell)>();
-        (Dictionary<string, double>, Dictionary<string, string>) Evaluate() => Regenerator.EvaluateEquations(new CadDocument { Equations = rows, Tables = tables });
-        void Show(TextBlock cell, Equation r, Dictionary<string, double> vals, Dictionary<string, string> errs)
+        var units = session.Doc.Units;
+        (Dictionary<string, Quantity>, Dictionary<string, string>) Evaluate() => Regenerator.EvaluateEquations(new CadDocument { Equations = rows, Tables = tables });
+        void Show(TextBlock cell, Equation r, Dictionary<string, Quantity> vals, Dictionary<string, string> errs)
         {
             var name = r.Name.Trim();
             // (an error of this row: one set twice has a value, from where it was set first)
             var err = rows.Count(x => x.Name.Trim().Equals(name, StringComparison.OrdinalIgnoreCase)) > 1 || fromTables.Contains(name, StringComparer.OrdinalIgnoreCase)
                 ? $"{name} is set twice" : errs.GetValueOrDefault(r.Name);
-            cell.Text = err ?? (vals.TryGetValue(name, out var val) ? Expr.Format(val) : "");
+            cell.Text = err ?? (vals.TryGetValue(name, out var val) ? units.Show(val) : "");
             if (err != null) cell.Foreground = Palette.Danger; else cell.ClearValue(TextBlock.ForegroundProperty);
             ToolTip.SetTip(cell, err);
         }
@@ -268,8 +270,8 @@ public static class Dialogs
         {
             var text = tb.Text?.Trim() ?? "";
             if (text.Length == 0) { now.Text = "No condition: the feature is built unless suppressed by hand."; now.Foreground = Palette.TextMuted; return; }
-            if (!Expr.TryEval(text, lookup, out var v, out var err)) { now.Text = err; now.Foreground = Palette.Danger; return; }
-            now.Text = Expr.Truthy(v) ? "Holds now: the feature is suppressed (and the features using it)." : "Does not hold now: the feature is built.";
+            if (!Expr.TryEvaluate(text, lookup, out var v, out var err)) { now.Text = err; now.Foreground = Palette.Danger; return; }
+            now.Text = Expr.Truthy(v.Value) ? "Holds now: the feature is suppressed (and the features using it)." : "Does not hold now: the feature is built.";
             now.Foreground = Palette.TextMuted;
         }
         tb.TextChanged += (_, _) => Update();
@@ -292,7 +294,7 @@ public static class Dialogs
         ok.Click += (_, _) =>
         {
             var text = tb.Text?.Trim() ?? "";
-            if (text.Length > 0 && !Expr.TryEval(text, lookup, out _, out _)) return; // (the error shows under the box)
+            if (text.Length > 0 && !Expr.TryEvaluate(text, lookup, out _, out _)) return; // (the error shows under the box)
             w.Close();
             var value = text.Length == 0 ? null : text;
             if (value != f.SuppressWhen) session.Change(() => f.SuppressWhen = value);
@@ -529,7 +531,7 @@ public static class Dialogs
         {
             // what the choices give: the internal values too, so a size can be checked before OK
             var (vals, _) = Regenerator.EvaluateEquations(part.Configured(values));
-            var shown = vals.Where(kv => !ps.Any(p => p.Name.Equals(kv.Key, StringComparison.OrdinalIgnoreCase))).Take(12).Select(kv => $"{kv.Key} {Expr.Format(kv.Value)}");
+            var shown = vals.Where(kv => !ps.Any(p => p.Name.Equals(kv.Key, StringComparison.OrdinalIgnoreCase))).Take(12).Select(kv => $"{kv.Key} {part.Units.Show(kv.Value)}");
             summary.Text = string.Join(", ", shown);
         }
         for (int i = 0; i < ps.Count; i++)

@@ -13,9 +13,13 @@ natively on **Windows, Linux and macOS** with no browser, no Electron and no nat
   corner, heads-up view toolbar, translucent yellow previews, blue/black/red sketch definition colors,
   and SolidWorks mouse/keyboard navigation.
 - **Fully parametric**: every feature is regenerated from the history; dimensions and feature values accept
-  expressions and global variables (`W = 100`, `W/2 + 5`, `1in`, `sin(30)`); conditions on them suppress features
+  expressions and global variables (`W = 100mm`, `W/2 + 5mm`, `sin(30deg)`); conditions on them suppress features
   (`Suppress When Teeth < 30`, and the features using them with them); design tables give rows of values (a
   screw's sizes); user-facing parameters make one part file configurable per instance in assemblies.
+- **Units**: the model is always in millimetres; a part's units (MMGS or IPS) are only what values are shown in.
+  Every length and angle keeps its unit, so units mix freely (`10in` in a millimetre part, `M6` holes in an inch
+  one): one typed without a unit gets the part's (`10` in an inch part is kept as `10in`). Values in other units
+  add up (`1in + 2mm`); a length and a plain number do not (`W + 5` wants `W + 5mm`).
 - **Fast**: incremental rebuilds (only features after the change are rebuilt), background rebuild thread so
   the UI never blocks, live preview while editing, ~1 s cold start for the ReadyToRun build. A 14-feature
   shelled part (fillets, counterbored holes, pattern, shell, chamfer) rebuilds in ~85 ms; editing one of its
@@ -265,19 +269,20 @@ SpryCAD files: `.sprt` parts, `.sasm` assemblies, and `.sdrw` (reserved for draw
 file type icons are drawn by `build/make-icon.ps1`.
 
 A part is a JSON document: units, the part colour, equations, and the ordered feature list with sketches
-(points, entities, constraints and dimension expressions). Features store what was asked for (expressions,
+(points, entities, constraints and dimension expressions). Lengths are in millimetres whatever the units: sketch
+coordinates as numbers, values as expressions with their units (`"10in"`; a bare number is millimetres). Features store what was asked for (expressions,
 face and edge references by persistent name plus a hint point), never computed geometry: the model is rebuilt
 on open. An `.sprt` file is either this JSON as plain text, or a container (below) that holds it as
 `model.json`. Example:
 
 ```json
 {
-  "format": "SpryCAD", "formatVersion": 1, "units": "MMGS",
-  "equations": [ { "name": "W", "expr": "120" } ],
+  "format": "SpryCAD", "formatVersion": 3, "units": "MMGS",
+  "equations": [ { "name": "W", "expr": "120mm" } ],
   "features": [
     { "$type": "sketch", "id": "F1", "name": "Sketch1", "plane": { "std": "Front" }, "sketch": { "...": "..." } },
-    { "$type": "extrude", "id": "F2", "name": "Boss-Extrude1", "sketchId": "F1", "end": "Blind", "depth": "20" },
-    { "$type": "fillet", "id": "F5", "name": "Fillet1", "radius": "5", "edges": [ { "a": "F2.S.L3", "b": "F2.End", "hint": [100, 60, 10] } ] }
+    { "$type": "extrude", "id": "F2", "name": "Boss-Extrude1", "sketchId": "F1", "end": "Blind", "depth": "20mm" },
+    { "$type": "fillet", "id": "F5", "name": "Fillet1", "radius": "5mm", "edges": [ { "a": "F2.S.L3", "b": "F2.End", "hint": [100, 60, 10] } ] }
   ]
 }
 ```

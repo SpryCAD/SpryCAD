@@ -55,7 +55,7 @@ static class ConfigTests
             t.Eq(Expr.Eval("!(Teeth == 24) || Bore != 12", v), 0.0);
             t.Eq(Expr.Eval("Teeth = 24 && Bore <> 13", v), 1.0);
             t.Eq(Expr.Eval("0.1 + 0.2 == 0.3"), 1.0);
-            t.Eq(Expr.Eval("1in == 25.4"), 1.0);
+            t.Eq(Expr.Eval("1in == 25.4mm"), 1.0);
             t.Eq(Expr.Eval("1 + 2 * 3 > 6"), 1.0);       // arithmetic binds tighter
             t.Eq(Expr.Eval("-Bore < 0", v), 1.0);
             t.Eq(Expr.Eval("order + 1", v), 4.0);        // "or" only as a whole word
@@ -116,7 +116,7 @@ static class ConfigTests
             doc.Tables = new() { SizeTable() };
             var (vals, errs) = Regenerator.EvaluateEquations(doc);
             t.True(errs.Count == 0, string.Join("; ", errs.Values));
-            t.Eq(vals["Size"], 2.0); t.Eq(vals["W"], 100.0); t.Eq(vals["Holes"], 1.0); t.Eq(vals["Area"], 6000.0);
+            t.Eq(vals["Size"].Value, 2.0); t.Eq(vals["W"].Value, 100.0); t.Eq(vals["Holes"].Value, 1.0); t.Eq(vals["Area"].Value, 6000.0);
             var regen = new Regenerator();
             var r = regen.Rebuild(doc);
             t.True(!r.Status[cut.Id].Suppressed, "holes in M");
@@ -128,12 +128,12 @@ static class ConfigTests
 
             // a key no row has: the first row
             doc.Tables[0].Selected = "XL";
-            t.Eq(Regenerator.EvaluateEquations(doc).values["W"], 80.0);
+            t.Eq(Regenerator.EvaluateEquations(doc).values["W"].Value, 80.0);
 
             // a variable set twice: the first (the table) wins, the second is an error
             doc.Equations.Add(new Equation { Name = "W", Expr = "5" });
             (vals, errs) = Regenerator.EvaluateEquations(doc);
-            t.Eq(vals["W"], 80.0);
+            t.Eq(vals["W"].Value, 80.0);
             t.True(errs.ContainsKey("W"), "W set twice is an error");
 
             // saved and read again

@@ -51,7 +51,6 @@ static class IdTests
             t.True(File.ReadAllText(file).Contains("\"formatVersion\": 1"), "the fixture is format 1");
             var doc = CadDocument.Load(file);
             t.Eq(doc.FormatVersion, CadDocument.CurrentFormatVersion);
-            t.Eq(doc.FormatVersion, 2);
             t.True(doc.Features.Count > 0, "features");
             t.True(doc.Features.All(f => !Regex.IsMatch(f.Id, @"^F\d+$")), "no counted feature ids: " + string.Join(",", doc.Features.Select(f => f.Id)));
             t.True(doc.Features.All(f => NewFeature.IsMatch(f.Id)), "new-form feature ids: " + string.Join(",", doc.Features.Select(f => f.Id)));
@@ -69,7 +68,7 @@ static class IdTests
             var path = Path.Combine(dir, "shelled-bracket.sprt");
             doc.Save(path);
             var back = CadDocument.Load(path);
-            t.Eq(back.FormatVersion, 2);
+            t.Eq(back.FormatVersion, CadDocument.CurrentFormatVersion);
             t.True(doc.Features.Select(f => f.Id).SequenceEqual(back.Features.Select(f => f.Id)), "ids kept through save and open");
             doc.NameCounters = doc.NameCounters.OrderBy(kv => kv.Key, StringComparer.Ordinal).ToDictionary(); // (the file keeps them sorted)
             t.Eq(back.ToJson(), doc.ToJson());

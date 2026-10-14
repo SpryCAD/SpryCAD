@@ -1,5 +1,6 @@
 using SpryCad.Core;
 using SpryCad.App.Viewport;
+using SpryCad.Core.Model;
 using SpryCad.Core.Sketching;
 using SpryCad.Kernel;
 
@@ -76,7 +77,7 @@ public sealed partial class SketchEditor
         }
         Selected.Clear(); SelectionChanged?.Invoke();
         Resolve();
-        Message?.Invoke(error ?? $"Filleted {done} corner{(done == 1 ? "" : "s")} (R {Expr.Format(FilletRadius)}). The original lines and arcs remain as construction geometry; delete the fillet to restore the corner.");
+        Message?.Invoke(error ?? $"Filleted {done} corner{(done == 1 ? "" : "s")} (R {Units.Length(FilletRadius)}). The original lines and arcs remain as construction geometry; delete the fillet to restore the corner.");
         _vp.Redraw();
     }
 

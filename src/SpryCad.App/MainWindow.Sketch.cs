@@ -110,7 +110,7 @@ public partial class MainWindow
     {
         Selection.Clear();
         _sketchIsNew = isNew;
-        _sketch = new SketchEditor(Viewport, sf, frame, Session.Lookup) { PointsOnly = pointsOnly };
+        _sketch = new SketchEditor(Viewport, sf, frame, Session.Lookup) { PointsOnly = pointsOnly, Units = Session.Doc.Units };
         _sketch.Overlay = Overlay;
         _sketch.Changed += OnSketchChanged;
         _sketch.SelectionChanged += BuildSketchPage;
@@ -273,11 +273,11 @@ public partial class MainWindow
             if (ed.Tool == SketchTool.Fillet)
             {
                 var fs = page.Section("Sketch Fillet");
-                page.Number(fs, "Radius", () => Expr.Format(ed.FilletRadius), v =>
+                page.Number(fs, "Radius", () => Units.Entry(ed.FilletRadius), v =>
                 {
                     // only the value: the field applies on every change, also as the panel is built, so anything
                     // that rebuilds the panel from here would loop
-                    if (Expr.TryEval(v, Session.Lookup, out var r, out _) && r > 0) ed.FilletRadius = r;
+                    if (UnitFormat.TryLength(v, Session.Lookup, out var r, out _) && r > 0) ed.FilletRadius = r;
                 }, "sketchfillet");
                 page.Info(fs, "Click corners where two lines meet (or the two lines). The lines stay as construction geometry, so dimensions to the sharp corner remain; delete the fillet's arc to restore the corner.");
             }
@@ -400,14 +400,14 @@ public partial class MainWindow
                 if (pid is long id && id != Sketch.OriginId && ed.Sk.Point(id) is { } pt)
                 {
                     var par = page.Section("Parameters");
-                    page.Number(par, "X", () => Expr.Format(pt.X), v => { if (Expr.TryEval(v, Session.Lookup, out var x, out _) && Math.Abs(x - pt.X) > 1e-9) ed.SetPointPosition(id, new Vec2(x, pt.Y)); });
-                    page.Number(par, "Y", () => Expr.Format(pt.Y), v => { if (Expr.TryEval(v, Session.Lookup, out var y, out _) && Math.Abs(y - pt.Y) > 1e-9) ed.SetPointPosition(id, new Vec2(pt.X, y)); });
+                    page.Number(par, "X", () => Units.Entry(pt.X), v => { if (UnitFormat.TryLength(v, Session.Lookup, out var x, out _) && Math.Abs(x - pt.X) > 1e-9) ed.SetPointPosition(id, new Vec2(x, pt.Y)); });
+                    page.Number(par, "Y", () => Units.Entry(pt.Y), v => { if (UnitFormat.TryLength(v, Session.Lookup, out var y, out _) && Math.Abs(y - pt.Y) > 1e-9) ed.SetPointPosition(id, new Vec2(pt.X, y)); });
                 }
                 if (r.Kind == SkRefKind.Constraint && ed.Sk.Constraint(r.Id) is { IsDimension: true } dim)
                 {
                     var par = page.Section("Dimension");
                     // applied on Enter / leaving the field (not per keystroke: "1" on the way to "12" would re-solve)
-                    var vb = page.Number(par, "Value", () => dim.Expr ?? Expr.Format(dim.Value), _ => { }, null, dim.Type == CType.Angle ? "°" : UnitLabel);
+                    var vb = page.Number(par, "Value", () => dim.Expr ?? Units.Entry(dim.Value, dim.ValueKind), _ => { }, null, dim.Type == CType.Angle ? "°" : null);
                     void Apply() { if (ed.SetDimensionValue(dim, vb.Text)) { ed.UpdateOverlay(Viewport); OnSketchChanged(); } }
                     vb.KeyDown += (_, e) => { if (e.Key == Avalonia.Input.Key.Enter) { Apply(); e.Handled = true; } };
                     vb.LostFocus += (_, _) => Apply();
@@ -430,7 +430,7 @@ public partial class MainWindow
             case SkRefKind.Constraint:
                 {
                     var c = ed.Sk.Constraint(r.Id);
-                    return c == null ? "" : c.IsDimension ? $"{c.Name ?? "Dimension"} = {Expr.Format(c.Value)}" : SketchEditor.RelationName(c.Type);
+                    return c == null ? "" : c.IsDimension ? $"{c.Name ?? "Dimension"} = {(c.Type == CType.Angle ? UnitFormat.Angle(c.Value) : ed.Units.Length(c.Value))}" : SketchEditor.RelationName(c.Type);
                 }
             default:
                 return DisplayNames.Of(ed.Sk, r.Id);

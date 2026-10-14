@@ -220,6 +220,8 @@ public sealed class SkConstraint
     public string? Name { get; set; }
 
     [JsonIgnore] public bool IsDimension => Type is CType.Distance or CType.HDistance or CType.VDistance or CType.Radius or CType.Diameter or CType.Angle or CType.Offset or CType.Length;
+    /// <summary>What a dimension's value is: an angle (degrees) or a length (millimetres).</summary>
+    [JsonIgnore] public Model.ValueKind ValueKind => Type == CType.Angle ? Model.ValueKind.Angle : Model.ValueKind.Length;
     public SkConstraint Clone() { var c = (SkConstraint)MemberwiseClone(); c.Refs = (long[])Refs.Clone(); c.Sides = (int[]?)Sides?.Clone(); return c; }
 }
 

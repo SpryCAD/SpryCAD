@@ -16,8 +16,11 @@ public enum UnitSystem { MMGS, IPS }
 public sealed class CadDocument
 {
     public const string FileExtension = ".sprt";
-    /// <summary>2: random ids (<see cref="Ids"/>); 1: counted ids, renewed on opening (<see cref="LegacyIds"/>).</summary>
-    public const int CurrentFormatVersion = 2;
+    /// <summary>
+    /// 3: lengths in millimetres whatever <see cref="Units"/> (2 kept an inch part's in inches); 2: random ids (<see cref="Ids"/>);
+    /// 1: counted ids, renewed on opening (<see cref="LegacyIds"/>).
+    /// </summary>
+    public const int CurrentFormatVersion = 3;
 
     public string Format { get; set; } = "SpryCAD";
     public int FormatVersion { get; set; } = CurrentFormatVersion;
@@ -30,6 +33,10 @@ public sealed class CadDocument
     public string? Revision { get; set; }
     /// <summary>The part this one was saved as a copy of (its <see cref="Id"/>), if any.</summary>
     public string? DerivedFrom { get; set; }
+    /// <summary>
+    /// The units values are shown in, and a value typed without a unit is taken in (see <see cref="UnitFormat"/>). Only that:
+    /// the model is in millimetres (and degrees) whatever they are, so changing them changes nothing in it.
+    /// </summary>
     public UnitSystem Units { get; set; } = UnitSystem.MMGS;
     public List<Equation> Equations { get; set; } = new();
     /// <summary>Design tables: rows of values for sets of variables, one row in use (<see cref="DesignTable"/>). Null when none.</summary>

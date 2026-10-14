@@ -446,7 +446,7 @@ static class ThreadFeatureTests
                 t.True(r.Status.Values.All(s => s.Ok && s.Warnings.Count == 0), $"{label}: {string.Join("; ", r.Status.Values.Select(s => s.Error ?? string.Join(",", s.Warnings)).Where(x => x != ""))}");
                 t.Eq(r.State.Bodies.Count, 2);
                 var screw = r.State.Bodies[0].Solid.Native!; var nut = r.State.Bodies[1].Solid.Native!;
-                var gap = r.EquationValues["Gap"]; var p = r.EquationValues["P"];
+                var gap = r.EquationValues["Gap"].Value; var p = r.EquationValues["P"].Value;
                 double Overlap(double dz)
                 {
                     var moved = nut.Transformed(Transform.Translation(new Vec3(-gap, 0, dz)));

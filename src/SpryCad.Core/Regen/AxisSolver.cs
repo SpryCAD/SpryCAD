@@ -24,7 +24,7 @@ public static class AxisSolver
     }
 
     /// <summary>The stretch of the axis to draw (it runs on both ways), or why the references make none.</summary>
-    public static (Vec3 A, Vec3 B) Solve(IReadOnlyList<AxisReference> refs, ModelState st, double perMm = 1)
+    public static (Vec3 A, Vec3 B) Solve(IReadOnlyList<AxisReference> refs, ModelState st)
     {
         if (refs.Count == 0) throw new FeatureException("Select a line, edge or round face; or two planes; or two points; or a point and a plane.");
         if (TypeOf(refs) == null)
@@ -64,7 +64,7 @@ public static class AxisSolver
             d = planes[0].Normal; o = points[0];
             span.Add(points[0]); span.Add(points[0] - d * Vec3.Dot(points[0] - planes[0].Origin, d));
         }
-        return Stretch(o, d, span, st, perMm);
+        return Stretch(o, d, span, st);
     }
 
     /// <summary>Where a line reference reaches: an edge's or sketch line's ends, a round face's extent.</summary>
@@ -83,18 +83,18 @@ public static class AxisSolver
     }
 
     /// <summary>The stretch drawn: over what the references reach (else the model), a little past each end.</summary>
-    static (Vec3, Vec3) Stretch(Vec3 o, Vec3 d, List<Vec3> span, ModelState st, double perMm)
+    static (Vec3, Vec3) Stretch(Vec3 o, Vec3 d, List<Vec3> span, ModelState st)
     {
         if (span.Count < 2)
         {
             var b = st.Bounds;
             if (!b.IsEmpty)
                 for (int i = 0; i < 8; i++) span.Add(new Vec3((i & 1) == 0 ? b.Min.X : b.Max.X, (i & 2) == 0 ? b.Min.Y : b.Max.Y, (i & 4) == 0 ? b.Min.Z : b.Max.Z));
-            else { span.Add(o - d * (25 * perMm)); span.Add(o + d * (25 * perMm)); } // (50 mm, in the part's units)
+            else { span.Add(o - d * 25); span.Add(o + d * 25); } // (50 mm)
         }
         double lo = double.MaxValue, hi = double.MinValue;
         foreach (var p in span) { var t = Vec3.Dot(p - o, d); lo = Math.Min(lo, t); hi = Math.Max(hi, t); }
-        var more = Math.Max(2 * perMm, (hi - lo) * 0.1);
+        var more = Math.Max(2, (hi - lo) * 0.1);
         return (o + d * (lo - more), o + d * (hi + more));
     }
 }

@@ -172,12 +172,12 @@ static class ImportTests
             t.Near(NTess.ToSolid(body, 1e-3).Volume(), volume, volume * 2e-5);
         });
 
-        t.Test("STEP import: inch documents get the geometry in inches", () =>
+        t.Test("STEP import: an inch part gets the same geometry as a millimetre one (the model is in millimetres)", () =>
         {
             var (step, volume) = Exported("heat-sink.sprt");
             var d = ImportDoc(step); d.Units = UnitSystem.IPS;
             var r = new Regenerator().Rebuild(d);
-            t.Near(Vol(r.State.Bodies[0].Solid), volume / Math.Pow(25.4, 3), volume / Math.Pow(25.4, 3) * 1e-4);
+            t.Near(Vol(r.State.Bodies[0].Solid), volume, volume * 1e-4);
         });
 
         t.Test("STEP round trip: a round-wire spring keeps its half-round helical faces apart (each its own B-spline patch)", () =>

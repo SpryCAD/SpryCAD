@@ -5,6 +5,7 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using SpryCad.App.Session;
 using SpryCad.Core;
+using SpryCad.Core.Model;
 
 namespace SpryCad.App.UI;
 
@@ -73,7 +74,7 @@ public sealed class PmPage
     public List<PmSelectionBox> Boxes { get; } = new();
     public PmSelectionBox? ActiveBox { get; private set; }
     public event Action? ActiveBoxChanged;
-    public Func<string, double?> Lookup { get; set; } = _ => null;
+    public Func<string, Quantity?> Lookup { get; set; } = _ => null;
     public string? Message { get => _msg.Text; set { _msg.Text = value; _msgBorder.IsVisible = !string.IsNullOrEmpty(value); } }
 
     readonly DockPanel _root = new();
@@ -141,19 +142,30 @@ public sealed class PmPage
         return g;
     }
 
-    /// <summary>Numeric field that accepts expressions; shows the evaluated value as a tooltip.</summary>
-    /// <summary>Length unit shown next to numeric fields (the document's units).</summary>
-    public static string LengthUnit { get; set; } = "mm";
+    /// <summary>The document's units: what a length typed without one is in, and what worked-out values show in.</summary>
+    public static Func<UnitSystem> CurrentUnits { get; set; } = () => UnitSystem.MMGS;
+    static UnitSystem Units => CurrentUnits();
 
+    /// <summary>
+    /// Numeric field that accepts expressions, the evaluated value as a tooltip. A length (<paramref name="unit"/> null)
+    /// or an angle ("°") is shown and kept with its units: one typed without gets the document's ("10" → "10in", see
+    /// <see cref="UnitFormat.TryEnter"/>), and <paramref name="set"/> is given the text so kept. Any other
+    /// <paramref name="unit"/> is a plain number, the unit shown beside it.
+    /// </summary>
     public TextBox Number(StackPanel s, string label, Func<string> get, Action<string> set, string? icon = null, string? unit = null, bool optional = false)
     {
-        unit ??= LengthUnit;
-        var tb = new TextBox { Text = get(), MinWidth = 90, HorizontalAlignment = HorizontalAlignment.Stretch };
+        var kind = unit == null ? ValueKind.Length : unit == "°" ? ValueKind.Angle : ValueKind.Number;
+        var tb = new TextBox { Text = UnitFormat.Show(get(), kind), MinWidth = 90, HorizontalAlignment = HorizontalAlignment.Stretch };
         void MarkInvalid(bool bad) { if (bad) _invalid[tb] = label; else _invalid.Remove(tb); }
-        var unitLbl = new TextBlock { Text = unit, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(4, 0, 0, 0), Foreground = Palette.TextMuted, FontSize = TypeScale.Small };
-        var dp = new DockPanel();
-        DockPanel.SetDock(unitLbl, Dock.Right);
-        dp.Children.Add(unitLbl); dp.Children.Add(tb);
+        Control field = tb;
+        if (kind == ValueKind.Number && !string.IsNullOrEmpty(unit))
+        {
+            var unitLbl = new TextBlock { Text = unit, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(4, 0, 0, 0), Foreground = Palette.TextMuted, FontSize = TypeScale.Small };
+            var dp = new DockPanel();
+            DockPanel.SetDock(unitLbl, Dock.Right);
+            dp.Children.Add(unitLbl); dp.Children.Add(tb);
+            field = dp;
+        }
         void Validate()
         {
             var t = tb.Text ?? "";
@@ -165,12 +177,14 @@ public sealed class PmPage
                 Changed?.Invoke();
                 return;
             }
-            if (Expr.TryEval(t, Lookup, out var v, out var err))
+            if (Units.TryEnter(t, kind, Lookup, out var kept, out var v, out var err))
             {
                 MarkInvalid(false);
                 tb.BorderBrush = null;
-                ToolTip.SetTip(tb, double.TryParse(t, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out _) ? null : $"= {Expr.Format(v)}");
-                set(t.Trim());
+                // (what a formula, or a value in other units, comes to in the document's)
+                var plain = Expr.IsLiteral(t, out var u) && (u == "" || kind == ValueKind.Length && u == Units.Symbol() || kind == ValueKind.Angle);
+                ToolTip.SetTip(tb, plain ? null : $"= {Units.Show(v)}");
+                set(kept);
                 Changed?.Invoke();
             }
             else
@@ -183,14 +197,21 @@ public sealed class PmPage
         tb.TextChanged += (_, _) => Validate();
         tb.KeyDown += (_, e) =>
         {
-            if ((e.Key is Key.Up or Key.Down) && Expr.TryEval(tb.Text, Lookup, out var v, out string? _))
+            if (e.Key is not (Key.Up or Key.Down) || !Units.TryEnter(tb.Text, kind, Lookup, out string _, out var v, out string? _)) return;
+            var step = e.KeyModifiers.HasFlag(KeyModifiers.Shift) ? 10 : e.KeyModifiers.HasFlag(KeyModifiers.Control) ? 0.1 : 1;
+            if (e.Key == Key.Down) step = -step;
+            // in the units the value is written in (a step of an inch in "2in", of a millimetre in "10mm"), else the document's
+            if (kind == ValueKind.Length)
             {
-                var step = e.KeyModifiers.HasFlag(KeyModifiers.Shift) ? 10 : e.KeyModifiers.HasFlag(KeyModifiers.Control) ? 0.1 : 1;
-                tb.Text = Expr.Format(v + (e.Key == Key.Up ? step : -step));
-                e.Handled = true;
+                var unit = Expr.IsLiteral(tb.Text, out var u) && u != "" ? u : Units.Symbol();
+                var per = Expr.UnitFactor(unit);
+                tb.Text = Expr.Format(v.Value / per + step) + unit;
             }
+            else if (kind == ValueKind.Angle) tb.Text = Expr.Format(v.Value + step) + "deg";
+            else tb.Text = Expr.Format(v.Value + step);
+            e.Handled = true;
         };
-        s.Children.Add(Row(label, dp, icon));
+        s.Children.Add(Row(label, field, icon));
         return tb;
     }
 

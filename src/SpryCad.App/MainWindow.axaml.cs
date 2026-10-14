@@ -167,7 +167,7 @@ public partial class MainWindow : Window
     {
         Title = "SpryCAD - " + (_tab != null ? TitleOf(_tab) : Session.Title);
         StatusUnits.Text = Session.Doc.Units.ToString();
-        PmPage.LengthUnit = UnitLabel;
+        PmPage.CurrentUnits = () => Units;
         UpdateUndoButtons();
         Viewport.PartColor = new Rgba((float)Session.Doc.Color[0], (float)Session.Doc.Color[1], (float)Session.Doc.Color[2]);
         RebuildTree();
@@ -233,7 +233,6 @@ public partial class MainWindow : Window
         if (Asm != null) { RefreshAssemblyScene(); return; }
         Viewport.Instances = Array.Empty<MeshInstance>();
         var doc = Session.Doc;
-        Viewport.UnitScale = PerMm; // (before any zoom to fit: an empty part fits 100 mm, in its units)
         var result = Session.DisplayResult;
         var baseResult = Session.Result;
         ModelState state = result?.State ?? ModelState.Initial();
@@ -275,7 +274,7 @@ public partial class MainWindow : Window
         // hidden as sketches are (shown while nothing uses them, unless set in the tree), and those the feature or
         // sketch being edited refers to; any of them while hovered or selected
         var b = state.Bounds;
-        var half = b.IsEmpty ? 50 * PerMm : Math.Max(30 * PerMm, b.Diagonal * 0.55);
+        var half = b.IsEmpty ? 50 : Math.Max(30, b.Diagonal * 0.55);
         var used = UsedByActive();
         var editRefs = RefersTo(_edit?.Feature ?? _sketch?.Feature);
         var planes = new List<PlaneDisplay>();
@@ -474,7 +473,7 @@ public partial class MainWindow : Window
         var a = id.StartsWith("Axis") ? id[4..] : id;
         if (a is not ("X" or "Y" or "Z")) return null;
         var b = Session.Result?.State.Bounds ?? default;
-        var half = b.IsEmpty ? 50 * PerMm : Math.Max(30 * PerMm, b.Diagonal * 0.55);
+        var half = b.IsEmpty ? 50 : Math.Max(30, b.Diagonal * 0.55);
         return new SelItem { Kind = SelKind.Axis, Name = a, Point = Vec3.Zero, Normal = a == "X" ? Vec3.UnitX : a == "Y" ? Vec3.UnitY : Vec3.UnitZ, AxisHalfLength = half };
     }
 
@@ -649,11 +648,10 @@ public partial class MainWindow : Window
 
     public void Status(string text) => StatusText.Text = text;
 
-    /// <summary>Length unit label of the document ("mm" or "in").</summary>
-    string UnitLabel => Session.Doc.Units == UnitSystem.IPS ? "in" : "mm";
-
-    /// <summary>Model units per millimetre: the part's lengths are in its own units (inches in an IPS part), sizes set in millimetres are scaled by this.</summary>
-    double PerMm => Session.Doc.Units == UnitSystem.IPS ? 1 / 25.4 : 1;
+    /// <summary>
+    /// The units values are shown and typed in: the active assembly's or part's. Lengths are millimetres whatever they are.
+    /// </summary>
+    UnitSystem Units => Asm?.Model.Doc.Units ?? Session.Doc.Units;
 
     void ShowPage(PmPage? page)
     {

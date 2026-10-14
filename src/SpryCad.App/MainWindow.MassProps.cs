@@ -231,9 +231,13 @@ public partial class MainWindow
         mp.Finish();
 
         var ips = Session.Doc.Units == UnitSystem.IPS;
-        var u = UnitLabel;
+        var u = Session.Doc.Units.Symbol();
         var kgm3 = Session.Doc.Density ?? CadDocument.DefaultDensity;
-        var density = ips ? kgm3 * KgM3ToLbIn3 : kgm3 * 1e-6; // model units: lb/in³, or g/mm³
+        var density = ips ? kgm3 * KgM3ToLbIn3 : kgm3 * 1e-6; // lb/in³, or g/mm³
+        // the model is in millimetres: lengths shown in the part's units (k per mm), so volumes k³, inertias k⁵
+        var k = 1 / Session.Doc.Units.MmPer();
+        double k3 = k * k * k, k5 = k3 * k * k;
+        var inertia = density * k5;
         var massUnit = ips ? "lb" : "g";
         var iu = $"{massUnit}·{u}²";
         // every value with the same decimals; anything that rounds to zero is 0 (no -0, no 1E-15 noise)
@@ -264,38 +268,38 @@ public partial class MainWindow
         if (bodies.Count > 1) Line($"    Bodies: {bodies.Count}");
         Line();
         Line($"Density = {dShown} {(ips ? "lb/in³" : "kg/m³")}");
-        Line($"Mass = {F(mp.Volume * density)} {massUnit}");
-        Line($"Volume = {F(mp.Volume)} {u}³");
-        Line($"Surface area = {F(mp.SurfaceArea)} {u}²");
-        Line($"Bounding box = {F(bb.Size.X)} × {F(bb.Size.Y)} × {F(bb.Size.Z)} {u}");
+        Line($"Mass = {F(mp.Volume * k3 * density)} {massUnit}");
+        Line($"Volume = {F(mp.Volume * k3)} {u}³");
+        Line($"Surface area = {F(mp.SurfaceArea * k * k)} {u}²");
+        Line($"Bounding box = {F(bb.Size.X * k)} × {F(bb.Size.Y * k)} × {F(bb.Size.Z * k)} {u}");
 
         var c0 = mp.Center;
         var size = Math.Max(bb.Diagonal, 1e-9);
         Line();
         Line($"Center of mass: ({u})", true);
-        Line($"    X = {F(Clean(c0.X, size))}");
-        Line($"    Y = {F(Clean(c0.Y, size))}");
-        Line($"    Z = {F(Clean(c0.Z, size))}");
+        Line($"    X = {F(Clean(c0.X, size) * k)}");
+        Line($"    Y = {F(Clean(c0.Y, size) * k)}");
+        Line($"    Z = {F(Clean(c0.Z, size) * k)}");
 
         Line();
         Line($"Principal axes of inertia and principal moments of inertia: ({iu})", true);
         Line("Taken at the center of mass.");
         string[] pn = { "Ix", "Iy", "Iz" }, pm = { "Px", "Py", "Pz" };
-        var biggest = Math.Max(mp.Principal.Max(Math.Abs), 1e-300) * density;
+        var biggest = Math.Max(mp.Principal.Max(Math.Abs), 1e-300) * inertia;
         string A(double v) => (v >= 0 ? " " : "") + F(Clean(v, 1)); // signs in their own place, so the axes line up
         Columns(Enumerable.Range(0, 3).Select(i =>
         {
             var a = mp.Axes[i];
-            return new[] { $"{pn[i]} = ({A(a.X)}, {A(a.Y)}, {A(a.Z)})", $"{pm[i]} = {F(Clean(mp.Principal[i] * density, biggest))}" };
+            return new[] { $"{pn[i]} = ({A(a.X)}, {A(a.Y)}, {A(a.Z)})", $"{pm[i]} = {F(Clean(mp.Principal[i] * inertia, biggest))}" };
         }));
 
         // as SolidWorks shows them: moments on the diagonal, products of inertia (∫xy dm) off it
         void Tensor(double[,] t, string p)
         {
-            var scale = Math.Max(Math.Max(Math.Abs(t[0, 0]), Math.Abs(t[1, 1])), Math.Abs(t[2, 2])) * density;
+            var scale = Math.Max(Math.Max(Math.Abs(t[0, 0]), Math.Abs(t[1, 1])), Math.Abs(t[2, 2])) * inertia;
             string[] ax = { "x", "y", "z" };
             Columns(Enumerable.Range(0, 3).Select(i => Enumerable.Range(0, 3)
-                .Select(j => $"{p}{ax[i]}{ax[j]} = {F(Clean((i == j ? t[i, j] : -t[i, j]) * density, scale))}").ToArray()));
+                .Select(j => $"{p}{ax[i]}{ax[j]} = {F(Clean((i == j ? t[i, j] : -t[i, j]) * inertia, scale))}").ToArray()));
         }
         Line();
         Line($"Moments of inertia: ({iu})", true);

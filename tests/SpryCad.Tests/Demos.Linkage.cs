@@ -131,8 +131,8 @@ static partial class Demos
         var gear = Gear();
         gear.Color = new[] { 0.80, 0.62, 0.30 };
         var gr = new Regenerator().Rebuild(gear);
-        double z = gr.EquationValues["z"], gb = gr.EquationValues["b"], gBore = gr.EquationValues["Bore"];
-        double centre = 2 * gr.EquationValues["r"] + 0.1;
+        double z = gr.EquationValues["z"].Value, gb = gr.EquationValues["b"].Value, gBore = gr.EquationValues["Bore"].Value;
+        double centre = 2 * gr.EquationValues["r"].Value + 0.1;
         // the gears above the linkage (clear of the coupler and the pins' heads), their shafts to the gears' tops
         const double gearLift = 13;
         double gearZ = LkBT + gearLift;

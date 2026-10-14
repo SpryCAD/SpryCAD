@@ -1,5 +1,6 @@
 using System.Globalization;
 using SpryCad.Core;
+using SpryCad.Core.Model;
 using SpryCad.Core.Sketching;
 using SpryCad.Kernel;
 
@@ -55,7 +56,7 @@ public sealed partial class SketchEditor
         if (!string.IsNullOrEmpty(c.Expr) && !double.TryParse(c.Expr, NumberStyles.Float, CultureInfo.InvariantCulture, out _)) return;
         c.Doubled = doubled;
         c.Value = SketchSolver.Measure(Sk, c);
-        c.Expr = Expr.Format(c.Value);
+        c.Expr = Units.Entry(c.Value, c.ValueKind);
     }
 
     /// <summary>The two ends a diameter to a centerline is drawn between: the geometry, and its mirror across the axis.</summary>

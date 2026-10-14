@@ -117,7 +117,7 @@ public static class PlaneSolver
     }
 
     /// <summary>The plane the references define, or why they do not (a <see cref="FeatureException"/>).</summary>
-    public static Frame Solve(IReadOnlyList<PlaneReference> refs, ModelState st, Func<string, string, double> num)
+    public static Frame Solve(IReadOnlyList<PlaneReference> refs, ModelState st, Func<string, string, double> length, Func<string, string, double> angle)
     {
         refs = refs.Where(r => KindOf(r) != RefKind.None).ToList();
         if (refs.Count == 0) throw new FeatureException("Select the references of the plane: a face or plane, an edge or axis, a curve, or a point.");
@@ -171,7 +171,7 @@ public static class PlaneSolver
         {
             if (lines.FirstOrDefault(l => l.r.Relation == PlaneRelation.Coincident) is not { r: not null } axis)
                 throw new FeatureException("At an angle to a plane: also pick the line (an edge, sketch line or axis) it turns about.");
-            var deg = num(ang.r.Value, "Angle") * (ang.r.Flip ? -1 : 1);
+            var deg = angle(ang.r.Value, "Angle") * (ang.r.Flip ? -1 : 1);
             var rot = Transform.Rotation(axis.o, axis.d, deg * Math.PI / 180);
             var f = ang.f;
             // the plane through the line first: the base plane moved to contain it
@@ -203,7 +203,7 @@ public static class PlaneSolver
             {
                 basis = par.f; n = par.f.Normal;
                 if (par.r.Relation == PlaneRelation.Coincident) through = par.f.Origin;
-                if (par.r.Relation == PlaneRelation.Offset) through = par.f.Origin + par.f.Normal * num(par.r.Value, "Offset") * (par.r.Flip ? -1 : 1);
+                if (par.r.Relation == PlaneRelation.Offset) through = par.f.Origin + par.f.Normal * length(par.r.Value, "Offset") * (par.r.Flip ? -1 : 1);
             }
             else if (lines.FirstOrDefault(l => l.r.Relation == PlaneRelation.Perpendicular) is { r: not null } perp) n = perp.d;
             else if (normalTo is { } nt) { n = nt.t; through = nt.p; }

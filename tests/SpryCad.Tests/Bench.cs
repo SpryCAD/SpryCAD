@@ -491,7 +491,7 @@ static class Bench
     {
         var doc = CadDocument.Load(file);
         var r = new Regenerator().Rebuild(doc);
-        Func<string, double?> lookup = n => r.EquationValues.TryGetValue(n, out var v) ? v : null;
+        Func<string, SpryCad.Core.Quantity?> lookup = n => r.EquationValues.TryGetValue(n, out var v) ? v : null;
         for (int i = 0; i < doc.Features.Count; i++)
         {
             if (doc.Features[i] is not (CircularPatternFeature or LinearPatternFeature)) continue;

@@ -63,9 +63,9 @@ public partial class MainWindow
         var prm = page.Section("Parameters");
         var distance = ed.OffsetDistance;
         var reverse = false;
-        page.Number(prm, "Distance", () => Expr.Format(distance), v =>
+        page.Number(prm, "Distance", () => Units.Entry(distance), v =>
         {
-            if (Expr.TryEval(v, Session.Lookup, out var d, out _) && d > 0) distance = d;
+            if (UnitFormat.TryLength(v, Session.Lookup, out var d, out _) && d > 0) distance = d;
         }, "offset");
         page.Check(prm, "Reverse direction", () => reverse, v => reverse = v);
         page.Info(prm, "The copies keep the distance as the originals change (its dimension can be edited later).");

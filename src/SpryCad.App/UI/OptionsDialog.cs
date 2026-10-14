@@ -338,7 +338,8 @@ public static class OptionsDialog
         var doc = c.Part.Doc;
         f.Section("Unit system");
         var units = f.Row("Units", Combo(new[] { "MMGS (millimeter, gram, second)", "IPS (inch, pound, second)" }, doc.Units == UnitSystem.IPS ? 1 : 0),
-            "In IPS, values are inches; STEP and STL exports are converted to millimeters.");
+            "What values are shown in, and what a value typed without a unit is in. Changing it changes nothing in the model: "
+            + "values keep the units they were typed in (10mm stays 10mm in an IPS part), and any unit can be typed in either.");
         return new Commit(() => null, () =>
         {
             var u = units.SelectedIndex == 1 ? UnitSystem.IPS : UnitSystem.MMGS;
@@ -382,7 +383,7 @@ public static class OptionsDialog
         method.SelectionChanged += (_, _) => Sync();
         Sync();
         return new Commit(
-            () => method.SelectedIndex != 0 || (Expr.TryEval((k.Text ?? "").Trim(), s.Lookup, out var v, out _) && v >= 0 && v <= 1) ? null
+            () => method.SelectedIndex != 0 || (Expr.TryEvaluate((k.Text ?? "").Trim(), s.Lookup, out var v, out _) && v.IsNumber && v.Value >= 0 && v.Value <= 1) ? null
                 : "K-factor: a number from 0 to 1, or an expression of the part's variables.",
             () =>
             {

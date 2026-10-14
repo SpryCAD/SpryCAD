@@ -86,7 +86,7 @@ static class CoreTests
                 var doc = new CadDocument();
                 for (int i = 0; i < 6; i++) doc.Equations.Add(new Equation { Name = $"c{i}", Expr = i == 5 ? "7" : $"c{i + 1} + 1" });
                 var (v, e) = Regenerator.EvaluateEquations(doc);
-                t.True(e.Count == 0 && v["c0"] == 12, $"reverse chain: c0 = {v.GetValueOrDefault("c0")}, errors {string.Join("; ", e)}");
+                t.True(e.Count == 0 && v["c0"].Value == 12, $"reverse chain: c0 = {v.GetValueOrDefault("c0")}, errors {string.Join("; ", e)}");
             }
             var rnd = new Random(4);
             var templates = new[] { "{0} + 1", "{0} * {1}", "max({0}, {1}) / 2", "sqrt({0} * {0} + 4)", "{0} - unknown1", "7", "{1} + 0.5", "-{0}" };
@@ -106,7 +106,7 @@ static class CoreTests
                 doc.Equations.AddRange(eqs);
                 var (va, ea) = Regenerator.EvaluateEquations(doc);
                 var (vb, eb) = Passes(eqs);
-                t.True(va.Count == vb.Count && va.All(kv => vb.TryGetValue(kv.Key, out var w) && BitConverter.DoubleToInt64Bits(w) == BitConverter.DoubleToInt64Bits(kv.Value)), $"trial {trial}: values");
+                t.True(va.Count == vb.Count && va.All(kv => vb.TryGetValue(kv.Key, out var w) && BitConverter.DoubleToInt64Bits(w) == BitConverter.DoubleToInt64Bits(kv.Value.Value)), $"trial {trial}: values");
                 t.True(ea.Count == eb.Count && ea.All(kv => eb.TryGetValue(kv.Key, out var w) && w == kv.Value), $"trial {trial}: errors {string.Join("; ", ea)} vs {string.Join("; ", eb)}");
             }
         });

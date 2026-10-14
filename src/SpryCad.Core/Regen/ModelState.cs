@@ -135,7 +135,7 @@ public sealed class RegenResult
     public required List<ModelState> States { get; init; }
     public double Milliseconds { get; init; }
     public int Rebuilt { get; init; }
-    public Dictionary<string, double> EquationValues { get; init; } = new();
+    public Dictionary<string, Quantity> EquationValues { get; init; } = new();
     public Dictionary<string, string> EquationErrors { get; init; } = new();
 }
 
