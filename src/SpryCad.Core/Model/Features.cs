@@ -291,6 +291,11 @@ public sealed class ChamferFeature : Feature
     public bool TangentPropagation { get; set; } = true;
     /// <summary>A chamfer running into neighbouring geometry is trimmed by it instead of failing.</summary>
     public bool Overflow { get; set; } = true;
+    /// <summary>
+    /// Where three of the chamfers meet at a corner, the point they leave cut off flat: a triangle through the
+    /// corners of the faces between them (where each pair of chamfers parts).
+    /// </summary>
+    public bool FlatCorners { get; set; }
 }
 
 public enum HoleType { Simple, Counterbore, Countersink }

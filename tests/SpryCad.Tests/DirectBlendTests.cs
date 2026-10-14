@@ -9,6 +9,41 @@ static class DirectBlendTests
 {
     public static void Run(TestRunner t)
     {
+        foreach (var flat in new[] { false, true })
+            t.Test($"Chamfer: three edges meeting at a block's corner{(flat ? ", its corner cut flat" : ", a point")}", () =>
+            {
+                var dir = AppContext.BaseDirectory;
+                while (dir != null && !Directory.Exists(Path.Combine(dir, "samples"))) dir = Path.GetDirectoryName(dir);
+                var doc = CadDocument.Load(Path.Combine(dir!, "tests", "SpryCad.Tests", "models", "parts", "face-fillet.sprt"));
+                var fi = doc.Features.OfType<FilletFeature>().Single();
+                int at = doc.Features.IndexOf(fi);
+                var before = new Regenerator().Rebuild(doc, at).State.Bodies.Single().Solid.Native!;
+                var ch = new ChamferFeature { Name = "Corner", Distance = "2mm", FlatCorners = flat };
+                // (the block's corner at the origin: its three edges there)
+                foreach (var p in new[] { new Vec3(25, 0, 0), new Vec3(0, 12, 0), new Vec3(0, 0, -12) })
+                {
+                    var e = before.Edges.Where(x => x.Uses.Count == 2).MinBy(x => Enumerable.Range(0, 9).Min(i => Vec3.Distance(x.At(i / 8.0), p)))!;
+                    ch.Edges.Add(new EdgeRef { A = e.Uses[0].Face.Tag.Name, B = e.Uses[1].Face.Tag.Name, Hint = e.Mid });
+                }
+                doc.Features[at] = ch;
+                t.True(CadDocument.JsonOf(ch).Contains("\"flatCorners\":" + (flat ? "true" : "false")), "flat corners saved");
+                var r = new Regenerator().Rebuild(doc);
+                t.True(r.Status[ch.Id].Ok, r.Status[ch.Id].Error ?? "");
+                t.True(r.Status[ch.Id].Warnings.Count == 0, string.Join("; ", r.Status[ch.Id].Warnings));
+                var b = r.State.Bodies.Single().Solid;
+                t.True(b.Native?.Validate() == null, $"invalid: {b.Native?.Validate()}");
+                t.Eq(b.Topology.OpenHalfEdges, 0);
+                var corner = b.Native!.Faces.Where(f => f.Tag.Name.StartsWith(ch.Id + ".V", StringComparison.Ordinal)).ToList();
+                t.Eq(corner.Count, flat ? 1 : 0);
+                // (a triangle across the corner, its corners where the chamfers part on the block's faces, 2 mm along
+                // each edge from the corner: x + y - z = 4 here)
+                if (flat)
+                {
+                    t.Eq(corner[0].Coedges.Count(), 3);
+                    foreach (var c in corner[0].Coedges) t.Near(c.Start.P.X + c.Start.P.Y - c.Start.P.Z, 4, 1e-6);
+                }
+            });
+
         // (a block's angled face blended all round, the edges between the faces beside it left sharp: both blends at a
         // corner convex, round a convex corner edge leaning to the angled face. Each ended on a mitre holding that edge,
         // which is not where they cross: a wing of each, its square end, standing beside the other)

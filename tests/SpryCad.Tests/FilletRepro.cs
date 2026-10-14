@@ -71,13 +71,13 @@ static class FilletRepro
                 doc.Features.OfType<MirrorFeature>().First(m => m.Name == mname).Seeds.Add(fi.Id);
             return doc;
         }
-        // (chamfer: the part's last fillet a chamfer of the size given on the same edges; or, with CHAMFER_AT
+        // (chamfer: the part's last fillet a chamfer of the size given on the same edges (FLAT_CORNERS: its corners cut flat); or, with CHAMFER_AT
         // (x,y,z;x,y,z…), the fillet dropped and the edges nearest those points chamfered instead)
         if (kase == "chamfer")
         {
             var fi = doc.Features.OfType<FilletFeature>().Last();
             int at = doc.Features.IndexOf(fi);
-            var ch = new ChamferFeature { Name = "Chamfer", Distance = radius ?? "2mm", Edges = fi.Edges, TangentPropagation = fi.TangentPropagation };
+            var ch = new ChamferFeature { Name = "Chamfer", Distance = radius ?? "2mm", Edges = fi.Edges, TangentPropagation = fi.TangentPropagation, FlatCorners = Environment.GetEnvironmentVariable("FLAT_CORNERS") != null };
             if (Environment.GetEnvironmentVariable("CHAMFER_AT") is { } pts)
             {
                 var body = new Regenerator().Rebuild(doc, at).State.Bodies.Single().Solid.Native!;

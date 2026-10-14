@@ -432,7 +432,13 @@ public sealed class Regenerator
                     DoBlend(fi.Edges, PosLen(fi.Radius, "Radius"), true, fi.TangentPropagation, fi.Overflow,
                         scope: fi.WholeBody || fi.Features.Count > 0 ? (fi.Features.Count > 0 ? fi.Features : null, fi.ScopeKind) : null);
                     break;
-                case ChamferFeature ch: { var cs = ChamferSizeOf(ch); DoBlend(ch.Edges, cs.D1, false, ch.TangentPropagation, ch.Overflow, cs); break; }
+                case ChamferFeature ch:
+                    {
+                        var cs = ChamferSizeOf(ch);
+                        DoBlend(ch.Edges, cs.D1, false, ch.TangentPropagation, ch.Overflow, cs);
+                        if (ch.FlatCorners) FlatCorners();
+                        break;
+                    }
                 case HoleFeature h: DoHole(h); break;
                 case ShellFeature sh: DoShell(sh); break;
                 case DraftFeature dr: DoDraft(dr); break;
@@ -1097,6 +1103,56 @@ public sealed class Regenerator
                 default:
                     return ChamferSize.Equal(PosLen(ch.Distance, "Distance"));
             }
+        }
+
+        /// <summary>
+        /// A chamfer's corners cut off flat: where three of its faces meet at a point and nothing else (three chamfered
+        /// edges meeting at a corner, the point they leave), the point cut off on the plane through the far ends of
+        /// the three edges between those faces (the corners of the faces between the chamfers, where each pair of
+        /// them parts): a triangle whose sides are the three chamfers' ends.
+        /// </summary>
+        void FlatCorners()
+        {
+            var bodies = new List<Body>();
+            int corners = 0;
+            foreach (var b in State.Bodies)
+            {
+                var nb = b.Solid.Native;
+                if (nb == null) { bodies.Add(b); continue; }
+                nb.Link();
+                var scale = Math.Max(1, nb.Bounds.Diagonal);
+                bool Mine(Kernel.Native.NFace x) => x.Tag.Name.StartsWith(f.Id + ".", StringComparison.Ordinal);
+                var cutters = new List<Solid>();
+                var tips = nb.Faces.Where(Mine).SelectMany(x => x.Coedges).Select(c => c.Start).Distinct(ReferenceEqualityComparer.Instance).Cast<Kernel.Native.NVertex>().ToList();
+                foreach (var tip in tips)
+                {
+                    var faces = nb.Faces.Where(x => x.Coedges.Any(c => ReferenceEquals(c.Start, tip))).ToList();
+                    if (faces.Count != 3 || !faces.All(Mine) || faces.Any(x => x.Surface.Kind != SurfaceKind.Plane)) continue;
+                    var edges = faces.SelectMany(x => x.Coedges).Select(c => c.Edge).Where(e => ReferenceEquals(e.V0, tip) || ReferenceEquals(e.V1, tip))
+                        .Distinct(ReferenceEqualityComparer.Instance).Cast<Kernel.Native.NEdge>().ToList();
+                    if (edges.Count != 3 || edges.Any(e => e.Curve is not Kernel.Native.NLine)) continue;
+                    var ps = edges.Select(e => (ReferenceEquals(e.V0, tip) ? e.V1 : e.V0).P).ToArray();
+                    var n = Vec3.Cross(ps[1] - ps[0], ps[2] - ps[0]);
+                    if (n.Length < 1e-12 * scale * scale) continue;
+                    n = n.Normalized;
+                    var h = Vec3.Dot(tip.P - ps[0], n);
+                    if (Math.Abs(h) < 1e-9 * scale) continue;
+                    if (h < 0) { n = -n; h = -h; }
+                    // (a slab on the plane, over the point: what of the body lies on that side there is the point alone,
+                    // between the three chamfers)
+                    var c0 = (ps[0] + ps[1] + ps[2]) / 3;
+                    var x = (ps[0] - c0).Normalized; var y = Vec3.Cross(n, x);
+                    var reach = 1.5 * ps.Append(tip.P - n * h).Max(q => Vec3.Distance(q, c0));
+                    var sq = ProfileLoop.Polygon(new[] { new Vec2(-reach, -reach), new Vec2(reach, -reach), new Vec2(reach, reach), new Vec2(-reach, reach) }, "corner");
+                    cutters.Add(Builders.Extrude(new[] { new ProfileRegion(sq) }, new Frame(c0, x, y, n), 0, 1.5 * h, $"{f.Id}.V{corners + cutters.Count}"));
+                }
+                var s = b.Solid;
+                foreach (var c in cutters) s = Csg.Subtract(s, c);
+                corners += cutters.Count;
+                bodies.Add(cutters.Count == 0 ? b : new Body { Id = b.Id, Solid = s });
+            }
+            if (corners == 0) status.Warnings.Add("No corner where three of the chamfers meet: none cut flat.");
+            State = State.With(bodies);
         }
 
         void DoBlend(List<EdgeRef> refs, double size, bool fillet, bool propagate, bool overflow = true, ChamferSize? chamfer = null,

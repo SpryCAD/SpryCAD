@@ -665,7 +665,11 @@ public partial class MainWindow
         else page.Check(p, "Tangent propagation", () => ((ChamferFeature)f).TangentPropagation, v => ((ChamferFeature)f).TangentPropagation = v);
         // SolidWorks "overflow": where the blend runs into neighbouring geometry it is trimmed by it (keep edge)
         if (fillet) page.Check(p, "Overflow: trim at neighbouring faces", () => ((FilletFeature)f).Overflow, v => ((FilletFeature)f).Overflow = v);
-        else page.Check(p, "Overflow: trim at neighbouring faces", () => ((ChamferFeature)f).Overflow, v => ((ChamferFeature)f).Overflow = v);
+        else
+        {
+            page.Check(p, "Overflow: trim at neighbouring faces", () => ((ChamferFeature)f).Overflow, v => ((ChamferFeature)f).Overflow = v);
+            page.Check(p, "Flat corners where three chamfers meet", () => ((ChamferFeature)f).FlatCorners, v => ((ChamferFeature)f).FlatCorners = v);
+        }
         var scoped = f is FilletFeature { WholeBody: true } or FilletFeature { Features.Count: > 0 };
         BeginEdit(f, isNew, page, overlay: true, hint: edges.Count == 0 && !scoped ? "Select edges in the graphics area, or set a scope." : null);
     }
