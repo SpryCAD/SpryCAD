@@ -310,7 +310,8 @@ public partial class MainWindow : Window
         if (_edit?.Feature is AxisFeature af && Session.PreviewActive && Session.PreviewResult?.State.Axes.TryGetValue(af.Id, out var afx) == true)
             axes.Add(new AxisDisplay(af.Name, af.Id, afx.A, afx.B));
         Viewport.Axes = axes;
-        Viewport.ShowPlanes = _showPlanes || editingPlane || state.Bodies.Count == 0 && _sketch == null;
+        // (editing a plane shows only it and its references, not every plane)
+        Viewport.ShowPlanes = _showPlanes || state.Bodies.Count == 0 && _sketch == null && !editingPlane;
 
         // visible sketches: as shown/hidden in the tree, else while no active feature uses them; also the selected
         // ones, and those the feature being edited uses (to be picked again, e.g. a sweep's path or a helical
