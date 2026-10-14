@@ -680,16 +680,37 @@ public static class DirectBlend
                 if (Math.Abs(den) < 1e-14) continue;
                 var ta = Cr(b0 - a0, s) / den; var tb = Cr(b0 - a0, r) / den;
                 if (ta < 0 || ta > 1 || tb < 0 || tb > 1) continue;
-                // on both curves: projected onto each in turn
+                // on both curves: along one, bisected on which side of the other it is (projected onto the exact one of
+                // the two where one is: a contact curve's projection is its spine's, only near its own); else projected
+                // onto each in turn
                 var p = pa[i] + (pa[i + 1] - pa[i]) * ta;
                 Vec3 q = p;
-                for (int it = 0; it < 30; it++)
+                static bool Exact(NCurve c) => c is NLine or NCircle or NEllipse;
+                var (m, o) = Exact(b.Curve) || !Exact(a.Curve) ? (a, b) : (b, a);
+                var (m0, m1) = ReferenceEquals(m, a) ? (pa[i], pa[i + 1]) : (pb[j], pb[j + 1]);
+                double Side(double t)
                 {
-                    q = b.Curve.Eval(On(b, p));
-                    var p2 = a.Curve.Eval(On(a, q));
-                    var moved = Vec3.Distance(p2, p); p = p2;
-                    if (moved < 1e-3 * tol) break;
+                    var x = m.Curve.Eval(t); var to = On(o, x);
+                    return Vec3.Dot(Vec3.Cross(o.Curve.Deriv(to), x - o.Curve.Eval(to)), n);
                 }
+                double lo = On(m, m0), hi = On(m, m1), flo = Side(lo), fhi = Side(hi);
+                if (Math.Sign(flo) != Math.Sign(fhi) && flo != 0 && fhi != 0)
+                {
+                    for (int it = 0; it < 80; it++)
+                    {
+                        var mid = 0.5 * (lo + hi); var fm = Side(mid);
+                        if (Math.Sign(fm) == Math.Sign(flo)) { lo = mid; flo = fm; } else hi = mid;
+                    }
+                    p = m.Curve.Eval(0.5 * (lo + hi)); q = o.Curve.Eval(On(o, p));
+                }
+                else
+                    for (int it = 0; it < 30; it++)
+                    {
+                        q = b.Curve.Eval(On(b, p));
+                        var p2 = a.Curve.Eval(On(a, q));
+                        var moved = Vec3.Distance(p2, p); p = p2;
+                        if (moved < 1e-3 * tol) break;
+                    }
                 if (Vec3.Distance(p, q) > 10 * tol) continue;
                 p = 0.5 * (p + q);
                 if (!Inside(a, p, tol, out var sa) || !Inside(b, p, tol, out var sb)) continue;
