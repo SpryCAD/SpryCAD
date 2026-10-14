@@ -267,7 +267,7 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         DrawPlanes(_dyn, hl);
         DrawRefAxes(_dyn, hl);
         DrawSketches(_dyn, hl);
-        if (ShowOrigin) DrawOrigin(_dyn);
+        if (ShowOrigin) DrawOrigin(_dyn, hl);
         long tm0 = RenderProfile ? Stopwatch.GetTimestamp() : 0;
         Mode?.Draw(this, _dyn);
         if (RenderProfile) { var ms = Stopwatch.GetElapsedTime(tm0).TotalMilliseconds; _rnModeMs += ms; _rnModeMax = Math.Max(_rnModeMax, ms); }
@@ -1093,13 +1093,23 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         g.Line(c - up * (r * 0.3), c + up * (r * 0.3), color, top: true);
     }
 
-    void DrawOrigin(DynamicGeometry g)
+    /// <summary>The origin: three short strokes along the axes; hovered or selected, in the highlight colour over the model, a small square at it.</summary>
+    void DrawOrigin(DynamicGeometry g, Highlights hl)
     {
         var s = Camera.PixelSize * 28;
-        var c = new Rgba(0.2f, 0.25f, 0.65f, 0.9f);
-        g.Line(Vec3.Zero, new Vec3(s, 0, 0), c);
-        g.Line(Vec3.Zero, new Vec3(0, s, 0), c);
-        g.Line(Vec3.Zero, new Vec3(0, 0, s), c);
+        var hc = hl.Of(new SelItem { Kind = SelKind.Origin }.Key);
+        var c = hc ?? new Rgba(0.2f, 0.25f, 0.65f, 0.9f);
+        var top = hc != null;
+        g.Line(Vec3.Zero, new Vec3(s, 0, 0), c, top);
+        g.Line(Vec3.Zero, new Vec3(0, s, 0), c, top);
+        g.Line(Vec3.Zero, new Vec3(0, 0, s), c, top);
+        if (hc == null) return;
+        // the square, in the screen plane
+        var r = Camera.PixelSize * 4;
+        Vec3 right = Camera.V(Camera.Right), up = Camera.V(Camera.Up);
+        Vec3 P(double x, double y) => right * (x * r) + up * (y * r);
+        g.Line(P(-1, -1), P(1, -1), c, true); g.Line(P(1, -1), P(1, 1), c, true);
+        g.Line(P(1, 1), P(-1, 1), c, true); g.Line(P(-1, 1), P(-1, -1), c, true);
     }
 
     void DrawTriad(int w, int h)

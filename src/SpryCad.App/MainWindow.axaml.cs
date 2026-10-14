@@ -441,6 +441,8 @@ public partial class MainWindow : Window
                 break;
             case "Origin":
             case "OriginPoint":
+                Selection.Set(new SelItem { Kind = SelKind.Origin });
+                break;
             case "__part":
                 Selection.Clear();
                 break;
@@ -474,6 +476,7 @@ public partial class MainWindow : Window
         {
             "Front" or "Top" or "Right" => new SelItem { Kind = SelKind.Plane, Name = id },
             "AxisX" or "AxisY" or "AxisZ" => WorldAxisItem(id),
+            "Origin" or "OriginPoint" => new SelItem { Kind = SelKind.Origin },
             _ => Session.Doc.Find(id) switch
             {
                 SketchFeature => new SelItem { Kind = SelKind.Sketch, FeatureId = id },
