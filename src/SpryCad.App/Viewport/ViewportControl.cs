@@ -1489,9 +1489,14 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         return new PointerInfo(p.X, p.Y, e.KeyModifiers, clicks);
     }
 
+    /// <summary>Where and when the last left press in the graphics area was (the context palette shows by it).</summary>
+    public Point LastPress { get; private set; }
+    public DateTime LastPressAt { get; private set; }
+
     protected override void OnPointerPressed(PointerPressedEventArgs e)
     {
         base.OnPointerPressed(e);
+        if (e.GetCurrentPoint(this).Properties.IsLeftButtonPressed) { LastPress = e.GetPosition(this); LastPressAt = DateTime.UtcNow; }
         Focus();
         var pt = e.GetCurrentPoint(this);
         var props = pt.Properties;

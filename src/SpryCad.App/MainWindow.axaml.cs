@@ -59,6 +59,7 @@ public partial class MainWindow : Window
         _tab = AddTab(Session);
         UpdateTabHeader(_tab);
         Selection.Changed += OnSelectionChanged;
+        Viewport.PointerMoved += (_, e) => FadePalette(e.GetPosition(Viewport));
 
         Tree.SelectedChanged += OnTreeSelected;
         Tree.EditRequested += id => EditFeature(id);
@@ -391,6 +392,7 @@ public partial class MainWindow : Window
 
     void OnSelectionChanged()
     {
+        UpdatePalette();
         var s = Selection.First;
         if (_sketch == null)
         {
@@ -582,6 +584,7 @@ public partial class MainWindow : Window
                 if (_sketch == null)
                 {
                     Selection.Clear();
+                    HidePalette();
                     if (Asm is { Selected: not null } or { SelectedMate: not null }) SelectMate(null);
                     if (_asmOriginSel != null) { _asmOriginSel = null; RefreshAssemblyScene(); }
                     if (_normalToPick) { _normalToPick = false; RefreshAssemblyScene(); Status("Normal To cancelled."); }
@@ -669,6 +672,7 @@ public partial class MainWindow : Window
 
     void ShowPage(PmPage? page)
     {
+        if (page != null) HidePalette(); // (a command started: the palette has done its part)
         // the Measure tool's drawing belongs to its page
         if (_measurePage != null && page != _measurePage) EndMeasure();
         // the Section View page replaced by another: the section kept as it is, its arrow gone

@@ -22,8 +22,8 @@
     <!-- CommandManager -->
     <Border DockPanel.Dock="Top" Background="{DynamicResource Spry.SurfaceAlt}" BorderBrush="{DynamicResource Spry.Border}" BorderThickness="0,0,0,1">
       <DockPanel>
-        <!-- the command sets and, beside them, the documents: one row (MainWindow.Tabs.cs) -->
-        <DockPanel DockPanel.Dock="Bottom" Background="{DynamicResource Spry.Strip}">
+        <!-- the command sets and, beside them, the documents: one row above the commands (MainWindow.Tabs.cs) -->
+        <DockPanel DockPanel.Dock="Top" Background="{DynamicResource Spry.Strip}">
           <StackPanel x:Name="CommandTabs" DockPanel.Dock="Left" Orientation="Horizontal" />
           <Border DockPanel.Dock="Left" Width="1" Background="{DynamicResource Spry.Border}" Margin="8,5" />
           <Button x:Name="PartsButton" DockPanel.Dock="Right" Margin="2,2,4,2" Padding="8,1" MinHeight="0" FontSize="{x:Static ui:TypeScale.Body}"

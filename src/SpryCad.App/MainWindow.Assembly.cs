@@ -317,6 +317,7 @@ public partial class MainWindow : IAssemblyHost
         // the part's Insert menu (sketches, features) has nothing to act on in an assembly
         foreach (var mi in MainMenu.Items.OfType<MenuItem>().Where(m => m.Header as string == "_Insert")) mi.IsEnabled = !asm;
         foreach (var mi in _partOnlyMenu) mi.IsEnabled = !asm;
+        HidePalette();
         EndSection(); // (another model shown)
         if (asm && _activeTab != "Assembly") ShowTab("Assembly");
         else if (!asm && _activeTab == "Assembly") ShowTab("Features");
@@ -809,6 +810,8 @@ public partial class MainWindow : IAssemblyHost
         a.SelectedMate = null;
         a.Selected = id;
         RefreshAssemblyScene();
+        // clicked in the graphics area: what can be done with it, by the cursor
+        if (!exact && id != null) ComponentPalette(id); else HidePalette();
         _asmTree.Select(id);
         if (a.Model.Find(id) is { } o)
         {
