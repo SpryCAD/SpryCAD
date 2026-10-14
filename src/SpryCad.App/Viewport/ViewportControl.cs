@@ -273,6 +273,7 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         _dyn.Clear();
         DrawPlanes(_dyn, hl);
         DrawRefAxes(_dyn, hl);
+        DrawSectionArrow(_dyn);
         DrawSketches(_dyn, hl);
         if (ShowOrigin) DrawOrigin(_dyn, hl);
         long tm0 = RenderProfile ? Stopwatch.GetTimestamp() : 0;
@@ -707,6 +708,53 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         }
         return best is { } r ? (r.at, r.m) : null;
     }
+
+    // ---- the section's drag arrow (while its page is open) ----
+
+    /// <summary>Whether the section plane shows its arrow: dragged along the plane's normal, the cut moves with it.</summary>
+    public bool SectionArrow { get; set; }
+    /// <summary>The arrow dragged: how far along the section's normal since it was pressed (live, as it moves).</summary>
+    public Action<double>? SectionDragged { get; set; }
+    /// <summary>The arrow let go.</summary>
+    public Action? SectionDragEnded { get; set; }
+    (Vec3 at, Vec3 dir, double s0)? _sectionDrag; // the arrow's line where it was pressed, and the press along it
+
+    /// <summary>The arrow: from where the section plane is over the model's middle, along its normal (the side cut away), 60 px long.</summary>
+    (Vec3 at, Vec3 dir, double len)? SectionArrowGeom()
+    {
+        if (!SectionArrow || Section is not { } s) return null;
+        var b = SceneBounds();
+        var c = b.IsEmpty ? Vec3.Zero : b.Center;
+        return (c - s.Normal * s.Distance(c), s.Normal, Camera.PixelSize * 60);
+    }
+
+    void DrawSectionArrow(DynamicGeometry g)
+    {
+        if (SectionArrowGeom() is not { } a) return;
+        var amber = new Rgba(0.93f, 0.6f, 0.13f);
+        var tip = a.at + a.dir * a.len;
+        var side = Vec3.Cross(Camera.V(Camera.Back), a.dir);
+        if (side.Length < 1e-9) side = Vec3.Cross(Camera.V(Camera.Up), a.dir);
+        side = side.Normalized * (Camera.PixelSize * 6);
+        var neck = a.at + a.dir * (a.len * 0.7);
+        // a shaft three lines wide, and the head filled
+        foreach (var k in new[] { -0.25, 0, 0.25 }) g.Line(a.at + side * k, neck + side * k, amber, top: true);
+        g.Quad(neck - side, neck + side, tip, tip, amber, top: true);
+        g.Line(a.at - side * 0.8, a.at + side * 0.8, amber, top: true);
+    }
+
+    /// <summary>Where along a line (point, unit direction) the cursor's ray passes nearest; null when they run the same way.</summary>
+    double? AlongLine(Vec3 at, Vec3 dir, double x, double y)
+    {
+        var (ro, rd) = Camera.Ray(x, y);
+        var w0 = ro - at;
+        double b = Vec3.Dot(rd, dir), dd = Vec3.Dot(dir, w0), e = Vec3.Dot(rd, w0), denom = 1 - b * b;
+        return Math.Abs(denom) < 1e-6 ? null : (dd - b * e) / denom;
+    }
+
+    /// <summary>Whether the cursor is on the section's arrow (within a few pixels of it).</summary>
+    bool OnSectionArrow(double x, double y) =>
+        SectionArrowGeom() is { } a && ScreenDistance(a.at, a.at + a.dir * a.len, x, y).dist <= 8;
 
     /// <summary>The tint of an origin plane: the triad colour of the axis square to it (Front: Z, Top: Y, Right: X); null for any other.</summary>
     public static Rgba? OriginPlaneTint(string name) => name switch
@@ -1395,6 +1443,9 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
                 e.Pointer.Capture(this);
                 return;
             }
+            // the section's arrow: dragged along its normal, the cut with it
+            if (OnSectionArrow(pt.Position.X, pt.Position.Y) && SectionArrowGeom() is { } sa && AlongLine(sa.at, sa.dir, pt.Position.X, pt.Position.Y) is { } s0)
+            { _sectionDrag = (sa.at, sa.dir, s0); e.Pointer.Capture(this); e.Handled = true; return; }
             // a size handle of the plane being made: dragged, not a pick
             if (HandleAt(pt.Position.X, pt.Position.Y) is var h and >= 0) { _handle = h; _sizing = null; e.Pointer.Capture(this); e.Handled = true; return; }
             _leftDown = true;
@@ -1470,6 +1521,7 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
             return;
         }
         _navLast = pos;
+        if (_sectionDrag is { } sd) { if (AlongLine(sd.at, sd.dir, pos.X, pos.Y) is { } s) SectionDragged?.Invoke(s - sd.s0); return; }
         if (_handle >= 0) { DragHandle(pos.X, pos.Y); return; }
         Mode?.PointerMove(this, Info(e));
     }
@@ -1492,6 +1544,13 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
             if (!_rightDragged) ContextRequested?.Invoke(Info(e));
             else GestureEnded?.Invoke(e.GetPosition(this));
             _rightDragged = false;
+            return;
+        }
+        if (e.InitialPressMouseButton == MouseButton.Left && _sectionDrag != null)
+        {
+            e.Pointer.Capture(null);
+            _sectionDrag = null;
+            SectionDragEnded?.Invoke();
             return;
         }
         if (e.InitialPressMouseButton == MouseButton.Left && _handle >= 0)

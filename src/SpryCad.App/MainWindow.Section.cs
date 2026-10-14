@@ -1,3 +1,5 @@
+using SpryCad.Core.Assembly;
+using Avalonia.Controls;
 using SpryCad.App.Session;
 using SpryCad.App.UI;
 using SpryCad.Core;
@@ -9,26 +11,36 @@ namespace SpryCad.App;
 /// <summary>
 /// Section View, as SolidWorks': the model (a part's bodies, or an assembly's components) cut along a plane, what is
 /// on one side taken away and the cut filled, so the inside shows. The plane: one of the origin planes, a reference
-/// plane or a flat face (a part), moved along by an offset, the side kept flipped if wanted. A view setting: nothing in
-/// the model changes. The heads-up bar's section button (and View > Section View) opens the page, and turns it off.
+/// plane or any flat face (of the part, or of a component), moved along by an offset (typed, or by dragging the
+/// arrow on it), the side cut away flipped if wanted. A view setting: nothing in the model changes. The heads-up bar's
+/// section button (and View > Section View) opens the page, and turns it off.
 /// </summary>
 public partial class MainWindow
 {
     bool _sectionOn;
     SelItem? _sectionRef;          // a part's plane or face (null: the origin plane below)
+    (Vec3 p, Vec3 n)? _sectionFace; // an assembly component's flat face (null: the origin plane below)
     string _sectionStd = "Front";  // an origin plane (an assembly's, or a part's when nothing is picked)
     string _sectionOffset = "0";
     bool _sectionFlip;
     PmPage? _sectionPage;
+    TextBox? _sectionOffsetBox;
+    double? _sectionDragFrom;      // the offset when the arrow was pressed
+
+    /// <summary>Whether the Section View page is open (an assembly's face clicks go to it).</summary>
+    bool SectionPageOpen => _sectionPage != null && _page == _sectionPage;
 
     /// <summary>The section plane as set: the chosen plane moved by the offset along its normal, the side its normal points to cut away (flipped: the other).</summary>
     Plane SectionPlane()
     {
-        var f = Asm == null && _sectionRef != null && TryPlaneOf(_sectionRef, out _, out var fr) ? fr : Resolver.StdPlane(_sectionStd);
-        var off = Expr.TryEval(_sectionOffset, Session.Lookup, out var v, out string? _) ? v : 0;
+        var f = Asm != null && _sectionFace is { } sf ? Frame.FromPlane(Plane.FromPointNormal(sf.p, sf.n))
+            : Asm == null && _sectionRef != null && TryPlaneOf(_sectionRef, out _, out var fr) ? fr
+            : Resolver.StdPlane(_sectionStd);
         var n = f.Normal.Normalized;
-        return Plane.FromPointNormal(f.Origin + n * off, _sectionFlip ? -n : n);
+        return Plane.FromPointNormal(f.Origin + n * SectionOffset(), _sectionFlip ? -n : n);
     }
+
+    double SectionOffset() => Expr.TryEval(_sectionOffset, Session.Lookup, out var v, out string? _) ? v : 0;
 
     void ApplySection()
     {
@@ -39,43 +51,70 @@ public partial class MainWindow
     /// <summary>The section button: on, the page to choose the plane (live); already on, off again.</summary>
     void SectionCommand()
     {
-        if (_sectionPage != null && _page == _sectionPage) return;
+        if (SectionPageOpen) return;
         if (_sectionOn) { _sectionOn = false; ApplySection(); Status("Section view off."); return; }
         if (_sketch != null || _edit != null) { Status("Finish the current edit before sectioning."); return; }
-        var before = (_sectionRef, _sectionStd, _sectionOffset, _sectionFlip);
+        var before = (_sectionRef, _sectionFace, _sectionStd, _sectionOffset, _sectionFlip);
         var page = new PmPage("Section View", "section");
         var s = page.Section("Section Plane");
         if (Asm == null)
         {
-            var box = page.Selection(s, "Plane", SelFilter.Plane | SelFilter.PlanarFace, "A plane or a flat face to cut along (the Front Plane when none is picked).", 1);
+            var box = page.Selection(s, "Plane", SelFilter.Plane | SelFilter.PlanarFace, "A plane or any flat face to cut along (the Front Plane when none is picked).", 1);
             box.Items.Add(_sectionRef ?? new SelItem { Kind = SelKind.Plane, Name = _sectionStd, Frame = Resolver.StdPlane(_sectionStd) });
             box.Changed += () => { _sectionRef = box.Items.FirstOrDefault(); if (_sectionRef == null) _sectionStd = "Front"; ApplySection(); };
         }
         else
+        {
             page.Combo(s, "Plane", new List<(string, string)> { ("Front", "Front Plane"), ("Top", "Top Plane"), ("Right", "Right Plane") },
-                () => _sectionStd, v => { _sectionStd = v; ApplySection(); }, "plane");
-        page.Number(s, "Offset", () => _sectionOffset, v => { _sectionOffset = v; ApplySection(); }, "dimension");
+                () => _sectionStd, v => { _sectionStd = v; _sectionFace = null; ApplySection(); }, "plane");
+            page.Info(s, "Or click any flat face of a component to cut along it.");
+        }
+        _sectionOffsetBox = page.Number(s, "Offset", () => _sectionOffset, v => { _sectionOffset = v; ApplySection(); }, "dimension");
         page.Check(s, "Flip the side cut away", () => _sectionFlip, v => { _sectionFlip = v; ApplySection(); });
-        page.Info(s, "A view only: the model is not changed. Click the section button again to turn it off.");
-        page.OnOk = () => { _sectionPage = null; ShowPage(null); Status("Section view on (the section button turns it off)."); };
+        page.Info(s, "Drag the arrow on the plane to move the cut. A view only: the model is not changed; the section button turns it off.");
+        void Close() { _sectionPage = null; _sectionOffsetBox = null; Viewport.SectionArrow = false; ShowPage(null); }
+        page.OnOk = () => { Close(); ApplySection(); Status("Section view on (the section button turns it off)."); };
         page.OnCancel = () =>
         {
-            (_sectionRef, _sectionStd, _sectionOffset, _sectionFlip) = before;
-            _sectionOn = false; _sectionPage = null;
+            (_sectionRef, _sectionFace, _sectionStd, _sectionOffset, _sectionFlip) = before;
+            _sectionOn = false;
+            Close();
             ApplySection();
-            ShowPage(null);
         };
+        // the arrow: dragged, the offset follows (its field too)
+        Viewport.SectionDragged = d =>
+        {
+            _sectionDragFrom ??= SectionOffset();
+            var off = _sectionDragFrom.Value + (_sectionFlip ? -d : d);
+            var text = Expr.Format(off);
+            if (_sectionOffsetBox != null) _sectionOffsetBox.Text = text; // (its setter applies it)
+            else { _sectionOffset = text; ApplySection(); }
+        };
+        Viewport.SectionDragEnded = () => _sectionDragFrom = null;
         _sectionPage = page;
         _sectionOn = true;
         ShowPage(page);
+        Viewport.SectionArrow = true;
         ApplySection();
+    }
+
+    /// <summary>A component's face clicked while the page is open: a flat one is the plane cut along.</summary>
+    void SectionPickFace(string component, string face)
+    {
+        if (Asm is not { } a) return;
+        if (a.Model.RefTo(component, face) is not { } r || a.Model.World(r) is not { Kind: MateGeomKind.Plane } g)
+        { Status($"{a.Model.NameAt(component)}: that face is not flat (pick a flat face to cut along)."); return; }
+        _sectionFace = (g.P, g.D);
+        ApplySection();
+        Status($"Cutting along a face of {a.Model.NameAt(component)}.");
     }
 
     /// <summary>Another document shown: its own model, so the section goes.</summary>
     void EndSection()
     {
         if (!_sectionOn && _sectionPage == null) return;
-        _sectionOn = false; _sectionRef = null; _sectionPage = null;
+        _sectionOn = false; _sectionRef = null; _sectionFace = null; _sectionPage = null; _sectionOffsetBox = null;
+        Viewport.SectionArrow = false;
         Viewport.Section = null;
     }
 }

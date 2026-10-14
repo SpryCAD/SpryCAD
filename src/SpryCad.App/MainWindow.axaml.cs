@@ -667,6 +667,8 @@ public partial class MainWindow : Window
     {
         // the Measure tool's drawing belongs to its page
         if (_measurePage != null && page != _measurePage) EndMeasure();
+        // the Section View page replaced by another: the section kept as it is, its arrow gone
+        if (_sectionPage != null && page != _sectionPage) { _sectionPage = null; _sectionOffsetBox = null; Viewport.SectionArrow = false; }
         // the plane-pick page closed (cancelled, or replaced by another command): the planes go back to as set
         if (_planePickPage != null && page != _planePickPage)
         {

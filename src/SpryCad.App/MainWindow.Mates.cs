@@ -63,7 +63,7 @@ public partial class MainWindow
     /// <summary>The color a mate's i-th reference is drawn in: full selection blue, paler while another is selected in the box.</summary>
     Rgba PickColor(int i) => _mating is { Focus: >= 0 } mt && mt.Focus != i ? PaleSelect : ViewportControl.SelectColor;
 
-    public bool PickingFaces => (_mating != null || _motor != null || _patterning != null) && Asm != null;
+    public bool PickingFaces => (_mating != null || _motor != null || _patterning != null || SectionPageOpen) && Asm != null;
 
     /// <summary>The picks not selected in the Mate Selections box while one is: a paler selection blue.</summary>
     static readonly Rgba PaleSelect = new(0.62f, 0.78f, 1.0f);
@@ -78,6 +78,7 @@ public partial class MainWindow
 
     public void PickFace(string component, string face)
     {
+        if (SectionPageOpen) { SectionPickFace(component, face); return; }
         if (_motor != null) { MotorPick(component, face); return; }
         if (_patterning != null) { PatternPick(component, face); return; }
         if (_mating is not { } st || Asm is not { } a) return;

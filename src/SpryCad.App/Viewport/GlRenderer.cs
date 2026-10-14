@@ -170,11 +170,13 @@ public sealed unsafe class GlRenderer : IDisposable
             uniform vec4 uColor; uniform float uPersp; uniform float uCap;
             out vec4 oColor;
             void main() {
-              // the section: past the plane cut away; a solid's inside, seen through the cut, filled flat (the cut face)
+              // the section: past the plane cut away
               if (vClip > 0.0) discard;
-              if (uCap > 0.5 && !gl_FrontFacing) { oColor = vec4(uColor.rgb * 0.72, uColor.a); return; }
               vec3 n = normalize(vN);
               vec3 v = uPersp > 0.5 ? normalize(-vPosV) : vec3(0.0, 0.0, 1.0);
+              // a solid's inside seen through the cut (its outward normal turned away from the eye: the winding is
+              // not to be trusted, the normals are): filled flat, as the cut face
+              if (uCap > 0.5 && dot(n, v) < 0.0) { oColor = vec4(uColor.rgb * 0.72, uColor.a); return; }
               if (dot(n, v) < 0.0) n = -n;
               // camera attached lights: a headlight slightly above/left plus two fills
               vec3 l1 = normalize(vec3(-0.15, 0.25, 1.0));
