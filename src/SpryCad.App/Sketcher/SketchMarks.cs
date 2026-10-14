@@ -39,15 +39,26 @@ sealed class SketchMarks : Control, ICustomHitTest
 
     public void Clear() { _marks.Clear(); SetUnder(null); InvalidateVisual(); }
 
-    public FormattedText Text(string text, double size, FontWeight weight, IBrush fore) =>
-        new(text, CultureInfo.CurrentCulture, FlowDirection.LeftToRight,
+    // texts made before, by what they are (marks are made again on every overlay update: most repeat), and the pens
+    // of the borders by their brush
+    readonly Dictionary<(string, double, FontWeight, IBrush), FormattedText> _texts = new();
+    readonly Dictionary<IBrush, Pen> _pens = new();
+
+    public FormattedText Text(string text, double size, FontWeight weight, IBrush fore)
+    {
+        var key = (text, size, weight, fore);
+        if (_texts.TryGetValue(key, out var t)) return t;
+        if (_texts.Count > 4096) _texts.Clear();
+        return _texts[key] = new(text, CultureInfo.CurrentCulture, FlowDirection.LeftToRight,
             new Typeface(GetValue(TextElement.FontFamilyProperty), FontStyle.Normal, weight), size, fore);
+    }
 
     public override void Render(DrawingContext ctx)
     {
         foreach (var m in _marks)
         {
-            var pen = m.Border != null ? new Pen(m.Border, 1) : null;
+            Pen? pen = null;
+            if (m.Border != null && !_pens.TryGetValue(m.Border, out pen)) _pens[m.Border] = pen = new Pen(m.Border, 1);
             if (m.Back != null || pen != null) ctx.DrawRectangle(m.Back, pen, m.Box.Deflate(pen != null ? 0.5 : 0), 2, 2);
             ctx.DrawText(m.Text, new Point(m.Box.X + (m.Box.Width - m.Text.Width) / 2, m.Box.Y + (m.Box.Height - m.Text.Height) / 2));
         }
