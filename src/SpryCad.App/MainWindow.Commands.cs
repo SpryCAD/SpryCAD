@@ -211,7 +211,7 @@ public partial class MainWindow
             PartMenu(Item("_Equations...", () => _ = Dialogs.Equations(this), null, "equations")),
             PartMenu(Item("_Design Table...", () => _ = Dialogs.DesignTables(this), null, "table")),
             PartMenu(Item("_Configure...", () => _ = Dialogs.ConfigurePart(this), null, "configure")),
-            PartMenu(Item("Mea_sure...", MeasureCommand, null, "measure")),
+            Item("Mea_sure...", MeasureCommand, null, "measure"),
             Item("_Mass Properties...", MassPropertiesCommand, null, "mass"),
             "-",
             Item("_Options...", () => _ = Dialogs.Options(this), null, "options")));
@@ -340,8 +340,8 @@ public partial class MainWindow
                 Cmd("export-dxf", "Export\nDXF", () => _ = ExportDxf());
                 break;
             case "Evaluate":
-                // (in an assembly only what works on one: its mass properties and its export)
-                if (Asm == null) Cmd("measure", "Measure", MeasureCommand);
+                // (in an assembly only what works on one: measuring, its mass properties and its export)
+                Cmd("measure", "Measure", MeasureCommand);
                 Cmd("mass", "Mass\nProperties", MassPropertiesCommand);
                 if (Asm == null)
                 {
@@ -593,8 +593,35 @@ public partial class MainWindow
             if (s.Kind == SelKind.Face && s.FacePlane != null) f = Frame.FromPlane(s.FacePlane);
             else if (s.Frame != null) f = s.Frame;
         }
+        // an assembly: an origin plane picked in the tree, else the next flat face of a component clicked
+        if (f == null && Asm != null)
+        {
+            if (_asmOriginSel is "Front" or "Top" or "Right") f = Resolver.StdPlane(_asmOriginSel);
+            else
+            {
+                _normalToPick = true;
+                RefreshAssemblyScene();
+                Status("Normal To: click a flat face of a component to look straight at it (Esc to cancel).");
+                return;
+            }
+        }
         if (f == null) { Status("Select a planar face, plane or sketch for Normal To."); return; }
         Viewport.NormalTo(f.Value);
+    }
+
+    // Normal To in an assembly, waiting for the face to look at
+    bool _normalToPick;
+
+    /// <summary>The face clicked for Normal To in an assembly: a flat one is looked at straight on.</summary>
+    void NormalToFace(string component, string face)
+    {
+        if (Asm is not { } a) return;
+        if (a.Model.RefTo(component, face) is not { } r || a.Model.World(r) is not { Kind: Core.Assembly.MateGeomKind.Plane } g)
+        { Status($"{a.Model.NameAt(component)}: that face is not flat (pick a flat face, or Esc)."); return; }
+        _normalToPick = false;
+        RefreshAssemblyScene();
+        Viewport.NormalTo(Frame.FromPlane(Plane.FromPointNormal(g.P, g.D)));
+        Status($"Normal to a face of {a.Model.NameAt(component)}.");
     }
 
     // ------------------------------------------------------------------------------------------
@@ -722,7 +749,7 @@ public partial class MainWindow
             }
             if (menu.Items.Count > 0) menu.Items.Add(new Separator());
             // measures what was right-clicked (and the rest of the selection), as SolidWorks
-            if (Asm == null && (_page != _measurePage || _measurePage == null)) menu.Items.Add(Item("Measure", MeasureCommand, null, "measure"));
+            if (_page != _measurePage || _measurePage == null) menu.Items.Add(Item("Measure", MeasureCommand, null, "measure"));
             menu.Items.Add(Item("Zoom to Fit", () => Viewport.ZoomToFit(), "F", "fit"));
             menu.Items.Add(Sub("View Orientation",
                 Item("Front", () => Viewport.StandardView("Front")),

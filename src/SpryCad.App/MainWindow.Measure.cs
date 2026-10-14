@@ -30,7 +30,6 @@ public partial class MainWindow
 
     void MeasureCommand()
     {
-        if (PartOnly("Measure")) return;
         if (_page == _measurePage && _measurePage != null) { _measurePage.Activate(_measureBox); return; }
         if (_sketch != null || _edit != null) { Status("Finish the current edit before measuring."); return; }
         var page = new PmPage("Measure", "measure");
@@ -53,8 +52,19 @@ public partial class MainWindow
         Session.Rebuilt += UpdateMeasure;
         Viewport.CameraChanged += PlaceMeasureLabel;
         ShowPage(page);
+        // in an assembly: faces of its components, named by them, shown picked
+        if (Asm is { } am)
+        {
+            box.LabelOf = i => i.BodyId != null && am.Model.Find(i.BodyId) != null ? $"Face of {am.Model.NameAt(i.BodyId)}" : i.Label(Session.Doc);
+            box.Refresh();
+            box.Changed += () => { if (Asm != null) RefreshAssemblyScene(); };
+            RefreshAssemblyScene();
+        }
         UpdateMeasure();
     }
+
+    /// <summary>Whether the Measure page is open (an assembly's face clicks go to it).</summary>
+    bool MeasureOpen => _measurePage != null && _page == _measurePage;
 
     void CloseMeasure() { if (_page == _measurePage) ShowPage(null); }
 
@@ -91,8 +101,65 @@ public partial class MainWindow
         public bool IsFace => Item.Kind == SelKind.Face;
     }
 
+    /// <summary>A face (by name) of a mesh as a measured item: its triangles, area and exact surface.</summary>
+    MeasureItem? FaceItem(SelItem s, DisplayMesh m)
+    {
+        Vec3 P(int i) => new(m.Positions[3 * i], m.Positions[3 * i + 1], m.Positions[3 * i + 2]);
+        var shape = new MeasureShape();
+        var it = new MeasureItem { Item = s, Shape = shape };
+        SurfaceDef? def = null; Plane? plane = null;
+        foreach (var fr in m.Faces.Where(f => f.Name == s.Name))
+        {
+            def ??= fr.Surface; plane ??= fr.FirstPlane;
+            for (int i = fr.IndexStart; i < fr.IndexStart + fr.IndexCount; i += 3)
+            {
+                var (a, b, c) = (P(m.Indices[i]), P(m.Indices[i + 1]), P(m.Indices[i + 2]));
+                shape.Triangles.Add((a, b, c));
+                it.Area += Vec3.Cross(b - a, c - a).Length / 2;
+            }
+        }
+        if (def == null || shape.IsEmpty) return null;
+        switch (def.Kind)
+        {
+            case SurfaceKind.Plane: it.Kind = "Plane"; it.Plane = plane; break;
+            case SurfaceKind.Cylinder: it.Kind = "Cylinder"; it.Center = def.Origin; it.Axis = def.Axis; it.Radius = def.Radius; break;
+            case SurfaceKind.Cone: it.Kind = "Cone"; it.Center = def.Origin; it.Axis = def.Axis; it.ConeAngle = def.Param2 * 180 / Math.PI; break;
+            case SurfaceKind.Sphere: it.Kind = "Sphere"; it.Center = def.Origin; it.Radius = def.Radius; break;
+            case SurfaceKind.Torus: it.Kind = "Torus"; it.Center = def.Origin; it.Axis = def.Axis; it.Radius = def.Radius; it.TubeRadius = def.Param2; break;
+            default: it.Kind = "Surface"; break;
+        }
+        if (def.IsCurved) { var es = new ExactSurface(def); it.Project = es.Project; }
+        it.Size = Extent(shape);
+        return it;
+    }
+
+    /// <summary>A measured item moved by a placement (a component's): its shape, plane, center, axis and exact projection.</summary>
+    static MeasureItem Placed(MeasureItem it, SpryCad.Kernel.Transform t)
+    {
+        var shape = new MeasureShape();
+        foreach (var p in it.Shape.Points) shape.Points.Add(t.Point(p));
+        foreach (var (a, b) in it.Shape.Segments) shape.Segments.Add((t.Point(a), t.Point(b)));
+        foreach (var (a, b, c) in it.Shape.Triangles) shape.Triangles.Add((t.Point(a), t.Point(b), t.Point(c)));
+        var inv = t.RigidInverse();
+        var project = it.Project;
+        return new MeasureItem
+        {
+            Item = it.Item, Shape = shape, Kind = it.Kind, Length = it.Length, Area = it.Area, Size = it.Size,
+            Radius = it.Radius, TubeRadius = it.TubeRadius, ConeAngle = it.ConeAngle,
+            Center = it.Center is { } c0 ? t.Point(c0) : null,
+            Axis = it.Axis is { } ax ? t.Vector(ax) : null,
+            Dir = it.Dir is { } d ? t.Vector(d) : null,
+            Plane = it.Plane is { } pl ? Plane.FromPointNormal(t.Point(pl.Origin), t.Vector(pl.Normal)) : null,
+            Project = project == null ? null : p => t.Point(project(inv.Point(p))),
+        };
+    }
+
     MeasureItem? MeasureItemOf(SelItem s, ModelState? st)
     {
+        // a face of an assembly's component (its path as the body): measured on its part's own mesh, then moved to
+        // where the component is
+        if (Asm is { } asm && s.Kind == SelKind.Face && s.BodyId != null && asm.Model.Find(s.BodyId) is { Display: { } pd } occ)
+            return FaceItem(s, pd.Mesh) is { } local ? Placed(local, occ.World) : null;
         var shape = new MeasureShape();
         if (s.Kind == SelKind.Vertex)
         {
@@ -103,34 +170,7 @@ public partial class MainWindow
         if (body == null) return null;
         var m = body.Mesh;
         Vec3 P(int i) => new(m.Positions[3 * i], m.Positions[3 * i + 1], m.Positions[3 * i + 2]);
-        if (s.Kind == SelKind.Face)
-        {
-            var it = new MeasureItem { Item = s, Shape = shape };
-            SurfaceDef? def = null; Plane? plane = null;
-            foreach (var fr in m.Faces.Where(f => f.Name == s.Name))
-            {
-                def ??= fr.Surface; plane ??= fr.FirstPlane;
-                for (int i = fr.IndexStart; i < fr.IndexStart + fr.IndexCount; i += 3)
-                {
-                    var (a, b, c) = (P(m.Indices[i]), P(m.Indices[i + 1]), P(m.Indices[i + 2]));
-                    shape.Triangles.Add((a, b, c));
-                    it.Area += Vec3.Cross(b - a, c - a).Length / 2;
-                }
-            }
-            if (def == null || shape.IsEmpty) return null;
-            switch (def.Kind)
-            {
-                case SurfaceKind.Plane: it.Kind = "Plane"; it.Plane = plane; break;
-                case SurfaceKind.Cylinder: it.Kind = "Cylinder"; it.Center = def.Origin; it.Axis = def.Axis; it.Radius = def.Radius; break;
-                case SurfaceKind.Cone: it.Kind = "Cone"; it.Center = def.Origin; it.Axis = def.Axis; it.ConeAngle = def.Param2 * 180 / Math.PI; break;
-                case SurfaceKind.Sphere: it.Kind = "Sphere"; it.Center = def.Origin; it.Radius = def.Radius; break;
-                case SurfaceKind.Torus: it.Kind = "Torus"; it.Center = def.Origin; it.Axis = def.Axis; it.Radius = def.Radius; it.TubeRadius = def.Param2; break;
-                default: it.Kind = "Surface"; break;
-            }
-            if (def.IsCurved) { var es = new ExactSurface(def); it.Project = es.Project; }
-            it.Size = Extent(shape);
-            return it;
-        }
+        if (s.Kind == SelKind.Face) return FaceItem(s, m);
         if (s.Kind == SelKind.Edge)
         {
             var it = new MeasureItem { Item = s, Shape = shape };

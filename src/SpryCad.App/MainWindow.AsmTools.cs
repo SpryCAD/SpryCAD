@@ -55,6 +55,7 @@ public partial class MainWindow
         switch (cmd)
         {
             case "open": OpenComponent(path); break;
+            case "rename": _ = RenameComponent(path); break;
             case "makeexternal": _ = MakeExternalCommand(path); break;
             case "makevirtual": _ = MakeVirtualCommand(path); break;
             case "pin": _ = PinCommand(path); break;

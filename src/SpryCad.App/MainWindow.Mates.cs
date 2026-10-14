@@ -63,7 +63,7 @@ public partial class MainWindow
     /// <summary>The color a mate's i-th reference is drawn in: full selection blue, paler while another is selected in the box.</summary>
     Rgba PickColor(int i) => _mating is { Focus: >= 0 } mt && mt.Focus != i ? PaleSelect : ViewportControl.SelectColor;
 
-    public bool PickingFaces => (_mating != null || _motor != null || _patterning != null || SectionPageOpen) && Asm != null;
+    public bool PickingFaces => (_mating != null || _motor != null || _patterning != null || SectionPageOpen || MeasureOpen || _normalToPick) && Asm != null;
 
     /// <summary>The picks not selected in the Mate Selections box while one is: a paler selection blue.</summary>
     static readonly Rgba PaleSelect = new(0.62f, 0.78f, 1.0f);
@@ -78,7 +78,9 @@ public partial class MainWindow
 
     public void PickFace(string component, string face)
     {
+        if (_normalToPick) { NormalToFace(component, face); return; }
         if (SectionPageOpen) { SectionPickFace(component, face); return; }
+        if (MeasureOpen) { _measureBox?.Add(new SpryCad.App.Session.SelItem { Kind = SpryCad.App.Session.SelKind.Face, BodyId = component, Name = face }); RefreshAssemblyScene(); return; }
         if (_motor != null) { MotorPick(component, face); return; }
         if (_patterning != null) { PatternPick(component, face); return; }
         if (_mating is not { } st || Asm is not { } a) return;
@@ -130,6 +132,9 @@ public partial class MainWindow
                     // paler, so it is plain which it is (orange is the hover's)
                     (l ??= new()).Add((refs[i].Face, PickColor(i)));
         if (_hoverPick is { Component: { } hc, Face: var hf } && hc == componentId) (l ??= new()).Add((hf, ViewportControl.HoverColor));
+        // the faces being measured
+        if (MeasureOpen && _measureBox != null)
+            foreach (var it in _measureBox.Items) if (it.BodyId == componentId && it.Name != null) (l ??= new()).Add((it.Name, ViewportControl.SelectColor));
         if (_hoverFace is { } h && h.comp == componentId) (l ??= new()).Add((h.face, ViewportControl.HoverColor));
         return l;
     }
@@ -534,6 +539,22 @@ public partial class MainWindow
         a.EndChange();
         Status(cmd switch { "flip" => $"{mate.Name}: flipped.", "suppress" => $"{mate.Name}: {(mate.Suppressed ? "suppressed" : "unsuppressed")}.", _ => $"Deleted {mate.Name}." });
         RefreshAssemblyScene();
+    }
+
+    /// <summary>
+    /// Renames one of the assembly's own components (F2, or its menu in the tree): the name the tree and the mates show;
+    /// the part keeps its own name.
+    /// </summary>
+    async Task RenameComponent(string path)
+    {
+        if (Asm is not { } a || path.Contains('/') || a.Model.Doc.Find(path) is not { } c) return;
+        var name = (await Dialogs.Input(this, "Rename", "Component name:", c.Name))?.Trim();
+        if (string.IsNullOrEmpty(name) || name == c.Name) return;
+        if (a.Model.Doc.Components.Any(o => o != c && o.Name == name)) { Status($"Another component is already named {name}."); return; }
+        a.BeginChange();
+        c.Name = name;
+        a.EndChange();
+        Status($"Renamed to {name}.");
     }
 
     async Task RenameMate(Mate mate)

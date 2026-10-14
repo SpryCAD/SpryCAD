@@ -584,6 +584,7 @@ public partial class MainWindow : Window
                     Selection.Clear();
                     if (Asm is { Selected: not null } or { SelectedMate: not null }) SelectMate(null);
                     if (_asmOriginSel != null) { _asmOriginSel = null; RefreshAssemblyScene(); }
+                    if (_normalToPick) { _normalToPick = false; RefreshAssemblyScene(); Status("Normal To cancelled."); }
                     e.Handled = true;
                 }
                 break;
@@ -592,6 +593,9 @@ public partial class MainWindow : Window
                 break;
             case Key.F2 when Asm is { SelectedMate: { } mateId } && _mating == null:
                 OnMateCommand(mateId, "rename"); e.Handled = true;
+                break;
+            case Key.F2 when Asm is { Selected: { } compPath } && _page == null:
+                _ = RenameComponent(compPath); e.Handled = true;
                 break;
             case Key.F2:
                 // rename the feature selected in the tree (or owning the selected face)

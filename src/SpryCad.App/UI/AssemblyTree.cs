@@ -415,7 +415,10 @@ public sealed class AssemblyTree : DockPanel
         var menu = new ContextMenu();
         void Add(params object[] items) { foreach (var i in items) menu.Items.Add(i); }
         var embedded = c.Part.Embedded != null;
-        Add(I(c.IsAssembly ? (embedded ? "_Edit Sub-assembly" : "_Open Sub-assembly") : embedded ? "_Edit Part" : "_Open Part", "open", "open"), new Separator());
+        Add(I(c.IsAssembly ? (embedded ? "_Edit Sub-assembly" : "_Open Sub-assembly") : embedded ? "_Edit Part" : "_Open Part", "open", "open"));
+        // (named in this assembly: its own components only)
+        if (o.Rel == null) Add(I("_Rename... (F2)", "rename", "rename"));
+        Add(new Separator());
         // how it shows (any component)
         Add(o.Hidden ? I("_Show", "show", "show") : I("_Hide", "hide", "hide"),
             o.Suppressed ? I("_Unsuppress", "unsuppress", "suppress") : I("_Suppress", "suppress", "suppress"),
