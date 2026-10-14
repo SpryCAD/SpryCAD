@@ -436,7 +436,13 @@ public sealed class Regenerator
                     {
                         var cs = ChamferSizeOf(ch);
                         DoBlend(ch.Edges, cs.D1, false, ch.TangentPropagation, ch.Overflow, cs);
-                        if (ch.FlatCorners) FlatCorners();
+                        if (ch.FlatCorners)
+                        {
+                            FlatCorners();
+                            // (its copies' corners cut too, by the patterns and mirrors that copy it)
+                            if (State.Tools.TryGetValue(f.Id, out var ti))
+                                State.Tools[f.Id] = new ToolInfo(() => ti.Tool, ti.IsCut, ti.Merge) { Blend = ti.Blend, FlatCorners = new[] { f.Id } };
+                        }
                         break;
                     }
                 case HoleFeature h: DoHole(h); break;
@@ -1111,7 +1117,7 @@ public sealed class Regenerator
         /// the three edges between those faces (the corners of the faces between the chamfers, where each pair of
         /// them parts): a triangle whose sides are the three chamfers' ends.
         /// </summary>
-        void FlatCorners()
+        void FlatCorners(Func<string, bool>? ofChamfer = null)
         {
             var bodies = new List<Body>();
             int corners = 0;
@@ -1121,13 +1127,16 @@ public sealed class Regenerator
                 if (nb == null) { bodies.Add(b); continue; }
                 nb.Link();
                 var scale = Math.Max(1, nb.Bounds.Diagonal);
-                bool Mine(Kernel.Native.NFace x) => x.Tag.Name.StartsWith(f.Id + ".", StringComparison.Ordinal);
+                // (a chamfer's own faces; for a pattern or mirror, the faces of the chamfers with flat corners it copies, its
+                // copies' or theirs, a corner of them taken only where one at least is its own: the others the chamfer cut)
+                bool Own(Kernel.Native.NFace x) => x.Tag.Name.StartsWith(f.Id + ".", StringComparison.Ordinal);
+                bool Mine(Kernel.Native.NFace x) => ofChamfer == null ? Own(x) : ofChamfer(x.Tag.Name);
                 var cutters = new List<Solid>();
                 var tips = nb.Faces.Where(Mine).SelectMany(x => x.Coedges).Select(c => c.Start).Distinct(ReferenceEqualityComparer.Instance).Cast<Kernel.Native.NVertex>().ToList();
                 foreach (var tip in tips)
                 {
                     var faces = nb.Faces.Where(x => x.Coedges.Any(c => ReferenceEquals(c.Start, tip))).ToList();
-                    if (faces.Count != 3 || !faces.All(Mine) || faces.Any(x => x.Surface.Kind != SurfaceKind.Plane)) continue;
+                    if (faces.Count != 3 || !faces.All(Mine) || !faces.Any(Own) || faces.Any(x => x.Surface.Kind != SurfaceKind.Plane)) continue;
                     var edges = faces.SelectMany(x => x.Coedges).Select(c => c.Edge).Where(e => ReferenceEquals(e.V0, tip) || ReferenceEquals(e.V1, tip))
                         .Distinct(ReferenceEqualityComparer.Instance).Cast<Kernel.Native.NEdge>().ToList();
                     if (edges.Count != 3 || edges.Any(e => e.Curve is not Kernel.Native.NLine)) continue;
@@ -1151,7 +1160,7 @@ public sealed class Regenerator
                 corners += cutters.Count;
                 bodies.Add(cutters.Count == 0 ? b : new Body { Id = b.Id, Solid = s });
             }
-            if (corners == 0) status.Warnings.Add("No corner where three of the chamfers meet: none cut flat.");
+            if (corners == 0 && ofChamfer == null) status.Warnings.Add("No corner where three of the chamfers meet: none cut flat.");
             State = State.With(bodies);
         }
 
@@ -1811,6 +1820,10 @@ public sealed class Regenerator
                 }
                 if (cutKind == null) cutKind = tool.IsCut; else if (cutKind != tool.IsCut) mixed = true;
             }
+            // the copies of chamfers with flat corners: their corners cut (the copies' faces named for this feature, then
+            // for the chamfer they copy)
+            var flat = seeds.SelectMany(s => State.Tools.TryGetValue(s, out var ti) ? ti.FlatCorners : Array.Empty<string>()).Distinct().ToList();
+            if (flat.Count > 0) FlatCorners(name => flat.Any(id => name.StartsWith(id + ".", StringComparison.Ordinal) || name.Contains("." + id + ".", StringComparison.Ordinal)));
             // the pattern/mirror as a whole (seeds + copies) can itself be patterned or mirrored
             // (built only when used; a cut and the fillet on its edges touch along the fillet's tangent faces, which
             // a union may not resolve: such a pattern works, it just cannot be patterned again)
@@ -1822,7 +1835,7 @@ public sealed class Regenerator
                     try { return Csg.UnionAll(everything); }
                     catch (InvalidOperationException ex) { throw new FeatureException("This pattern cannot be patterned or mirrored again: " + ex.Message); }
                     finally { Csg.NoFallback = old; }
-                }, isCut, true);
+                }, isCut, true) { FlatCorners = flat };
         }
 
         /// <summary>

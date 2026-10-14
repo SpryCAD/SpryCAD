@@ -33,6 +33,11 @@ public sealed class ToolInfo
     public bool Merge { get; }
     /// <summary>For fillets/chamfers: how to solve the blend again on a pattern instance whose geometry differs.</summary>
     public BlendSpec? Blend { get; init; }
+    /// <summary>
+    /// The chamfers with flat corners whose copies the tool carries (the chamfer itself, or patterns/mirrors of it):
+    /// their corners are cut again on each copy, after it is applied.
+    /// </summary>
+    public IReadOnlyList<string> FlatCorners { get; init; } = Array.Empty<string>();
 }
 
 /// <summary>
