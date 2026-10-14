@@ -164,6 +164,7 @@ public partial class MainWindow
                 StyleItem("Hidden Lines Visible", DisplayStyle.HiddenLinesVisible),
                 StyleItem("Wireframe", DisplayStyle.Wireframe)),
             _colorByMenu = Toggle("Color by _Feature", () => _colorByFeature, ToggleColorByFeature),
+            Toggle("_Section View", () => _sectionOn, SectionCommand),
             Toggle("Perspective", () => Viewport.Camera.Perspective, () => { Viewport.Camera.Perspective = !Viewport.Camera.Perspective; Viewport.Redraw(); }),
             Sub("_Threads",
                 Toggle("As Set in Each Thread", () => ThreadMode == ThreadDisplay.AsSet, () => _ = SetThreadMode(ThreadDisplay.AsSet), radio: true),
@@ -532,6 +533,7 @@ public partial class MainWindow
         disp.Flyout = df;
         H("planes", "Hide/Show Planes", TogglePlanes);
         _colorByButton = H("colorbyfeature", "Color by Feature", ToggleColorByFeature);
+        H("section", "Section View", SectionCommand);
     }
 
     Flyout OrientationFlyout()

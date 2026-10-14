@@ -57,10 +57,30 @@ public partial class MainWindow
         _flyTree.Select(Tree.SelectedId);
     }
 
-    /// <summary>An assembly tree's origin row clicked: an origin plane is the pick while faces are picked (a mate, a motor, a pattern).</summary>
+    // an origin item picked in an assembly's tree (not into a page): shown selected, as in a part
+    string? _asmOriginSel;
+
+    /// <summary>An origin row's item as drawn: a plane, an axis or the point.</summary>
+    SelItem? OriginItem(string o) => o switch
+    {
+        "Front" or "Top" or "Right" => new SelItem { Kind = SelKind.Plane, Name = o },
+        "AxisX" or "AxisY" or "AxisZ" => WorldAxisItem(o),
+        "Point" => new SelItem { Kind = SelKind.Origin },
+        _ => null,
+    };
+
+    /// <summary>
+    /// An assembly tree's origin row clicked: an origin plane is the pick while faces are picked (a mate, a motor, a
+    /// pattern); otherwise the item is selected and shown, as in a part.
+    /// </summary>
     void OnAssemblyOriginPicked(string o)
     {
-        if (PickingFaces && Asm is { } a && o is "Front" or "Top" or "Right") PickRef(a.Model.RefTo(null, o), "");
+        if (Asm is not { } a) return;
+        if (PickingFaces) { if (o is "Front" or "Top" or "Right") PickRef(a.Model.RefTo(null, o), ""); return; }
+        a.Selected = null; a.SelectedMate = null;
+        _asmOriginSel = o;
+        RefreshAssemblyScene();
+        Status((o switch { "Point" => "Origin", "AxisX" or "AxisY" or "AxisZ" => o[4..] + " Axis", _ => o + " Plane" }) + " selected");
     }
 
     /// <summary>An assembly tree's row hovered: its component tinted, or its origin plane lit, in the graphics area.</summary>

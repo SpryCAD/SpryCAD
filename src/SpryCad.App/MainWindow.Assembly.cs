@@ -317,6 +317,7 @@ public partial class MainWindow : IAssemblyHost
         // the part's Insert menu (sketches, features) has nothing to act on in an assembly
         foreach (var mi in MainMenu.Items.OfType<MenuItem>().Where(m => m.Header as string == "_Insert")) mi.IsEnabled = !asm;
         foreach (var mi in _partOnlyMenu) mi.IsEnabled = !asm;
+        EndSection(); // (another model shown)
         if (asm && _activeTab != "Assembly") ShowTab("Assembly");
         else if (!asm && _activeTab == "Assembly") ShowTab("Features");
         _asmHover = null;
@@ -429,6 +430,8 @@ public partial class MainWindow : IAssemblyHost
             else if (refs[i].Kind == MateGeomKind.Axis && a.Model.AxisSegment(rc, refs[i].Face) is { } seg) marked.Add((AxisItem(seg), PickColor(i)));
         }
         if (PickingFaces && _hoverFace is { } hov && a.Model.AxisSegment(hov.comp, hov.face) is { } hseg) marked.Add((AxisItem(hseg), ViewportControl.HoverColor));
+        // an origin item picked in the tree (a plane, an axis, the point): shown selected, as in a part
+        if (_asmOriginSel is { } os && OriginItem(os) is { } oi) marked.Add((oi, ViewportControl.SelectColor));
         Viewport.Emphasis = Array.Empty<SelItem>();
         Viewport.Marked = marked;
         Viewport.Instances = inst;
@@ -762,6 +765,7 @@ public partial class MainWindow : IAssemblyHost
     {
         if (Asm is not { } a || (id == a.SelectedMate && a.Selected == null)) return;
         a.SelectedMate = id;
+        _asmOriginSel = null;
         a.Selected = null;
         RefreshAssemblyScene();
         _asmTree.SelectMateRow(id);
@@ -800,7 +804,8 @@ public partial class MainWindow : IAssemblyHost
     void SelectComponent(string? id, bool exact)
     {
         if (Asm is { } sa && id != null && !exact) id = sa.Model.Selectable(id);
-        if (Asm is not { } a || (a.Selected == id && a.SelectedMate == null)) return;
+        if (Asm is not { } a || (a.Selected == id && a.SelectedMate == null && _asmOriginSel == null)) return;
+        _asmOriginSel = null;
         a.SelectedMate = null;
         a.Selected = id;
         RefreshAssemblyScene();

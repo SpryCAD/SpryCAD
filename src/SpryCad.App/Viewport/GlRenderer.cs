@@ -127,6 +127,19 @@ public sealed unsafe class GlRenderer : IDisposable
     readonly bool _es;
     uint _lit, _flat, _vcol;
     int _litVP, _litView, _litColor, _litPersp, _flatVP, _flatColor, _vcolVP;
+    int _litClip, _litCap, _flatClip;
+
+    /// <summary>
+    /// The section plane (a, b, c, d in world coordinates: what is past it, where ax + by + cz + d > 0, is cut away), or
+    /// null for none. Faces and edges are cut; while there is one, a solid's inside faces (seen through the cut) are
+    /// filled flat in their own color, darker, so the cut reads as solid.
+    /// </summary>
+    public Vector4? Clip { get; set; }
+    /// <summary>Where the meshes drawn next are placed (an assembly instance's placement; identity for a part's bodies): the clip plane is moved into them.</summary>
+    public Matrix4x4 Model { get; set; } = Matrix4x4.Identity;
+
+    // the clip plane in the coordinates of the mesh drawn (none: one that cuts nothing)
+    Vector4 ModelClip => Clip is { } c ? Vector4.Transform(c, Matrix4x4.Transpose(Model)) : new Vector4(0, 0, 0, -1);
     uint _dynVao, _dynVbo;
     uint _fbo, _colorRb, _depthRb;
     int _fbW, _fbH, _samples;
@@ -143,19 +156,23 @@ public sealed unsafe class GlRenderer : IDisposable
     {
         const string litVs = """
             in vec3 aPos; in vec3 aNormal;
-            uniform mat4 uViewProj; uniform mat4 uView;
-            out vec3 vN; out vec3 vPosV;
+            uniform mat4 uViewProj; uniform mat4 uView; uniform vec4 uClip;
+            out vec3 vN; out vec3 vPosV; out float vClip;
             void main() {
+              vClip = dot(vec4(aPos, 1.0), uClip);
               vN = mat3(uView) * aNormal;
               vPosV = (uView * vec4(aPos, 1.0)).xyz;
               gl_Position = uViewProj * vec4(aPos, 1.0);
             }
             """;
         const string litFs = """
-            in vec3 vN; in vec3 vPosV;
-            uniform vec4 uColor; uniform float uPersp;
+            in vec3 vN; in vec3 vPosV; in float vClip;
+            uniform vec4 uColor; uniform float uPersp; uniform float uCap;
             out vec4 oColor;
             void main() {
+              // the section: past the plane cut away; a solid's inside, seen through the cut, filled flat (the cut face)
+              if (vClip > 0.0) discard;
+              if (uCap > 0.5 && !gl_FrontFacing) { oColor = vec4(uColor.rgb * 0.72, uColor.a); return; }
               vec3 n = normalize(vN);
               vec3 v = uPersp > 0.5 ? normalize(-vPosV) : vec3(0.0, 0.0, 1.0);
               if (dot(n, v) < 0.0) n = -n;
@@ -171,13 +188,15 @@ public sealed unsafe class GlRenderer : IDisposable
             """;
         const string flatVs = """
             in vec3 aPos;
-            uniform mat4 uViewProj;
-            void main() { gl_Position = uViewProj * vec4(aPos, 1.0); }
+            uniform mat4 uViewProj; uniform vec4 uClip;
+            out float vClip;
+            void main() { vClip = dot(vec4(aPos, 1.0), uClip); gl_Position = uViewProj * vec4(aPos, 1.0); }
             """;
         const string flatFs = """
             uniform vec4 uColor;
+            in float vClip;
             out vec4 oColor;
-            void main() { oColor = uColor; }
+            void main() { if (vClip > 0.0) discard; oColor = uColor; }
             """;
         const string vcolVs = """
             in vec3 aPos; in vec4 aColor;
@@ -200,6 +219,9 @@ public sealed unsafe class GlRenderer : IDisposable
         _flatVP = _gl.GetUniformLocation(_flat, "uViewProj");
         _flatColor = _gl.GetUniformLocation(_flat, "uColor");
         _vcolVP = _gl.GetUniformLocation(_vcol, "uViewProj");
+        _litClip = _gl.GetUniformLocation(_lit, "uClip");
+        _litCap = _gl.GetUniformLocation(_lit, "uCap");
+        _flatClip = _gl.GetUniformLocation(_flat, "uClip");
 
         _dynVao = _gl.GenVertexArray();
         _gl.BindVertexArray(_dynVao);
@@ -307,6 +329,9 @@ public sealed unsafe class GlRenderer : IDisposable
         SetMat(_litVP, viewProj); SetMat(_litView, view);
         _gl.Uniform4(_litColor, color.R, color.G, color.B, color.A);
         _gl.Uniform1(_litPersp, persp ? 1f : 0f);
+        var clip = ModelClip;
+        _gl.Uniform4(_litClip, clip.X, clip.Y, clip.Z, clip.W);
+        _gl.Uniform1(_litCap, Clip != null ? 1f : 0f);
         _gl.BindVertexArray(m.Vao);
         if (count < 0) count = m.IndexCount;
         _gl.DrawElements(PrimitiveType.Triangles, (uint)count, DrawElementsType.UnsignedInt, (void*)(start * 4));
@@ -318,6 +343,8 @@ public sealed unsafe class GlRenderer : IDisposable
     {
         _gl.UseProgram(_flat);
         SetMat(_flatVP, viewProj);
+        var fc = ModelClip;
+        _gl.Uniform4(_flatClip, fc.X, fc.Y, fc.Z, fc.W);
         _gl.Uniform4(_flatColor, color.R, color.G, color.B, color.A);
         _gl.BindVertexArray(m.Vao);
         _gl.DrawElements(PrimitiveType.Triangles, (uint)count, DrawElementsType.UnsignedInt, (void*)(start * 4));
@@ -329,6 +356,8 @@ public sealed unsafe class GlRenderer : IDisposable
         if (m.EdgeVertexCount == 0) return;
         _gl.UseProgram(_flat);
         SetMat(_flatVP, viewProj);
+        var fc = ModelClip;
+        _gl.Uniform4(_flatClip, fc.X, fc.Y, fc.Z, fc.W);
         _gl.Uniform4(_flatColor, color.R, color.G, color.B, color.A);
         _gl.BindVertexArray(m.EdgeVao);
         _gl.DrawArrays(PrimitiveType.Lines, start, (uint)(count < 0 ? m.EdgeVertexCount : count));

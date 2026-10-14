@@ -71,6 +71,8 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
     public IReadOnlyList<Body> PreviewBodies { get; set; } = Array.Empty<Body>();
     public IReadOnlyList<PlaneDisplay> Planes { get; set; } = Array.Empty<PlaneDisplay>();
     public IReadOnlyList<AxisDisplay> Axes { get; set; } = Array.Empty<AxisDisplay>();
+    /// <summary>The section plane (Section View): the model on the side its normal points to cut away, the cut filled; null for none.</summary>
+    public SpryCad.Kernel.Plane? Section { get; set; }
     public IReadOnlyList<SketchDisplay> Sketches { get; set; } = Array.Empty<SketchDisplay>();
     /// <summary>Placed meshes (an assembly's components), drawn in the display style with their own colors.</summary>
     public IReadOnlyList<MeshInstance> Instances { get; set; } = Array.Empty<MeshInstance>();
@@ -179,6 +181,10 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
 
         var hl = CollectHighlights();
 
+        // the section (Section View): the meshes past its plane cut away (the plane's own side, where its normal points)
+        _r.Clip = Section is { } sec ? new Vector4((float)sec.Normal.X, (float)sec.Normal.Y, (float)sec.Normal.Z, (float)-sec.D) : null;
+        _r.Model = Matrix4x4.Identity;
+
         // solids
         _r.SetupDepth(true, true);
         var ghost = Ghosted && Style is DisplayStyle.ShadedWithEdges or DisplayStyle.Shaded;
@@ -242,7 +248,8 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
             _r.SetupDepth(true, false);
             _r.Gl.DepthFunc(DepthFunction.Greater);
             foreach (var b in Bodies) _r.DrawEdges(_gpu[b.Mesh], new Rgba(0.55f, 0.55f, 0.6f), vp);
-            foreach (var i in Instances) _r.DrawEdges(_gpu[i.Mesh], new Rgba(0.55f, 0.55f, 0.6f), i.Model * vp);
+            foreach (var i in Instances) { _r.Model = i.Model; _r.DrawEdges(_gpu[i.Mesh], new Rgba(0.55f, 0.55f, 0.6f), i.Model * vp); }
+            _r.Model = Matrix4x4.Identity;
             _r.Gl.DepthFunc(DepthFunction.Lequal);
         }
 
@@ -378,6 +385,7 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
             if (Style == DisplayStyle.HiddenLinesVisible) _r.Gl.ColorMask(false, false, false, false);
             foreach (var i in Instances)
             {
+                _r.Model = i.Model;
                 // (an instance see-through by its color: its own faces solid now, the rest blended over after)
                 if (i.Color.A >= 1) _r.DrawMesh(_gpu[i.Mesh], i.Color, i.Model * vp, i.Model * view, Camera.Perspective);
                 if (i.Faces != null && Style != DisplayStyle.HiddenLinesVisible)
@@ -390,15 +398,22 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
             {
                 _r.Blend(true);
                 foreach (var i in Instances)
+                {
+                    _r.Model = i.Model;
                     if (i.Color.A is > 0 and < 1) _r.DrawMesh(_gpu[i.Mesh], i.Color, i.Model * vp, i.Model * view, Camera.Perspective);
+                }
                 _r.Blend(false);
             }
             _r.PolygonOffset(false);
         }
         if (Style != DisplayStyle.Shaded)
             foreach (var i in Instances)
+            {
+                _r.Model = i.Model;
                 if (i.Color.A >= 1) _r.DrawEdges(_gpu[i.Mesh], EdgeColor, i.Model * vp);
                 else if (i.Color.A > 0) { _r.Blend(true); _r.DrawEdges(_gpu[i.Mesh], EdgeColor.WithAlpha(i.Color.A), i.Model * vp); _r.Blend(false); }
+            }
+        _r.Model = Matrix4x4.Identity;
     }
 
     /// <summary>A mesh box placed by a row-vector matrix: the box of its eight corners.</summary>
@@ -445,7 +460,7 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
             void Test(int k)
             {
                 var t = RayTriangle(lo, ld, P(m, m.Indices[k]), P(m, m.Indices[k + 1]), P(m, m.Indices[k + 2]));
-                if (t > 0 && (best == null || t < best.Value.t)) { best = (inst.Id, t, ro + rd * t, null); bestMesh = m; bestTri = k; }
+                if (t > 0 && (best == null || t < best.Value.t) && !Cut(ro + rd * t)) { best = (inst.Id, t, ro + rd * t, null); bestMesh = m; bestTri = k; }
             }
         }
         if (best is { } b && bestMesh != null)
@@ -1517,6 +1532,9 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
 
     // ---- picking ----
 
+    /// <summary>Whether a point is in what the section cuts away (not drawn, so not picked).</summary>
+    bool Cut(Vec3 p) => Section is { } s && s.Distance(p) > 0;
+
     /// <summary>
     /// What is under the cursor that <paramref name="filter"/> accepts. A box asking for axes
     /// (<see cref="SelFilter.Axis"/>) gets a round face's or a circular edge's axis (as SolidWorks' temporary axes)
@@ -1619,7 +1637,7 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         const double edgePx = 6, sketchPx = 6;
 
         // faces (memoized: hover, vertex and edge picks at the same cursor share the ray test)
-        var faceKey = (ro, rd, Bodies, Style);
+        var faceKey = (ro, rd, Bodies, Style, Section);
         if (_faceMemo is { } fm && fm.key.Equals(faceKey)) { best = fm.hit; bestT = fm.t; }
         else if (Style != DisplayStyle.Wireframe)
             foreach (var b in Bodies)
@@ -1631,7 +1649,7 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
                     for (int i = fr.IndexStart; i < fr.IndexStart + fr.IndexCount; i += 3)
                     {
                         var t = RayTri(ro, rd, P(m, m.Indices[i]), P(m, m.Indices[i + 1]), P(m, m.Indices[i + 2]));
-                        if (t > 0 && t < bestT)
+                        if (t > 0 && t < bestT && !Cut(ro + rd * t))
                         {
                             bestT = t;
                             var planar = !fr.Surface.IsCurved;
@@ -1739,7 +1757,7 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
                     {
                         var a = E(m, i); var c = E(m, i + 1);
                         var (d, wp) = ScreenDistance(a, c, x, y);
-                        if (d >= bestPx) continue;
+                        if (d >= bestPx || Cut(wp)) continue;
                         if (faceHit != null && Style != DisplayStyle.Wireframe)
                         {
                             var depth = Vec3.Dot(wp - ro, rd);
@@ -1842,7 +1860,7 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
     }
 
     static Vec3 P(DisplayMesh m, int i) => new(m.Positions[i * 3], m.Positions[i * 3 + 1], m.Positions[i * 3 + 2]);
-    ((Vec3, Vec3, IReadOnlyList<Body>, DisplayStyle) key, SelItem? hit, double t)? _faceMemo;
+    ((Vec3, Vec3, IReadOnlyList<Body>, DisplayStyle, SpryCad.Kernel.Plane?) key, SelItem? hit, double t)? _faceMemo;
     static readonly System.Runtime.CompilerServices.ConditionalWeakTable<DisplayMesh, Box3[]> _edgeBoxes = new();
 
     /// <summary>3D bounds of each display edge (cached per mesh).</summary>

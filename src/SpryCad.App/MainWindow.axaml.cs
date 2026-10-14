@@ -579,7 +579,13 @@ public partial class MainWindow : Window
         {
             case Key.Escape:
                 // (in an assembly: the selected component or mate too)
-                if (_sketch == null) { Selection.Clear(); if (Asm is { Selected: not null } or { SelectedMate: not null }) SelectMate(null); e.Handled = true; }
+                if (_sketch == null)
+                {
+                    Selection.Clear();
+                    if (Asm is { Selected: not null } or { SelectedMate: not null }) SelectMate(null);
+                    if (_asmOriginSel != null) { _asmOriginSel = null; RefreshAssemblyScene(); }
+                    e.Handled = true;
+                }
                 break;
             case Key.Delete:
                 if (_sketch == null && _page == null) { DeleteSelected(); e.Handled = true; }
