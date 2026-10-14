@@ -275,6 +275,7 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         DrawPlanes(_dyn, hl);
         DrawRefAxes(_dyn, hl);
         DrawSectionArrow(_dyn);
+        DrawSectionOutline(_dyn);
         DrawSketches(_dyn, hl);
         if (ShowOrigin) DrawOrigin(_dyn, hl);
         long tm0 = RenderProfile ? Stopwatch.GetTimestamp() : 0;
@@ -447,6 +448,56 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         foreach (var i in Instances)
             if (i.Color.A >= 1) { _r.Model = i.Model; _r.DrawCap(_gpu[i.Mesh], i.Model * vp, Quad(i.Color), vp); }
         _r.Model = Matrix4x4.Identity;
+    }
+
+    // the section's outline per mesh and placement, kept while the plane stays (moved, it is worked out again)
+    readonly Dictionary<(DisplayMesh mesh, Matrix4x4 model), (Vector4 plane, List<Vec3> segs)> _outlines = new();
+
+    /// <summary>
+    /// The section's hard edges: where the plane cuts each body (and each placed component), as edges are drawn, in
+    /// the styles that show edges (not plain Shaded).
+    /// </summary>
+    void DrawSectionOutline(DynamicGeometry g)
+    {
+        if (Section is not { } s || Style == DisplayStyle.Shaded) { _outlines.Clear(); return; }
+        var world = new Vector4((float)s.Normal.X, (float)s.Normal.Y, (float)s.Normal.Z, (float)-s.D);
+        var live = new HashSet<(DisplayMesh, Matrix4x4)>();
+        void One(DisplayMesh m, Matrix4x4 model)
+        {
+            var key = (m, model);
+            live.Add(key);
+            if (!_outlines.TryGetValue(key, out var o) || o.plane != world) _outlines[key] = o = (world, Outline(m, model, world));
+            for (int k = 0; k + 1 < o.segs.Count; k += 2) g.Line(o.segs[k], o.segs[k + 1], EdgeColor);
+        }
+        foreach (var b in Bodies) One(b.Mesh, Matrix4x4.Identity);
+        foreach (var i in Instances) if (i.Color.A > 0) One(i.Mesh, i.Model);
+        foreach (var k in _outlines.Keys.Where(k => !live.Contains(k)).ToList()) _outlines.Remove(k);
+    }
+
+    /// <summary>Where a plane (world) cuts a placed mesh's triangles: the segments, in pairs of world points.</summary>
+    static List<Vec3> Outline(DisplayMesh m, Matrix4x4 model, Vector4 world)
+    {
+        var p = Vector4.Transform(world, Matrix4x4.Transpose(model)); // the plane in the mesh's own coordinates
+        var segs = new List<Vec3>();
+        var idx = m.Indices;
+        double D(Vec3 v) => p.X * v.X + p.Y * v.Y + p.Z * v.Z + p.W;
+        Vec3 W(Vec3 q) { var v = Vector3.Transform(new Vector3((float)q.X, (float)q.Y, (float)q.Z), model); return new Vec3(v.X, v.Y, v.Z); }
+        for (int t = 0; t + 2 < idx.Length; t += 3)
+        {
+            Vec3 a = P(m, idx[t]), b = P(m, idx[t + 1]), c = P(m, idx[t + 2]);
+            double da = D(a), db = D(b), dc = D(c);
+            if (da < 0 == db < 0 && db < 0 == dc < 0) continue; // all one side
+            int n = 0; Vec3 q0 = default, q1 = default;
+            void Cross(Vec3 u, double du, Vec3 v, double dv)
+            {
+                if (du < 0 == dv < 0) return;
+                var q = u + (v - u) * (du / (du - dv));
+                if (n++ == 0) q0 = q; else q1 = q;
+            }
+            Cross(a, da, b, db); Cross(b, db, c, dc); Cross(c, dc, a, da);
+            if (n == 2) { segs.Add(W(q0)); segs.Add(W(q1)); }
+        }
+        return segs;
     }
 
     /// <summary>A mesh box placed by a row-vector matrix: the box of its eight corners.</summary>

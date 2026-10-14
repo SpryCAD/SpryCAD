@@ -389,7 +389,9 @@ public sealed unsafe class GlRenderer : IDisposable
         _gl.DepthFunc(DepthFunction.Lequal);
         _gl.StencilFunc(StencilFunction.Equal, 1, 1);
         _gl.StencilOp(StencilOp.Keep, StencilOp.Keep, StencilOp.Keep);
+        PolygonOffset(true, 1, 1); // (behind the cut's outline, drawn on it)
         DrawDynamic(cap, PrimitiveType.Triangles, viewProj);
+        PolygonOffset(false);
         _gl.Disable(EnableCap.StencilTest);
     }
 
