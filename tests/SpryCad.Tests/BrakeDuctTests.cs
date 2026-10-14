@@ -147,9 +147,10 @@ static class BrakeDuctTests
             t.True(r.Status[collar.Id].Warnings.Count == 0, string.Join("; ", r.Status[collar.Id].Warnings));
             // no sharp stretch of the seam left between the collar and the loft
             t.Eq(EdgesBetween(body, n => n == "F9ykg06njewzt.S.C63kc9mekgs5", n => n.StartsWith("Fbqb9zpmy19f8.", StringComparison.Ordinal)), 0);
-            // each stretch fading out to a point where the seam turns tangent: no end cap left short of it (outside: inside,
-            // the concave stretch made again at R0.13 does not join, and the convex one staged round it keeps its ends)
-            var caps = body.Faces.Where(f => Capped(f, collar.Id) && !f.Tag.Name.Contains(".I.", StringComparison.Ordinal)).ToList();
+            // each stretch fading out to a point where the seam turns tangent, outside and in: no end cap left short of it
+            var caps = body.Faces.Where(f => Capped(f, collar.Id)).ToList();
+            // and made inside too (the seam split where it turns before its two kinds were filleted at their own radii)
+            t.True(r.Status[shell.Id].Warnings.All(w => !w.Contains("Not inside")), string.Join("; ", r.Status[shell.Id].Warnings));
             t.True(caps.Count == 0, "a fade-out end capped short of the point: " + string.Join(", ", caps.Select(f => f.Tag.Name + " at " + f.Coedges.First().Start.P)));
         });
     }

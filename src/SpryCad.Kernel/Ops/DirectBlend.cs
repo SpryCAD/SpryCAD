@@ -63,7 +63,12 @@ public static class DirectBlend
                 work ??= body.Clone();
                 NBody? next;
                 string? why;
-                using (Prof.Time("blend.direct")) next = Try(work, tool, out why);
+                using (Prof.Time("blend.direct"))
+                {
+                    next = Try(work, tool, out why, crossings: false);
+                    // (the body's edges crossing a strip: looked for only where they run into it, then split where they cross)
+                    if (next == null && why != null && why.StartsWith("other edges of ", StringComparison.Ordinal)) next = Try(work, tool, out why, crossings: true);
+                }
                 if (next != null) { work = next; any = true; }
                 if (why != null && glueWhy != null) why += $" (not glued: {glueWhy})";
                 foreach (var k in members)
@@ -206,7 +211,7 @@ public static class DirectBlend
     /// The tool applied to the body (edited in place, or a new body after splitting faces at their seams); null and
     /// the reason when it cannot be (the body is then as it was).
     /// </summary>
-    static NBody? Try(NBody body, Tool tool, out string? why)
+    static NBody? Try(NBody body, Tool tool, out string? why, bool crossings)
     {
         why = null;
         var sw = System.Diagnostics.Stopwatch.StartNew();
@@ -285,7 +290,7 @@ public static class DirectBlend
         // faces traced by side, not by cancelling, and the part of the strip off the face made a face where it leaves
         // material on one side only (see below)
         var crossed = new HashSet<NFace>(Ref);
-        foreach (var t in support)
+        foreach (var t in crossings ? support : new List<NFace>())
         {
             if (t.Surface.Kind != SurfaceKind.Plane) continue;
             var n = t.Surface.Plane!.Normal;

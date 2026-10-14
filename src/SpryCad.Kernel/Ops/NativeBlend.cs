@@ -175,6 +175,20 @@ public static class NativeBlend
     /// nearest its middle), and the new edges between their faces and the first blends' faces, near where they
     /// met (a fillet's arcs round a rounded corner, a chamfer's short lines across it).
     /// </summary>
+    /// <summary>
+    /// The body (a copy) with the edges that turn from concave to convex along their length split where they do, and
+    /// all the pieces, each of one kind (to blend each kind at its own size: a fillet made again inside a shell); null
+    /// where no edge turns.
+    /// </summary>
+    public static (Solid body, List<NEdge> pieces)? SplitAtFlips(Solid body, IReadOnlyList<NEdge> edges)
+        => SplitFlips(body, edges) is { } s ? (s.body, s.edges.Concat(s.others).ToList()) : null;
+
+    /// <summary>
+    /// The edges still to blend on the body earlier blends left: each one's remains (between the same faces, nearest
+    /// its middle). See <see cref="Rest"/>.
+    /// </summary>
+    public static List<NEdge> OnResult(NBody before, NBody after, List<NEdge> edges, double size) => Rest(before, after, edges, "", size, joins: false);
+
     static List<NEdge> Rest(NBody before, NBody after, List<NEdge> edges, string firstPrefix, double size, bool joins = true)
     {
         after.Link();

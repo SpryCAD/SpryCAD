@@ -1476,11 +1476,20 @@ public sealed class Regenerator
                             seeds.Add(hit.Item2);
                         }
                         var edges = NativeBlend.Expand(inner.Native!, seeds, ff.TangentPropagation);
+                        // (an edge turning from concave to convex along its length split where it does first: each piece
+                        // filleted at its own kind's radius, fading out where they meet)
+                        if (NativeBlend.SplitAtFlips(inner, edges) is { } split) (inner, edges) = (split.body, split.pieces);
+                        var beforeKinds = inner.Native!;
+                        bool applied = false;
                         foreach (var convex in new[] { true, false })
                         {
                             var group = edges.Where(e => NativeBlend.IsConvex(e) == convex).ToList();
                             var radius = convex ? r - t : r + t;
                             if (group.Count == 0 || radius <= 1e-6 * Math.Max(1, inner.Bounds.Diagonal)) continue;
+                            // (the second kind's edges on the body the first left, not the one before it)
+                            if (applied) group = NativeBlend.OnResult(beforeKinds, inner.Native!, group, radius);
+                            if (group.Count == 0) continue;
+                            applied = true;
                             var errors = new List<string>();
                             inner = NativeBlend.Apply(inner, group, radius, true, f.Id + ".I." + ff.Id, errors, ff.Overflow);
                             if (errors.Count > 0)
