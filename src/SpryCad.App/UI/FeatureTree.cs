@@ -24,7 +24,7 @@ public sealed class FeatureTree : UserControl
     Point _pressAt;
     bool _moving;
 
-    public event Action<string?>? SelectedChanged;        // feature id, or "Front"/"Top"/"Right"/"Origin"
+    public event Action<string?>? SelectedChanged;        // feature id, or an origin row: "Origin", "Front"/"Top"/"Right", "AxisX"/"AxisY"/"AxisZ", "OriginPoint"
     public event Action<string>? EditRequested;
     public event Action<string, Point, Control>? ContextRequested;
     public event Action<string>? HoverChanged;
@@ -102,10 +102,18 @@ public sealed class FeatureTree : UserControl
         _pressId = null; _moving = false; _dropLine.IsVisible = false;
         AddRow("__part", title, "part", 0, null, isHeader: true, hasChildren: Flyout);
         if (Flyout && !FlyoutOpen) { Select(_selectedId); return; }
-        AddRow("Origin", "Origin", "origin", 1, null);
-        AddRow("Front", "Front Plane", "plane", 1, null);
-        AddRow("Top", "Top Plane", "plane", 1, null);
-        AddRow("Right", "Right Plane", "plane", 1, null);
+        // the origin: a folder of the three planes, the three axes and the origin point
+        AddRow("Origin", "Origin", "folder", 1, null, hasChildren: true);
+        if (_expanded.Contains("Origin"))
+        {
+            AddRow("Front", "Front Plane", "plane", 2, null);
+            AddRow("Top", "Top Plane", "plane", 2, null);
+            AddRow("Right", "Right Plane", "plane", 2, null);
+            AddRow("AxisX", "X Axis", "axis", 2, null);
+            AddRow("AxisY", "Y Axis", "axis", 2, null);
+            AddRow("AxisZ", "Z Axis", "axis", 2, null);
+            AddRow("OriginPoint", "Origin Point", "origin", 2, null);
+        }
 
         // sketches consumed by a later feature are shown as its children
         var consumedBy = new Dictionary<string, string>();
@@ -240,7 +248,7 @@ public sealed class FeatureTree : UserControl
         Border? last = null;
         for (int i = 0; i < kids.Count; i++)
         {
-            if (kids[i] is not Border b || b.Tag is not string id || id.StartsWith("__") || id is "Origin" or "Front" or "Top" or "Right") continue;
+            if (kids[i] is not Border b || b.Tag is not string id || id.StartsWith("__") || OriginRows.Contains(id)) continue;
             last = b;
             if (y < b.Bounds.Bottom)
             {
@@ -255,7 +263,10 @@ public sealed class FeatureTree : UserControl
 
     public event Action<string, bool>? RollbackTo;
 
-    static bool IsFeatureRow(string id) => !id.StartsWith("__") && id is not ("Origin" or "Front" or "Top" or "Right");
+    static bool IsFeatureRow(string id) => !id.StartsWith("__") && !OriginRows.Contains(id);
+
+    /// <summary>The origin folder and its rows (no features: not moved, not rolled back to).</summary>
+    public static readonly HashSet<string> OriginRows = ["Origin", "Front", "Top", "Right", "AxisX", "AxisY", "AxisZ", "OriginPoint"];
 
     /// <summary>
     /// Where a feature dragged to <paramref name="y"/> drops: before/after a feature (a nested sketch row counts as

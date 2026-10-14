@@ -108,13 +108,13 @@ public partial class MainWindow
     }
 
     /// <summary>A reference shown in its box again (editing a plane).</summary>
-    static SelItem? PlaneRefItem(PlaneReference r, ModelState st)
+    SelItem? PlaneRefItem(PlaneReference r, ModelState st)
     {
         if (r.Plane != null) return PlaneItem(r.Plane, st);
         if (r.Round != null) return FaceItem(r.Round);
         if (r.Curve?.Edge is { } e) return EdgeItem(e, st);
         if (r.Curve?.Sketch is { } cs) return new SelItem { Kind = SelKind.SketchSegment, FeatureId = cs, SketchItem = r.Curve.SketchEntity };
-        if (r.Line != null) return DirItem(r.Line, st) ?? (r.Line.Axis is { } a ? new SelItem { Kind = SelKind.Axis, Name = a + " axis" } : null);
+        if (r.Line != null) return DirItem(r.Line, st) ?? (r.Line.Axis is { } a ? WorldAxisItem(a) : null);
         if (r.Point != null) return PointItem(r.Point, st);
         return null;
     }

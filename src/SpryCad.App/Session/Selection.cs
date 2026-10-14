@@ -51,6 +51,9 @@ public sealed class SelItem
     /// <summary>Where on it it was clicked (an edge's <see cref="Point"/> is its midpoint).</summary>
     public Vec3? At { get; init; }
 
+    /// <summary>An axis of the origin (X, Y or Z): an Axis of no body, edge or feature.</summary>
+    public bool IsWorldAxis => Kind == SelKind.Axis && BodyId == null && Edge == null && FeatureId == null && Name is "X" or "Y" or "Z";
+
     public string Key => Kind switch
     {
         SelKind.Face => $"F:{BodyId}:{Name}",
@@ -75,7 +78,7 @@ public sealed class SelItem
         SelKind.Body => $"Body<{DisplayNames.Face(doc, BodyId)}>",
         SelKind.Vertex => FeatureId != null ? $"{SketchItemName(doc)}@{doc.Find(FeatureId)?.Name}" : IsCenter ? $"Center<Ø{2 * CenterRadius:0.###}>" : "Vertex<" + $"{Point.X:0.##}, {Point.Y:0.##}, {Point.Z:0.##}>",
         SelKind.SketchSegment => $"{SketchItemName(doc)}@{doc.Find(FeatureId!)?.Name}",
-        SelKind.Axis => FeatureId != null ? doc.Find(FeatureId)?.Name ?? "Axis" : $"Axis<{ShortName(DisplayNames.Face(doc, Name ?? Edge?.A))}>",
+        SelKind.Axis => FeatureId != null ? doc.Find(FeatureId)?.Name ?? "Axis" : IsWorldAxis ? $"{Name} Axis" : $"Axis<{ShortName(DisplayNames.Face(doc, Name ?? Edge?.A))}>",
         _ => "Origin",
     };
 
@@ -116,6 +119,7 @@ public sealed class SelItem
     {
         // an axis: of its round face, else of its circular edge
         if (Kind == SelKind.Axis && FeatureId != null) return new DirRef { Feature = FeatureId };
+        if (IsWorldAxis) return new DirRef { Axis = Name };
         if (Kind == SelKind.Axis) return Name != null ? new DirRef { Face = ToFaceRef() } : Edge != null ? new DirRef { Edge = Edge.Clone() } : null;
         if (Kind == SelKind.Edge && Edge != null) return new DirRef { Edge = Edge.Clone() };
         if (Kind == SelKind.Face) return new DirRef { Face = ToFaceRef() };

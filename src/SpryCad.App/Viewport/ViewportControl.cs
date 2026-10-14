@@ -654,6 +654,23 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         return (o + d * lo, o + d * hi);
     }
 
+    /// <summary>
+    /// Where a plane's label goes: its side leftmost on screen, from the end the text starts at to the other (reading
+    /// up a steep side, else left to right); null when the plane is not in the scene.
+    /// </summary>
+    public (Point from, Point to)? PlaneLabelSide(string name, string? featureId)
+    {
+        var p = Planes.FirstOrDefault(x => featureId != null ? x.FeatureId == featureId : x.FeatureId == null && x.Name == name);
+        if (p == null) return null;
+        var (lo, hi) = SizeOf(p);
+        var c = new[] { lo, new Vec2(hi.X, lo.Y), hi, new Vec2(lo.X, hi.Y) }
+            .Select(v => Camera.Project(p.Frame.ToWorld(v))).Select(s => new Point(s.X, s.Y)).ToArray();
+        var (a, b) = Enumerable.Range(0, 4).Select(i => (c[i], c[(i + 1) % 4])).MinBy(e => e.Item1.X + e.Item2.X);
+        var steep = Math.Abs(b.Y - a.Y) > Math.Abs(b.X - a.X);
+        if (steep ? a.Y < b.Y : a.X > b.X) (a, b) = (b, a);
+        return (a, b);
+    }
+
     /// <summary>The tint of an origin plane: the triad colour of the axis square to it (Front: Z, Top: Y, Right: X); null for any other.</summary>
     public static Rgba? OriginPlaneTint(string name) => name switch
     {

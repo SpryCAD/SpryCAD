@@ -414,6 +414,13 @@ public partial class MainWindow : Window
             _page.HandlePick(new SelItem { Kind = SelKind.Plane, Name = id, Frame = Resolver.StdPlane(id) });
             return;
         }
+        // an origin axis into a box that takes axes or lines
+        if (_page?.ActiveBox != null && WorldAxisItem(id) is { } wax && PmPage.Matches(_page.ActiveBox.Filter, wax))
+        {
+            _page.HandlePick(wax);
+            RefreshScene();
+            return;
+        }
         if (_page?.ActiveBox != null && (_page.ActiveBox.Filter & SelFilter.Sketch) != 0 && Session.Doc.Find(id) is SketchFeature sf)
         {
             _page.HandlePick(new SelItem { Kind = SelKind.Sketch, FeatureId = sf.Id });
@@ -427,7 +434,13 @@ public partial class MainWindow : Window
             case "Right":
                 Selection.Set(new SelItem { Kind = SelKind.Plane, Name = id, Frame = Resolver.StdPlane(id) });
                 break;
+            case "AxisX":
+            case "AxisY":
+            case "AxisZ":
+                Selection.Set(WorldAxisItem(id)!);
+                break;
             case "Origin":
+            case "OriginPoint":
             case "__part":
                 Selection.Clear();
                 break;
@@ -441,12 +454,26 @@ public partial class MainWindow : Window
         }
     }
 
+    /// <summary>
+    /// An axis of the origin as a pick, from its tree row ("AxisX") or its letter ("X"); drawn through the origin as
+    /// far as the origin planes reach. Null for anything else.
+    /// </summary>
+    SelItem? WorldAxisItem(string id)
+    {
+        var a = id.StartsWith("Axis") ? id[4..] : id;
+        if (a is not ("X" or "Y" or "Z")) return null;
+        var b = Session.Result?.State.Bounds ?? default;
+        var half = b.IsEmpty ? 50 : Math.Max(30, b.Diagonal * 0.55);
+        return new SelItem { Kind = SelKind.Axis, Name = a, Point = Vec3.Zero, Normal = a == "X" ? Vec3.UnitX : a == "Y" ? Vec3.UnitY : Vec3.UnitZ, AxisHalfLength = half };
+    }
+
     void OnTreeHover(string id)
     {
         if (string.IsNullOrEmpty(id)) { Viewport.Hover = null; Viewport.Redraw(); return; }
         Viewport.Hover = id switch
         {
             "Front" or "Top" or "Right" => new SelItem { Kind = SelKind.Plane, Name = id },
+            "AxisX" or "AxisY" or "AxisZ" => WorldAxisItem(id),
             _ => Session.Doc.Find(id) switch
             {
                 SketchFeature => new SelItem { Kind = SelKind.Sketch, FeatureId = id },
@@ -784,7 +811,34 @@ public partial class MainWindow : Window
             _triadLabels[i] = new TextBlock { Text = names[i], Foreground = colors[i], FontWeight = FontWeight.Bold, FontSize = 11, IsHitTestVisible = false };
             Overlay.Children.Add(_triadLabels[i]);
         }
+        Overlay.Children.Add(_planeLabel);
         UpdateTriadLabels();
+    }
+
+    // the name of the plane hovered or selected, small along its side (as the tree names it)
+    readonly TextBlock _planeLabel = new()
+    {
+        FontSize = 11, FontWeight = FontWeight.SemiBold, IsHitTestVisible = false, IsVisible = false,
+        RenderTransformOrigin = new RelativePoint(0, 0, RelativeUnit.Relative),
+    };
+
+    void UpdatePlaneLabel()
+    {
+        var hover = Viewport.Hover is { Kind: SelKind.Plane } h ? h : null;
+        var it = hover ?? Selection.Items.FirstOrDefault(s => s.Kind == SelKind.Plane);
+        var name = it == null ? null : it.FeatureId != null ? Session.Doc.Find(it.FeatureId)?.Name : it.Name + " Plane";
+        if (it == null || name == null || Viewport.PlaneLabelSide(it.Name ?? "", it.FeatureId) is not { } side) { _planeLabel.IsVisible = false; return; }
+        var (a, b) = side;
+        var len = Math.Sqrt((b.X - a.X) * (b.X - a.X) + (b.Y - a.Y) * (b.Y - a.Y));
+        if (len < 40) { _planeLabel.IsVisible = false; return; } // edge on, or too small to read
+        double ux = (b.X - a.X) / len, uy = (b.Y - a.Y) / len;
+        _planeLabel.Text = name;
+        _planeLabel.Foreground = hover != null ? Brushes.DarkOrange : Palette.Accent;
+        _planeLabel.RenderTransform = new RotateTransform(Math.Atan2(uy, ux) * 180 / Math.PI);
+        // a little in from the corner, along the side, and just inside the plane
+        Canvas.SetLeft(_planeLabel, a.X + ux * 8 - uy * 3);
+        Canvas.SetTop(_planeLabel, a.Y + uy * 8 + ux * 3);
+        _planeLabel.IsVisible = true;
     }
 
     void UpdateTriadLabels()
@@ -795,6 +849,7 @@ public partial class MainWindow : Window
             var p = Viewport.TriadLabel(axes[i]);
             Canvas.SetLeft(_triadLabels[i], p.X - 4); Canvas.SetTop(_triadLabels[i], p.Y - 8);
         }
+        UpdatePlaneLabel();
         if (_sketch != null)
         {
             var c = _sketch.Status;

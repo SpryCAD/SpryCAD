@@ -34,8 +34,8 @@ public partial class MainWindow
         _ => null,
     };
 
-    static SelItem? AxisRefItem(AxisReference r, ModelState st) =>
-        r.Plane != null ? PlaneItem(r.Plane, st) : r.Line != null ? DirItem(r.Line, st) : r.Point != null ? PointItem(r.Point, st) : null;
+    SelItem? AxisRefItem(AxisReference r, ModelState st) =>
+        r.Plane != null ? PlaneItem(r.Plane, st) : r.Line != null ? DirItem(r.Line, st) ?? (r.Line.Axis is { } a ? WorldAxisItem(a) : null) : r.Point != null ? PointItem(r.Point, st) : null;
 
     void OpenAxisPage(AxisFeature f, bool isNew)
     {
