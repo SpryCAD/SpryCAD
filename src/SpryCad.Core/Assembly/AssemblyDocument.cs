@@ -29,6 +29,11 @@ public sealed partial class AssemblyDocument
     public string? DerivedFrom { get; set; }
     public UnitSystem Units { get; set; } = UnitSystem.MMGS;
     public List<Component> Components { get; set; } = new();
+    /// <summary>
+    /// The origin planes ("Front", "Top", "Right") shown (true) or hidden (false) by their eyes in the tree; one not
+    /// listed is shown while the assembly is empty. Null when none is set.
+    /// </summary>
+    public Dictionary<string, bool>? PlaneVisibility { get; set; }
     public int NextComponentId { get; set; } = 1;
     /// <summary>The mates, in the order they were added (solved together).</summary>
     public List<Mate> Mates { get; set; } = new();

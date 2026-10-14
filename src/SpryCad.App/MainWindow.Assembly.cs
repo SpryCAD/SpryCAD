@@ -139,6 +139,9 @@ public partial class MainWindow : IAssemblyHost
         _asmTree = new AssemblyTree { IsVisible = false };
         _asmTree.Selected += id => SelectComponent(id, exact: true);
         _asmTree.MateSelected += SelectMate;
+        _asmTree.PlaneVisibilityToggled += ToggleAssemblyPlane;
+        // an origin plane clicked while faces are being picked (a mate, a motor, a pattern): it is the pick
+        _asmTree.OriginPicked += o => { if (PickingFaces && Asm is { } pa && o is "Front" or "Top" or "Right") PickRef(pa.Model.RefTo(null, o), ""); };
         _asmTree.Opened += OpenComponent;
         _asmTree.MateCommand += OnMateCommand;
         _asmTree.Command += OnComponentCommand;
@@ -336,10 +339,11 @@ public partial class MainWindow : IAssemblyHost
         Viewport.BendLines = Array.Empty<ViewportControl.BendLine>();
         Viewport.CosmeticThreads = threads;
         Viewport.Sketches = Array.Empty<SketchDisplay>();
-        var planes = new List<PlaneDisplay>
-        {
-            new("Front", null, Frame.Front, half), new("Top", null, Frame.Top, half), new("Right", null, Frame.Right, half),
-        };
+        // the origin planes: as their eyes in the tree say, else shown while the assembly is empty; tinted as the triad
+        bool StdShown(string std) => a.Model.Doc.PlaneVisibility?.TryGetValue(std, out var v) == true ? v : a.Model.Doc.Components.Count == 0;
+        var planes = new List<PlaneDisplay>();
+        foreach (var (std, fr) in new[] { ("Front", Frame.Front), ("Top", Frame.Top), ("Right", Frame.Right) })
+            planes.Add(new PlaneDisplay(std, null, fr, half, StdShown(std), Tint: ViewportControl.OriginPlaneTint(std)));
         // a sub-assembly's origin plane picked (or hovered on the Mate page): drawn where the sub-assembly is
         static Frame Placed(Frame f, Transform t) => new(t.Point(f.Origin), t.Vector(f.XDir), t.Vector(f.YDir), t.Vector(f.Normal));
         var subPlanes = (PagePicks ?? (SelectedMate() is { } spm ? new List<MateRef> { spm.A, spm.B } : new List<MateRef>())).Append(_hoverPick)
@@ -351,7 +355,7 @@ public partial class MainWindow : IAssemblyHost
                 planes.Add(new PlaneDisplay(r.Face, r.Component, Placed(f, a.Model.WorldOf(r.Component!)), Math.Max(10, a.Model.WorldBounds(r.Component!).Diagonal * 0.4)));
         }
         Viewport.Planes = planes;
-        Viewport.ShowPlanes = _showPlanes || inst.Count == 0;
+        Viewport.ShowPlanes = _showPlanes; // (each plane as its eye says, unless the Planes view shows them all)
         // the origin planes the selected mate (or the Mate page's picks) use: shown highlighted as its faces are (the
         // pick selected in the Mate Selections box in full blue, the other paler); one hovered on the page in orange
         var refs = PagePicks ?? (SelectedMate() is { } sm ? new List<MateRef> { sm.A, sm.B } : new List<MateRef>());
@@ -716,6 +720,22 @@ public partial class MainWindow : IAssemblyHost
 
     /// <summary>The mate selected in the tree (none while the Mate page shows its own picks).</summary>
     Mate? SelectedMate() => Asm is { SelectedMate: { } id } a && _mating == null ? a.Model.Doc.Mates.FirstOrDefault(m => m.Id == id) : null;
+
+    /// <summary>Shows or hides an origin plane of the assembly (its eye in the tree): saved with it, undoable.</summary>
+    void ToggleAssemblyPlane(string std)
+    {
+        if (Asm is not { } a) return;
+        var doc = a.Model.Doc;
+        var empty = doc.Components.Count == 0;
+        var shown = doc.PlaneVisibility?.TryGetValue(std, out var v) == true ? v : empty;
+        a.BeginChange();
+        // (back to automatic when that is what it would be anyway)
+        if (!shown == empty) doc.PlaneVisibility?.Remove(std);
+        else (doc.PlaneVisibility ??= new())[std] = !shown;
+        if (doc.PlaneVisibility is { Count: 0 }) doc.PlaneVisibility = null;
+        a.EndChange();
+        Status($"{std} Plane {(shown ? "hidden" : "shown")}");
+    }
 
     public void SelectComponent(string? id) => SelectComponent(id, exact: false);
 

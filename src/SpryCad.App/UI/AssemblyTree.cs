@@ -25,7 +25,7 @@ public sealed class AssemblyTree : DockPanel
     readonly StackPanel _notes = new() { Spacing = 4, Margin = new Thickness(8, 6) };
     readonly Dictionary<string, Border> _rowById = new();
     string? _selected;        // a component's path, "mate:" + a mate's id, or "pattern:" + a pattern's
-    bool _matesOpen = true, _patternsOpen = true;
+    bool _matesOpen = true, _patternsOpen = true, _originOpen;
     /// <summary>The sub-assemblies shown open (by path).</summary>
     readonly HashSet<string> _open = new();
     string? _doubleClicked;
@@ -51,6 +51,10 @@ public sealed class AssemblyTree : DockPanel
     /// "bom", "mass", "interference", "explode", "packgo", "showall".
     /// </summary>
     public event Action<string>? AssemblyCommand;
+    /// <summary>An origin plane's eye clicked ("Front", "Top" or "Right").</summary>
+    public event Action<string>? PlaneVisibilityToggled;
+    /// <summary>An origin row clicked: "Front"/"Top"/"Right", "AxisX"/"AxisY"/"AxisZ" or "Point".</summary>
+    public event Action<string>? OriginPicked;
 
     static IBrush Red => Palette.Danger;
     static IBrush Dim => Palette.TextMuted;
@@ -91,6 +95,7 @@ public sealed class AssemblyTree : DockPanel
     void Pick(string key)
     {
         Highlight(key);
+        if (key.StartsWith("origin:")) { OriginPicked?.Invoke(key["origin:".Length..]); return; }
         if (SelectedMate is { } mate) MateSelected?.Invoke(mate);
         else Selected?.Invoke(key != "__asm" && !key.StartsWith("pattern:") ? key : null);
     }
@@ -105,6 +110,16 @@ public sealed class AssemblyTree : DockPanel
         var configs = m.Doc.ConfigurationNames;
         AddRow("__asm", 0, "assembly", s.Title.TrimEnd(' ', '*'), note: configs.Count > 1 ? m.Doc.ActiveConfigurationName : null, header: true, menu: AssemblyMenu(m),
             tip: configs.Count > 1 ? $"Configuration: {m.Doc.ActiveConfigurationName} (right-click to change)" : "Right-click for configurations, the bill of materials and more");
+        // the origin, as the part's tree has it: a folder of the three planes (each with an eye), the axes and the point
+        AddRow("__origin", 1, "folder", "Origin", folder: true, expander: (_originOpen, () => { _originOpen = !_originOpen; Show(s); }));
+        if (_originOpen)
+        {
+            var empty = m.Doc.Components.Count == 0;
+            foreach (var (std, label) in new[] { ("Front", "Front Plane"), ("Top", "Top Plane"), ("Right", "Right Plane") })
+                AddRow("origin:" + std, 2, "plane", label, eye: m.Doc.PlaneVisibility?.TryGetValue(std, out var v) == true ? v : empty);
+            foreach (var ax in new[] { "X", "Y", "Z" }) AddRow("origin:Axis" + ax, 2, "axis", ax + " Axis");
+            AddRow("origin:Point", 2, "origin", "Origin Point");
+        }
         foreach (var c in m.Doc.Components) ComponentRow(m, m.Find(c.Id)!, 1);
         // the mates, in their folder
         if (m.Doc.Mates.Count > 0)
@@ -214,7 +229,7 @@ public sealed class AssemblyTree : DockPanel
 
     /// <summary>A row as the part's tree draws them: an arrow (folders, sub-assemblies), the icon, the name, a note in grey.</summary>
     void AddRow(string key, int indent, string icon, string text, string? note = null, bool header = false, bool folder = false,
-        bool bad = false, bool dim = false, string? tip = null, ContextMenu? menu = null, (bool open, Action toggle)? expander = null)
+        bool bad = false, bool dim = false, string? tip = null, ContextMenu? menu = null, (bool open, Action toggle)? expander = null, bool? eye = null)
     {
         // as the part's tree (UI/TreeRow.cs): as wide as the tree, the grey note trimmed first when the row is too
         // long, then the name; the whole of it on the row's tip
@@ -233,6 +248,7 @@ public sealed class AssemblyTree : DockPanel
             sp.Shrink.Add(nb);
         }
         sp.Shrink.Add(tb);
+        if (eye is { } shown) sp.Children.Add(EyeButton(key, shown));
         var row = new Border { Classes = { "treerow" }, Child = sp, Tag = key, ContextMenu = menu };
         if (tip != null || note != null) ToolTip.SetTip(row, (note != null ? $"{text}  {note}" : text) + (tip != null ? "\n" + tip : ""));
         row.PointerPressed += (_, e) =>
@@ -267,6 +283,27 @@ public sealed class AssemblyTree : DockPanel
         };
         _rowById[key] = row;
         _rows.Children.Add(row);
+    }
+
+    /// <summary>An origin plane's eye: shown or hidden in the graphics area, a click the other way round.</summary>
+    Control EyeButton(string key, bool shown)
+    {
+        var b = new Border
+        {
+            Child = Icons.Make(shown ? "show" : "hide", 14), Padding = new Thickness(2), CornerRadius = new CornerRadius(3), Background = Brushes.Transparent,
+            VerticalAlignment = VerticalAlignment.Center, Cursor = new Cursor(StandardCursorType.Hand), Margin = new Thickness(2, 0, 0, 0),
+            Opacity = shown ? 1 : 0.6,
+        };
+        ToolTip.SetTip(b, shown ? "Hide the plane" : "Show the plane");
+        b.PointerEntered += (_, _) => b.Background = Palette.SelectedBg;
+        b.PointerExited += (_, _) => b.Background = Brushes.Transparent;
+        b.PointerPressed += (_, e) =>
+        {
+            if (!e.GetCurrentPoint(b).Properties.IsLeftButtonPressed) return;
+            e.Handled = true; // not a row press
+            PlaneVisibilityToggled?.Invoke(key["origin:".Length..]);
+        };
+        return b;
     }
 
     static string IconFor(MateType t) => MainWindow.MateIcon(t);
