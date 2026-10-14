@@ -522,8 +522,8 @@ public partial class MainWindow : Window
                 case Key.S: if (shift) _ = SaveAs(); else _ = Save(); break;
                 case Key.Z: if (!inText) Undo(); else handled = false; break;
                 case Key.Y: if (!inText) Redo(); else handled = false; break;
-                case Key.B: Session.RequestRebuild(); break;
-                case Key.Q: Session.ForceRebuild(); break;
+                case Key.B: Rebuild(); break;
+                case Key.Q: Rebuild(force: true); break;
                 case Key.W or Key.F4: _ = CloseTab(_tab); break;
                 case Key.Tab: _ = CycleTab(shift ? -1 : 1); break;
                 case Key.E: ShowPartsList(); break;
@@ -552,7 +552,8 @@ public partial class MainWindow : Window
                 if (_edit != null) CancelEdit(); else _page.OnCancel?.Invoke();
                 e.Handled = true; return;
             }
-            if (e.Key == Key.Enter && _edit != null && !(e.Source is TextBox { AcceptsReturn: true }))
+            // (a feature being edited, or an assembly's page: Insert Components, Mate, ...)
+            if (e.Key == Key.Enter && (_edit != null || Asm != null) && !(e.Source is TextBox { AcceptsReturn: true }))
             {
                 // let a text field commit its value first (it parses on change), then accept the page
                 Avalonia.Threading.Dispatcher.UIThread.Post(() => _page?.OnOk?.Invoke());
@@ -577,7 +578,8 @@ public partial class MainWindow : Window
         switch (e.Key)
         {
             case Key.Escape:
-                if (_sketch == null) { Selection.Clear(); e.Handled = true; }
+                // (in an assembly: the selected component or mate too)
+                if (_sketch == null) { Selection.Clear(); if (Asm is { Selected: not null } or { SelectedMate: not null }) SelectMate(null); e.Handled = true; }
                 break;
             case Key.Delete:
                 if (_sketch == null && _page == null) { DeleteSelected(); e.Handled = true; }
@@ -734,7 +736,8 @@ public partial class MainWindow : Window
             foreach (var t in _parts) t.Session.RefreshLock();
         }
         if (_autosaving is { IsCompleted: false }) return;
-        var dirty = _parts.Where(t => t.Session.Dirty && !t.Session.IsPending).ToList();
+        // (an assembly tab's part session is a blank stand-in, never a part to keep)
+        var dirty = _parts.Where(t => t.Asm == null && t.Session.Dirty && !t.Session.IsPending).ToList();
         if (dirty.Count == 0) return;
         // copies of the parts, written off the UI thread: compressing an imported model's file takes long enough to be
         // felt, and the part being edited is not touched by it

@@ -145,6 +145,7 @@ public static class Dialogs
 
     public static async Task Equations(MainWindow owner)
     {
+        if (owner.PartOnly("Equations")) return;
         var session = owner.Session;
         var rows = session.Doc.Equations.Select(Serialization.Clone).ToList();
         var tables = session.Doc.Tables;
@@ -311,6 +312,7 @@ public static class Dialogs
     /// </summary>
     public static async Task DesignTables(MainWindow owner)
     {
+        if (owner.PartOnly("Design tables")) return;
         var session = owner.Session;
         var tables = (session.Doc.Tables ?? new()).Select(Serialization.Clone).ToList();
         int current = 0;
@@ -602,6 +604,7 @@ public static class Dialogs
     /// <summary>Configure for the part open: its own values (the defaults assemblies start from) set.</summary>
     public static async Task ConfigurePart(MainWindow owner)
     {
+        if (owner.PartOnly("Configure", "an assembly's configurations are on its row at the top of the tree (right-click it), a component's on the Configure button with it selected")) return;
         var session = owner.Session;
         if (session.Doc.UserParameters().Count == 0)
         {

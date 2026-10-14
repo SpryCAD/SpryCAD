@@ -30,6 +30,7 @@ public partial class MainWindow
 
     void MeasureCommand()
     {
+        if (PartOnly("Measure")) return;
         if (_page == _measurePage && _measurePage != null) { _measurePage.Activate(_measureBox); return; }
         if (_sketch != null || _edit != null) { Status("Finish the current edit before measuring."); return; }
         var page = new PmPage("Measure", "measure");

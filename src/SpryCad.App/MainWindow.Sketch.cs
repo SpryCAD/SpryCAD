@@ -31,6 +31,7 @@ public partial class MainWindow
     /// <summary>Sketch command: on the selected plane / planar face, or edit the selected sketch.</summary>
     void StartSketchCommand(string? pendingAfter = null)
     {
+        if (PartOnly("Sketching")) return;
         if (_sketch != null) { ExitSketch(true); return; }
         if (_page != null && _edit != null) CancelEdit();
         var sel = Selection.First;

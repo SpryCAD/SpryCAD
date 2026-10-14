@@ -25,6 +25,10 @@ public partial class MainWindow
     // ------------------------------------------------------------------------------------------
     // menu
 
+    // menu items for parts only (equations, sketches, import...): greyed in an assembly (ApplyDocumentKind)
+    readonly List<MenuItem> _partOnlyMenu = new();
+    MenuItem PartMenu(MenuItem m) { _partOnlyMenu.Add(m); return m; }
+
     static MenuItem Item(string header, Action click, string? gesture = null, string? icon = null)
     {
         var m = new MenuItem { Header = header };
@@ -119,10 +123,10 @@ public partial class MainWindow
             Item("_Close", () => _ = CloseTab(_tab), "Ctrl+W"),
             RecentMenu(),
             "-",
-            Item("_Import STEP...", () => _ = ImportDialog(), "Ctrl+I", "import"),
+            PartMenu(Item("_Import STEP...", () => _ = ImportDialog(), "Ctrl+I", "import")),
             Item("Export _STEP...", () => _ = Export("step"), null, "export-step"),
             Item("Export S_TL...", () => _ = Export("stl"), null, "export-stl"),
-            Item("Export Flat Pattern _DXF...", () => _ = ExportDxf(), null, "export-dxf"),
+            PartMenu(Item("Export Flat Pattern _DXF...", () => _ = ExportDxf(), null, "export-dxf")),
             "-",
             Item("Re_visions", () => ShowTaskPane(_revisionsPane, focus: true), null, "revisions"),
             Item("_History...", HistoryCommand),
@@ -134,12 +138,12 @@ public partial class MainWindow
             Item("_Redo", Redo, "Ctrl+Y", "redo"),
             "-",
             Item("_Delete", DeleteSelected, "Delete", "delete"),
-            Item("Re_build", () => Session.RequestRebuild(), "Ctrl+B", "rebuild"),
-            Item("Force Rebuild", () => Session.ForceRebuild(), "Ctrl+Q", "rebuild"),
+            Item("Re_build", () => Rebuild(), "Ctrl+B", "rebuild"),
+            Item("Force Rebuild", () => Rebuild(force: true), "Ctrl+Q", "rebuild"),
             "-",
             Item("Suppress", () => SetSuppressed(true), null, "suppress"),
             Item("Unsuppress", () => SetSuppressed(false), null, "part"),
-            Item("Roll Forward to End", RollForward, null, "rollforward")));
+            PartMenu(Item("Roll Forward to End", RollForward, null, "rollforward"))));
         MainMenu.Items.Add(Sub("_View",
             Sub("_Orientation",
                 Item("Front", () => Viewport.StandardView("Front"), "Ctrl+D1"),
@@ -168,7 +172,7 @@ public partial class MainWindow
             "-",
             Toggle("Planes", () => _showPlanes, TogglePlanes),
             Toggle("Origins", () => Viewport.ShowOrigin, () => { Viewport.ShowOrigin = !Viewport.ShowOrigin; Viewport.Redraw(); }),
-            Toggle("Sketch Relations", () => _sketch?.ShowRelations ?? true, () => { if (_sketch != null) { _sketch.ShowRelations = !_sketch.ShowRelations; _sketch.UpdateOverlay(Viewport); } })));
+            PartMenu(Toggle("Sketch Relations", () => _sketch?.ShowRelations ?? true, () => { if (_sketch != null) { _sketch.ShowRelations = !_sketch.ShowRelations; _sketch.UpdateOverlay(Viewport); } }))));
         MainMenu.Items.Add(Sub("_Insert",
             Item("_Sketch", () => StartSketchCommand(), null, "sketch"),
             "-",
@@ -203,10 +207,10 @@ public partial class MainWindow
                 Item("_Flat Pattern...", FlatPatternCommand, null, "flatpattern"),
                 Item("Fla_tten", ToggleFlatten, null, "flatten"))));
         MainMenu.Items.Add(Sub("_Tools",
-            Item("_Equations...", () => _ = Dialogs.Equations(this), null, "equations"),
-            Item("_Design Table...", () => _ = Dialogs.DesignTables(this), null, "table"),
-            Item("_Configure...", () => _ = Dialogs.ConfigurePart(this), null, "configure"),
-            Item("Mea_sure...", MeasureCommand, null, "measure"),
+            PartMenu(Item("_Equations...", () => _ = Dialogs.Equations(this), null, "equations")),
+            PartMenu(Item("_Design Table...", () => _ = Dialogs.DesignTables(this), null, "table")),
+            PartMenu(Item("_Configure...", () => _ = Dialogs.ConfigurePart(this), null, "configure")),
+            PartMenu(Item("Mea_sure...", MeasureCommand, null, "measure")),
             Item("_Mass Properties...", MassPropertiesCommand, null, "mass"),
             "-",
             Item("_Options...", () => _ = Dialogs.Options(this), null, "options")));
@@ -242,7 +246,7 @@ public partial class MainWindow
         B("save", "Save (Ctrl+S)", () => _ = Save());
         _undoButton = B("undo", "Undo (Ctrl+Z)", Undo);
         _redoButton = B("redo", "Redo (Ctrl+Y)", Redo);
-        B("rebuild", "Rebuild (Ctrl+B)", () => Session.RequestRebuild());
+        B("rebuild", "Rebuild (Ctrl+B)", () => Rebuild());
         B("options", "Options", () => _ = Dialogs.Options(this));
     }
 
@@ -335,11 +339,15 @@ public partial class MainWindow
                 Cmd("export-dxf", "Export\nDXF", () => _ = ExportDxf());
                 break;
             case "Evaluate":
-                Cmd("measure", "Measure", MeasureCommand);
+                // (in an assembly only what works on one: its mass properties and its export)
+                if (Asm == null) Cmd("measure", "Measure", MeasureCommand);
                 Cmd("mass", "Mass\nProperties", MassPropertiesCommand);
-                Cmd("equations", "Equations", () => _ = Dialogs.Equations(this));
-                Cmd("table", "Design\nTable", () => _ = Dialogs.DesignTables(this));
-                Cmd("configure", "Configure", () => _ = Dialogs.ConfigurePart(this));
+                if (Asm == null)
+                {
+                    Cmd("equations", "Equations", () => _ = Dialogs.Equations(this));
+                    Cmd("table", "Design\nTable", () => _ = Dialogs.DesignTables(this));
+                    Cmd("configure", "Configure", () => _ = Dialogs.ConfigurePart(this));
+                }
                 Sep();
                 Cmd("export-step", "Export\nSTEP", () => _ = Export("step"));
                 Cmd("export-stl", "Export\nSTL", () => _ = Export("stl"));
@@ -613,6 +621,15 @@ public partial class MainWindow
             new("line", "Line", () => SetSketchTool(SketchTool.Line)),
             new("rect", "Rectangle", () => SetSketchTool(SketchTool.Rectangle)),
         }
+        // (an assembly: its own commands where a part has Measure and Sketch)
+        : Asm != null
+        ? new GestureWheel.Command?[]
+        {
+            new("mates", "Mate", MateCommand),
+            new("normalto", "Normal To", NormalTo),
+            new("fit", "Zoom to Fit", () => Viewport.ZoomToFit()),
+            new("insertcomp", "Insert Components", InsertComponentCommand),
+        }
         : new GestureWheel.Command?[]
         {
             new("measure", "Measure", MeasureCommand),
@@ -667,8 +684,9 @@ public partial class MainWindow
             if (hit != null && !Selection.Contains(hit)) Selection.Set(hit);
             if (hit?.Kind == SelKind.Face && hit.Planar || hit?.Kind == SelKind.Plane)
             {
-                menu.Items.Add(Item("Sketch", () => StartSketchCommand(), null, "sketch"));
-                menu.Items.Add(Item("Hole Wizard", HoleCommand, null, "hole"));
+                // (sketches and holes are a part's: not offered on an assembly's origin plane)
+                if (Asm == null) menu.Items.Add(Item("Sketch", () => StartSketchCommand(), null, "sketch"));
+                if (Asm == null) menu.Items.Add(Item("Hole Wizard", HoleCommand, null, "hole"));
                 menu.Items.Add(Item("Normal To", NormalTo, null, "normalto"));
             }
             if (hit?.Kind == SelKind.Edge)
@@ -702,7 +720,7 @@ public partial class MainWindow
             }
             if (menu.Items.Count > 0) menu.Items.Add(new Separator());
             // measures what was right-clicked (and the rest of the selection), as SolidWorks
-            if (_page != _measurePage || _measurePage == null) menu.Items.Add(Item("Measure", MeasureCommand, null, "measure"));
+            if (Asm == null && (_page != _measurePage || _measurePage == null)) menu.Items.Add(Item("Measure", MeasureCommand, null, "measure"));
             menu.Items.Add(Item("Zoom to Fit", () => Viewport.ZoomToFit(), "F", "fit"));
             menu.Items.Add(Sub("View Orientation",
                 Item("Front", () => Viewport.StandardView("Front")),
@@ -757,6 +775,7 @@ public partial class MainWindow
     /// <summary>Imports a STEP file into the current part (as SolidWorks' Insert > Imported body).</summary>
     async Task ImportDialog()
     {
+        if (PartOnly("Import STEP", "to bring a STEP model into the assembly, open it as a part, save it, and insert it as a component")) return;
         if (!await ResolvePendingEdit()) return;
         var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
         {
@@ -1049,6 +1068,7 @@ public partial class MainWindow
     /// <summary>Writes the flat pattern (of each body a Flat Pattern feature unfolded) as DXF, in millimetres.</summary>
     async Task ExportDxf()
     {
+        if (PartOnly("Flat pattern export")) return;
         var flats = Session.Result?.State.Flats;
         if (flats == null || flats.Count == 0)
         {
@@ -1141,6 +1161,8 @@ public partial class MainWindow
 
     void SetSuppressed(bool on)
     {
+        // (in an assembly: the selected component)
+        if (Asm is { } sa) { if (sa.Selected is { } sp) SuppressComponent(sp, on); else Status("Select a component first."); return; }
         var id = Tree.SelectedId ?? Selection.First?.FeatureId;
         var f = id != null ? Session.Doc.Find(id) : null;
         if (f == null) return;
@@ -1155,7 +1177,7 @@ public partial class MainWindow
         Session.Change(() => Session.Doc.RollbackIndex = target >= Session.Doc.Features.Count ? null : target);
     }
 
-    void RollForward() => Session.Change(() => Session.Doc.RollbackIndex = null);
+    void RollForward() { if (!PartOnly("Roll forward")) Session.Change(() => Session.Doc.RollbackIndex = null); }
 
     /// <summary>
     /// Tree drag reorder: puts the feature (with the sketches only it absorbs) before/after the target feature or

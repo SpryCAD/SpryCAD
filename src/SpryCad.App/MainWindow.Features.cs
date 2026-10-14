@@ -675,6 +675,7 @@ public partial class MainWindow
 
     void HoleCommand()
     {
+        if (PartOnly("The hole wizard")) return;
         if (_sketch != null) ExitSketch(true);
         var hole = new HoleFeature();
         var sel = Selection.First;

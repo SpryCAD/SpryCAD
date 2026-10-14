@@ -213,6 +213,44 @@ public partial class MainWindow : IAssemblyHost
         await BuildPendingOf(s);
     }
 
+    /// <summary>
+    /// Rebuild (Ctrl+B, Force: Ctrl+Q): in a part, its features built again; in an assembly, the parts saved since they
+    /// were read shown as they now are, and the mates solved again.
+    /// </summary>
+    void Rebuild(bool force = false)
+    {
+        if (Asm is not { } a) { if (force) Session.ForceRebuild(); else Session.RequestRebuild(); return; }
+        _ = RebuildAssembly(a);
+    }
+
+    async Task RebuildAssembly(AssemblySession a)
+    {
+        var files = a.Model.Resolution.Parts.Values.Select(p => p.Path).OfType<string>().ToList();
+        List<string> changed;
+        try { changed = a.Reload(files); }
+        catch (Exception ex) { App.Log(ex, "Rebuild assembly"); Status($"Rebuild failed: {ex.Message}"); return; }
+        if (changed.Count == 0)
+        {
+            if (a.Model.HasMates) a.Model.SolveMates();
+            RefreshAssemblyScene();
+            _asmTree.Show(a);
+        }
+        Status(changed.Count == 0 ? "Rebuilt: the parts are up to date, the mates solved again."
+            : $"Rebuilt: {string.Join(", ", changed.Take(4))}{(changed.Count > 4 ? $" and {changed.Count - 4} more" : "")} updated from their saved files.");
+        await BuildPendingOf(a);
+    }
+
+    /// <summary>
+    /// A part's command (features, sketches, equations) asked for in an assembly: refused, saying so, rather than done
+    /// to the assembly tab's hidden part. True when refused (the command goes no further).
+    /// </summary>
+    internal bool PartOnly(string what, string? instead = null)
+    {
+        if (Asm == null) return false;
+        Status($"{what} works in a part{(instead != null ? "; " + instead : ": open the part to use it")}.");
+        return true;
+    }
+
     /// <summary>How threads are shown (View > Threads): in the part, or in the assembly and all it holds.</summary>
     Core.Regen.ThreadDisplay ThreadMode => Asm?.Model.Threads ?? Session.Threads;
 
@@ -276,6 +314,7 @@ public partial class MainWindow : IAssemblyHost
         foreach (var (name, tab) in _tabs) tab.IsVisible = name is "Assembly" ? asm : !(asm && name is "Features" or "Sketch" or "Sheet Metal");
         // the part's Insert menu (sketches, features) has nothing to act on in an assembly
         foreach (var mi in MainMenu.Items.OfType<MenuItem>().Where(m => m.Header as string == "_Insert")) mi.IsEnabled = !asm;
+        foreach (var mi in _partOnlyMenu) mi.IsEnabled = !asm;
         if (asm && _activeTab != "Assembly") ShowTab("Assembly");
         else if (!asm && _activeTab == "Assembly") ShowTab("Features");
         _asmHover = null;
