@@ -818,7 +818,7 @@ public partial class MainWindow : Window
     // the name of the plane hovered or selected, small along its side (as the tree names it)
     readonly TextBlock _planeLabel = new()
     {
-        FontSize = 11, FontWeight = FontWeight.SemiBold, IsHitTestVisible = false, IsVisible = false,
+        FontSize = 12, FontWeight = FontWeight.SemiBold, IsHitTestVisible = false, IsVisible = false,
         RenderTransformOrigin = new RelativePoint(0, 0, RelativeUnit.Relative),
     };
 
@@ -827,17 +827,15 @@ public partial class MainWindow : Window
         var hover = Viewport.Hover is { Kind: SelKind.Plane } h ? h : null;
         var it = hover ?? Selection.Items.FirstOrDefault(s => s.Kind == SelKind.Plane);
         var name = it == null ? null : it.FeatureId != null ? Session.Doc.Find(it.FeatureId)?.Name : it.Name + " Plane";
-        if (it == null || name == null || Viewport.PlaneLabelSide(it.Name ?? "", it.FeatureId) is not { } side) { _planeLabel.IsVisible = false; return; }
-        var (a, b) = side;
-        var len = Math.Sqrt((b.X - a.X) * (b.X - a.X) + (b.Y - a.Y) * (b.Y - a.Y));
-        if (len < 40) { _planeLabel.IsVisible = false; return; } // edge on, or too small to read
-        double ux = (b.X - a.X) / len, uy = (b.Y - a.Y) / len;
+        if (it == null || name == null || Viewport.PlaneLabelPlacement(it.Name ?? "", it.FeatureId) is not { } place) { _planeLabel.IsVisible = false; return; }
+        // laid in the plane: along a side, foreshortened and skewed with it (too flat to read: none)
+        var m = place.m;
+        if (Math.Abs(m.M11 * m.M22 - m.M12 * m.M21) < 0.15) { _planeLabel.IsVisible = false; return; }
         _planeLabel.Text = name;
         _planeLabel.Foreground = hover != null ? Brushes.DarkOrange : Palette.Accent;
-        _planeLabel.RenderTransform = new RotateTransform(Math.Atan2(uy, ux) * 180 / Math.PI);
-        // a little in from the corner, along the side, and just inside the plane
-        Canvas.SetLeft(_planeLabel, a.X + ux * 8 - uy * 3);
-        Canvas.SetTop(_planeLabel, a.Y + uy * 8 + ux * 3);
+        _planeLabel.RenderTransform = new MatrixTransform(m);
+        Canvas.SetLeft(_planeLabel, place.at.X);
+        Canvas.SetTop(_planeLabel, place.at.Y);
         _planeLabel.IsVisible = true;
     }
 

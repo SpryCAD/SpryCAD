@@ -658,17 +658,39 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
     /// Where a plane's label goes: its side leftmost on screen, from the end the text starts at to the other (reading
     /// up a steep side, else left to right); null when the plane is not in the scene.
     /// </summary>
-    public (Point from, Point to)? PlaneLabelSide(string name, string? featureId)
+    public (Point at, Matrix m)? PlaneLabelPlacement(string name, string? featureId)
     {
         var p = Planes.FirstOrDefault(x => featureId != null ? x.FeatureId == featureId : x.FeatureId == null && x.Name == name);
         if (p == null) return null;
         var (lo, hi) = SizeOf(p);
-        var c = new[] { lo, new Vec2(hi.X, lo.Y), hi, new Vec2(lo.X, hi.Y) }
-            .Select(v => Camera.Project(p.Frame.ToWorld(v))).Select(s => new Point(s.X, s.Y)).ToArray();
-        var (a, b) = Enumerable.Range(0, 4).Select(i => (c[i], c[(i + 1) % 4])).MinBy(e => e.Item1.X + e.Item2.X);
-        var steep = Math.Abs(b.Y - a.Y) > Math.Abs(b.X - a.X);
-        if (steep ? a.Y < b.Y : a.X > b.X) (a, b) = (b, a);
-        return (a, b);
+        var f = p.Frame;
+        var corners = new[] { lo, new Vec2(hi.X, lo.Y), hi, new Vec2(lo.X, hi.Y) };
+        var k = Camera.PixelSize * 1.3; // world length of a pixel of text (a third bigger than the UI's, face on)
+        Point S(Vec3 w) { var s = Camera.Project(w); return new Point(s.X, s.Y); }
+        // each side, run the way that reads unmirrored with the text's height across the plane (inward); of those
+        // that read upright (rightward, or up a steep side), the leftmost on screen
+        (Point at, Matrix m, double x, bool upright)? best = null;
+        for (int i = 0; i < 4; i++)
+        {
+            Vec2 a = corners[i], b = corners[(i + 1) % 4];
+            var e2 = (b - a) / (b - a).Length;
+            var n2 = new Vec2(-e2.Y, e2.X); // inward (the corners go counter-clockwise)
+            foreach (var flip in new[] { false, true })
+            {
+                var (start, dir) = flip ? (b, -e2) : (a, e2);
+                var o = f.ToWorld(start + dir * (8 * k) + n2 * (3 * k));
+                Vec3 E = f.XDir * dir.X + f.YDir * dir.Y, N = f.XDir * n2.X + f.YDir * n2.Y;
+                var so = S(o);
+                var c1 = S(o + E * k) - so; var c2 = S(o + N * k) - so;
+                if (c1.X * c2.Y - c1.Y * c2.X <= 0) continue; // mirrored: seen from the other side
+                if (Math.Sqrt(c1.X * c1.X + c1.Y * c1.Y) < 0.25) continue; // the side end on
+                var upright = c1.X > 0.1 * Math.Abs(c1.Y) || c1.Y < 0 && Math.Abs(c1.Y) > Math.Abs(c1.X);
+                var x = Math.Min(S(f.ToWorld(a)).X, S(f.ToWorld(b)).X);
+                if (best is not { } bb || upright && !bb.upright || upright == bb.upright && x < bb.x)
+                    best = (so, new Matrix(c1.X, c1.Y, c2.X, c2.Y, 0, 0), x, upright);
+            }
+        }
+        return best is { } r ? (r.at, r.m) : null;
     }
 
     /// <summary>The tint of an origin plane: the triad colour of the axis square to it (Front: Z, Top: Y, Right: X); null for any other.</summary>
