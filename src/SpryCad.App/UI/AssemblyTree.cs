@@ -23,6 +23,14 @@ public sealed class AssemblyTree : DockPanel
 {
     readonly StackPanel _rows = new() { Spacing = 0, Margin = new Thickness(2, 4) };
     readonly StackPanel _notes = new() { Spacing = 4, Margin = new Thickness(8, 6) };
+    ScrollViewer _notesView = null!;
+
+    /// <summary>The flyout copy over the graphics area (while a page has the panel): rows to pick and hover, no menus or eyes.</summary>
+    public bool Flyout { get; init; }
+    /// <summary>Whether the flyout is open past the assembly's row.</summary>
+    public bool FlyoutOpen { get; set; }
+    /// <summary>The row under the pointer (a component's path, "origin:Front", ...), null when it leaves.</summary>
+    public event Action<string?>? Hovered;
     readonly Dictionary<string, Border> _rowById = new();
     string? _selected;        // a component's path, "mate:" + a mate's id, or "pattern:" + a pattern's
     bool _matesOpen = true, _patternsOpen = true, _originOpen;
@@ -61,7 +69,7 @@ public sealed class AssemblyTree : DockPanel
 
     public AssemblyTree()
     {
-        var notes = new ScrollViewer { Content = _notes, MaxHeight = 200 };
+        var notes = _notesView = new ScrollViewer { Content = _notes, MaxHeight = 200 };
         SetDock(notes, Dock.Bottom);
         Children.Add(notes);
         Children.Add(new ScrollViewer { Content = _rows, HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled });
@@ -108,6 +116,14 @@ public sealed class AssemblyTree : DockPanel
         _rowById.Clear();
         var m = s.Model;
         var configs = m.Doc.ConfigurationNames;
+        _notesView.IsVisible = !Flyout;
+        if (Flyout)
+        {
+            // the flyout: closed to the assembly's row until its arrow (or the row) opens it
+            AddRow("__asm", 0, "assembly", s.Title.TrimEnd(' ', '*'), header: true, folder: true, expander: (FlyoutOpen, () => { FlyoutOpen = !FlyoutOpen; Show(s); }));
+            if (!FlyoutOpen) return;
+        }
+        else
         AddRow("__asm", 0, "assembly", s.Title.TrimEnd(' ', '*'), note: configs.Count > 1 ? m.Doc.ActiveConfigurationName : null, header: true, menu: AssemblyMenu(m),
             tip: configs.Count > 1 ? $"Configuration: {m.Doc.ActiveConfigurationName} (right-click to change)" : "Right-click for configurations, the bill of materials and more");
         // the origin, as the part's tree has it: a folder of the three planes (each with an eye), the axes and the point
@@ -248,8 +264,10 @@ public sealed class AssemblyTree : DockPanel
             sp.Shrink.Add(nb);
         }
         sp.Shrink.Add(tb);
-        if (eye is { } shown) sp.Children.Add(EyeButton(key, shown));
-        var row = new Border { Classes = { "treerow" }, Child = sp, Tag = key, ContextMenu = menu };
+        if (eye is { } shown && !Flyout) sp.Children.Add(EyeButton(key, shown));
+        var row = new Border { Classes = { "treerow" }, Child = sp, Tag = key, ContextMenu = Flyout ? null : menu };
+        row.PointerEntered += (_, _) => Hovered?.Invoke(key);
+        row.PointerExited += (_, _) => Hovered?.Invoke(null);
         if (tip != null || note != null) ToolTip.SetTip(row, (note != null ? $"{text}  {note}" : text) + (tip != null ? "\n" + tip : ""));
         row.PointerPressed += (_, e) =>
         {
@@ -257,11 +275,13 @@ public sealed class AssemblyTree : DockPanel
             if (!pt.IsLeftButtonPressed && !pt.IsRightButtonPressed) return;
             if (folder)
             {
+                // (the flyout's own row opens and closes it at a click, an easier target than the arrow)
+                if (Flyout && key == "__asm" && pt.IsLeftButtonPressed) { expander?.toggle(); e.Handled = true; return; }
                 if (pt.IsLeftButtonPressed && e.ClickCount >= 2) expander?.toggle();
                 e.Handled = pt.IsLeftButtonPressed;
                 return;
             }
-            if (pt.IsLeftButtonPressed && e.ClickCount >= 2)
+            if (pt.IsLeftButtonPressed && e.ClickCount >= 2 && !Flyout)
             {
                 // acted on at the release: a page opened now would take the release (a button under the pointer)
                 _doubleClicked = key;

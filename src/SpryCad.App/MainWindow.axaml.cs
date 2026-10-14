@@ -180,7 +180,7 @@ public partial class MainWindow : Window
 
     void RebuildTree()
     {
-        if (Asm is { } a) { _asmTree.Show(a); return; }
+        if (Asm is { } a) { _asmTree.Show(a); if (FlyoutHost.IsVisible) RebuildFlyoutTree(); return; }
         var t0 = TreeProfile ? System.Diagnostics.Stopwatch.GetTimestamp() : 0;
         _treeDoc = Session.Doc; _treeResult = Session.Result;
         Tree.Swatches = FeatureSwatches();

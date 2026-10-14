@@ -141,7 +141,8 @@ public partial class MainWindow : IAssemblyHost
         _asmTree.MateSelected += SelectMate;
         _asmTree.PlaneVisibilityToggled += ToggleAssemblyPlane;
         // an origin plane clicked while faces are being picked (a mate, a motor, a pattern): it is the pick
-        _asmTree.OriginPicked += o => { if (PickingFaces && Asm is { } pa && o is "Front" or "Top" or "Right") PickRef(pa.Model.RefTo(null, o), ""); };
+        _asmTree.OriginPicked += OnAssemblyOriginPicked;
+        _asmTree.Hovered += OnAssemblyTreeHover;
         _asmTree.Opened += OpenComponent;
         _asmTree.MateCommand += OnMateCommand;
         _asmTree.Command += OnComponentCommand;
@@ -234,6 +235,7 @@ public partial class MainWindow : IAssemblyHost
             if (a.Model.HasMates) a.Model.SolveMates();
             RefreshAssemblyScene();
             _asmTree.Show(a);
+            if (FlyoutHost.IsVisible) RebuildFlyoutTree();
         }
         Status(changed.Count == 0 ? "Rebuilt: the parts are up to date, the mates solved again."
             : $"Rebuilt: {string.Join(", ", changed.Take(4))}{(changed.Count > 4 ? $" and {changed.Count - 4} more" : "")} updated from their saved files.");
