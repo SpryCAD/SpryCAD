@@ -106,9 +106,10 @@ public sealed class FeatureTree : UserControl
         AddRow("Origin", "Origin", "folder", 1, null, hasChildren: true);
         if (_expanded.Contains("Origin"))
         {
-            AddRow("Front", "Front Plane", "plane", 2, null);
-            AddRow("Top", "Top Plane", "plane", 2, null);
-            AddRow("Right", "Right Plane", "plane", 2, null);
+            // (an eye each: shown in an empty part, hidden once there is a body, unless set)
+            var hasBodies = result?.State.Bodies.Count > 0;
+            foreach (var (std, label) in new[] { ("Front", "Front Plane"), ("Top", "Top Plane"), ("Right", "Right Plane") })
+                AddRow(std, label, "plane", 2, null, sketchShown: doc.SketchShown(std, hasBodies));
             AddRow("AxisX", "X Axis", "axis", 2, null);
             AddRow("AxisY", "Y Axis", "axis", 2, null);
             AddRow("AxisZ", "Z Axis", "axis", 2, null);

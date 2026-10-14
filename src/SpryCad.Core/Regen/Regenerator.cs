@@ -424,7 +424,7 @@ public sealed class Regenerator
                 case CircularPatternFeature cp: DoCircularPattern(cp); break;
                 case MirrorFeature m: DoMirror(m); break;
                 case PlaneFeature p: DoPlane(p); break;
-                case AxisFeature ax: State.Axes[f.Id] = AxisSolver.Solve(ax.Refs, State); break;
+                case AxisFeature ax: State.Axes[f.Id] = AxisSolver.Solve(ax.Refs, State, doc.Units == UnitSystem.IPS ? 1 / 25.4 : 1); break;
                 case CombineFeature c: DoCombine(c); break;
                 case ImportFeature im: DoImport(im); break;
                 case FlatPatternFeature fp: DoFlatPattern(fp); break;

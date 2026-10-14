@@ -233,6 +233,7 @@ public partial class MainWindow : Window
         if (Asm != null) { RefreshAssemblyScene(); return; }
         Viewport.Instances = Array.Empty<MeshInstance>();
         var doc = Session.Doc;
+        Viewport.UnitScale = PerMm; // (before any zoom to fit: an empty part fits 100 mm, in its units)
         var result = Session.DisplayResult;
         var baseResult = Session.Result;
         ModelState state = result?.State ?? ModelState.Initial();
@@ -274,12 +275,18 @@ public partial class MainWindow : Window
         // hidden as sketches are (shown while nothing uses them, unless set in the tree), and those the feature or
         // sketch being edited refers to; any of them while hovered or selected
         var b = state.Bounds;
-        var half = b.IsEmpty ? 50 : Math.Max(30, b.Diagonal * 0.55);
+        var half = b.IsEmpty ? 50 * PerMm : Math.Max(30 * PerMm, b.Diagonal * 0.55);
         var used = UsedByActive();
         var editRefs = RefersTo(_edit?.Feature ?? _sketch?.Feature);
         var planes = new List<PlaneDisplay>();
+        // the origin planes: as set by their eyes in the tree, else shown in an empty part (not while sketching or
+        // making a plane there); and those what is being edited refers to
+        var editingPlane = _edit?.Feature is PlaneFeature;
         foreach (var std in new[] { "Front", "Top", "Right" })
-            planes.Add(new PlaneDisplay(std, null, Resolver.StdPlane(std), half, editRefs.Contains(std), Tint: ViewportControl.OriginPlaneTint(std)));
+        {
+            var shown = doc.SketchVisibility?.ContainsKey(std) == true ? doc.SketchShown(std, true) : state.Bodies.Count == 0 && _sketch == null && !editingPlane;
+            planes.Add(new PlaneDisplay(std, null, Resolver.StdPlane(std), half, shown || editRefs.Contains(std), Tint: ViewportControl.OriginPlaneTint(std)));
+        }
         PlaneDisplay Reference(PlaneFeature f, Frame fr)
         {
             var (lo, hi) = f.Size is { } sz ? (new Vec2(sz.MinX, sz.MinY), new Vec2(sz.MaxX, sz.MaxY)) : PlaneFit(f.Id, fr, state, half * 0.8);
@@ -290,7 +297,6 @@ public partial class MainWindow : Window
             if (state.Planes.TryGetValue(f.Id, out var fr) && !f.Suppressed && !(_edit?.Feature is PlaneFeature { } ep && ep.Id == f.Id))
                 planes.Add(Reference(f, fr));
         // the plane being created/edited: its live preview (a new plane is not in the document yet), with its size handles
-        var editingPlane = _edit?.Feature is PlaneFeature;
         if (_edit?.Feature is PlaneFeature pf && Session.PreviewActive && Session.PreviewResult?.State.Planes.TryGetValue(pf.Id, out var pfr) == true)
             planes.Add(Reference(pf, pfr));
         Viewport.Planes = planes;
@@ -310,8 +316,8 @@ public partial class MainWindow : Window
         if (_edit?.Feature is AxisFeature af && Session.PreviewActive && Session.PreviewResult?.State.Axes.TryGetValue(af.Id, out var afx) == true)
             axes.Add(new AxisDisplay(af.Name, af.Id, afx.A, afx.B));
         Viewport.Axes = axes;
-        // (editing a plane shows only it and its references, not every plane)
-        Viewport.ShowPlanes = _showPlanes || state.Bodies.Count == 0 && _sketch == null && !editingPlane;
+        // (all of them when the Planes view is on; otherwise each as above: editing a plane shows only it and its references)
+        Viewport.ShowPlanes = _showPlanes || _planePickPage != null; // (and while a sketch's plane is being picked)
 
         // visible sketches: as shown/hidden in the tree, else while no active feature uses them; also the selected
         // ones, and those the feature being edited uses (to be picked again, e.g. a sweep's path or a helical
@@ -338,12 +344,14 @@ public partial class MainWindow : Window
     void SetSketchShown(string id, bool? shown)
     {
         var doc = Session.Doc;
-        if (doc.Find(id) is not (SketchFeature or PlaneFeature or AxisFeature)) return;
-        var consumed = UsedByActive().Contains(id);
+        bool consumed;
+        if (id is "Front" or "Top" or "Right") consumed = Session.Result?.State.Bodies.Count > 0; // (an origin plane: hidden once there is a body)
+        else if (doc.Find(id) is SketchFeature or PlaneFeature or AxisFeature) consumed = UsedByActive().Contains(id);
+        else return;
         var show = shown ?? !doc.SketchShown(id, consumed);
         if (show == doc.SketchShown(id, consumed)) return;
         Session.Change(() => doc.SetSketchShown(id, show, consumed));
-        Status($"{doc.Find(id)!.Name} {(show ? "shown" : "hidden")}");
+        Status($"{doc.Find(id)?.Name ?? id + " Plane"} {(show ? "shown" : "hidden")}");
     }
 
     /// <summary>Exact geometry of a selected face/edge for the status bar (like SolidWorks).</summary>
@@ -466,7 +474,7 @@ public partial class MainWindow : Window
         var a = id.StartsWith("Axis") ? id[4..] : id;
         if (a is not ("X" or "Y" or "Z")) return null;
         var b = Session.Result?.State.Bounds ?? default;
-        var half = b.IsEmpty ? 50 : Math.Max(30, b.Diagonal * 0.55);
+        var half = b.IsEmpty ? 50 * PerMm : Math.Max(30 * PerMm, b.Diagonal * 0.55);
         return new SelItem { Kind = SelKind.Axis, Name = a, Point = Vec3.Zero, Normal = a == "X" ? Vec3.UnitX : a == "Y" ? Vec3.UnitY : Vec3.UnitZ, AxisHalfLength = half };
     }
 
@@ -643,6 +651,9 @@ public partial class MainWindow : Window
 
     /// <summary>Length unit label of the document ("mm" or "in").</summary>
     string UnitLabel => Session.Doc.Units == UnitSystem.IPS ? "in" : "mm";
+
+    /// <summary>Model units per millimetre: the part's lengths are in its own units (inches in an IPS part), sizes set in millimetres are scaled by this.</summary>
+    double PerMm => Session.Doc.Units == UnitSystem.IPS ? 1 / 25.4 : 1;
 
     void ShowPage(PmPage? page)
     {

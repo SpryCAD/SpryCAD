@@ -83,6 +83,8 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
     public DisplayStyle Style = DisplayStyle.ShadedWithEdges;
     public bool ShowPlanes = true;
     public bool ShowOrigin = true;
+    /// <summary>Model units per millimetre (1 in a millimetre part, 1/25.4 in an inch part): sizes set in millimetres (an empty scene's extent) come out the same size in either.</summary>
+    public double UnitScale { get; set; } = 1;
     public bool ReverseWheel;
     /// <summary>Draw the part faded (shaded styles), e.g. so the View Selector cube stands out over it.</summary>
     public bool Ghosted { get => _ghosted; set { if (_ghosted != value) { _ghosted = value; Redraw(); } } }
@@ -1044,7 +1046,7 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
     {
         // along the axis: as far as the model reaches (its box corners), and a little more
         var b = SceneBounds();
-        double len = 50;
+        double len = 50 * UnitScale;
         if (!b.IsEmpty)
             for (int i = 0; i < 8; i++)
             {
@@ -1241,7 +1243,7 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
     public void ZoomToFit(bool animate = true, Box3? box = null)
     {
         var b = box ?? SceneBounds();
-        if (b.IsEmpty) { b.Add(new Vec3(-50, -50, -50)); b.Add(new Vec3(50, 50, 50)); }
+        if (b.IsEmpty) { var e = 50 * UnitScale; b.Add(new Vec3(-e, -e, -e)); b.Add(new Vec3(e, e, e)); }
         var tmp = new Camera { Width = Camera.Width, Height = Camera.Height, Rotation = Camera.Rotation };
         tmp.Fit(b);
         if (animate) AnimateTo(Camera.Rotation, tmp.Target, tmp.HalfHeight);
@@ -1259,7 +1261,7 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         {
             var tmp = new Camera { Width = Camera.Width, Height = Camera.Height, Rotation = q };
             var b = SceneBounds();
-            if (b.IsEmpty) { b.Add(new Vec3(-50, -50, -50)); b.Add(new Vec3(50, 50, 50)); }
+            if (b.IsEmpty) { var e = 50 * UnitScale; b.Add(new Vec3(-e, -e, -e)); b.Add(new Vec3(e, e, e)); }
             tmp.Fit(b);
             (target, halfHeight) = (tmp.Target, tmp.HalfHeight);
         }
