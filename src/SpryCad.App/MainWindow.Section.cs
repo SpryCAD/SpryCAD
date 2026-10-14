@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using SpryCad.App.Session;
 using SpryCad.App.UI;
 using SpryCad.Core;
+using SpryCad.Core.Model;
 using SpryCad.Core.Regen;
 using SpryCad.Kernel;
 
@@ -40,7 +41,8 @@ public partial class MainWindow
         return Plane.FromPointNormal(f.Origin + n * SectionOffset(), _sectionFlip ? -n : n);
     }
 
-    double SectionOffset() => Expr.TryEval(_sectionOffset, Session.Lookup, out var v, out string? _) ? v : 0;
+    // (millimetres, the offset kept with its units)
+    double SectionOffset() => UnitFormat.TryLength(_sectionOffset, Session.Lookup, out var v, out _) ? v : 0;
 
     void ApplySection()
     {
@@ -86,7 +88,7 @@ public partial class MainWindow
         {
             _sectionDragFrom ??= SectionOffset();
             var off = _sectionDragFrom.Value + (_sectionFlip ? -d : d);
-            var text = Expr.Format(off);
+            var text = Units.Entry(off);
             if (_sectionOffsetBox != null) _sectionOffsetBox.Text = text; // (its setter applies it)
             else { _sectionOffset = text; ApplySection(); }
         };
