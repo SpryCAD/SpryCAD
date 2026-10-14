@@ -150,7 +150,14 @@ public sealed unsafe class GlRenderer : IDisposable
     Vector4 ModelClip => Clip is { } c ? Vector4.Transform(c, Matrix4x4.Transpose(Model)) : new Vector4(0, 0, 0, -1);
     uint _dynVao, _dynVbo;
     uint _fbo, _colorRb, _depthRb;
-    int _fbW, _fbH, _samples;
+    int _fbW, _fbH, _samples, _maxSamples, _wantSamples = 4;
+
+    /// <summary>Anti-aliasing: samples per pixel asked for (0: none), as many as the card has at most; the next frame takes it.</summary>
+    public int Samples
+    {
+        get => _samples;
+        set => _wantSamples = Math.Max(0, value);
+    }
 
     public GlRenderer(GL gl, bool es)
     {
@@ -250,8 +257,7 @@ public sealed unsafe class GlRenderer : IDisposable
         _gl.VertexAttribPointer(1, 4, VertexAttribPointerType.Float, false, 28, (void*)12);
         _gl.BindVertexArray(0);
 
-        _gl.GetInteger((GetPName)0x8D57, out int maxSamples);
-        _samples = Math.Clamp(maxSamples, 0, 4);
+        _gl.GetInteger((GetPName)0x8D57, out _maxSamples);
     }
 
     uint Program(string vs, string fs, params (string name, uint loc)[] attribs)
@@ -282,8 +288,10 @@ public sealed unsafe class GlRenderer : IDisposable
     /// <summary>Binds the multisampled offscreen target (created/resized as needed).</summary>
     public void BeginFrame(int w, int h)
     {
-        if (w != _fbW || h != _fbH || _fbo == 0)
+        var samples = Math.Clamp(_wantSamples, 0, Math.Max(0, _maxSamples));
+        if (w != _fbW || h != _fbH || _fbo == 0 || samples != _samples)
         {
+            _samples = samples;
             if (_fbo != 0) { _gl.DeleteFramebuffer(_fbo); _gl.DeleteRenderbuffer(_colorRb); _gl.DeleteRenderbuffer(_depthRb); }
             _fbW = w; _fbH = h;
             _fbo = _gl.GenFramebuffer();

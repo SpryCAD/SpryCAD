@@ -22,6 +22,9 @@ public partial class App : Application
         Write((context != null ? context + ": " : "") + ex);
     }
 
+    /// <summary>The GL driver the view draws with (vendor, renderer, version), or null before the first viewport starts.</summary>
+    public static string? GlInfo { get { lock (_logLock) return _glInfo; } }
+
     /// <summary>The GL driver (vendor, renderer, version), set when the first viewport starts; logged with the run's header.</summary>
     public static void SetGlInfo(string info)
     {

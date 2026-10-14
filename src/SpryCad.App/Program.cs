@@ -8,6 +8,8 @@ static class Program
     public static void Main(string[] args)
     {
         MoveSettings();
+        // (before the app is built: which graphics API it draws through is chosen there)
+        Session.UserSettings.Load();
         // files opened while SpryCAD already runs open there, in tabs
         var files = args.Where(File.Exists).ToArray();
         if (files.Length > 0 && SingleInstance.TrySend(files)) return;
@@ -51,7 +53,13 @@ static class Program
     public static AppBuilder BuildAvaloniaApp()
         => AppBuilder.Configure<App>()
             .UsePlatformDetect()
-            .With(new Win32PlatformOptions { RenderingMode = new[] { Win32RenderingMode.AngleEgl, Win32RenderingMode.Wgl, Win32RenderingMode.Software } })
+            // Direct3D (ANGLE) or the card's own OpenGL first (Options > Graphics), the other after it so the app always starts
+            .With(new Win32PlatformOptions
+            {
+                RenderingMode = Session.UserSettings.PreferOpenGL
+                    ? new[] { Win32RenderingMode.Wgl, Win32RenderingMode.AngleEgl, Win32RenderingMode.Software }
+                    : new[] { Win32RenderingMode.AngleEgl, Win32RenderingMode.Wgl, Win32RenderingMode.Software },
+            })
             .With(new X11PlatformOptions { RenderingMode = new[] { X11RenderingMode.Glx, X11RenderingMode.Egl, X11RenderingMode.Software } })
             .WithInterFont()
             .LogToTrace();

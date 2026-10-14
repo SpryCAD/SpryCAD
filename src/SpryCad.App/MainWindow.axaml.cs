@@ -38,10 +38,11 @@ public partial class MainWindow : Window
         Icons.Scaling = Screens.Primary?.Scaling ?? 1; // (before any icon is made: at 100% the 16 px drawings are used where there are any)
         _modelMode = new ModelMode(Selection);
         Viewport.Mode = _modelMode;
-        UserSettings.Load();
         Viewport.ReverseWheel = UserSettings.ReverseWheel;
         Viewport.RotateAbout = UserSettings.RotateAbout;
         Viewport.Camera.Perspective = UserSettings.Perspective;
+        Viewport.AntiAliasing = UserSettings.AntiAliasing;
+        Viewport.SoftwareRenderer += () => Status("The view is drawn without the graphics card (a software renderer), slow with large models: see Tools > Options > Graphics.");
         Viewport.Overlay = Overlay;
         Viewport.Selection = Selection;
         Viewport.ContextRequested += OnViewportContext;

@@ -144,9 +144,32 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
     protected override void OnOpenGlInit(GlInterface gl)
     {
         var silk = GL.GetApi(gl.GetProcAddress);
-        try { App.SetGlInfo($"{silk.GetStringS(StringName.Vendor)} / {silk.GetStringS(StringName.Renderer)} / {silk.GetStringS(StringName.Version)}"); } catch { }
-        _r = new GlRenderer(silk, GlVersion.Type == GlProfileType.OpenGLES);
+        try
+        {
+            var renderer = silk.GetStringS(StringName.Renderer);
+            App.SetGlInfo($"{silk.GetStringS(StringName.Vendor)} / {renderer} / {silk.GetStringS(StringName.Version)}");
+            if (IsSoftwareRenderer(renderer)) Avalonia.Threading.Dispatcher.UIThread.Post(() => SoftwareRenderer?.Invoke());
+        }
+        catch { }
+        _r = new GlRenderer(silk, GlVersion.Type == GlProfileType.OpenGLES) { Samples = _antiAliasing };
     }
+
+    /// <summary>Raised once the view is found drawn by a software renderer (no graphics card in use: slow with large models).</summary>
+    public event Action? SoftwareRenderer;
+
+    /// <summary>Whether an OpenGL renderer string names a software rasterizer (Windows' WARP under ANGLE, Mesa's, GDI's).</summary>
+    public static bool IsSoftwareRenderer(string? renderer) => renderer != null &&
+        (renderer.Contains("Basic Render Driver", StringComparison.OrdinalIgnoreCase) || renderer.Contains("llvmpipe", StringComparison.OrdinalIgnoreCase)
+         || renderer.Contains("softpipe", StringComparison.OrdinalIgnoreCase) || renderer.Contains("SwiftShader", StringComparison.OrdinalIgnoreCase)
+         || renderer.Contains("GDI Generic", StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>Anti-aliasing: samples per pixel (0, 2 or 4; as many as the card has at most).</summary>
+    public int AntiAliasing
+    {
+        get => _antiAliasing;
+        set { _antiAliasing = value; if (_r != null) _r.Samples = value; RequestNextFrameRendering(); }
+    }
+    int _antiAliasing = 4;
 
     protected override void OnOpenGlDeinit(GlInterface gl)
     {
