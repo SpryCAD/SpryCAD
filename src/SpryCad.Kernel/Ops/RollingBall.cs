@@ -640,6 +640,38 @@ public static class RollingBall
                 if (closed ? ((k - a + n) % n) < ((m - a + n) % n) : k >= a && k < m) return a;
             return -1;
         }
+        var box = Box3.Empty;
+        foreach (var p in pieces) foreach (var q in p.E.Samples(1e-3)) box.Add(q);
+        var scale = Math.Max(box.Diagonal, r);
+        var tolS = 1e-9 * Math.Max(10, scale);
+
+        // (an island open at the chain's end: the chain's last pieces on the next face, the ball still on the face before
+        // it where the chain ends (its foot reaching the boundary only past the end's section, as a big ball beside a small
+        // round the chain runs up onto at its end). No switch: the ball rolls on the face before to the end; between the
+        // chain, the boundary up to the end's section and that section, the next face's own piece of the tool)
+        (int k, List<(NCurve c, double ta, double tb)> segs, NFace face)? endIsland = null;
+        (int k, List<(NCurve c, double ta, double tb)> segs, NFace face)? EndIsland(int k, List<(NCurve c, double ta, double tb)> segs, double root)
+        {
+            if (closed || k <= 0 || k >= n) return null;
+            for (int q = k + 1; q < n; q++) if (RawSwitch(q) || SwitchA(q)) return null;
+            var fb = faB[Prev(k)];
+            var G = segs[^1].c.Eval(root);
+            var Ss = G + Sup(fb).Normal(G) * ((fb.Sense ? 1 : -1) * rho);
+            var pc = pieces[n - 1];
+            var V = pc.End; var dir = pc.Dir(pc.Tb);
+            var na = Outward(faA[n - 1], V); var nb = Outward(fb, V);
+            var j = SolveJoint(OffA(faA[n - 1]), Off(fb), V, V + (na + nb) * (rho / (1 + Vec3.Dot(na, nb))), dir, scale);
+            if (j == null || Vec3.Dot(Ss - j.Value.S, j.Value.T) <= 1e-9 * scale) return null;
+            // the boundary from vertex k as far as the end's section
+            var (S, T) = j.Value;
+            var cut = new List<(NCurve c, double ta, double tb)>();
+            foreach (var (c, ta, tb) in segs)
+            {
+                if (Root(ta, tb, t => Vec3.Dot(c.Eval(t) - S, T)) is { } x) { cut.Add((c, ta, x)); return (k, cut, faB[k]); }
+                cut.Add((c, ta, tb));
+            }
+            return null;
+        }
         try
         {
             for (int k = 0; k < nj; k++)
@@ -655,6 +687,12 @@ public static class RollingBall
                 if (!RawSwitch(k) || islandEnd.Contains(k) || InsideIsland(k)) continue;
                 var wk = Walk(k, true);
                 if (wk.err != null) return Fail(wk.err);
+                if (wk.back == null && wk.root is { } wr && second.ContainsKey(k) == false && EndIsland(k, wk.segs, wr) is { } ei)
+                {
+                    Debug?.Invoke($"  island at the end from {ChainVertex(k).P}: the ball reaches {ei.face.Tag.Name} only past the end");
+                    endIsland = ei; islandEnd.Add(k);
+                    continue;
+                }
                 walks[k] = wk;
                 if (wk.back is int m)
                 {
@@ -667,11 +705,6 @@ public static class RollingBall
         }
         catch (InvalidOperationException) { return Fail("the radius is larger than the curvature of a face it blends."); }
         bool IsSwitch(int k) => onA.Contains(k) || RawSwitch(k) && !islandEnd.Contains(k) && !InsideIsland(k);
-
-        var box = Box3.Empty;
-        foreach (var p in pieces) foreach (var q in p.E.Samples(1e-3)) box.Add(q);
-        var scale = Math.Max(box.Diagonal, r);
-        var tolS = 1e-9 * Math.Max(10, scale);
 
         // ---- events along the chain, in order: joints (cross-sections through chain vertices) and switches (where
         // the ball's foot reaches the boundary curve). A switch need not lie between the vertices it belongs to: the
@@ -855,6 +888,7 @@ public static class RollingBall
         }
         int EvOf(int k, bool sw) => events.FindIndex(e => e.k == k && e.sw == sw);
         // sections at the open ends, boundary paths at switches (chain vertex to foot point), on each side
+        NVertex? endX = null;   // an island at the end: where the boundary crosses the end's section
         var bndA = new Dictionary<int, List<(NEdge e, bool fwd)>>();     // by chain vertex
         var bnd = new Dictionary<int, List<(NEdge e, bool fwd)>>();
         if (!closed)
@@ -864,7 +898,19 @@ public static class RollingBall
                 var j = ev[i];
                 var plane = NSurface.FromPlane(Plane.FromPointNormal(j.S, j.T));
                 bndA[k] = new() { (new NEdge(new NSection(SupA(supportA[i]), plane, j.V, j.A), 0, 1, VV[k], AV[i]), true) };
-                bnd[k] = new() { (new NEdge(new NSection(Sup(support[i]), plane, j.V, j.B), 0, 1, VV[k], BV[i]), true) };
+                if (k == n && endIsland is { } ei)
+                {
+                    // (across the island's face from the chain's end to the boundary, then on the face the ball is on)
+                    var (gc, _, gb) = ei.segs[^1];
+                    var X = gc.Eval(gb);
+                    endX = new NVertex(X);
+                    bnd[k] = new()
+                    {
+                        (new NEdge(new NSection(Sup(ei.face), plane, j.V, X), 0, 1, VV[k], endX), true),
+                        (new NEdge(new NSection(Sup(support[i]), plane, X, j.B), 0, 1, endX, BV[i]), true),
+                    };
+                }
+                else bnd[k] = new() { (new NEdge(new NSection(Sup(support[i]), plane, j.V, j.B), 0, 1, VV[k], BV[i]), true) };
             }
         foreach (var (k, _) in swJoint)
         {
@@ -979,6 +1025,35 @@ public static class RollingBall
             body.Faces.Add(MakeFace(sI, convex ? fI.Sense : !fI.Sense, tagI, loop, sI.Project((Mp + qI) * 0.5)));
         }
 
+        // the island at the end: the chain from its vertex to the end, the end's section to the boundary, the boundary back
+        List<(NEdge, bool)>? endPath = null;
+        if (endIsland is { } eis)
+        {
+            int k = eis.k;
+            endPath = new List<(NEdge, bool)>();
+            var v0 = VV[k];
+            for (int i = 0; i < eis.segs.Count; i++)
+            {
+                var (gc, ga, gb) = eis.segs[i];
+                var v1 = i == eis.segs.Count - 1 ? endX! : new NVertex(gc.Eval(gb));
+                endPath.Add(ga < gb ? (new NEdge(gc, ga, gb, v0, v1), true) : (new NEdge(gc, gb, ga, v1, v0), false));
+                v0 = v1;
+            }
+            var loop = new List<(NEdge, bool)>();
+            for (int q = k; q < n; q++) loop.Add((E[q], fwdE[q]));
+            loop.Add(bnd[n][0]);
+            loop.AddRange(Enumerable.Reverse(endPath).Select(x => (x.Item1, !x.Item2)));
+            var fI = eis.face;
+            var sI = Sup(fI);
+            var Mp = pieces[k].E.Curve.Eval(pieces[k].Mid); var t = pieces[k].Dir(pieces[k].Mid);
+            var (gm, gma, gmb) = eis.segs[eis.segs.Count / 2];
+            var qI = gm.Eval(0.5 * (gma + gmb));
+            var nT = Outward(fI, Mp) * (convex ? 1 : -1);
+            if (Vec3.Dot(Vec3.Cross(nT, t), qI - Mp) < 0) loop = Reverse(loop);
+            var tagI = new FaceTag($"{name}.I{k}", sI.Kind == SurfaceKind.Plane ? SurfaceDef.PlaneDef : sI.Def);
+            body.Faces.Add(MakeFace(sI, convex ? fI.Sense : !fI.Sense, tagI, loop, sI.Project((Mp + qI) * 0.5)));
+        }
+
         // each side: one face per run between its switches (or open ends): the chain edges from the run's first vertex
         // to its last (on B, the boundary curve across islands), the boundary at its end, the contact back, the boundary
         // at its start
@@ -1013,6 +1088,7 @@ public static class RollingBall
                     body.Faces.Add(MakeFace(sM, mSense, tagM, loop, sM.Project(anchor)));
                     continue;
                 }
+                bool toEndIsland = false;
                 for (int q = 0; q < vsteps; q++)
                 {
                     int k = (ka + q) % n;
@@ -1023,9 +1099,11 @@ public static class RollingBall
                         q += (ip.m - k + n) % n - 1;
                         continue;
                     }
+                    if (sideB && endIsland?.k == k) { loop.AddRange(endPath!); toEndIsland = true; break; }
                     loop.Add((E[k], fwdE[k]));
                 }
-                loop.AddRange(sideB ? Out(eb.k) : OutA(eb.k));
+                // (past an island at the end: the end's section from where the boundary crosses it)
+                loop.AddRange(sideB ? Out(eb.k).Skip(toEndIsland ? 1 : 0) : OutA(eb.k));
                 for (int q = esteps - 1; q >= 0; q--) loop.Add((cont[(ia + q) % ne], false));
                 loop.AddRange(sideB ? In(ea.k) : InA(ea.k));
                 // orientation: the face lies on the side of the chain where the contact is

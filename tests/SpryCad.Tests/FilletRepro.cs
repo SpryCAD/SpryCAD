@@ -148,6 +148,7 @@ static class FilletRepro
         {
             SpryCad.Kernel.NativeBlend.Debug = m => Console.WriteLine("NB " + m);
             SpryCad.Kernel.RollingBall.Debug = m => Console.WriteLine("RB " + m);
+            SpryCad.Kernel.DirectBlend.Debug = m => Console.WriteLine("DB " + m);
         }
         if (Environment.GetEnvironmentVariable("SEAMS") is { } upto)
         {

@@ -109,10 +109,11 @@ static class BrakeDuctTests
             t.True(minX > 7.061 - 1e-3, $"the flat reaches X {minX:R}, under the ramp");
         });
 
-        // (at 0.0625 the tube bend inside is left out: its tool, cut back on the inside of the drop's flat, does not join)
-        t.Test("Brake duct: shells 0.03 and 0.125 make the tube bend inside, in under a few seconds", () =>
+        // (at 0.0625 the corner where the drop's flat runs up its sketch fillet slid along their seam, and the tube bend
+        // inside, ending beside it, did not join)
+        t.Test("Brake duct: shells 0.03, 0.0625 and 0.125 make the tube bend inside, in under a few seconds", () =>
         {
-            foreach (var wall in new[] { "0.03", "0.125" })
+            foreach (var wall in new[] { "0.03", "0.0625", "0.125" })
             {
                 var doc = Part();
                 var rim = Feature<FilletFeature>(doc, "Tube rim");

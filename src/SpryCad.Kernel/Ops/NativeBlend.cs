@@ -638,7 +638,19 @@ public static class NativeBlend
         var on = RollingBall.Build(chain, size, name, OnFaces, (v, dirOut, fa, fb) =>
         {
             if (pivots.Any(x => ReferenceEquals(x.v, v))) return 0;
-            if (endCuts != null && endCuts.TryGetValue(v, out var given)) { cuts.Add((v.P, given)); return run; }
+            if (endCuts != null && endCuts.TryGetValue(v, out var given))
+            {
+                // (the plane of an end piece left off: the valleys beside it are reached from that piece's far end, on it)
+                cuts.Add((v.P, given));
+                valleys[v.P] = ValleysBeside(v, fa, fb, given);
+                foreach (var e in new[] { fa, fb }.SelectMany(f => f.Coedges).Select(c => c.Edge).Where(x => ReferenceEquals(x.V0, v) || ReferenceEquals(x.V1, v)).Distinct())
+                {
+                    var w = ReferenceEquals(e.V0, v) ? e.V1 : e.V0;
+                    if (e.Uses.Count == 2 && Math.Abs(given.Distance(w.P)) < 1e-7)
+                        valleys[v.P].AddRange(ValleysBeside(w, e.Uses[0].Face, e.Uses[1].Face, given).Where(x => !valleys[v.P].Any(y => ReferenceEquals(y.Cyl, x.Cyl))));
+                }
+                return run;
+            }
             if (EndPlane(v, dirOut, fa, fb, chain, sel, out _, nearSquare: true) is not { } pl)
             {
                 if (EndCutAt(v, dirOut, fa, fb, chain, sel) is not { Plane: null } roundCut) return 0;

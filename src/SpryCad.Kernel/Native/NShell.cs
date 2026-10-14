@@ -147,6 +147,15 @@ public static class NShell
                 ss.Add(s); normals.Add(n.Length > 1e-300 ? n.Normalized : n);
             }
             var p = Solve(ss, v.P, tol, out var res);
+            // (two of its faces meeting tangentially along an edge here (a cut's floor running up a sketch fillet into
+            // its wall), the corner on their new surfaces' seam: solved at once, the pair leaves it free to slide along
+            // the seam, a long way where the others cross it at a shallow angle. Along the seam itself instead, where
+            // it meets the others' new surfaces, where the plain solve is off the one of the pair it left out)
+            if (ss.Count < all.Count && Residual(all, p) > tol && SeamCorner(v, body, surf, ss, p, scale) is { } sc && Residual(all, sc) <= Math.Max(Residual(all, p), tol))
+            {
+                Debug?.Invoke($"vertex {v.P}: on the tangent seam, {Vec3.Distance(sc, p):g3} from the plain solve");
+                (p, res) = (sc, Residual(ss, sc));
+            }
             Debug?.Invoke($"vertex {v.P} -> {p} res {res:g2} on {string.Join(",", ss.Select(x => x.Kind))}");
             if (res > 1e-6 * scale)
             {
@@ -547,6 +556,62 @@ public static class NShell
 
         public double F(Vec3 p) => F(p, out _);
         public Vec3 Grad(Vec3 p) { F(p, out var g); return g; }
+    }
+
+    static double Residual(IEnumerable<NSurface> ss, Vec3 p) => ss.Max(s => Math.Abs(s.F_(p)));
+
+    /// <summary>
+    /// The new corner for vertex v where two of its faces meet tangentially along an edge e at v: the point of their
+    /// new surfaces' seam (e's points moved onto one's new surface, which the other's shares there: they are tangent
+    /// along it) where it meets the new surface of the corner's other face. Null where there is no such edge, not one
+    /// other face, or no crossing along e (or on past v).
+    /// </summary>
+    static Vec3? SeamCorner(NVertex v, NBody body, Dictionary<NFace, NSurface> surf, List<NSurface> ss, Vec3 near, double scale)
+    {
+        static Vec3 Nrm(NFace f, Vec3 p) => (f.Surface.Normal(p) * (f.Sense ? 1 : -1)).Normalized;
+        foreach (var e in body.Edges)
+        {
+            if (!ReferenceEquals(e.V0, v) && !ReferenceEquals(e.V1, v) || e.Uses.Count != 2) continue;
+            var (fa, fb) = (e.Uses[0].Face, e.Uses[1].Face);
+            if (Vec3.Dot(Nrm(fa, v.P), Nrm(fb, v.P)) < Math.Cos(Math.PI / 180) || Vec3.Dot(Nrm(fa, e.Mid), Nrm(fb, e.Mid)) < Math.Cos(Math.PI / 180)) continue;
+            NSurface sa = surf[fa], sb = surf[fb];
+            var others = ss.Where(s => !ReferenceEquals(s, sa) && !ReferenceEquals(s, sb)).ToList();
+            if (others.Count != 1) continue;
+            var o = others[0];
+            double tv = ReferenceEquals(e.V0, v) ? e.T0 : e.T1, tf = ReferenceEquals(e.V0, v) ? e.T1 : e.T0;
+            Vec3 Seam(double t) => sa.Project(e.Curve.Eval(t));
+            // (the pair's new surfaces share the seam: both offset the same way along it)
+            double tm = 0.5 * (tv + tf);
+            if (Math.Abs(sb.F_(Seam(tv))) > 1e-6 * scale || Math.Abs(sb.F_(Seam(tm))) > 1e-6 * scale) continue;
+            double G(double t) => o.F_(Seam(t));
+            // the crossing nearest the plain solve, which has the corner right but for its slide along the seam: along
+            // the edge, or on past v (the corner may move out)
+            const int N = 64;
+            double? root = null;
+            foreach (var dir in new[] { 1.0, -1.0 })
+            {
+                double a = tv, ga = G(a);
+                for (int i = 1; i <= N; i++)
+                {
+                    var b = tv + dir * (tf - tv) * i / N; var gb = G(b);
+                    if (Math.Sign(gb) != Math.Sign(ga) || gb == 0)
+                    {
+                        double lo = a, hi = b, flo = ga;
+                        for (int it = 0; it < 100; it++)
+                        {
+                            var m = 0.5 * (lo + hi); var gm = G(m);
+                            if (Math.Sign(gm) == Math.Sign(flo)) { lo = m; flo = gm; } else hi = m;
+                        }
+                        var r = 0.5 * (lo + hi);
+                        if (root == null || Vec3.Distance(Seam(r), near) < Vec3.Distance(Seam(root.Value), near)) root = r;
+                        break;
+                    }
+                    a = b; ga = gb;
+                }
+            }
+            if (root != null) return Seam(root.Value);
+        }
+        return null;
     }
 
     static Vec3 Solve(IReadOnlyList<NSurface> ss, Vec3 p0, double tol, out double residual) => Solve(ss.Select(x => new Near(x)).ToList(), p0, tol, out residual);
