@@ -71,6 +71,27 @@ static class FilletRepro
                 doc.Features.OfType<MirrorFeature>().First(m => m.Name == mname).Seeds.Add(fi.Id);
             return doc;
         }
+        // (chamfer: the part's last fillet a chamfer of the size given on the same edges; or, with CHAMFER_AT
+        // (x,y,z;x,y,z…), the fillet dropped and the edges nearest those points chamfered instead)
+        if (kase == "chamfer")
+        {
+            var fi = doc.Features.OfType<FilletFeature>().Last();
+            int at = doc.Features.IndexOf(fi);
+            var ch = new ChamferFeature { Name = "Chamfer", Distance = radius ?? "2mm", Edges = fi.Edges, TangentPropagation = fi.TangentPropagation };
+            if (Environment.GetEnvironmentVariable("CHAMFER_AT") is { } pts)
+            {
+                var body = new Regenerator().Rebuild(doc, at).State.Bodies.Single().Solid.Native!;
+                ch.Edges = new();
+                foreach (var pt in pts.Split(';'))
+                {
+                    var c = pt.Split(',').Select(double.Parse).ToArray(); var p = new Vec3(c[0], c[1], c[2]);
+                    var e = body.Edges.Where(x => x.Uses.Count == 2).MinBy(x => Enumerable.Range(0, 9).Min(i => Vec3.Distance(x.At(i / 8.0), p)))!;
+                    ch.Edges.Add(new EdgeRef { A = e.Uses[0].Face.Tag.Name, B = e.Uses[1].Face.Tag.Name, Hint = e.Mid });
+                }
+            }
+            doc.Features[at] = ch;
+            return doc;
+        }
         // (shell: the part as it is, its wall the thickness given)
         if (kase == "shell")
         {
