@@ -531,9 +531,9 @@ public partial class MainWindow
         df.Items.Add(StyleItem("Hidden Lines Visible", DisplayStyle.HiddenLinesVisible));
         df.Items.Add(StyleItem("Wireframe", DisplayStyle.Wireframe));
         disp.Flyout = df;
-        H("planes", "Hide/Show Planes", TogglePlanes);
+        _planesButton = H("planes", "Hide/Show Planes", TogglePlanes);
         _colorByButton = H("colorbyfeature", "Color by Feature", ToggleColorByFeature);
-        H("section", "Section View", SectionCommand);
+        _sectionButton = H("section", "Section View", SectionCommand);
     }
 
     Flyout OrientationFlyout()
@@ -562,6 +562,16 @@ public partial class MainWindow
     /// <summary>View > Color by Feature: each face in its feature's color, with a swatch of it on the feature's tree row.</summary>
     bool _colorByFeature;
     // the button and menu item (in an assembly they color by part: each part its own color, on all its instances)
+    // the view bar's toggles, shown pressed while on
+    Button? _planesButton, _sectionButton;
+
+    void UpdateHudStates()
+    {
+        _planesButton?.Classes.Set("active", _showPlanes);
+        _colorByButton?.Classes.Set("active", _colorByFeature);
+        _sectionButton?.Classes.Set("active", _sectionOn);
+    }
+
     Button? _colorByButton;
     MenuItem? _colorByMenu;
 

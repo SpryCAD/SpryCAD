@@ -63,6 +63,12 @@ public partial class MainWindow
             CornerRadius = new CornerRadius(5), Padding = new Thickness(2),
         };
         Overlay.Children.Add(_crumbs);
-        Canvas.SetLeft(_crumbs, 8); Canvas.SetTop(_crumbs, 8);
+        // clear of the view bar at the top: beside it while there is room, else just below it
+        var top = 8.0;
+        var hud = HudBar.Parent as Control ?? HudBar;
+        _crumbs.Measure(Size.Infinity);
+        if (hud.TranslatePoint(new Point(0, 0), Overlay) is { } hp && 8 + _crumbs.DesiredSize.Width > hp.X - 8)
+            top = hp.Y + hud.Bounds.Height + 6;
+        Canvas.SetLeft(_crumbs, 8); Canvas.SetTop(_crumbs, top);
     }
 }
