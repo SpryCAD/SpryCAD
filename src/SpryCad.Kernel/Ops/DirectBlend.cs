@@ -60,7 +60,8 @@ public static class DirectBlend
             // (tools of one kind overlapping, not meeting end to end (two convex edges' fillets round a convex corner,
             // each run on to the face it meets): joined by the boolean, small and exact, as one tool; one at a time
             // they run into each other)
-            else if (cluster.Count > 1 && Join(cluster.Select(k => tools[k]).ToList()) is { } joined)
+            // (only where they do overlap: tools merely side by side go one at a time as before, without the boolean)
+            else if (cluster.Count > 1 && Overlap(cluster.Select(k => tools[k]).ToList()) && Join(cluster.Select(k => tools[k]).ToList()) is { } joined)
             {
                 work ??= body.Clone();
                 NBody? jn; string? jwhy;
@@ -103,6 +104,45 @@ public static class DirectBlend
             }
         }
         return any ? work : null;
+    }
+
+    /// <summary>
+    /// Whether two of the tools may overlap: their edges come within the reach of a blend of each other (cheap; tools
+    /// side by side whose boxes merely overlap go one at a time, without the boolean).
+    /// </summary>
+    static bool Overlap(List<Tool> tools)
+    {
+        if (tools.Any(t => t.Strip.Native == null || !t.Convex)) return false;
+        using var _ = Prof.Time("blend.overlap");
+        // (overlapping, the edges of each pass within a blend's size or so of the other's (tools round a corner: their
+        // edges cross); side by side (concentric rims, a pocket's opposite walls), several sizes apart. Sampled at
+        // about its size, each sample standing for the half step to the next)
+        var samples = tools.Select(t =>
+        {
+            var step = Math.Max(1e-6, t.Size);
+            var l = new List<(Vec3 p, double h)>();
+            foreach (var e in t.Strip.Native!.Faces.SelectMany(f => f.Coedges).Select(c => c.Edge).Distinct(Ref).Cast<NEdge>())
+            {
+                double len = 0; var q = e.Curve.Eval(e.T0);
+                for (int k = 1; k <= 16; k++) { var r = e.Curve.Eval(e.T0 + (e.T1 - e.T0) * k / 16); len += Vec3.Distance(q, r); q = r; }
+                int n = Math.Clamp((int)Math.Ceiling(len / step), 1, 64);
+                for (int k = 0; k <= n; k++) l.Add((e.Curve.Eval(e.T0 + (e.T1 - e.T0) * k / n), len / n / 2));
+            }
+            return l;
+        }).ToList();
+        for (int i = 0; i < tools.Count; i++)
+            for (int j = i + 1; j < tools.Count; j++)
+            {
+                var reach = 1.5 * (tools[i].Size + tools[j].Size);
+                var bj = tools[j].Strip.Native!.Bounds;
+                foreach (var (p, hp) in samples[i])
+                {
+                    if (!bj.Contains(p, reach + hp)) continue;
+                    foreach (var (q, hq) in samples[j])
+                        if (Vec3.Distance(p, q) < reach + hp + hq) return true;
+                }
+            }
+        return false;
     }
 
     /// <summary>

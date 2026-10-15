@@ -135,7 +135,7 @@ public static class NativeBlend
         // (a tool's end left standing in the result (a wing): where a tangent chain of edges the exact tools take runs
         // on into ones only the rolling ball does, separate tools square at the joint; again with such chains one
         // rolling-ball tool each, kept where that leaves fewer)
-        if (fillet && !buildOnly && !_wholeChains && errs1.Count == 0 && r1.Native != null && CapsLeft(r1.Native, prefix) is var caps1 && caps1 > 0)
+        if (fillet && !buildOnly && !_wholeChains && errs1.Count == 0 && r1.Native != null && MixedChains(edges) && CapsLeft(r1.Native, prefix) is var caps1 && caps1 > 0)
         {
             var errs3 = new List<string>(); var probs3 = problemEdges == null ? null : new List<Vec3[]>(); var app3 = applied == null ? null : new List<(Solid, bool)>();
             _wholeChains = true;
@@ -143,7 +143,7 @@ public static class NativeBlend
             try { r3 = ApplyOne(body, edges, size, fillet, prefix, errs3, overflow, probs3, app3, chamfer, buildOnly, trimmedOut); }
             finally { _wholeChains = false; }
             var caps3 = errs3.Count == 0 && r3.Native != null ? CapsLeft(r3.Native, prefix) : int.MaxValue;
-            Debug?.Invoke($"tool ends left: {caps1}; with whole tangent chains: {(caps3 == int.MaxValue ? "failed" : caps3.ToString())}");
+            Debug?.Invoke($"{prefix}: tool ends left: {caps1} ({string.Join(", ", r1.Native.Faces.Where(f => f.Tag.Name.StartsWith(prefix + ".", StringComparison.Ordinal) && (f.Tag.Name.EndsWith(".End") || f.Tag.Name.EndsWith(".Start") || f.Tag.Name.EndsWith(".End0") || f.Tag.Name.EndsWith(".End1"))).Select(f => f.Tag.Name))}); with whole tangent chains: {(caps3 == int.MaxValue ? "failed" : caps3.ToString())}");
             if (caps3 < caps1) (r1, errs1, probs1, app1) = (r3, errs3, probs3, app3);
         }
         errors.AddRange(errs1);
@@ -161,10 +161,32 @@ public static class NativeBlend
     [ThreadStatic] static bool _wholeChains;
 
     /// <summary>The faces of a blend's tools' ends (named prefix.k.Start / .End / .End0 / .End1) still in a body: a tool square where it should meet the next or run onto a face, standing.</summary>
-    internal static int CapsLeft(NBody body, string prefix)
-        => body.Faces.Count(f => f.Tag.Name.StartsWith(prefix + ".", StringComparison.Ordinal)
+    /// <summary>Whether a tangent chain of the edges mixes ones the exact tools take with ones only the rolling ball does (what building such chains whole changes).</summary>
+    static bool MixedChains(IReadOnlyList<NEdge> edges)
+    {
+        var seen = new HashSet<NEdge>(ReferenceEqualityComparer.Instance);
+        foreach (var e in edges)
+        {
+            if (seen.Contains(e)) continue;
+            var chain = TangentChain(e, edges, new HashSet<NEdge>(ReferenceEqualityComparer.Instance));
+            foreach (var x in chain) seen.Add(x);
+            if (chain.Count > 1 && chain.Any(Analytic) && !chain.All(Analytic)) return true;
+        }
+        return false;
+    }
+
+    public static int CapsLeft(NBody body, string prefix)
+    {
+        body.Link();
+        var tol = 1e-7 * Math.Max(1, body.Bounds.Diagonal);
+        return body.Faces.Count(f => f.Tag.Name.StartsWith(prefix + ".", StringComparison.Ordinal)
             && (f.Tag.Name.EndsWith(".End", StringComparison.Ordinal) || f.Tag.Name.EndsWith(".Start", StringComparison.Ordinal)
-                || f.Tag.Name.EndsWith(".End0", StringComparison.Ordinal) || f.Tag.Name.EndsWith(".End1", StringComparison.Ordinal)));
+                || f.Tag.Name.EndsWith(".End0", StringComparison.Ordinal) || f.Tag.Name.EndsWith(".End1", StringComparison.Ordinal))
+            // (an end flush with a face beside it, in its plane (a concave blend ending on a face it runs out onto): the
+            // face carried on, not a tool standing)
+            && !f.Coedges.SelectMany(c => c.Edge.Uses).Select(u => u.Face)
+                .Any(g => !ReferenceEquals(g, f) && g.Surface.Kind == SurfaceKind.Plane && f.Surface.Kind == SurfaceKind.Plane && g.Surface.CoincidentWith(f.Surface, tol)));
+    }
 
     /// <summary>The corners the ball would pivot round (convex corner edges two selected edges turn round).</summary>
     static int PivotCorners(IReadOnlyList<NEdge> edges)
@@ -1692,8 +1714,11 @@ public static class NativeBlend
                     // cross. A mitre holding the corner edge is that only where the edge stands square to the shared
                     // face; leaning, it leaves a wing of each beside the other)
                     var faces3 = new[] { fa, fb }.Concat(g.Uses.Select(w => w.Face)).ToList();
+                    // (only where it leans: square to the shared face (a box's corner) the mitre is exact, and the tools
+                    // meet end to end, glued as one, rather than overlap and need joining by a boolean)
                     if (blended.All(x => IsConvex(x) == true) && IsConvex(g) == true
-                        && CornerEdgeOf(v, shared, faces3, blended, selected) is { } ce && IsConvex(ce) == true)
+                        && CornerEdgeOf(v, shared, faces3, blended, selected) is { } ce && IsConvex(ce) == true
+                        && CornerEdge(v, shared, faces3, blended, selected) is { } ced && Math.Abs(Vec3.Dot(ced, Outward(shared, v.P).Normalized)) < 0.9999)
                         continue;
                     if (CornerEdge(v, shared, faces3, blended, selected) is { } cd && (a + b).Length > 1e-3 && Vec3.Cross((a + b).Normalized, cd) is var m && m.Length > 1e-3)
                         n = Vec3.Dot(m, a) < 0 ? -m : m;

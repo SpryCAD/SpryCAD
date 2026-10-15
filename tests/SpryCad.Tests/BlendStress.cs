@@ -107,6 +107,54 @@ static class BlendStress
     }
 
     /// <summary>
+    /// <c>-- blendtime [reps]</c>: every demo part, blend case and test model rebuilt cold reps times (5); each fillet
+    /// and chamfer feature's best time, and their sum per part and in all. To compare builds: run each, compare.
+    /// </summary>
+    public static int Time(int reps, string? filter = null)
+    {
+        var dir = AppContext.BaseDirectory;
+        while (dir != null && !Directory.Exists(Path.Combine(dir, "samples"))) dir = Path.GetDirectoryName(dir);
+        var docs = new List<(string name, Func<CadDocument> load)>();
+        foreach (var (file, build) in Demos.All)
+            if (file.EndsWith(".sprt", StringComparison.Ordinal)) docs.Add(("demo " + file, build));
+        foreach (var (name, build) in Demos.BlendCases) docs.Add(("case " + name, build));
+        foreach (var f in Directory.GetFiles(Path.Combine(dir!, "tests", "SpryCad.Tests", "models"), "*.sprt", SearchOption.AllDirectories).OrderBy(x => x))
+        {
+            var path = f;
+            docs.Add((Path.GetFileNameWithoutExtension(f), () => CadDocument.Load(path)));
+        }
+        double total = 0;
+        foreach (var (name, load) in docs)
+        {
+            if (filter != null && !name.Contains(filter, StringComparison.OrdinalIgnoreCase)) continue;
+            var part = load();
+            var blends = part.Features.Where(f => f is FilletFeature or ChamferFeature).Select(f => f.Id).ToList();
+            if (blends.Count == 0) continue;
+            var best = blends.ToDictionary(id => id, _ => double.MaxValue);
+            for (int i = 0; i < reps; i++)
+            {
+                Csg.ClearCache();
+                // (FC_TIME_PROF: the last rebuild profiled)
+                bool prof = i == reps - 1 && Environment.GetEnvironmentVariable("FC_TIME_PROF") != null;
+                if (prof) { Prof.Reset(); Prof.Enabled = true; }
+                var r = new Regenerator().Rebuild(part.Clone());
+                if (prof)
+                {
+                    Prof.Enabled = false;
+                    foreach (var (pn, pms, calls) in Prof.Results().Where(x => x.name.StartsWith("blend", StringComparison.Ordinal) || x.name.StartsWith("direct", StringComparison.Ordinal) || x.name.StartsWith("csg", StringComparison.Ordinal)).OrderByDescending(x => x.ms).Take(14))
+                        Console.WriteLine($"      {pn,-28} {pms,8:0.0} ms x{calls}");
+                }
+                foreach (var id in blends) best[id] = Math.Min(best[id], r.Status[id].Milliseconds);
+            }
+            var sum = best.Values.Sum();
+            total += sum;
+            Console.WriteLine($"{sum,9:0.0} ms  {name} ({blends.Count} blend features)");
+        }
+        Console.WriteLine($"{total,9:0.0} ms  all blend features");
+        return 0;
+    }
+
+    /// <summary>
     /// The cases of the stress shapes named (all their selections, kinds and sizes), each scored: for a regression test.
     /// </summary>
     public static List<(string name, string outcome, string detail)> Cases(IEnumerable<string> shapeNames)
@@ -216,9 +264,15 @@ static class BlendStress
         if (s.Native is not { } nb) { detail = "faceted: no exact body"; return "wrong"; }
         if (nb.Validate() is { } bad) { detail = "invalid: " + Short(bad); return "wrong"; }
         if (s.Topology.OpenHalfEdges != 0) { detail = $"open mesh: {s.Topology.OpenHalfEdges} half-edges"; return "wrong"; }
+        // (a tool's end standing: not one flush with a face beside it, in its plane, as a concave blend ending on a face
+        // it runs out onto leaves)
+        nb.Link();
+        var ftol = 1e-7 * Math.Max(1, nb.Bounds.Diagonal);
         var caps = nb.Faces.Where(f => f.Tag.Name.StartsWith(blend.Id + ".", StringComparison.Ordinal)
             && (f.Tag.Name.EndsWith(".End", StringComparison.Ordinal) || f.Tag.Name.EndsWith(".Start", StringComparison.Ordinal)
-                || f.Tag.Name.EndsWith(".End0", StringComparison.Ordinal) || f.Tag.Name.EndsWith(".End1", StringComparison.Ordinal))).ToList();
+                || f.Tag.Name.EndsWith(".End0", StringComparison.Ordinal) || f.Tag.Name.EndsWith(".End1", StringComparison.Ordinal))
+            && !f.Coedges.SelectMany(c => c.Edge.Uses).Select(u => u.Face).Any(g => !ReferenceEquals(g, f) && g.Surface.Kind == SurfaceKind.Plane
+                && f.Surface.Kind == SurfaceKind.Plane && g.Surface.CoincidentWith(f.Surface, ftol))).ToList();
         if (caps.Count > 0) { detail = $"tool end left: {caps.Count} face(s)"; return "wrong"; }
         // (each edge picked blended: none of the result's sharp edges still runs through its middle; a blend left out
         // silently leaves a valid body)
