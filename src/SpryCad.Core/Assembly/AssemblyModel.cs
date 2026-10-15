@@ -472,9 +472,9 @@ public sealed partial class AssemblyModel
 
     /// <summary>
     /// An assembly from a STEP assembly file: each of its parts a part document embedded in the assembly (an Import
-    /// of that part's solids, in its own coordinates), each use of a part a component where the file places it. The
-    /// first component is fixed and every other one locked to it, so the assembly stays as it was designed until a
-    /// lock is deleted (then mate it as wanted). Null when the file is not an assembly (or holds one part, once).
+    /// of that part's solids, in its own coordinates), each use of a part a component where the file places it, its
+    /// sub-assemblies embedded sub-assemblies. Every component is fixed there, so the assembly stays as it was
+    /// designed until one is floated (then mate it as wanted). Null when the file is not an assembly (or holds one part, once).
     /// With <paramref name="defer"/> the parts' displays are left to build (<see cref="PendingJobs"/>): the assembly
     /// shows at once and its parts appear as each is built.
     /// </summary>
@@ -548,16 +548,9 @@ public sealed partial class AssemblyModel
         var top = res.Roots.Count == 1 && res.Products[res.Roots[0]].Uses.Any(u => u.Product >= 0)
             ? res.Products[res.Roots[0]].Uses
             : res.Occurrences.Select(o => new StepUse(o.Part, -1, o.Name, o.Placement)).ToList();
-        Component? first = null;
+        // each fixed where the file puts it (float one to move it, then mate it as wanted)
         foreach (var u in top)
-        {
-            var c = u.Part >= 0 ? m.InsertEmbedded(docs[u.Part], names[u.Part], u.Placement, made[u.Part]) : m.InsertEmbeddedSub(Sub(u.Product).model, u.Product, res.Products[u.Product].Name, u.Placement, placed);
-            if (first == null) { first = c; continue; }
-            // held where the file put it: locked to the first component
-            // (a lock holds the components themselves: no face is needed; each holds them where they are, so they are
-            // solved once after, not after each)
-            m.AddMate(MateType.Lock, new MateRef { Component = c.Id, D = Vec3.UnitZ }, new MateRef { Component = first.Id, D = Vec3.UnitZ }, settle: false);
-        }
+            (u.Part >= 0 ? m.InsertEmbedded(docs[u.Part], names[u.Part], u.Placement, made[u.Part]) : m.InsertEmbeddedSub(Sub(u.Product).model, u.Product, res.Products[u.Product].Name, u.Placement, placed)).Fixed = true;
         // the sub-assemblies' files: each holds those of the sub-assemblies it uses, so the innermost first; those as
         // deep as each other at once (a file read back at once: not synced to disk)
         using (Kernel.Prof.Time("stepasm.subfiles"))

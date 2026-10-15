@@ -47,7 +47,7 @@ public partial class MainWindow : IAssemblyHost
 
     /// <summary>
     /// A STEP assembly opened as a new assembly (not saved yet, named after the file): its parts embedded, each use
-    /// placed as the file has it, the first fixed and the others locked to it (delete a lock to move a part).
+    /// placed as the file has it and fixed there (float a component to move it).
     /// </summary>
     async Task OpenStepAssembly(string path)
     {
@@ -68,7 +68,8 @@ public partial class MainWindow : IAssemblyHost
         if (blank != null && blank != t) RemoveTab(blank);
         Viewport.StandardView("Trimetric", fit: true, animate: false);
         var shownAt = System.Diagnostics.Stopwatch.GetTimestamp();
-        var imported = $"Imported {m.Doc.Components.Count} components from {m.Parts.Count} embedded part{(m.Parts.Count == 1 ? "" : "s")}. Delete a component's lock under Mates to move it." +
+        var subCount = m.Doc.Components.Count(c => c.IsAssembly);
+        var imported = $"Imported {m.Doc.Components.Count} components" + (subCount > 0 ? $" ({subCount} sub-assembl{(subCount == 1 ? "y" : "ies")}, {m.PlacedParts(hidden: true).Count()} parts in all)" : "") + ". Components are fixed where the file places them; float one to move it." +
                        (m.Notes.Count > 0 ? $" {m.Notes.Count} note{(m.Notes.Count == 1 ? "" : "s")} in the design tree." : "");
         Status(imported);
         // the parts built, several at once, each shown when done; the view fitted to them after (nothing to fit before)

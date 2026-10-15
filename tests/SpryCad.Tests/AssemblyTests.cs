@@ -124,9 +124,9 @@ static class AssemblyTests
             var m = AssemblyModel.FromStep(step, "Hinge")!;
             t.Eq(m.Doc.Components.Count, 3);
             t.True(m.Doc.Components.All(c => c.Part.Embedded != null) && m.Parts.Count == 2, "embedded, a part each");
-            t.True(m.Doc.Components[0].Fixed && m.Doc.Mates.Count == 2 && m.Doc.Mates.All(x => x.Type == MateType.Lock), "fixed first, the others locked to it");
+            t.True(m.Doc.Components.All(c => c.Fixed) && m.Doc.Mates.Count == 0, "every component fixed where the file puts it, no mates");
             m.SolveMates();
-            t.True(m.LastSolve!.Satisfied && m.LastSolve.Moved.Count == 0, "the locks hold as read");
+            t.True(m.LastSolve!.Satisfied && m.LastSolve.Moved.Count == 0, "nothing moves");
             for (int i = 0; i < 3; i++)
             {
                 t.True(Vec3.Distance(m.Doc.Components[i].Placement.ToTransform().Point(q), hinge.Doc.Components[i].Placement.ToTransform().Point(q)) < 1e-6, $"component {i + 1} where it was");
