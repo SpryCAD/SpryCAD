@@ -21,6 +21,11 @@ public sealed class AssemblySession
     public string? SelectedMate { get; set; }
     /// <summary>The assembly changed (components, placements, references, saved state).</summary>
     public event Action? Changed;
+    /// <summary>
+    /// Parts' displays arrived while they are built in the background (<see cref="BuildPending"/>): only what is drawn
+    /// changed (the tree, the components and their mates are as they were); <see cref="Changed"/> follows when all are done.
+    /// </summary>
+    public event Action? DisplaysChanged;
     /// <summary>Counts changes to what it looks like (a preview made of an older count is stale).</summary>
     public int Revision { get; private set; }
 
@@ -69,9 +74,12 @@ public sealed class AssemblySession
                     try { built.Enqueue((job, job.Build(), null)); }
                     catch (Exception ex) { App.Log(ex, "Build component part " + job.Name); built.Enqueue((job, null, ex.Message)); }
                 }));
-                // each shown as it comes (here, on the UI thread)
+                // each shown as it comes (here, on the UI thread): what is drawn, a few times a second at most (the
+                // tree and the rest once all are done: rebuilt for every part, hundreds of rows each time, they were
+                // most of opening a large assembly)
                 int done = 0;
                 progress?.Invoke($"Building parts, 0 of {jobs.Count} done…");
+                long drawnAt = 0; bool undrawn = false;
                 while (true)
                 {
                     var finished = run.IsCompleted;
@@ -79,14 +87,20 @@ public sealed class AssemblySession
                     {
                         done++;
                         progress?.Invoke($"Building parts, {done} of {jobs.Count} done…");
-                        if (Model.Install(b.job, b.display, b.problem)) { any = true; Shown(); }
+                        if (Model.Install(b.job, b.display, b.problem)) { any = true; undrawn = true; }
+                    }
+                    if (undrawn && (finished || System.Diagnostics.Stopwatch.GetElapsedTime(drawnAt).TotalMilliseconds >= 300))
+                    {
+                        Revision++; DisplaysChanged?.Invoke();
+                        undrawn = false; drawnAt = System.Diagnostics.Stopwatch.GetTimestamp();
                     }
                     if (finished) break;
                     await Task.WhenAny(run, Task.Delay(50));
                 }
                 await run;
             }
-            if (any && Model.HasMates) { Model.SolveMates(); Shown(); }
+            if (any && Model.HasMates) Model.SolveMates();
+            if (any) Shown();
         }
         finally { Building = false; progress?.Invoke(null); }
     }

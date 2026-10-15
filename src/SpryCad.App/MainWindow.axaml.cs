@@ -158,7 +158,8 @@ public partial class MainWindow : Window
     /// </summary>
     void ShowTimeOnScreen()
     {
-        if (Session.Timing is not { Shown: 0 } timing) return;
+        // (not for an assembly: its tab's part is a blank stand-in, whose time says nothing about the assembly)
+        if (Asm != null || Session.Timing is not { Shown: 0 } timing) return;
         var session = Session;
         var text = StatusRebuild.Text;
         Viewport.AfterNextFrame(at =>

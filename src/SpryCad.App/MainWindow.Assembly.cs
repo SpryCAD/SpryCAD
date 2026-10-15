@@ -53,6 +53,7 @@ public partial class MainWindow : IAssemblyHost
     {
         if (_parts.FirstOrDefault(t => t.Asm != null && t.Source is { } src && PartIndex.SamePath(src, path)) is { } open) { await SwitchTo(open); return; }
         Status("Importing " + Path.GetFileName(path) + "…");
+        var started = System.Diagnostics.Stopwatch.GetTimestamp();
         AssemblyModel? m;
         // (the parts' displays built after: the assembly shows at once, each part as it is done)
         try { m = await Task.Run(() => AssemblyModel.FromStep(File.ReadAllBytes(path), Path.GetFileNameWithoutExtension(path), defer: true)); }
@@ -66,11 +67,21 @@ public partial class MainWindow : IAssemblyHost
         if (!await SwitchTo(t)) return;
         if (blank != null && blank != t) RemoveTab(blank);
         Viewport.StandardView("Trimetric", fit: true, animate: false);
-        Status($"Imported {m.Doc.Components.Count} components ({m.Parts.Count} parts, embedded), each locked to the first: delete a lock (under Mates) to move a part." +
-               (m.Notes.Count > 0 ? $" {m.Notes.Count} notes under the tree." : ""));
+        var shownAt = System.Diagnostics.Stopwatch.GetTimestamp();
+        var imported = $"Imported {m.Doc.Components.Count} components ({m.Parts.Count} parts, embedded), each locked to the first: delete a lock (under Mates) to move a part." +
+                       (m.Notes.Count > 0 ? $" {m.Notes.Count} notes under the tree." : "");
+        Status(imported);
         // the parts built, several at once, each shown when done; the view fitted to them after (nothing to fit before)
         await BuildPendingOf(t.Asm!);
-        if (_tab == t) Viewport.StandardView("Trimetric", fit: true, animate: false);
+        var builtAt = System.Diagnostics.Stopwatch.GetTimestamp();
+        if (_tab != t) return;
+        Viewport.StandardView("Trimetric", fit: true, animate: false);
+        // how long it took, once the frame with every part is drawn: read and made, the parts built, the first full frame
+        Viewport.AfterNextFrame(at =>
+        {
+            static double S(long a, long b) => System.Diagnostics.Stopwatch.GetElapsedTime(a, b).TotalSeconds;
+            if (_tab == t) Status($"{imported}  On screen in {S(started, at):0.0} s (file read and assembly shown {S(started, shownAt):0.0} s, parts built {S(shownAt, builtAt):0.0} s, drawn {S(builtAt, at):0.0} s).");
+        });
     }
 
     /// <summary>
@@ -190,6 +201,8 @@ public partial class MainWindow : IAssemblyHost
             // (components inserted, removed, found: the files watched follow)
             s.Watcher?.Watch(s.Model.SourceFiles());
         };
+        // parts' displays arriving (built in the background): only the scene
+        s.DisplaysChanged += () => { if (t == _tab) RefreshAssemblyScene(); };
         UpdateTabHeader(t);
         if (!_watchingActivation)
         {
