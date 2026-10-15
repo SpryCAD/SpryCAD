@@ -23,6 +23,18 @@ public static class NativeBlend
         bool overflow = true, List<Vec3[]>? problemEdges = null, List<(Solid tool, bool cut)>? applied = null, ChamferSize? chamfer = null,
         bool buildOnly = false, System.Runtime.CompilerServices.StrongBox<bool>? trimmedOut = null)
     {
+        // (every boolean of a blend exact or failed, its tools' trims too: a tool faceted by a fallback while it was built
+        // was then joined to the body by the facet engine, unbounded in time, the part left faceted)
+        var oldNoFallback = Csg.NoFallback;
+        Csg.NoFallback = true;
+        try { return ApplyExact(body, edges, size, fillet, prefix, errors, overflow, problemEdges, applied, chamfer, buildOnly, trimmedOut); }
+        finally { Csg.NoFallback = oldNoFallback; }
+    }
+
+    static Solid ApplyExact(Solid body, IReadOnlyList<NEdge> edges, double size, bool fillet, string prefix, List<string> errors,
+        bool overflow, List<Vec3[]>? problemEdges, List<(Solid tool, bool cut)>? applied, ChamferSize? chamfer,
+        bool buildOnly, System.Runtime.CompilerServices.StrongBox<bool>? trimmedOut)
+    {
         if (size <= 0) { errors.Add("Size must be greater than zero."); return body; }
         // (edges turning from concave to convex along their length split where their faces are tangent, only the part
         // running on from the rest of the blend kept: the blend fades out there)
