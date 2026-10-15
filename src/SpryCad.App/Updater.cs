@@ -155,7 +155,7 @@ static class Updater
         }
         w.Status("");
         var now = Card.ShowAsync(w, CardKind.Info, $"{r.Version} ready to install",
-            new[] { Card.Text("Closes SpryCAD and installs. Prompts to save files with changes.") },
+            new[] { Card.Text("Closes SpryCAD, installs and reopens. Prompts to save files with changes.") },
             new[] { "Install Now", "On Exit" }, 0, 1) is { } ready ? await ready == 0 : false;
         if (!now) { w.Status($"{r.Version} installs on exit."); return; }
         RestartNow(w);
