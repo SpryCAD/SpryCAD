@@ -1056,6 +1056,19 @@ public sealed partial class AssemblyModel
     }
 
     /// <summary>Saves the assembly (caches refreshed; references made relative to the new place; its preview made).</summary>
+    /// <summary>
+    /// The assembly as the bytes of its file, to embed in another (an embedded sub-assembly edited in memory): its
+    /// display caches and preview made, as a save makes them; its history going on from <paramref name="previous"/>,
+    /// the bytes it had there.
+    /// </summary>
+    public byte[] ToBytes(byte[]? previous)
+    {
+        Doc.RecordActiveConfiguration();
+        RefreshCaches();
+        try { Doc.Thumbnail = RenderThumbnail() ?? Doc.Thumbnail; } catch { }
+        return AssemblyContainer.ToBytes(Doc, previous);
+    }
+
     public void Save(string path)
     {
         path = System.IO.Path.GetFullPath(path);

@@ -50,6 +50,30 @@ public sealed class AssemblySession
         return new AssemblySession(model, model.Resolution.Changed);
     }
 
+    /// <summary>
+    /// Opens an assembly embedded in another from its bytes, in memory: no file of its own (saved back into that
+    /// assembly, <see cref="SaveToBytes"/>), named <paramref name="name"/>'s file name. Call off the UI thread.
+    /// </summary>
+    public static AssemblySession FromEmbedded(byte[] bytes, string name)
+    {
+        var doc = AssemblyContainer.Load(bytes, name);
+        var model = PartsIndexStore.Use(ix => AssemblyModel.Open(doc, null, ix, defer: true));
+        if (model.HasMates) model.SolveMates();
+        return new AssemblySession(model, model.Resolution.Changed) { UntitledName = Path.GetFileNameWithoutExtension(name) };
+    }
+
+    /// <summary>
+    /// Its bytes, to embed in the assembly it belongs to (its history going on from <paramref name="previous"/>, the
+    /// bytes it had there): saved, as far as this tab goes.
+    /// </summary>
+    public byte[] SaveToBytes(byte[]? previous)
+    {
+        var bytes = Model.ToBytes(previous);
+        Dirty = false;
+        Changed?.Invoke();
+        return bytes;
+    }
+
     /// <summary>Displays are being built in the background (<see cref="BuildPending"/>).</summary>
     public bool Building { get; private set; }
 

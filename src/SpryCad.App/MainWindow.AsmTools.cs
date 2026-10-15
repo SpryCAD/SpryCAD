@@ -420,17 +420,26 @@ public partial class MainWindow
         if (_parts.FirstOrDefault(t => t.EmbeddedIn == a && t.EmbeddedName == name) is { } open) { await SwitchTo(open); return; }
         if (!o.Owner.Doc.Files.TryGetValue(name, out var bytes)) { Status("The embedded file is missing."); return; }
         if (o.Owner != a.Model) { Status($"{o.Component.Name} is embedded in a sub-assembly. Edit the sub-assembly to change it."); return; }
+        void Embedded(PartTab t) { t.EmbeddedIn = a; t.EmbeddedName = name; t.EmbeddedPath = a.FilePath; UpdateTabHeader(t); }
+        if (o.Component.IsAssembly)
+        {
+            // a sub-assembly: opened from the assembly's copy, in memory (no file of its own: saved back into it)
+            AssemblySession s;
+            try { s = await Task.Run(() => AssemblySession.FromEmbedded(bytes, name)); }
+            catch (Exception ex) { App.Log(ex, "Edit embedded sub-assembly"); await Dialogs.Message(this, "Edit Sub-assembly", $"{Path.GetFileNameWithoutExtension(name)} could not be opened: {ex.Message}"); return; }
+            if (await ShowAssembly(s, null, Embedded) != null)
+                Status($"Editing embedded {Path.GetFileNameWithoutExtension(name)}. Save writes it back into {a.Title.TrimEnd(' ', '*')}.");
+            return;
+        }
         var dir = Path.Combine(EmbeddedEditDir, Guid.NewGuid().ToString("N")[..12]);
         Directory.CreateDirectory(dir);
         var file = Path.Combine(dir, Path.GetFileName(name));
         await File.WriteAllBytesAsync(file, bytes);
         var parent = _tab;
-        if (o.Component.IsAssembly) await OpenAssembly(file);
-        else await OpenFileAsync(file);
+        await OpenFileAsync(file);
         var t = _parts.FirstOrDefault(x => (x.Asm?.FilePath ?? x.Session.FilePath) is { } p && PartIndex.SamePath(p, file));
         if (t == null) return;
-        t.EmbeddedIn = a; t.EmbeddedName = name; t.EmbeddedPath = a.FilePath;
-        UpdateTabHeader(t);
+        Embedded(t);
         Status($"Editing embedded {Path.GetFileNameWithoutExtension(name)}. Save writes it back into {a.Title.TrimEnd(' ', '*')}.");
     }
 
@@ -467,11 +476,18 @@ public partial class MainWindow
             if (!await Dialogs.YesNo(this, "Save", $"Could not save this {what} into its assembly: {why}. Save it as a separate file?", "Save As…")) return false;
             return t.Asm != null ? await SaveAssembly(true) : await SaveAs();
         }
-        // the edit written out, then into the assembly
-        var copy = t.Asm?.FilePath ?? t.Session.FilePath!;
-        if (t.Asm != null) t.Asm.Save(copy); else t.Session.Save(copy);
+        // the edit into the assembly: a sub-assembly edited in memory as its bytes (its history going on from the
+        // assembly's copy); else written out to its copy and read back
+        byte[] bytes;
+        if (t.Asm is { FilePath: null } sub) bytes = sub.SaveToBytes(a.Model.Doc.Files[name]);
+        else
+        {
+            var copy = t.Asm?.FilePath ?? t.Session.FilePath!;
+            if (t.Asm != null) t.Asm.Save(copy); else t.Session.Save(copy);
+            bytes = await File.ReadAllBytesAsync(copy);
+        }
         a.BeginChange();
-        a.Model.UpdateEmbedded(name, await File.ReadAllBytesAsync(copy), defer: true);
+        a.Model.UpdateEmbedded(name, bytes, defer: true);
         if (a.Model.HasMates) a.Model.SolveMates();
         a.EndChange();
         // the assembly saved with it

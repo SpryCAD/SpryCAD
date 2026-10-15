@@ -306,19 +306,36 @@ public partial class MainWindow : IAssemblyHost
         AssemblySession s;
         try { s = await Task.Run(() => AssemblySession.Open(path)); }
         catch (Exception ex) { App.Log(ex, "Open Assembly"); await Dialogs.Message(this, "Open Assembly", $"{Path.GetFileName(path)} could not be opened: {ex.Message}"); return; }
+        if (!IsEmbeddedCopy(path)) RecentFiles.Add(path);
+        await ShowAssembly(s, path);
+    }
+
+    /// <summary>
+    /// An assembly just read shown in a tab of its own (<paramref name="setup"/>: told of the tab before its parts are
+    /// built), then its parts built in the background. <paramref name="path"/>: its file, if it has one. The tab, or
+    /// null when it could not be shown.
+    /// </summary>
+    async Task<PartTab?> ShowAssembly(AssemblySession s, string? path, Action<PartTab>? setup = null)
+    {
         var blank = IsUntouched(_tab) ? _tab : null;
         var t = AddAssemblyTab(s);
-        if (!IsEmbeddedCopy(path)) RecentFiles.Add(path);
-        if (!await SwitchTo(t)) return;
+        setup?.Invoke(t);
+        if (!await SwitchTo(t)) return null;
         if (blank != null && blank != t) RemoveTab(blank);
         Viewport.StandardView("Trimetric", fit: true, animate: false);
+        // (nothing to fit yet when no part has a display to show: an assembly saved without its parts' displays, as a
+        // STEP assembly's sub-assemblies are made; fitted again once they are built)
+        var nothingShown = !s.Model.PlacedParts().Any(x => x.Item2.Mesh.Indices.Length > 0);
         var notes = s.Model.Notes;
-        var opened = notes.Count == 0 ? "Opened " + path + "." : notes.Count == 1 ? notes[0] : $"Opened {Path.GetFileName(path)}. {notes.Count} part notes in the design tree.";
+        var name = path != null ? Path.GetFileName(path) : s.Title.TrimEnd(' ', '*');
+        var opened = notes.Count == 0 ? "Opened " + (path ?? name) + "." : notes.Count == 1 ? notes[0] : $"Opened {name}. {notes.Count} part notes in the design tree.";
         Status(opened);
         // virtual parts whose original files changed since they were made virtual here
         await OfferChangedOriginals(s);
         // parts without a current display cache: built now, each shown when done (the busy text says which)
         await BuildPendingOf(s);
+        if (nothingShown && _tab == t) Viewport.StandardView("Trimetric", fit: true, animate: false);
+        return t;
     }
 
     /// <summary>
