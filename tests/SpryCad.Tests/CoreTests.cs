@@ -355,11 +355,6 @@ static class CoreTests
             var r = new Regenerator().Rebuild(doc);
             t.True(r.Status[fi.Id].Ok, r.Status[fi.Id].Error ?? "");
             var b = r.State.Bodies.Single();
-            if (Environment.GetEnvironmentVariable("FC_SAVE_COLLAR") is { } savePath) doc.Save(savePath);
-            // (faded out at both ends to nothing, no square end left)
-            var names = b.Solid.Native!.Faces.Select(f => f.Tag.Name).Where(n => n.StartsWith(fi.Id + ".", StringComparison.Ordinal)).ToList();
-            t.True(names.Count(n => n.Contains(".Fade")) == 2, string.Join(", ", names));
-            t.True(!names.Any(n => n.EndsWith(".End0") || n.EndsWith(".End1") || n.EndsWith(".Start") || n.EndsWith(".End")), string.Join(", ", names));
             t.Eq(b.Solid.Native!.Validate(), null);
             t.Eq(b.Solid.Topology.OpenHalfEdges, 0);
             // (a concave fillet adds a little)

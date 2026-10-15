@@ -780,8 +780,6 @@ public static class NativeBlend
         bool retry = true)
     {
         var sel = selected as IReadOnlyCollection<NEdge> ?? selected.ToList();
-        // (an end where the edge runs on tangentially into one not picked: faded out along it)
-        if (retry && endCuts == null && Fades && !_noFades && _fadeLength != 0 && Faded(chain, size, name, sel) is { } faded) { _fadesMade++; return faded; }
         // the ends where the ball pivots round a corner: the tool ending exactly where the pivot starts (its end then
         // the pivot's, glued to it)
         var pivots = new List<(NVertex v, RoundCornerCut c, CornerPatch.Result p)>();
@@ -789,7 +787,15 @@ public static class NativeBlend
             if (EndPlane(v, dirOut, fa, fb, chain, sel) is { } pl0 && RoundCorner(v, fa, fb, chain, sel, pl0, size, name) is { } rc0 && rc0.Patch() is { } p0)
                 pivots.Add((v, rc0, p0));
         Vec3? EndAt(NVertex v) => pivots.Where(x => ReferenceEquals(x.v, v)).Select(x => (Vec3?)x.p.QOwn).FirstOrDefault() ?? TangentStop(v, chain);
-        var rb = RollingBall.Build(chain, size, name, OnFaces, endAt: EndAt);
+        // (an end where the edge runs on tangentially into one not picked, or its faces turn tangent: faded out along it;
+        // not with a pivot at the other end (its patch joined below). Where the fade fails, the chain built for it is the
+        // one wanted here when its ends are the same)
+        RollingBall.Result? built = null;
+        if (retry && endCuts == null && pivots.Count == 0 && Fades && !_noFades && _fadeLength != 0)
+        {
+            if (Faded(chain, size, name, sel, out built) is { } faded) { _fadesMade++; return faded; }
+        }
+        var rb = built ?? RollingBall.Build(chain, size, name, OnFaces, endAt: EndAt);
         // (a chain failing only for a sliver of an edge at an end, far shorter than the ball, on which it would have to
         // roll backwards (a round the chain just touches, its last few thousandths): built without that piece, left sharp)
         // First run on over the piece and cut back where it ended (on the face it ran into there): the piece covered,
@@ -2236,6 +2242,9 @@ public static class NativeBlend
     /// <summary>Fillets fading out where their edge runs on tangentially into one not picked (FC_FADE=0: square ends).</summary>
     public static bool Fades = Environment.GetEnvironmentVariable("FC_FADE") != "0";
 
+    /// <summary>Fades where an edge's own faces turn tangent too (FC_FADE_TANGENT); else the tip to a point there.</summary>
+    public static bool FadeTangentStops = Environment.GetEnvironmentVariable("FC_FADE_TANGENT") != null;
+
     // (the blend's fade length on this thread: null the whole wrap, 0 none)
     [ThreadStatic] static double? _fadeLength;
 
@@ -2248,9 +2257,10 @@ public static class NativeBlend
     /// The chain stops where the fade starts, the two glued at their common section. Null where there is no such end,
     /// or any of it fails (the square end, as before).
     /// </summary>
-    static RollingBall.Result? Faded(List<NEdge> chain, double size, string name, IReadOnlyCollection<NEdge> sel)
+    static RollingBall.Result? Faded(List<NEdge> chain, double size, string name, IReadOnlyCollection<NEdge> sel, out RollingBall.Result? chainBuilt)
     {
         const double stopDeg = 5;
+        chainBuilt = null;
         var runs = new List<(NVertex v, NEdge g)>();
         // (and ends where the edge's own faces turn tangent: the chain stops where they are a few degrees apart, as
         // before, and fades out from there to the vertex along the edge)
@@ -2258,7 +2268,10 @@ public static class NativeBlend
         foreach (var (v, dirOut, fa, fb) in ChainEnds(chain))
         {
             if (RunsOnInto(v, dirOut, chain, sel) is { } g) runs.Add((v, g));
-            else if (TangentStop(v, chain, stopDeg) is { } q && chain.FirstOrDefault(x => ReferenceEquals(x.V0, v) || ReferenceEquals(x.V1, v)) is { } e)
+            // (where the edge's own faces turn tangent: only on asking (FC_FADE_TANGENT), the tip to a point there
+            // otherwise (Tip): there the fillet is a sliver already, and the fade left the duct's drop with sharp edges
+            // beside its side rounds where the tip left none)
+            else if (FadeTangentStops && TangentStop(v, chain, stopDeg) is { } q && chain.FirstOrDefault(x => ReferenceEquals(x.V0, v) || ReferenceEquals(x.V1, v)) is { } e)
                 stops.Add((v, e, e.Curve.Param(q, 0.5 * (e.T0 + e.T1))));
         }
         if (runs.Count == 0 && stops.Count == 0) return null;
@@ -2282,13 +2295,19 @@ public static class NativeBlend
         if (ends.Count == 0) return null;
         Vec3? EndAt(NVertex v) => ends.TryGetValue(v, out var x) ? x.q : TangentStop(v, chain);
         var rb = RollingBall.Build(chain, size, name, OnFaces, endAt: EndAt);
+        // (only tangent stops: the chain as it would be built without fades, the same ends)
+        if (runs.Count == 0) chainBuilt = rb;
         if (rb.Error != null || rb.Tool?.Native == null) { Debug?.Invoke($"fade {name}: the chain stopping short -> {rb.Error ?? "not exact"}"); return null; }
         var tools = new List<DirectBlend.Tool> { new(rb.Tool, rb.Convex, name, size) };
         bool fits = rb.Fits;
         int k = 0;
         foreach (var (q, g, tq, tEnd) in ends.Values)
         {
-            var fade = RollingBall.Fade(g, tq, tEnd, size, $"{name}.Fade{k++}", OnFaces);
+            // (its first ball the chain's end ball there: the centre of the arc on the chain's end face through q)
+            var startCenter = rb.Tool.Native.Faces
+                .Where(f => f.Surface.Kind == SurfaceKind.Plane && Math.Abs(f.Surface.Plane!.Distance(q)) < 1e-7 * Math.Max(1, size) && (f.Tag.Name.EndsWith(".End0") || f.Tag.Name.EndsWith(".End1")))
+                .SelectMany(f => f.Coedges).Select(c => c.Edge.Curve).OfType<NCircle>().Select(c => (Vec3?)c.C).FirstOrDefault();
+            var fade = RollingBall.Fade(g, tq, tEnd, size, $"{name}.Fade{k++}", OnFaces, rb.Convex, startCenter);
             // (only where it fits as it is: one running into the geometry beside it, cut back, was not joined where the
             // square end was)
             if (fade.Error != null || fade.Tool?.Native == null || fade.Convex != rb.Convex || !fade.Fits)

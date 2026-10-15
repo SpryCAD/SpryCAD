@@ -329,7 +329,7 @@ public static class RollingBall
     /// exactly at its own radius, the blend the envelope of balls along their centres (a pipe of varying radius), the
     /// tool closed by a square start and its tip on the edge. One edge between two faces.
     /// </summary>
-    public static Result Fade(NEdge e, double ta, double tb, double r, string name, Func<NFace, Vec3, bool> onFaces)
+    public static Result Fade(NEdge e, double ta, double tb, double r, string name, Func<NFace, Vec3, bool> onFaces, bool? kind = null, Vec3? startCenter = null)
     {
         static Result Fail(string m) => new(null, false, false, m);
         if (e.Uses.Count != 2) return Fail("the edge is not between two faces.");
@@ -341,7 +341,8 @@ public static class RollingBall
         var nA = Outward(fA, V0); var nB = Outward(fB, V0);
         var uB = Vec3.Cross(nB, e.Curve.Deriv(ta) * (cB.Forward ? 1 : -1)).Normalized;
         if (Math.Abs(Vec3.Dot(nA, nB)) > 1 - 1e-9) return Fail("the faces are tangent along the edge: there is nothing to fillet.");
-        bool convex = Vec3.Dot(uB, nA) < 0;
+        // (the chain's kind where given: near tangency the faces' own turn at the fade's start can read the other way)
+        bool convex = kind ?? Vec3.Dot(uB, nA) < 0;
         var len = pc.Length;
         var scale = Math.Max(len, r);
 
@@ -370,37 +371,59 @@ public static class RollingBall
         }
         static double Rho(double u, double r) => r * (1 - 3 * u * u + 2 * u * u * u);
         // the ball at a fraction u of the way: its centre and the direction of the section there (the tip: on the edge)
-        var memo = new Dictionary<double, (Vec3 S, Vec3 T)?>();
-        (Vec3 S, Vec3 T)? Station(double u)
+        // (each ball rolled on from the one before it, as the chain's own end joint is: near tangency the offsets meet along
+        // two branches, and a ball solved in its section alone can sit on the other one, or on none; the first the chain's
+        // end ball where given)
+        var memo = new SortedDictionary<double, (Vec3 S, Vec3 T)?>();
+        (Vec3 S, Vec3 T)? Solve(double u, Vec3? from)
         {
-            if (memo.TryGetValue(u, out var got)) return got;
             var t = TAt(u);
             var V = u <= 0 ? pc.Start : u >= 1 ? pc.End : e.Curve.Eval(t);
             var dir = pc.Dir(t);
+            if (u >= 1) return (V, dir);
+            var rho = Rho(u, r) * (convex ? -1 : 1);
+            try
+            {
+                var A2 = NShell.OffsetSurface(SA, rho * (fA.Sense ? 1 : -1)); var B2 = NShell.OffsetSurface(SB, rho * (fB.Sense ? 1 : -1));
+                if (from is { } g && SolveJoint(A2, B2, V, g, dir, scale) is { } j) return j;
+                var na = Outward(fA, V); var nb = Outward(fB, V);
+                return SolveJoint(A2, B2, V, V + (na + nb) * (rho / (1 + Vec3.Dot(na, nb))), dir, scale);
+            }
+            catch (InvalidOperationException) { return null; }
+        }
+        // the guess for u from a ball solved at u0: moved along with the edge, scaled to u's radius
+        Vec3 From(double u0, Vec3 S0, double u)
+        {
+            var V0 = u0 <= 0 ? pc.Start : e.Curve.Eval(TAt(u0));
+            var V = e.Curve.Eval(TAt(u));
+            var r0 = Rho(u0, r);
+            return V + (S0 - V0) * (r0 > 1e-300 ? Rho(u, r) / r0 : 1);
+        }
+        (Vec3 S, Vec3 T)? Station(double u)
+        {
+            if (memo.TryGetValue(u, out var got)) return got;
             (Vec3 S, Vec3 T)? res;
-            if (u >= 1) res = (V, dir);
+            if (u <= 0) res = Solve(0, startCenter);
+            else if (u >= 1) res = Solve(1, null);
             else
             {
-                var rho = Rho(u, r) * (convex ? -1 : 1);
-                try
+                // from the nearest solved before it; where that fails, crept up on in smaller steps
+                var below = memo.LastOrDefault(x => x.Key < u && x.Value != null);
+                if (below.Value is not { } b) { var s0 = Station(0); below = new(0, s0); b = s0 ?? default; if (s0 == null) return memo[u] = null; }
+                res = Solve(u, From(below.Key, b.S, u));
+                if (res == null)
                 {
-                    var A2 = NShell.OffsetSurface(SA, rho * (fA.Sense ? 1 : -1)); var B2 = NShell.OffsetSurface(SB, rho * (fB.Sense ? 1 : -1));
-                    var na = Outward(fA, V); var nb = Outward(fB, V);
-                    var guess = V + (na + nb) * (rho / (1 + Vec3.Dot(na, nb)));
-                    res = SolveJoint(A2, B2, V, guess, dir, scale);
-                    // (the faces nearly tangent, as an edge's faces where they turn so: from the nearest ball solved, moved
-                    // along with the edge, scaled to this one's radius)
-                    if (res == null && memo.Where(x => x.Value != null && x.Key < 1).OrderBy(x => Math.Abs(x.Key - u)).Select(x => (KeyValuePair<double, (Vec3 S, Vec3 T)?>?)x).FirstOrDefault() is { } near)
+                    var (uc, sc) = (below.Key, b.S);
+                    for (int k = 1; k <= 8; k++)
                     {
-                        var tn = TAt(near.Key);
-                        var Vn = e.Curve.Eval(tn);
-                        var rn = Rho(near.Key, r);
-                        var off = near.Value!.Value.S - Vn;
-                        res = SolveJoint(A2, B2, V, V + off * (rn > 1e-300 ? Math.Abs(rho) / rn : 1), dir, scale);
+                        var uk = below.Key + (u - below.Key) * k / 8;
+                        var jk = Solve(uk, From(uc, sc, uk));
+                        if (jk == null) break;
+                        (uc, sc) = (uk, jk.Value.S);
+                        if (k == 8) res = jk;
                     }
                 }
-                catch (InvalidOperationException ex) { res = null; Debug?.Invoke($"fade {name}: {ex.Message}"); }
-                if (res == null) Debug?.Invoke($"fade {name}: no ball at {V} (u {u:g3}), radius {Math.Abs(rho):g4}, the faces {Math.Acos(Math.Clamp(Vec3.Dot(Outward(fA, V).Normalized, Outward(fB, V).Normalized), -1, 1)) * 180 / Math.PI:g3}° apart ({SA.Kind}/{SB.Kind})");
+                if (res == null) Debug?.Invoke($"fade {name}: no ball at u {u:g3}, radius {Rho(u, r):g4}, the faces {Math.Acos(Math.Clamp(Vec3.Dot(Outward(fA, e.Curve.Eval(TAt(u))).Normalized, Outward(fB, e.Curve.Eval(TAt(u))).Normalized), -1, 1)) * 180 / Math.PI:g3}° apart ({SA.Kind}/{SB.Kind})");
             }
             return memo[u] = res;
         }
@@ -433,6 +456,13 @@ public static class RollingBall
         var tolS = 1e-7 * Math.Max(1, scale);
         var stations = Enumerable.Range(0, 17).Select(k => k / 16.0).ToList();
         if (stations.Any(u => Station(u) == null)) return Fail("the fillet cannot fade out along the edge.");
+        // (its contacts off its faces already at these (the ball rolling onto a face beside them): not refined further)
+        for (int k = 1; k < 16; k++)
+        {
+            var st = Station(stations[k])!.Value;
+            if (!onFaces(fA, SA.Project(st.S)) || !onFaces(fB, SB.Project(st.S)))
+            { Debug?.Invoke($"fade {name}: at u {stations[k]:g3} a contact off its face"); return Fail("the fade does not fit on the faces."); }
+        }
         PipeSpine? sp = null;
         for (int round = 0; round < 10; round++)
         {
@@ -495,10 +525,12 @@ public static class RollingBall
             body.Faces.Add(MakeFace(NSurface.FromPlane(Plane.FromPointNormal(S[0], outward)), true, new FaceTag(name + ".End0", SurfaceDef.PlaneDef), loop, null));
         }
         bool fits = true;
-        for (int i = 0; i <= 8 && fits; i++)
+        // (its start the chain's own end ball, checked with the chain)
+        for (int i = 1; i <= 8 && fits; i++)
         {
             var c = sp.Eval(sp.S0 + (sp.S1 - sp.S0) * i / 8);
             fits = onFaces(fA, SA.Project(c)) && onFaces(fB, SB.Project(c));
+            if (!fits) Debug?.Invoke($"fade {name}: at {i}/8 a contact off its face ({(onFaces(fA, SA.Project(c)) ? "" : fA.Tag.Name + " at " + SA.Project(c))} {(onFaces(fB, SB.Project(c)) ? "" : fB.Tag.Name + " at " + SB.Project(c))})");
         }
         body.Link();
         if (body.Validate() is { } err) return Fail("internal: " + err);

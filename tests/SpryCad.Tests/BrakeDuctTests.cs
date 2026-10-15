@@ -61,8 +61,7 @@ static class BrakeDuctTests
                 rim.Radius = radius; rim.TangentPropagation = true;
                 Feature<ShellFeature>(doc, "Shell").Thickness = wall;
                 var r = new Regenerator().Rebuild(doc);
-                var what = $"R{radius} shelled at {wall}";
-                var body = Built(t, doc, r, what);
+                var what = $"R{radius} shelled at {wall}";                var body = Built(t, doc, r, what);
                 t.True(r.Status[rim.Id].Warnings.Count == 0, $"{what}: Tube rim: {string.Join("; ", r.Status[rim.Id].Warnings)}");
                 t.True(r.Status[Feature<ShellFeature>(doc, "Shell").Id].Warnings.All(w => !w.Contains("Not inside")), $"{what}: a fillet left out inside");
                 // round the corner and up the drop's sides: no sharp edge left between them and the side rounds
