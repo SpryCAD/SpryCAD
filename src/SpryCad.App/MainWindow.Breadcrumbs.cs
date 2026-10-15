@@ -10,7 +10,7 @@ namespace SpryCad.App;
 
 /// <summary>
 /// Selection breadcrumbs, as SolidWorks': a face, edge or vertex picked in a part shows a small trail at the graphics
-/// area's top left (Face › the feature that made it › its body); a click on the feature or the body selects that
+/// area's top left, from the top down (the part › its body › the feature that made it › Face); a click on the body or the feature selects that
 /// instead, without looking for it in the tree.
 /// </summary>
 public partial class MainWindow
@@ -40,20 +40,23 @@ public partial class MainWindow
             b.Click += (_, _) => click();
             row.Children.Add(b);
         }
-        Crumb(s.Kind == SelKind.Face ? "part" : s.Kind == SelKind.Edge ? "line" : "point", s.Kind.ToString(), null);
-        // the feature that made it (a face's name, an edge's or vertex's first face, starts with its id)
+        // from the top down, as a path: the part, its body, the feature that made the item, the item
+        Crumb("part", Session.Title.TrimEnd(' ', '*'), null);
+        if (s.BodyId is { } body)
+        {
+            Sep();
+            var bodies = Session.Result?.State.Bodies.Count ?? 1;
+            Crumb("display", bodies > 1 ? $"Body {body}" : "Body", () => Selection.Set(new SelItem { Kind = SelKind.Body, BodyId = body }));
+        }
+        // (a face's name, an edge's or vertex's first face, starts with the id of the feature that made it)
         var owner = s.Kind == SelKind.Face ? s.OwningFeatureId : FeatureColors.FeatureOf(s.Edge?.A ?? "");
         if (owner != null && Session.Doc.Find(owner) is { } f)
         {
             Sep();
             Crumb(FeatureTree.IconFor(f), f.Name, () => { Tree.Select(f.Id); OnTreeSelected(f.Id); });
         }
-        if (s.BodyId is { } body)
-        {
-            Sep();
-            var bodies = Session.Result?.State.Bodies.Count ?? 1;
-            Crumb("part", bodies > 1 ? $"Body {body}" : "Body", () => Selection.Set(new SelItem { Kind = SelKind.Body, BodyId = body }));
-        }
+        Sep();
+        Crumb(s.Kind == SelKind.Face ? "colorbyfeature" : s.Kind == SelKind.Edge ? "line" : "point", s.Kind.ToString(), null);
         _crumbs = new Border
         {
             Child = row, Background = Palette.Hud, BorderBrush = Palette.Border, BorderThickness = new Thickness(1),
