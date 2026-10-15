@@ -110,7 +110,7 @@ static class AssemblyTests
             t.True(AssemblyModel.New().RenderThumbnail() == null, "an empty assembly has none");
         });
 
-        t.Test("STEP assemblies: the hinge written and read back (parts once, placed); as an assembly: embedded parts, locked to the first", () =>
+        t.Test("STEP assemblies: the hinge written and read back (parts once, placed); as an assembly: embedded parts, each fixed where it was", () =>
         {
             var hinge = Demos.Assemblies.First(x => x.file == "hinge.sasm").build();
             var step = Demos.AssemblyStep(hinge, "Hinge");
@@ -152,6 +152,23 @@ static class AssemblyTests
             using var ms = new MemoryStream();
             StepWriter.Write(ms, new[] { ("Pin", new SpryCad.Core.Regen.Regenerator().Rebuild(hinge.Parts.Values.First().Doc!).State.Bodies[0].Solid) }, "Pin");
             t.True(!StepImport.IsAssembly(ms.ToArray()) && AssemblyModel.FromStep(ms.ToArray(), "Pin") == null, "a part's STEP is not an assembly");
+        });
+
+        t.Test("A part embedded in an embedded sub-assembly saved back: into the sub-assembly's file, that into the assembly's, shown as it now is", () =>
+        {
+            var m = AssemblyModel.FromStep(Demos.AssemblyStep(Demos.Assemblies.First(x => x.file == "hinge.sasm").build(), "Hinge"), "Hinge")!;
+            var sub = m.FormSubAssembly(m.Doc.Components.Skip(1).ToList(), Path.Combine(NewDir("nested-embed"), "Leaves.sasm"), flexible: false, embed: true);
+            var inner = m.Occurrences().First(o => o.Path.StartsWith(sub.Id + "/", StringComparison.Ordinal) && !o.Component.IsAssembly);
+            t.True(m.EmbeddedAllTheWay(sub.Id), "the sub-assembly is embedded");
+            var name = inner.Component.Part.Embedded!;
+            var doc = DocumentContainer.Load(m.NestedEmbedded(sub.Id, name)!, name);
+            doc.Color = new[] { 0.9, 0.1, 0.1 };
+            var subFile = m.Doc.Files[sub.Part.Embedded!];
+            m.UpdateNestedEmbedded(sub.Id, name, DocumentContainer.ToNewBytes(doc, "x"));
+            t.True(DocumentContainer.Load(m.NestedEmbedded(sub.Id, name)!, name).Color[0] == 0.9, "saved into the sub-assembly");
+            t.True(!ReferenceEquals(m.Doc.Files[sub.Part.Embedded!], subFile) && AssemblyContainer.Load(m.Doc.Files[sub.Part.Embedded!], "s.sasm").Revision == sub.Part.Revision,
+                "the sub-assembly's file saved into the assembly, its revision noted");
+            t.True(m.Find(inner.Path)!.Display!.Color[0] == 0.9, "shown as it now is");
         });
 
         t.Test("Lead screw assembly demo: the nut on the screw (a Screw mate of the thread's lead) fits; turned, it travels and still fits", () =>

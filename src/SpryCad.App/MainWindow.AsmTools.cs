@@ -420,10 +420,12 @@ public partial class MainWindow
     {
         var name = o.Component.Part.Embedded!;
         // already open: shown
-        if (_parts.FirstOrDefault(t => t.EmbeddedIn == a && t.EmbeddedName == name) is { } open) { await SwitchTo(open); return; }
+        // (embedded deeper down: the sub-assembly holding it, every one on the way embedded, saved back up through them)
+        var owner = o.Owner != a.Model ? o.Path[..o.Path.LastIndexOf('/')] : null;
+        if (_parts.FirstOrDefault(t => t.EmbeddedIn == a && t.EmbeddedName == name && t.EmbeddedOwner == owner) is { } open) { await SwitchTo(open); return; }
         if (!o.Owner.Doc.Files.TryGetValue(name, out var bytes)) { Status("The embedded file is missing."); return; }
-        if (o.Owner != a.Model) { Status($"{o.Component.Name} is embedded in a sub-assembly. Edit the sub-assembly to change it."); return; }
-        void Embedded(PartTab t) { t.EmbeddedIn = a; t.EmbeddedName = name; t.EmbeddedPath = a.FilePath; UpdateTabHeader(t); }
+        if (owner != null && !a.Model.EmbeddedAllTheWay(owner)) { Status($"{o.Component.Name} is in a sub-assembly saved as a file of its own. Open that sub-assembly to change it."); return; }
+        void Embedded(PartTab t) { t.EmbeddedIn = a; t.EmbeddedName = name; t.EmbeddedOwner = owner; t.EmbeddedPath = a.FilePath; UpdateTabHeader(t); }
         if (o.Component.IsAssembly)
         {
             // a sub-assembly: opened from the assembly's copy, in memory (no file of its own: saved back into it)
@@ -471,7 +473,9 @@ public partial class MainWindow
             try { a = await Task.Run(() => PartsIndexStore.Use(_ => AssemblySession.Open(asmFile))); background = true; }
             catch (Exception ex) { App.Log(ex, "Open assembly to save embedded"); a = null; }
         }
-        if (a == null || !a.Model.Doc.Files.ContainsKey(name))
+        // (its copy there now: in the assembly, or in the sub-assembly holding it)
+        byte[]? Held(AssemblySession x) => t.EmbeddedOwner is { } ow ? x.Model.EmbeddedAllTheWay(ow) ? x.Model.NestedEmbedded(ow, name) : null : x.Model.Doc.Files.GetValueOrDefault(name);
+        if (a == null || Held(a) == null)
         {
             var why = a == null
                 ? t.EmbeddedPath == null ? "its assembly was closed without being saved" : $"its assembly ({t.EmbeddedPath}) cannot be opened"
@@ -482,7 +486,7 @@ public partial class MainWindow
         // the edit into the assembly: a sub-assembly edited in memory as its bytes (its history going on from the
         // assembly's copy); else written out to its copy and read back
         byte[] bytes;
-        if (t.Asm is { FilePath: null } sub) bytes = sub.SaveToBytes(a.Model.Doc.Files[name]);
+        if (t.Asm is { FilePath: null } sub) bytes = sub.SaveToBytes(Held(a));
         else
         {
             var copy = t.Asm?.FilePath ?? t.Session.FilePath!;
@@ -490,7 +494,8 @@ public partial class MainWindow
             bytes = await File.ReadAllBytesAsync(copy);
         }
         a.BeginChange();
-        a.Model.UpdateEmbedded(name, bytes, defer: true);
+        if (t.EmbeddedOwner is { } holder) a.Model.UpdateNestedEmbedded(holder, name, bytes, defer: true);
+        else a.Model.UpdateEmbedded(name, bytes, defer: true);
         if (a.Model.HasMates) a.Model.SolveMates();
         a.EndChange();
         // the assembly saved with it

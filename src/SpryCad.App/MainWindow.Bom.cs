@@ -131,6 +131,9 @@ public partial class MainWindow
         var n = all.Count == 1 ? "" : $" ({all.Count})";
         var menu = new ContextMenu();
         menu.Items.Add(Item(all[0].Component.Part.Embedded != null ? "Edit Part" : "Open Part", () => OpenComponent(first), null, "open"));
+        // (in a sub-assembly: that sub-assembly, opened)
+        if (first.LastIndexOf('/') is var slash and > 0 && Asm?.Model.Find(first[..slash]) is { } holder)
+            menu.Items.Add(Item((holder.Component.Part.Embedded != null ? "Edit Sub-assembly" : "Open Sub-assembly") + $" ({holder.Component.Name})", () => OpenComponent(holder.Path), null, "open"));
         menu.Items.Add(Item("Select First Instance", () => SelectComponent(first, exact: true), null, "select"));
         menu.Items.Add(new Separator());
         if (live.Count > 0)

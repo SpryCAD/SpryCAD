@@ -27,6 +27,8 @@ public partial class MainWindow
         /// </summary>
         public AssemblySession? EmbeddedIn;
         public string? EmbeddedName;
+        /// <summary>The sub-assembly holding it when it is embedded deeper down (its path in the assembly; null: in the assembly itself).</summary>
+        public string? EmbeddedOwner;
         /// <summary>The embedding assembly's file (found again by it once its tab is closed; null: never saved).</summary>
         public string? EmbeddedPath;
         public Border Header = null!;
