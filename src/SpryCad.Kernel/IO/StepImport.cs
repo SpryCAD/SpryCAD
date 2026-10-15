@@ -437,7 +437,10 @@ public static class StepImport
             foreach (var f in body.Faces)
             {
                 if (f.Surface.PeriodicU || f.Surface.PeriodicV) continue; // (wrapping faces are oriented after splitting)
-                try { if (NDomain.Of(f).SignedArea() < 0) { f.Sense = !f.Sense; flipped++; } }
+                // (only the sign of its area is wanted: its edges sampled to a thousandth of its size, not finer)
+                var box = Box3.Empty;
+                foreach (var c in f.Coedges) { box.Add(c.Edge.V0.P); box.Add(c.Edge.Curve.Eval((c.Edge.T0 + c.Edge.T1) / 2)); }
+                try { if (NDomain.Of(f, Math.Max(1e-3, box.Diagonal * 1e-3)).SignedArea() < 0) { f.Sense = !f.Sense; flipped++; } }
                 catch (InvalidOperationException) { }
             }
             if (flipped > 0) _warn.Add($"{name}: {flipped} face(s) had their orientation flag reversed in the file; corrected from their edges.");

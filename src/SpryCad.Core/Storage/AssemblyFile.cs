@@ -45,46 +45,13 @@ public static class AssemblyFile
         doc.Id ??= CadDocument.NewGuid();
         var asmId = Guid.Parse(doc.Id);
         var tmp = path + ".saving";
-        var scratch = Path.Combine(Path.GetTempPath(), "sprycad-" + Guid.NewGuid().ToString("N"));
         RevisionInfo head;
         try
         {
             bool append = File.Exists(path) && PartDatabase.IsFile(path) && RootOf(path) == asmId;
             if (append) File.Copy(path, tmp, overwrite: true);
             using (var db = append ? PartDatabase.Open(tmp, readOnly: false) : PartDatabase.Create(tmp, durable))
-            {
-                // the documents embedded in it: their rows (a part or sub-assembly saved before databases, converted first)
-                Directory.CreateDirectory(scratch);
-                var embedded = new Dictionary<string, (string id, string revision)>(StringComparer.Ordinal);
-                foreach (var (name, bytes) in doc.Files.Where(f => IsEmbeddedDocument(f.Key)).OrderBy(f => f.Key, StringComparer.Ordinal))
-                {
-                    var file = Path.Combine(scratch, embedded.Count + (name.EndsWith(AssemblyDocument.FileExtension, StringComparison.OrdinalIgnoreCase) ? ".sasm" : ".sprt"));
-                    AsDatabase(bytes, name, file);
-                    embedded[name] = Import(db, file);
-                }
-                db.Begin();
-                try
-                {
-                    db.SetPart(asmId, Path.GetFileNameWithoutExtension(path));
-                    var objects = AssemblyObjects.From(doc, embedded).ToDictionary(kv => kv.Key, kv => db.Blobs.Put(kv.Value));
-                    head = db.Commit(asmId, objects, author ?? PartFile.DefaultAuthor, message.Length > 0 ? message : doc.SaveMessage ?? "",
-                        doc.SaveMessage != null ? doc.SaveKind : RevisionKind.Save) ?? db.GetHead(asmId)!;
-                    var now = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture);
-                    db.SetManifest("FormatVersion", CadDocument.CurrentFormatVersion.ToString(CultureInfo.InvariantCulture));
-                    db.SetManifest("AppVersion", typeof(AssemblyFile).Assembly.GetName().Version?.ToString() ?? "");
-                    db.SetManifest("RootPartId", asmId.ToString("D"));
-                    db.SetManifest("RootKind", RootKindAssembly);
-                    db.SetManifest("Units", doc.Units.ToString());
-                    if (db.Manifest("CreatedUtc") == null) db.SetManifest("CreatedUtc", now);
-                    db.SetManifest("ModifiedUtc", now);
-                    db.SetManifest("DerivedFrom", doc.DerivedFrom);
-                    db.SetManifest("AssemblyState", AssemblyObjects.State(doc));
-                    db.SetThumbnail(doc.Thumbnail);
-                    SaveCaches(db, asmId, doc);
-                    db.CommitTransaction();
-                }
-                catch { db.Rollback(); throw; }
-            }
+                head = Write(db, doc, asmId, Path.GetFileNameWithoutExtension(path), author, message);
             File.Move(tmp, path, overwrite: true);
         }
         catch
@@ -92,9 +59,73 @@ public static class AssemblyFile
             try { File.Delete(tmp); } catch { /* best effort */ }
             throw;
         }
-        finally { try { Directory.Delete(scratch, true); } catch { /* best effort */ } }
         doc.Revision = head.RevisionId.ToString("D");
         doc.SaveMessage = null; doc.SaveKind = RevisionKind.Save;
+    }
+
+    /// <summary>
+    /// The assembly as the bytes of a new file (no history before it), made in memory: an assembly embedded in another
+    /// as it is first made (a STEP assembly's sub-assemblies), no file written and read back.
+    /// </summary>
+    public static byte[] ToNewBytes(AssemblyDocument doc, string name)
+    {
+        foreach (var n in doc.Files.Keys) DocumentContainer.CheckName(n);
+        doc.Id ??= CadDocument.NewGuid();
+        RevisionInfo head;
+        byte[] bytes;
+        using (var db = PartDatabase.CreateInMemory())
+        {
+            head = Write(db, doc, Guid.Parse(doc.Id), name, null, "");
+            bytes = db.ToBytes();
+        }
+        doc.Revision = head.RevisionId.ToString("D");
+        doc.SaveMessage = null; doc.SaveKind = RevisionKind.Save;
+        return bytes;
+    }
+
+    /// <summary>The assembly written into a database (a new one, or its file's to append to): its new head revision.</summary>
+    static RevisionInfo Write(PartDatabase db, AssemblyDocument doc, Guid asmId, string name, string? author, string message)
+    {
+        var scratch = Path.Combine(Path.GetTempPath(), "sprycad-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            // the documents embedded in it: their rows (from their bytes; a part or sub-assembly saved before
+            // databases, converted first)
+            var embedded = new Dictionary<string, (string id, string revision)>(StringComparer.Ordinal);
+            foreach (var (file, bytes) in doc.Files.Where(f => IsEmbeddedDocument(f.Key)).OrderBy(f => f.Key, StringComparer.Ordinal))
+            {
+                if (PartDatabase.Is(bytes)) { embedded[file] = Import(db, bytes); continue; }
+                Directory.CreateDirectory(scratch);
+                var path = Path.Combine(scratch, embedded.Count + (file.EndsWith(AssemblyDocument.FileExtension, StringComparison.OrdinalIgnoreCase) ? ".sasm" : ".sprt"));
+                AsDatabase(bytes, file, path);
+                embedded[file] = Import(db, File.ReadAllBytes(path));
+            }
+            RevisionInfo head;
+            db.Begin();
+            try
+            {
+                db.SetPart(asmId, name);
+                var objects = AssemblyObjects.From(doc, embedded).ToDictionary(kv => kv.Key, kv => db.Blobs.Put(kv.Value));
+                head = db.Commit(asmId, objects, author ?? PartFile.DefaultAuthor, message.Length > 0 ? message : doc.SaveMessage ?? "",
+                    doc.SaveMessage != null ? doc.SaveKind : RevisionKind.Save) ?? db.GetHead(asmId)!;
+                var now = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture);
+                db.SetManifest("FormatVersion", CadDocument.CurrentFormatVersion.ToString(CultureInfo.InvariantCulture));
+                db.SetManifest("AppVersion", typeof(AssemblyFile).Assembly.GetName().Version?.ToString() ?? "");
+                db.SetManifest("RootPartId", asmId.ToString("D"));
+                db.SetManifest("RootKind", RootKindAssembly);
+                db.SetManifest("Units", doc.Units.ToString());
+                if (db.Manifest("CreatedUtc") == null) db.SetManifest("CreatedUtc", now);
+                db.SetManifest("ModifiedUtc", now);
+                db.SetManifest("DerivedFrom", doc.DerivedFrom);
+                db.SetManifest("AssemblyState", AssemblyObjects.State(doc));
+                db.SetThumbnail(doc.Thumbnail);
+                SaveCaches(db, asmId, doc);
+                db.CommitTransaction();
+            }
+            catch { db.Rollback(); throw; }
+            return head;
+        }
+        finally { try { if (Directory.Exists(scratch)) Directory.Delete(scratch, true); } catch { /* best effort */ } }
     }
 
     /// <summary>The assembly at the head of the file's history, its embedded documents and display caches with it.</summary>
@@ -135,16 +166,16 @@ public static class AssemblyFile
     /// Copies a database's documents into <paramref name="db"/>: their revisions (not autosaves), tags, blobs and display
     /// caches (in place of those they had), and their state. The id of its own document and its head revision.
     /// </summary>
-    static (string id, string revision) Import(PartDatabase db, string file)
+    static (string id, string revision) Import(PartDatabase db, byte[] file)
     {
         string root, head; byte[]? preview;
-        using (var src = PartDatabase.Open(file))
+        using (var src = PartDatabase.FromBytes(file))
         {
             var id = RootOf(src);
             root = id.ToString("D"); preview = src.GetThumbnail();
             head = src.GetHead(id)?.RevisionId.ToString("D") ?? "";
         }
-        db.Execute("ATTACH DATABASE $f AS src", ("$f", file));
+        db.AttachBytes("src", file);
         try
         {
             db.Begin();

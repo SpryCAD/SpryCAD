@@ -31,10 +31,12 @@ public static class AssemblyContainer
     /// </summary>
     public static byte[] ToBytes(AssemblyDocument asm, byte[]? previous = null, bool durable = true)
     {
+        // a new file (no history to go on from): made in memory
+        if (previous == null || !Storage.PartDatabase.Is(previous)) return Storage.AssemblyFile.ToNewBytes(asm, "Assembly");
         var tmp = Path.Combine(Path.GetTempPath(), "sprycad-" + Guid.NewGuid().ToString("N") + AssemblyDocument.FileExtension);
         try
         {
-            if (previous != null && Storage.PartDatabase.Is(previous)) File.WriteAllBytes(tmp, previous);
+            File.WriteAllBytes(tmp, previous);
             Storage.AssemblyFile.Save(asm, tmp, durable: durable);
             return File.ReadAllBytes(tmp);
         }

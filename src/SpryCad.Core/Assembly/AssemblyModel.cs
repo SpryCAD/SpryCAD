@@ -459,10 +459,8 @@ public sealed partial class AssemblyModel
     /// <summary>A part saved as a part file is (its identity and revision given), as the bytes an assembly embeds.</summary>
     static byte[] SaveEmbedded(CadDocument doc)
     {
-        var tmp = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "fc-embed-" + Guid.NewGuid().ToString("N") + CadDocument.FileExtension);
-        // (a file read back at once: not synced to disk)
-        try { DocumentContainer.Save(doc, tmp, durable: false); return File.ReadAllBytes(tmp); }
-        finally { try { File.Delete(tmp); } catch { } }
+        // (made in memory: no file written and read back)
+        return DocumentContainer.ToNewBytes(doc, "Part");
     }
 
     static string SafeFileName(string name)

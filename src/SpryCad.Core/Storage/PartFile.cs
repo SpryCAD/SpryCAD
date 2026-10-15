@@ -29,26 +29,7 @@ public static class PartFile
             bool append = File.Exists(path) && PartDatabase.IsFile(path) && RootPart(path) == partId;
             if (append) File.Copy(path, tmp, overwrite: true);
             using (var db = append ? PartDatabase.Open(tmp, readOnly: false) : PartDatabase.Create(tmp, durable))
-            {
-                db.Begin();
-                try
-                {
-                    db.SetPart(partId, Path.GetFileNameWithoutExtension(path));
-                    var objects = PartObjects.From(doc).ToDictionary(kv => kv.Key, kv => db.Blobs.Put(kv.Value));
-                    var made = db.Commit(partId, objects, author ?? DefaultAuthor, message, kind);
-                    head = made ?? db.GetHead(partId)!;
-                    // a new revision: what it looks like, its changes shown (the Revisions pane)
-                    if (made != null && PreviewMeshOf(doc) is { } mesh)
-                        try { RevisionPreview.Record(db, made, mesh, doc.Color, doc); }
-                        catch (Exception ex) when (ex is not Microsoft.Data.Sqlite.SqliteException) { /* a preview is never worth failing a save */ }
-                    db.DropWorking(partId); // (saved: what autosave kept is in the head now)
-                    WriteManifest(db, doc, partId);
-                    db.SetThumbnail(doc.Thumbnail);
-                    db.SetDisplay(partId, DisplayKey(head.RootHash), doc.Display);
-                    db.CommitTransaction();
-                }
-                catch { db.Rollback(); throw; }
-            }
+                head = Write(db, doc, partId, Path.GetFileNameWithoutExtension(path), author, message, kind);
             File.Move(tmp, path, overwrite: true);
         }
         catch
@@ -57,6 +38,49 @@ public static class PartFile
             throw;
         }
         doc.Revision = head.RevisionId.ToString("D");
+    }
+
+    /// <summary>
+    /// The part as the bytes of a new file (no history before it), made in memory: a part embedded in an assembly as it
+    /// is first made, no file written and read back.
+    /// </summary>
+    public static byte[] ToNewBytes(CadDocument doc, string name)
+    {
+        doc.Id ??= CadDocument.NewGuid();
+        RevisionInfo head;
+        byte[] bytes;
+        using (var db = PartDatabase.CreateInMemory())
+        {
+            head = Write(db, doc, Guid.Parse(doc.Id), name, null, "", RevisionKind.Save);
+            bytes = db.ToBytes();
+        }
+        doc.Revision = head.RevisionId.ToString("D");
+        return bytes;
+    }
+
+    /// <summary>The part written into a database (a new one, or its file's to append to): its new head revision.</summary>
+    static RevisionInfo Write(PartDatabase db, CadDocument doc, Guid partId, string name, string? author, string message, RevisionKind kind)
+    {
+        RevisionInfo head;
+        db.Begin();
+        try
+        {
+            db.SetPart(partId, name);
+            var objects = PartObjects.From(doc).ToDictionary(kv => kv.Key, kv => db.Blobs.Put(kv.Value));
+            var made = db.Commit(partId, objects, author ?? DefaultAuthor, message, kind);
+            head = made ?? db.GetHead(partId)!;
+            // a new revision: what it looks like, its changes shown (the Revisions pane)
+            if (made != null && PreviewMeshOf(doc) is { } mesh)
+                try { RevisionPreview.Record(db, made, mesh, doc.Color, doc); }
+                catch (Exception ex) when (ex is not Microsoft.Data.Sqlite.SqliteException) { /* a preview is never worth failing a save */ }
+            db.DropWorking(partId); // (saved: what autosave kept is in the head now)
+            WriteManifest(db, doc, partId);
+            db.SetThumbnail(doc.Thumbnail);
+            db.SetDisplay(partId, DisplayKey(head.RootHash), doc.Display);
+            db.CommitTransaction();
+        }
+        catch { db.Rollback(); throw; }
+        return head;
     }
 
     /// <summary>The part's display as saved: the one the app built (<see cref="CadDocument.PreviewMesh"/>), else its display cache's.</summary>
