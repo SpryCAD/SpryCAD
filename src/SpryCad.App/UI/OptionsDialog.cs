@@ -314,7 +314,7 @@ public static class OptionsDialog
             {
                 if (mine != checks) return;
                 App.Log(ex, "Checking for updates");
-                text = $"Could not check: {ex.Message}";
+                text = Updater.FailureReason(ex);
             }
             latest.Text = text;
             checkNow.IsEnabled = true;
@@ -333,11 +333,11 @@ public static class OptionsDialog
             update.Content = $"Update to {r.Version}";
             update.IsVisible = true;
             update.IsEnabled = checkNow.IsEnabled = channel.IsEnabled = false;
-            try { await Updater.Download(r, new Progress<double>(p => latest.Text = $"Downloading {r.Version}... {p:P0}")); }
+            try { await Updater.Download(r, new Progress<double>(p => latest.Text = $"Downloading {r.Version}… {p:P0}")); }
             catch (Exception ex)
             {
                 App.Log(ex, "Downloading an update");
-                latest.Text = $"The download failed: {ex.Message}";
+                latest.Text = "Download failed: " + Updater.FailureReason(ex);
                 update.IsEnabled = checkNow.IsEnabled = channel.IsEnabled = true;
                 return;
             }
