@@ -279,6 +279,9 @@ public static class NativeBlend
             bool blend0 = n0.StartsWith(firstPrefix + ".", StringComparison.Ordinal), blend1 = n1.StartsWith(firstPrefix + ".", StringComparison.Ordinal);
             if (!(blend0 && names.Contains(n1) || blend1 && names.Contains(n0))) continue;
             var m = x.Curve.Eval(0.5 * (x.T0 + x.T1));
+            // (not where the first blend meets a face smoothly, as a fillet does its own faces: nothing to blend, and the
+            // rest was refused for it)
+            if (Vec3.Dot(Outward(x.Uses[0].Face, m).Normalized, Outward(x.Uses[1].Face, m).Normalized) > Math.Cos(Math.PI / 180)) continue;
             if (ends.Any(p => Vec3.Distance(p, m) < 3 * size)) res.Add(x);
         }
         return res;
