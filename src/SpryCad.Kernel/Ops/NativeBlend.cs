@@ -1178,6 +1178,50 @@ public static class NativeBlend
         var ext = 3 * Math.Max(size, Math.Max(tlA, tlB));
         // (a fillet turning round a corner onto the next: ended where the ball starts to pivot round it)
         var pivots = new List<(RoundCornerCut c, CornerPatch.Result patch)>();
+        // (a chamfer's face: the plane through the lines its legs end on, along a straight edge between planes)
+        Plane? ChamferPlane(NEdge x)
+        {
+            if (x.Curve is not NLine || x.Uses.Count != 2) return null;
+            var (xa, xb) = (x.Uses[0], x.Uses[1]);
+            if (xa.Face.Surface.Kind != SurfaceKind.Plane || xb.Face.Surface.Kind != SurfaceKind.Plane) return null;
+            var p = xa.Start.P; var tx = (xa.End.P - p).Normalized;
+            var na = Outward(xa.Face, p); var nbx = Outward(xb.Face, p);
+            var ua = Vec3.Cross(na, tx).Normalized; var ub = Vec3.Cross(nbx, -tx).Normalized;
+            var fx = ua; var fy = Vec3.Cross(tx, fx).Normalized;
+            Vec2 Q(Vec3 w) => new(Vec3.Dot(w, fx), Vec3.Dot(w, fy));
+            var (la, lb) = EdgeBlend.ChamferLegs(Q(ua), Q(ub), ch, refIsFirst(xa.Face, xb.Face));
+            var pa = p + ua * la; var pb = p + ub * lb;
+            var n = Vec3.Cross(tx, pb - pa);
+            return n.Length < 1e-12 ? null : Plane.FromPointNormal(pa, n.Normalized);
+        }
+        // (two chamfers meeting at a joint, on a mitre: exactly where their faces meet, the plane through the vertex and
+        // the line the two chamfer faces cross on. The mitre the fillets take (through the corner edge, bisecting the
+        // edges) is that only where the faces are square; on a drafted one it left a sliver between the two)
+        EndCut? ChamferJoint(NVertex v, Vec3 dirOut)
+        {
+            var others = new[] { cA.Face, cB.Face }.SelectMany(f => f.Coedges).Select(c => c.Edge)
+                .Where(g => !ReferenceEquals(g, e) && (ReferenceEquals(g.V0, v) || ReferenceEquals(g.V1, v)) && selected.Contains(g) && !IsSeam(g))
+                .Distinct(ReferenceEqualityComparer.Instance).Cast<NEdge>().ToList();
+            if (others.Count != 1) return null;
+            var g = others[0];
+            // (both convex round a convex corner: each runs to the face it meets, as EndPlane has it)
+            var shared = g.Uses.Any(u => ReferenceEquals(u.Face, cA.Face)) ? cA.Face : cB.Face;
+            if (IsConvex(e) == true && IsConvex(g) == true && CornerEdgeOf(v, shared, new[] { cA.Face, cB.Face }.Concat(g.Uses.Select(u => u.Face)), new[] { e }, selected) is { } ce && IsConvex(ce) == true) return null;
+            if (ChamferPlane(e) is not { } me || ChamferPlane(g) is not { } them) return null;
+            var n1 = me.Normal; var n2 = them.Normal;
+            var dd = Vec3.Cross(n1, n2);
+            if (dd.Length < 1e-9) return null;
+            var d = dd.Normalized;
+            // a point of the line where the two faces cross (n1·x = h1, n2·x = h2), then the nearest to v
+            var h1 = Vec3.Dot(n1, me.Project(v.P)); var h2 = Vec3.Dot(n2, them.Project(v.P));
+            var q = (Vec3.Cross(n2, dd) * h1 + Vec3.Cross(dd, n1) * h2) / Vec3.Dot(dd, dd);
+            q += d * Vec3.Dot(v.P - q, d);
+            var n = Vec3.Cross(d, q - v.P);
+            if (n.Length < 1e-9 * Math.Max(1, size)) return null;
+            var pl = Plane.FromPointNormal(v.P, n.Normalized);
+            if (pl.Distance(v.P - dirOut * size) < 0) pl = Plane.FromPointNormal(v.P, -n.Normalized);
+            return new EndCut(pl);
+        }
         EndCut? End(NVertex v, Vec3 dirOut)
         {
             if (fillet && EndPlane(v, dirOut, cA.Face, cB.Face, new[] { e }, selected) is { } pl
@@ -1186,6 +1230,7 @@ public static class NativeBlend
                 pivots.Add((rc, patch));
                 return new EndCut(patch.EndOwn);
             }
+            if (!fillet && ChamferJoint(v, dirOut) is { } joint) return joint;
             return EndCutAt(v, dirOut, cA.Face, cB.Face, new[] { e }, selected);
         }
         var p0 = End(cA.Start, -t);
