@@ -160,9 +160,14 @@ static class BlendStress
         var (d0, b0) = DirectBlend.Counts;
         var sw = Stopwatch.StartNew();
         RegenResult r;
-        try { r = new Regenerator().Rebuild(doc); }
+        // (a minute at most: where the rebuild heeds it)
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        try { r = new Regenerator().Rebuild(doc, null, cts.Token); }
+        catch (OperationCanceledException) { ms = sw.Elapsed.TotalMilliseconds; detail = "slow: cancelled after a minute"; return "wrong"; }
         catch (Exception ex) { ms = sw.Elapsed.TotalMilliseconds; detail = "exception: " + ex.Message; return "wrong"; }
         ms = sw.Elapsed.TotalMilliseconds;
+        // (a blend taking more than ten seconds is a failure too, whatever it makes)
+        if (ms > 10000) { detail = $"slow: {ms / 1000:0} s"; return "wrong"; }
         var (d1, b1) = DirectBlend.Counts;
         direct = d1 - d0; boolean = b1 - b0;
         var st = r.Status[blend.Id];

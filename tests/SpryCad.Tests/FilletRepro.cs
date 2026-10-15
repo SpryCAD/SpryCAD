@@ -115,6 +115,8 @@ static class FilletRepro
             // (PROPAGATE: the tube fillets run on along tangent edges)
             if (Environment.GetEnvironmentVariable("PROPAGATE") != null) foreach (var tf in doc.Features.OfType<FilletFeature>().Where(f => f.Name.StartsWith("Tube"))) tf.TangentPropagation = true;
             if (Environment.GetEnvironmentVariable("RIM_R") is { } rr) doc.Features.OfType<FilletFeature>().First(f => f.Name == "Tube rim").Radius = rr;
+            // (RIM_ALONE: the rim not run on along tangent edges)
+            if (Environment.GetEnvironmentVariable("RIM_ALONE") != null) doc.Features.OfType<FilletFeature>().First(f => f.Name == "Tube rim").TangentPropagation = false;
             return doc;
         }
         if (si >= 0) doc.Features.RemoveRange(si, doc.Features.Count - si);
