@@ -39,8 +39,10 @@ static class BlendStress
         bool all = Environment.GetEnvironmentVariable("FC_STRESS_ALL") != null;
         // (why the direct blend left tools to the boolean, the face names taken out)
         var why = new Dictionary<string, int>();
+        bool printWhy = Environment.GetEnvironmentVariable("FC_STRESS_WHY") != null;
         DirectBlend.Debug = m =>
         {
+            if (printWhy) Console.WriteLine("      why: " + m);
             var k = m[(m.IndexOf('(') + 1)..].TrimEnd(')');
             k = System.Text.RegularExpressions.Regex.Replace(k, @"F(?:[0-9a-z]{12}|[0-9])[0-9A-Za-z.]*", "F");
             k = System.Text.RegularExpressions.Regex.Replace(k, @"\(not glued:.*$", "").Trim();
@@ -102,6 +104,31 @@ static class BlendStress
                 .Concat(cases.Select(c => string.Join(",", new[] { c.Shape, c.Selection, c.Kind, c.Size, c.Outcome, c.Detail, c.Ms.ToString("0"), c.Direct.ToString(), c.Boolean.ToString() }
                     .Select(x => "\"" + x.Replace("\"", "'") + "\"")))));
         return 0;
+    }
+
+    /// <summary>
+    /// The cases of the stress shapes named (all their selections, kinds and sizes), each scored: for a regression test.
+    /// </summary>
+    public static List<(string name, string outcome, string detail)> Cases(IEnumerable<string> shapeNames)
+    {
+        var res = new List<(string, string, string)>();
+        foreach (var (shape, build) in Demos.StressShapes.Where(s => shapeNames.Contains(s.name)))
+        {
+            var doc0 = build();
+            var r0 = new Regenerator().Rebuild(doc0);
+            var body = r0.State.Bodies.Single().Solid.Native!;
+            body.Link();
+            var diag = body.Bounds.Diagonal;
+            var minDim = body.Edges.Where(e => e.Curve is NLine).Select(e => e.Length).Where(l => l > 0.03 * diag).Min();
+            foreach (var (selName, edges) in Selections(body, true))
+                foreach (var kind in new[] { "fillet", "chamfer" })
+                    foreach (var (sizeName, f) in new[] { ("small", 0.08), ("medium", 0.2), ("large", 0.4) })
+                    {
+                        var c = Score(doc0, body, edges, kind, f * minDim, out var detail, out _, out _, out _);
+                        res.Add(($"{shape} | {selName} | {kind} {sizeName}", c, detail));
+                    }
+        }
+        return res;
     }
 
     /// <summary>
