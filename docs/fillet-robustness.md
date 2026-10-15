@@ -46,25 +46,46 @@ set is 2700 now, and a few hundred of the baseline's verdicts were the harness's
 
 ## After (branch fillet-robustness)
 
-2700 cases: 2435 right (90%), 167 refused (6.2%), 98 wrong (3.6%). Tools: 13557 applied directly, 3177 by boolean;
-307 cases use the boolean at all.
+2700 cases: 2471 right (91.5%), 165 refused (6.1%), 64 wrong (2.4%). Tools: 13662 applied directly, 3256 by boolean;
+305 cases use the boolean at all.
 
 | | right | refused | wrong |
 |---|---|---|---|
-| fillet | 1216 | 71 | 63 |
-| chamfer | 1219 | 96 | 35 |
+| fillet | 1234 | 69 | 47 |
+| chamfer | 1237 | 96 | 17 |
 | corner selections | 452 | 30 | 10 |
-| face selections | 755 | 61 | 54 |
-| all edges | 89 | 1 | 12 |
+| face selections | 784 | 59 | 27 |
+| all edges | 94 | 1 | 7 |
 
-Wrong, by what: a tool's end left standing 70, export 13, slow 6, volume 5, edge not blended 3, open mesh 1.
+Wrong, by what: a tool's end left standing 35, export 14, slow 6, volume 5, edge not blended 3, open mesh 1.
 
-Every plain prism (block, corner cut, trapezoid, triangle, hexagon, thin wedge, drafted or not) and the blocks with
-a round boss or pocket: all right, all direct (the test suite's "Blend stress: prisms" gate keeps them so).
+Every plain prism (block, corner cut, trapezoid, triangle, hexagon, L, thin wedge, drafted or not), the blocks with
+a round boss or pocket, and the block with a square pocket: no case wrong (the test suite's "Blend stress: prisms"
+gate keeps the prisms so).
 
-What is still wrong is mostly convex and concave edges meeting at a corner: the drafted boss (27), the drafted L
-(14), the handwheel's grips (13), the shelled parts. A corner classifier (each kind of vertex given its own patch)
-is the next step for those; per-edge tolerances showed no near misses worth the change and were not done.
+### Corners
+
+Two blends of one kind on a shared face, meeting at a vertex, are classified by the corner edge between their other
+faces:
+
+- square to the shared face (a box, an L's inside corner): both end on one plane through the corner, exact there,
+  and the tools glue end to end;
+- leaning from square, convex (a drafted block) or concave (a drafted boss's side edge running down onto its foot's
+  chamfer): their faces and the two beside them meet at no one point, and a plane leaves a sliver or wing. Each runs
+  on to the face it meets, and the overlapping tools are joined by an exact union.
+
+Blends of both kinds meeting at a vertex are staged, the odd kind out first. Fillets take with them the edges of
+their kind they meet (a corner of three gets its patch, rather than one fillet later rolling over another's round
+as big as itself); where the staging leaves a tool's end standing or fails, the other kind goes first (a boss's
+side and top edges, then its foot rolling round their rounds), kept where it leaves fewer.
+
+A fillet stopping where its edge runs on tangentially into one not picked (a boss's foot fillet, wrapped round the
+side fillet, reaching the next face) ends square: correct, and counted as a tool's end standing here. A variable
+radius fading the fillet out there is the better end, for later.
+
+Still wrong: the drafted boss (14, mostly those square ends), the handwheel's grips (13), the brake duct (7, corner
+chamfers slow on its lofted faces), the shelled parts (14), the drafted L (6). Per-edge tolerances showed no near
+misses worth the change and were not done.
 
 ## Speed
 
