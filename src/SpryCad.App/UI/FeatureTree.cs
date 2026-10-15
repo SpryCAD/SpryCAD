@@ -95,13 +95,13 @@ public sealed class FeatureTree : UserControl
     public void Rebuild(CadDocument doc, string title, RegenResult? result)
     {
         _last = (doc, title, result);
-        SetHover(null); // the hovered row is going away
-        _rows.Children.Clear();
+        var hovered = _hoverId != null ? _rowById.GetValueOrDefault(_hoverId) : null;
+        _building.Clear();
         _rowById.Clear();
         _childRows.Clear();
         _pressId = null; _moving = false; _dropLine.IsVisible = false;
         AddRow("__part", title, "part", 0, null, isHeader: true, hasChildren: Flyout);
-        if (Flyout && !FlyoutOpen) { Select(_selectedId); return; }
+        if (Flyout && !FlyoutOpen) { CommitRows(hovered); Select(_selectedId); return; }
         // the origin: a folder of the three planes, the three axes and the origin point
         AddRow("Origin", "Origin", "folder", 1, null, hasChildren: true);
         if (_expanded.Contains("Origin"))
@@ -160,8 +160,27 @@ public sealed class FeatureTree : UserControl
                         sketchShown: rolledBack ? null : ShownOf(ch), condition: ConditionTip(ch)));
         }
         if (active >= doc.Features.Count && !Flyout) AddRollbackBar();
+        CommitRows(hovered);
         Select(_selectedId);
         Relate(_relatedId);
+    }
+
+    // rows built by the last rebuild, by id, with what they show (AddRow's signature): a row showing the same again is
+    // kept, not made anew; the rows of this rebuild in order, put in place by CommitRows
+    readonly Dictionary<string, (string sig, Border row)> _rowCache = new();
+    readonly List<Control> _building = new();
+    Border? _rollbackBar;
+
+    /// <summary>
+    /// The rows of a rebuild shown: the panel's children replaced only if they changed (an edit, a rebuild result with
+    /// the same names and states, leaves them as they are: nothing is laid out again); rows not shown now forgotten.
+    /// </summary>
+    void CommitRows(Border? hovered)
+    {
+        if (!_rows.Children.SequenceEqual(_building)) { _rows.Children.Clear(); _rows.Children.AddRange(_building); }
+        foreach (var id in _rowCache.Keys.Where(k => !_rowById.ContainsKey(k)).ToList()) _rowCache.Remove(id);
+        // a hovered row that went (replaced or removed) gets no "pointer left": its highlight on the model would stay
+        if (hovered == null || !_building.Contains(hovered)) SetHover(null);
     }
 
     /// <summary>Feature name; sketches get SolidWorks' "(-)" under-defined / "(+)" over-defined prefix.</summary>
@@ -204,7 +223,9 @@ public sealed class FeatureTree : UserControl
     static Cursor? _rollbackCursor;
     static Cursor RollbackCursor => _rollbackCursor ??= new Cursor(StandardCursorType.SizeNorthSouth);
 
-    void AddRollbackBar()
+    void AddRollbackBar() => _building.Add(_rollbackBar ??= MakeRollbackBar());
+
+    Border MakeRollbackBar()
     {
         // a thin line, in a taller clear strip that takes the mouse: as easy to grab as a thick bar, lighter to look at
         var bar = new Border
@@ -237,7 +258,7 @@ public sealed class FeatureTree : UserControl
             RollbackRequested?.Invoke(target == null ? null : -1);
             if (target != null) RollbackTo?.Invoke(target, after);
         };
-        _rows.Children.Add(bar);
+        return bar;
     }
 
     /// <summary>The feature row a rollback bar dropped at <paramref name="y"/> lands next to (null = end of tree),
@@ -332,6 +353,20 @@ public sealed class FeatureTree : UserControl
     Border AddRow(string id, string text, string icon, int indent, FeatureStatus? status, bool isHeader = false, bool suppressed = false, bool hasChildren = false,
         bool? sketchShown = null, string? condition = null)
     {
+        // everything the row shows: the same as last time (and not already in this rebuild), the row as it was
+        var swatchKey = Swatches != null && Swatches.TryGetValue(id, out var sw) ? sw.ToString() : "";
+        var sig = string.Join("|", text, icon, indent, isHeader, suppressed, hasChildren, hasChildren && _expanded.Contains(id), sketchShown, condition,
+            swatchKey, Flyout, status?.Ok, status?.Error, status == null ? null : string.Join("\n", status.Warnings),
+            status is { Milliseconds: > 200 } ? status.Milliseconds.ToString("0") : "");
+        if (_rowCache.TryGetValue(id, out var kept) && kept.sig == sig && !_rowById.ContainsKey(id))
+        {
+            // (its marks put back by Select and Relate; a drag cut short by the rebuild ended)
+            kept.row.Opacity = 1;
+            kept.row.Classes.Remove("selected"); kept.row.Classes.Remove("related");
+            _rowById[id] = kept.row;
+            _building.Add(kept.row);
+            return kept.row;
+        }
         // as the assembly's tree (UI/TreeRow.cs): as wide as the tree, a long name trimmed, the markers after it kept
         var sp = new TreeRowPanel { Margin = new Thickness(indent * 14, 0, 0, 0) };
         sp.Children.Add(hasChildren
@@ -427,7 +462,8 @@ public sealed class FeatureTree : UserControl
         row.PointerEntered += (_, _) => SetHover(id);
         row.PointerExited += (_, _) => SetHover(null);
         _rowById[id] = row;
-        _rows.Children.Add(row);
+        _rowCache[id] = (sig, row);
+        _building.Add(row);
         return row;
     }
 

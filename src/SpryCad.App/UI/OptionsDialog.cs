@@ -31,8 +31,8 @@ public static class OptionsDialog
 
     // Updates: Windows only (Linux updates with its packages)
     static readonly Page[] SystemPages = OperatingSystem.IsWindows()
-        ? new Page[] { new("View", "views", ViewPage), new("Files", "folder", FilesPage), new("Updates", "rebuild", UpdatesPage) }
-        : new Page[] { new("View", "views", ViewPage), new("Files", "folder", FilesPage) };
+        ? new Page[] { new("View", "views", ViewPage), new("Graphics", "display", GraphicsPage), new("Files", "folder", FilesPage), new("Updates", "rebuild", UpdatesPage) }
+        : new Page[] { new("View", "views", ViewPage), new("Graphics", "display", GraphicsPage), new("Files", "folder", FilesPage) };
 
     static readonly Page[] DocumentPages =
     {
@@ -191,6 +191,43 @@ public static class OptionsDialog
             vp.ReverseWheel = UserSettings.ReverseWheel = wheel.IsChecked == true;
             vp.Camera.Perspective = UserSettings.Perspective = persp.IsChecked == true;
             if (pivot.SelectedIndex >= 0) vp.RotateAbout = UserSettings.RotateAbout = pivots[pivot.SelectedIndex];
+        });
+    }
+
+    static Commit GraphicsPage(Form f, Context c)
+    {
+        var vp = c.Owner.Viewport;
+        f.Section("Graphics card");
+        // the driver's renderer (vendor / renderer / version as logged)
+        var renderer = App.GlInfo?.Split(" / ") is { Length: >= 2 } parts ? parts[1] : App.GlInfo;
+        f.Row("Drawing with", new SelectableTextBlock { Text = renderer ?? "(not started yet)", TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center });
+        if (Viewport.ViewportControl.IsSoftwareRenderer(renderer))
+            f.Hint("A software renderer: no graphics card draws the view, so large models are slow to turn. On a laptop with two "
+                + "graphics chips, choose High performance below. If that does not help, the graphics driver may be missing or "
+                + "disabled (Device Manager > Display adapters).", 150, Palette.Danger);
+        ComboBox? gpu = null, api = null;
+        if (OperatingSystem.IsWindows())
+        {
+            gpu = f.Row("Graphics processor", Combo(new[] { "Let Windows decide", "Power saving", "High performance" }, (int)GpuPreference.Get()),
+                "Windows' own setting for SpryCAD (as in Settings > System > Display > Graphics): on a laptop with two graphics "
+                + "chips, which one draws the view. Takes effect when SpryCAD starts again.");
+            api = f.Row("Draw through", Combo(new[] { "Direct3D (default)", "OpenGL (the card's own driver)" }, UserSettings.PreferOpenGL ? 1 : 0),
+                "Try OpenGL if the view draws wrongly or slowly; where it cannot start, Direct3D is used. Takes effect when SpryCAD starts again.");
+        }
+        f.Section("Quality");
+        var levels = new[] { 0, 2, 4 };
+        var aa = f.Row("Anti-aliasing", Combo(new[] { "Off", "2x", "4x (default)" }, Math.Max(0, Array.IndexOf(levels, UserSettings.AntiAliasing))),
+            "Smooths the edges of faces and lines. Off draws fastest, which helps most without a graphics card.");
+        return new Commit(() => null, () => () =>
+        {
+            if (aa.SelectedIndex >= 0) vp.AntiAliasing = UserSettings.AntiAliasing = levels[aa.SelectedIndex];
+            if (!OperatingSystem.IsWindows()) return;
+            if (api is { SelectedIndex: >= 0 }) UserSettings.PreferOpenGL = api.SelectedIndex == 1;
+            if (gpu is { SelectedIndex: >= 0 } && (GpuPreference.Choice)gpu.SelectedIndex != GpuPreference.Get())
+            {
+                try { GpuPreference.Set((GpuPreference.Choice)gpu.SelectedIndex); }
+                catch (Exception ex) { App.Log(ex, "Setting the graphics processor"); }
+            }
         });
     }
 
@@ -436,9 +473,9 @@ public static class OptionsDialog
             return cb;
         }
 
-        public void Hint(string text, double indent = 0) => Root.Children.Add(new TextBlock
+        public void Hint(string text, double indent = 0, IBrush? color = null) => Root.Children.Add(new TextBlock
         {
-            Text = text, FontSize = TypeScale.Small, Foreground = Palette.TextMuted, TextWrapping = TextWrapping.Wrap,
+            Text = text, FontSize = TypeScale.Small, Foreground = color ?? Palette.TextMuted, TextWrapping = TextWrapping.Wrap,
             Margin = new Thickness(indent, -2, 0, 4),
         });
     }

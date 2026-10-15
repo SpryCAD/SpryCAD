@@ -38,10 +38,11 @@ public partial class MainWindow : Window
         Icons.Scaling = Screens.Primary?.Scaling ?? 1; // (before any icon is made: at 100% the 16 px drawings are used where there are any)
         _modelMode = new ModelMode(Selection);
         Viewport.Mode = _modelMode;
-        UserSettings.Load();
         Viewport.ReverseWheel = UserSettings.ReverseWheel;
         Viewport.RotateAbout = UserSettings.RotateAbout;
         Viewport.Camera.Perspective = UserSettings.Perspective;
+        Viewport.AntiAliasing = UserSettings.AntiAliasing;
+        Viewport.SoftwareRenderer += () => Status("The view is drawn without the graphics card (a software renderer), slow with large models: see Tools > Options > Graphics.");
         Viewport.Overlay = Overlay;
         Viewport.Selection = Selection;
         Viewport.ContextRequested += OnViewportContext;
@@ -60,6 +61,7 @@ public partial class MainWindow : Window
         UpdateTabHeader(_tab);
         Selection.Changed += OnSelectionChanged;
         Viewport.PointerMoved += (_, e) => FadePalette(e.GetPosition(Viewport));
+        SetupUnitsSwitch();
 
         Tree.SelectedChanged += OnTreeSelected;
         Tree.EditRequested += id => EditFeature(id);
@@ -138,6 +140,7 @@ public partial class MainWindow : Window
             ToolTip.SetTip(StatusRebuild, bad.Count + warned == 0 ? null : string.Join(Environment.NewLine,
                 Session.Doc.Features.Where(f => r.Status.TryGetValue(f.Id, out var st) && (!st.Ok || st.Warnings.Count > 0))
                     .Select(f => $"{f.Name}: {r.Status[f.Id].Error ?? string.Join("; ", r.Status[f.Id].Warnings)}")));
+            ShowTimeOnScreen();
         }
         if (_page != null && _edit != null && Session.PreviewActive && Session.PreviewResult is { } pr)
         {
@@ -148,6 +151,26 @@ public partial class MainWindow : Window
         if (_firstRebuild) { _firstRebuild = false; }
         if (_tab.FitAfterLoad is { } fitRev && Session.ResultRevision >= fitRev && !Session.PreviewActive)
         { _tab.FitAfterLoad = null; Viewport.StandardView("Trimetric", fit: true, animate: false); } // a part just opened or shown: at once
+    }
+
+    /// <summary>
+    /// The time from the change to its result on screen, added to the rebuild's status once the frame showing it is
+    /// drawn (the rebuild's own time is only part of it), with where it went in the status's tip.
+    /// </summary>
+    void ShowTimeOnScreen()
+    {
+        if (Session.Timing is not { Shown: 0 } timing) return;
+        var session = Session;
+        var text = StatusRebuild.Text;
+        Viewport.AfterNextFrame(at =>
+        {
+            if (!ReferenceEquals(session.Timing, timing) || timing.Shown != 0) return;
+            timing.Shown = at;
+            if (!ReferenceEquals(session, Session) || StatusRebuild.Text != text) return; // another tab, or a newer status
+            StatusRebuild.Text = $"{text}  ·  on screen in {timing.TotalMs:0} ms";
+            var tip = ToolTip.GetTip(StatusRebuild) as string;
+            ToolTip.SetTip(StatusRebuild, tip == null ? timing.Breakdown : tip + Environment.NewLine + Environment.NewLine + timing.Breakdown);
+        });
     }
 
     /// <summary>
@@ -165,10 +188,44 @@ public partial class MainWindow : Window
 
     static IBrush StatusNormalBrush => Palette.TextMuted;
 
+    /// <summary>
+    /// The status bar's units, as SolidWorks': clicked, a menu of the unit systems, the one picked the document's (a
+    /// part's or an assembly's; undoable). Only how lengths show and are typed changes: the model is in millimetres.
+    /// </summary>
+    void SetupUnitsSwitch()
+    {
+        StatusUnits.Cursor = new Cursor(StandardCursorType.Hand);
+        ToolTip.SetTip(StatusUnits, "Units: click to change");
+        StatusUnits.PointerPressed += (_, e) =>
+        {
+            if (!e.GetCurrentPoint(StatusUnits).Properties.IsLeftButtonPressed) return;
+            // (above the status bar, its right edge on the label: over the window, never off its side or bottom)
+            var menu = new MenuFlyout { Placement = Avalonia.Controls.PlacementMode.TopEdgeAlignedRight };
+            foreach (var (u, text) in new[] { (UnitSystem.MMGS, "MMGS (millimeter, gram, second)"), (UnitSystem.IPS, "IPS (inch, pound, second)") })
+            {
+                var mi = new MenuItem { Header = text, Icon = Units == u ? Icons.Make("ok", 14) : null };
+                mi.Click += (_, _) => SetUnits(u);
+                menu.Items.Add(mi);
+            }
+            menu.ShowAt(StatusUnits);
+            e.Handled = true;
+        };
+    }
+
+    void SetUnits(UnitSystem u)
+    {
+        if (Units == u) return;
+        if (Asm is { } a) { a.BeginChange(); a.Model.Doc.Units = u; a.EndChange(); }
+        else Session.Change(() => Session.Doc.Units = u);
+        StatusUnits.Text = Units.ToString();
+        RefreshScene();
+        Status($"Units: {u}.");
+    }
+
     void OnDocumentChanged()
     {
         Title = "SpryCAD - " + (_tab != null ? TitleOf(_tab) : Session.Title);
-        StatusUnits.Text = Session.Doc.Units.ToString();
+        StatusUnits.Text = Units.ToString();
         PmPage.CurrentUnits = () => Units;
         UpdateUndoButtons();
         Viewport.PartColor = new Rgba((float)Session.Doc.Color[0], (float)Session.Doc.Color[1], (float)Session.Doc.Color[2]);
@@ -393,6 +450,7 @@ public partial class MainWindow : Window
     void OnSelectionChanged()
     {
         UpdatePalette();
+        UpdateBreadcrumbs();
         var s = Selection.First;
         if (_sketch == null)
         {
@@ -525,6 +583,7 @@ public partial class MainWindow : Window
                 case Key.Z: if (!inText) Undo(); else handled = false; break;
                 case Key.Y: if (!inText) Redo(); else handled = false; break;
                 case Key.B: Rebuild(); break;
+                case Key.K: OpenCommandPalette(atCursor: false); break; // (the command palette, in any mode)
                 case Key.Q: Rebuild(force: true); break;
                 case Key.W or Key.F4: _ = CloseTab(_tab); break;
                 case Key.Tab: _ = CycleTab(shift ? -1 : 1); break;
@@ -605,6 +664,13 @@ public partial class MainWindow : Window
                 if (_sketch == null && _page == null && Session.Doc.Find(Tree.SelectedId ?? Selection.First?.FeatureId ?? "") is { } rf)
                 { _ = RenameFeature(rf); e.Handled = true; }
                 break;
+            case Key.S when _sketch == null && _page == null:
+                // (the command palette at the cursor; in a sketch S is the spline, so there Ctrl+K)
+                OpenCommandPalette(atCursor: true); e.Handled = true;
+                break;
+            case Key.Enter when _sketch == null && _page == null && _edit == null:
+                if (RepeatLastCommand()) e.Handled = true;
+                break;
             case Key.F:
                 Viewport.ZoomToFit(); e.Handled = true;
                 break;
@@ -673,6 +739,7 @@ public partial class MainWindow : Window
     void ShowPage(PmPage? page)
     {
         if (page != null) HidePalette(); // (a command started: the palette has done its part)
+        if (page != null) HideBreadcrumbs(); // (a command started)
         // the Measure tool's drawing belongs to its page
         if (_measurePage != null && page != _measurePage) EndMeasure();
         // the Section View page replaced by another: the section kept as it is, its arrow gone

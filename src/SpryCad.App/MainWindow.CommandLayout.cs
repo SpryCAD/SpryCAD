@@ -69,7 +69,7 @@ public partial class MainWindow
         }
         _dropGroups.Add(new DropGroup { Key = key, Commands = family, Show = Show });
         Show(Current());
-        main.Click += (_, _) => family[Current()].Run();
+        main.Click += (_, _) => { var c = family[Current()]; NoteCommand(c.Name, c.Icon, c.Run); c.Run(); };
         ToolTip.SetTip(arrow, (label ?? "More") + ": " + string.Join(", ", family.Select(f => f.Name)));
         arrow.Click += (_, _) =>
         {
@@ -78,7 +78,7 @@ public partial class MainWindow
             {
                 var idx = i;
                 var mi = new MenuItem { Header = family[i].Name, Icon = Icons.Make(family[i].Icon, 18) };
-                mi.Click += (_, _) => { _dropChoice[key] = idx; Show(idx); FitCommandRow(); family[idx].Run(); UpdateToolButtons(); };
+                mi.Click += (_, _) => { _dropChoice[key] = idx; Show(idx); FitCommandRow(); NoteCommand(family[idx].Name, family[idx].Icon, family[idx].Run); family[idx].Run(); UpdateToolButtons(); };
                 menu.Items.Add(mi);
             }
             menu.ShowAt(main);

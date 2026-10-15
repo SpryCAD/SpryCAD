@@ -42,7 +42,7 @@
     <!-- Status bar -->
     <Border DockPanel.Dock="Bottom" Background="{DynamicResource Spry.Strip}" BorderBrush="{DynamicResource Spry.Border}" BorderThickness="0,1,0,0" Height="24">
       <DockPanel Margin="8,0">
-        <TextBlock x:Name="StatusUnits" DockPanel.Dock="Right" Text="MMGS" VerticalAlignment="Center" Margin="12,0,0,0" Foreground="{DynamicResource Spry.TextSecondary}" />
+        <TextBlock x:Name="StatusUnits" DockPanel.Dock="Right" Text="MMGS" VerticalAlignment="Center" Margin="12,0,0,0" Width="44" TextAlignment="Center" Foreground="{DynamicResource Spry.TextSecondary}" />
         <TextBlock x:Name="StatusSketch" DockPanel.Dock="Right" Text="" VerticalAlignment="Center" Margin="12,0,0,0" FontWeight="SemiBold" />
         <TextBlock x:Name="StatusCoords" DockPanel.Dock="Right" Text="" VerticalAlignment="Center" Margin="12,0,0,0" Foreground="{DynamicResource Spry.TextSecondary}" />
         <TextBlock x:Name="StatusRebuild" DockPanel.Dock="Right" Text="" VerticalAlignment="Center" Margin="12,0,0,0" Foreground="{DynamicResource Spry.TextMuted}" />

@@ -362,7 +362,7 @@ public partial class MainWindow
         var b = new Button { Classes = { "cmd" }, Content = RowContent(icon, name) };
         var key = tool is { } st && SketchToolKeys.TryGetValue(st, out var k) ? $" ({k})" : "";
         ToolTip.SetTip(b, CommandHelp.TryGetValue(name, out var help) ? $"{name}{key}\n{help}" : name + key);
-        b.Click += (_, _) => click();
+        b.Click += (_, _) => { NoteCommand(name, icon, click); click(); };
         if (tool != null) _toolButtons[tool.Value] = b;
         CommandBar.Children.Add(b);
     }

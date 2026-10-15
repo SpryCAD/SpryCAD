@@ -144,9 +144,44 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
     protected override void OnOpenGlInit(GlInterface gl)
     {
         var silk = GL.GetApi(gl.GetProcAddress);
-        try { App.SetGlInfo($"{silk.GetStringS(StringName.Vendor)} / {silk.GetStringS(StringName.Renderer)} / {silk.GetStringS(StringName.Version)}"); } catch { }
-        _r = new GlRenderer(silk, GlVersion.Type == GlProfileType.OpenGLES);
+        try
+        {
+            var renderer = silk.GetStringS(StringName.Renderer);
+            App.SetGlInfo($"{silk.GetStringS(StringName.Vendor)} / {renderer} / {silk.GetStringS(StringName.Version)}");
+            if (IsSoftwareRenderer(renderer)) Avalonia.Threading.Dispatcher.UIThread.Post(() => SoftwareRenderer?.Invoke());
+        }
+        catch { }
+        _r = new GlRenderer(silk, GlVersion.Type == GlProfileType.OpenGLES) { Samples = _antiAliasing };
     }
+
+    Action<long>? _afterFrame;
+
+    /// <summary>
+    /// Calls <paramref name="done"/> (on the UI thread) with the time the next frame finished drawing (a Stopwatch
+    /// timestamp): when what was just put in the scene first shows. One at a time: a later call replaces an earlier one.
+    /// </summary>
+    public void AfterNextFrame(Action<long> done)
+    {
+        _afterFrame = done;
+        RequestNextFrameRendering();
+    }
+
+    /// <summary>Raised once the view is found drawn by a software renderer (no graphics card in use: slow with large models).</summary>
+    public event Action? SoftwareRenderer;
+
+    /// <summary>Whether an OpenGL renderer string names a software rasterizer (Windows' WARP under ANGLE, Mesa's, GDI's).</summary>
+    public static bool IsSoftwareRenderer(string? renderer) => renderer != null &&
+        (renderer.Contains("Basic Render Driver", StringComparison.OrdinalIgnoreCase) || renderer.Contains("llvmpipe", StringComparison.OrdinalIgnoreCase)
+         || renderer.Contains("softpipe", StringComparison.OrdinalIgnoreCase) || renderer.Contains("SwiftShader", StringComparison.OrdinalIgnoreCase)
+         || renderer.Contains("GDI Generic", StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>Anti-aliasing: samples per pixel (0, 2 or 4; as many as the card has at most).</summary>
+    public int AntiAliasing
+    {
+        get => _antiAliasing;
+        set { _antiAliasing = value; if (_r != null) _r.Samples = value; RequestNextFrameRendering(); }
+    }
+    int _antiAliasing = 4;
 
     protected override void OnOpenGlDeinit(GlInterface gl)
     {
@@ -309,6 +344,11 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
 
         DrawTriad(w, h);
         _r.EndFrame(fb);
+        if (Interlocked.Exchange(ref _afterFrame, null) is { } done)
+        {
+            var at = Stopwatch.GetTimestamp();
+            Avalonia.Threading.Dispatcher.UIThread.Post(() => done(at));
+        }
         if (RenderProfile) NoteRender(t0, tDyn0, tDyn1);
         if (PickProfile) ProfilePick();
 
@@ -656,7 +696,8 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         foreach (var m in Marked) h.Items.Add(m);
         foreach (var e in Emphasis) h.Items.Add((e, SelectColor.WithAlpha(1)));
         if (Selection != null) foreach (var s in Selection.Items) h.Items.Add((s, SelectColor));
-        if (Hover != null) h.Items.Add((Hover, HoverColor));
+        // (something selected stays in the selection blue under the cursor: the hover's tint is for what is not)
+        if (Hover != null && !h.Items.Any(x => x.item.Key == Hover.Key)) h.Items.Add((Hover, HoverColor));
         if (ColorByFeature != null)
         {
             // each face from its own color: what is hovered, and features (as picked in the tree), in their feature's
@@ -1574,11 +1615,15 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
     /// <summary>Forgets a rotation center set by middle-clicking (e.g. when another part is opened).</summary>
     public void ClearPivot() { _pinnedPivot = null; Redraw(); }
 
+    /// <summary>Where the cursor last was over the graphics area (the command palette opens there).</summary>
+    public Point LastPointer { get; private set; }
+
     protected override void OnPointerMoved(PointerEventArgs e)
     {
         base.OnPointerMoved(e);
         var pt = e.GetCurrentPoint(this);
         var pos = pt.Position;
+        LastPointer = pos;
         var dx = (float)(pos.X - _navLast.X); var dy = (float)(pos.Y - _navLast.Y);
         if (pt.Properties.IsRightButtonPressed && _nav == Nav.None)
         {

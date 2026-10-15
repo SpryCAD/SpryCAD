@@ -87,6 +87,55 @@ public sealed partial class SketchEditor
         return b.DesiredSize;
     }
 
+    // what the view's labels were last laid out from (LayoutKey; 0: not yet)
+    ulong _layoutKey;
+
+    /// <summary>
+    /// The view's labels laid out, unless nothing the layout reads has changed since last time: the sketch (its points,
+    /// entities and dimensions, with their texts), the model's bodies (labels keep clear of the part) and the camera,
+    /// but for a pan of an orthographic view (which moves everything on screen alike). An overlay update for a pan, a
+    /// hover or a selection keeps the labels where they are, without laying them out again.
+    /// </summary>
+    void LayoutLabelsForView(List<SkConstraint> dims, Func<SkConstraint, Size> sizeOf)
+    {
+        var key = LayoutKey(dims);
+        if (key == _layoutKey) return;
+        LayoutLabels(dims, sizeOf);
+        _layoutKey = key;
+    }
+
+    ulong LayoutKey(List<SkConstraint> dims)
+    {
+        ulong h = 14695981039346656037;
+        void Mix(ulong v) => h = (h ^ v) * 1099511628211;
+        void D(double v) => Mix((ulong)BitConverter.DoubleToInt64Bits(v));
+        void B(bool v) => Mix(v ? 1UL : 2UL);
+        var cam = Cam;
+        D(cam.Rotation.X); D(cam.Rotation.Y); D(cam.Rotation.Z); D(cam.Rotation.W);
+        D(cam.HalfHeight); D(cam.Width); D(cam.Height); B(cam.Perspective);
+        if (cam.Perspective) { D(cam.Fov); D(cam.Target.X); D(cam.Target.Y); D(cam.Target.Z); }
+        foreach (var b in _vp.Bodies) Mix((ulong)System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(b.Mesh));
+        foreach (var p in Sk.Points) { Mix((ulong)p.Id); D(p.X); D(p.Y); }
+        foreach (var e in Sk.Entities)
+        {
+            foreach (var ch in e.GetType().Name) Mix(ch);
+            Mix((ulong)e.Id); B(e.Construction); B(e.IsReference);
+            foreach (var id in e.PointIds) Mix((ulong)id);
+            if (e is SkCircle c) D(c.R);
+            if (e is SkSpline sp) B(sp.Closed);
+        }
+        foreach (var c in dims)
+        {
+            Mix((ulong)c.Id); Mix((ulong)c.Type); Mix((ulong)c.Sign); Mix((ulong)c.Flip);
+            foreach (var r in c.Refs) Mix((ulong)r);
+            if (c.Sides != null) foreach (var s in c.Sides) Mix((ulong)s);
+            D(c.Value); B(c.Driven); B(c.Doubled); D(c.LabelX); D(c.LabelY); B(c.HasPlacedLabel);
+            foreach (var ch in DimText(c)) Mix(ch);
+            Mix(0);
+        }
+        return h == 0 ? 1 : h;
+    }
+
     void LayoutLabels(List<SkConstraint> dims, Func<SkConstraint, Size> sizeOf)
     {
         _autoLabels.Clear();

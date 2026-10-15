@@ -25,7 +25,7 @@ static class DirectBlendTests
                     var e = before.Edges.Where(x => x.Uses.Count == 2).MinBy(x => Enumerable.Range(0, 9).Min(i => Vec3.Distance(x.At(i / 8.0), p)))!;
                     ch.Edges.Add(new EdgeRef { A = e.Uses[0].Face.Tag.Name, B = e.Uses[1].Face.Tag.Name, Hint = e.Mid });
                 }
-                doc.Features[at] = ch;
+                doc.Features.RemoveAt(at); doc.AddFeature(ch, at);
                 t.True(CadDocument.JsonOf(ch).Contains("\"flatCorners\":" + (flat ? "true" : "false")), "flat corners saved");
                 var r = new Regenerator().Rebuild(doc);
                 t.True(r.Status[ch.Id].Ok, r.Status[ch.Id].Error ?? "");
@@ -43,6 +43,38 @@ static class DirectBlendTests
                     foreach (var c in corner[0].Coedges) t.Near(c.Start.P.X + c.Start.P.Y - c.Start.P.Z, 4, 1e-6);
                 }
             });
+
+        // (the corner cut after the chamfer, apart from its tools: a mirror copying the tools left the copy's point)
+        t.Test("Chamfer with flat corners mirrored: the copy's corner cut flat too", () =>
+        {
+            var dir = AppContext.BaseDirectory;
+            while (dir != null && !Directory.Exists(Path.Combine(dir, "samples"))) dir = Path.GetDirectoryName(dir);
+            var doc = CadDocument.Load(Path.Combine(dir!, "tests", "SpryCad.Tests", "models", "parts", "face-fillet.sprt"));
+            var fi = doc.Features.OfType<FilletFeature>().Single();
+            int at = doc.Features.IndexOf(fi);
+            var before = new Regenerator().Rebuild(doc, at).State.Bodies.Single().Solid.Native!;
+            var ch = new ChamferFeature { Name = "Corner", Distance = "2mm", FlatCorners = true };
+            foreach (var p in new[] { new Vec3(10, 0, 0), new Vec3(0, 12, 0), new Vec3(0, 0, -12) })
+            {
+                var e = before.Edges.Where(x => x.Uses.Count == 2).MinBy(x => Enumerable.Range(0, 9).Min(i => Vec3.Distance(x.At(i / 8.0), p)))!;
+                ch.Edges.Add(new EdgeRef { A = e.Uses[0].Face.Tag.Name, B = e.Uses[1].Face.Tag.Name, Hint = e.Mid });
+            }
+            doc.Features.RemoveAt(at); doc.AddFeature(ch, at);
+            // (across the middle of the block: onto its corner at x 50.8)
+            var mid = new PlaneFeature { Name = "Middle", Mode = PlaneMode.Offset, Base = PlaneRef.Right, Offset = "25.4mm" };
+            doc.AddFeature(mid);
+            var m = new MirrorFeature { Name = "Mirror", Seeds = { ch.Id }, Plane = new PlaneRef { Feature = mid.Id } };
+            doc.AddFeature(m);
+            var r = new Regenerator().Rebuild(doc);
+            foreach (var f in doc.Features) t.True(r.Status[f.Id].Ok, $"{f.Name}: {r.Status[f.Id].Error}");
+            var b = r.State.Bodies.Single().Solid;
+            t.True(b.Native?.Validate() == null, $"invalid: {b.Native?.Validate()}");
+            t.Eq(b.Topology.OpenHalfEdges, 0);
+            var corners = b.Native!.Faces.Where(f => f.Tag.Name.StartsWith(ch.Id + ".V", StringComparison.Ordinal) || f.Tag.Name.StartsWith(m.Id + ".V", StringComparison.Ordinal)).ToList();
+            t.Eq(corners.Count, 2);
+            // (the copy's: x - y + z = 50.8 - 4 there)
+            t.True(corners.Any(c => c.Coedges.All(q => Math.Abs(q.Start.P.X - q.Start.P.Y + q.Start.P.Z - (50.8 - 4)) < 1e-6)), "the copy's corner is not cut flat");
+        });
 
         // (a block's angled face blended all round, the edges between the faces beside it left sharp: both blends at a
         // corner convex, round a convex corner edge leaning to the angled face. Each ended on a mitre holding that edge,

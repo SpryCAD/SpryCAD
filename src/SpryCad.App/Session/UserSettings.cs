@@ -75,6 +75,13 @@ public static class UserSettings
     public static string? SkippedUpdate { get; set; }
     /// <summary>The update channel picked in Options ("stable" or "dev"); null: the one the installed build came from.</summary>
     public static string? UpdateChannel { get; set; }
+    /// <summary>
+    /// Windows: draw through the graphics card's own OpenGL driver first (WGL), Direct3D (ANGLE) after it; otherwise
+    /// Direct3D first (the default: it works on most cards, and on the software renderer). Read at start.
+    /// </summary>
+    public static bool PreferOpenGL { get; set; }
+    /// <summary>The view's anti-aliasing: samples per pixel (0, 2 or 4; 4 by default, fewer where the card has fewer).</summary>
+    public static int AntiAliasing { get; set; } = 4;
 
     /// <summary>
     /// The settings file's layout. 2: keep every part's display by default. A file before it holds the old default
@@ -109,6 +116,8 @@ public static class UserSettings
                 else if (k == nameof(CheckForUpdates)) CheckForUpdates = v == "1";
                 else if (k == nameof(SkippedUpdate)) SkippedUpdate = v.Length > 0 ? v : null;
                 else if (k == nameof(UpdateChannel)) UpdateChannel = v.Length > 0 ? v : null;
+                else if (k == nameof(PreferOpenGL)) PreferOpenGL = v == "1";
+                else if (k == nameof(AntiAliasing) && int.TryParse(v, out var aa) && aa is 0 or 2 or 4) AntiAliasing = aa;
                 else if (k == nameof(Version) && int.TryParse(v, out var sv)) version = sv;
             }
             if (version < 2 && KeepDisplay == KeepDisplay.SlowParts) KeepDisplay = KeepDisplay.Always;
@@ -140,6 +149,8 @@ public static class UserSettings
             lines.Add($"{nameof(CheckForUpdates)}={(CheckForUpdates ? 1 : 0)}");
             if (SkippedUpdate != null) lines.Add($"{nameof(SkippedUpdate)}={SkippedUpdate}");
             if (UpdateChannel != null) lines.Add($"{nameof(UpdateChannel)}={UpdateChannel}");
+            lines.Add($"{nameof(PreferOpenGL)}={(PreferOpenGL ? 1 : 0)}");
+            lines.Add($"{nameof(AntiAliasing)}={AntiAliasing}");
             File.WriteAllLines(StorePath, lines);
         }
         catch { /* preferences are a convenience only */ }

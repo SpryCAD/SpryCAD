@@ -1,4 +1,5 @@
 using Avalonia.Threading;
+using Stopwatch = System.Diagnostics.Stopwatch;
 using SpryCad.Core;
 using SpryCad.Core.Assembly;
 using SpryCad.Core.Model;
@@ -409,7 +410,10 @@ public sealed class DocumentSession
         RequestRebuild();
     }
 
-    public void RequestRebuild() => Enqueue(Doc.Clone(), preview: false);
+    public void RequestRebuild() { var at = Stopwatch.GetTimestamp(); Enqueue(Doc.Clone(), preview: false, at); }
+
+    /// <summary>The time from the change to the result shown, of the result shown last (null before any).</summary>
+    public ShowTiming? Timing { get; private set; }
 
     /// <summary>
     /// How long building <paramref name="doc"/>'s features from index <paramref name="from"/> on took last time (seconds),
@@ -429,7 +433,7 @@ public sealed class DocumentSession
     }
 
     /// <summary>Rebuilds a temporary document (feature being edited) for live preview.</summary>
-    public void RequestPreview(CadDocument previewDoc) => Enqueue(previewDoc.Clone(), preview: true);
+    public void RequestPreview(CadDocument previewDoc) { var at = Stopwatch.GetTimestamp(); Enqueue(previewDoc.Clone(), preview: true, at); }
 
     public void EndPreview()
     {
@@ -452,11 +456,16 @@ public sealed class DocumentSession
         RequestRebuild();
     }
 
-    void Enqueue(CadDocument snapshot, bool preview)
+    // when the waiting requests were made (before their copy) and queued (after it): Stopwatch timestamps
+    (long requested, long queued) _pendingRealAt, _pendingPreviewAt;
+
+    void Enqueue(CadDocument snapshot, bool preview, long requestedAt)
     {
+        var queued = (requestedAt, Stopwatch.GetTimestamp());
         lock (_lock)
         {
-            if (preview) _pendingPreview = snapshot; else { _pendingReal = snapshot; _pendingRealRev = ++_requested; }
+            if (preview) { _pendingPreview = snapshot; _pendingPreviewAt = queued; }
+            else { _pendingReal = snapshot; _pendingRealRev = ++_requested; _pendingRealAt = queued; }
             if (preview) PreviewActive = true;
             // a newer preview makes the running preview pointless; a real rebuild goes before any preview, and a
             // newer real rebuild replaces the running one (its result would not be shown)
@@ -473,14 +482,15 @@ public sealed class DocumentSession
     {
         while (true)
         {
-            CadDocument doc; bool preview; int rev = 0;
+            CadDocument doc; bool preview; int rev = 0; (long requested, long queued) at;
             lock (_lock)
             {
                 // the real model first: the tree, status and selection depend on it
-                if (_pendingReal != null) { doc = _pendingReal; preview = false; rev = _pendingRealRev; _pendingReal = null; }
-                else if (_pendingPreview != null) { doc = _pendingPreview; preview = true; _pendingPreview = null; }
+                if (_pendingReal != null) { doc = _pendingReal; preview = false; rev = _pendingRealRev; _pendingReal = null; at = _pendingRealAt; }
+                else if (_pendingPreview != null) { doc = _pendingPreview; preview = true; _pendingPreview = null; at = _pendingPreviewAt; }
                 else { _running = false; break; }
             }
+            var timing = new ShowTiming { Preview = preview, Requested = at.requested, Queued = at.queued, Started = Stopwatch.GetTimestamp() };
             RegenResult r;
             var cts = new CancellationTokenSource();
             lock (_lock) { _runningCts = cts; _runningPreview = preview; }
@@ -501,10 +511,12 @@ public sealed class DocumentSession
             try
             {
                 r = _regen.Rebuild(doc, null, cts.Token, Report);
+                timing.Rebuilt = Stopwatch.GetTimestamp();
                 foreach (var (id, st) in r.Status) if (st.Milliseconds > 0) _featureMs[id] = st.Milliseconds;
                 // build display meshes off the UI thread (not for a result already superseded)
                 foreach (var b in r.State.Bodies) { if (Stale()) break; _ = b.Mesh; }
                 foreach (var s in r.States) foreach (var b in s.Bodies) if (!b.HasMesh && s == r.States[^1] && !Stale()) _ = b.Mesh;
+                timing.Meshed = Stopwatch.GetTimestamp();
             }
             catch (OperationCanceledException) { continue; } // superseded by a newer request
             catch (Exception ex)
@@ -517,9 +529,12 @@ public sealed class DocumentSession
             if (Stale()) continue; // a newer request is waiting; skip publishing this one
             Dispatcher.UIThread.Post(() =>
             {
+                timing.Applied = Stopwatch.GetTimestamp();
                 if (preview) { if (PreviewActive) PreviewResult = r; }
                 else { Result = r; ResultRevision = rev; _saved = null; }
+                Timing = timing;
                 Rebuilt?.Invoke();
+                timing.Updated = Stopwatch.GetTimestamp();
             });
         }
         Dispatcher.UIThread.Post(() => BusyChanged?.Invoke(false));
@@ -553,4 +568,25 @@ public sealed record RebuildProgress(bool Preview, int Index, int Count, string 
             return t;
         }
     }
+}
+
+/// <summary>
+/// Where the time went from a change to its result on screen (Stopwatch timestamps): the part copied for the rebuild
+/// thread (Requested to Queued), waiting for it (to Started), the rebuild (to Rebuilt), the display meshes (to Meshed),
+/// the hand-over to the UI thread (to Applied), the tree and scene updated (to Updated), and the first frame drawn
+/// with it, the meshes sent to the graphics card (to Shown, set by the window once that frame is drawn).
+/// </summary>
+public sealed class ShowTiming
+{
+    public bool Preview { get; init; }
+    public long Requested, Queued, Started, Rebuilt, Meshed, Applied, Updated, Shown;
+
+    static double Ms(long a, long b) => a != 0 && b > a ? Stopwatch.GetElapsedTime(a, b).TotalMilliseconds : 0;
+
+    public double TotalMs => Ms(Requested, Shown);
+
+    public string Breakdown =>
+        $"On screen {TotalMs:0} ms after the change: copying the part {Ms(Requested, Queued):0} ms, waiting {Ms(Queued, Started):0}, " +
+        $"rebuild {Ms(Started, Rebuilt):0}, display meshes {Ms(Rebuilt, Meshed):0}, to the window {Ms(Meshed, Applied):0}, " +
+        $"tree and scene {Ms(Applied, Updated):0}, first frame {Ms(Updated, Shown):0}";
 }

@@ -2123,6 +2123,8 @@ public sealed partial class SketchEditor : IViewportMode
     SketchMarks? _marks;
     readonly Dictionary<long, Rect> _labelBoxes = new();
     Border? _sizeProbe;
+    // dimension labels' sizes by their text (measured with _sizeProbe)
+    readonly Dictionary<string, Size> _labelSizes = new();
     static readonly IBrush RelBack = new ImmutableSolidColorBrush(Color.FromArgb(230, 200, 240, 200));
     static readonly IBrush RelBackSelected = new ImmutableSolidColorBrush(Color.FromRgb(120, 170, 255));
     static readonly IBrush RelBorder = new ImmutableSolidColorBrush(Color.FromRgb(60, 140, 60));
@@ -2190,10 +2192,16 @@ public sealed partial class SketchEditor : IViewportMode
         var marks = new List<SketchMarks.Mark>();
         var dims = Sk.Constraints.Where(c => c.IsDimension).ToList();
         _sizeProbe ??= MakeLabel();
-        var sizes = new Dictionary<long, Size>();
-        Size SizeOf(SkConstraint c) => sizes.TryGetValue(c.Id, out var s) ? s : sizes[c.Id] = LabelSize(_sizeProbe, DimText(c));
+        // a label's size depends on its text alone: measured once per text
+        Size SizeOf(SkConstraint c)
+        {
+            var text = DimText(c);
+            if (_labelSizes.TryGetValue(text, out var s)) return s;
+            if (_labelSizes.Count > 4096) _labelSizes.Clear();
+            return _labelSizes[text] = LabelSize(_sizeProbe, text);
+        }
         // labels the user did not place go where they are clear of each other and of the geometry
-        LayoutLabels(dims, SizeOf);
+        LayoutLabelsForView(dims, SizeOf);
         _labelBoxes.Clear();
         foreach (var c in dims)
         {

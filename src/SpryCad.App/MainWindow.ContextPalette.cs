@@ -40,7 +40,8 @@ public partial class MainWindow
             var b = new Button { Classes = { "tb" }, Content = Icons.Make(it.Icon, 20), Padding = new Thickness(3) };
             ToolTip.SetTip(b, it.Tip);
             var run = it.Run;
-            b.Click += (_, _) => { HidePalette(); run(); };
+            var tip = it.Tip; var icon = it.Icon;
+            b.Click += (_, _) => { HidePalette(); NoteCommand(tip, icon, run); run(); };
             row.Children.Add(b);
         }
         _palette = new Border

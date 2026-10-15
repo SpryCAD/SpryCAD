@@ -125,9 +125,18 @@ public sealed unsafe class GlRenderer : IDisposable
 {
     readonly GL _gl;
     readonly bool _es;
-    uint _lit, _flat, _vcol;
-    int _litVP, _litView, _litColor, _litPersp, _flatVP, _flatColor, _vcolVP;
-    int _litClip, _flatClip;
+    uint _vcol;
+    int _vcolVP;
+
+    // the shaded and flat programs, plain and cutting at the section plane: a fragment shader that may discard turns off
+    // early depth rejection, so every hidden fragment of every triangle is shaded (slow with large models, and very slow
+    // on a software renderer): the cutting ones only while there is a section
+    sealed record LitProgram(uint P, int VP, int View, int Color, int Persp, int Clip);
+    sealed record FlatProgram(uint P, int VP, int Color, int Clip);
+    LitProgram _litPlain = null!, _litCut = null!;
+    FlatProgram _flatPlain = null!, _flatCut = null!;
+    LitProgram Lit => Clip != null ? _litCut : _litPlain;
+    FlatProgram Flat => Clip != null ? _flatCut : _flatPlain;
 
     /// <summary>
     /// The section plane (a, b, c, d in world coordinates: what is past it, where ax + by + cz + d > 0, is cut away), or
@@ -141,7 +150,14 @@ public sealed unsafe class GlRenderer : IDisposable
     Vector4 ModelClip => Clip is { } c ? Vector4.Transform(c, Matrix4x4.Transpose(Model)) : new Vector4(0, 0, 0, -1);
     uint _dynVao, _dynVbo;
     uint _fbo, _colorRb, _depthRb;
-    int _fbW, _fbH, _samples;
+    int _fbW, _fbH, _samples, _maxSamples, _wantSamples = 4;
+
+    /// <summary>Anti-aliasing: samples per pixel asked for (0: none), as many as the card has at most; the next frame takes it.</summary>
+    public int Samples
+    {
+        get => _samples;
+        set => _wantSamples = Math.Max(0, value);
+    }
 
     public GlRenderer(GL gl, bool es)
     {
@@ -169,8 +185,10 @@ public sealed unsafe class GlRenderer : IDisposable
             uniform vec4 uColor; uniform float uPersp;
             out vec4 oColor;
             void main() {
+            #ifdef SECTION
               // the section: past the plane cut away
               if (vClip > 0.0) discard;
+            #endif
               vec3 n = normalize(vN);
               vec3 v = uPersp > 0.5 ? normalize(-vPosV) : vec3(0.0, 0.0, 1.0);
               if (dot(n, v) < 0.0) n = -n;
@@ -194,7 +212,12 @@ public sealed unsafe class GlRenderer : IDisposable
             uniform vec4 uColor;
             in float vClip;
             out vec4 oColor;
-            void main() { if (vClip > 0.0) discard; oColor = uColor; }
+            void main() {
+            #ifdef SECTION
+              if (vClip > 0.0) discard;
+            #endif
+              oColor = uColor;
+            }
             """;
         const string vcolVs = """
             in vec3 aPos; in vec4 aColor;
@@ -207,18 +230,22 @@ public sealed unsafe class GlRenderer : IDisposable
             out vec4 oColor;
             void main() { oColor = vColor; }
             """;
-        _lit = Program(litVs, litFs, ("aPos", 0), ("aNormal", 1));
-        _flat = Program(flatVs, flatFs, ("aPos", 0));
+        LitProgram MakeLit(string defines)
+        {
+            var p = Program(defines + litVs, defines + litFs, ("aPos", 0), ("aNormal", 1));
+            return new LitProgram(p, _gl.GetUniformLocation(p, "uViewProj"), _gl.GetUniformLocation(p, "uView"),
+                _gl.GetUniformLocation(p, "uColor"), _gl.GetUniformLocation(p, "uPersp"), _gl.GetUniformLocation(p, "uClip"));
+        }
+        FlatProgram MakeFlat(string defines)
+        {
+            var p = Program(defines + flatVs, defines + flatFs, ("aPos", 0));
+            return new FlatProgram(p, _gl.GetUniformLocation(p, "uViewProj"), _gl.GetUniformLocation(p, "uColor"), _gl.GetUniformLocation(p, "uClip"));
+        }
+        const string section = "#define SECTION\n";
+        _litPlain = MakeLit(""); _litCut = MakeLit(section);
+        _flatPlain = MakeFlat(""); _flatCut = MakeFlat(section);
         _vcol = Program(vcolVs, vcolFs, ("aPos", 0), ("aColor", 1));
-        _litVP = _gl.GetUniformLocation(_lit, "uViewProj");
-        _litView = _gl.GetUniformLocation(_lit, "uView");
-        _litColor = _gl.GetUniformLocation(_lit, "uColor");
-        _litPersp = _gl.GetUniformLocation(_lit, "uPersp");
-        _flatVP = _gl.GetUniformLocation(_flat, "uViewProj");
-        _flatColor = _gl.GetUniformLocation(_flat, "uColor");
         _vcolVP = _gl.GetUniformLocation(_vcol, "uViewProj");
-        _litClip = _gl.GetUniformLocation(_lit, "uClip");
-        _flatClip = _gl.GetUniformLocation(_flat, "uClip");
 
         _dynVao = _gl.GenVertexArray();
         _gl.BindVertexArray(_dynVao);
@@ -230,8 +257,7 @@ public sealed unsafe class GlRenderer : IDisposable
         _gl.VertexAttribPointer(1, 4, VertexAttribPointerType.Float, false, 28, (void*)12);
         _gl.BindVertexArray(0);
 
-        _gl.GetInteger((GetPName)0x8D57, out int maxSamples);
-        _samples = Math.Clamp(maxSamples, 0, 4);
+        _gl.GetInteger((GetPName)0x8D57, out _maxSamples);
     }
 
     uint Program(string vs, string fs, params (string name, uint loc)[] attribs)
@@ -262,8 +288,10 @@ public sealed unsafe class GlRenderer : IDisposable
     /// <summary>Binds the multisampled offscreen target (created/resized as needed).</summary>
     public void BeginFrame(int w, int h)
     {
-        if (w != _fbW || h != _fbH || _fbo == 0)
+        var samples = Math.Clamp(_wantSamples, 0, Math.Max(0, _maxSamples));
+        if (w != _fbW || h != _fbH || _fbo == 0 || samples != _samples)
         {
+            _samples = samples;
             if (_fbo != 0) { _gl.DeleteFramebuffer(_fbo); _gl.DeleteRenderbuffer(_colorRb); _gl.DeleteRenderbuffer(_depthRb); }
             _fbW = w; _fbH = h;
             _fbo = _gl.GenFramebuffer();
@@ -323,12 +351,13 @@ public sealed unsafe class GlRenderer : IDisposable
     public void DrawMesh(GpuMesh m, Rgba color, Matrix4x4 viewProj, Matrix4x4 view, bool persp, int start = 0, int count = -1)
     {
         if (m.IndexCount == 0) return;
-        _gl.UseProgram(_lit);
-        SetMat(_litVP, viewProj); SetMat(_litView, view);
-        _gl.Uniform4(_litColor, color.R, color.G, color.B, color.A);
-        _gl.Uniform1(_litPersp, persp ? 1f : 0f);
+        var lp = Lit;
+        _gl.UseProgram(lp.P);
+        SetMat(lp.VP, viewProj); SetMat(lp.View, view);
+        _gl.Uniform4(lp.Color, color.R, color.G, color.B, color.A);
+        _gl.Uniform1(lp.Persp, persp ? 1f : 0f);
         var clip = ModelClip;
-        _gl.Uniform4(_litClip, clip.X, clip.Y, clip.Z, clip.W);
+        _gl.Uniform4(lp.Clip, clip.X, clip.Y, clip.Z, clip.W);
         _gl.BindVertexArray(m.Vao);
         if (count < 0) count = m.IndexCount;
         _gl.DrawElements(PrimitiveType.Triangles, (uint)count, DrawElementsType.UnsignedInt, (void*)(start * 4));
@@ -338,11 +367,12 @@ public sealed unsafe class GlRenderer : IDisposable
     /// <summary>Solid color (unlit) mesh draw, used for selection overlays.</summary>
     public void DrawMeshFlat(GpuMesh m, Rgba color, Matrix4x4 viewProj, int start, int count)
     {
-        _gl.UseProgram(_flat);
-        SetMat(_flatVP, viewProj);
+        var fp = Flat;
+        _gl.UseProgram(fp.P);
+        SetMat(fp.VP, viewProj);
         var fc = ModelClip;
-        _gl.Uniform4(_flatClip, fc.X, fc.Y, fc.Z, fc.W);
-        _gl.Uniform4(_flatColor, color.R, color.G, color.B, color.A);
+        _gl.Uniform4(fp.Clip, fc.X, fc.Y, fc.Z, fc.W);
+        _gl.Uniform4(fp.Color, color.R, color.G, color.B, color.A);
         _gl.BindVertexArray(m.Vao);
         _gl.DrawElements(PrimitiveType.Triangles, (uint)count, DrawElementsType.UnsignedInt, (void*)(start * 4));
         _gl.BindVertexArray(0);
@@ -351,11 +381,12 @@ public sealed unsafe class GlRenderer : IDisposable
     public void DrawEdges(GpuMesh m, Rgba color, Matrix4x4 viewProj, int start = 0, int count = -1)
     {
         if (m.EdgeVertexCount == 0) return;
-        _gl.UseProgram(_flat);
-        SetMat(_flatVP, viewProj);
+        var fp = Flat;
+        _gl.UseProgram(fp.P);
+        SetMat(fp.VP, viewProj);
         var fc = ModelClip;
-        _gl.Uniform4(_flatClip, fc.X, fc.Y, fc.Z, fc.W);
-        _gl.Uniform4(_flatColor, color.R, color.G, color.B, color.A);
+        _gl.Uniform4(fp.Clip, fc.X, fc.Y, fc.Z, fc.W);
+        _gl.Uniform4(fp.Color, color.R, color.G, color.B, color.A);
         _gl.BindVertexArray(m.EdgeVao);
         _gl.DrawArrays(PrimitiveType.Lines, start, (uint)(count < 0 ? m.EdgeVertexCount : count));
         _gl.BindVertexArray(0);
@@ -444,7 +475,7 @@ public sealed unsafe class GlRenderer : IDisposable
 
     public void Dispose()
     {
-        _gl.DeleteProgram(_lit); _gl.DeleteProgram(_flat); _gl.DeleteProgram(_vcol);
+        foreach (var p in new[] { _litPlain.P, _litCut.P, _flatPlain.P, _flatCut.P, _vcol }) _gl.DeleteProgram(p);
         _gl.DeleteVertexArray(_dynVao); _gl.DeleteBuffer(_dynVbo);
         if (_fbo != 0) { _gl.DeleteFramebuffer(_fbo); _gl.DeleteRenderbuffer(_colorRb); _gl.DeleteRenderbuffer(_depthRb); }
     }
