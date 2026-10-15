@@ -464,6 +464,15 @@ public sealed class NBoolean
                 if (mp == null && fa.Surface.Kind == SurfaceKind.BSpline && fb.Surface.Kind == SurfaceKind.BSpline)
                     foreach (var q in mirrors) if (Apart(fa, fb, q)) { mp = q; apart = true; break; }
                 var against = mp is { } mpp ? NSurface.FromPlane(mpp) : fb.Surface;
+                // (both distances slow, an offset's or a B-spline's (a shelled loft's inner wall against a swept
+                // chamfer): the smaller face proved clear of the other's surface first, as for the trace from the other
+                // side below; most such pairs, boxes overlapping, do not meet, and each trace was a long search)
+                if (mp == null && fa.Surface.Kind is SurfaceKind.Offset or SurfaceKind.BSpline && fb.Surface.Kind is SurfaceKind.Offset or SurfaceKind.BSpline)
+                {
+                    var (small, other) = fa.Bounds().Diagonal <= fb.Bounds().Diagonal ? (fa, fb) : (fb, fa);
+                    bool clear0; using (Prof.Time("tr0.apart")) clear0 = Apart(small, other.Surface, _onTol, traceDoms[small]);
+                    if (clear0) { pairCurves[i] = new(); return; }
+                }
                 List<NCurve> c; using (Prof.Time(Prof.Enabled ? $"tr.{fa.Surface.Kind}x{against.Kind}" : "")) c = mp == null ? Traced(fa, against) : NIntersect.Trace(fa, against, traceTol, traceDoms[fa]).Cast<NCurve>().ToList();
                 if (apart) c = OnSurface(c, fb.Surface, traceTol);
                 if (Prof.Enabled && c.Count == 0) Prof.Add($"tr.empty.{fa.Surface.Kind}x{fb.Surface.Kind}", 0);

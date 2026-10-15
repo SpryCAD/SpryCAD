@@ -27,9 +27,20 @@ public static class NativeBlend
         // was then joined to the body by the facet engine, unbounded in time, the part left faceted)
         var oldNoFallback = Csg.NoFallback;
         Csg.NoFallback = true;
-        try { return ApplyExact(body, edges, size, fillet, prefix, errors, overflow, problemEdges, applied, chamfer, buildOnly, trimmedOut); }
-        finally { Csg.NoFallback = oldNoFallback; }
+        _depth++;
+        try
+        {
+            var r = ApplyExact(body, edges, size, fillet, prefix, errors, overflow, problemEdges, applied, chamfer, buildOnly, trimmedOut);
+            // (the whole blend done: a fillet's square ends where its edge runs on into one not picked faded out)
+            if (_depth == 1 && fillet && FadeOut.Enabled && !buildOnly && errors.Count == 0 && r.Native != null)
+                using (Prof.Time("blend.fade")) r = FadeOut.Apply(r, prefix, size, applied);
+            return r;
+        }
+        finally { Csg.NoFallback = oldNoFallback; _depth--; }
     }
+
+    // (blends staged call Apply again: the outermost one fades)
+    [ThreadStatic] static int _depth;
 
     static Solid ApplyExact(Solid body, IReadOnlyList<NEdge> edges, double size, bool fillet, string prefix, List<string> errors,
         bool overflow, List<Vec3[]>? problemEdges, List<(Solid tool, bool cut)>? applied, ChamferSize? chamfer,
@@ -535,6 +546,18 @@ public static class NativeBlend
                     }
                 }
             }
+        // (an edge already refused: the blend fails as a whole, and its body is not used; the booleans joining the other
+        // tools (on a shelled loft, seconds each) only cost time)
+        if (!buildOnly && fails.Count > 0)
+        {
+            Debug?.Invoke($"{fails.Count} edge(s) refused: the tools not trimmed or applied");
+            foreach (var (group, msg) in fails)
+            {
+                errors.Add(msg);
+                problemEdges?.AddRange(group.Select(g => g.Samples(1e-3).ToArray()));
+            }
+            return body;
+        }
         if (pending.Count > 0)
         {
             using var _tr = Prof.Time("blend.trim");
