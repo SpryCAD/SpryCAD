@@ -41,6 +41,7 @@ public static class LibraryLink
     {
         set ??= Current;
         var used = doc.Features.SelectMany(f => f.LibraryItems()).ToHashSet(StringComparer.Ordinal);
+        if (doc.MaterialItem != null) used.Add(doc.MaterialItem);
         bool changed = false;
         foreach (var item in used)
             if (doc.Library?.ContainsKey(item) != true && set.Snapshot(item) is { } s)

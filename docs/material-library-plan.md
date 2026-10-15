@@ -115,9 +115,11 @@ public Appearance? Appearance { get; set; }
 - **A custom material** (a density typed in Mass Properties, or Edit Material > Custom) is a snapshot with no library:
   item `Part/<name>`, `LibraryId = Guid.Empty`, never offered for update, and not removed by `Sync` while `MaterialItem` names it.
 - `Doc.EffectiveAppearance` = `Appearance ?? material's appearance columns ?? default grey`;
-  `Doc.EffectiveDensity` = material's `density ?? 7850`. The ~10 readers of `doc.Color` / `doc.Density` (thumbnails,
-  previews, revision previews, display cache, `PartDisplay`, assembly mass, BOM) move to these; `Color`, `Material` and
-  `Density` go, kept only as legacy read/write in storage.
+  `Doc.EffectiveDensity` = material's `density ?? 7850`. `Material` and `Density` go (BOM and assembly mass read
+  `MaterialName` / `EffectiveDensity`). `Color` stays as the color shown (`EffectiveAppearance.Color`, not serialized),
+  so thumbnails, previews and the display cache need no change; setting it gives the part its own appearance, the
+  finish kept. Older JSON's `color/material/density` are read into `LegacyColor/LegacyMaterial/LegacyDensity` and
+  upgraded at once.
 - **Storage:** `MaterialData` becomes `{ MaterialItem, Appearance }` plus the legacy `Color/Material/Density` still written
   (from the effective values) so an older SpryCAD opening a newer part sees the right color and density. The envelope stays
   `v: 1` (unknown members are ignored when read).

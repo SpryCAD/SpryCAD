@@ -145,7 +145,7 @@ static class FastenerTests
             part.Save(path);
             var loaded = CadDocument.Load(path);
             t.Eq(Fasteners.Of(loaded)!.Designation, "ISO 4762 M8x30");
-            t.Eq(string.Join(",", loaded.Library!.Keys), "ISO4762/M8x30");
+            t.Eq(string.Join(",", loaded.Library!.Keys), "ISO4762/M8x30,Materials-steel/Steel, property class 8.8"); // (its row and its grade's)
         });
 
         t.Test("Insert Fastener: a bolt through two plates, length rounded up to a standard one, nut and washer mated; BOM by designation", () =>

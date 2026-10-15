@@ -118,6 +118,7 @@ public static class LibraryFile
         foreach (var t in tables)
         {
             if (string.IsNullOrWhiteSpace(t.Key) || t.Key.Contains('/')) throw new ArgumentException($"A table key cannot be empty or hold '/': \"{t.Key}\".");
+            if (t.Key == PartMaterial.CustomTable) throw new ArgumentException($"\"{t.Key}\" is kept for parts' own materials: a table cannot be keyed so.");
             foreach (var r in t.Rows)
             {
                 if (r.Values.Count != t.Columns.Count) throw new ArgumentException($"{t.Key}/{r.Key} has {r.Values.Count} values for {t.Columns.Count} columns.");

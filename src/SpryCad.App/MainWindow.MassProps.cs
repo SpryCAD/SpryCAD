@@ -30,15 +30,14 @@ public partial class MainWindow
     string _massText = "";
 
     /// <summary>
-    /// The materials the libraries offer (built-in and company ones, a company's restrictions applied) and their
-    /// densities (kg/m³), in the libraries' order; a name in two tables once, the first.
+    /// The materials the libraries offer (built-in and company ones, a company's restrictions applied), by name with
+    /// their items, in the libraries' order; a name in two tables once, the first.
     /// </summary>
-    static List<(string name, double density)> OfferedMaterials() =>
-        LibraryLink.Current.Offered(TableKinds.Material).SelectMany(t => t.Rows.Select(r => Core.Library.Materials.Of(t, r)!))
-            .GroupBy(m => m.Name).Select(g => (g.Key, g.First().Density)).ToList();
-    /// <summary>What a part with no material is taken to be (its density <see cref="CadDocument.DefaultDensity"/>).</summary>
-    const string DefaultMaterial = "Steel (plain carbon)";
-    const string CustomMaterial = "Custom";
+    static List<(string name, string item)> OfferedMaterials() =>
+        LibraryLink.Current.Offered(TableKinds.Material).SelectMany(t => t.Rows.Select(r => (name: r.Key, item: LibrarySnapshot.ItemKey(t.Key, r.Key))))
+            .GroupBy(m => m.name).Select(g => g.First()).ToList();
+    /// <summary>What a part with no material is listed as (steel's density assumed, <see cref="CadDocument.DefaultDensity"/>).</summary>
+    const string NoMaterial = "Not specified";
     const double KgM3ToLbIn3 = 3.6127292e-5;
 
     static IBrush LabelBrush => Palette.TextMuted;
@@ -59,32 +58,31 @@ public partial class MainWindow
         void Fill()
         {
             filling = true;
-            // the libraries' materials as they are now, and the part's own if they no longer offer it
+            // the libraries' materials as they are now, and the part's own (custom, or no longer offered)
             materials = OfferedMaterials();
-            var list = materials.Select(x => x.name).ToList();
-            if (Session.Doc.Material is { } own && own != CustomMaterial && !list.Contains(own)) list.Add(own);
-            list.Add(CustomMaterial);
+            var list = materials.Select(x => x.name).Prepend(NoMaterial).ToList();
+            var own = Session.Doc.MaterialName;
+            if (own != null && !list.Contains(own)) list.Add(own);
             if (!list.SequenceEqual(names)) { names = list; combo.ItemsSource = names; }
             var ips = Session.Doc.Units == UnitSystem.IPS;
-            var d = Session.Doc.Density ?? CadDocument.DefaultDensity;
-            combo.SelectedItem = Session.Doc.Material is { } mat && names.Contains(mat) ? mat
-                : Session.Doc.Density == null && names.Contains(DefaultMaterial) ? DefaultMaterial : CustomMaterial;
+            var d = Session.Doc.EffectiveDensity;
+            combo.SelectedItem = own ?? NoMaterial;
             dens.Text = (ips ? d * KgM3ToLbIn3 : d).ToString(ips ? "0.######" : "0.##", CultureInfo.InvariantCulture);
             unit.Text = ips ? "lb/in³" : "kg/m³";
             filling = false;
         }
-        void SetMaterial(string? name, double kgm3)
+        void Changed(Action change)
         {
-            if (Session.Doc.Material == name && Session.Doc.Density == kgm3) return;
-            Session.Change(() => { Session.Doc.Material = name; Session.Doc.Density = kgm3; });
+            Session.Change(change);
             Fill();
             UpdateMassProperties();
         }
         combo.SelectionChanged += (_, _) =>
         {
-            if (filling || combo.SelectedItem is not string name || name == CustomMaterial) return;
-            // (the part's own, no longer offered: as it is)
-            if (materials.FindIndex(x => x.name == name) is var i && i >= 0) SetMaterial(name, materials[i].density);
+            if (filling || combo.SelectedItem is not string name || name == Session.Doc.MaterialName) return;
+            if (name == NoMaterial) { if (Session.Doc.MaterialItem != null) Changed(() => PartMaterial.Set(Session.Doc, null)); return; }
+            // (the part's own, custom or no longer offered, is listed as it is: nothing to take)
+            if (materials.FindIndex(x => x.name == name) is var i && i >= 0) Changed(() => PartMaterial.Set(Session.Doc, materials[i].item));
         };
         void ApplyDensity()
         {
@@ -92,10 +90,13 @@ public partial class MainWindow
             var ips = Session.Doc.Units == UnitSystem.IPS;
             if (!double.TryParse(dens.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out var v) || v <= 0) { Fill(); return; }
             var kgm3 = ips ? v / KgM3ToLbIn3 : v;
-            if (Math.Abs((Session.Doc.Density ?? CadDocument.DefaultDensity) - kgm3) < 1e-9 * kgm3 && Session.Doc.Density != null) return;
-            // a typed density that is no listed material's is a custom material
-            var preset = materials.FirstOrDefault(x => Math.Abs(x.density - kgm3) < 1e-6 * kgm3);
-            SetMaterial(preset.name ?? CustomMaterial, kgm3);
+            if (Math.Abs(Session.Doc.EffectiveDensity - kgm3) < 1e-6 * kgm3) return;
+            // a typed density is a material of the part's own: the material's other properties and look kept
+            var doc = Session.Doc;
+            var basedOn = doc.MaterialItem != null ? LibraryLink.Resolve(doc, doc.MaterialItem) : null;
+            var name = doc.MaterialName is not { } n ? PartMaterial.CustomName
+                : PartMaterial.IsCustom(doc.MaterialItem) ? n : n + ", custom density";
+            Changed(() => PartMaterial.SetCustom(doc, name, kgm3, basedOn));
         }
         dens.LostFocus += (_, _) => ApplyDensity();
         dens.KeyDown += (_, e) => { if (e.Key == Key.Enter) { ApplyDensity(); e.Handled = true; } };
@@ -243,7 +244,7 @@ public partial class MainWindow
 
         var ips = Session.Doc.Units == UnitSystem.IPS;
         var u = Session.Doc.Units.Symbol();
-        var kgm3 = Session.Doc.Density ?? CadDocument.DefaultDensity;
+        var kgm3 = Session.Doc.EffectiveDensity;
         var density = ips ? kgm3 * KgM3ToLbIn3 : kgm3 * 1e-6; // lb/in³, or g/mm³
         // the model is in millimetres: lengths shown in the part's units (k per mm), so volumes k³, inertias k⁵
         var k = 1 / Session.Doc.Units.MmPer();
@@ -275,7 +276,7 @@ public partial class MainWindow
 
         var dShown = (ips ? kgm3 * KgM3ToLbIn3 : kgm3).ToString(ips ? "0.######" : "0.##", CultureInfo.InvariantCulture);
         Line($"Mass properties of {Session.Title.TrimEnd(' ', '*')}", true);
-        Line($"    Material: {Session.Doc.Material ?? DefaultMaterial}{(Session.Doc.Density == null ? " (default)" : "")}");
+        Line($"    Material: {Session.Doc.MaterialName ?? "Not specified (steel's density assumed)"}");
         if (bodies.Count > 1) Line($"    Bodies: {bodies.Count}");
         Line();
         Line($"Density = {dShown} {(ips ? "lb/in³" : "kg/m³")}");

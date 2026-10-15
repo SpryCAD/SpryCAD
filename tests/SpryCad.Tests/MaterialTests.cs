@@ -133,5 +133,121 @@ static class MaterialTests
         });
     }
 
+    /// <summary>The part's material and appearance (plan phase 2): set, kept, saved, upgraded from older parts, updated from a library.</summary>
+    public static void RunPart(TestRunner t)
+    {
+        const string Al = "Materials-aluminum/Aluminum 6061";
+
+        t.Test("Part material: a library material copied in (name, density, look); a color of its own keeps the finish; cleared, its row goes", () =>
+        {
+            var doc = new CadDocument();
+            t.Eq(doc.MaterialName, null);
+            t.Eq(doc.EffectiveDensity, CadDocument.DefaultDensity);
+            t.Eq(doc.EffectiveAppearance, Appearance.Default);
+            PartMaterial.Set(doc, Al, LibrarySet.BuiltIn);
+            t.Eq(doc.MaterialItem, Al);
+            t.True(doc.Library?.ContainsKey(Al) == true, "the row copied into the part");
+            t.Eq(doc.MaterialName, "Aluminum 6061");
+            t.Near(doc.EffectiveDensity, 2700, 1e-9);
+            t.Eq(doc.EffectiveAppearance.Metallic, 1.0);
+            t.True(doc.Color.SequenceEqual(new[] { 0.78, 0.79, 0.80 }), "the color shown is the material's");
+            doc.Color = new[] { 0.1, 0.2, 0.6 };
+            t.True(doc.Appearance != null && doc.Appearance.Metallic == 1 && doc.Appearance.Roughness == 0.4, "its own color, the material's finish kept");
+            PartMaterial.Set(doc, "Materials-copper/Brass", LibrarySet.BuiltIn);
+            t.True(doc.Color.SequenceEqual(new[] { 0.1, 0.2, 0.6 }), "its own appearance kept through a change of material");
+            t.True(doc.Library!.Keys.SequenceEqual(new[] { "Materials-copper/Brass" }), "the old material's row dropped");
+            PartMaterial.Set(doc, null);
+            t.True(doc.MaterialItem == null && doc.Library == null, "cleared");
+            t.True(Throws(() => PartMaterial.Set(doc, "ISO273/M8", LibrarySet.BuiltIn)), "a size is not a material");
+        });
+
+        t.Test("Part material: kept through a copy (undo) and a part file's objects, its row with it; the older readers' color, name and density written", () =>
+        {
+            var doc = new CadDocument();
+            PartMaterial.Set(doc, Al, LibrarySet.BuiltIn);
+            doc.Appearance = new Appearance(new[] { 0.2, 0.3, 0.4 }, 0.5, 0.2, 0.8, "Mine");
+            var copy = doc.Clone();
+            t.Eq(copy.MaterialItem, Al);
+            t.Eq(copy.Appearance, doc.Appearance);
+            t.Eq(J(copy.Library), J(doc.Library));
+            t.True(copy.LegacyColor == null && !doc.ToJson().Contains("\"color\":[0.2"), "no legacy color written");
+            var objects = SpryCad.Core.Storage.PartObjects.From(doc);
+            var material = System.Text.Encoding.UTF8.GetString(objects[SpryCad.Core.Storage.PartObjects.Single(SpryCad.Core.Storage.ObjectKind.Material)]);
+            t.True(material.Contains("\"material\":\"Aluminum 6061\"") && material.Contains("\"density\":2700") && material.Contains("\"color\":[0.2,0.3,0.4]"), "what an older SpryCAD reads");
+            // the part's copy read back with it (what it weighs by, library or none)
+            var back = SpryCad.Core.Storage.PartObjects.ToDocument(objects);
+            t.Eq(back.MaterialItem, Al);
+            t.Eq(J(back.Library), J(doc.Library));
+            t.Near(back.EffectiveDensity, 2700, 1e-9);
+            t.Eq(back.Appearance, doc.Appearance);
+        });
+
+        t.Test("Part material: older parts (JSON and part files) keep their weight and color: a name matched to the library, a density that differs or an unknown name a custom material", () =>
+        {
+            static CadDocument FromJson(string material) =>
+                CadDocument.FromJson($$"""{ "format": "SpryCAD", "formatVersion": 3, "features": [], {{material}} }""");
+            var a = FromJson("""  "color": [0.74, 0.76, 0.80], "material": "Aluminum 6061", "density": 2700  """);
+            t.Eq(a.MaterialItem, Al);
+            t.Eq(a.Appearance, null);
+            t.True(a.LegacyColor == null && a.LegacyMaterial == null && a.LegacyDensity == null, "the legacy values cleared");
+            var b = FromJson("""  "color": [0.74, 0.76, 0.80], "material": "Brass", "density": 8400  """);
+            t.True(PartMaterial.IsCustom(b.MaterialItem) && b.MaterialName == "Brass", "a changed density: a custom material of the old name");
+            t.Near(b.EffectiveDensity, 8400, 1e-9);
+            t.Eq(b.MaterialInfo!.Type, MaterialType.CopperAlloy);
+            var c = FromJson("""  "color": [0.9, 0.1, 0.1], "material": "Custom", "density": 5000  """);
+            t.True(PartMaterial.IsCustom(c.MaterialItem) && c.MaterialName == "Custom", "custom");
+            t.Near(c.EffectiveDensity, 5000, 1e-9);
+            t.True(c.Color.SequenceEqual(new[] { 0.9, 0.1, 0.1 }) && c.Appearance != null, "a color set: its own appearance");
+            var d = FromJson("""  "color": [0.74, 0.76, 0.80]  """);
+            t.True(d.MaterialItem == null && d.Appearance == null && d.Library == null, "nothing set: nothing");
+            // a part file's objects from before (the material object holding only a color, a name and a density)
+            var objects = SpryCad.Core.Storage.PartObjects.From(new CadDocument());
+            objects[SpryCad.Core.Storage.PartObjects.Single(SpryCad.Core.Storage.ObjectKind.Material)] =
+                System.Text.Encoding.UTF8.GetBytes("""{"kind":4,"v":1,"data":{"color":[0.5,0.5,0.5],"material":"Copper","density":8940}}""");
+            var e = SpryCad.Core.Storage.PartObjects.ToDocument(objects);
+            t.Eq(e.MaterialItem, "Materials-copper/Copper");
+            t.True(e.Color.SequenceEqual(new[] { 0.5, 0.5, 0.5 }), "its color kept");
+        });
+
+        t.Test("Part material: a library's change offered by Library Updates and taken in (density); a custom material kept by Sync and never offered", () =>
+        {
+            var doc = new CadDocument();
+            PartMaterial.Set(doc, Al, LibrarySet.BuiltIn);
+            var table = BuiltInMaterials.Tables.Single(x => x.Key == "Materials-aluminum");
+            var values = table.Row("Aluminum 6061")!.Values.ToArray();
+            values[table.Column("density")] = 2710;
+            var company = new LoadedLibrary(Guid.NewGuid(), "Acme", LibraryLayer.Company, Guid.NewGuid(), null,
+                new[] { new LibraryTable { Key = table.Key, Kind = TableKinds.Material, Columns = table.Columns, Rows = { new LibraryRow("Aluminum 6061", values) { Text = table.Row("Aluminum 6061")!.Text } } } },
+                Array.Empty<LibraryRestriction>());
+            var set = new LibrarySet(new[] { company });
+            t.True(!LibraryLink.Sync(doc, set), "nothing to add or drop");
+            var updates = LibraryLink.Updates(doc, set);
+            t.Eq(updates.Single().Item, Al);
+            t.Near(doc.EffectiveDensity, 2700, 1e-9);
+            LibraryLink.Accept(doc, updates);
+            t.Near(doc.EffectiveDensity, 2710, 1e-9);
+            PartMaterial.SetCustom(doc, "Aluminum 6061, custom density", 2650, doc.Library![Al]);
+            t.True(doc.Library.Keys.SequenceEqual(new[] { "Part/Aluminum 6061, custom density" }), "the custom row only");
+            t.True(!LibraryLink.Sync(doc, set), "Sync keeps it");
+            t.Eq(LibraryLink.Updates(doc, set).Count, 0);
+            t.True(doc.EffectiveAppearance.Metallic == 1, "the material's look kept");
+            t.True(Throws(() => LibraryFile.Publish(Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".sprlib"), Guid.NewGuid(), "Bad", LibraryLayer.Company,
+                new[] { new LibraryTable { Key = PartMaterial.CustomTable, Kind = TableKinds.Material, Columns = Materials.Columns.ToList() } }, null, "test")), "no library may key a table as parts' own");
+        });
+
+        t.Test("Part material: a fastener weighs and looks as its grade (class 8.8 steel, a washer plain steel; a row naming its own)", () =>
+        {
+            var set = LibrarySet.BuiltIn;
+            var screw = Fasteners.Part(set.Snapshot("ISO4762/M8x30")!, set);
+            t.Eq(screw.MaterialName, "Steel, property class 8.8");
+            t.True(screw.EffectiveAppearance.Color[0] < 0.3, "black oxide");
+            t.Eq(Fasteners.Part(set.Snapshot("ISO7089/M8")!, set).MaterialName, "Steel (plain carbon)");
+            var a2 = set.Snapshot("ISO4762/M8x30")!;
+            a2.Text![Fasteners.MaterialKey] = "Materials-stainless/Stainless steel, A2-70";
+            t.Eq(Fasteners.Part(a2, set).MaterialName, "Stainless steel, A2-70");
+            t.True(screw.Library!.Count == 2 && !LibraryLink.Sync(screw, set), "its row and its material's");
+        });
+    }
+
     static bool Throws(Action a) { try { a(); return false; } catch (ArgumentException) { return true; } }
 }

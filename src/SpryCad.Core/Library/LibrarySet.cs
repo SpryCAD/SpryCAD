@@ -52,6 +52,10 @@ public sealed class LibrarySet
     /// <summary>The table by key, every row (null if no library has it).</summary>
     public LibraryTable? Table(string key) => _tables.TryGetValue(key, out var m) ? m.Table : null;
 
+    /// <summary>Every table of a kind, every row (restrictions aside: what parts that already use them resolve), in the order pickers list them.</summary>
+    public IEnumerable<LibraryTable> Tables(string kind) =>
+        _tables.Values.Where(m => m.Table.Kind == kind).OrderBy(m => Order(m.Table.Key)).ThenBy(m => m.Table.Key, StringComparer.Ordinal).Select(m => m.Table);
+
     /// <summary>Whether the company libraries offer this row (and its table) in pickers.</summary>
     public bool Allowed(string table, string row) => Allowed(table, row, Table(table)?.Row(row)?.Text?.GetValueOrDefault(Fasteners.SizeKey));
 

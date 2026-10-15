@@ -253,6 +253,7 @@ static class Program
             LibraryTests.Run(t);
             FastenerTests.Run(t);
             MaterialTests.Run(t);
+            MaterialTests.RunPart(t);
             AssemblyStorageTests.Run(t);
             TransferTests.Run(t);
             TransferTests.RunPins(t);

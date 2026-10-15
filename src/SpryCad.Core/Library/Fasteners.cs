@@ -200,17 +200,22 @@ public static class Fasteners
     public static CadDocument Part(LibrarySnapshot s, LibrarySet? set = null)
     {
         if (KindOf(s) == null) throw new ArgumentException($"{s.Item} is not a fastener row.");
-        var doc = new CadDocument
-        {
-            Id = PartId(s).ToString("D"),
-            Color = new[] { 0.30, 0.31, 0.33 },
-            Material = "Steel",
-        };
+        var doc = new CadDocument { Id = PartId(s).ToString("D") };
         var designation = Designation(s, set);
         doc.AddFeature(new FastenerFeature { Name = designation, Item = s.Item, Designation = designation });
         doc.Library = new(StringComparer.Ordinal) { [s.Item] = s };
+        // its grade, as its row names it or its kind's (weighs and looks as it: a steel screw black oxide)
+        var material = s.Text?.GetValueOrDefault(MaterialKey) ?? DefaultMaterial(KindOf(s)!.Value);
+        if ((set ?? LibraryLink.Current).Snapshot(material) != null) PartMaterial.Set(doc, material, set);
         return doc;
     }
+
+    /// <summary>The row text naming the material item a fastener is made of ("Materials-stainless/Stainless steel, A2-70").</summary>
+    public const string MaterialKey = "material";
+
+    /// <summary>A fastener's material when its row names none: property class 8.8 steel; a washer, plain carbon steel.</summary>
+    public static string DefaultMaterial(FastenerKind kind) =>
+        kind == FastenerKind.Washer ? "Materials-steel/Steel (plain carbon)" : "Materials-steel/Steel, property class 8.8";
 
     /// <summary>A fastener part's identity: from its row's item and data (not where it came from).</summary>
     public static Guid PartId(LibrarySnapshot s)

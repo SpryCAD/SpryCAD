@@ -73,7 +73,7 @@ public static class Bom
         else
         {
             config = c.Parameters != null ? o.Owner.ConfigLabel(c) : "";
-            material = o.Display?.Part?.Material ?? o.Display?.Doc?.Material ?? "";
+            material = o.Display?.Part?.MaterialName ?? o.Display?.Doc?.MaterialName ?? "";
         }
         return new BomRow(item, level, name, config, qty, c.IsAssembly, file, material.Length > 0 ? material : null);
     }
@@ -179,7 +179,7 @@ public static class AssemblyMass
             var mp = Of(pd, out var exact);
             if (mp.Volume <= 0) continue;
             if (!exact) r.Approximate.Add(m.NameAt(o.Path));
-            var rho = (pd.Part?.Density ?? pd.Doc?.Density ?? CadDocument.DefaultDensity) * 1e-6; // kg/m³ to g/mm³
+            var rho = (pd.Part ?? pd.Doc)?.EffectiveDensity * 1e-6 ?? CadDocument.DefaultDensity * 1e-6; // kg/m³ to g/mm³
             var t = o.World;
             var mass = mp.Volume * rho;
             // the tensor turned into the assembly's axes: R I Rᵀ
