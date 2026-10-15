@@ -46,13 +46,18 @@ public sealed class PartDatabase : IDisposable
         catch (UnauthorizedAccessException) { return false; }
     }
 
-    /// <summary>A new, empty database at <paramref name="path"/> (replacing any file there).</summary>
-    public static PartDatabase Create(string path)
+    /// <summary>
+    /// A new, empty database at <paramref name="path"/> (replacing any file there). Not <paramref name="durable"/>: a
+    /// file read back at once and dropped (a part embedded in an assembly), written without its journal synced to disk
+    /// (three times faster to make; a crash loses nothing that was not in memory anyway).
+    /// </summary>
+    public static PartDatabase Create(string path, bool durable = true)
     {
         if (File.Exists(path)) File.Delete(path);
         var db = Connect(path, SqliteOpenMode.ReadWriteCreate);
         // (the page size must be set before the first table)
         Exec(db, $"PRAGMA page_size = 4096; PRAGMA application_id = {ApplicationId}; PRAGMA user_version = {SchemaVersion};");
+        if (!durable) Exec(db, "PRAGMA journal_mode = MEMORY; PRAGMA synchronous = OFF;");
         Exec(db, Schema);
         return new PartDatabase(db);
     }

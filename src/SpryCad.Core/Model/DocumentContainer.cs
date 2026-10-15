@@ -68,10 +68,11 @@ public static class DocumentContainer
     }
 
     /// <summary>Saves the part (a revision of its history: <see cref="Storage.PartFile.Save"/>).</summary>
-    public static void Save(CadDocument doc, string path, string? author = null)
+    /// <remarks>Not <paramref name="durable"/>: a file read back at once and dropped (see <see cref="Storage.PartDatabase.Create"/>).</remarks>
+    public static void Save(CadDocument doc, string path, string? author = null, bool durable = true)
     {
         foreach (var name in doc.Files.Keys) CheckName(name);
-        Storage.PartFile.Save(doc, path, author);
+        Storage.PartFile.Save(doc, path, author, durable: durable);
         doc.Attachments = null; // (the old containers' index of embedded files: the database keeps its own)
     }
 

@@ -460,7 +460,8 @@ public sealed partial class AssemblyModel
     static byte[] SaveEmbedded(CadDocument doc)
     {
         var tmp = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "fc-embed-" + Guid.NewGuid().ToString("N") + CadDocument.FileExtension);
-        try { doc.Save(tmp); return File.ReadAllBytes(tmp); }
+        // (a file read back at once: not synced to disk)
+        try { DocumentContainer.Save(doc, tmp, durable: false); return File.ReadAllBytes(tmp); }
         finally { try { File.Delete(tmp); } catch { } }
     }
 
@@ -481,7 +482,7 @@ public sealed partial class AssemblyModel
     /// </summary>
     public static AssemblyModel? FromStep(byte[] data, string name, bool defer = false)
     {
-        var res = StepImport.ReadAssembly(data, "S.");
+        StepAssemblyResult? res; using (Kernel.Prof.Time("stepasm.read")) res = StepImport.ReadAssembly(data, "S.");
         // no assembly structure, or a single use of a single part (a part, as STEP parts are opened)
         if (res == null || res.Occurrences.Count < 2) return null;
         var m = New();
@@ -503,6 +504,7 @@ public sealed partial class AssemblyModel
         var made = new (byte[] file, DisplayMesh? mesh, List<CosmeticThread>? threads)[res.Parts.Count];
         var usedParts = res.Occurrences.Select(o => o.Part).ToHashSet();
         var threadsMode = m.Threads;
+        using (Kernel.Prof.Time("stepasm.parts"))
         Parallel.For(0, res.Parts.Count, i =>
         {
             byte[] bytes; string ext;
@@ -524,15 +526,19 @@ public sealed partial class AssemblyModel
             var (mesh, threads) = Build(doc, threadsMode);
             made[i] = (saved, mesh, threads);
         });
+        var pIns = Kernel.Prof.Time("stepasm.insert");
         Component? first = null;
         foreach (var o in res.Occurrences)
         {
             var c = m.InsertEmbedded(docs[o.Part], names[o.Part], o.Placement, made[o.Part]);
             if (first == null) { first = c; continue; }
             // held where the file put it: locked to the first component
-            // (a lock holds the components themselves: no face is needed)
-            m.AddMate(MateType.Lock, new MateRef { Component = c.Id, D = Vec3.UnitZ }, new MateRef { Component = first.Id, D = Vec3.UnitZ });
+            // (a lock holds the components themselves: no face is needed; each holds them where they are, so they are
+            // solved once after, not after each)
+            m.AddMate(MateType.Lock, new MateRef { Component = c.Id, D = Vec3.UnitZ }, new MateRef { Component = first.Id, D = Vec3.UnitZ }, settle: false);
         }
+        if (m.HasMates) m.SolveMates();
+        pIns.Dispose();
         return m;
     }
 
@@ -831,14 +837,15 @@ public sealed partial class AssemblyModel
     /// recording how the components lie), moving the first reference's component onto it if it floats (else the
     /// second's), then solving all the mates. <paramref name="setup"/>: the mate's options (limits, ratio, …) before.
     /// </summary>
-    public Mate AddMate(MateType type, MateRef a, MateRef b, double value = 0, Action<Mate>? setup = null)
+    /// <remarks>Without <paramref name="settle"/> nothing is moved or solved (many mates added at once, solved after).</remarks>
+    public Mate AddMate(MateType type, MateRef a, MateRef b, double value = 0, Action<Mate>? setup = null, bool settle = true)
     {
         var m = new Mate { Type = type, A = a, B = b, Value = value };
         Mate.Normalize(m);
         m.Capture(World(a), World(b), PlacementOf(a), PlacementOf(b));
         setup?.Invoke(m);
         Doc.AddMate(m);
-        Settle(a, b);
+        if (settle) Settle(a, b);
         return m;
     }
 

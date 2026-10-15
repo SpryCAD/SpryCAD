@@ -18,7 +18,7 @@ public static class PartFile
     /// Saves the part as a revision of its history in the file (no revision when nothing changed since the last).
     /// Sets the part's identity on its first save and its <see cref="CadDocument.Revision"/> to the head's id.
     /// </summary>
-    public static void Save(CadDocument doc, string path, string? author = null, string message = "", RevisionKind kind = RevisionKind.Save)
+    public static void Save(CadDocument doc, string path, string? author = null, string message = "", RevisionKind kind = RevisionKind.Save, bool durable = true)
     {
         doc.Id ??= CadDocument.NewGuid();
         var partId = Guid.Parse(doc.Id);
@@ -28,7 +28,7 @@ public static class PartFile
         {
             bool append = File.Exists(path) && PartDatabase.IsFile(path) && RootPart(path) == partId;
             if (append) File.Copy(path, tmp, overwrite: true);
-            using (var db = append ? PartDatabase.Open(tmp, readOnly: false) : PartDatabase.Create(tmp))
+            using (var db = append ? PartDatabase.Open(tmp, readOnly: false) : PartDatabase.Create(tmp, durable))
             {
                 db.Begin();
                 try
