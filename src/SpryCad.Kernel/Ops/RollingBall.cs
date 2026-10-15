@@ -388,9 +388,19 @@ public static class RollingBall
                     var na = Outward(fA, V); var nb = Outward(fB, V);
                     var guess = V + (na + nb) * (rho / (1 + Vec3.Dot(na, nb)));
                     res = SolveJoint(A2, B2, V, guess, dir, scale);
+                    // (the faces nearly tangent, as an edge's faces where they turn so: from the nearest ball solved, moved
+                    // along with the edge, scaled to this one's radius)
+                    if (res == null && memo.Where(x => x.Value != null && x.Key < 1).OrderBy(x => Math.Abs(x.Key - u)).Select(x => (KeyValuePair<double, (Vec3 S, Vec3 T)?>?)x).FirstOrDefault() is { } near)
+                    {
+                        var tn = TAt(near.Key);
+                        var Vn = e.Curve.Eval(tn);
+                        var rn = Rho(near.Key, r);
+                        var off = near.Value!.Value.S - Vn;
+                        res = SolveJoint(A2, B2, V, V + off * (rn > 1e-300 ? Math.Abs(rho) / rn : 1), dir, scale);
+                    }
                 }
-                catch (InvalidOperationException) { res = null; }
-                if (res == null) Debug?.Invoke($"fade {name}: no ball at {V}, radius {Math.Abs(rho):g4}");
+                catch (InvalidOperationException ex) { res = null; Debug?.Invoke($"fade {name}: {ex.Message}"); }
+                if (res == null) Debug?.Invoke($"fade {name}: no ball at {V} (u {u:g3}), radius {Math.Abs(rho):g4}, the faces {Math.Acos(Math.Clamp(Vec3.Dot(Outward(fA, V).Normalized, Outward(fB, V).Normalized), -1, 1)) * 180 / Math.PI:g3}° apart ({SA.Kind}/{SB.Kind})");
             }
             return memo[u] = res;
         }

@@ -53,6 +53,8 @@ public sealed record BlendSpec(List<SpryCad.Core.Model.EdgeRef> Refs, double Siz
     /// pattern solves it again on each instance rather than copying the tools joined.
     /// </summary>
     public bool OneAtATime { get; init; }
+    /// <summary>A fillet's fade length (null: over the whole wrap; 0: square ends).</summary>
+    public double? FadeLength { get; init; }
 }
 
 /// <summary>

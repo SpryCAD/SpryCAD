@@ -21,7 +21,18 @@ public static class NativeBlend
     /// </summary>
     public static Solid Apply(Solid body, IReadOnlyList<NEdge> edges, double size, bool fillet, string prefix, List<string> errors,
         bool overflow = true, List<Vec3[]>? problemEdges = null, List<(Solid tool, bool cut)>? applied = null, ChamferSize? chamfer = null,
-        bool buildOnly = false, System.Runtime.CompilerServices.StrongBox<bool>? trimmedOut = null)
+        bool buildOnly = false, System.Runtime.CompilerServices.StrongBox<bool>? trimmedOut = null, double? fadeLength = null)
+    {
+        // (a fillet's fade (see Faded): over the length given, the whole wrap where none is, square ends for 0)
+        var oldFade = _fadeLength;
+        _fadeLength = fadeLength;
+        try { return ApplyFaded(body, edges, size, fillet, prefix, errors, overflow, problemEdges, applied, chamfer, buildOnly, trimmedOut); }
+        finally { _fadeLength = oldFade; }
+    }
+
+    static Solid ApplyFaded(Solid body, IReadOnlyList<NEdge> edges, double size, bool fillet, string prefix, List<string> errors,
+        bool overflow, List<Vec3[]>? problemEdges, List<(Solid tool, bool cut)>? applied, ChamferSize? chamfer,
+        bool buildOnly, System.Runtime.CompilerServices.StrongBox<bool>? trimmedOut)
     {
         // (every boolean of a blend exact or failed, its tools' trims too: a tool faceted by a fallback while it was built
         // was then joined to the body by the facet engine, unbounded in time, the part left faceted)
@@ -770,7 +781,7 @@ public static class NativeBlend
     {
         var sel = selected as IReadOnlyCollection<NEdge> ?? selected.ToList();
         // (an end where the edge runs on tangentially into one not picked: faded out along it)
-        if (retry && endCuts == null && Fades && !_noFades && Faded(chain, size, name, sel) is { } faded) { _fadesMade++; return faded; }
+        if (retry && endCuts == null && Fades && !_noFades && _fadeLength != 0 && Faded(chain, size, name, sel) is { } faded) { _fadesMade++; return faded; }
         // the ends where the ball pivots round a corner: the tool ending exactly where the pivot starts (its end then
         // the pivot's, glued to it)
         var pivots = new List<(NVertex v, RoundCornerCut c, CornerPatch.Result p)>();
@@ -2225,19 +2236,21 @@ public static class NativeBlend
     /// <summary>Fillets fading out where their edge runs on tangentially into one not picked (FC_FADE=0: square ends).</summary>
     public static bool Fades = Environment.GetEnvironmentVariable("FC_FADE") != "0";
 
-    /// <summary>How far a fillet fades out, in radii.</summary>
-    public const double FadeRadii = 4;
+    // (the blend's fade length on this thread: null the whole wrap, 0 none)
+    [ThreadStatic] static double? _fadeLength;
 
     /// <summary>
     /// A rolling-ball chain faded out at its ends where the edge runs on tangentially into one not picked, between the
     /// same face on one side and a face meeting the other smoothly (a boss's foot fillet, wrapped round its side fillet,
-    /// reaching the next face's foot): the chain carried on along that edge a radius (the ball rolling over onto the
-    /// next face as at any switch), then the radius falling to nothing over <see cref="FadeRadii"/> more
-    /// (<see cref="RollingBall.Fade"/>), the two glued at their common section. Null where there is no such end, or
-    /// any of it fails (the square end, as before).
+    /// reaching the next face's foot): the radius falling to nothing along the wrap, at the tangent point of the fillet it
+    /// wraps round (the edge's end), over the fade length asked for (Apply's), else the whole wrap; and where the edge's
+    /// own faces turn tangent, from where they are a few degrees apart to the vertex (<see cref="RollingBall.Fade"/>).
+    /// The chain stops where the fade starts, the two glued at their common section. Null where there is no such end,
+    /// or any of it fails (the square end, as before).
     /// </summary>
     static RollingBall.Result? Faded(List<NEdge> chain, double size, string name, IReadOnlyCollection<NEdge> sel)
     {
+        const double stopDeg = 5;
         var runs = new List<(NVertex v, NEdge g)>();
         // (and ends where the edge's own faces turn tangent: the chain stops where they are a few degrees apart, as
         // before, and fades out from there to the vertex along the edge)
@@ -2245,29 +2258,31 @@ public static class NativeBlend
         foreach (var (v, dirOut, fa, fb) in ChainEnds(chain))
         {
             if (RunsOnInto(v, dirOut, chain, sel) is { } g) runs.Add((v, g));
-            else if (TangentStop(v, chain) is { } q && chain.FirstOrDefault(x => ReferenceEquals(x.V0, v) || ReferenceEquals(x.V1, v)) is { } e)
+            else if (TangentStop(v, chain, stopDeg) is { } q && chain.FirstOrDefault(x => ReferenceEquals(x.V0, v) || ReferenceEquals(x.V1, v)) is { } e)
                 stops.Add((v, e, e.Curve.Param(q, 0.5 * (e.T0 + e.T1))));
         }
         if (runs.Count == 0 && stops.Count == 0) return null;
-        // the chain with each run-on edge, ending a radius along it
+        // each end's last edge: the chain stopping on it, the rest of it faded out
         var ends = new Dictionary<NVertex, (Vec3 q, NEdge g, double tq, double tEnd)>(ReferenceEqualityComparer.Instance);
         foreach (var (v, e, tq) in stops) ends[v] = (e.Curve.Eval(tq), e, tq, ReferenceEquals(e.V0, v) ? e.T0 : e.T1);
-        var longer = new List<NEdge>(chain);
-        foreach (var (v, g) in runs)
+        // (wrapping round a fillet into an edge not picked: faded out along the wrap, to nothing at that fillet's tangent
+        // point, over the length asked for or the whole wrap, but for a quarter radius at its start: the ball there rolls
+        // onto the round it wraps, at a constant radius, as at any switch)
+        foreach (var (v, _) in runs)
         {
-            var far = ReferenceEquals(g.V0, v) ? g.V1 : g.V0;
-            double tv = ReferenceEquals(g.V0, v) ? g.T0 : g.T1, tf = ReferenceEquals(g.V0, v) ? g.T1 : g.T0;
-            var len = g.Length;
-            var fadeLen = Math.Min(FadeRadii * size, len - 1.5 * size);
-            if (fadeLen < size) { Debug?.Invoke($"fade at {v.P}: the edge on is too short ({len:g3})"); return null; }
-            double At(double d) => AlongEdge(g, tv, tf, d);
-            var tq = At(size); var tEnd = At(size + fadeLen);
-            ends[far] = (g.Curve.Eval(tq), g, tq, tEnd);
-            longer.Add(g);
+            var e = chain.First(x => ReferenceEquals(x.V0, v) || ReferenceEquals(x.V1, v));
+            double tv = ReferenceEquals(e.V0, v) ? e.T0 : e.T1, tf = ReferenceEquals(e.V0, v) ? e.T1 : e.T0;
+            var len = e.Length;
+            var most = len - Math.Min(0.25 * size, 0.2 * len);
+            var fadeLen = _fadeLength is { } asked ? Math.Min(asked, most) : most;
+            if (fadeLen < 1e-6 * Math.Max(1, size)) continue;
+            var tq = AlongEdge(e, tv, tf, fadeLen);
+            ends[v] = (e.Curve.Eval(tq), e, tq, tv);
         }
+        if (ends.Count == 0) return null;
         Vec3? EndAt(NVertex v) => ends.TryGetValue(v, out var x) ? x.q : TangentStop(v, chain);
-        var rb = RollingBall.Build(longer, size, name, OnFaces, endAt: EndAt);
-        if (rb.Error != null || rb.Tool?.Native == null) { Debug?.Invoke($"fade {name}: the chain carried on -> {rb.Error ?? "not exact"}"); return null; }
+        var rb = RollingBall.Build(chain, size, name, OnFaces, endAt: EndAt);
+        if (rb.Error != null || rb.Tool?.Native == null) { Debug?.Invoke($"fade {name}: the chain stopping short -> {rb.Error ?? "not exact"}"); return null; }
         var tools = new List<DirectBlend.Tool> { new(rb.Tool, rb.Convex, name, size) };
         bool fits = rb.Fits;
         int k = 0;
@@ -2335,14 +2350,14 @@ public static class NativeBlend
         return tf;
     }
 
-    static Vec3? TangentStop(NVertex v, List<NEdge> chain)
+    static Vec3? TangentStop(NVertex v, List<NEdge> chain, double stopDeg = 5)
     {
         var e = chain.FirstOrDefault(x => ReferenceEquals(x.V0, v) || ReferenceEquals(x.V1, v));
         if (e == null || e.Uses.Count != 2 || chain.Count(x => ReferenceEquals(x.V0, v) || ReferenceEquals(x.V1, v)) != 1) return null;
         double tv = ReferenceEquals(e.V0, v) ? e.T0 : e.T1, tf = ReferenceEquals(e.V0, v) ? e.T1 : e.T0;
         // (at 5° the end cap of a ball of radius r is about r/11 across; much nearer tangent the cap's edges are too
         // short to join)
-        const double stop = 5 * Math.PI / 180;
+        var stop = stopDeg * Math.PI / 180;
         if (NormalsAngle(e, tv) > 0.9 * stop) return null;
         // (from the vertex towards the far end, the first place the faces open to the stop angle)
         double a = tv, b = tf;
