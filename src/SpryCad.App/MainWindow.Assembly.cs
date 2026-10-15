@@ -54,7 +54,8 @@ public partial class MainWindow : IAssemblyHost
         if (_parts.FirstOrDefault(t => t.Asm != null && t.Source is { } src && PartIndex.SamePath(src, path)) is { } open) { await SwitchTo(open); return; }
         Status("Importing " + Path.GetFileName(path) + "…");
         AssemblyModel? m;
-        try { m = await Task.Run(() => AssemblyModel.FromStep(File.ReadAllBytes(path), Path.GetFileNameWithoutExtension(path))); }
+        // (the parts' displays built after: the assembly shows at once, each part as it is done)
+        try { m = await Task.Run(() => AssemblyModel.FromStep(File.ReadAllBytes(path), Path.GetFileNameWithoutExtension(path), defer: true)); }
         catch (Exception ex) { App.Log(ex, "Import STEP Assembly"); await Dialogs.Message(this, "Import STEP Assembly", $"{Path.GetFileName(path)} could not be imported: {ex.Message}"); return; }
         // one part after all: a part tab, as any STEP part
         if (m == null) { _stepParts.Add(Path.GetFullPath(path)); await OpenFileAsync(path); return; }
@@ -67,6 +68,9 @@ public partial class MainWindow : IAssemblyHost
         Viewport.StandardView("Trimetric", fit: true, animate: false);
         Status($"Imported {m.Doc.Components.Count} components ({m.Parts.Count} parts, embedded), each locked to the first: delete a lock (under Mates) to move a part." +
                (m.Notes.Count > 0 ? $" {m.Notes.Count} notes under the tree." : ""));
+        // the parts built, several at once, each shown when done; the view fitted to them after (nothing to fit before)
+        await BuildPendingOf(t.Asm!);
+        if (_tab == t) Viewport.StandardView("Trimetric", fit: true, animate: false);
     }
 
     /// <summary>

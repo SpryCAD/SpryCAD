@@ -420,7 +420,13 @@ public sealed partial class AssemblyModel
     /// Adds a component of a part document embedded in the assembly (the document saved into it once per part:
     /// further components of it share the copy). The document gets an identity if it has none.
     /// </summary>
-    public Component InsertEmbedded(CadDocument doc, string name, Transform placement)
+    public Component InsertEmbedded(CadDocument doc, string name, Transform placement) => InsertEmbedded(doc, name, placement, null);
+
+    /// <summary>
+    /// <see cref="InsertEmbedded(CadDocument, string, Transform)"/> with the part already saved (<see cref="SaveEmbedded"/>)
+    /// and its display built, as several parts are made at once (<see cref="FromStep"/>).
+    /// </summary>
+    Component InsertEmbedded(CadDocument doc, string name, Transform placement, (byte[] file, DisplayMesh? mesh, List<CosmeticThread>? threads)? made)
     {
         var existing = doc.Id != null ? Doc.Components.Select(c => c.Part).FirstOrDefault(p => p.Embedded != null && p.PartId == doc.Id) : null;
         PartRef r;
@@ -428,9 +434,7 @@ public sealed partial class AssemblyModel
         else
         {
             // saved as a part file would be (its identity and revision given), kept inside the assembly
-            var tmp = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "fc-embed-" + Guid.NewGuid().ToString("N") + CadDocument.FileExtension);
-            try { doc.Save(tmp); Doc.Files[UniqueName("parts/" + SafeFileName(name) + CadDocument.FileExtension)] = File.ReadAllBytes(tmp); }
-            finally { try { File.Delete(tmp); } catch { } }
+            Doc.Files[UniqueName("parts/" + SafeFileName(name) + CadDocument.FileExtension)] = made?.file ?? SaveEmbedded(doc);
             var file = Doc.Files.Keys.Last(k => k.StartsWith("parts/" + SafeFileName(name), StringComparison.Ordinal));
             r = new PartRef { PartId = doc.Id, Revision = doc.Revision, Embedded = file };
         }
@@ -439,10 +443,25 @@ public sealed partial class AssemblyModel
         if (!Resolution.Parts.ContainsKey(key)) Resolution.Parts[key] = new PartResolution(PartStatus.Embedded, null, false, null);
         if (!Parts.ContainsKey(key))
         {
-            var (mesh, threads) = Build(doc, Threads);
+            if (made is { mesh: null })
+            {
+                // its display left to build (PendingJobs): shown empty until then
+                Parts[key] = new PartDisplay { Mesh = new DisplayMesh(), Threads = Array.Empty<CosmeticThread>(), Color = doc.Color, Source = PartSource.Embedded, Revision = doc.Revision, Doc = doc, Part = doc, Building = true };
+                Pending.Add(key);
+                return c;
+            }
+            var (mesh, threads) = made is { mesh: { } mm } m ? (mm, m.threads!) : Build(doc, Threads);
             Parts[key] = new PartDisplay { Mesh = mesh, Threads = threads, Color = doc.Color, Source = PartSource.Embedded, Revision = doc.Revision, Doc = doc, Part = doc };
         }
         return c;
+    }
+
+    /// <summary>A part saved as a part file is (its identity and revision given), as the bytes an assembly embeds.</summary>
+    static byte[] SaveEmbedded(CadDocument doc)
+    {
+        var tmp = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "fc-embed-" + Guid.NewGuid().ToString("N") + CadDocument.FileExtension);
+        try { doc.Save(tmp); return File.ReadAllBytes(tmp); }
+        finally { try { File.Delete(tmp); } catch { } }
     }
 
     static string SafeFileName(string name)
@@ -457,8 +476,10 @@ public sealed partial class AssemblyModel
     /// of that part's solids, in its own coordinates), each use of a part a component where the file places it. The
     /// first component is fixed and every other one locked to it, so the assembly stays as it was designed until a
     /// lock is deleted (then mate it as wanted). Null when the file is not an assembly (or holds one part, once).
+    /// With <paramref name="defer"/> the parts' displays are left to build (<see cref="PendingJobs"/>): the assembly
+    /// shows at once and its parts appear as each is built.
     /// </summary>
-    public static AssemblyModel? FromStep(byte[] data, string name)
+    public static AssemblyModel? FromStep(byte[] data, string name, bool defer = false)
     {
         var res = StepImport.ReadAssembly(data, "S.");
         // no assembly structure, or a single use of a single part (a part, as STEP parts are opened)
@@ -466,28 +487,40 @@ public sealed partial class AssemblyModel
         var m = New();
         m.Notes.AddRange(res.Warnings);
         // a part document per STEP part: its solids written to a STEP of their own and imported
-        var docs = new CadDocument?[res.Parts.Count];
         var names = new string[res.Parts.Count];
         var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         for (int i = 0; i < res.Parts.Count; i++)
         {
-            var part = res.Parts[i];
-            var n = part.Name;
-            for (int k = 2; !used.Add(n); k++) n = $"{part.Name} ({k})";
+            var n = res.Parts[i].Name;
+            for (int k = 2; !used.Add(n); k++) n = $"{res.Parts[i].Name} ({k})";
             names[i] = n;
+        }
+        // each part's document written, saved (as embedded) and its display built: the parts are independent, so at
+        // once (most of opening the file; reading it is a fraction), then put in the assembly in order as before
+        var docs = new CadDocument[res.Parts.Count];
+        var made = new (byte[] file, DisplayMesh? mesh, List<CosmeticThread>? threads)[res.Parts.Count];
+        var usedParts = res.Occurrences.Select(o => o.Part).ToHashSet();
+        var threadsMode = m.Threads;
+        Parallel.For(0, res.Parts.Count, i =>
+        {
             using var ms = new MemoryStream();
-            StepWriter.Write(ms, part.Solids.Select(sd => (sd.Name, Kernel.Native.NTess.ToSolid(sd.Body))), n);
+            StepWriter.Write(ms, res.Parts[i].Solids.Select(sd => (sd.Name, Kernel.Native.NTess.ToSolid(sd.Body))), names[i]);
             var bytes = ms.ToArray();
             var doc = new CadDocument();
-            var file = "imports/" + SafeFileName(n) + ".step";
+            var file = "imports/" + SafeFileName(names[i]) + ".step";
             doc.AddFile(file, bytes);
             doc.AddFeature(new ImportFeature { File = file, Sha256 = DocumentContainer.Hash(bytes) });
             docs[i] = doc;
-        }
+            if (!usedParts.Contains(i)) return;
+            var saved = SaveEmbedded(doc);
+            if (defer) { made[i] = (saved, null, null); return; }
+            var (mesh, threads) = Build(doc, threadsMode);
+            made[i] = (saved, mesh, threads);
+        });
         Component? first = null;
         foreach (var o in res.Occurrences)
         {
-            var c = m.InsertEmbedded(docs[o.Part]!, names[o.Part], o.Placement);
+            var c = m.InsertEmbedded(docs[o.Part], names[o.Part], o.Placement, made[o.Part]);
             if (first == null) { first = c; continue; }
             // held where the file put it: locked to the first component
             // (a lock holds the components themselves: no face is needed)
