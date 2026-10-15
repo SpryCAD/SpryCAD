@@ -25,7 +25,7 @@
         <!-- the command sets, above their commands -->
         <StackPanel x:Name="CommandTabs" DockPanel.Dock="Top" Orientation="Horizontal" Background="{DynamicResource Spry.Strip}" />
         <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
-          <StackPanel x:Name="CommandBar" Orientation="Horizontal" Height="34" Margin="4,3" />
+          <StackPanel x:Name="CommandBar" Orientation="Horizontal" Margin="4,3" />
         </ScrollViewer>
       </DockPanel>
     </Border>

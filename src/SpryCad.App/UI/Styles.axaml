@@ -41,18 +41,30 @@
     <Setter Property="CornerRadius" Value="4" />
     <Setter Property="Padding" Value="4" />
   </Style>
-  <Style Selector="Button.cmd.gridcmd">
+  <!-- the row's buttons and the grid's, one size: the icon above the name -->
+  <Style Selector="Button.cmd.big">
     <Setter Property="Width" Value="88" />
     <Setter Property="MinHeight" Value="64" />
-    <Setter Property="Margin" Value="1" />
-    <Setter Property="Padding" Value="4,6,4,4" />
+    <Setter Property="Margin" Value="1,0" />
+    <Setter Property="Padding" Value="4,5,4,3" />
     <Setter Property="HorizontalContentAlignment" Value="Center" />
     <Setter Property="VerticalContentAlignment" Value="Top" />
   </Style>
-  <Style Selector="Button.cmd.gridcmd TextBlock">
+  <Style Selector="Button.cmd.big TextBlock">
     <Setter Property="TextWrapping" Value="Wrap" />
     <Setter Property="TextAlignment" Value="Center" />
     <Setter Property="HorizontalAlignment" Value="Center" />
+  </Style>
+  <Style Selector="Button.cmd.big.iconsonly">
+    <Setter Property="Width" Value="48" />
+  </Style>
+  <Style Selector="UniformGrid > Button.cmd.big">
+    <Setter Property="Margin" Value="1" />
+  </Style>
+  <Style Selector="TextBlock.cmdgridhead">
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="Foreground" Value="{DynamicResource Spry.TextSecondary}" />
+    <Setter Property="Margin" Value="4,0,0,2" />
   </Style>
 
   <!-- small toolbar buttons -->

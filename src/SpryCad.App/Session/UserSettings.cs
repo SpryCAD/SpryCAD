@@ -31,12 +31,23 @@ public enum KeepDisplay
     Always,
 }
 
+/// <summary>How the CommandManager's buttons are laid out.</summary>
+public enum CommandBarLayout
+{
+    /// <summary>The icon above the name, the drop-down grid's size.</summary>
+    Large,
+    /// <summary>A small icon with the name beside it, one short row.</summary>
+    Compact,
+}
+
 /// <summary>Per-user view preferences (not part of the document), stored as key=value lines in app data.</summary>
 public static class UserSettings
 {
     static string StorePath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "SpryCAD", "settings.txt");
 
     public static bool ReverseWheel { get; set; }
+    /// <summary>The CommandManager's buttons: large (the default) or compact.</summary>
+    public static CommandBarLayout CommandBar { get; set; } = CommandBarLayout.Large;
     public static bool Perspective { get; set; }
     /// <summary>
     /// The name saved revisions are made by (their history shows it): the user's sign-in name until set. Also the name
@@ -101,6 +112,7 @@ public static class UserSettings
                 if (i < 0) continue;
                 var (k, v) = (line[..i].Trim(), line[(i + 1)..].Trim());
                 if (k == nameof(ReverseWheel)) ReverseWheel = v == "1";
+                else if (k == nameof(CommandBar) && Enum.TryParse<CommandBarLayout>(v, out var cb)) CommandBar = cb;
                 else if (k == nameof(Perspective)) Perspective = v == "1";
                 else if (k == nameof(AuthorName) && v.Length > 0) AuthorName = v;
                 else if (k == nameof(KeepDisplay) && Enum.TryParse<KeepDisplay>(v, out var kd)) KeepDisplay = kd;
@@ -134,6 +146,7 @@ public static class UserSettings
             {
                 $"{nameof(Version)}={Version}",
                 $"{nameof(ReverseWheel)}={(ReverseWheel ? 1 : 0)}",
+                $"{nameof(CommandBar)}={CommandBar}",
                 $"{nameof(Perspective)}={(Perspective ? 1 : 0)}",
                 $"{nameof(AuthorName)}={AuthorName}",
                 $"{nameof(KeepDisplay)}={KeepDisplay}",

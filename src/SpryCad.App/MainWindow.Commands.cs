@@ -256,6 +256,20 @@ public partial class MainWindow
 
     void BuildCommandManager()
     {
+        // right-click the bar: its layout
+        if (CommandBar.Parent is Control barHost)
+            barHost.ContextRequested += (_, e) =>
+            {
+                var menu = new ContextMenu();
+                foreach (var (layout, text) in new[] { (CommandBarLayout.Large, "Large Buttons"), (CommandBarLayout.Compact, "Compact Buttons") })
+                {
+                    var mi = new MenuItem { Header = text, ToggleType = MenuItemToggleType.Radio, IsChecked = UserSettings.CommandBar == layout };
+                    mi.Click += (_, _) => SetCommandBarLayout(layout);
+                    menu.Items.Add(mi);
+                }
+                menu.Open(barHost);
+                e.Handled = true;
+            };
         foreach (var name in new[] { "Assembly", "Features", "Sketch", "Sheet Metal", "Evaluate" })
         {
             // the Assembly tab only while an assembly is active (ApplyDocumentKind)
@@ -355,11 +369,11 @@ public partial class MainWindow
         FitCommandRow();
     }
 
-    /// <summary>A command's button on the row: its icon and its name beside it (a "\n" in the name is a space).</summary>
+    /// <summary>A command's button on the row: its icon and its name (a "\n" in the name is a space).</summary>
     void Cmd(string icon, string label, Action click, SketchTool? tool = null)
     {
         var name = label.Replace('\n', ' ');
-        var b = new Button { Classes = { "cmd" }, Content = RowContent(icon, name) };
+        var b = new Button { Classes = { "cmd", LargeBar ? "big" : "compact" }, Content = RowContent(icon, name) };
         var key = tool is { } st && SketchToolKeys.TryGetValue(st, out var k) ? $" ({k})" : "";
         ToolTip.SetTip(b, CommandHelp.TryGetValue(name, out var help) ? $"{name}{key}\n{help}" : name + key);
         b.Click += (_, _) => { NoteCommand(name, icon, click); click(); };

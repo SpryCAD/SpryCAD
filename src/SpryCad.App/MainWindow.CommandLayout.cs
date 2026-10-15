@@ -2,17 +2,19 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Layout;
+using Avalonia.LogicalTree;
 using Avalonia.Threading;
+using SpryCad.App.Session;
 using SpryCad.App.Sketcher;
 using SpryCad.App.UI;
 
 namespace SpryCad.App;
 
 /// <summary>
-/// The CommandManager's buttons, one compact row: each an icon and its name beside it, and families of a command (the
-/// boss features, the cuts, fillet and chamfer, the rectangle's kinds) on one button: a click runs the one used last
-/// (shown on it); hovering it (or a right-click) drops a grid of the whole family below it, and the one picked there
-/// runs and becomes the button's. A row too long for the window shows its icons only (the names in the tooltips).
+/// The CommandManager's buttons, one row: each its icon above its name, and families of a command (the boss features,
+/// the cuts, fillet and chamfer, the rectangle's kinds) on one button: a click runs the one used last (shown on it);
+/// hovering it (or a right-click) drops a grid of the whole family below it, buttons the same size, and the one picked
+/// there runs and becomes the button's. A row too long for the window shows its icons only (the names in the tooltips).
 /// </summary>
 public partial class MainWindow
 {
@@ -39,46 +41,66 @@ public partial class MainWindow
         return CommandHelp.TryGetValue(c.Name, out var help) ? $"{c.Name}{key}\n{help}" : c.Name + key;
     }
 
-    /// <summary>A button's content: its icon and, beside it, its name.</summary>
+    /// <summary>The bar's layout (<see cref="UserSettings.CommandBar"/>): large buttons, else compact.</summary>
+    static bool LargeBar => UserSettings.CommandBar == CommandBarLayout.Large;
+
+    /// <summary>Lays the bar out anew as <paramref name="layout"/> (remembered).</summary>
+    public void SetCommandBarLayout(CommandBarLayout layout)
+    {
+        if (UserSettings.CommandBar == layout) return;
+        UserSettings.CommandBar = layout;
+        UserSettings.Save();
+        ShowTab(_activeTab);
+    }
+
+    /// <summary>A button's content: its icon and its name, below it (large) or beside it (compact).</summary>
     StackPanel RowContent(string icon, string text)
     {
         var label = new TextBlock { Text = text };
         _cmdLabels.Add(label);
-        return new StackPanel { Orientation = Orientation.Horizontal, Spacing = 5, Children = { Icons.Make(icon, 22), label } };
+        return LargeBar
+            ? new StackPanel { Spacing = 4, Children = { Icons.Make(icon, 32), label } }
+            : new StackPanel { Orientation = Orientation.Horizontal, Spacing = 5, Children = { Icons.Make(icon, 22), label } };
     }
 
     /// <summary>
-    /// A family on one button: <paramref name="label"/> (else the name of the one shown) beside the icon of the one
-    /// used last, and a chevron: hovered, the family's grid drops below it.
+    /// A family on one button: the icon and name of the one used last, and a chevron: hovered, the family's grid
+    /// drops below it, under <paramref name="label"/> (the family's name) when there is one.
     /// </summary>
     void Family(string? label, params Command[] family)
     {
-        var main = new Button { Classes = { "cmd" } };
+        var main = new Button { Classes = { "cmd", LargeBar ? "big" : "compact" } };
         var key = string.Join("|", family.Select(f => f.Name));
         int Current() => Math.Clamp(_dropChoice.GetValueOrDefault(key), 0, family.Length - 1);
-        // the button: the icon of the one shown, the family's name (or the one's), and a chevron (more on hover)
         var text = new TextBlock();
         _cmdLabels.Add(text);
         var iconHost = new ContentControl();
+        // (the chevron beside the icon: a two-line name keeps the button the others' height)
         var chevron = Chevron(7);
-        chevron.Margin = new Thickness(1, 0, 0, 0);
-        main.Content = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 5, Children = { iconHost, text, chevron } };
+        chevron.Margin = new Thickness(0, 0, -11, 0);
+        if (LargeBar)
+        {
+            var top = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, HorizontalAlignment = HorizontalAlignment.Center, Children = { iconHost, chevron } };
+            main.Content = new StackPanel { Spacing = 4, Children = { top, text } };
+        }
+        else
+        {
+            // compact: the icon, the name and the chevron in a line
+            chevron.Margin = new Thickness(1, 0, 0, 0);
+            main.Content = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 5, Children = { iconHost, text, chevron } };
+        }
+        void Show(int i)
+        {
+            // (no tooltip of its own: it would cover the grid, whose buttons have theirs)
+            iconHost.Content = Icons.Make(family[i].Icon, LargeBar ? 32 : 22);
+            text.Text = family[i].Name;
+        }
 
-        // the grid: each of the family, its icon above its name; the one on the button marked
-        var items = new Button[family.Length];
-        var grid = new UniformGrid { Columns = Math.Min(family.Length, 5) };
-        var panel = new Border { Classes = { "cmdgrid" }, Child = grid };
+        // the grid: the family's name over its commands, each its icon above its name, the one on the button marked
+        var panel = new Border { Classes = { "cmdgrid" } };
         // (not light-dismissed: its layer over the window would take the pointer off the button, which closed the grid,
         // and the pointer back on the button opened it again, over and over; it closes as below instead)
         var popup = new Popup { PlacementTarget = main, Placement = PlacementMode.BottomEdgeAlignedLeft, VerticalOffset = 2, Child = panel };
-        void Show(int i)
-        {
-            var c = family[i];
-            iconHost.Content = Icons.Make(c.Icon, 22);
-            text.Text = label ?? c.Name;
-            // (no tooltip of its own: it would cover the grid, whose buttons have theirs; icons only, the grid names them)
-            foreach (var (b, k) in items.Select((b, k) => (b, k))) b?.Classes.Set("active", k == i);
-        }
         void Pick(int i)
         {
             popup.IsOpen = false;
@@ -89,19 +111,26 @@ public partial class MainWindow
             family[i].Run();
             UpdateToolButtons();
         }
-        for (int i = 0; i < family.Length; i++)
+        // made anew each time it opens (no button left looking pressed or hovered from the time before)
+        void Open()
         {
-            var idx = i;
-            var c = family[i];
-            var item = new Button
+            if (popup.IsOpen) return;
+            var grid = new UniformGrid { Columns = Math.Min(family.Length, 5) };
+            for (int i = 0; i < family.Length; i++)
             {
-                Classes = { "cmd", "gridcmd" },
-                Content = new StackPanel { Spacing = 4, Children = { Icons.Make(c.Icon, 32), new TextBlock { Text = c.Name } } },
-            };
-            ToolTip.SetTip(item, TipOf(c));
-            item.Click += (_, _) => Pick(idx);
-            items[i] = item;
-            grid.Children.Add(item);
+                var idx = i;
+                var c = family[i];
+                var item = new Button { Classes = { "cmd", "big" }, Content = new StackPanel { Spacing = 4, Children = { Icons.Make(c.Icon, 32), new TextBlock { Text = c.Name } } } };
+                item.Classes.Set("active", i == Current());
+                ToolTip.SetTip(item, TipOf(c));
+                item.Click += (_, _) => Pick(idx);
+                grid.Children.Add(item);
+            }
+            var content = new StackPanel { Spacing = 2 };
+            if (label != null) content.Children.Add(new TextBlock { Text = label, Classes = { "cmdgridhead" } });
+            content.Children.Add(grid);
+            panel.Child = content;
+            popup.IsOpen = true;
         }
         _dropGroups.Add(new DropGroup { Key = key, Commands = family, Show = Show });
         Show(Current());
@@ -110,7 +139,7 @@ public partial class MainWindow
         // hovering the button a moment opens the grid; leaving both (a moment, to cross the gap) closes it
         var opening = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(350) };
         var closing = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(300) };
-        opening.Tick += (_, _) => { opening.Stop(); if (main.IsPointerOver && main.IsEffectivelyEnabled) popup.IsOpen = true; };
+        opening.Tick += (_, _) => { opening.Stop(); if (main.IsPointerOver && main.IsEffectivelyEnabled) Open(); };
         closing.Tick += (_, _) => { closing.Stop(); if (!main.IsPointerOver && !panel.IsPointerOver) popup.IsOpen = false; };
         main.PointerEntered += (_, _) => { closing.Stop(); if (!popup.IsOpen) opening.Start(); };
         main.PointerExited += (_, _) => { opening.Stop(); closing.Start(); };
@@ -118,15 +147,16 @@ public partial class MainWindow
         panel.PointerExited += (_, _) => closing.Start();
         // (pressed: the click runs the button's command, the grid not wanted)
         main.AddHandler(PointerPressedEvent, (_, _) => opening.Stop(), Avalonia.Interactivity.RoutingStrategies.Tunnel);
-        main.ContextRequested += (_, e) => { popup.IsOpen = true; e.Handled = true; };
-        // a click anywhere else in the window, or the window left, closes it
+        main.ContextRequested += (_, e) => { Open(); e.Handled = true; };
+        // a click anywhere else in the window closes it (a click in the grid reaches the window too, through the
+        // popup's owner: not that one, or the grid closed before its button got the click; nor the window losing
+        // focus, which a click in the grid, a window of its own, can do)
         main.AttachedToVisualTree += (_, _) =>
         {
             if (TopLevel.GetTopLevel(main) is not Window w || main.Tag != null) return;
             main.Tag = w;
-            w.AddHandler(PointerPressedEvent, (_, _) => { if (popup.IsOpen && !main.IsPointerOver) popup.IsOpen = false; },
+            w.AddHandler(PointerPressedEvent, (_, _) => { if (popup.IsOpen && !main.IsPointerOver && !panel.IsPointerOver) popup.IsOpen = false; },
                 Avalonia.Interactivity.RoutingStrategies.Tunnel, handledEventsToo: true);
-            w.Deactivated += (_, _) => popup.IsOpen = false;
         };
 
         // the family's sketch tools light the button (in use, it shows that kind: UpdateDropGroups)
@@ -164,13 +194,16 @@ public partial class MainWindow
     {
         // (again when the window is resized)
         if (!_fitHooked && CommandBar.Parent is Control h) { h.SizeChanged += (_, _) => FitCommandRow(); _fitHooked = true; }
+        CommandBar.Height = LargeBar ? double.NaN : 34;
         foreach (var l in _cmdLabels) l.IsVisible = true;
+        foreach (var b in CommandBar.GetLogicalDescendants().OfType<Button>()) b.Classes.Set("iconsonly", false);
         Avalonia.Threading.Dispatcher.UIThread.Post(() =>
         {
             if (CommandBar.Parent is not Control host) return;
             CommandBar.Measure(Size.Infinity);
             var fits = CommandBar.DesiredSize.Width <= host.Bounds.Width - 8;
             foreach (var l in _cmdLabels) l.IsVisible = fits;
+            foreach (var b in CommandBar.GetLogicalDescendants().OfType<Button>()) b.Classes.Set("iconsonly", !fits);
         }, Avalonia.Threading.DispatcherPriority.Loaded);
     }
 }

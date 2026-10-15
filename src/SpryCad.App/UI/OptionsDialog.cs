@@ -185,8 +185,12 @@ public static class OptionsDialog
             "Middle-click a vertex, edge or face to rotate about that spot instead, until you middle-click empty space.");
         f.Section("Projection");
         var persp = f.Check("Perspective view", vp.Camera.Perspective, "Otherwise orthographic (parallel lines stay parallel), as drawings are.");
+        f.Section("Command bar");
+        var bar = f.Row("Buttons", Combo(new[] { "Large: the icon above the name (default)", "Compact: a small icon, the name beside it" }, (int)UserSettings.CommandBar),
+            "Hovering a button with more commands drops a grid of them in either. Right-click the bar to switch.");
         return new Commit(() => null, () => () =>
         {
+            if (bar.SelectedIndex >= 0) c.Owner.SetCommandBarLayout((CommandBarLayout)bar.SelectedIndex);
             // the user's, not the document's: remembered, no undo step, the part not marked modified
             vp.ReverseWheel = UserSettings.ReverseWheel = wheel.IsChecked == true;
             vp.Camera.Perspective = UserSettings.Perspective = persp.IsChecked == true;
