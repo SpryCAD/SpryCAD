@@ -2221,6 +2221,9 @@ public static class NativeBlend
                 foreach (var o in others)
                 {
                     if (seen.Contains(o)) continue;
+                    // (not onto an edge between faces meeting smoothly (two pieces of one loft's surface): nothing to
+                    // blend there, and the whole chain was refused for it)
+                    if (o.Uses.Count == 2 && Vec3.Dot(Outward(o.Uses[0].Face, o.Mid).Normalized, Outward(o.Uses[1].Face, o.Mid).Normalized) > Math.Cos(Math.PI / 180)) continue;
                     // the other pieces of a seam-split edge: same named faces on the same surfaces
                     bool sibling = SameFaces(e, o) && (e.Curve is NCircle ec && o.Curve is NCircle oc ? SameCircle(ec, oc) : RollingBall.SameSurfaces(e, o));
                     bool cont = false;
