@@ -315,13 +315,32 @@ static class BlendStress
             if (x.Warnings.Count > 0) return "exact: " + Short(x.Warnings[0]);
             foreach (var f in x.Faces.Where(f => f.Surface.Kind == SurfaceKind.Pipe && f.Name.StartsWith(blendId + ".", StringComparison.Ordinal)))
             {
-                var ps = Of.Invoke(null, new[] { PipeFit.Invoke(null, new object[] { f, x })! })!;
+                var fit = (BSplineSurface)PipeFit.Invoke(null, new object[] { f, x })!;
+                var ps = Of.Invoke(null, new object[] { fit })!;
                 foreach (var (ei, _) in f.Loops.SelectMany(l => l.Edges))
                 {
                     object? hint = null;
                     foreach (var p in x.Edges[ei].Points)
                     {
-                        if (Find.Invoke(ps, new object?[] { p, hint, 1e-4, false }) is not { } uv) return $"an edge off its written surface ({f.Name})";
+                        if (Find.Invoke(ps, new object?[] { p, hint, 1e-4, false }) is not { } uv)
+                        {
+                            // (FC_STRESS_WHY: where along the spine, and how far off, by a grid of the fitted surface)
+                            if (Environment.GetEnvironmentVariable("FC_STRESS_WHY") != null && f.Surface.Def.Spine is { } sp)
+                            {
+                                double best = double.MaxValue;
+                                for (int i = 0; i <= 200; i++)
+                                    for (int j = 0; j <= 200; j++)
+                                        best = Math.Min(best, Vec3.Distance(p, fit.Eval(fit.KnotsU[0] + (fit.KnotsU[^1] - fit.KnotsU[0]) * i / 200, fit.KnotsV[0] + (fit.KnotsV[^1] - fit.KnotsV[0]) * j / 200)));
+                                var bs = sp.Ball(p, f.Surface.Def.Radius).s;
+                                // (densely near the point's place along the spine)
+                                double vlo = Math.Max(fit.KnotsV[0], bs - 0.05 * (sp.S1 - sp.S0)), vhi = Math.Min(fit.KnotsV[^1], bs + 0.05 * (sp.S1 - sp.S0));
+                                for (int i = 0; i <= 400; i++)
+                                    for (int j = 0; j <= 400; j++)
+                                        best = Math.Min(best, Vec3.Distance(p, fit.Eval(fit.KnotsU[0] + (fit.KnotsU[^1] - fit.KnotsU[0]) * i / 400, vlo + (vhi - vlo) * j / 400)));
+                                Console.WriteLine($"    off: {p} at s {bs:g4} of {sp.S0:g4}..{sp.S1:g4}, ~{best:g3} from the fit; fit v {fit.KnotsV[0]:g4}..{fit.KnotsV[^1]:g4}");
+                            }
+                            return $"an edge off its written surface ({f.Name})";
+                        }
                         hint = uv;
                     }
                 }

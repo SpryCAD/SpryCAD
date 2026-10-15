@@ -302,9 +302,10 @@ public static class NMass
             if (sp.SurfacePartials(u, v, s.R, out var pp, out var pu, out var pv)) return (pp, pu, pv);
             var (_, n1, n2) = sp.Frame(v);
             double c = Math.Cos(u), sn = Math.Sin(u), hs = 1e-6 * Math.Max(1, Math.Abs(v));
-            var pt = sp.Eval(v) + (n1 * c + n2 * sn) * s.R;
+            var (back, q) = sp.Section(v, s.R);
+            var pt = sp.Eval(v) - sp.Frame(v).T * back + (n1 * c + n2 * sn) * q;
             var dsv = (sp.Surface(u, v + hs, s.R) - sp.Surface(u, v - hs, s.R)) / (2 * hs);
-            return (pt, (n1 * -sn + n2 * c) * s.R, dsv);
+            return (pt, (n1 * -sn + n2 * c) * q, dsv);
         }
         // B-splines, screws, offsets of B-splines: exact
         if (s.TryPartials(u, v, out var es, out var esu, out var esv)) return (es, esu, esv);

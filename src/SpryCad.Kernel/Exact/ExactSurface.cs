@@ -105,7 +105,7 @@ public sealed class ExactSurface
                     return (p - c).Normalized;
                 }
             case SurfaceKind.Pipe:
-                return Def.Spine!.Normal(p);
+                return Def.Spine!.Normal(p, Def.Radius);
             case SurfaceKind.Screw:
                 return Def.Screw!.Normal(p);
             case SurfaceKind.BSpline:

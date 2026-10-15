@@ -27,20 +27,34 @@ public static class NativeBlend
         // was then joined to the body by the facet engine, unbounded in time, the part left faceted)
         var oldNoFallback = Csg.NoFallback;
         Csg.NoFallback = true;
-        _depth++;
+        int fades0 = _fadesMade;
+        bool outer = !_noFades;
         try
         {
-            var r = ApplyExact(body, edges, size, fillet, prefix, errors, overflow, problemEdges, applied, chamfer, buildOnly, trimmedOut);
-            // (the whole blend done: a fillet's square ends where its edge runs on into one not picked faded out)
-            if (_depth == 1 && fillet && FadeOut.Enabled && !buildOnly && errors.Count == 0 && r.Native != null)
-                using (Prof.Time("blend.fade")) r = FadeOut.Apply(r, prefix, size, applied);
+            var errs = new List<string>(); var probs = problemEdges == null ? null : new List<Vec3[]>(); var app = applied == null ? null : new List<(Solid, bool)>();
+            var r = ApplyExact(body, edges, size, fillet, prefix, errs, overflow, probs, app, chamfer, buildOnly, trimmedOut);
+            // (failed where fillets faded out: again with square ends, as before, kept where that works)
+            if (outer && errs.Count > 0 && _fadesMade > fades0)
+            {
+                var errs2 = new List<string>(); var probs2 = problemEdges == null ? null : new List<Vec3[]>(); var app2 = applied == null ? null : new List<(Solid, bool)>();
+                _noFades = true;
+                Solid r2;
+                try { r2 = ApplyExact(body, edges, size, fillet, prefix, errs2, overflow, probs2, app2, chamfer, buildOnly, trimmedOut); }
+                finally { _noFades = false; }
+                Debug?.Invoke($"faded: {errs.Count} error(s); square ends: {errs2.Count}");
+                if (errs2.Count == 0) (r, errs, probs, app) = (r2, errs2, probs2, app2);
+            }
+            errors.AddRange(errs);
+            if (probs != null) problemEdges!.AddRange(probs);
+            if (app != null) applied!.AddRange(app);
             return r;
         }
-        finally { Csg.NoFallback = oldNoFallback; _depth--; }
+        finally { Csg.NoFallback = oldNoFallback; }
     }
 
-    // (blends staged call Apply again: the outermost one fades)
-    [ThreadStatic] static int _depth;
+    // (fades made on this thread, and a run without them)
+    [ThreadStatic] static int _fadesMade;
+    [ThreadStatic] static bool _noFades;
 
     static Solid ApplyExact(Solid body, IReadOnlyList<NEdge> edges, double size, bool fillet, string prefix, List<string> errors,
         bool overflow, List<Vec3[]>? problemEdges, List<(Solid tool, bool cut)>? applied, ChamferSize? chamfer,
@@ -755,6 +769,8 @@ public static class NativeBlend
         bool retry = true)
     {
         var sel = selected as IReadOnlyCollection<NEdge> ?? selected.ToList();
+        // (an end where the edge runs on tangentially into one not picked: faded out along it)
+        if (retry && endCuts == null && Fades && !_noFades && Faded(chain, size, name, sel) is { } faded) { _fadesMade++; return faded; }
         // the ends where the ball pivots round a corner: the tool ending exactly where the pivot starts (its end then
         // the pivot's, glued to it)
         var pivots = new List<(NVertex v, RoundCornerCut c, CornerPatch.Result p)>();
@@ -2206,6 +2222,111 @@ public static class NativeBlend
     /// where the faces are a few degrees from tangent (the ball there a sliver; at the vertex itself it has no
     /// centre). Null for any other end.
     /// </summary>
+    /// <summary>Fillets fading out where their edge runs on tangentially into one not picked (FC_FADE=0: square ends).</summary>
+    public static bool Fades = Environment.GetEnvironmentVariable("FC_FADE") != "0";
+
+    /// <summary>How far a fillet fades out, in radii.</summary>
+    public const double FadeRadii = 4;
+
+    /// <summary>
+    /// A rolling-ball chain faded out at its ends where the edge runs on tangentially into one not picked, between the
+    /// same face on one side and a face meeting the other smoothly (a boss's foot fillet, wrapped round its side fillet,
+    /// reaching the next face's foot): the chain carried on along that edge a radius (the ball rolling over onto the
+    /// next face as at any switch), then the radius falling to nothing over <see cref="FadeRadii"/> more
+    /// (<see cref="RollingBall.Fade"/>), the two glued at their common section. Null where there is no such end, or
+    /// any of it fails (the square end, as before).
+    /// </summary>
+    static RollingBall.Result? Faded(List<NEdge> chain, double size, string name, IReadOnlyCollection<NEdge> sel)
+    {
+        var runs = new List<(NVertex v, NEdge g)>();
+        foreach (var (v, dirOut, fa, fb) in ChainEnds(chain))
+            if (RunsOnInto(v, dirOut, chain, sel) is { } g) runs.Add((v, g));
+        if (runs.Count == 0) return null;
+        // the chain with each run-on edge, ending a radius along it
+        var ends = new Dictionary<NVertex, (Vec3 q, NEdge g, double tq, double tEnd)>(ReferenceEqualityComparer.Instance);
+        var longer = new List<NEdge>(chain);
+        foreach (var (v, g) in runs)
+        {
+            var far = ReferenceEquals(g.V0, v) ? g.V1 : g.V0;
+            double tv = ReferenceEquals(g.V0, v) ? g.T0 : g.T1, tf = ReferenceEquals(g.V0, v) ? g.T1 : g.T0;
+            var len = g.Length;
+            var fadeLen = Math.Min(FadeRadii * size, len - 1.5 * size);
+            if (fadeLen < size) { Debug?.Invoke($"fade at {v.P}: the edge on is too short ({len:g3})"); return null; }
+            double At(double d) => AlongEdge(g, tv, tf, d);
+            var tq = At(size); var tEnd = At(size + fadeLen);
+            ends[far] = (g.Curve.Eval(tq), g, tq, tEnd);
+            longer.Add(g);
+        }
+        Vec3? EndAt(NVertex v) => ends.TryGetValue(v, out var x) ? x.q : TangentStop(v, chain);
+        var rb = RollingBall.Build(longer, size, name, OnFaces, endAt: EndAt);
+        if (rb.Error != null || rb.Tool?.Native == null) { Debug?.Invoke($"fade {name}: the chain carried on -> {rb.Error ?? "not exact"}"); return null; }
+        var tools = new List<DirectBlend.Tool> { new(rb.Tool, rb.Convex, name, size) };
+        bool fits = rb.Fits;
+        int k = 0;
+        foreach (var (q, g, tq, tEnd) in ends.Values)
+        {
+            var fade = RollingBall.Fade(g, tq, tEnd, size, $"{name}.Fade{k++}", OnFaces);
+            // (only where it fits as it is: one running into the geometry beside it, cut back, was not joined where the
+            // square end was)
+            if (fade.Error != null || fade.Tool?.Native == null || fade.Convex != rb.Convex || !fade.Fits)
+            { Debug?.Invoke($"fade {name}: {fade.Error ?? (fade.Convex != rb.Convex ? "not the chain's kind" : "it does not fit")}"); return null; }
+            tools.Add(new(fade.Tool, fade.Convex, name, size));
+            fits &= fade.Fits;
+        }
+        if (DirectBlend.Glue(tools, out var why) is not { } glued) { Debug?.Invoke($"fade {name}: not glued ({why})"); return null; }
+        Debug?.Invoke($"fade {name}: {ends.Count} end(s) faded out");
+        return new RollingBall.Result(glued.Strip, rb.Convex, fits, null);
+    }
+
+    /// <summary>
+    /// The edge an open chain end runs on into tangentially, not picked, of the same kind (convex or concave), between
+    /// the end edge's face on one side and, on the other, its face or one meeting it smoothly. Null where there is none.
+    /// </summary>
+    static NEdge? RunsOnInto(NVertex v, Vec3 dirOut, List<NEdge> chain, IReadOnlyCollection<NEdge> sel)
+    {
+        var e = chain.FirstOrDefault(x => ReferenceEquals(x.V0, v) || ReferenceEquals(x.V1, v));
+        if (e == null || e.Uses.Count != 2 || chain.Count(x => ReferenceEquals(x.V0, v) || ReferenceEquals(x.V1, v)) != 1) return null;
+        var kind = IsConvex(e);
+        if (kind == null) return null;
+        var faces = e.Uses.Select(u => u.Face).ToList();
+        NEdge? found = null;
+        foreach (var g in faces.SelectMany(f => f.Coedges).Select(c => c.Edge).Distinct(ReferenceEqualityComparer.Instance).Cast<NEdge>())
+        {
+            if (ReferenceEquals(g, e) || g.Uses.Count != 2 || sel.Contains(g) || chain.Contains(g) || IsSeam(g)) continue;
+            if (!ReferenceEquals(g.V0, v) && !ReferenceEquals(g.V1, v)) continue;
+            var dir = (ReferenceEquals(g.V0, v) ? g.Curve.Deriv(g.T0) : -g.Curve.Deriv(g.T1)).Normalized;
+            if (Vec3.Dot(dir, dirOut.Normalized) < 1 - 1e-6) continue;
+            if (IsConvex(g) != kind) continue;
+            // one side the same face, the other the same or meeting it smoothly across an edge at v
+            var gf = g.Uses.Select(u => u.Face).ToList();
+            var same = gf.Where(f => faces.Contains(f)).ToList();
+            if (same.Count == 2) continue;
+            if (same.Count != 1) continue;
+            var other = gf.First(f => !ReferenceEquals(f, same[0]));
+            var mine = faces.First(f => !ReferenceEquals(f, same[0]));
+            var between = mine.Coedges.Select(c => c.Edge).FirstOrDefault(x => x.Uses.Any(u => ReferenceEquals(u.Face, other)) && (ReferenceEquals(x.V0, v) || ReferenceEquals(x.V1, v)));
+            if (between == null || Vec3.Dot(Outward(mine, v.P).Normalized, Outward(other, v.P).Normalized) < 1 - 1e-6) continue;
+            if (found != null) return null;
+            found = g;
+        }
+        return found;
+    }
+
+    /// <summary>The parameter of the point a length d along the edge from tv towards tf (its far end where it is shorter).</summary>
+    static double AlongEdge(NEdge g, double tv, double tf, double d)
+    {
+        const int n = 512;
+        double acc = 0; var p = g.Curve.Eval(tv);
+        for (int i = 1; i <= n; i++)
+        {
+            var t = tv + (tf - tv) * i / n; var q = g.Curve.Eval(t);
+            var step = Vec3.Distance(p, q);
+            if (acc + step >= d) return tv + (tf - tv) * ((i - 1) + (d - acc) / Math.Max(step, 1e-300)) / n;
+            acc += step; p = q;
+        }
+        return tf;
+    }
+
     static Vec3? TangentStop(NVertex v, List<NEdge> chain)
     {
         var e = chain.FirstOrDefault(x => ReferenceEquals(x.V0, v) || ReferenceEquals(x.V1, v));

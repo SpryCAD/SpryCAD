@@ -391,8 +391,31 @@ public static class StepWriter
                         var d = (Eval(q.X, q.Y) - p).LengthSq;
                         if (d < best) { best = d; uv = q; }
                     }
+                // (zoomed in round the nearest, a few times: where the surface narrows to a point (a fading fillet's tip,
+                // a corner patch's), the grid's step along it is far wider than the surface is there, and Newton from
+                // its nearest sample stalls)
+                // (at such a point every u is the same place: the first zooms take all of u, along a narrower v)
+                double wu = (U1 - U0) / gu, wv = (V1 - V0) / gv;
+                for (int zoom = 0; zoom < 5; zoom++)
+                {
+                    var c0 = uv;
+                    bool allU = zoom < 2;
+                    int nu = allU ? gu : 10;
+                    for (int i = allU ? 0 : -10; i <= nu; i++)
+                        for (int j = -10; j <= 10; j++)
+                        {
+                            var qu = allU ? U0 + (U1 - U0) * i / gu : Math.Clamp(c0.X + wu * i / 10, U0, U1);
+                            var q = new Vec2(qu, Math.Clamp(c0.Y + wv * j / 10, V0, V1));
+                            var d = (Eval(q.X, q.Y) - p).LengthSq;
+                            if (d < best) { best = d; uv = q; }
+                        }
+                    if (!allU) wu /= 5;
+                    wv /= 5;
+                }
             }
             double hu = 1e-6 * (U1 - U0), hv = 1e-6 * (V1 - V0);
+            // (Newton from here may wander off where the surface narrows: the start kept where it ends farther)
+            var start = uv; var startD = Vec3.Distance(Eval(uv.X, uv.Y), p);
             for (int it = 0; it < 40; it++)
             {
                 var r = Eval(uv.X, uv.Y) - p;
@@ -408,6 +431,7 @@ public static class StepWriter
                 uv = next;
                 if (moved < 1e-15) break;
             }
+            if (Vec3.Distance(Eval(uv.X, uv.Y), p) > startD) uv = start;
             if (Vec3.Distance(Eval(uv.X, uv.Y), p) <= tol) return uv;
             // a hint or a seed that led astray: once more from the seed, then from the grid
             if (hint != null) return Find(p, null, tol);
@@ -599,7 +623,7 @@ public static class StepWriter
         var sp = d.Spine!; var rad = d.Radius;
         // the pipe's own parameterization is only C1 along the spine (Hermite nodes) and so fits slowly; fit the same
         // surface through a C2 spline of the spine nodes (same points within ~1e-8) with a smooth frame instead
-        var range = BoundaryPoints(f, b).Select(p => sp.Closest(p).s).ToList();
+        var range = BoundaryPoints(f, b).Select(p => sp.Ball(p, rad).s).ToList();
         double s0 = range.Min(), s1 = range.Max(), pad = (s1 - s0) * 0.05 + 1e-3;
         var nodes = Enumerable.Range(0, sp.P.Length).Where(i => sp.S[i] >= s0 - pad && sp.S[i] <= s1 + pad).ToList();
         if (nodes.Count < 4)
@@ -641,13 +665,21 @@ public static class StepWriter
         for (int k = 0; k < 16; k++) refv += Vec3.Cross(Tan(sa + (sb - sa) * k / 16), Tan(sa + (sb - sa) * (k + 1) / 16));
         refv = refv.Length > 1e-9 ? refv.Normalized : Tan(sa).AnyPerpendicular();
         (Vec3 n1, Vec3 n2) Frame(double s) { var t = Tan(s); var n = (refv - t * Vec3.Dot(refv, t)).Normalized; return (n, Vec3.Cross(t, n)); }
-        Vec3 Surface(double th, double s) { var (n1, n2) = Frame(s); return C(s) + (n1 * Math.Cos(th) + n2 * Math.Sin(th)) * rad; }
+        // (a variable radius: its section at s, set back along the spine and smaller)
+        Vec3 Surface(double th, double s)
+        {
+            var (n1, n2) = Frame(s);
+            var (back, q) = sp.Section(s, rad);
+            return C(s) - Tan(s) * back + (n1 * Math.Cos(th) + n2 * Math.Sin(th)) * q;
+        }
         double u0 = double.MaxValue, u1 = double.MinValue, v0 = double.MaxValue, v1 = double.MinValue, hint = double.NaN;
         var samples = new List<(double s, double th)>();
         foreach (var p in BoundaryPoints(f, b))
         {
-            var s = sp.Closest(p).s;
+            var s = sp.Ball(p, rad).s;
             var (n1, n2) = Frame(s); var r = p - C(s);
+            // (a fading pipe's tip, its radius come to nothing: no angle there, its place along the spine only)
+            if (sp.Variable && r.Length < 0.02 * rad) { v0 = Math.Min(v0, s); v1 = Math.Max(v1, s); continue; }
             var th = Math.Atan2(Vec3.Dot(r, n2), Vec3.Dot(r, n1));
             if (!double.IsNaN(hint)) th = Native.NCurve.Wrap(th, hint);
             hint = th;

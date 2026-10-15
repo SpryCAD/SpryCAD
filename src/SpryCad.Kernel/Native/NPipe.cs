@@ -21,6 +21,17 @@ public sealed class PipeSpine
     /// </summary>
     public IReadOnlyList<NSurface> Rolls { get; init; } = Array.Empty<NSurface>();
 
+    /// <summary>
+    /// A variable radius (a fillet fading out): at each node the radius's change from the pipe's own (≤ 0, so the pipe's
+    /// radius is its largest) and its slope along the spine, Hermite between. The pipe is then the envelope of balls of
+    /// radius r + Δ(s) along the spine (a canal surface): its section at s is the circle where the ball touches the
+    /// envelope, set back along the spine by r r′ and smaller by that. Null: a constant radius.
+    /// </summary>
+    public double[]? Dr { get; init; }
+    /// <summary>d/ds of <see cref="Dr"/> at the nodes.</summary>
+    public double[]? DrS { get; init; }
+    public bool Variable => Dr != null;
+
     const int Sub = 8;
     readonly Vec3[] _sp;      // dense samples
     readonly double[] _ss;    // their parameters
@@ -255,6 +266,65 @@ public sealed class PipeSpine
         return (s, cs, Vec3.Distance(cs, p));
     }
 
+    /// <summary>The radius at s of a pipe of radius r (r itself where it is constant; held past the ends).</summary>
+    public double Rad(double s, double r)
+    {
+        if (Dr == null) return r;
+        if (s <= S[0]) return r + Dr[0];
+        if (s >= S[^1]) return r + Dr[^1];
+        int i = Seg(s); var h = S[i + 1] - S[i];
+        var t = (s - S[i]) / h;
+        double t2 = t * t, t3 = t2 * t;
+        return r + Dr[i] * (2 * t3 - 3 * t2 + 1) + DrS![i] * h * (t3 - 2 * t2 + t) + Dr[i + 1] * (-2 * t3 + 3 * t2) + DrS[i + 1] * h * (t3 - t2);
+    }
+
+    /// <summary>d/ds of <see cref="Rad"/>.</summary>
+    public double RadS(double s)
+    {
+        if (Dr == null || s <= S[0] || s >= S[^1]) return 0;
+        int i = Seg(s); var h = S[i + 1] - S[i];
+        var t = (s - S[i]) / h;
+        double t2 = t * t;
+        return (Dr[i] * (6 * t2 - 6 * t) + DrS![i] * h * (3 * t2 - 4 * t + 1) + Dr[i + 1] * (-6 * t2 + 6 * t) + DrS[i + 1] * h * (3 * t2 - 2 * t)) / h;
+    }
+
+    /// <summary>
+    /// The ball of a pipe of radius r nearest p (its surface nearest): its place s on the spine, its centre and p's
+    /// distance from that. A constant pipe's is the spine's nearest point; a variable one's minimises
+    /// |p − c(s)| − ρ(s), from there.
+    /// </summary>
+    public (double s, Vec3 c, double dist) Ball(Vec3 p, double r)
+    {
+        var cl = Closest(p);
+        if (Dr == null) return cl;
+        var s = cl.s;
+        // g(s) = d/ds (|p − c| − ρ) = −(p − c)·c′/|p − c| − ρ′, by Newton with a numeric slope, kept within a step of
+        // the spine's nearest point's neighbourhood
+        double G(double t)
+        {
+            var c = Eval(t); var d = p - c; var l = d.Length;
+            return (l > 1e-300 ? -Vec3.Dot(d, Deriv(t)) / l : 0) - RadS(t);
+        }
+        var span = Math.Max(Length, 1e-9);
+        var hs = 1e-7 * span;
+        for (int it = 0; it < 30; it++)
+        {
+            var g = G(s);
+            var gp = (G(s + hs) - G(s - hs)) / (2 * hs);
+            if (!(gp > 1e-12)) break;
+            var sn = Math.Clamp(s - g / gp, S[0] - 0.25 * span, S[^1] + 0.25 * span);
+            if (Math.Abs(sn - s) < 1e-13 * Math.Max(1, span)) { s = sn; break; }
+            s = sn;
+        }
+        var cs = Eval(s);
+        // (no better than the spine's nearest: kept)
+        if (Vec3.Distance(p, cs) - Rad(s, r) > cl.dist - Rad(cl.s, r)) return cl;
+        return (s, cs, Vec3.Distance(p, cs));
+    }
+
+    /// <summary>Signed distance from a pipe of radius r (positive outside).</summary>
+    public double Dist(Vec3 p, double r) { var b = Ball(p, r); return b.dist - Rad(b.s, r); }
+
     /// <summary>Tangent and rotation-minimizing normals at s.</summary>
     public (Vec3 T, Vec3 N1, Vec3 N2) Frame(double s)
     {
@@ -278,6 +348,18 @@ public sealed class PipeSpine
     {
         pt = dTheta = dS = default;
         if (!(s > S[0] && s < S[^1])) return false;
+        if (Dr != null)
+        {
+            // (a variable radius: along the spine by differences)
+            pt = Surface(theta, s, r);
+            var (_, n1v, n2v) = Frame(s);
+            var (_, q) = Section(s, r);
+            dTheta = (n1v * -Math.Sin(theta) + n2v * Math.Cos(theta)) * q;
+            var hs = 1e-6 * Math.Max(1, Length);
+            double a = Math.Max(S[0], s - hs), b = Math.Min(S[^1], s + hs);
+            dS = (Surface(theta, b, r) - Surface(theta, a, r)) / (b - a);
+            return true;
+        }
         Derivs(s, out var c, out var d1, out var d2);
         var dl = d1.Length;
         if (!(dl > 1e-300)) return false;
@@ -308,49 +390,73 @@ public sealed class PipeSpine
     }
 
     /// <summary>Point of the pipe of radius r at angle θ (about the spine) and spine parameter s.</summary>
-    public Vec3 Surface(double theta, double s, double r)
+    /// <summary>
+    /// The section of a pipe of radius r at s: where its ball there touches the envelope, a circle about the spine set
+    /// back along it by ρρ′ (for |c′| ≈ 1), of radius √(ρ² − (ρρ′)²); the ball's own great circle where the radius is
+    /// constant.
+    /// </summary>
+    public (double back, double q) Section(double s, double r)
     {
-        var (_, n1, n2) = Frame(s);
-        return Eval(s) + (n1 * Math.Cos(theta) + n2 * Math.Sin(theta)) * r;
+        var rho = Rad(s, r);
+        if (Dr == null) return (0, rho);
+        var a = rho * RadS(s) / Math.Max(Deriv(s).Length, 1e-300);
+        return (a, Math.Sqrt(Math.Max(0, rho * rho - a * a)));
     }
 
-    /// <summary>(θ, s) of a point near the pipe; θ is wrapped next to the hint.</summary>
-    public Vec2 UV(Vec3 p, double uHint = double.NaN)
+    public Vec3 Surface(double theta, double s, double r)
     {
-        var (s, c, _) = Closest(p);
+        var (T, n1, n2) = Frame(s);
+        if (Dr == null) return Eval(s) + (n1 * Math.Cos(theta) + n2 * Math.Sin(theta)) * r;
+        var (a, q) = Section(s, r);
+        return Eval(s) - T * a + (n1 * Math.Cos(theta) + n2 * Math.Sin(theta)) * q;
+    }
+
+    /// <summary>(θ, s) of a point near the pipe of radius r; θ is wrapped next to the hint.</summary>
+    public Vec2 UV(Vec3 p, double uHint = double.NaN, double r = 0)
+    {
+        var (s, c, dist) = Ball(p, r);
         var (_, n1, n2) = Frame(s);
         var d = p - c;
+        // (on the spine itself, where a fading radius has come to nothing: any angle; the hint's)
+        if (dist < 1e-9 * Math.Max(1, r) && !double.IsNaN(uHint)) return new Vec2(uHint, s);
         var th = Math.Atan2(Vec3.Dot(d, n2), Vec3.Dot(d, n1));
         return new Vec2(double.IsNaN(uHint) ? th : NCurve.Wrap(th, uHint), s);
     }
 
     public Vec3 Project(Vec3 p, double r)
     {
-        var (s, c, dist) = Closest(p);
+        var (s, c, dist) = Ball(p, r);
         var d = dist > 1e-300 ? (p - c) / dist : Frame(s).N1;
-        return c + d * r;
+        return c + d * Rad(s, r);
     }
 
-    public Vec3 Normal(Vec3 p)
+    /// <summary>The pipe's normal near p (the direction from the nearest ball's centre); r: the pipe's radius, needed where it varies.</summary>
+    public Vec3 Normal(Vec3 p, double r = 0)
     {
-        var (s, c, dist) = Closest(p);
+        var (s, c, dist) = Ball(p, r);
         return dist > 1e-300 ? (p - c) / dist : Frame(s).N1;
     }
 
     public PipeSpine Transformed(in Transform t)
     {
         var tt = t;
+        // (a uniform scale scales the radius's change and keeps its slope)
+        var k = t.Vector(Vec3.UnitX).Length;
         return new PipeSpine(P.Select(p => tt.Point(p)).ToList(), D.Select(d => tt.Vector(d)).ToList(),
-            SupportA?.Transformed(t), SupportB?.Transformed(t)) { Rolls = Rolls.Select(s => s.Transformed(tt)).ToList() };
+            SupportA?.Transformed(t), SupportB?.Transformed(t))
+        { Rolls = Rolls.Select(s => s.Transformed(tt)).ToList(), Dr = Dr?.Select(x => x * k).ToArray(), DrS = DrS?.ToArray() };
     }
 
-    /// <summary>Same spine geometry (nodes and tangents within tol).</summary>
+    /// <summary>Same spine geometry (nodes and tangents within tol; the radius's change too).</summary>
     public bool SameAs(PipeSpine o, double tol)
     {
         if (ReferenceEquals(this, o)) return true;
-        if (P.Length != o.P.Length) return false;
+        if (P.Length != o.P.Length || (Dr == null) != (o.Dr == null)) return false;
         for (int i = 0; i < P.Length; i++)
             if (Vec3.Distance(P[i], o.P[i]) > tol || Vec3.Dot(D[i], o.D[i]) < 1 - 1e-10) return false;
+        if (Dr != null)
+            for (int i = 0; i < Dr.Length; i++)
+                if (Math.Abs(Dr[i] - o.Dr![i]) > tol || Math.Abs(DrS![i] - o.DrS![i]) > 1e-9) return false;
         return true;
     }
 
@@ -373,7 +479,7 @@ public sealed class PipeSpine
             t0 = Math.Max(t0, a); t1 = Math.Min(t1, b);
         }
         if (!(t1 > t0)) return res;
-        double F(double t) => Closest(o + d * t).dist - r;
+        double F(double t) => Dist(o + d * t, r);
         var minL = Math.Max(1e-9, r * 1e-7);
         void Iso(double a, double b, double fa, double fb, int depth)
         {
