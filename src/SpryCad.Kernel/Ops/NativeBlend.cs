@@ -61,7 +61,7 @@ public static class NativeBlend
         // one out at each such vertex first, then the others on the body it leaves, running on round what it blended
         // (as two features would). At once, their tools can collide where they meet
         // (only where all at once fails: where it works, a corner of three blends gets its patch, as before)
-        if (!buildOnly && Mixed(body.Native!, edges) is { } first)
+        if (!buildOnly && Mixed(body.Native!, edges, grow: fillet) is { } first)
         {
             var errs = new List<string>(); var probs = problemEdges == null ? null : new List<Vec3[]>(); var app = applied == null ? null : new List<(Solid, bool)>();
             // (all at once only where it may do better: three or more blends of one kind at a vertex get a corner of
@@ -71,23 +71,39 @@ public static class NativeBlend
             // (all at once without errors, but a tool's end left standing where the kinds meet: staged too, the one that
             // leaves fewer kept)
             int onceCaps = errs.Count == 0 && once.Native != null ? CapsLeft(once.Native, prefix) : int.MaxValue;
+            Debug?.Invoke($"mixed blends: {first.Count} of {edges.Count} first; at once {(onceCaps == int.MaxValue ? "failed" : onceCaps.ToString())}");
             if (errs.Count == 0 && onceCaps == 0)
             {
                 if (probs != null) problemEdges!.AddRange(probs);
                 if (app != null) applied!.AddRange(app);
                 return once;
             }
-            var serrs = new List<string>(); var sprobs = problemEdges == null ? null : new List<Vec3[]>(); var sapp = applied == null ? null : new List<(Solid, bool)>();
-            Solid staged;
-            var nb1 = Apply(body, first, size, fillet, prefix + ".c", serrs, overflow, sprobs, sapp, chamfer, false, trimmedOut);
-            if (ReferenceEquals(nb1, body) || nb1.Native == null) staged = nb1;
-            else
+            (Solid staged, List<string> serrs, List<Vec3[]>? sprobs, List<(Solid, bool)>? sapp, int caps) Staged(List<NEdge> first)
             {
-                var rest = Rest(body.Native!, nb1.Native, edges.Except(first).ToList(), prefix + ".c", size);
-                Debug?.Invoke($"mixed blends: {first.Count} first, then {rest.Count} edges");
-                staged = rest.Count == 0 ? nb1 : Apply(nb1, rest, size, fillet, prefix, serrs, overflow, sprobs, sapp, chamfer, false, trimmedOut);
+                var serrs = new List<string>(); var sprobs = problemEdges == null ? null : new List<Vec3[]>(); var sapp = applied == null ? null : new List<(Solid, bool)>();
+                Solid staged;
+                var nb1 = Apply(body, first, size, fillet, prefix + ".c", serrs, overflow, sprobs, sapp, chamfer, false, trimmedOut);
+                if (ReferenceEquals(nb1, body) || nb1.Native == null) staged = nb1;
+                else
+                {
+                    var rest = Rest(body.Native!, nb1.Native, edges.Except(first).ToList(), prefix + ".c", size);
+                    Debug?.Invoke($"mixed blends: {first.Count} first, then {rest.Count} edges");
+                    staged = rest.Count == 0 ? nb1 : Apply(nb1, rest, size, fillet, prefix, serrs, overflow, sprobs, sapp, chamfer, false, trimmedOut);
+                }
+                return (staged, serrs, sprobs, sapp, serrs.Count == 0 && staged.Native != null ? CapsLeft(staged.Native, prefix) : int.MaxValue);
             }
-            int stagedCaps = serrs.Count == 0 && staged.Native != null ? CapsLeft(staged.Native, prefix) : int.MaxValue;
+            var (staged, serrs, sprobs, sapp, stagedCaps) = Staged(first);
+            // (a tool's end left standing, or failed: the other kind first, the one leaving fewer kept. A convex edge
+            // running down onto a concave one (a boss's side edge onto its foot) is filleted first: the foot's ball then
+            // rolls round its round, where the other way the side's ball rolls in the foot's round, as big as itself.
+            // Fillets only: chamfers have no round to roll in, and a second staging doubled hard cases' time)
+            if (fillet && stagedCaps > 0 && Mixed(body.Native!, edges, otherFirst: true, grow: true) is { } other && !other.ToHashSet(ReferenceEqualityComparer.Instance).SetEquals(first))
+            {
+                var alt = Staged(other);
+                Debug?.Invoke($"mixed blends: staged {(stagedCaps == int.MaxValue ? "failed" : stagedCaps.ToString())}, the other kind first {(alt.caps == int.MaxValue ? "failed" : alt.caps.ToString())}");
+                // (over a failure only when clean: a refusal says so, a tool's end standing does not)
+                if (alt.caps == 0 || stagedCaps != int.MaxValue && alt.caps < stagedCaps) (staged, serrs, sprobs, sapp, stagedCaps) = alt;
+            }
             if (errs.Count == 0 && onceCaps <= stagedCaps)
             {
                 Debug?.Invoke($"mixed blends: at once {onceCaps} tool end(s) left, staged {(stagedCaps == int.MaxValue ? "failed" : stagedCaps.ToString())}: at once");
@@ -224,7 +240,7 @@ public static class NativeBlend
     /// The edges to blend first where selected edges of both kinds (convex, concave) meet at a vertex: at each such
     /// vertex those of the kind fewer edges there have (concave on a tie). Null when there is no such vertex.
     /// </summary>
-    static List<NEdge>? Mixed(NBody body, IReadOnlyList<NEdge> edges)
+    static List<NEdge>? Mixed(NBody body, IReadOnlyList<NEdge> edges, bool otherFirst = false, bool grow = false)
     {
         var kind = new Dictionary<NEdge, bool?>(ReferenceEqualityComparer.Instance);
         foreach (var e in edges) kind[e] = e.Curve.Periodic && ReferenceEquals(e.V0, e.V1) ? null : Convex(e, e.Curve.Eval(0.5 * (e.T0 + e.T1)));
@@ -240,7 +256,21 @@ public static class NativeBlend
         {
             var cv = l.Where(e => kind[e] == true).ToList(); var cc = l.Where(e => kind[e] == false).ToList();
             if (cv.Count == 0 || cc.Count == 0) continue;
-            foreach (var e in cv.Count < cc.Count ? cv : cc) if (!first.Contains(e)) first.Add(e);
+            foreach (var e in (cv.Count < cc.Count) != otherFirst ? cv : cc) if (!first.Contains(e)) first.Add(e);
+        }
+        // (with the edges of their kind they meet: those blended together, a corner of three getting its patch; left
+        // for later, one would roll over the round of another as big as itself (a boss's top edge over its side edges'))
+        // (fillets, or the other kind first: chamfers have no round to roll over, and grown, a pocket's corner edges
+        // took its floor along and the edges where the wall meets their chamfers were taken on after, again and again;
+        // a first of one kind, not grown to all)
+        if (grow && first.Count > 0 && first.All(e => kind[e] == kind[first[0]]))
+        {
+            var grown = new List<NEdge>(first);
+            for (int i = 0; i < grown.Count; i++)
+                foreach (var v in new[] { grown[i].V0, grown[i].V1 })
+                    foreach (var g in at[v])
+                        if (kind[g] == kind[grown[i]] && kind[g] != null && !grown.Contains(g)) grown.Add(g);
+            if (grown.Count < edges.Count) first = grown;
         }
         return first.Count == 0 || first.Count == edges.Count ? null : first;
     }
@@ -1243,7 +1273,7 @@ public static class NativeBlend
             var g = others[0];
             // (both convex round a convex corner: each runs to the face it meets, as EndPlane has it)
             var shared = g.Uses.Any(u => ReferenceEquals(u.Face, cA.Face)) ? cA.Face : cB.Face;
-            if (IsConvex(e) == true && IsConvex(g) == true && CornerEdgeOf(v, shared, new[] { cA.Face, cB.Face }.Concat(g.Uses.Select(u => u.Face)), new[] { e }, selected) is { } ce && IsConvex(ce) == true) return null;
+            if (RunsOnAt(v, e, g, shared, new[] { cA.Face, cB.Face }.Concat(g.Uses.Select(u => u.Face)), selected, squareToo: true)) return null;
             if (ChamferPlane(e) is not { } me || ChamferPlane(g) is not { } them) return null;
             var n1 = me.Normal; var n2 = them.Normal;
             var dd = Vec3.Cross(n1, n2);
@@ -1708,17 +1738,12 @@ public static class NativeBlend
                     // standing out of a drafted or round face, the bisector's leaves one blend's edge past the corner
                     // (edges running on tangentially: square to them, as before)
                     var shared = g.Uses.Any(u => ReferenceEquals(u.Face, fa)) ? fa : fb;
-                    // (both blends convex, round a convex corner (the edges of a face, a block's angled one, filleted or
-                    // chamfered all round, the corner edge between the faces beside it left sharp): each ends on the
-                    // face it runs into, as at any other end; what the two take off then overlaps, meeting where they
-                    // cross. A mitre holding the corner edge is that only where the edge stands square to the shared
-                    // face; leaning, it leaves a wing of each beside the other)
+                    // (both blends convex, round a corner edge leaning or concave (see RunsOnAt): each ends on the face
+                    // it runs into, as at any other end; what the two take off then overlaps, meeting where they cross.
+                    // A mitre holding the corner edge leaves a wing of each beside the other there)
                     var faces3 = new[] { fa, fb }.Concat(g.Uses.Select(w => w.Face)).ToList();
-                    // (only where it leans: square to the shared face (a box's corner) the mitre is exact, and the tools
-                    // meet end to end, glued as one, rather than overlap and need joining by a boolean)
-                    if (blended.All(x => IsConvex(x) == true) && IsConvex(g) == true
-                        && CornerEdgeOf(v, shared, faces3, blended, selected) is { } ce && IsConvex(ce) == true
-                        && CornerEdge(v, shared, faces3, blended, selected) is { } ced && Math.Abs(Vec3.Dot(ced, Outward(shared, v.P).Normalized)) < 0.9999)
+                    if (blended.All(x => IsConvex(x) == true) && blended.FirstOrDefault(x => ReferenceEquals(x.V0, v) || ReferenceEquals(x.V1, v)) is { } own
+                        && RunsOnAt(v, own, g, shared, faces3, selected, squareToo: false))
                         continue;
                     if (CornerEdge(v, shared, faces3, blended, selected) is { } cd && (a + b).Length > 1e-3 && Vec3.Cross((a + b).Normalized, cd) is var m && m.Length > 1e-3)
                         n = Vec3.Dot(m, a) < 0 ? -m : m;
@@ -1795,6 +1820,31 @@ public static class NativeBlend
     /// </summary>
     static Vec3? CornerEdge(NVertex v, NFace shared, IEnumerable<NFace> faces, IEnumerable<NEdge> blended, IReadOnlyCollection<NEdge> selected)
         => CornerEdgeOf(v, shared, faces, blended, selected) is { } u ? (ReferenceEquals(u.V0, v) ? u.Curve.Deriv(u.T0) : -u.Curve.Deriv(u.T1)).Normalized : null;
+
+    /// <summary>
+    /// Two convex blends on a shared face meeting at v (edge e, and g the next): whether each runs on to the face it
+    /// meets, the two overlapping (joined), rather than both ending on one plane through the corner. So where the corner
+    /// edge (between their other faces) leans from square to the shared face, convex (a drafted block's corner) or
+    /// concave (a drafted boss's side edge running down onto its foot's chamfer): their faces and the two beside them
+    /// meet at no one point, and a plane leaves a sliver or wing of one. Square to it (a box's corner, an L's inside
+    /// one) the plane is exact; convex chamfers run on there too (<paramref name="squareToo"/>). Concave blends meet on
+    /// the plane (their tools are not joined).
+    /// </summary>
+    static bool RunsOnAt(NVertex v, NEdge e, NEdge g, NFace shared, IEnumerable<NFace> faces, IReadOnlyCollection<NEdge> selected, bool squareToo)
+    {
+        if (IsConvex(e) != true || IsConvex(g) != true) return false;
+        if (CornerEdgeOf(v, shared, faces, new[] { e }, selected) is not { } ce) return false;
+        var kc = IsConvex(ce);
+        if (kc == null) return false;
+        if (kc == true && squareToo) return true;
+        if (CornerEdge(v, shared, faces, new[] { e }, selected) is not { } d) return false;
+        var cos = Math.Abs(Vec3.Dot(d, Outward(shared, v.P).Normalized));
+        // (concave: leaning as a draft does, not lying along the shared face (a boss flush with the block's side, where
+        // the mitre is as before))
+        var runs = cos < 0.9999 && (kc == true || cos > 0.5);
+        if (runs) Debug?.Invoke($"runs on at {v.P}: corner edge {(kc == true ? "convex" : "concave")} cos {cos:G4}");
+        return runs;
+    }
 
     /// <summary>The edge <see cref="CornerEdge"/> gives the direction of.</summary>
     static NEdge? CornerEdgeOf(NVertex v, NFace shared, IEnumerable<NFace> faces, IEnumerable<NEdge> blended, IReadOnlyCollection<NEdge> selected)
