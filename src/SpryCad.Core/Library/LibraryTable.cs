@@ -64,6 +64,14 @@ public static class TableKinds
     public const string Nut = "nut";
     /// <summary>Washers, a row per size: <see cref="Fasteners.WasherColumns"/> (mm).</summary>
     public const string Washer = "washer";
+    /// <summary>
+    /// Materials, a row per material ("Aluminum 6061"): <see cref="Materials.Columns"/> in SI units, not millimetres
+    /// (<see cref="Materials.Unit"/>), a value not known NaN; text "type" (<see cref="MaterialType"/>) and optionally
+    /// "category", "spec", "description", "hardnessScale", part numbers.
+    /// </summary>
+    public const string Material = "material";
+    /// <summary>Appearances, a row per finish ("Brushed aluminum"): <see cref="Materials.AppearanceColumns"/> (0-1).</summary>
+    public const string Appearance = "appearance";
 }
 
 /// <summary>

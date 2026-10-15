@@ -21,7 +21,7 @@ public sealed class LibrarySet
 
     public LibrarySet(IEnumerable<LoadedLibrary> libraries)
     {
-        Libraries = new[] { BuiltInStandards.AsLibrary(), FastenerFamilies.AsLibrary() }.Concat(libraries.Where(l => l.LibraryId != Guid.Empty).OrderBy(l => l.Layer)).ToList();
+        Libraries = new[] { BuiltInStandards.AsLibrary(), BuiltInMaterials.AsLibrary(), FastenerFamilies.AsLibrary() }.Concat(libraries.Where(l => l.LibraryId != Guid.Empty).OrderBy(l => l.Layer)).ToList();
         foreach (var lib in Libraries)
         {
             foreach (var t in lib.Tables) Add(lib, t);
@@ -71,7 +71,8 @@ public sealed class LibrarySet
     }
 
     // built-in tables first in their own order, then the others by key
-    static int Order(string key) { var i = BuiltInStandards.Tables.ToList().FindIndex(t => t.Key == key); return i >= 0 ? i : 1000; }
+    static readonly List<string> BuiltInOrder = BuiltInStandards.Tables.Concat(BuiltInMaterials.Tables).Select(t => t.Key).ToList();
+    static int Order(string key) { var i = BuiltInOrder.IndexOf(key); return i >= 0 ? i : 1000; }
 
     /// <summary>The row of an item ("ISO273/M8") as a snapshot to copy into a part (null: no library has it).</summary>
     public LibrarySnapshot? Snapshot(string item)

@@ -39,6 +39,8 @@ public static class LibraryEditor
         (TableKinds.Clearance, "Clearance holes", new[] { "close", "normal", "loose" }),
         (TableKinds.Counterbore, "Counterbores", new[] { "diameter", "depth" }),
         (TableKinds.Countersink, "Countersinks", new[] { "diameter", "angle" }),
+        (TableKinds.Material, "Materials", Materials.Columns.ToArray()),
+        (TableKinds.Appearance, "Appearances", Materials.AppearanceColumns.ToArray()),
     };
 
     // ------------------------------------------------------------------------------------------
