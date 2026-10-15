@@ -57,6 +57,27 @@ public static class DirectBlend
             var attempts = new List<(Tool tool, List<int> members)>();
             string? glueWhy = null;
             if (cluster.Count > 1 && Glue(cluster.Select(k => tools[k]).ToList(), out glueWhy) is { } glued) attempts.Add((glued, cluster));
+            // (tools of one kind overlapping, not meeting end to end (two convex edges' fillets round a convex corner,
+            // each run on to the face it meets): joined by the boolean, small and exact, as one tool; one at a time
+            // they run into each other)
+            else if (cluster.Count > 1 && Join(cluster.Select(k => tools[k]).ToList()) is { } joined)
+            {
+                work ??= body.Clone();
+                NBody? jn; string? jwhy;
+                using (Prof.Time("blend.direct"))
+                {
+                    jn = Try(work, joined, out jwhy, crossings: false);
+                    if (jn == null && jwhy != null && jwhy.StartsWith("other edges of ", StringComparison.Ordinal)) jn = Try(work, joined, out jwhy, crossings: true);
+                }
+                if (jn != null)
+                {
+                    work = jn; any = true;
+                    foreach (var _ in cluster) Interlocked.Increment(ref _applied);
+                    continue;
+                }
+                glueWhy = $"joined: {jwhy}";
+                attempts.AddRange(cluster.Select(k => (tools[k], new List<int> { k })));
+            }
             else attempts.AddRange(cluster.Select(k => (tools[k], new List<int> { k })));
             foreach (var (tool, members) in attempts)
             {
@@ -82,6 +103,26 @@ public static class DirectBlend
             }
         }
         return any ? work : null;
+    }
+
+    /// <summary>
+    /// Tools of one kind joined by an exact union (they overlap: blends round a corner each run on to the face it meets).
+    /// Null where they are of both kinds, one is not exact, or the union fails.
+    /// </summary>
+    static Tool? Join(List<Tool> tools)
+    {
+        if (tools.Any(t => t.Strip.Native == null || t.Convex != tools[0].Convex)) return null;
+        var old = Csg.NoFallback;
+        Csg.NoFallback = true;
+        try
+        {
+            Solid u;
+            using (Prof.Time("blend.join")) u = Csg.UnionAll(tools.Select(t => t.Strip).ToList());
+            if (u.IsEmpty || u.Native == null || u.Native.Validate() != null) return null;
+            return new Tool(u, tools[0].Convex, tools[0].Name, tools.Min(t => t.Size));
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or NBooleanException) { return null; }
+        finally { Csg.NoFallback = old; }
     }
 
     /// <summary>

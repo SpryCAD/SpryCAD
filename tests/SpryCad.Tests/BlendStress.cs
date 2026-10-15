@@ -37,6 +37,15 @@ static class BlendStress
             shapes.Add((Path.GetFileNameWithoutExtension(f), () => CadDocument.Load(path), false));
         }
         bool all = Environment.GetEnvironmentVariable("FC_STRESS_ALL") != null;
+        // (why the direct blend left tools to the boolean, the face names taken out)
+        var why = new Dictionary<string, int>();
+        DirectBlend.Debug = m =>
+        {
+            var k = m[(m.IndexOf('(') + 1)..].TrimEnd(')');
+            k = System.Text.RegularExpressions.Regex.Replace(k, @"F(?:[0-9a-z]{12}|[0-9])[0-9A-Za-z.]*", "F");
+            k = System.Text.RegularExpressions.Regex.Replace(k, @"\(not glued:.*$", "").Trim();
+            lock (why) why[k] = why.GetValueOrDefault(k) + 1;
+        };
         var cases = new List<Case>();
         var sw = Stopwatch.StartNew();
         foreach (var (shape, load, small) in shapes)
@@ -65,7 +74,7 @@ static class BlendStress
                         var c = Score(doc0, body, edges, kind, f * minDim, out var detail, out var ms, out var direct, out var boolean);
                         var row = new Case(shape, selName, kind, sizeName, c, detail, ms, direct, boolean);
                         cases.Add(row);
-                        if (c == "wrong" && Environment.GetEnvironmentVariable("FC_STRESS_SAVE") is { } saveDir) Save(saveDir, doc0, edges, kind, f * minDim, $"{shape} {selName} {kind} {sizeName}");
+                        if ((c == "wrong" || Environment.GetEnvironmentVariable("FC_STRESS_SAVEALL") != null) && Environment.GetEnvironmentVariable("FC_STRESS_SAVE") is { } saveDir) Save(saveDir, doc0, edges, kind, f * minDim, $"{shape} {selName} {kind} {sizeName}");
                         if (all || c != "right") Console.WriteLine($"{c,-7} {shape} | {selName} | {kind} {sizeName} ({f * minDim:0.###}) | {detail} [{ms:0} ms]");
                     }
         }
@@ -82,6 +91,9 @@ static class BlendStress
         By("size", c => c.Size);
         By("selection", c => c.Selection.Split(' ')[0]);
         By("shape", c => c.Shape);
+        Console.WriteLine("tools left to the boolean, why:");
+        foreach (var (k, n) in why.OrderByDescending(x => x.Value).Take(15)) Console.WriteLine($"  {n,5}  {k}");
+        DirectBlend.Debug = null;
         Console.WriteLine("wrong, by what:");
         foreach (var g in cases.Where(c => c.Outcome == "wrong").GroupBy(c => c.Detail.Split(':')[0]).OrderByDescending(g => g.Count()))
             Console.WriteLine($"  {g.Count(),4}  {g.Key}");
