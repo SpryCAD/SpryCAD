@@ -298,6 +298,13 @@ public sealed class PipeSpine
         var cl = Closest(p);
         if (Dr == null) return cl;
         var s = cl.s;
+        // (where the radius does not change round there (a chain's constant stretch, its end fading): the spine's nearest)
+        {
+            int i0 = Math.Max(0, Seg(s) - 1), i1 = Math.Min(S.Length - 1, Seg(s) + 2);
+            bool flat = true;
+            for (int i = i0; i <= i1 && flat; i++) flat = Dr[i] == 0 && DrS![i] == 0;
+            if (flat) return cl;
+        }
         // g(s) = d/ds (|p − c| − ρ) = −(p − c)·c′/|p − c| − ρ′, by Newton with a numeric slope, kept within a step of
         // the spine's nearest point's neighbourhood
         double G(double t)

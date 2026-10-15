@@ -75,6 +75,7 @@ public static class PartTools
         reg.Rebuild(doc, k);
         NativeBlend.Debug = s => Console.WriteLine("NB " + s); DirectBlend.Debug = s => Console.WriteLine("DB " + s);
         RollingBall.Debug = s => Console.WriteLine("RB " + s); SweptChamfer.Debug = s => Console.WriteLine("SC " + s);
+        if (Environment.GetEnvironmentVariable("FC_SEAM_DEBUG") != null) Kernel.Native.NSeamSplit.Debug = s => Console.WriteLine("SS " + s);
         Console.WriteLine("---- " + a[1]);
         // (FC_TIME_PROF: where the feature's time goes)
         bool prof = Environment.GetEnvironmentVariable("FC_TIME_PROF") != null;
