@@ -77,6 +77,9 @@ public sealed class AssemblyTree : DockPanel
         Children.Add(new ScrollViewer { Content = _rows, HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled });
     }
 
+    /// <summary>A component's menu, as its row has it (right-clicked in the graphics area); null when it is not shown.</summary>
+    public ContextMenu? ComponentMenu(string path) => _shown?.Model is { } m && m.Find(path) is { } o ? MenuFor(m, o) : null;
+
     /// <summary>The mate selected in the tree (its id), if a mate's row is.</summary>
     public string? SelectedMate => _selected is { } s && s.StartsWith("mate:") ? s["mate:".Length..] : null;
 

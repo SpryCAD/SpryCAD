@@ -727,6 +727,13 @@ public partial class MainWindow
                 menu.Items.Add(Item("Select Center", () => PickRef(asm.Model.RefTo(mh.id, mf, asm.Model.NearerEnd(mh.id, mf, mh.point)), "The selected face has no circular edge.")));
                 menu.Items.Add(new Separator());
             }
+            // a component right-clicked in an assembly: selected, as a click selects it, and its menu as its row in the
+            // tree has it (the view's commands after)
+            else if (Asm is { } ca && _page == null && Viewport.PickInstance(p.X, p.Y) is { } ch)
+            {
+                SelectComponent(ch.id);
+                if (ca.Selected is { } sel && _asmTree.ComponentMenu(sel) is { } cm) menu = cm;
+            }
             var hit = Viewport.Pick(p.X, p.Y, SelFilter.Any);
             if (hit != null && !Selection.Contains(hit)) Selection.Set(hit);
             if (hit?.Kind == SelKind.Face && hit.Planar || hit?.Kind == SelKind.Plane)
