@@ -290,6 +290,7 @@ static class Program
             AxisCenterTests.Run(t);
             PlaneSectionTests.Run(t);
             PlaneReferenceTests.Run(t);
+            NBrepFileTests.Run(t);
             SlotDragTests.Run(t);
             UnitTests.Run(t);
             SketchFuzz.Check(t);

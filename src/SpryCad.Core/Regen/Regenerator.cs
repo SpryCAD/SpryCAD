@@ -471,8 +471,10 @@ public sealed class Regenerator
             var key = (hash, f.Id + ".");
             if (!ImportCache.TryGet(key, out var r))
             {
-                Detail?.Invoke($"reading the STEP file ({data.Length / 1048576.0:0.#} MB)");
-                try { r = StepImport.Read(data, f.Id + "."); }
+                // (a STEP file, or SpryCAD's own file of exact solids: a STEP assembly's part, kept as the assembly was read)
+                var native = NBrepFile.Is(data);
+                Detail?.Invoke($"reading the {(native ? "solids" : "STEP file")} ({data.Length / 1048576.0:0.#} MB)");
+                try { r = native ? NBrepFile.Read(data, f.Id + ".") : StepImport.Read(data, f.Id + "."); }
                 catch (InvalidDataException ex) { throw new FeatureException(ex.Message); }
                 ImportCache.Add(key, r);
             }

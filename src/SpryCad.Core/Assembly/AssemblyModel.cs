@@ -486,7 +486,9 @@ public sealed partial class AssemblyModel
         if (res == null || res.Occurrences.Count < 2) return null;
         var m = New();
         m.Notes.AddRange(res.Warnings);
-        // a part document per STEP part: its solids written to a STEP of their own and imported
+        // a part document per STEP part: an Import of its solids, kept as the assembly file was read (SpryCAD's own file
+        // of exact solids: not written to a STEP of their own and read again); a part holding something those files do
+        // not, as a STEP of its own
         var names = new string[res.Parts.Count];
         var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         for (int i = 0; i < res.Parts.Count; i++)
@@ -503,11 +505,16 @@ public sealed partial class AssemblyModel
         var threadsMode = m.Threads;
         Parallel.For(0, res.Parts.Count, i =>
         {
-            using var ms = new MemoryStream();
-            StepWriter.Write(ms, res.Parts[i].Solids.Select(sd => (sd.Name, Kernel.Native.NTess.ToSolid(sd.Body))), names[i]);
-            var bytes = ms.ToArray();
+            byte[] bytes; string ext;
+            try { bytes = NBrepFile.Write(res.Parts[i].Solids, "S."); ext = ".sbrep"; }
+            catch (NotSupportedException)
+            {
+                using var ms = new MemoryStream();
+                StepWriter.Write(ms, res.Parts[i].Solids.Select(sd => (sd.Name, Kernel.Native.NTess.ToSolid(sd.Body))), names[i]);
+                bytes = ms.ToArray(); ext = ".step";
+            }
             var doc = new CadDocument();
-            var file = "imports/" + SafeFileName(names[i]) + ".step";
+            var file = "imports/" + SafeFileName(names[i]) + ext;
             doc.AddFile(file, bytes);
             doc.AddFeature(new ImportFeature { File = file, Sha256 = DocumentContainer.Hash(bytes) });
             docs[i] = doc;

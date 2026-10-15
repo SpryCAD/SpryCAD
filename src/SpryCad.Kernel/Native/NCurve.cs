@@ -29,6 +29,9 @@ public sealed class NLine : NCurve
     public Vec3 P { get; }
     public Vec3 D { get; }   // unit
     public NLine(Vec3 p, Vec3 d) { P = p; D = d.Normalized; }
+    // as stored (NBrepFile): the direction as it was, not normalized again (which can move its last bit)
+    NLine(Vec3 p, Vec3 d, bool _) { P = p; D = d; }
+    internal static NLine Raw(Vec3 p, Vec3 d) => new(p, d, true);
     public override Vec3 Eval(double t) => P + D * t;
     public override Vec3 Deriv(double t) => D;
     public override double Param(Vec3 p, double? hint = null) => Vec3.Dot(p - P, D);
@@ -55,6 +58,10 @@ public sealed class NCircle : NCurve
         X = x.Normalized;
         Y = Vec3.Cross(a, X);
     }
+
+    // as stored (NBrepFile): the frame as it was
+    NCircle(Vec3 c, Vec3 x, Vec3 y, double r, bool _) { C = c; X = x; Y = y; R = r; }
+    internal static NCircle Raw(Vec3 c, Vec3 x, Vec3 y, double r) => new(c, x, y, r, true);
 
     public override Vec3 Eval(double t) => C + (X * Math.Cos(t) + Y * Math.Sin(t)) * R;
     public override Vec3 Deriv(double t) => (X * -Math.Sin(t) + Y * Math.Cos(t)) * R;
@@ -91,6 +98,8 @@ public sealed class NEllipse : NCurve
     public double B { get; }
 
     public NEllipse(Vec3 c, Vec3 x, Vec3 y, double a, double b) { C = c; X = x.Normalized; Y = y.Normalized; A = a; B = b; }
+    NEllipse(Vec3 c, Vec3 x, Vec3 y, double a, double b, bool _) { C = c; X = x; Y = y; A = a; B = b; }
+    internal static NEllipse Raw(Vec3 c, Vec3 x, Vec3 y, double a, double b) => new(c, x, y, a, b, true);
     public override Vec3 Eval(double t) => C + X * (A * Math.Cos(t)) + Y * (B * Math.Sin(t));
     public override Vec3 Deriv(double t) => X * (-A * Math.Sin(t)) + Y * (B * Math.Cos(t));
     public override double Param(Vec3 p, double? hint = null)
@@ -138,6 +147,8 @@ public sealed class NHyperbola : NCurve
     public double B { get; }
 
     public NHyperbola(Vec3 c, Vec3 x, Vec3 y, double a, double b) { C = c; X = x.Normalized; Y = y.Normalized; A = a; B = b; }
+    NHyperbola(Vec3 c, Vec3 x, Vec3 y, double a, double b, bool _) { C = c; X = x; Y = y; A = a; B = b; }
+    internal static NHyperbola Raw(Vec3 c, Vec3 x, Vec3 y, double a, double b) => new(c, x, y, a, b, true);
     public override Vec3 Eval(double t) => C + X * (A * Math.Cosh(t)) + Y * (B * Math.Sinh(t));
     public override Vec3 Deriv(double t) => X * (A * Math.Sinh(t)) + Y * (B * Math.Cosh(t));
     Vec3 Deriv2(double t) => X * (A * Math.Cosh(t)) + Y * (B * Math.Sinh(t));
@@ -187,6 +198,8 @@ public sealed class NParabola : NCurve
     public double F { get; }
 
     public NParabola(Vec3 c, Vec3 x, Vec3 y, double f) { C = c; X = x.Normalized; Y = y.Normalized; F = f; }
+    NParabola(Vec3 c, Vec3 x, Vec3 y, double f, bool _) { C = c; X = x; Y = y; F = f; }
+    internal static NParabola Raw(Vec3 c, Vec3 x, Vec3 y, double f) => new(c, x, y, f, true);
     public override Vec3 Eval(double t) => C + X * (F * t * t) + Y * (2 * F * t);
     public override Vec3 Deriv(double t) => X * (2 * F * t) + Y * (2 * F);
 
