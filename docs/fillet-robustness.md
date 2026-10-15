@@ -81,11 +81,13 @@ side and top edges, then its foot rolling round their rounds), kept where it lea
 
 ### Fading out
 
-A fillet whose edge runs on tangentially into one not picked (a boss's foot fillet, wrapped round the side fillet,
-reaching the next face) is carried on along that edge a radius, the ball rolling over onto the next face, then fades
-out over four radii more: a variable-radius rolling ball, r (1 - 3u^2 + 2u^3), no slope at either end, so it joins
-the constant fillet exactly and closes onto the edge smoothly. Where the edge's own faces turn tangent (a collar a
-loft leaves tangentially) the fillet stops a few degrees short, as before, and fades out from there to the vertex.
+A fillet that wraps round another fillet into an edge not picked (a boss's foot fillet round its side fillet) fades
+out to nothing at that fillet's tangent point, along the wrap: a variable-radius rolling ball, r (1 - 3u^2 + 2u^3),
+no slope at either end, so it joins the constant fillet exactly and closes onto the edge smoothly. The fillet's Fade
+length sets how far back from the tangent point it starts (empty: the whole wrap; 0: square ends). Where an edge's own
+faces turn tangent the fillet still stops a few degrees short and ends in a tip to a point (FC_FADE_TANGENT=1 fades
+there instead). The brake duct's tube rim needs its fade inside the composite (face-switching) rolling ball: its ball
+has rolled onto neighbouring faces by the time the chain ends, and that builder takes one radius throughout.
 The pipe surface carries the radius's change along its spine (the envelope of balls); booleans, mass and STEP take
 it as any pipe. Only where the fade fits; a blend failing with fades is done again with square ends. FC_FADE=0:
 square ends.
