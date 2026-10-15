@@ -39,3 +39,45 @@ CSV file; `FC_STRESS_SAVE=dir` saves each wrong case as a part file to look at (
 | all edges | 48 | 18 | 36 |
 
 Wrong, by what: a tool's end left standing 179, export 49, volume 24.
+
+The harness was tightened after this baseline (sharp edges picked only, sizes from edges not tiny beside the part,
+caps flush with a face not counted as wings, a blended edge checked actually blended, slow cases scored): the case
+set is 2700 now, and a few hundred of the baseline's verdicts were the harness's own mistakes.
+
+## After (branch fillet-robustness)
+
+2700 cases: 2435 right (90%), 167 refused (6.2%), 98 wrong (3.6%). Tools: 13557 applied directly, 3177 by boolean;
+307 cases use the boolean at all.
+
+| | right | refused | wrong |
+|---|---|---|---|
+| fillet | 1216 | 71 | 63 |
+| chamfer | 1219 | 96 | 35 |
+| corner selections | 452 | 30 | 10 |
+| face selections | 755 | 61 | 54 |
+| all edges | 89 | 1 | 12 |
+
+Wrong, by what: a tool's end left standing 70, export 13, slow 6, volume 5, edge not blended 3, open mesh 1.
+
+Every plain prism (block, corner cut, trapezoid, triangle, hexagon, thin wedge, drafted or not) and the blocks with
+a round boss or pocket: all right, all direct (the test suite's "Blend stress: prisms" gate keeps them so).
+
+What is still wrong is mostly convex and concave edges meeting at a corner: the drafted boss (27), the drafted L
+(14), the handwheel's grips (13), the shelled parts. A corner classifier (each kind of vertex given its own patch)
+is the next step for those; per-edge tolerances showed no near misses worth the change and were not done.
+
+## Speed
+
+`SpryCad.Tests blendtime [reps] [filter]`: the blend features of every test model, demo and case, each the best of
+`reps` rebuilds (`FC_TIME_PROF=1`: where the time goes). Same machine, alternating runs, best of 7 each:
+
+| | baseline (master) | this branch |
+|---|---|---|
+| all blend features, median of 3 runs | 1207 ms | 1211 ms |
+| all blend features, best of 3 runs | 1176 ms | 1200 ms |
+
+Within the run-to-run spread. Faster: a box's top edges (1.8 -> 0.5 ms), pipe flange (24 -> 22.5), a handwheel
+chamfer that took twelve minutes before the booleans were made exact or failed (now under a second). A few
+percent slower: drafted chamfers (their ends on the plane the faces cross on, no sliver: slightly different tools
+for the boolean). Tools overlapping round a corner are joined by an exact union only where they are convex and
+their edges come within a blend's size of each other (a check of 0.1 ms).
