@@ -75,6 +75,7 @@ public sealed class DirRef
 [JsonDerivedType(typeof(CombineFeature), "combine")]
 [JsonDerivedType(typeof(ImportFeature), "import")]
 [JsonDerivedType(typeof(FlatPatternFeature), "flatPattern")]
+[JsonDerivedType(typeof(FastenerFeature), "fastener")]
 public abstract class Feature
 {
     public string Id { get; set; } = "";
@@ -89,6 +90,8 @@ public abstract class Feature
     [JsonIgnore] public abstract string Kind { get; }
     /// <summary>Feature ids this feature consumes (e.g. the sketch of an extrude). Used for tree nesting.</summary>
     [JsonIgnore] public virtual IEnumerable<string> Consumes => Array.Empty<string>();
+    /// <summary>The library items ("ISO273/M8") the feature is sized from: the part keeps a snapshot of each (<see cref="Library.LibraryLink"/>).</summary>
+    public virtual IEnumerable<string> LibraryItems() => Array.Empty<string>();
     public Feature Clone() => (Feature)Serialization.CloneObject(this, GetType());
 }
 
@@ -222,8 +225,13 @@ public sealed class ThreadFeature : Feature
 {
     public override string Kind => "Thread";
     public FaceRef Face { get; set; } = new();
-    /// <summary>"Auto" (the size fitting the face), a metric size such as "M10", or "Custom" (Pitch, and the face as major/minor diameter).</summary>
+    /// <summary>
+    /// "Auto" (the ISO metric coarse size fitting the face), a size of <see cref="Standard"/>'s table such as "M10" or
+    /// "1/4-20 UNC", or "Custom" (Pitch, and the face as major/minor diameter).
+    /// </summary>
     public string Size { get; set; } = "Auto";
+    /// <summary>The library table the size is from ("ASME-B1.1-UNC"); null: ISO metric coarse.</summary>
+    public string? Standard { get; set; }
     /// <summary>Pitch for a custom thread.</summary>
     public string Pitch { get; set; } = "1.5";
     /// <summary>Blind (Length), up to the face's far end (stopping short of a shoulder), or through it (nuts, through holes).</summary>
@@ -244,6 +252,7 @@ public sealed class ThreadFeature : Feature
     public bool LeftHand { get; set; }
     /// <summary>Start from the other end of the face.</summary>
     public bool Reverse { get; set; }
+    public override IEnumerable<string> LibraryItems() => Library.ThreadSizes.Items(this);
 }
 
 public sealed class FilletFeature : Feature
@@ -314,7 +323,17 @@ public sealed class HoleFeature : Feature
     public string CsDiameter { get; set; } = "13";
     public string CsAngle { get; set; } = "90";
     public bool DrillPoint { get; set; } = true;
+    /// <summary>
+    /// The clearance hole table the hole is sized from ("ISO273", "ASME-B18.2.8"), with <see cref="Size"/> (the screw:
+    /// "M8", "1/4") and <see cref="Fit"/> (its column: close, normal, loose); null: sized by hand. The diameters above
+    /// are what the hole is made with; these say where they came from, so a library update can size it again.
+    /// </summary>
+    public string? Standard { get; set; }
+    public string? Size { get; set; }
+    /// <summary>(null: normal; null rather than a default, so holes saved before this keep their bytes)</summary>
+    public string? Fit { get; set; }
     public override IEnumerable<string> Consumes => new[] { SketchId };
+    public override IEnumerable<string> LibraryItems() => Library.HoleSizes.Items(this);
 }
 
 public sealed class ShellFeature : Feature
@@ -509,6 +528,20 @@ public sealed class ImportFeature : Feature
     public string File { get; set; } = "";
     /// <summary>SHA-256 of the embedded file when it was imported (a replaced file rebuilds).</summary>
     public string Sha256 { get; set; } = "";
+}
+
+/// <summary>
+/// A fastener made from a part family row (section 25): the screw, nut or washer its generator builds from the row's
+/// values (<see cref="Library.Fasteners.Body"/>), from the part's snapshot of the row. A fastener part has this one feature.
+/// </summary>
+public sealed class FastenerFeature : Feature
+{
+    public override string Kind => "Fastener";
+    /// <summary>The row ("ISO4762/M8x30").</summary>
+    public string Item { get; set; } = "";
+    /// <summary>How the fastener is named in a bill of materials ("ISO 4762 M8x30").</summary>
+    public string Designation { get; set; } = "";
+    public override IEnumerable<string> LibraryItems() => new[] { Item };
 }
 
 /// <summary>A part's sheet metal settings: how long its bends are in the flat.</summary>

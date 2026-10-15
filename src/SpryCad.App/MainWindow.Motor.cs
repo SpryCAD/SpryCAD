@@ -36,14 +36,14 @@ public partial class MainWindow
     Motoring? _motor;
 
     /// <summary>The faces the open page has picked (Mate's two, or the Motor's axis): drawn highlighted.</summary>
-    List<MateRef>? PagePicks => _mating?.Picks ?? (_motor?.Axis is { } ax ? new List<MateRef> { ax } : null);
+    List<MateRef>? PagePicks => _mating?.Picks ?? (_motor?.Axis is { } ax ? new List<MateRef> { ax } : _fastening?.Hole is { } hole ? new List<MateRef> { hole } : null);
 
     void MotorCommand()
     {
         if (Asm is not { } a) return;
-        if (_mating != null) { Status("Finish the open Mate page first (OK or Cancel)."); return; }
+        if (_mating != null) { Status("Close the open Mate PropertyManager first."); return; }
         if (_motor != null) return;
-        if (!a.Model.HasMates) { Status("Add mates first: the motor turns a component and its mates carry the rest."); return; }
+        if (!a.Model.HasMates) { Status("Add mates before using a motor."); return; }
         a.BeginChange();
         // (where everything is, flexible sub-assemblies' parts too, and the turns the gears and screws have counted)
         var st = new Motoring { Start = a.Model.CapturePoses() };
@@ -58,7 +58,7 @@ public partial class MainWindow
         var comp = page.Section("Component/Direction");
         var axisLbl = new TextBlock { TextWrapping = Avalonia.Media.TextWrapping.Wrap, FontSize = TypeScale.Body };
         comp.Children.Add(new Border { Classes = { "pmsection" }, Child = axisLbl, Padding = new Thickness(6, 4) });
-        page.Info(comp, "Click a round face (a bore, a shaft) of a floating component: it turns about that face's axis.");
+        page.Info(comp, "Select a cylindrical face of a floating component. The component rotates about the face's axis.");
         page.Check(comp, "Reverse direction", () => st.Reverse, v => st.Reverse = v);
 
         var motion = page.Section("Motion");
@@ -78,8 +78,8 @@ public partial class MainWindow
             buttons.Children.Add(b);
             return b;
         }
-        var play = Btn("play", "Play", "Turn the component at the speed set; the mates carry the rest", () => Run(st.Timer?.IsEnabled != true));
-        Btn("reset", "Reset", "Stop, and put everything back where it was when the page opened", () =>
+        var play = Btn("play", "Play", "Rotates the component at the set speed", () => Run(st.Timer?.IsEnabled != true));
+        Btn("reset", "Reset", "Stops the motor and returns components to their starting positions", () =>
         {
             Run(false);
             Restore();
@@ -91,7 +91,7 @@ public partial class MainWindow
 
         void Run(bool on)
         {
-            if (on && st.Axis == null) { Status("Pick a round face to turn about first."); return; }
+            if (on && st.Axis == null) { Status("Select a cylindrical face first."); return; }
             if (on)
             {
                 st.Timer ??= new DispatcherTimer(TimeSpan.FromMilliseconds(15), DispatcherPriority.Render, (_, _) => Tick());
@@ -127,7 +127,7 @@ public partial class MainWindow
                 a.Model.SolveMotion();
                 st.Turned -= step * 180 / Math.PI;
                 Run(false);
-                Status($"The motor stopped: the mates do not let {a.Model.NameAt(body)} turn further ({string.Join(", ", res.Failed().Select(m => MateName(a.Model, m)))}).");
+                Status($"Motor stopped. {a.Model.NameAt(body)} is blocked by {string.Join(", ", res.Failed().Select(m => MateName(a.Model, m)))}.");
             }
             RefreshAssemblyScene();
             turnedLbl.Text = $"Turned {st.Turned:0.#}°";
@@ -137,9 +137,9 @@ public partial class MainWindow
         {
             if (st.Axis is { } ax)
             {
-                axisLbl.Text = $"{(ax.Component != null ? a.Model.NameAt(ax.Component) : "")}: turning about the axis of the face picked";
+                axisLbl.Text = $"{(ax.Component != null ? a.Model.NameAt(ax.Component) : "")}: face axis";
             }
-            else axisLbl.Text = "(no face picked)";
+            else axisLbl.Text = "No face selected";
             var running = st.Timer?.IsEnabled == true;
             ((StackPanel)play.Content!).Children[0] = Icons.Make(running ? "pause" : "play", 16);
             ((TextBlock)((StackPanel)play.Content!).Children[1]).Text = running ? "Pause" : "Play";
@@ -161,7 +161,7 @@ public partial class MainWindow
             var moved = st.Start!.Moved(a.Model);
             Close();
             // where the motor left it: an undo point (nothing moved: none)
-            if (moved) { a.EndChange(); Status("Kept where the motor left it."); }
+            if (moved) { a.EndChange(); Status("Motor positions kept."); }
             else a.AbandonChange();
         }
         void Cancel()
@@ -175,9 +175,9 @@ public partial class MainWindow
         page.OnOk = Ok;
         page.OnCancel = Cancel;
         ShowPage(page);
-        ShowConfirmCorner(Ok, Cancel, "OK: keep the assembly where the motor left it (Enter)", "Cancel: put it back (Esc)");
+        ShowConfirmCorner(Ok, Cancel, "OK (Enter)", "Cancel (Esc)");
         st.Update();
-        Status("Motor: click a round face of the component to turn, then Play.");
+        Status("Select a cylindrical face of the component to rotate, then click Play.");
     }
 
     /// <summary>A mate by its id (the assembly's, or a flexible sub-assembly's by its path: "C3/M1") as named in the tree.</summary>
@@ -195,12 +195,12 @@ public partial class MainWindow
     {
         if (_motor is not { } st || Asm is not { } a) return;
         var name = a.Model.NameAt(component);
-        if (a.Model.RefTo(component, face) is not { Kind: MateGeomKind.Axis } r) { Status($"{name}: pick a round face (a bore or a shaft): the motor turns about its axis."); return; }
-        if (a.Model.Movable(component) is not { } body) { Status($"{name} is fixed: pick a face of a floating component."); return; }
+        if (a.Model.RefTo(component, face) is not { Kind: MateGeomKind.Axis } r) { Status($"{name}: select a cylindrical face for the motor axis."); return; }
+        if (a.Model.Movable(component) is not { } body) { Status($"{name} is fixed. Select a face of a floating component."); return; }
         st.Timer?.Stop();
         a.Model.EndMotion();
         st.Axis = r;
         st.Update?.Invoke();
-        Status($"Motor: {a.Model.NameAt(body)} turns about that axis. Play to run it.");
+        Status($"{a.Model.NameAt(body)} rotates about the selected axis. Click Play to run the motor.");
     }
 }

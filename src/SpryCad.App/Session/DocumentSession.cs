@@ -375,6 +375,8 @@ public sealed class DocumentSession
     /// <summary>Call after mutating the document.</summary>
     public void EndChange()
     {
+        // the library rows the features now use copied in, those none uses dropped (part of this undo step)
+        Core.Library.LibraryLink.Sync(Doc);
         SetDirty();
         DocumentChanged?.Invoke();
         RequestRebuild();

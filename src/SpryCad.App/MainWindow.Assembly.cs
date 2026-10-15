@@ -470,6 +470,8 @@ public partial class MainWindow : IAssemblyHost
         Tip("Mate\nPositions components relative to each other: pick two faces (or a face and an origin plane), then coincident, parallel, perpendicular, concentric, distance or angle.");
         Cmd("motor", "Motor", MotorCommand);
         Tip("Motor\nTurns a component about the axis of a round face at a set speed; its mates carry the rest (a gear drives its mate, a crank its linkage). Play, Pause, Reset.");
+        Cmd("thread", "Insert\nFastener", InsertFastenerCommand);
+        Tip("Insert Fastener\nAdds a screw to a hole made with the Hole Wizard from a clearance hole size: its size from the hole, its length from the parts it clamps (plus a nut and washer, or the thread of a tapped part) rounded up to a standard length the company library offers; mated to the hole.");
         Cmd("lpattern", "Linear\nPattern", () => PatternPage(PatternKind.Linear));
         Tip("Linear Component Pattern\nCopies components along a direction (a face's normal or axis, or an origin plane's normal); the copies follow their seeds.");
         Cmd("cpattern", "Circular\nPattern", () => PatternPage(PatternKind.Circular));

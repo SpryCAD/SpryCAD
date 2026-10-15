@@ -73,6 +73,8 @@ public static class UserSettings
     public static PartsOrder PartsSort { get; set; } = PartsOrder.Tabs;
     /// <summary>Look for a newer version at start (Windows, installed copies only: see Updater). On by default.</summary>
     public static bool CheckForUpdates { get; set; } = true;
+    /// <summary>The standards library set (libraries.json, or its folder) chosen here; an admin's setting takes precedence (<see cref="Libraries"/>).</summary>
+    public static string? LibrariesPath { get; set; }
     /// <summary>The version the user chose to skip: not offered again at start (Help > Check for Updates still does).</summary>
     public static string? SkippedUpdate { get; set; }
     /// <summary>The update channel picked in Options ("stable" or "dev"); null: the one the installed build came from.</summary>
@@ -118,6 +120,7 @@ public static class UserSettings
                 else if (k == nameof(PartsSort) && Enum.TryParse<PartsOrder>(v, out var po)) PartsSort = po;
                 else if (k == nameof(CheckForUpdates)) CheckForUpdates = v == "1";
                 else if (k == nameof(SkippedUpdate)) SkippedUpdate = v.Length > 0 ? v : null;
+                else if (k == nameof(LibrariesPath)) LibrariesPath = v.Length > 0 ? v : null;
                 else if (k == nameof(UpdateChannel)) UpdateChannel = v.Length > 0 ? v : null;
                 else if (k == nameof(PreferOpenGL)) PreferOpenGL = v == "1";
                 else if (k == nameof(AntiAliasing) && int.TryParse(v, out var aa) && aa is 0 or 2 or 4) AntiAliasing = aa;
@@ -153,6 +156,7 @@ public static class UserSettings
             lines.Add($"{nameof(CheckForUpdates)}={(CheckForUpdates ? 1 : 0)}");
             if (SkippedUpdate != null) lines.Add($"{nameof(SkippedUpdate)}={SkippedUpdate}");
             if (UpdateChannel != null) lines.Add($"{nameof(UpdateChannel)}={UpdateChannel}");
+            if (LibrariesPath != null) lines.Add($"{nameof(LibrariesPath)}={LibrariesPath}");
             lines.Add($"{nameof(PreferOpenGL)}={(PreferOpenGL ? 1 : 0)}");
             lines.Add($"{nameof(AntiAliasing)}={AntiAliasing}");
             File.WriteAllLines(StorePath, lines);

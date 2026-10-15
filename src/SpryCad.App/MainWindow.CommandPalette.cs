@@ -34,7 +34,7 @@ public partial class MainWindow
     bool RepeatLastCommand()
     {
         if (_lastCommand is not { } c || _page != null || _edit != null) return false;
-        Status($"Repeat: {c.name}");
+        Status($"Repeating {c.name}.");
         c.run();
         return true;
     }
@@ -50,6 +50,7 @@ public partial class MainWindow
             C("insertcomp", "Insert Components", InsertComponentCommand);
             C("mates", "Mate", MateCommand);
             C("motor", "Motor", MotorCommand);
+            C("thread", "Insert Fastener", InsertFastenerCommand);
             C("lpattern", "Linear Component Pattern", () => PatternPage(Core.Assembly.PatternKind.Linear));
             C("cpattern", "Circular Component Pattern", () => PatternPage(Core.Assembly.PatternKind.Circular));
             C("mirror", "Mirror Components", () => PatternPage(Core.Assembly.PatternKind.Mirror));

@@ -77,6 +77,7 @@ public partial class MainWindow : Window
         _autosave = new DispatcherTimer { Interval = TimeSpan.FromSeconds(60) };
         _autosave.Tick += (_, _) => AutoSave();
         _autosave.Start();
+        InitLibraries();
 
         BuildMenu();
         BuildQuickAccess();

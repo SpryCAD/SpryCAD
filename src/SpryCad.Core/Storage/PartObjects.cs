@@ -26,6 +26,8 @@ public enum ObjectKind : byte
     /// changes them and the history does not list that as a change of its own.
     /// </summary>
     NameCounters = 7,
+    /// <summary>One per library item the part uses ("ISO261-coarse/M8"): the rows it rebuilds from (section 34).</summary>
+    LibrarySnapshot = 8,
 
     // an assembly's (AssemblyObjects)
     /// <summary>Units and the documents (parts, sub-assemblies) embedded in it by name (exactly one).</summary>
@@ -44,6 +46,12 @@ public enum ObjectKind : byte
     AssemblyConfigurations = 26,
     /// <summary>The exploded views (exactly one).</summary>
     Explodes = 27,
+
+    // a library's (Library.LibraryFile)
+    /// <summary>One per table, by its key.</summary>
+    LibraryTable = 40,
+    /// <summary>What a company library allows of the tables below it (at most one).</summary>
+    LibraryRestrictions = 41,
 }
 
 /// <summary>
@@ -80,6 +88,8 @@ public static class PartObjects
         })));
         objects.Add(Single(ObjectKind.NameCounters), Envelope(ObjectKind.NameCounters, Json(new SortedDictionary<string, int>(doc.NameCounters, StringComparer.Ordinal))));
         foreach (var name in files) objects.Add(FileId(name), doc.Files[name]);
+        foreach (var (item, snap) in doc.Library ?? new())
+            objects.Add(IdOf(ObjectKind.LibrarySnapshot, item), Envelope(ObjectKind.LibrarySnapshot, Json(snap)));
         return objects;
     }
 
@@ -105,6 +115,12 @@ public static class PartObjects
             ? Open<SortedDictionary<string, int>>(nc, ObjectKind.NameCounters) : s.NameCounters ?? new());
         foreach (var name in s.Files ?? new())
             doc.Files[name] = objects.TryGetValue(FileId(name), out var fb) ? fb : throw new InvalidDataException($"The file is damaged: the embedded file \"{name}\" is missing.");
+        foreach (var (id, b) in objects)
+            if (id.Kind == ObjectKind.LibrarySnapshot)
+            {
+                var snap = Open<Library.LibrarySnapshot>(b, ObjectKind.LibrarySnapshot);
+                (doc.Library ??= new(StringComparer.Ordinal))[snap.Item] = snap;
+            }
         return doc;
     }
 
@@ -136,6 +152,13 @@ public static class PartObjects
     internal static List<string> OrderOf(byte[] envelope) => Open<List<string>>(envelope, ObjectKind.FeatureOrder);
 
     internal static byte[] OrderObject(IEnumerable<string> ids) => Envelope(ObjectKind.FeatureOrder, Json(ids.ToList()));
+
+    /// <summary>How a library snapshot object is called in history ("M8 (ISO261-coarse)").</summary>
+    internal static string SnapshotName(byte[] envelope)
+    {
+        var s = Open<Library.LibrarySnapshot>(envelope, ObjectKind.LibrarySnapshot);
+        return $"{s.Row} ({s.Table})";
+    }
 
     /// <summary>The embedded files' names a settings object lists.</summary>
     internal static List<string> FileNamesOf(byte[] settings) => Open<SettingsData>(settings, ObjectKind.Settings).Files ?? new();

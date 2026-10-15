@@ -49,6 +49,12 @@ public static class PartDescribe
                 }
             case ObjectKind.Settings: return "Part settings changed (units, sheet metal or embedded files)";
             case ObjectKind.File: return $"Embedded file {name} replaced";
+            case ObjectKind.LibrarySnapshot:
+                {
+                    var items = new List<string>();
+                    Fields(Data(old), Data(@new), "", items, skip: new[] { "table", "row", "columns" });
+                    return $"{name} updated: " + (items.Count == 0 ? "changed" : Join(items));
+                }
             default: return $"{name} changed";
         }
     }
@@ -104,6 +110,7 @@ public static class PartDescribe
                 ObjectKind.File => files.TryGetValue(c.ObjectId, out var n) ? n : "an embedded file",
                 ObjectKind.FeatureOrder => "Feature order",
                 ObjectKind.Variables => "Equations",
+                ObjectKind.LibrarySnapshot => "Library data " + PartObjects.SnapshotName(newB ?? oldB!),
                 _ => c.ObjectId.Kind.ToString(),
             };
             list.Add(new DescribedChange(c, name, Describe(c.ObjectId.Kind, oldB, newB, name)));
