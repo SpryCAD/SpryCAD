@@ -80,7 +80,7 @@ static class BlendStress
         }
         Console.WriteLine();
         Console.WriteLine($"{cases.Count} cases in {sw.Elapsed.TotalSeconds:0} s: {cases.Count(c => c.Outcome == "right")} right, {cases.Count(c => c.Outcome == "refused")} refused, {cases.Count(c => c.Outcome == "wrong")} wrong");
-        Console.WriteLine($"tools {cases.Sum(c => c.Direct)} direct, {cases.Sum(c => c.Boolean)} by boolean");
+        Console.WriteLine($"tools {cases.Sum(c => c.Direct)} direct, {cases.Sum(c => c.Boolean)} by boolean; cases using the boolean at all: {cases.Count(c => c.Boolean > 0)} of {cases.Count}");
         void By(string title, Func<Case, string> key)
         {
             Console.WriteLine($"by {title}:");
