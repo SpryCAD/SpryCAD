@@ -46,6 +46,7 @@ public partial class MainWindow
 
     void ApplySection()
     {
+        UpdateHudStates();
         Viewport.Section = _sectionOn ? SectionPlane() : null;
         Viewport.Redraw();
     }
@@ -118,5 +119,6 @@ public partial class MainWindow
         _sectionOn = false; _sectionRef = null; _sectionFace = null; _sectionPage = null; _sectionOffsetBox = null;
         Viewport.SectionArrow = false;
         Viewport.Section = null;
+        UpdateHudStates();
     }
 }
