@@ -138,6 +138,7 @@ public partial class MainWindow : Window
             ToolTip.SetTip(StatusRebuild, bad.Count + warned == 0 ? null : string.Join(Environment.NewLine,
                 Session.Doc.Features.Where(f => r.Status.TryGetValue(f.Id, out var st) && (!st.Ok || st.Warnings.Count > 0))
                     .Select(f => $"{f.Name}: {r.Status[f.Id].Error ?? string.Join("; ", r.Status[f.Id].Warnings)}")));
+            ShowTimeOnScreen();
         }
         if (_page != null && _edit != null && Session.PreviewActive && Session.PreviewResult is { } pr)
         {
@@ -148,6 +149,26 @@ public partial class MainWindow : Window
         if (_firstRebuild) { _firstRebuild = false; }
         if (_tab.FitAfterLoad is { } fitRev && Session.ResultRevision >= fitRev && !Session.PreviewActive)
         { _tab.FitAfterLoad = null; Viewport.StandardView("Trimetric", fit: true, animate: false); } // a part just opened or shown: at once
+    }
+
+    /// <summary>
+    /// The time from the change to its result on screen, added to the rebuild's status once the frame showing it is
+    /// drawn (the rebuild's own time is only part of it), with where it went in the status's tip.
+    /// </summary>
+    void ShowTimeOnScreen()
+    {
+        if (Session.Timing is not { Shown: 0 } timing) return;
+        var session = Session;
+        var text = StatusRebuild.Text;
+        Viewport.AfterNextFrame(at =>
+        {
+            if (!ReferenceEquals(session.Timing, timing) || timing.Shown != 0) return;
+            timing.Shown = at;
+            if (!ReferenceEquals(session, Session) || StatusRebuild.Text != text) return; // another tab, or a newer status
+            StatusRebuild.Text = $"{text}  ·  on screen in {timing.TotalMs:0} ms";
+            var tip = ToolTip.GetTip(StatusRebuild) as string;
+            ToolTip.SetTip(StatusRebuild, tip == null ? timing.Breakdown : tip + Environment.NewLine + Environment.NewLine + timing.Breakdown);
+        });
     }
 
     /// <summary>

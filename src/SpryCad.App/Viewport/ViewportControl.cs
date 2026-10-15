@@ -154,6 +154,18 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         _r = new GlRenderer(silk, GlVersion.Type == GlProfileType.OpenGLES) { Samples = _antiAliasing };
     }
 
+    Action<long>? _afterFrame;
+
+    /// <summary>
+    /// Calls <paramref name="done"/> (on the UI thread) with the time the next frame finished drawing (a Stopwatch
+    /// timestamp): when what was just put in the scene first shows. One at a time: a later call replaces an earlier one.
+    /// </summary>
+    public void AfterNextFrame(Action<long> done)
+    {
+        _afterFrame = done;
+        RequestNextFrameRendering();
+    }
+
     /// <summary>Raised once the view is found drawn by a software renderer (no graphics card in use: slow with large models).</summary>
     public event Action? SoftwareRenderer;
 
@@ -332,6 +344,11 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
 
         DrawTriad(w, h);
         _r.EndFrame(fb);
+        if (Interlocked.Exchange(ref _afterFrame, null) is { } done)
+        {
+            var at = Stopwatch.GetTimestamp();
+            Avalonia.Threading.Dispatcher.UIThread.Post(() => done(at));
+        }
         if (RenderProfile) NoteRender(t0, tDyn0, tDyn1);
         if (PickProfile) ProfilePick();
 
@@ -679,7 +696,8 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         foreach (var m in Marked) h.Items.Add(m);
         foreach (var e in Emphasis) h.Items.Add((e, SelectColor.WithAlpha(1)));
         if (Selection != null) foreach (var s in Selection.Items) h.Items.Add((s, SelectColor));
-        if (Hover != null) h.Items.Add((Hover, HoverColor));
+        // (something selected stays in the selection blue under the cursor: the hover's tint is for what is not)
+        if (Hover != null && !h.Items.Any(x => x.item.Key == Hover.Key)) h.Items.Add((Hover, HoverColor));
         if (ColorByFeature != null)
         {
             // each face from its own color: what is hovered, and features (as picked in the tree), in their feature's
