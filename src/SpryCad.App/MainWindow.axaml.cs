@@ -234,6 +234,7 @@ public partial class MainWindow : Window
         Viewport.PartColor = new Rgba((float)Session.Doc.Color[0], (float)Session.Doc.Color[1], (float)Session.Doc.Color[2]);
         RebuildTree();
         RefreshRevisions();
+        RefreshBom();
     }
 
     // what the feature tree was last built from

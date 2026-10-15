@@ -403,13 +403,8 @@ public partial class MainWindow : IAssemblyHost
         // Color by Part (the Color by Feature button, in an assembly): each part, in each configuration, a color of
         // its own, the same on every instance of it; in the order the parts first appear (hidden ones too), so hiding
         // or adding a component leaves the others' colors as they were
-        Dictionary<string, int>? partColor = null;
-        if (_colorByFeature)
-        {
-            partColor = new();
-            foreach (var (o, _) in a.Model.PlacedParts(hidden: true))
-                partColor.TryAdd(PartKey(o.Component), partColor.Count);
-        }
+        // (the Bill of Materials pane shows the same colors: PartColorIndex)
+        var partColor = _colorByFeature ? PartColorIndex(a) : null;
         foreach (var (o, pd) in a.Model.PlacedParts())
         {
             if (pd.Mesh.Indices.Length == 0 || IsolatedOut(o.Path)) continue;
@@ -474,6 +469,7 @@ public partial class MainWindow : IAssemblyHost
         Viewport.Marked = marked;
         Viewport.Instances = inst;
         Viewport.Redraw();
+        RefreshBom(); // (when what it shows changed)
     }
 
     // ------------------------------------------------------------------------------------------
