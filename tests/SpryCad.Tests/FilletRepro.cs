@@ -233,7 +233,8 @@ static class FilletRepro
                     {
                         object? hint = null; int missed = 0;
                         foreach (var p in x.Edges[ei].Points)
-                            if (find.Invoke(ps, new object?[] { p, hint, 1e-4, false }) is { } uv) hint = uv; else missed++;
+                            if (find.Invoke(ps, new object?[] { p, hint, 1e-4, false }) is { } uv) hint = uv;
+                            else { missed++; if (Environment.GetEnvironmentVariable("STEP_CHECK") == "2" && find.Invoke(ps, new object?[] { p, null, 1.0, false }) is Vec2 lu) { var srfE = (Func<double, double, Vec3>)ps.GetType().GetProperty("Eval")!.GetValue(ps)!; Console.WriteLine($"    missed {p}: nearest found {Vec3.Distance(srfE(lu.X, lu.Y), p):g3} at uv {lu}"); } }
                         if (missed > 0) { bad++; Console.WriteLine($"  off its written surface: {f.Name} edge {ei} ({missed} of {x.Edges[ei].Points.Count} points)"); }
                     }
                 }

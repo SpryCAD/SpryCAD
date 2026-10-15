@@ -56,17 +56,37 @@ public static class NativeBlend
             // their own there; else it fails where the kinds meet, and only costs time)
             var once = Corner3(edges) ? ApplyOne(body, edges, size, fillet, prefix, errs, overflow, probs, app, chamfer, false, trimmedOut) : body;
             if (!Corner3(edges)) errs.Add("staged");
-            if (errs.Count == 0)
+            // (all at once without errors, but a tool's end left standing where the kinds meet: staged too, the one that
+            // leaves fewer kept)
+            int onceCaps = errs.Count == 0 && once.Native != null ? CapsLeft(once.Native, prefix) : int.MaxValue;
+            if (errs.Count == 0 && onceCaps == 0)
             {
                 if (probs != null) problemEdges!.AddRange(probs);
                 if (app != null) applied!.AddRange(app);
                 return once;
             }
-            var nb1 = Apply(body, first, size, fillet, prefix + ".c", errors, overflow, problemEdges, applied, chamfer, false, trimmedOut);
-            if (ReferenceEquals(nb1, body) || nb1.Native == null) return nb1;
-            var rest = Rest(body.Native!, nb1.Native, edges.Except(first).ToList(), prefix + ".c", size);
-            Debug?.Invoke($"mixed blends: {first.Count} first, then {rest.Count} edges");
-            return rest.Count == 0 ? nb1 : Apply(nb1, rest, size, fillet, prefix, errors, overflow, problemEdges, applied, chamfer, false, trimmedOut);
+            var serrs = new List<string>(); var sprobs = problemEdges == null ? null : new List<Vec3[]>(); var sapp = applied == null ? null : new List<(Solid, bool)>();
+            Solid staged;
+            var nb1 = Apply(body, first, size, fillet, prefix + ".c", serrs, overflow, sprobs, sapp, chamfer, false, trimmedOut);
+            if (ReferenceEquals(nb1, body) || nb1.Native == null) staged = nb1;
+            else
+            {
+                var rest = Rest(body.Native!, nb1.Native, edges.Except(first).ToList(), prefix + ".c", size);
+                Debug?.Invoke($"mixed blends: {first.Count} first, then {rest.Count} edges");
+                staged = rest.Count == 0 ? nb1 : Apply(nb1, rest, size, fillet, prefix, serrs, overflow, sprobs, sapp, chamfer, false, trimmedOut);
+            }
+            int stagedCaps = serrs.Count == 0 && staged.Native != null ? CapsLeft(staged.Native, prefix) : int.MaxValue;
+            if (errs.Count == 0 && onceCaps <= stagedCaps)
+            {
+                Debug?.Invoke($"mixed blends: at once {onceCaps} tool end(s) left, staged {(stagedCaps == int.MaxValue ? "failed" : stagedCaps.ToString())}: at once");
+                if (probs != null) problemEdges!.AddRange(probs);
+                if (app != null) applied!.AddRange(app);
+                return once;
+            }
+            errors.AddRange(serrs);
+            if (sprobs != null) problemEdges!.AddRange(sprobs);
+            if (sapp != null) applied!.AddRange(sapp);
+            return staged;
         }
         // (the ball pivoting round convex corners: where that leaves errors, the fillets mitred there instead, as before,
         // when that does better)

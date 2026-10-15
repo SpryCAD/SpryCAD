@@ -712,13 +712,23 @@ public static class StepWriter
         for (int i = 0; i < u.Length; i++) u[i] = (u[i] - ua) / (ub - ua);
         var curve = BSplineCurve.Interpolate(pts, u, Math.Min(3, pts.Count - 1));
         var widest = pts.Max(p => p.Y - p.X);
-        var margin = 0.02 * widest + 0.02;
-        return s =>
+        (double lo, double hi) Raw(double s)
         {
             var t = Math.Clamp(((s - v0) / (v1 - v0) - ua) / (ub - ua), 0, 1);
             var q = curve.Eval(t);
-            return (q.X - margin, Math.Max(q.Y, q.X) + margin);
-        };
+            return (q.X, Math.Max(q.Y, q.X));
+        }
+        // (every boundary sample inside the band: where the face's edge swings faster than the windows follow (a
+        // corner's patch, its contact turning round the corner), the margin widened by as much as one falls outside)
+        double outside = 0;
+        foreach (var (s, th) in samples)
+        {
+            var (lo, hi) = Raw(s);
+            outside = Math.Max(outside, Math.Max(lo - th, th - hi));
+        }
+        var margin = 0.02 * widest + 0.02 + 1.25 * outside;
+        if (widest + 2 * margin > 2 * Math.PI - 0.1) return null;
+        return s => { var (lo, hi) = Raw(s); return (lo - margin, hi + margin); };
     }
 
     /// <summary>A B-spline surface as it is (rational ones as the complex entity STEP uses).</summary>
