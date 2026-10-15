@@ -33,6 +33,15 @@ public partial class MainWindow
     {
         var m = new MenuItem { Header = header };
         if (gesture != null) m.InputGesture = Avalonia.Input.KeyGesture.Parse(gesture);
+        // Avalonia shows a number key by its name ("Ctrl+D1"): the menu's gesture text put as the key reads (Ctrl+1)
+        if (m.InputGesture is { } g && g.Key is >= Avalonia.Input.Key.D0 and <= Avalonia.Input.Key.D9)
+            m.TemplateApplied += (_, _) => Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+            {
+                var raw = Avalonia.Controls.Converters.PlatformKeyGestureConverter.ToPlatformString(g);
+                var digit = (char)('0' + (g.Key - Avalonia.Input.Key.D0));
+                foreach (var tb in Avalonia.VisualTree.VisualExtensions.GetVisualDescendants(m).OfType<TextBlock>())
+                    if (tb.Text == raw && raw.EndsWith("D" + digit)) tb.Text = raw[..^2] + digit;
+            });
         if (icon != null) m.Icon = Icons.Make(icon, 16);
         m.Click += (_, _) => click();
         return m;

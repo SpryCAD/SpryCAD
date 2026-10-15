@@ -419,8 +419,8 @@ public partial class MainWindow
             angleRow.IsVisible = ang && !st.Limits;
             limits.IsVisible = coin || ang;
             minRow.IsVisible = maxRow.IsVisible = (coin || ang) && st.Limits;
-            ((TextBlock)minRow.Children[0]).Text = ang ? "Minimum (deg)" : "Minimum (mm)";
-            ((TextBlock)maxRow.Children[0]).Text = ang ? "Maximum (deg)" : "Maximum (mm)";
+            ((TextBlock)minRow.Children[0]).Text = $"Minimum ({(ang ? "deg" : Units.Symbol())})";
+            ((TextBlock)maxRow.Children[0]).Text = $"Maximum ({(ang ? "deg" : Units.Symbol())})";
             ratioA.IsVisible = ratioB.IsVisible = type == MateType.Gear;
             lead.IsVisible = type == MateType.Screw;
             reverse.IsVisible = type is MateType.Gear or MateType.Screw;

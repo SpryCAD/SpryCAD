@@ -237,7 +237,7 @@ public partial class MainWindow
         }
         var asmName = mark.AssemblyPath != null ? Path.GetFileNameWithoutExtension(mark.AssemblyPath) : "an assembly";
         _supersededTitle!.Text = $"{Path.GetFileNameWithoutExtension(path)} was made virtual in {asmName}";
-        _supersededText!.Text = $"On {mark.Utc.ToLocalTime():g} by {mark.User}. Changes made here will not appear in that assembly. Opened read-only.";
+        _supersededText!.Text = $"Read-only. Made virtual on {mark.Utc.ToLocalTime():g} by {mark.User}; edits to this file do not update that assembly.";
         _supersededBanner.IsVisible = true;
     }
 }
