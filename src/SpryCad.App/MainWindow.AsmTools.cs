@@ -158,13 +158,16 @@ public partial class MainWindow
         ("Blue", new[] { 0.20, 0.45, 0.85 }), ("Purple", new[] { 0.55, 0.35, 0.75 }), ("Brass", new[] { 0.80, 0.65, 0.30 }), ("Copper", new[] { 0.78, 0.45, 0.30 }),
     };
 
-    /// <summary>A component's appearance: a color of its own (for a sub-assembly's component, in this instance), or its part's.</summary>
-    async Task Appearance(string path)
+    /// <summary>
+    /// A component's appearance: a color of its own (for a sub-assembly's component, in this instance), or its part's;
+    /// given <paramref name="all"/>, every one of them (a part's instances, from the Bill of Materials pane).
+    /// </summary>
+    async Task Appearance(string path, IReadOnlyList<string>? all = null)
     {
         if (Asm is not { } a || a.Model.Find(path) is not { } o) return;
         double[]? chosen = null; bool picked = false;
         var grid = new WrapPanel { Orientation = Orientation.Horizontal, MaxWidth = 330 };
-        var w = Dialogs.MakeWindow($"Appearance: {o.Component.Name}", new StackPanel
+        var w = Dialogs.MakeWindow(all is { Count: > 1 } ? $"Appearance: {o.Component.Name.Split('<')[0]} (all {all.Count})" : $"Appearance: {o.Component.Name}", new StackPanel
         {
             Spacing = 8,
             Children =
@@ -195,7 +198,7 @@ public partial class MainWindow
         await w.ShowDialog(this);
         if (!picked) return;
         a.BeginChange();
-        a.Model.SetColor(path, chosen);
+        foreach (var p in all ?? new[] { path }) a.Model.SetColor(p, chosen);
         a.EndChange();
     }
 

@@ -64,15 +64,19 @@ public partial class MainWindow
         _bomRows.Children.Clear();
         if (Asm is not { } a) { _bomNote.Text = "Open an assembly to see its bill of materials."; return; }
         var colors = _colorByFeature ? PartColorIndex(a) : null;
-        // each part in each configuration once (as the Bill of Materials counts them), in the order first met
-        var groups = a.Model.Occurrences().Where(o => !o.Component.IsAssembly).GroupBy(o => AssemblyModel.DisplayKey(o.Component)).ToList();
-        var total = groups.Sum(g => g.Count());
-        _bomNote.Text = groups.Count == 0 ? "The assembly has no parts." : $"{groups.Count} part{(groups.Count == 1 ? "" : "s")}, {total} in all.";
-        foreach (var g in groups) _bomRows.Children.Add(BomRowControl(g.First(), g.Count(), colors));
+        // each part in each configuration once (as the Bill of Materials counts them), in the order first met; its
+        // suppressed instances not counted (all of them suppressed: listed, greyed, to unsuppress)
+        var groups = a.Model.Occurrences(suppressed: true).Where(o => !o.Component.IsAssembly).GroupBy(o => AssemblyModel.DisplayKey(o.Component)).Select(g => g.ToList()).ToList();
+        var counted = groups.Where(g => g.Any(o => !o.Suppressed)).ToList();
+        var total = counted.Sum(g => g.Count(o => !o.Suppressed));
+        _bomNote.Text = counted.Count == 0 ? "The assembly has no parts." : $"{counted.Count} part{(counted.Count == 1 ? "" : "s")}, {total} in all.";
+        foreach (var g in groups) _bomRows.Children.Add(BomRowControl(g, colors));
     }
 
-    Control BomRowControl(Occurrence o, int count, Dictionary<string, int>? colors)
+    Control BomRowControl(List<Occurrence> all, Dictionary<string, int>? colors)
     {
+        var o = all.FirstOrDefault(x => !x.Suppressed) ?? all[0];
+        var count = all.Count(x => !x.Suppressed);
         var c = o.Component;
         var r = c.Part;
         var name = Path.GetFileNameWithoutExtension(r.Path ?? r.AbsolutePath ?? r.Embedded ?? "");
@@ -99,7 +103,17 @@ public partial class MainWindow
         Grid.SetColumn(text, 1); Grid.SetColumn(qty, 2);
         grid.Children.Add(thumb); grid.Children.Add(text); grid.Children.Add(qty);
         var row = new Border { Classes = { "treerow" }, Child = grid, Padding = new Thickness(6, 3), Background = Brushes.Transparent, Cursor = new Cursor(StandardCursorType.Hand) };
-        ToolTip.SetTip(row, $"{name}{(config.Length > 0 ? $" ({config})" : "")}: {count} in the assembly" + (r.Embedded != null ? ", embedded" : r.AbsolutePath is { } f ? "\n" + f : "") + "\nClick to select the first one.");
+        if (count == 0) { row.Opacity = 0.5; qty.Text = "suppressed"; qty.FontWeight = FontWeight.Normal; }
+        ToolTip.SetTip(row, $"{name}{(config.Length > 0 ? $" ({config})" : "")}: {count} in the assembly" + (all.Count > count ? $" ({all.Count - count} suppressed)" : "")
+            + (r.Embedded != null ? ", embedded" : r.AbsolutePath is { } f ? "\n" + f : "") + "\nClick to select the first one; right-click for all of them.");
+        // its menu made when first wanted
+        row.AddHandler(ContextRequestedEvent, (_, e) =>
+        {
+            if (row.ContextMenu != null) return;
+            row.ContextMenu = BomMenu(all, name);
+            row.ContextMenu.Open(row);
+            e.Handled = true;
+        }, Avalonia.Interactivity.RoutingStrategies.Tunnel);
         row.PointerPressed += (_, e) =>
         {
             if (!e.GetCurrentPoint(row).Properties.IsLeftButtonPressed) return;
@@ -107,6 +121,50 @@ public partial class MainWindow
             e.Handled = true;
         };
         return row;
+    }
+
+    /// <summary>A part's menu in the pane: open it, and what the tree's menu does to one instance, to all of them.</summary>
+    ContextMenu BomMenu(List<Occurrence> all, string name)
+    {
+        var live = all.Where(o => !o.Suppressed).Select(o => o.Path).ToList();
+        var first = live.FirstOrDefault() ?? all[0].Path;
+        var n = all.Count == 1 ? "" : $" ({all.Count})";
+        var menu = new ContextMenu();
+        menu.Items.Add(Item(all[0].Component.Part.Embedded != null ? "Edit Part" : "Open Part", () => OpenComponent(first), null, "open"));
+        menu.Items.Add(Item("Select First Instance", () => SelectComponent(first, exact: true), null, "select"));
+        menu.Items.Add(new Separator());
+        if (live.Count > 0)
+        {
+            var anyShown = all.Any(o => !o.Suppressed && !o.Hidden);
+            menu.Items.Add(Item((anyShown ? "Hide All Instances" : "Show All Instances") + n, () => BomSet(live, anyShown ? "hidden" : "shown", (m, p) => m.SetHidden(p, anyShown)), null, anyShown ? "hide" : "show"));
+            menu.Items.Add(Item("Isolate All Instances" + n, () => BomIsolate(live, name), null, "isolate"));
+            menu.Items.Add(Item("Appearance of All Instances" + n + "…", () => _ = Appearance(first, live), null, "appearance"));
+            menu.Items.Add(new Separator());
+            menu.Items.Add(Item("Suppress All Instances" + n, () => BomSet(live, "suppressed", (m, p) => m.SetSuppressed(p, true), solve: true), null, "suppress"));
+        }
+        if (all.Count > live.Count)
+            menu.Items.Add(Item($"Unsuppress All Instances ({all.Count - live.Count})", () => BomSet(all.Where(o => o.Suppressed).Select(o => o.Path).ToList(), "unsuppressed", (m, p) => m.SetSuppressed(p, false), solve: true), null, "suppress"));
+        return menu;
+    }
+
+    /// <summary>A change made to each of a part's instances, as one (one undo).</summary>
+    void BomSet(List<string> paths, string done, Action<AssemblyModel, string> set, bool solve = false)
+    {
+        if (Asm is not { } a) return;
+        a.BeginChange();
+        foreach (var p in paths) set(a.Model, p);
+        if (solve && a.Model.HasMates) a.Model.SolveMates();
+        a.EndChange();
+        Status($"{paths.Count} instance{(paths.Count == 1 ? "" : "s")} {done}.");
+    }
+
+    /// <summary>Only a part's instances shown (Isolate on the Assembly tab, or again here, shows everything).</summary>
+    void BomIsolate(List<string> paths, string name)
+    {
+        if (Asm == null) return;
+        if (_isolate != null && _isolate.SetEquals(paths)) { _isolate = null; Status("Isolate off."); }
+        else { _isolate = new HashSet<string>(paths); Status($"{name} isolated ({paths.Count}). Click Isolate again to show all components."); }
+        RefreshAssemblyScene();
     }
 
     /// <summary>A part's preview in a color (made in the background, kept for the next time).</summary>
