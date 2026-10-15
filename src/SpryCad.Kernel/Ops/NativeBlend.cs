@@ -2239,11 +2239,19 @@ public static class NativeBlend
     static RollingBall.Result? Faded(List<NEdge> chain, double size, string name, IReadOnlyCollection<NEdge> sel)
     {
         var runs = new List<(NVertex v, NEdge g)>();
+        // (and ends where the edge's own faces turn tangent: the chain stops where they are a few degrees apart, as
+        // before, and fades out from there to the vertex along the edge)
+        var stops = new List<(NVertex v, NEdge e, double tq)>();
         foreach (var (v, dirOut, fa, fb) in ChainEnds(chain))
+        {
             if (RunsOnInto(v, dirOut, chain, sel) is { } g) runs.Add((v, g));
-        if (runs.Count == 0) return null;
+            else if (TangentStop(v, chain) is { } q && chain.FirstOrDefault(x => ReferenceEquals(x.V0, v) || ReferenceEquals(x.V1, v)) is { } e)
+                stops.Add((v, e, e.Curve.Param(q, 0.5 * (e.T0 + e.T1))));
+        }
+        if (runs.Count == 0 && stops.Count == 0) return null;
         // the chain with each run-on edge, ending a radius along it
         var ends = new Dictionary<NVertex, (Vec3 q, NEdge g, double tq, double tEnd)>(ReferenceEqualityComparer.Instance);
+        foreach (var (v, e, tq) in stops) ends[v] = (e.Curve.Eval(tq), e, tq, ReferenceEquals(e.V0, v) ? e.T0 : e.T1);
         var longer = new List<NEdge>(chain);
         foreach (var (v, g) in runs)
         {
