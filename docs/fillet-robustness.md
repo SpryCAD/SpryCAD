@@ -46,18 +46,18 @@ set is 2700 now, and a few hundred of the baseline's verdicts were the harness's
 
 ## After (branch fillet-robustness)
 
-2700 cases: 2471 right (91.5%), 165 refused (6.1%), 64 wrong (2.4%). Tools: 13662 applied directly, 3256 by boolean;
-305 cases use the boolean at all.
+2700 cases: 2483 right (92%), 165 refused (6.1%), 52 wrong (1.9%). The whole run takes 178 s (348 s before the
+quick refusals below).
 
 | | right | refused | wrong |
 |---|---|---|---|
-| fillet | 1234 | 69 | 47 |
-| chamfer | 1237 | 96 | 17 |
-| corner selections | 452 | 30 | 10 |
-| face selections | 784 | 59 | 27 |
-| all edges | 94 | 1 | 7 |
+| fillet | 1246 | 64 | 40 |
+| chamfer | 1237 | 101 | 12 |
+| corner selections | 452 | 36 | 4 |
+| face selections | 796 | 54 | 20 |
+| all edges | 94 | 0 | 8 |
 
-Wrong, by what: a tool's end left standing 35, export 14, slow 6, volume 5, edge not blended 3, open mesh 1.
+Wrong, by what: a tool's end left standing 26, export 17, volume 5, edge not blended 3, open mesh 1.
 
 Every plain prism (block, corner cut, trapezoid, triangle, hexagon, L, thin wedge, drafted or not), the blocks with
 a round boss or pocket, and the block with a square pocket: no case wrong (the test suite's "Blend stress: prisms"
@@ -79,13 +79,26 @@ their kind they meet (a corner of three gets its patch, rather than one fillet l
 as big as itself); where the staging leaves a tool's end standing or fails, the other kind goes first (a boss's
 side and top edges, then its foot rolling round their rounds), kept where it leaves fewer.
 
-A fillet stopping where its edge runs on tangentially into one not picked (a boss's foot fillet, wrapped round the
-side fillet, reaching the next face) ends square: correct, and counted as a tool's end standing here. A variable
-radius fading the fillet out there is the better end, for later.
+### Fading out
 
-Still wrong: the drafted boss (14, mostly those square ends), the handwheel's grips (13), the brake duct (7, corner
-chamfers slow on its lofted faces), the shelled parts (14), the drafted L (6). Per-edge tolerances showed no near
-misses worth the change and were not done.
+A fillet whose edge runs on tangentially into one not picked (a boss's foot fillet, wrapped round the side fillet,
+reaching the next face) is carried on along that edge a radius, the ball rolling over onto the next face, then fades
+out over four radii more: a variable-radius rolling ball, r (1 - 3u^2 + 2u^3), no slope at either end, so it joins
+the constant fillet exactly and closes onto the edge smoothly. Where the edge's own faces turn tangent (a collar a
+loft leaves tangentially) the fillet stops a few degrees short, as before, and fades out from there to the vertex.
+The pipe surface carries the radius's change along its spine (the envelope of balls); booleans, mass and STEP take
+it as any pipe. Only where the fade fits; a blend failing with fades is done again with square ends. FC_FADE=0:
+square ends.
+
+### Quick refusals
+
+An edge refused while the tools are built fails the blend as a whole (all or nothing), so the other tools are
+neither trimmed nor joined: on the brake duct's shelled loft a corner's chamfer took 16 s to 60 s to be refused,
+now 2 to 3 s. Booleans prove a pair of slow surfaces (offsets, B-splines) clear before tracing them.
+
+Still wrong: the handwheel's grips (13), the shelled parts (14), the drafted L (6), the flush boss (5), the drafted
+boss (4: a corner patch's STEP surface off by 1e-3, a chamfer), face-fillet (3, newly built, a constant fillet's STEP
+surface off by 4e-4). Per-edge tolerances showed no near misses worth the change and were not done.
 
 ## Speed
 
