@@ -198,7 +198,8 @@ public partial class MainWindow : Window
         StatusUnits.PointerPressed += (_, e) =>
         {
             if (!e.GetCurrentPoint(StatusUnits).Properties.IsLeftButtonPressed) return;
-            var menu = new MenuFlyout();
+            // (above the status bar, its right edge on the label: over the window, never off its side or bottom)
+            var menu = new MenuFlyout { Placement = Avalonia.Controls.PlacementMode.TopEdgeAlignedRight };
             foreach (var (u, text) in new[] { (UnitSystem.MMGS, "MMGS (millimeter, gram, second)"), (UnitSystem.IPS, "IPS (inch, pound, second)") })
             {
                 var mi = new MenuItem { Header = text, Icon = Units == u ? Icons.Make("ok", 14) : null };
@@ -447,6 +448,7 @@ public partial class MainWindow : Window
 
     void OnSelectionChanged()
     {
+        UpdateBreadcrumbs();
         var s = Selection.First;
         if (_sketch == null)
         {
@@ -579,6 +581,7 @@ public partial class MainWindow : Window
                 case Key.Z: if (!inText) Undo(); else handled = false; break;
                 case Key.Y: if (!inText) Redo(); else handled = false; break;
                 case Key.B: Rebuild(); break;
+                case Key.K: OpenCommandPalette(atCursor: false); break; // (the command palette, in any mode)
                 case Key.Q: Rebuild(force: true); break;
                 case Key.W or Key.F4: _ = CloseTab(_tab); break;
                 case Key.Tab: _ = CycleTab(shift ? -1 : 1); break;
@@ -658,6 +661,13 @@ public partial class MainWindow : Window
                 if (_sketch == null && _page == null && Session.Doc.Find(Tree.SelectedId ?? Selection.First?.FeatureId ?? "") is { } rf)
                 { _ = RenameFeature(rf); e.Handled = true; }
                 break;
+            case Key.S when _sketch == null && _page == null:
+                // (the command palette at the cursor; in a sketch S is the spline, so there Ctrl+K)
+                OpenCommandPalette(atCursor: true); e.Handled = true;
+                break;
+            case Key.Enter when _sketch == null && _page == null && _edit == null:
+                if (RepeatLastCommand()) e.Handled = true;
+                break;
             case Key.F:
                 Viewport.ZoomToFit(); e.Handled = true;
                 break;
@@ -725,6 +735,7 @@ public partial class MainWindow : Window
 
     void ShowPage(PmPage? page)
     {
+        if (page != null) HideBreadcrumbs(); // (a command started)
         // the Measure tool's drawing belongs to its page
         if (_measurePage != null && page != _measurePage) EndMeasure();
         // the Section View page replaced by another: the section kept as it is, its arrow gone

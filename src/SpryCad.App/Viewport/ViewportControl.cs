@@ -1610,11 +1610,15 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
     /// <summary>Forgets a rotation center set by middle-clicking (e.g. when another part is opened).</summary>
     public void ClearPivot() { _pinnedPivot = null; Redraw(); }
 
+    /// <summary>Where the cursor last was over the graphics area (the command palette opens there).</summary>
+    public Point LastPointer { get; private set; }
+
     protected override void OnPointerMoved(PointerEventArgs e)
     {
         base.OnPointerMoved(e);
         var pt = e.GetCurrentPoint(this);
         var pos = pt.Position;
+        LastPointer = pos;
         var dx = (float)(pos.X - _navLast.X); var dy = (float)(pos.Y - _navLast.Y);
         if (pt.Properties.IsRightButtonPressed && _nav == Nav.None)
         {
