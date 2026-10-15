@@ -60,6 +60,7 @@ public partial class MainWindow : Window
         _tab = AddTab(Session);
         UpdateTabHeader(_tab);
         Selection.Changed += OnSelectionChanged;
+        SetupUnitsSwitch();
 
         Tree.SelectedChanged += OnTreeSelected;
         Tree.EditRequested += id => EditFeature(id);
@@ -186,10 +187,43 @@ public partial class MainWindow : Window
 
     static IBrush StatusNormalBrush => Palette.TextMuted;
 
+    /// <summary>
+    /// The status bar's units, as SolidWorks': clicked, a menu of the unit systems, the one picked the document's (a
+    /// part's or an assembly's; undoable). Only how lengths show and are typed changes: the model is in millimetres.
+    /// </summary>
+    void SetupUnitsSwitch()
+    {
+        StatusUnits.Cursor = new Cursor(StandardCursorType.Hand);
+        ToolTip.SetTip(StatusUnits, "Units: click to change");
+        StatusUnits.PointerPressed += (_, e) =>
+        {
+            if (!e.GetCurrentPoint(StatusUnits).Properties.IsLeftButtonPressed) return;
+            var menu = new MenuFlyout();
+            foreach (var (u, text) in new[] { (UnitSystem.MMGS, "MMGS (millimeter, gram, second)"), (UnitSystem.IPS, "IPS (inch, pound, second)") })
+            {
+                var mi = new MenuItem { Header = text, Icon = Units == u ? Icons.Make("ok", 14) : null };
+                mi.Click += (_, _) => SetUnits(u);
+                menu.Items.Add(mi);
+            }
+            menu.ShowAt(StatusUnits);
+            e.Handled = true;
+        };
+    }
+
+    void SetUnits(UnitSystem u)
+    {
+        if (Units == u) return;
+        if (Asm is { } a) { a.BeginChange(); a.Model.Doc.Units = u; a.EndChange(); }
+        else Session.Change(() => Session.Doc.Units = u);
+        StatusUnits.Text = Units.ToString();
+        RefreshScene();
+        Status($"Units: {u}.");
+    }
+
     void OnDocumentChanged()
     {
         Title = "SpryCAD - " + (_tab != null ? TitleOf(_tab) : Session.Title);
-        StatusUnits.Text = Session.Doc.Units.ToString();
+        StatusUnits.Text = Units.ToString();
         PmPage.CurrentUnits = () => Units;
         UpdateUndoButtons();
         Viewport.PartColor = new Rgba((float)Session.Doc.Color[0], (float)Session.Doc.Color[1], (float)Session.Doc.Color[2]);

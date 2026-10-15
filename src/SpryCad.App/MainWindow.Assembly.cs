@@ -330,6 +330,7 @@ public partial class MainWindow : IAssemblyHost
     void OnAssemblyChanged()
     {
         if (Asm is not { } a) return;
+        StatusUnits.Text = a.Model.Doc.Units.ToString();
         Title = "SpryCAD - " + a.Title;
         UpdateUndoButtons();
         RefreshAssemblyScene();
