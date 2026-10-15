@@ -341,8 +341,11 @@ public static class NTess
         double Ang(double r) => 2 * Math.Acos(Math.Max(-1, 1 - Math.Min(1, tol / Math.Max(r, 1e-9))));
         switch (s.Kind)
         {
-            case SurfaceKind.Cylinder: { var hu = Ang(s.R) * s.R; return (hu, Math.Max(hu * 8, 1e-6)); }
-            case SurfaceKind.Cone: { var r = Math.Max(s.R, 1e-3); var hu = Ang(r) * r; return (hu, Math.Max(hu * 4, 1e-6)); }
+            // straight along the axis: a line from end to end lies on the surface, so no rows of points along it (only
+            // round it, which the boundary and the refinement against the surface give); a long, thin round (a bend of
+            // sheet metal two metres long) is a few hundred triangles, not tens of thousands
+            case SurfaceKind.Cylinder: { var hu = Ang(s.R) * s.R; return (hu, double.PositiveInfinity); }
+            case SurfaceKind.Cone: { var r = Math.Max(s.R, 1e-3); var hu = Ang(r) * r; return (hu, double.PositiveInfinity); } // (straight along its sides too)
             case SurfaceKind.Sphere: { var h = Ang(s.R) * s.R; return (h, h); }
             case SurfaceKind.Torus: { var hu = Ang(s.R + s.R2) * (s.R + s.R2); var hv = Ang(s.R2) * s.R2; return (hu, hv); }
             case SurfaceKind.Offset:
