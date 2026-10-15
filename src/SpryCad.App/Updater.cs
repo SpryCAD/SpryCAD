@@ -95,17 +95,17 @@ static class Updater
     {
         if (!OperatingSystem.IsWindows())
         {
-            await Dialogs.Message(w, "Check for Updates", "On Linux, SpryCAD updates with the system's packages (sudo apt update && sudo apt upgrade, with the SpryCAD repository added). The download page has the latest tarball.");
+            await Dialogs.Message(w, "Check for Updates", "On Linux, update with the package manager: sudo apt update && sudo apt upgrade.");
             return;
         }
         if (!CanUpdate)
         {
             await Dialogs.Message(w, "Check for Updates", BaseUrl == null
-                ? "This is a local build of SpryCAD: it does not check for updates. Installed releases do."
-                : "This copy of SpryCAD was not installed by its setup, so it cannot update itself. Install SpryCAD with the setup to get updates.");
+                ? "Local build: update checks are off."
+                : "Not installed by the setup, so it cannot update itself. Install with the setup to get updates.");
             return;
         }
-        if (_pending != null) { await Dialogs.Message(w, "Check for Updates", "An update is ready: it installs when SpryCAD closes."); return; }
+        if (_pending != null) { await Dialogs.Message(w, "Check for Updates", "Update downloaded. It installs on exit."); return; }
         // already downloading (Update clicked, its window hidden): its progress again, not a second download
         if (Downloading is { } dl) { await ShowProgress(w, dl); return; }
         w.Status("Checking for updates...");
@@ -115,12 +115,12 @@ static class Updater
         {
             w.Status("");
             App.Log(ex, "Checking for updates");
-            await Dialogs.Message(w, "Update check failed", $"Could not check for updates: {ex.Message}");
+            await Dialogs.Message(w, "Update check failed", FailureReason(ex));
             return;
         }
         w.Status("");
-        if (r == null) await Dialogs.Message(w, "Update check failed", "The update information could not be verified. Try again later.");
-        else if (!IsNewer(r.Version, CurrentVersion)) await Dialogs.Message(w, "Check for Updates", $"SpryCAD {CurrentVersion} is the latest version ({Channel} channel).");
+        if (r == null) await Dialogs.Message(w, "Update check failed", "The update information failed its signature check. Try again later.");
+        else if (!IsNewer(r.Version, CurrentVersion)) await Dialogs.Message(w, "Check for Updates", $"SpryCAD {CurrentVersion} is up to date ({Channel} channel).");
         else await Offer(w, r);
     }
 
@@ -128,9 +128,9 @@ static class Updater
     static async Task Offer(MainWindow w, Release r)
     {
         var mb = r.Size / (1024.0 * 1024.0);
-        var title = $"New version available: v{r.Version}";
-        var text = $"You are on v{CurrentVersion}. Would you like to update?";
-        var note = $"{mb:0} MB download. It installs when SpryCAD closes.";
+        var title = $"Update available: {r.Version}";
+        var text = $"Installed: {CurrentVersion}.";
+        var note = $"{mb:0} MB. Installs on exit.";
         var buttons = new[] { "Update", "Later", "Skip This Version" };
         var choice = Card.ShowAsync(w, CardKind.Question, title, new[] { Card.Text(text), Card.Text(note, dim: true) }, buttons, 0, 1) is { } shown
             ? await shown
@@ -140,7 +140,7 @@ static class Updater
 
         try
         {
-            var progress = new Progress<double>(f => w.Status($"Downloading SpryCAD {r.Version}... {f:P0}"));
+            var progress = new Progress<double>(f => w.Status($"Downloading {r.Version}… {f:P0}"));
             var download = Download(r, progress);
             // its progress in a window (hidden, the download goes on: the status bar shows it, and the ready card follows)
             _ = ShowProgress(w, r);
@@ -150,15 +150,37 @@ static class Updater
         {
             w.Status("");
             App.Log(ex, "Downloading an update");
-            await Dialogs.Message(w, "Update failed", $"The update could not be downloaded: {ex.Message}");
+            await Dialogs.Message(w, "Update failed", FailureReason(ex));
             return;
         }
         w.Status("");
-        var now = Card.ShowAsync(w, CardKind.Info, $"SpryCAD {r.Version} is ready to install",
-            new[] { Card.Text("SpryCAD closes (asking about unsaved parts first), installs the update and starts again.") },
-            new[] { "Restart Now", "When I Close SpryCAD" }, 0, 1) is { } ready ? await ready == 0 : false;
-        if (!now) { w.Status($"SpryCAD {r.Version} installs when SpryCAD closes."); return; }
+        var now = Card.ShowAsync(w, CardKind.Info, $"{r.Version} ready to install",
+            new[] { Card.Text("SpryCAD restarts to install it (unsaved parts are asked about first).") },
+            new[] { "Restart Now", "On Exit" }, 0, 1) is { } ready ? await ready == 0 : false;
+        if (!now) { w.Status($"{r.Version} installs on exit."); return; }
         RestartNow(w);
+    }
+
+    /// <summary>
+    /// Why checking or downloading failed, in words to act on: no connection, the server not answering or answering an
+    /// error, a download that came out wrong; else the error's own message.
+    /// </summary>
+    internal static string FailureReason(Exception ex)
+    {
+        for (var e = ex; e != null; e = e.InnerException)
+            switch (e)
+            {
+                case System.Net.Sockets.SocketException:
+                case HttpRequestException { HttpRequestError: HttpRequestError.NameResolutionError or HttpRequestError.ConnectionError }:
+                    return "No connection to the update server. Check the internet connection and try again.";
+                case TaskCanceledException or TimeoutException:
+                    return "The update server did not answer in time. Try again later.";
+                case HttpRequestException { StatusCode: { } code }:
+                    return $"The update server answered {(int)code} ({code}). Try again later.";
+                case InvalidDataException:
+                    return "The download was corrupted (checksum mismatch). Try again.";
+            }
+        return ex.Message;
     }
 
     /// <summary>The version downloaded and waiting to install when SpryCAD closes, if any.</summary>
@@ -261,14 +283,14 @@ static class Updater
     /// </summary>
     static async Task ShowProgress(Window owner, Release r)
     {
-        var text = new TextBlock { Text = $"Downloading SpryCAD {r.Version}...", TextWrapping = TextWrapping.Wrap };
+        var text = new TextBlock { Text = $"SpryCAD {r.Version}", TextWrapping = TextWrapping.Wrap };
         var bar = new ProgressBar { Minimum = 0, Maximum = 1, Height = 8, Margin = new Thickness(0, 10, 0, 0) };
-        var note = new TextBlock { Text = "It installs when SpryCAD closes. Hide this and the download goes on.", Foreground = Palette.TextMuted, FontSize = TypeScale.Small, Margin = new Thickness(0, 8, 0, 0), TextWrapping = TextWrapping.Wrap };
+        var note = new TextBlock { Text = "Installs on exit. Hide to keep downloading in the background.", Foreground = Palette.TextMuted, FontSize = TypeScale.Small, Margin = new Thickness(0, 8, 0, 0), TextWrapping = TextWrapping.Wrap };
         var hide = new Button { Content = "Hide", IsDefault = true, IsCancel = true, MinWidth = 80, HorizontalContentAlignment = HorizontalAlignment.Center,
             HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 12, 0, 0) };
         var root = new StackPanel { Children = { text, bar, note, hide } };
-        var w = Dialogs.MakeWindow("Updating SpryCAD", root, 420);
-        void Show(double f) { bar.Value = f; text.Text = $"Downloading SpryCAD {r.Version}... {f:P0}"; }
+        var w = Dialogs.MakeWindow("Downloading Update", root, 420);
+        void Show(double f) { bar.Value = f; text.Text = $"SpryCAD {r.Version}: {f:P0}"; }
         Show(_downloaded);
         DownloadProgress += Show;
         hide.Click += (_, _) => w.Close();
@@ -300,7 +322,7 @@ static class Updater
                 Report((double)got / r.Size);
             }
         }
-        if (!Matches(file, r)) { File.Delete(file); throw new InvalidDataException("the download does not match the published checksum."); }
+        if (!Matches(file, r)) { File.Delete(file); throw new InvalidDataException("checksum mismatch"); }
         _release = r;
         _pending = file;
     }
@@ -335,7 +357,7 @@ static class Updater
         catch (Exception ex)
         {
             App.Log(ex, "Loading the change log");
-            await Dialogs.Message(owner, "Change log failed", $"The change log could not be loaded: {ex.Message}");
+            await Dialogs.Message(owner, "Change log failed", FailureReason(ex));
             return;
         }
         var list = new StackPanel { Spacing = 2 };
