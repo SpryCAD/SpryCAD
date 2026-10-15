@@ -68,17 +68,20 @@ public partial class MainWindow
 
     void PlaneCommand()
     {
-        var f = new PlaneFeature { Mode = PlaneMode.References };
+        var f = new PlaneFeature { Mode = PlaneMode.References }.Sized(Units);
         // what is selected becomes the references
         foreach (var s in Selection.Items.Take(3))
             if (PlaneRefOf(s) is { } r) { f.Refs.Add(r); PlaneSolver.Suggest(f.Refs, r); }
         OpenPlanePage(f, true);
     }
 
+    /// <summary>A plane reference's distance to start with: round in the part's units.</summary>
+    string DefaultOffset => FeatureDefaults.Length(Units, 10, 0.5);
+
     /// <summary>A pick as a plane reference: what it is decides what it offers.</summary>
     PlaneReference? PlaneRefOf(SelItem s)
     {
-        var r = new PlaneReference { Hint = s.At ?? s.Point };
+        var r = new PlaneReference { Hint = s.At ?? s.Point, Value = DefaultOffset };
         switch (s.Kind)
         {
             case SelKind.Plane or SelKind.Sketch:
@@ -223,7 +226,7 @@ public partial class MainWindow
 
             relLists[i] = new StackPanel { Spacing = 1 };
             sec.Children.Add(relLists[i]);
-            distBoxes[i] = page.Number(sec, "Distance", () => slots[i]?.Value ?? "10", v => { if (slots[i] is { } s) s.Value = v; }, "dimension");
+            distBoxes[i] = page.Number(sec, "Distance", () => slots[i]?.Value ?? DefaultOffset, v => { if (slots[i] is { } s) s.Value = v; }, "dimension");
             distRows[i] = (Control)distBoxes[i].Parent!.Parent!;
             angleBoxes[i] = page.Number(sec, "Angle", () => slots[i]?.Value ?? "45", v => { if (slots[i] is { } s) s.Value = v; }, "mate-angle", "°");
             angleRows[i] = (Control)angleBoxes[i].Parent!.Parent!;
@@ -259,7 +262,7 @@ public partial class MainWindow
                             r.Relation = rel;
                             // a distance and an angle are different numbers
                             if (rel == PlaneRelation.Angle && was != PlaneRelation.Angle) r.Value = "45";
-                            if (rel == PlaneRelation.Offset && was == PlaneRelation.Angle) r.Value = "10";
+                            if (rel == PlaneRelation.Offset && was == PlaneRelation.Angle) r.Value = DefaultOffset;
                             sync(); page.RaiseChanged();
                         };
                         relLists[i].Children.Add(b);

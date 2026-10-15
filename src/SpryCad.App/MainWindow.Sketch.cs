@@ -111,7 +111,13 @@ public partial class MainWindow
     {
         Selection.Clear();
         _sketchIsNew = isNew;
-        _sketch = new SketchEditor(Viewport, sf, frame, Session.Lookup) { PointsOnly = pointsOnly, Units = Session.Doc.Units };
+        var u = Session.Doc.Units;
+        _sketch = new SketchEditor(Viewport, sf, frame, Session.Lookup)
+        {
+            PointsOnly = pointsOnly, Units = u,
+            // (round in the part's units)
+            FilletRadius = FeatureDefaults.Mm(u, 5, 0.125), OffsetDistance = FeatureDefaults.Mm(u, 5, 0.125),
+        };
         _sketch.Overlay = Overlay;
         _sketch.Changed += OnSketchChanged;
         _sketch.SelectionChanged += BuildSketchPage;
@@ -234,8 +240,8 @@ public partial class MainWindow
             }
             else switch (pending)
             {
-                case "extrude": OpenExtrudePage(new ExtrudeFeature { SketchId = sf.Id }, true); break;
-                case "cut": OpenExtrudePage(new ExtrudeFeature { SketchId = sf.Id, IsCut = true, End = EndCondition.ThroughAll, Reverse = true }, true); break;
+                case "extrude": OpenExtrudePage(new ExtrudeFeature { SketchId = sf.Id }.Sized(Units), true); break;
+                case "cut": OpenExtrudePage(new ExtrudeFeature { SketchId = sf.Id, IsCut = true, End = EndCondition.ThroughAll, Reverse = true }.Sized(Units), true); break;
                 case "revolve": OpenRevolvePage(new RevolveFeature { SketchId = sf.Id }, true); break;
                 case "cutrevolve": OpenRevolvePage(new RevolveFeature { SketchId = sf.Id, IsCut = true }, true); break;
             }

@@ -179,7 +179,9 @@ public partial class MainWindow : IAssemblyHost
 
     async Task NewAssemblyAsync()
     {
-        var t = AddAssemblyTab(new AssemblySession(AssemblyModel.New()) { UntitledName = NextAssemblyName() });
+        var model = AssemblyModel.New();
+        model.Doc.Units = UserSettings.Units; // (in the units chosen last)
+        var t = AddAssemblyTab(new AssemblySession(model) { UntitledName = NextAssemblyName() });
         if (!await SwitchTo(t)) { RemoveTab(t); return; }
         Status("New assembly: Insert Components to bring in parts (the first is fixed at the origin).");
         InsertComponentCommand();

@@ -59,7 +59,8 @@ public sealed class DocumentSession
     // how long each feature took when last built: the time left of a rebuild is estimated from them
     readonly System.Collections.Concurrent.ConcurrentDictionary<string, double> _featureMs = new();
 
-    public static CadDocument NewDocument() => new();
+    /// <summary>A new part, in the units chosen last.</summary>
+    public static CadDocument NewDocument() => new() { Units = UserSettings.Units };
 
     /// <summary>The name of a part not saved yet ("Part1", "Part2", ...: one per tab).</summary>
     public string UntitledName { get; set; } = "Part1";

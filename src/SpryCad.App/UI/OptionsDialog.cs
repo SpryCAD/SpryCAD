@@ -380,7 +380,8 @@ public static class OptionsDialog
         return new Commit(() => null, () =>
         {
             var u = units.SelectedIndex == 1 ? UnitSystem.IPS : UnitSystem.MMGS;
-            return u == doc.Units ? null : () => doc.Units = u;
+            // (new parts start in them too)
+            return u == doc.Units ? null : () => { doc.Units = u; UserSettings.Units = u; };
         });
     }
 

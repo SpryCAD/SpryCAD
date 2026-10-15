@@ -217,6 +217,9 @@ public partial class MainWindow : Window
         if (Units == u) return;
         if (Asm is { } a) { a.BeginChange(); a.Model.Doc.Units = u; a.EndChange(); }
         else Session.Change(() => Session.Doc.Units = u);
+        // (new parts start in them too)
+        UserSettings.Units = u;
+        UserSettings.Save();
         StatusUnits.Text = Units.ToString();
         RefreshScene();
         Status($"Units: {u}.");

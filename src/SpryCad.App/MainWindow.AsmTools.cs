@@ -517,7 +517,7 @@ public partial class MainWindow
         if (editing != null) kind = editing.Kind;
         var p = editing != null
             ? new ComponentPattern { Kind = kind, Seeds = new(editing.Seeds), Reference = editing.Reference.Clone(), Count = editing.Count, Spacing = editing.Spacing, Reverse = editing.Reverse, Symmetry = editing.Symmetry }
-            : new ComponentPattern { Kind = kind, Reference = a.Model.RefTo(null, kind == PatternKind.Circular ? "Top" : "Right")!, Count = kind == PatternKind.Circular ? 4 : 3, Spacing = kind == PatternKind.Circular ? 90 : 50 };
+            : new ComponentPattern { Kind = kind, Reference = a.Model.RefTo(null, kind == PatternKind.Circular ? "Top" : "Right")!, Count = kind == PatternKind.Circular ? 4 : 3, Spacing = kind == PatternKind.Circular ? 90 : FeatureDefaults.Mm(Units, 50, 2) };
         if (editing == null && a.Selected is { } sel && a.Model.Doc.Find(sel.Split('/')[0]) is { Pattern: null } sc) p.Seeds.Add(sc.Id);
         var st = new Patterning { Pattern = p, Editing = editing };
         _patterning = st;
@@ -674,7 +674,7 @@ public partial class MainWindow
         }
         page.ButtonRow(steps, "Auto Explode (from where they are)", () => { v.Steps = a.Model.AutoExplode(v.Name).Steps; Fill(); RefreshAssemblyScene(); }, "explode");
         var add = page.Section("Add a Step");
-        var dir = "Z"; double dist = 50;
+        var dir = "Z"; double dist = FeatureDefaults.Mm(Units, 50, 2);
         page.Combo(add, "Direction", new List<(string, string)> { ("X", "+X"), ("-X", "-X"), ("Y", "+Y"), ("-Y", "-Y"), ("Z", "+Z"), ("-Z", "-Z") }, () => dir, x => dir = x);
         page.Number(add, "Distance", () => Units.Entry(dist), x => { if (UnitFormat.TryLength(x, null, out var d, out _)) dist = d; });
         page.ButtonRow(add, "Add Step for the Selected Component", () =>

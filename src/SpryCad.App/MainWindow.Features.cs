@@ -278,7 +278,7 @@ public partial class MainWindow
                 return;
             }
         }
-        OpenExtrudePage(new ExtrudeFeature { SketchId = sk ?? "", IsCut = cut, End = cut ? EndCondition.ThroughAll : EndCondition.Blind, Reverse = cut }, true);
+        OpenExtrudePage(new ExtrudeFeature { SketchId = sk ?? "", IsCut = cut, End = cut ? EndCondition.ThroughAll : EndCondition.Blind, Reverse = cut }.Sized(Units), true);
     }
 
     void OpenExtrudePage(ExtrudeFeature f, bool isNew)
@@ -474,7 +474,7 @@ public partial class MainWindow
     void HelicalCommand(bool cut)
     {
         if (_sketch != null) ExitSketch(true);
-        OpenHelicalPage(new HelicalSweepFeature { SketchId = SketchFromSelection() ?? "", IsCut = cut }, true);
+        OpenHelicalPage(new HelicalSweepFeature { SketchId = SketchFromSelection() ?? "", IsCut = cut }.Sized(Units), true);
     }
 
     void OpenHelicalPage(HelicalSweepFeature f, bool isNew)
@@ -540,7 +540,7 @@ public partial class MainWindow
     void ThreadCommand()
     {
         var face = Selection.Items.FirstOrDefault(s => s.Kind == SelKind.Face);
-        var f = new ThreadFeature();
+        var f = new ThreadFeature().Sized(Units);
         if (face != null) f.Face = face.ToFaceRef();
         OpenThreadPage(f, true);
     }
@@ -596,8 +596,8 @@ public partial class MainWindow
             foreach (var e in body.Solid.Topology.Edges.Where(e => e.FaceA == s.Name || e.FaceB == s.Name))
                 edges.Add(new EdgeRef { A = e.FaceA, B = e.FaceB, Body = body.Id, Hint = e.Midpoint });
         }
-        if (fillet) OpenBlendPage(new FilletFeature { Edges = edges }, true);
-        else OpenBlendPage(new ChamferFeature { Edges = edges }, true);
+        if (fillet) OpenBlendPage(new FilletFeature { Edges = edges }.Sized(Units), true);
+        else OpenBlendPage(new ChamferFeature { Edges = edges }.Sized(Units), true);
     }
 
     void OpenBlendPage(Feature f, bool isNew)
@@ -681,7 +681,7 @@ public partial class MainWindow
     {
         if (PartOnly("The hole wizard")) return;
         if (_sketch != null) ExitSketch(true);
-        var hole = new HoleFeature();
+        var hole = new HoleFeature().Sized(Units);
         var sel = Selection.First;
         if (sel != null && TryPlaneOf(sel, out var pr, out var frame))
         {
@@ -784,7 +784,7 @@ public partial class MainWindow
     void ShellCommand()
     {
         var faces = Selection.Items.Where(s => s.Kind == SelKind.Face).Select(s => s.ToFaceRef()).ToList();
-        OpenShellPage(new ShellFeature { Faces = faces }, true);
+        OpenShellPage(new ShellFeature { Faces = faces }.Sized(Units), true);
     }
 
     void OpenShellPage(ShellFeature f, bool isNew)
@@ -943,7 +943,7 @@ public partial class MainWindow
         return Refresh;
     }
 
-    void LinearPatternCommand() => OpenLinearPatternPage(new LinearPatternFeature { Seeds = SeedsFromSelection() }, true);
+    void LinearPatternCommand() => OpenLinearPatternPage(new LinearPatternFeature { Seeds = SeedsFromSelection() }.Sized(Units), true);
 
     void OpenLinearPatternPage(LinearPatternFeature f, bool isNew)
     {

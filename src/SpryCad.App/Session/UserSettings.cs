@@ -38,6 +38,8 @@ public static class UserSettings
 
     public static bool ReverseWheel { get; set; }
     public static bool Perspective { get; set; }
+    /// <summary>The units new parts and assemblies start in: the ones chosen last (the status bar, Options).</summary>
+    public static Core.Model.UnitSystem Units { get; set; } = Core.Model.UnitSystem.MMGS;
     /// <summary>
     /// The name saved revisions are made by (their history shows it): the user's sign-in name until set. Also the name
     /// files saved without one are given (assemblies, embedded documents: <see cref="Core.Storage.PartFile.DefaultAuthor"/>).
@@ -102,6 +104,7 @@ public static class UserSettings
                 var (k, v) = (line[..i].Trim(), line[(i + 1)..].Trim());
                 if (k == nameof(ReverseWheel)) ReverseWheel = v == "1";
                 else if (k == nameof(Perspective)) Perspective = v == "1";
+                else if (k == nameof(Units) && Enum.TryParse<Core.Model.UnitSystem>(v, out var us)) Units = us;
                 else if (k == nameof(AuthorName) && v.Length > 0) AuthorName = v;
                 else if (k == nameof(KeepDisplay) && Enum.TryParse<KeepDisplay>(v, out var kd)) KeepDisplay = kd;
                 else if (k == nameof(KeepDisplaySeconds) && double.TryParse(v, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var ks) && ks >= 0) KeepDisplaySeconds = ks;
@@ -135,6 +138,7 @@ public static class UserSettings
                 $"{nameof(Version)}={Version}",
                 $"{nameof(ReverseWheel)}={(ReverseWheel ? 1 : 0)}",
                 $"{nameof(Perspective)}={(Perspective ? 1 : 0)}",
+                $"{nameof(Units)}={Units}",
                 $"{nameof(AuthorName)}={AuthorName}",
                 $"{nameof(KeepDisplay)}={KeepDisplay}",
                 $"{nameof(KeepDisplaySeconds)}={KeepDisplaySeconds.ToString(System.Globalization.CultureInfo.InvariantCulture)}",

@@ -176,7 +176,8 @@ public partial class MainWindow
         if (_mating != null) { Status("Finish the open Mate page first (OK or Cancel)."); return; }
         if (_motor != null) { Status("Close the Motor page first (OK or Cancel)."); return; }
         a.BeginChange();
-        var st = new Mating { Editing = editing };
+        // (a screw's lead round in the assembly's units)
+        var st = new Mating { Editing = editing, Lead = FeatureDefaults.Mm(Units, 2, 0.1) };
         if (editing is { } e)
         {
             st.Picks.Add(e.A.Clone()); st.Picks.Add(e.B.Clone());
