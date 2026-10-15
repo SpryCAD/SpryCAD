@@ -968,30 +968,37 @@ public partial class MainWindow
             // the STEP model, imported into a new part named after it (a later Save As suggests that name)
             Session.UntitledName = Path.GetFileNameWithoutExtension(path);
             _tab.Source = path;
+            BeginLoading(_tab, "Importing " + Path.GetFileName(path));
             Session.New();
             // a file that cannot be read stays open, marked, saying why (as in a batch)
-            if (ImportInto(_tab, path) is { } err) { _tab.LoadError = err; UpdateTabHeader(_tab); }
+            if (ImportInto(_tab, path) is { } err) { _tab.LoadError = err; EndLoading(_tab); UpdateTabHeader(_tab); }
             else Status("Imported " + Path.GetFileName(path));
             Session.MarkClean();
             UpdateLoadBanner();
             return true;
         }
+        var tab = _tab;
         try
         {
             Viewport.ClearPivot();
-            Session.Load(path);
+            // read off the UI thread (a big part takes a moment), its progress shown over the view meanwhile
+            BeginLoading(tab, "Opening " + Path.GetFileName(path), reading: true);
+            var opened = await Task.Run(() => DocumentSession.Read(path));
+            if (!_parts.Contains(tab)) { opened.Copy.Close(); return false; } // (its tab closed meanwhile)
+            tab.Session.Load(opened);
+            tab.LoadingRead = false;
             if (!IsAutosave(path) && !IsEmbeddedCopy(path)) RecentFiles.Add(path);
             Status("Opened " + path);
-            _tab.FitAfterLoad = Session.RequestedRevision;
+            tab.FitAfterLoad = tab.Session.RequestedRevision;
             UpdateSupersededBanner();
             // someone else has it open: read-only (saving makes a copy elsewhere), unless the user says otherwise
-            if (Session.ForeignLock is { } l)
+            if (tab.Session.ForeignLock is { } l)
             {
-                Session.ReadOnly = await Dialogs.YesNo(this, "Opened by Someone Else",
+                tab.Session.ReadOnly = await Dialogs.YesNo(this, "Opened by Someone Else",
                     $"{Path.GetFileName(path)} is open by {l.User} on {l.Machine} since {l.SinceUtc.ToLocalTime():g}.\n\n" +
                     "Open it read-only (saving makes a copy elsewhere), or open it anyway (whoever saves last overwrites the other)?",
                     "Read-Only", "Open Anyway");
-                if (Session.ReadOnly) Status($"Opened {Path.GetFileName(path)} read-only: {l.User} has it open.");
+                if (tab.Session.ReadOnly) Status($"Opened {Path.GetFileName(path)} read-only: {l.User} has it open.");
             }
             return true;
         }
@@ -999,10 +1006,11 @@ public partial class MainWindow
         {
             // the part stays open, marked, saying why (Retry reads it again)
             App.Log(ex, "Open " + path);
-            _tab.Source = path;
-            Session.UntitledName = Path.GetFileNameWithoutExtension(path);
-            _tab.LoadError = ex.Message;
-            UpdateTabHeader(_tab);
+            tab.Source = path;
+            tab.Session.UntitledName = Path.GetFileNameWithoutExtension(path);
+            tab.LoadError = ex.Message;
+            EndLoading(tab);
+            UpdateTabHeader(tab);
             UpdateLoadBanner();
             return true;
         }

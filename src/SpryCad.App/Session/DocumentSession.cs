@@ -58,7 +58,6 @@ public sealed class DocumentSession
     bool _runningPreview;
     // how long each feature took when last built: the time left of a rebuild is estimated from them
     readonly System.Collections.Concurrent.ConcurrentDictionary<string, double> _featureMs = new();
-    long _lastProgressPost;
 
     public static CadDocument NewDocument() => new();
 
@@ -248,21 +247,35 @@ public sealed class DocumentSession
         RequestRebuild();
     }
 
-    public void Load(string path)
+    /// <summary>A part's file read (<see cref="Read"/>) and not yet the session's (<see cref="Load(Opened)"/>).</summary>
+    public sealed record Opened(string Path, WorkingCopy Copy, CadDocument Doc, SupersededBy? Superseded, MeshCache.Entry? Saved);
+
+    /// <summary>Reads a part's file (its local copy, the document, a display saved with it), touching no session state: can run off the UI thread.</summary>
+    public static Opened Read(string path)
     {
         var wc = WorkingCopy.Open(path);
-        CadDocument d;
-        try { d = wc.Load(); }
+        try
+        {
+            var d = wc.Load();
+            // a display saved with it: shown until the rebuild is done
+            MeshCache.Entry? saved = null;
+            if (d.Display != null) { try { saved = MeshCache.Read(d.Display); } catch { } d.Display = null; }
+            return new Opened(path, wc, d, Supersede.Read(path), saved);
+        }
         catch { wc.Close(); throw; }
+    }
+
+    public void Load(string path) => Load(Read(path));
+
+    public void Load(Opened o)
+    {
         _wc?.Close();
-        _wc = wc;
-        Superseded = Supersede.Read(path);
+        _wc = o.Copy;
+        Superseded = o.Superseded;
         _readOnly = Superseded != null;
-        Doc = d; FilePath = path; Dirty = false;
-        // a display saved with it: shown until the rebuild is done
-        _saved = null;
-        if (d.Display != null) { try { _saved = MeshCache.Read(d.Display); } catch { } d.Display = null; }
-        PartsIndexStore.Record(d, path);
+        Doc = o.Doc; FilePath = o.Path; Dirty = false;
+        _saved = o.Saved;
+        PartsIndexStore.Record(o.Doc, o.Path);
         _undo.Clear(); _redo.Clear();
         _regen.Invalidate();
         _exportRegen.Invalidate();
@@ -498,14 +511,8 @@ public sealed class DocumentSession
             // estimate: the features still to build, at the time they took last time
             double Remaining(int from) => doc.Features.Skip(from).Take(Math.Max(0, doc.ActiveCount - from))
                 .Sum(f => _featureMs.TryGetValue(f.Id, out var ms) ? ms : 0);
-            void Report(RegenProgress p)
-            {
-                var now = Environment.TickCount64;
-                if (now - Interlocked.Read(ref _lastProgressPost) < 150) return;
-                Interlocked.Exchange(ref _lastProgressPost, now);
-                var rp = new RebuildProgress(preview, p.Index, p.Count, p.FeatureName, p.Detail, started.Elapsed.TotalSeconds, Remaining(p.Index) / 1000);
-                Dispatcher.UIThread.Post(() => Progress?.Invoke(rp));
-            }
+            void Report(RegenProgress p) =>
+                PostProgress(new RebuildProgress(preview, p.Index, p.Count, p.FeatureName, p.Detail, started.Elapsed.TotalSeconds, Remaining(p.Index) / 1000));
             // a newer request of the same kind waiting: this result would not be shown
             bool Stale() { lock (_lock) return (preview ? _pendingPreview : _pendingReal) != null; }
             try
@@ -513,7 +520,8 @@ public sealed class DocumentSession
                 r = _regen.Rebuild(doc, null, cts.Token, Report);
                 timing.Rebuilt = Stopwatch.GetTimestamp();
                 foreach (var (id, st) in r.Status) if (st.Milliseconds > 0) _featureMs[id] = st.Milliseconds;
-                // build display meshes off the UI thread (not for a result already superseded)
+                // build display meshes off the UI thread (not for a result already superseded); a big model's take a while too
+                PostProgress(new RebuildProgress(preview, doc.ActiveCount, doc.ActiveCount, "", null, started.Elapsed.TotalSeconds, 0) { Meshing = true });
                 foreach (var b in r.State.Bodies) { if (Stale()) break; _ = b.Mesh; }
                 foreach (var s in r.States) foreach (var b in s.Bodies) if (!b.HasMesh && s == r.States[^1] && !Stale()) _ = b.Mesh;
                 timing.Meshed = Stopwatch.GetTimestamp();
@@ -540,6 +548,22 @@ public sealed class DocumentSession
         Dispatcher.UIThread.Post(() => BusyChanged?.Invoke(false));
     }
 
+    // the latest progress, and whether a post to the UI thread is waiting to show it: the UI is not flooded, and the
+    // step reported last is the one shown (one that takes long, such as reading a STEP file, is never dropped)
+    RebuildProgress? _latestProgress;
+    int _progressPosted;
+
+    void PostProgress(RebuildProgress p)
+    {
+        Volatile.Write(ref _latestProgress, p);
+        if (Interlocked.Exchange(ref _progressPosted, 1) == 1) return;
+        Dispatcher.UIThread.Post(() =>
+        {
+            Interlocked.Exchange(ref _progressPosted, 0);
+            if (Volatile.Read(ref _latestProgress) is { } latest) Progress?.Invoke(latest);
+        }, DispatcherPriority.Background);
+    }
+
     /// <summary>The result that should be displayed (preview when active).</summary>
     public RegenResult? DisplayResult => PreviewActive && PreviewResult != null ? PreviewResult : Result;
 
@@ -557,17 +581,26 @@ public sealed class DocumentSession
 /// <summary>A running rebuild's progress, for the status bar.</summary>
 public sealed record RebuildProgress(bool Preview, int Index, int Count, string Feature, string? Detail, double ElapsedSeconds, double EstimatedLeftSeconds)
 {
-    public string Text
+    /// <summary>The features are built: their display meshes are being made.</summary>
+    public bool Meshing { get; init; }
+
+    public string Text => $"{(Preview ? "Preview" : "Rebuilding")}: {Step}";
+
+    /// <summary>The step alone: the feature (n of m) and what it is doing, or the display meshes; the time taken and left.</summary>
+    public string Step
     {
         get
         {
-            var t = $"{(Preview ? "Preview" : "Rebuilding")}: {Feature} ({Index + 1}/{Count})";
-            if (Detail != null) t += $" – {Detail}";
+            var t = Meshing ? "display meshes" : $"{Feature} ({Index + 1} of {Count})";
+            if (!Meshing && Detail != null) t += $": {Detail}";
             t += $"  {ElapsedSeconds:0.0} s";
-            if (EstimatedLeftSeconds >= 1) t += $", about {EstimatedLeftSeconds:0} s left";
+            if (!Meshing && EstimatedLeftSeconds >= 1) t += $", about {EstimatedLeftSeconds:0} s left";
             return t;
         }
     }
+
+    /// <summary>How far through the features (0 to 1).</summary>
+    public double Fraction => Meshing || Count <= 0 ? 1 : (double)Index / Count;
 }
 
 /// <summary>

@@ -51,6 +51,10 @@ public partial class MainWindow
         public string? ImportError;
         /// <summary>Why the part could not be opened, if it could not: shown in red on its tab and row, and over the view.</summary>
         public string? Error => LoadError ?? ImportError;
+        /// <summary>Being opened or imported: what the card over its view says ("Opening X"), until its rebuild is done; null when not.</summary>
+        public string? Loading;
+        /// <summary>Its file is being read, its rebuild not started yet: a rebuild ending meanwhile does not end <see cref="Loading"/>.</summary>
+        public bool LoadingRead;
         /// <summary>When it was opened, as a count (the list can be ordered by it).</summary>
         public readonly long Opened = ++_openedCount;
     }
@@ -95,8 +99,12 @@ public partial class MainWindow
         };
         s.DocumentChanged += () => { UpdateTabHeader(t); if (s == Session) OnDocumentChanged(); };
         // (while it shows the display saved with it, opened just now, that is what it says)
-        s.BusyChanged += busy => { if (s == Session) { BusyText.IsVisible = busy; BusyText.Text = s.SavedDisplay != null ? "Shown as saved, rebuilding…" : "Rebuilding…"; } };
+        // (as it is now: a late "done" from the rebuild before must not hide a rebuild just started)
+        s.BusyChanged += _ => { if (s == Session) { BusyText.IsVisible = s.Busy; BusyText.Text = s.SavedDisplay != null ? "Shown as saved, rebuilding…" : "Rebuilding…"; } };
         s.Progress += p => { if (s == Session && s.Busy) BusyText.Text = (s.SavedDisplay != null ? "Shown as saved. " : "") + p.Text; };
+        // opened or imported just now: the card over its view shows the progress until the rebuild is done
+        s.Progress += p => { if (t == _tab && s.Busy) ShowLoadingProgress(t, p); };
+        s.BusyChanged += busy => { if (!busy && !s.Busy && !t.LoadingRead) EndLoading(t); };
 
         t.Label = new TextBlock { VerticalAlignment = VerticalAlignment.Center, FontSize = UI.TypeScale.Body, Margin = new Thickness(0, 0, 6, 0) };
         var close = new Button
@@ -542,11 +550,13 @@ public partial class MainWindow
     {
         if (t.Session.TakePending() is not { } path) return null;
         var s = t.Session;
+        BeginLoading(t, (IsStep(path) ? "Importing " : "Opening ") + Path.GetFileName(path));
         if (IsStep(path))
         {
             s.New();
             var err = ImportInto(t, path);
             s.MarkClean();
+            if (err != null) EndLoading(t);
             return err;
         }
         try
@@ -556,7 +566,7 @@ public partial class MainWindow
             t.FitAfterLoad = s.RequestedRevision;
             return null;
         }
-        catch (Exception ex) { App.Log(ex, "Open " + path); return ex.Message; }
+        catch (Exception ex) { App.Log(ex, "Open " + path); EndLoading(t); return ex.Message; }
     }
 
     /// <summary>
@@ -678,7 +688,7 @@ public partial class MainWindow
     /// <summary>An unsaved new part nobody has worked on: opening a file reuses its tab instead of adding one.</summary>
     bool IsUntouched(PartTab t) =>
         t.Asm == null && t.Session.FilePath == null && !t.Session.Dirty && !t.Session.CanUndo && t.Session.Doc.Features.Count == 0
-        && !t.Session.IsPending && t.Error == null && !(t == _tab && HasPendingEdit);
+        && !t.Session.IsPending && t.Loading == null && t.Error == null && !(t == _tab && HasPendingEdit);
 
     /// <summary>Opens an empty tab and makes it active (null if leaving the current one was cancelled).</summary>
     async Task<PartTab?> NewTab()
@@ -723,6 +733,7 @@ public partial class MainWindow
 
         StatusRebuild.Text = "";
         BusyText.IsVisible = Session.Busy;
+        UpdateLoadingCard();
         OnDocumentChanged();
         OnRebuilt();
         if (t.View is { } v) { cam.Rotation = v.rotation; cam.Target = v.target; cam.HalfHeight = v.halfHeight; Viewport.Redraw(); }
