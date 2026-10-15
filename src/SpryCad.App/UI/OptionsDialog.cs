@@ -277,7 +277,7 @@ public static class OptionsDialog
         var checkNow = new Button { Content = "Check Now", IsEnabled = can };
         var update = new Button { IsVisible = false };
         var restart = new Button { Content = "Install Now", IsVisible = false };
-        ToolTip.SetTip(restart, "Closes SpryCAD and installs the update. Prompts to save files with changes.");
+        ToolTip.SetTip(restart, "Closes SpryCAD, installs the update and reopens. Prompts to save files with changes.");
         f.Row("Latest", new WrapPanel { Orientation = Orientation.Horizontal, ItemSpacing = 8, LineSpacing = 6, Children = { latest, checkNow, update, restart } });
         var changes = f.Row("Changes", new Button { Content = "Change Log...", HorizontalAlignment = HorizontalAlignment.Left },
             "What each build of the picked channel changed, newest first.");
