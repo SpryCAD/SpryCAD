@@ -29,13 +29,13 @@ public static class AssemblyContainer
     /// it has none, a new revision when it changed). <paramref name="previous"/>: the bytes it had, so its history goes on
     /// (and it keeps its revision when nothing changed).
     /// </summary>
-    public static byte[] ToBytes(AssemblyDocument asm, byte[]? previous = null)
+    public static byte[] ToBytes(AssemblyDocument asm, byte[]? previous = null, bool durable = true)
     {
         var tmp = Path.Combine(Path.GetTempPath(), "sprycad-" + Guid.NewGuid().ToString("N") + AssemblyDocument.FileExtension);
         try
         {
             if (previous != null && Storage.PartDatabase.Is(previous)) File.WriteAllBytes(tmp, previous);
-            Storage.AssemblyFile.Save(asm, tmp);
+            Storage.AssemblyFile.Save(asm, tmp, durable: durable);
             return File.ReadAllBytes(tmp);
         }
         finally { try { File.Delete(tmp); } catch { /* best effort */ } }

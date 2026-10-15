@@ -28,8 +28,50 @@ static class NBrepFileTests
         return h;
     }
 
+    // a STEP file's instances as text, in their order (ids, types, arguments)
+    static string Dump(StepFile f)
+    {
+        var sb = new System.Text.StringBuilder();
+        void Arg(object? a)
+        {
+            switch (a)
+            {
+                case List<object?> l: sb.Append('('); foreach (var x in l) { Arg(x); sb.Append(','); } sb.Append(')'); break;
+                case double d: sb.Append(BitConverter.DoubleToInt64Bits(d)); break;
+                case StepTyped ty: sb.Append(ty.Type).Append('('); Arg(ty.Value); sb.Append(')'); break;
+                case null: sb.Append('$'); break;
+                default: sb.Append(a); break;
+            }
+        }
+        foreach (var (type, args) in f.Header) { sb.Append(type); Arg(args); sb.Append('\n'); }
+        foreach (var i in f.Instances.Values) { sb.Append(i.Id).Append('='); foreach (var (type, args) in i.Parts) { sb.Append(type); Arg(args); } sb.Append('\n'); }
+        return sb.ToString();
+    }
+
     public static void Run(TestRunner t)
     {
+        t.Test("STEP files parsed in pieces at once read as parsed in order (every STEP model and demo export)", () =>
+        {
+            var root = Root();
+            var files = Directory.GetFiles(Path.Combine(root, "tests", "SpryCad.Tests", "models", "step"), "*.step")
+                .Concat(Directory.GetFiles(Path.Combine(root, "samples", "demos"), "*.step")).ToList();
+            var was = StepFile.ParallelMin;
+            try
+            {
+                foreach (var file in files)
+                {
+                    var data = File.ReadAllBytes(file);
+                    StepFile.ParallelMin = int.MaxValue;
+                    var inOrder = Dump(StepFile.Parse(data));
+                    StepFile.ParallelMin = 0;
+                    t.True(Dump(StepFile.Parse(data)) == inOrder, Path.GetFileName(file) + " parsed in pieces differs");
+                }
+            }
+            finally { StepFile.ParallelMin = was; }
+            t.True(files.Count > 5, "the STEP files found");
+        });
+
+
         t.Test("Solid files: every STEP model and demo export written and read back the same (names, geometry, display)", () =>
         {
             var root = Root();

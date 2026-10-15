@@ -39,7 +39,7 @@ public static class AssemblyFile
     }
 
     /// <summary>Saves the assembly as a revision of its history in the file (none when nothing changed); sets its identity and revision.</summary>
-    public static void Save(AssemblyDocument doc, string path, string? author = null, string message = "")
+    public static void Save(AssemblyDocument doc, string path, string? author = null, string message = "", bool durable = true)
     {
         foreach (var name in doc.Files.Keys) DocumentContainer.CheckName(name);
         doc.Id ??= CadDocument.NewGuid();
@@ -51,7 +51,7 @@ public static class AssemblyFile
         {
             bool append = File.Exists(path) && PartDatabase.IsFile(path) && RootOf(path) == asmId;
             if (append) File.Copy(path, tmp, overwrite: true);
-            using (var db = append ? PartDatabase.Open(tmp, readOnly: false) : PartDatabase.Create(tmp))
+            using (var db = append ? PartDatabase.Open(tmp, readOnly: false) : PartDatabase.Create(tmp, durable))
             {
                 // the documents embedded in it: their rows (a part or sub-assembly saved before databases, converted first)
                 Directory.CreateDirectory(scratch);

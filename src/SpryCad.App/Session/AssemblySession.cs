@@ -69,9 +69,18 @@ public sealed class AssemblySession
             for (var jobs = Model.PendingJobs(); jobs.Count > 0; jobs = Model.PendingJobs())
             {
                 var built = new System.Collections.Concurrent.ConcurrentQueue<(AssemblyModel.PendingJob job, PartDisplay? display, string? problem)>();
+                // a part used in several sub-assemblies (one document: a STEP assembly's): built once, shown in each
+                // (a document's jobs run one after another, so no two build it at once)
+                var made = new System.Collections.Concurrent.ConcurrentDictionary<(object doc, string config, PartSource source, SpryCad.Core.Regen.ThreadDisplay threads), PartDisplay>();
                 var run = Task.Run(() => PartWork.Each(jobs, j => j.Placeholder.Part!, job =>
                 {
-                    try { built.Enqueue((job, job.Build(), null)); }
+                    try
+                    {
+                        var p = job.Placeholder;
+                        var k = ((object)p.Part!, p.Config, p.Source, job.Threads);
+                        if (!made.TryGetValue(k, out var d)) made[k] = d = job.Build();
+                        built.Enqueue((job, d, null));
+                    }
                     catch (Exception ex) { App.Log(ex, "Build component part " + job.Name); built.Enqueue((job, null, ex.Message)); }
                 }));
                 // each shown as it comes (here, on the UI thread): what is drawn, a few times a second at most (the

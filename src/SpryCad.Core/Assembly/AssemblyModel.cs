@@ -527,19 +527,78 @@ public sealed partial class AssemblyModel
             made[i] = (saved, mesh, threads);
         });
         var pIns = Kernel.Prof.Time("stepasm.insert");
-        Component? first = null;
-        foreach (var o in res.Occurrences)
+        // its sub-assemblies as the file has them (one top product holding others): each an embedded sub-assembly,
+        // rigid, made once however often it is used, its components fixed where the file puts them; else every use
+        // of a part a component of the assembly itself
+        var subs = new Dictionary<int, (AssemblyModel model, int height)>();
+        var placed = new List<(AssemblyModel owner, string file, int product)>(); // where each sub-assembly's file goes
+        (AssemblyModel model, int height) Sub(int p)
         {
-            var c = m.InsertEmbedded(docs[o.Part], names[o.Part], o.Placement, made[o.Part]);
+            if (subs.TryGetValue(p, out var had)) return had;
+            var sm = New();
+            sm.Doc.Id = CadDocument.NewGuid();
+            int height = 0;
+            foreach (var u in res.Products[p].Uses)
+            {
+                if (u.Part >= 0) { sm.InsertEmbedded(docs[u.Part], names[u.Part], u.Placement, made[u.Part]).Fixed = true; continue; }
+                var (child, h) = Sub(u.Product);
+                height = Math.Max(height, h + 1);
+                sm.InsertEmbeddedSub(child, u.Product, res.Products[u.Product].Name, u.Placement, placed).Fixed = true;
+            }
+            return subs[p] = (sm, height);
+        }
+        var top = res.Roots.Count == 1 && res.Products[res.Roots[0]].Uses.Any(u => u.Product >= 0)
+            ? res.Products[res.Roots[0]].Uses
+            : res.Occurrences.Select(o => new StepUse(o.Part, -1, o.Name, o.Placement)).ToList();
+        Component? first = null;
+        foreach (var u in top)
+        {
+            var c = u.Part >= 0 ? m.InsertEmbedded(docs[u.Part], names[u.Part], u.Placement, made[u.Part]) : m.InsertEmbeddedSub(Sub(u.Product).model, u.Product, res.Products[u.Product].Name, u.Placement, placed);
             if (first == null) { first = c; continue; }
             // held where the file put it: locked to the first component
             // (a lock holds the components themselves: no face is needed; each holds them where they are, so they are
             // solved once after, not after each)
             m.AddMate(MateType.Lock, new MateRef { Component = c.Id, D = Vec3.UnitZ }, new MateRef { Component = first.Id, D = Vec3.UnitZ }, settle: false);
         }
+        // the sub-assemblies' files: each holds those of the sub-assemblies it uses, so the innermost first; those as
+        // deep as each other at once (a file read back at once: not synced to disk)
+        using (Kernel.Prof.Time("stepasm.subfiles"))
+            foreach (var level in subs.GroupBy(kv => kv.Value.height).OrderBy(g => g.Key))
+            {
+                var files = new System.Collections.Concurrent.ConcurrentDictionary<int, byte[]>();
+                Parallel.ForEach(level, kv => files[kv.Key] = AssemblyContainer.ToBytes(kv.Value.model.Doc, durable: false));
+                foreach (var (owner, file, product) in placed.Where(x => files.ContainsKey(x.product)))
+                {
+                    owner.Doc.Files[file] = files[product];
+                    var revision = subs[product].model.Doc.Revision;
+                    foreach (var c in owner.Doc.Components.Where(c => c.Part.Embedded == file)) c.Part.Revision = revision;
+                }
+            }
         if (m.HasMates) m.SolveMates();
         pIns.Dispose();
         return m;
+    }
+
+    /// <summary>
+    /// Adds a component of a sub-assembly made here (<see cref="FromStep"/>), shown by that model: its file embedded
+    /// once (further components of it share the copy), written later (where noted in <paramref name="placed"/>). Rigid.
+    /// </summary>
+    Component InsertEmbeddedSub(AssemblyModel sub, int product, string name, Transform placement, List<(AssemblyModel owner, string file, int product)> placed)
+    {
+        var sd = sub.Doc;
+        PartRef r;
+        if (Doc.Components.Select(c => c.Part).FirstOrDefault(p => p.Assembly && p.Embedded != null && p.PartId == sd.Id) is { } same) r = same.Clone();
+        else
+        {
+            r = new PartRef { PartId = sd.Id, Assembly = true, Embedded = UniqueName("subs/" + SafeFileName(name) + AssemblyDocument.FileExtension) };
+            Doc.Files[r.Embedded] = Array.Empty<byte>();
+            placed.Add((this, r.Embedded, product));
+        }
+        var key = ComponentResolver.Key(r);
+        if (!Resolution.Parts.ContainsKey(key)) Resolution.Parts[key] = new PartResolution(PartStatus.Embedded, null, false, null);
+        var c = Doc.AddComponent(r, placement, name);
+        if (!Subs.ContainsKey(SubKey(c))) Subs[SubKey(c)] = new SubAssembly { Model = sub, Source = SubSource.Embedded };
+        return c;
     }
 
     string UniqueName(string name)

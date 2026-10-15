@@ -33,7 +33,9 @@ public sealed class AssemblyTree : DockPanel
     public event Action<string?>? Hovered;
     readonly Dictionary<string, Border> _rowById = new();
     string? _selected;        // a component's path, "mate:" + a mate's id, or "pattern:" + a pattern's
-    bool _matesOpen = true, _patternsOpen = true, _originOpen;
+    bool _patternsOpen = true, _originOpen;
+    // (null: as it starts, open unless there are many mates: a STEP assembly's hundreds of locks)
+    bool? _matesOpenSet;
     /// <summary>The sub-assemblies shown open (by path).</summary>
     readonly HashSet<string> _open = new();
     string? _doubleClicked;
@@ -124,7 +126,7 @@ public sealed class AssemblyTree : DockPanel
             if (!FlyoutOpen) return;
         }
         else
-        AddRow("__asm", 0, "assembly", s.Title.TrimEnd(' ', '*'), note: configs.Count > 1 ? m.Doc.ActiveConfigurationName : null, header: true, menu: AssemblyMenu(m),
+        AddRow("__asm", 0, "assembly", s.Title.TrimEnd(' ', '*'), note: configs.Count > 1 ? m.Doc.ActiveConfigurationName : null, header: true, menu: () => AssemblyMenu(m),
             tip: configs.Count > 1 ? $"Configuration: {m.Doc.ActiveConfigurationName} (right-click to change)" : "Right-click for configurations, the bill of materials and more");
         // the origin, as the part's tree has it: a folder of the three planes (each with an eye), the axes and the point
         AddRow("__origin", 1, "folder", "Origin", folder: true, expander: (_originOpen, () => { _originOpen = !_originOpen; Show(s); }));
@@ -142,9 +144,10 @@ public sealed class AssemblyTree : DockPanel
         {
             var broken = m.BrokenMates().ToDictionary(x => x.mate, x => x.why);
             var anyOff = broken.Count > 0 || m.Doc.Mates.Any(x => !x.Suppressed && (m.LastSolve?.Errors.GetValueOrDefault(x.Id) ?? 0) > 1e-6);
-            AddRow("__mates", 1, "mates", "Mates", folder: true, bad: anyOff && !_matesOpen, expander: (_matesOpen, () => { _matesOpen = !_matesOpen; Show(s); }),
-                tip: anyOff && !_matesOpen ? "A mate is not satisfied (open the folder)" : null);
-            if (_matesOpen)
+            var matesOpen = _matesOpenSet ?? m.Doc.Mates.Count <= 50;
+            AddRow("__mates", 1, "mates", "Mates", note: matesOpen ? null : m.Doc.Mates.Count.ToString(), folder: true, bad: anyOff && !matesOpen, expander: (matesOpen, () => { _matesOpenSet = !matesOpen; Show(s); }),
+                tip: anyOff && !matesOpen ? "A mate is not satisfied (open the folder)" : null);
+            if (matesOpen)
             {
                 string NameOf(MateRef r) => r.Component == null ? r.Face + " Plane" : m.NameAt(r.Component) + (m.Find(r.Component)?.Component.IsAssembly == true ? $" {r.Face} Plane" : "");
                 foreach (var mate in m.Doc.Mates)
@@ -153,7 +156,7 @@ public sealed class AssemblyTree : DockPanel
                     var why = broken.GetValueOrDefault(mate);
                     var off = why != null || !mate.Suppressed && err > 1e-6;
                     AddRow("mate:" + mate.Id, 2, IconFor(mate.Type), mate.Name + ValueOf(mate, m.Doc.Units), note: why != null ? $"reference missing: {why}" : $"{NameOf(mate.A)}, {NameOf(mate.B)}",
-                        bad: off, dim: mate.Suppressed, menu: MenuFor(mate, why != null),
+                        bad: off, dim: mate.Suppressed, menu: () => MenuFor(mate, why != null),
                         tip: why != null ? $"A reference is missing ({why}): right-click, Repair, to pick it again.\n{NameOf(mate.A)}, {NameOf(mate.B)}"
                             : off ? $"Not satisfied: off by {err:0.######} (it conflicts with other mates, or cannot be reached)"
                             : $"{mate.Type}{(mate.Suppressed ? ", suppressed" : "")}, {(mate.Aligned ? "aligned" : "anti-aligned")}. Double-click to edit, F2 to rename.");
@@ -175,7 +178,7 @@ public sealed class AssemblyTree : DockPanel
                         _ => "mirrored",
                     };
                     AddRow("pattern:" + p.Id, 2, p.Kind switch { PatternKind.Linear => "lpattern", PatternKind.Circular => "cpattern", _ => "mirror" }, p.Name,
-                        note: $"{seeds}: {what}", menu: MenuFor(p), tip: "Double-click to edit");
+                        note: $"{seeds}: {what}", menu: () => MenuFor(p), tip: "Double-click to edit");
                 }
         }
         // the selection survives the rows being made again (unless what it was is gone)
@@ -236,7 +239,7 @@ public sealed class AssemblyTree : DockPanel
         if (o.Rel == null && c.Pattern != null && m.Doc.Patterns?.FirstOrDefault(p => p.Id == c.Pattern) is { } pat) { tags.Add("copy: " + pat.Name); tip += $"\nA copy made by {pat.Name}: placed by it."; }
         var open = sub?.Model != null && _open.Contains(path);
         AddRow(path, indent, c.IsAssembly ? "assembly" : "part", $"{(c.Fixed ? "(f)" : "(-)")} {c.Name}" + (config.Length > 0 ? $" ({config})" : ""),
-            note: tags.Count > 0 ? string.Join(", ", tags) : null, bad: bad, dim: o.Suppressed || o.Hidden, tip: tip, menu: MenuFor(m, o),
+            note: tags.Count > 0 ? string.Join(", ", tags) : null, bad: bad, dim: o.Suppressed || o.Hidden, tip: tip, menu: () => MenuFor(m, o),
             expander: sub?.Model != null ? (open, () => { if (!_open.Remove(path)) _open.Add(path); if (_shown != null) Show(_shown); }) : null);
         if (open)
             foreach (var cc in sub!.Model!.Doc.Components)
@@ -245,7 +248,7 @@ public sealed class AssemblyTree : DockPanel
 
     /// <summary>A row as the part's tree draws them: an arrow (folders, sub-assemblies), the icon, the name, a note in grey.</summary>
     void AddRow(string key, int indent, string icon, string text, string? note = null, bool header = false, bool folder = false,
-        bool bad = false, bool dim = false, string? tip = null, ContextMenu? menu = null, (bool open, Action toggle)? expander = null, bool? eye = null)
+        bool bad = false, bool dim = false, string? tip = null, Func<ContextMenu>? menu = null, (bool open, Action toggle)? expander = null, bool? eye = null)
     {
         // as the part's tree (UI/TreeRow.cs): as wide as the tree, the grey note trimmed first when the row is too
         // long, then the name; the whole of it on the row's tip
@@ -265,7 +268,16 @@ public sealed class AssemblyTree : DockPanel
         }
         sp.Shrink.Add(tb);
         if (eye is { } shown && !Flyout) sp.Children.Add(EyeButton(key, shown));
-        var row = new Border { Classes = { "treerow" }, Child = sp, Tag = key, ContextMenu = Flyout ? null : menu };
+        var row = new Border { Classes = { "treerow" }, Child = sp, Tag = key };
+        // its menu made when first wanted (hundreds of rows, a dozen items each: most of making the tree)
+        if (!Flyout && menu != null)
+            row.AddHandler(ContextRequestedEvent, (_, e) =>
+            {
+                if (row.ContextMenu != null) return;
+                row.ContextMenu = menu();
+                row.ContextMenu.Open(row);
+                e.Handled = true;
+            }, Avalonia.Interactivity.RoutingStrategies.Tunnel);
         row.PointerEntered += (_, _) => Hovered?.Invoke(key);
         row.PointerExited += (_, _) => Hovered?.Invoke(null);
         if (tip != null || note != null) ToolTip.SetTip(row, (note != null ? $"{text}  {note}" : text) + (tip != null ? "\n" + tip : ""));
