@@ -983,7 +983,7 @@ public partial class MainWindow
             var opened = await Task.Run(() => DocumentSession.Read(path));
             if (!_parts.Contains(tab)) { opened.Copy.Close(); return false; } // (its tab closed meanwhile)
             tab.Session.Load(opened);
-            tab.LoadingRead = false;
+            BeginLoading(tab, "Opening " + Path.GetFileName(path)); // (read: now rebuilding)
             if (!IsAutosave(path) && !IsEmbeddedCopy(path)) RecentFiles.Add(path);
             Status("Opened " + path);
             tab.FitAfterLoad = tab.Session.RequestedRevision;
