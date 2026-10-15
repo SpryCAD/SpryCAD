@@ -45,7 +45,7 @@ public partial class MainWindow
         ShowConfirmCorner(CommitEdit, CancelEdit, "OK (Enter)", "Cancel (Esc)");
         FocusFirstField(page);
         SchedulePreview();
-        Status($"{f.Name}: set the parameters, then click OK (Enter) or Esc to cancel.");
+        Status($"{f.Name}: set the parameters, then click OK (Enter) or press Esc to cancel.");
     }
 
     /// <summary>Focuses and selects the first text field of a page (type a value, Enter = OK).</summary>
@@ -87,7 +87,7 @@ public partial class MainWindow
         if (_page != null && !_edit.IsNew)
         {
             var (secs, slowest, slowSecs) = Session.Estimate(doc, doc.IndexOf(clone.Id));
-            var note = secs >= 2 ? $"⏱ Each preview rebuilds the features from here on: about {secs:0} s{(slowest != null && slowSecs >= 1 ? $" ({slowest} {slowSecs:0.0} s)" : "")}." : null;
+            var note = secs >= 2 ? $"⏱ Each preview rebuilds all subsequent features, about {secs:0} s{(slowest != null && slowSecs >= 1 ? $"; slowest: {slowest}, {slowSecs:0.0} s" : "")}." : null;
             if (note != null && (_page.Message == null || _page.Message == _edit.Hint || _page.Message.StartsWith("⏱"))) _page.Message = note;
         }
         Session.RequestPreview(doc);
@@ -100,7 +100,7 @@ public partial class MainWindow
         if (_page?.FirstInvalidField is { } bad)
         {
             _page.Message = $"\u2716 \"{bad}\" has an invalid value.";
-            Status($"Fix \"{bad}\" first (or Esc to cancel).");
+            Status($"Correct \"{bad}\" before clicking OK, or press Esc to cancel.");
             return;
         }
         if (!_previewTimer.IsEnabled && !Session.Busy && Session.PreviewResult is { } pr
@@ -161,7 +161,7 @@ public partial class MainWindow
                     else
                     {
                         try { frame = Resolver.ResolvePlane(sf.Plane, r == null ? ModelState.Initial() : StateBefore(r, Session.Doc.IndexOf(sf.Id))); }
-                        catch (Exception ex) { App.Log(ex, "Edit sketch"); Status("Cannot edit sketch: " + ex.Message); return; }
+                        catch (Exception ex) { App.Log(ex, "Edit sketch"); Status("Could not edit sketch: " + ex.Message); return; }
                     }
                     var consumer = Session.Doc.ConsumersOf(sf.Id).FirstOrDefault();
                     EnterSketch((SketchFeature)sf.Clone(), frame, isNew: false, pointsOnly: consumer is HoleFeature);
@@ -274,7 +274,7 @@ public partial class MainWindow
             if (Selection.First is { } s && (s.Kind == SelKind.Plane || s.Kind == SelKind.Face && s.Planar))
             {
                 StartSketchCommand(cut ? "cut" : "extrude");
-                Status("Sketch the profile, then click Exit Sketch to continue the extrude.");
+                Status("Sketch the profile, then click Exit Sketch to continue.");
                 return;
             }
         }
@@ -297,7 +297,7 @@ public partial class MainWindow
         page.Check(d1, "Reverse direction", () => f.Reverse, v => f.Reverse = v);
         // Up To Surface / Up To Body: where it ends (a plane, a planar or cylindrical face; for a body, any face of it)
         var upTo = page.Selection(d1, "Up to", SelFilter.Face | SelFilter.Plane,
-            "Up To Surface: a plane, or a planar or cylindrical face, the extrude ends at. Up To Body: a face of the body it ends at", 1);
+            "Plane, or planar or cylindrical face, to end at; for Up To Body, any face of the body", 1);
         if (PlaneItem(f.UpTo, StateForEdit(f, isNew)) is { } ui) upTo.Items.Add(ui);
         upTo.Changed += () => f.UpTo = upTo.Items.FirstOrDefault() is { } it ? (it.Kind == SelKind.Face ? new PlaneRef { Face = it.ToFaceRef() } : it.ToPlaneRef()) : null;
         page.Number(d1, "Depth", () => f.Depth, v => f.Depth = v, "dimension");
@@ -331,7 +331,7 @@ public partial class MainWindow
         if (sk == null && Selection.First is { } s && (s.Kind == SelKind.Plane || s.Kind == SelKind.Face && s.Planar))
         {
             StartSketchCommand(cut ? "cutrevolve" : "revolve");
-            Status("Sketch the profile and a centerline (axis), then click Exit Sketch.");
+            Status("Sketch the profile and a centerline, then click Exit Sketch.");
             return;
         }
         OpenRevolvePage(new RevolveFeature { SketchId = sk ?? "", IsCut = cut }, true);
@@ -348,7 +348,7 @@ public partial class MainWindow
         // conical face, a straight or circular edge); the X / Y / Z buttons; empty: the sketch's first centerline
         var st = StateForEdit(f, isNew);
         var axBox = page.Selection(axisSec, "Axis", SelFilter.SketchSegment | SelFilter.Edge | SelFilter.Face | SelFilter.Axis,
-            "A centerline or line of the profile's sketch, the axis of a cylindrical or conical face or a circular edge (right-click: Select Axis), a straight edge, or an axis button", 1);
+            "Centerline or line in the profile sketch, linear edge, axis of a cylindrical or conical face or circular edge (right-click > Select Axis), or an axis button", 1);
         if (f.Axis != null) { if (DirItem(f.Axis, st) is { } ai) axBox.Items.Add(ai); }
         else if (f.AxisEntity != 0) axBox.Items.Add(new SelItem { Kind = SelKind.SketchSegment, FeatureId = f.SketchId, SketchItem = f.AxisEntity });
         var axisLbl = new TextBlock { FontSize = UI.TypeScale.Small, Foreground = UI.Palette.TextMuted, TextWrapping = Avalonia.Media.TextWrapping.Wrap };
@@ -367,7 +367,7 @@ public partial class MainWindow
                 // a line of the profile's sketch only (another sketch's line is not tied to this one)
                 if (it.FeatureId == f.SketchId && Session.Doc.Find(f.SketchId) is SketchFeature sf && sf.Sketch.Entity(it.SketchItem) is SkLine)
                 { f.AxisEntity = it.SketchItem; f.Axis = null; }
-                else { axBox.Items.Clear(); axBox.Refresh(); Status("Pick a line in the profile's sketch, or an edge or face of the model."); }
+                else { axBox.Items.Clear(); axBox.Refresh(); Status("Select a line in the profile sketch, or a model edge or face."); }
             }
             else if (it.ToDirRef() is { } dr) { f.Axis = dr; f.AxisEntity = 0; }
             UpdAxis();
@@ -404,10 +404,10 @@ public partial class MainWindow
     {
         var page = new PmPage(f.IsCut ? "Cut-Sweep" : "Sweep", f.IsCut ? "cutsweep" : "sweep");
         var sec = page.Section("Profile and Path");
-        var profBox = page.Selection(sec, "Profile", SelFilter.Sketch, "Closed profile sketch, perpendicular to the path where it starts", 1);
+        var profBox = page.Selection(sec, "Profile", SelFilter.Sketch, "Closed profile sketch, perpendicular to the path at its start", 1);
         if (!string.IsNullOrEmpty(f.ProfileSketchId)) profBox.Items.Add(new SelItem { Kind = SelKind.Sketch, FeatureId = f.ProfileSketchId });
         profBox.Changed += () => f.ProfileSketchId = profBox.Items.FirstOrDefault()?.FeatureId ?? "";
-        var pathBox = page.Selection(sec, "Path", SelFilter.Sketch, "Path sketch: tangent lines and arcs, or a circle, starting on the profile's plane", 1);
+        var pathBox = page.Selection(sec, "Path", SelFilter.Sketch, "Path sketch of tangent lines and arcs, or a circle, starting on the profile plane", 1);
         if (!string.IsNullOrEmpty(f.PathSketchId)) pathBox.Items.Add(new SelItem { Kind = SelKind.Sketch, FeatureId = f.PathSketchId });
         pathBox.Changed += () => f.PathSketchId = pathBox.Items.FirstOrDefault()?.FeatureId ?? "";
         page.Info(sec, "The profile keeps its orientation to the path. Round sharp corners of the path with sketch fillets.");
@@ -434,7 +434,7 @@ public partial class MainWindow
         var page = new PmPage(f.IsCut ? "Cut-Loft" : "Loft", f.IsCut ? "cutloft" : "loft");
         var sec = page.Section("Profiles");
         var profBox = page.Selection(sec, "Profiles", SelFilter.Sketch | SelFilter.PlanarFace,
-            "Profiles in order: sketches of closed profiles (the first or last may be a single point), or planar faces of the model");
+            "Closed profile sketches or planar faces, in order; the first or last can be a point");
         for (int i = 0; i < f.SectionSketchIds.Count; i++)
             profBox.Items.Add(f.SectionSketchIds[i] == "" && f.SectionFaces.ElementAtOrDefault(i) is { } sf ? FaceItem(sf) : new SelItem { Kind = SelKind.Sketch, FeatureId = f.SectionSketchIds[i] });
         profBox.Refresh();
@@ -443,14 +443,14 @@ public partial class MainWindow
             f.SectionSketchIds = profBox.Items.Select(i => i.Kind == SelKind.Face ? "" : i.FeatureId ?? "").ToList();
             f.SectionFaces = profBox.Items.Any(i => i.Kind == SelKind.Face) ? profBox.Items.Select(i => i.Kind == SelKind.Face ? i.ToFaceRef() : null).ToList() : new();
         };
-        page.Info(sec, "The loft runs through the profiles in the order they are picked. Each profile's corners are matched to the next one's with the least twist.");
+        page.Info(sec, "The loft passes through the profiles in the order selected. Vertices are matched between profiles for minimum twist.");
         var gsec = page.Section("Guide Curves");
-        var guideBox = page.Selection(gsec, "Guides", SelFilter.Sketch, "Optional: sketches of tangent lines and arcs through every profile (one guide per chain)");
+        var guideBox = page.Selection(gsec, "Guides", SelFilter.Sketch, "Optional guide sketches of tangent lines and arcs crossing every profile, one guide per chain");
         foreach (var id in f.GuideSketchIds) guideBox.Items.Add(new SelItem { Kind = SelKind.Sketch, FeatureId = id });
         guideBox.Refresh();
         guideBox.Changed += () => f.GuideSketchIds = guideBox.Items.Select(i => i.FeatureId).ToList();
         var csec = page.Section("Centerline");
-        var clBox = page.Selection(csec, "Centerline", SelFilter.Sketch, "Optional: a sketch of tangent lines and arcs through every profile's plane; the loft follows it", 1);
+        var clBox = page.Selection(csec, "Centerline", SelFilter.Sketch, "Optional sketch of tangent lines and arcs crossing every profile plane for the loft to follow", 1);
         if (!string.IsNullOrEmpty(f.CenterlineSketchId)) clBox.Items.Add(new SelItem { Kind = SelKind.Sketch, FeatureId = f.CenterlineSketchId });
         clBox.Refresh();
         clBox.Changed += () => f.CenterlineSketchId = clBox.Items.FirstOrDefault()?.FeatureId;
@@ -461,11 +461,11 @@ public partial class MainWindow
         page.Combo(opts, "End", tangency, () => f.EndTangency, v => f.EndTangency = v);
         page.Number(opts, "End tangent length", () => f.EndLength, v => f.EndLength = v, unit: "×");
         var osec = page.Section("Options");
-        page.Check(osec, "Close loft (back to the first profile)", () => f.Closed, v => f.Closed = v);
+        page.Check(osec, "Close loft", () => f.Closed, v => f.Closed = v);
         if (!f.IsCut) page.Check(osec, "Merge result", () => f.Merge, v => f.Merge = v);
         page.Activate(f.SectionSketchIds.Count < 2 ? profBox : null);
         BeginEdit(f, isNew, page, overlay: false,
-            hint: f.SectionSketchIds.Count < 2 ? "Select the profile sketches in order (two at least), then any guide curves." : null);
+            hint: f.SectionSketchIds.Count < 2 ? "Select at least two profile sketches in order, then any guide curves." : null);
     }
 
     // ------------------------------------------------------------------------------------------
@@ -481,14 +481,14 @@ public partial class MainWindow
     {
         var page = new PmPage(f.IsCut ? "Cut-Helical" : "Helical", f.IsCut ? "cuthelical" : "helical");
         var s0 = page.Section("Profile");
-        var skBox = page.Selection(s0, "Sketch", SelFilter.Sketch, "Closed profile and a centerline (the helix's axis)", 1);
+        var skBox = page.Selection(s0, "Sketch", SelFilter.Sketch, "Sketch with a closed profile and a centerline for the helix axis", 1);
         if (!string.IsNullOrEmpty(f.SketchId)) skBox.Items.Add(new SelItem { Kind = SelKind.Sketch, FeatureId = f.SketchId });
         var axisSec = page.Section("Axis");
         // one box: a line of the profile's sketch, or an axis from the model (a cylindrical face, a straight or
         // circular edge); the X / Y / Z buttons; empty: the sketch's first centerline
         var st = StateForEdit(f, isNew);
         var axBox = page.Selection(axisSec, "Axis", SelFilter.SketchSegment | SelFilter.Edge | SelFilter.Face | SelFilter.Axis,
-            "A centerline in the profile's sketch, the axis of a cylindrical face or a circular edge (right-click: Select Axis), a straight edge, or an axis button", 1);
+            "Centerline in the profile sketch, linear edge, axis of a cylindrical face or circular edge (right-click > Select Axis), or an axis button", 1);
         if (f.Axis != null) { if (DirItem(f.Axis, st) is { } ai) axBox.Items.Add(ai); }
         else if (f.AxisEntity != 0) axBox.Items.Add(new SelItem { Kind = SelKind.SketchSegment, FeatureId = f.SketchId, SketchItem = f.AxisEntity });
         var axisLbl = new TextBlock { FontSize = UI.TypeScale.Small, Foreground = UI.Palette.TextMuted, TextWrapping = Avalonia.Media.TextWrapping.Wrap };
@@ -507,7 +507,7 @@ public partial class MainWindow
                 // a line of the profile's sketch only (another sketch's line is not tied to this one)
                 if (it.FeatureId == f.SketchId && Session.Doc.Find(f.SketchId) is SketchFeature sf && sf.Sketch.Entity(it.SketchItem) is SkLine)
                 { f.AxisEntity = it.SketchItem; f.Axis = null; }
-                else { axBox.Items.Clear(); axBox.Refresh(); Status("Pick a line in the profile's sketch, or an edge or face of the model."); }
+                else { axBox.Items.Clear(); axBox.Refresh(); Status("Select a line in the profile sketch, or a model edge or face."); }
             }
             else if (it.ToDirRef() is { } dr) { f.Axis = dr; f.AxisEntity = 0; }
             UpdAxis();
@@ -524,11 +524,11 @@ public partial class MainWindow
         page.Number(h, "Revolutions", () => f.Revolutions, v => f.Revolutions = v, "helical", "");
         page.Check(h, "Left hand", () => f.LeftHand, v => f.LeftHand = v);
         page.Check(h, "Reverse direction", () => f.Reverse, v => f.Reverse = v);
-        page.Info(h, "The profile must not reach the axis, and (in a plane through the axis) must be shorter along it than the pitch.");
+        page.Info(h, "The profile must not touch the axis. Its length along the axis must be less than the pitch.");
         var ro = page.Section("Run-out");
         page.Check(ro, "Run out at the end", () => f.RunOut, v => f.RunOut = v);
         page.Number(ro, "Length", () => f.RunOutLength, v => f.RunOutLength = v, "dimension", optional: true);
-        page.Info(ro, "The end runs straight on along the helix's tangent. Blank length: until the profile is clear of the model (cuts), one pitch (bosses).");
+        page.Info(ro, "The end continues straight along the helix tangent. If the length is blank, cuts run until clear of the model and bosses run one pitch.");
         if (!f.IsCut) page.Check(page.Section("Options"), "Merge result", () => f.Merge, v => f.Merge = v);
         if (!string.IsNullOrEmpty(f.SketchId)) page.Activate(null);
         BeginEdit(f, isNew, page, overlay: false, hint: string.IsNullOrEmpty(f.SketchId) ? "Select a sketch with a closed profile and a centerline." : null);
@@ -549,7 +549,7 @@ public partial class MainWindow
     {
         var page = new PmPage("Thread", "thread");
         var s0 = page.Section("Face");
-        var box = page.Selection(s0, "Face", SelFilter.Face, "Cylindrical face: a shaft (external) or a hole (internal); the thread starts at the end nearest where you click", 1);
+        var box = page.Selection(s0, "Face", SelFilter.Face, "Cylindrical face of a shaft or hole; the thread starts at the end nearest the click", 1);
         if (!string.IsNullOrEmpty(f.Face.Name)) box.Items.Add(FaceItem(f.Face));
         box.Changed += () => f.Face = box.Items.FirstOrDefault()?.ToFaceRef() ?? new FaceRef();
         var spec = page.Section("Specification");
@@ -560,21 +560,21 @@ public partial class MainWindow
         page.Number(spec, "Pitch (custom)", () => f.Pitch, v => f.Pitch = v, "dimension");
         page.Combo(spec, "End", new List<(ThreadEnd, string)>
         {
-            (ThreadEnd.Blind, "Blind"), (ThreadEnd.UpToNext, "Up To Next (stop short of a shoulder)"), (ThreadEnd.ThroughAll, "Through All (run out of the far end)"),
+            (ThreadEnd.Blind, "Blind"), (ThreadEnd.UpToNext, "Up To Next"), (ThreadEnd.ThroughAll, "Through All"),
         }, () => f.End, v => f.End = v);
         page.Number(spec, "Length (blind)", () => f.Length, v => f.Length = v, "dimension", optional: true);
-        page.Info(spec, "Bolts: Up To Next stops before the head. Nuts and through holes: Through All.");
+        page.Info(spec, "Use Up To Next on bolts to stop short of the head or a shoulder, and Through All for nuts and through holes.");
         var opt = page.Section("Options");
         page.Number(opt, "Clearance", () => f.Clearance, v => f.Clearance = v, "dimension");
-        page.Info(opt, "Extra room on the flanks for 3D printed threads (0.1–0.3 mm is typical); the crest is lowered where it would get too narrow.");
+        page.Info(opt, "Flank clearance for 3D-printed threads, typically 0.1–0.3 mm. The crest is truncated where it would become too narrow.");
         page.Check(opt, "Lead-in chamfer", () => f.Chamfer, v => f.Chamfer = v);
-        page.Check(opt, "Cosmetic (not modeled: faster)", () => f.Cosmetic, v => f.Cosmetic = v);
-        page.Info(opt, "A cosmetic thread is drawn as a helix on the face; exports always model it. View > Threads shows every thread modeled or cosmetic.");
+        page.Check(opt, "Cosmetic thread", () => f.Cosmetic, v => f.Cosmetic = v);
+        page.Info(opt, "A cosmetic thread is shown as a helix on the face and is always modeled on export. View > Threads overrides the display of all threads.");
         page.Combo(opt, "Thread end", new List<(ThreadRunout, string)>
         {
-            (ThreadRunout.None, "Plain"), (ThreadRunout.Relief, "Relief groove (undercut)"), (ThreadRunout.Tangent, "Run out of the side (shafts)"),
+            (ThreadRunout.None, "Plain"), (ThreadRunout.Relief, "Relief groove"), (ThreadRunout.Tangent, "Tangent run-out (shafts)"),
         }, () => f.Runout, v => f.Runout = v);
-        page.Info(opt, "Relief: a groove where the thread stops, room for the threading tool against a shoulder. Run out: the groove leaves the shaft along the helix's tangent.");
+        page.Info(opt, "Relief groove: an undercut at the thread end for tool clearance at a shoulder. Tangent run-out: the thread groove exits the shaft along the helix tangent.");
         page.Check(opt, "Left hand", () => f.LeftHand, v => f.LeftHand = v);
         page.Check(opt, "Start at the other end", () => f.Reverse, v => f.Reverse = v);
         if (!string.IsNullOrEmpty(f.Face.Name)) page.Activate(null);
@@ -607,7 +607,7 @@ public partial class MainWindow
         var page = new PmPage(fillet ? "Fillet" : "Chamfer", fillet ? "fillet" : "chamfer");
         var s = page.Section("Items To " + (fillet ? "Fillet" : "Chamfer"));
         var st = StateForEdit(f, isNew);
-        var box = page.Selection(s, "Edges", SelFilter.Edge | SelFilter.Face, "Edges (or faces) to " + (fillet ? "fillet" : "chamfer"));
+        var box = page.Selection(s, "Edges", SelFilter.Edge | SelFilter.Face, "Edges or faces to " + (fillet ? "fillet" : "chamfer"));
         foreach (var e in edges) box.Items.Add(EdgeItem(e, st));
         box.Changed += () =>
         {
@@ -628,14 +628,14 @@ public partial class MainWindow
             // blends in one feature)
             var sc = page.Section("Scope");
             page.Check(sc, "Whole body", () => fs.WholeBody, v => fs.WholeBody = v);
-            var fbox = page.Selection(sc, "Between features", SelFilter.Feature, "Select features in the tree or click their faces");
+            var fbox = page.Selection(sc, "Between features", SelFilter.Feature, "Select features in the design tree or graphics area");
             foreach (var id in fs.Features) fbox.Items.Add(new SelItem { Kind = SelKind.Feature, FeatureId = id });
             fbox.Changed += () => { fs.Features.Clear(); fs.Features.AddRange(fbox.Items.Select(i => i.FeatureId!).Distinct()); };
             page.Combo(sc, "Edges", new List<(BlendScopeKind, string)>
             {
-                (BlendScopeKind.Concave, "Concave (filled in)"), (BlendScopeKind.Convex, "Convex (rounded off)"), (BlendScopeKind.All, "Both"),
+                (BlendScopeKind.Concave, "Concave"), (BlendScopeKind.Convex, "Convex"), (BlendScopeKind.All, "Concave and convex"),
             }, () => fs.ScopeKind, v => fs.ScopeKind = v);
-            page.Info(sc, "Whole body: every edge of that kind. Between features: one feature, its edges with the rest of the body; several, the edges between them (their pattern and mirror copies too). Edges that cannot be blended are left out with a warning.");
+            page.Info(sc, "Whole body fillets every edge of the selected type; Between features fillets the edges where the features meet the body or each other, including pattern and mirror copies. Edges that cannot be filleted are skipped with a warning.");
         }
         var p = page.Section(fillet ? "Fillet Parameters" : "Chamfer Parameters");
         if (fillet) page.Number(p, "Radius", () => ((FilletFeature)f).Radius, v => ((FilletFeature)f).Radius = v, "fillet");
@@ -653,7 +653,7 @@ public partial class MainWindow
             }
             page.Combo(p, "Type", new List<(ChamferType, string)>
             {
-                (ChamferType.Distance, "Equal distance"), (ChamferType.AngleDistance, "Angle distance"), (ChamferType.DistanceDistance, "Distance distance"),
+                (ChamferType.Distance, "Distance"), (ChamferType.AngleDistance, "Angle-Distance"), (ChamferType.DistanceDistance, "Distance-Distance"),
             }, () => ch.Type, v => { ch.Type = v; ShowFields(); });
             page.Number(p, "Distance", () => ch.Distance, v => ch.Distance = v, "chamfer");
             d2 = page.Number(p, "Distance 2", () => ch.Distance2, v => ch.Distance2 = v, "chamfer");
@@ -664,10 +664,10 @@ public partial class MainWindow
         if (fillet) page.Check(p, "Tangent propagation", () => ((FilletFeature)f).TangentPropagation, v => ((FilletFeature)f).TangentPropagation = v);
         else page.Check(p, "Tangent propagation", () => ((ChamferFeature)f).TangentPropagation, v => ((ChamferFeature)f).TangentPropagation = v);
         // SolidWorks "overflow": where the blend runs into neighbouring geometry it is trimmed by it (keep edge)
-        if (fillet) page.Check(p, "Overflow: trim at neighbouring faces", () => ((FilletFeature)f).Overflow, v => ((FilletFeature)f).Overflow = v);
+        if (fillet) page.Check(p, "Overflow: trim at neighboring faces", () => ((FilletFeature)f).Overflow, v => ((FilletFeature)f).Overflow = v);
         else
         {
-            page.Check(p, "Overflow: trim at neighbouring faces", () => ((ChamferFeature)f).Overflow, v => ((ChamferFeature)f).Overflow = v);
+            page.Check(p, "Overflow: trim at neighboring faces", () => ((ChamferFeature)f).Overflow, v => ((ChamferFeature)f).Overflow = v);
             page.Check(p, "Flat corners where three chamfers meet", () => ((ChamferFeature)f).FlatCorners, v => ((ChamferFeature)f).FlatCorners = v);
         }
         var scoped = f is FilletFeature { WholeBody: true } or FilletFeature { Features.Count: > 0 };
@@ -679,7 +679,7 @@ public partial class MainWindow
 
     void HoleCommand()
     {
-        if (PartOnly("The hole wizard")) return;
+        if (PartOnly("Hole Wizard")) return;
         if (_sketch != null) ExitSketch(true);
         var hole = new HoleFeature().Sized(Units);
         var sel = Selection.First;
@@ -692,7 +692,7 @@ public partial class MainWindow
         }
         var page = new PmPage("Hole Position", "hole");
         var s = page.Section("Positions");
-        page.Info(s, "Select the planar face (or plane) on which to place the holes.");
+        page.Info(s, "Select the planar face or plane on which to place the holes.");
         var box = page.Selection(s, "Face", SelFilter.PlanarFace | SelFilter.Plane, "Face or plane", 1);
         box.Changed += () =>
         {
@@ -714,7 +714,7 @@ public partial class MainWindow
         var page = new PmPage("Hole Specification", "hole");
         var t = page.Section("Hole Type");
         Action syncSections = () => { };
-        page.Combo(t, "Type", new List<(HoleType, string)> { (HoleType.Simple, "Simple (drilled)"), (HoleType.Counterbore, "Counterbore"), (HoleType.Countersink, "Countersink") },
+        page.Combo(t, "Type", new List<(HoleType, string)> { (HoleType.Simple, "Simple"), (HoleType.Counterbore, "Counterbore"), (HoleType.Countersink, "Countersink") },
             () => f.Type, v => { f.Type = v; syncSections(); });
         var std = page.Section("Size");
         var sizes = new List<(string, string)>
@@ -760,9 +760,9 @@ public partial class MainWindow
         };
         syncSections();
         var pos = page.Section("Positions");
-        page.ButtonRow(pos, "Edit hole positions…", () =>
+        page.ButtonRow(pos, "Edit Hole Positions…", () =>
         {
-            if (isNew) { Status("Finish the hole first (OK), then use Edit Hole Positions from the design tree."); return; }
+            if (isNew) { Status("Click OK to create the hole, then use Edit Hole Positions in the design tree."); return; }
             CancelEdit();
             EditFeature(f.SketchId);
         }, "sketch");
@@ -815,19 +815,19 @@ public partial class MainWindow
         page.Number(a, "Angle", () => f.Angle, v => f.Angle = v, "draft", "°");
         var n = page.Section("Neutral Plane");
         var neutral = page.Selection(n, "Neutral plane", SelFilter.Plane | SelFilter.PlanarFace,
-            "The plane or planar face the drafted faces turn about (they keep their place where they meet it)", 1);
+            "Plane or planar face about which the faces are drafted", 1);
         if (PlaneItem(f.Neutral, st) is { } pi) neutral.Items.Add(pi);
         neutral.Changed += () => { if (neutral.Items.FirstOrDefault()?.ToPlaneRef() is { } pr) f.Neutral = pr; };
         page.Check(n, "Reverse pull direction", () => f.Reverse, v => f.Reverse = v);
-        page.Info(n, "The part narrows along the pull direction: into the part from a neutral face, along a plane's normal.");
+        page.Info(n, "The part narrows along the pull direction. The pull direction points into the part from a neutral face, or along a neutral plane's normal.");
         var fs = page.Section("Faces to Draft");
-        var faces = page.Selection(fs, "Faces", SelFilter.Face, "Faces to draft: planar, or round along the pull direction");
+        var faces = page.Selection(fs, "Faces", SelFilter.Face, "Planar faces, or cylindrical faces parallel to the pull direction");
         foreach (var fr in f.Faces) faces.Items.Add(FaceItem(fr));
         faces.Changed += () => { f.Faces = faces.Items.Select(i => i.ToFaceRef()).ToList(); };
         // a new draft: the first click picks the neutral plane, the next ones the faces (as SolidWorks)
         neutral.Changed += () => { if (page.ActiveBox == neutral && neutral.Items.Count == 1) page.Activate(faces); };
         page.Activate(isNew && f.Faces.Count == 0 ? neutral : faces);
-        BeginEdit(f, isNew, page, overlay: true, hint: f.Faces.Count == 0 ? "Select the neutral plane (e.g. the base face), then the faces to draft." : null);
+        BeginEdit(f, isNew, page, overlay: true, hint: f.Faces.Count == 0 ? "Select the neutral plane or face, then the faces to draft." : null);
     }
 
     // ------------------------------------------------------------------------------------------
@@ -845,7 +845,7 @@ public partial class MainWindow
     {
         var page = new PmPage("Flat-Pattern", "flatpattern");
         var p = page.Section("Parameters");
-        var box = page.Selection(p, "Fixed face", SelFilter.Face, "Face that stays in place (none: the largest planar face)", max: 1, accept: s => s.Planar);
+        var box = page.Selection(p, "Fixed face", SelFilter.Face, "Face that stays in place; if empty, the largest planar face", max: 1, accept: s => s.Planar);
         if (f.FixedFace != null) box.Items.Add(FaceItem(f.FixedFace));
         box.Changed += () => { f.FixedFace = box.Items.FirstOrDefault()?.ToFaceRef(); };
         var part = Session.Doc.SheetMetal ?? new SheetMetalSettings();
@@ -857,9 +857,9 @@ public partial class MainWindow
         }, () => f.Method, v => f.Method = v);
         var k = page.Number(ba, "K-factor", () => f.KFactor ?? "", v => f.KFactor = string.IsNullOrWhiteSpace(v) ? null : v, unit: "", optional: true);
         k.Watermark = part.KFactor;
-        page.Info(ba, "K-factor: a bend is angle × (inner radius + K × thickness) long in the flat. DIN 6935: K = (0.65 + ½ log₁₀(r/s)) / 2, ½ from r/s = 5; bends under 15° need no allowance. The part setting is under Tools > Options.");
+        page.Info(ba, "K-factor: flat bend length = angle × (inner radius + K × thickness); DIN 6935 derives K from r/s and adds no allowance below 15°. Set the part default in Tools > Options.");
         page.Check(p, "Flatten", () => f.Flatten, v => f.Flatten = v);
-        page.Info(p, "Any part of uniform thickness whose bends are round unfolds: shelled and filleted parts, imported sheet metal.");
+        page.Info(p, "Any part of uniform thickness with round bends can be flattened, including shelled parts and imported sheet metal.");
         BeginEdit(f, isNew, page, overlay: false);
     }
 
@@ -893,7 +893,7 @@ public partial class MainWindow
     PmSelectionBox SeedBox(PmPage page, List<string> seeds)
     {
         var s = page.Section("Features to Pattern");
-        var box = page.Selection(s, "Features", SelFilter.Feature, "Select features in the tree or click their faces");
+        var box = page.Selection(s, "Features", SelFilter.Feature, "Select features in the design tree or graphics area");
         foreach (var id in seeds) box.Items.Add(new SelItem { Kind = SelKind.Feature, FeatureId = id });
         box.Changed += () => { seeds.Clear(); seeds.AddRange(box.Items.Select(i => i.FeatureId!).Distinct()); };
         return box;
@@ -950,7 +950,7 @@ public partial class MainWindow
         var page = new PmPage("Linear Pattern", "lpattern");
         var st = StateForEdit(f, isNew);
         var d1 = page.Section("Direction 1");
-        var dirBox = page.Selection(d1, "Direction", SelFilter.Edge | SelFilter.Face | SelFilter.Plane | SelFilter.Axis, "Pattern direction: a linear edge, face, plane, the axis of a round face, or axis button", 1);
+        var dirBox = page.Selection(d1, "Direction", SelFilter.Edge | SelFilter.Face | SelFilter.Plane | SelFilter.Axis, "Linear edge, face, plane, axis of a cylindrical face, or an axis button", 1);
         if (DirItem(f.Direction, st) is { } di) dirBox.Items.Add(di);
         var axisLbl = new TextBlock { FontSize = UI.TypeScale.Small, Foreground = UI.Palette.TextMuted };
         Action? axes1 = null;
@@ -973,10 +973,10 @@ public partial class MainWindow
         page.Number(d2, "Instances", () => f.Count2, v => f.Count2 = v, "lpattern", "");
         var sk = page.Section("Instances to Skip");
         var skipBox = page.IntList(sk, "Instances", () => f.Skip, v => f.Skip = v, 2,
-            "Instance numbers to leave out, e.g. 2, 5, 7-9 (or click the numbers in the graphics area). The seed is 1; numbers run along direction 1, then row by row along direction 2.");
+            "Instances to skip, e.g. 2, 5, 7-9, or click their numbers in the graphics area. The seed is 1; numbering runs along direction 1, then row by row along direction 2.");
         var seeds = SeedBox(page, f.Seeds);
         page.Activate(f.Seeds.Count == 0 ? seeds : dirBox);
-        BeginEdit(f, isNew, page, overlay: false, hint: f.Seeds.Count == 0 ? "Select the feature(s) to pattern." : null);
+        BeginEdit(f, isNew, page, overlay: false, hint: f.Seeds.Count == 0 ? "Select the features to pattern." : null);
         ShowInstanceMarkers(f, st, f.Seeds, () => f.Skip, skipBox, page);
     }
 
@@ -987,7 +987,7 @@ public partial class MainWindow
         var page = new PmPage("Circular Pattern", "cpattern");
         var st = StateForEdit(f, isNew);
         var p = page.Section("Parameters");
-        var axBox = page.Selection(p, "Axis", SelFilter.Edge | SelFilter.Face | SelFilter.Plane | SelFilter.Axis, "Axis: of a cylindrical face or circular edge (right-click: Select Axis), a linear edge, or axis button", 1);
+        var axBox = page.Selection(p, "Axis", SelFilter.Edge | SelFilter.Face | SelFilter.Plane | SelFilter.Axis, "Axis of a cylindrical face or circular edge (right-click > Select Axis), a linear edge, or an axis button", 1);
         if (DirItem(f.Axis, st) is { } ai) axBox.Items.Add(ai);
         var axisLbl = new TextBlock { FontSize = UI.TypeScale.Small, Foreground = UI.Palette.TextMuted };
         Action? axes = null;
@@ -1001,10 +1001,10 @@ public partial class MainWindow
         page.Check(p, "Equal spacing", () => f.EqualSpacing, v => f.EqualSpacing = v);
         var sk = page.Section("Instances to Skip");
         var skipBox = page.IntList(sk, "Instances", () => f.Skip, v => f.Skip = v, 2,
-            "Instance numbers to leave out, e.g. 2, 5, 7-9 (or click the numbers in the graphics area). The seed is 1; numbers run around the axis in the pattern direction.");
+            "Instances to skip, e.g. 2, 5, 7-9, or click their numbers in the graphics area. The seed is 1; numbering runs around the axis in the pattern direction.");
         var seeds = SeedBox(page, f.Seeds);
         page.Activate(f.Seeds.Count == 0 ? seeds : axBox);
-        BeginEdit(f, isNew, page, overlay: false, hint: f.Seeds.Count == 0 ? "Select the feature(s) to pattern." : null);
+        BeginEdit(f, isNew, page, overlay: false, hint: f.Seeds.Count == 0 ? "Select the features to pattern." : null);
         ShowInstanceMarkers(f, st, f.Seeds, () => f.Skip, skipBox, page);
     }
 
@@ -1097,7 +1097,7 @@ public partial class MainWindow
         box.Changed += () => { if (box.Items.FirstOrDefault()?.ToPlaneRef() is { } pr) f.Plane = pr; };
         var seeds = SeedBox(page, f.Seeds);
         page.Activate(f.Seeds.Count == 0 ? seeds : box);
-        BeginEdit(f, isNew, page, overlay: false, hint: f.Seeds.Count == 0 ? "Select the feature(s) to mirror." : null);
+        BeginEdit(f, isNew, page, overlay: false, hint: f.Seeds.Count == 0 ? "Select the features to mirror." : null);
     }
 
     // ------------------------------------------------------------------------------------------
@@ -1111,13 +1111,13 @@ public partial class MainWindow
         var t = page.Section("Operation Type");
         page.Combo(t, "Operation", new List<(CombineOp, string)> { (CombineOp.Add, "Add"), (CombineOp.Subtract, "Subtract"), (CombineOp.Common, "Common") }, () => f.Op, v => f.Op = v);
         var m = page.Section("Bodies");
-        var main = page.Selection(m, "Main body", SelFilter.Body, "Main body (click a face of it)", 1);
+        var main = page.Selection(m, "Main body", SelFilter.Body, "Main body; select one of its faces", 1);
         if (!string.IsNullOrEmpty(f.MainBody)) main.Items.Add(new SelItem { Kind = SelKind.Body, BodyId = f.MainBody });
         main.Changed += () => f.MainBody = main.Items.FirstOrDefault()?.BodyId ?? "";
-        var tools = page.Selection(m, "Bodies to combine", SelFilter.Body, "Other bodies");
+        var tools = page.Selection(m, "Bodies to combine", SelFilter.Body, "Bodies to combine with the main body");
         foreach (var b in f.ToolBodies) tools.Items.Add(new SelItem { Kind = SelKind.Body, BodyId = b });
         tools.Changed += () => f.ToolBodies = tools.Items.Select(i => i.BodyId!).ToList();
-        page.Info(m, "Tip: extrude with 'Merge result' off to create separate bodies.");
+        page.Info(m, "To create separate bodies, extrude with Merge result cleared.");
         BeginEdit(f, isNew, page, overlay: false);
     }
 }

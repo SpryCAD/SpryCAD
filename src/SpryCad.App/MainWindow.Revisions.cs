@@ -75,8 +75,8 @@ public partial class MainWindow
         _revisionsList.Items.Clear();
         _revisionEntries = new();
 
-        if (Asm != null) { _revisionsNote.Text = "Revisions are listed for parts (assemblies come later)."; return; }
-        if (session.FilePath == null) { _revisionsNote.Text = "Save the part to start its history: every save is kept, and shows here."; return; }
+        if (Asm != null) { _revisionsNote.Text = "Revisions are available for parts only."; return; }
+        if (session.FilePath == null) { _revisionsNote.Text = "Save the part to start its revision history."; return; }
         Dictionary<Guid, byte[]?> previews;
         try
         {
@@ -89,7 +89,7 @@ public partial class MainWindow
         }
         catch (Exception ex) when (ex is InvalidOperationException or IOException or InvalidDataException or Microsoft.Data.Sqlite.SqliteException)
         {
-            _revisionsNote.Text = "The part's history could not be read: " + ex.Message;
+            _revisionsNote.Text = "Could not read the revision history: " + ex.Message;
             return;
         }
         if (_revisionPreviews.Count > 2000) _revisionPreviews.Clear();
@@ -101,7 +101,7 @@ public partial class MainWindow
 
         var shown = session.ShownRevision;
         _revisionsNote.Text = _revisionEntries.Count == 0 ? "No revisions yet."
-            : "Click a revision to go back to it (Undo returns). Green: faces it added; amber: faces it changed.";
+            : "Click a revision to revert to it (Ctrl+Z to undo). Green: added faces. Amber: changed faces.";
         if (shown == null)
         {
             _revisionsNowImage = new Image { Width = 64, Height = 64, Stretch = Stretch.Uniform, Source = _tab.Thumb };
@@ -117,7 +117,7 @@ public partial class MainWindow
             var item = RevisionItem(img, When(e), sub, Describe(e), current, e.Tags);
             item.Tag = e;
             ToolTip.SetTip(item, $"{When(e)}, {e.Revision.Author}" + (e.Revision.Message.Length > 0 ? $"\n{e.Revision.Message}" : "") + $"\n{Describe(e)}"
-                + (current ? "\n\nThe part is as it was in this revision." : "\n\nClick to make the part as it was then (Undo returns)."));
+                + (current ? "\n\nThe part matches this revision." : "\n\nClick to revert to this revision (Ctrl+Z to undo)."));
             item.Tapped += (_, _) => RevertFromPane(e);
             _revisionsList.Items.Add(item);
             if (current) _revisionsList.SelectedItem = item;
@@ -154,7 +154,7 @@ public partial class MainWindow
     {
         var session = Session;
         if (Asm != null || session.ShownRevision == e.Revision.RevisionId) return;
-        if (session.ReadOnly) { Status("The part is read-only: it cannot be reverted here."); return; }
+        if (session.ReadOnly) { Status("The part is read-only and cannot be reverted."); return; }
         try { RevertToRevision(session, e, session.Title.TrimEnd(' ', '*')); }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or IOException or InvalidDataException)
         {
@@ -175,13 +175,13 @@ public partial class MainWindow
                 await Dialogs.Message(this, title, ex.Message);
             }
         }
-        var revert = new MenuItem { Header = "_Go Back to This" };
+        var revert = new MenuItem { Header = "_Revert to This" };
         revert.Click += (_, _) => { if (Target() is { } e) RevertFromPane(e); };
         var open = new MenuItem { Header = "_Open Read-Only" };
         open.Click += (_, _) => _ = Do("Open Revision", async () => { if (Target() is { } e) await OpenRevisionTab(Session, e, Name()); });
-        var changes = new MenuItem { Header = "What It _Changed..." };
+        var changes = new MenuItem { Header = "Show _Changes…" };
         changes.Click += (_, _) => { if (Target() is { } e) CompareCommand(Session, e, Name(), this); };
-        var compare3d = new MenuItem { Header = "Compare with _Now in 3D..." };
+        var compare3d = new MenuItem { Header = "Co_mpare with Current in 3D…" };
         compare3d.Click += (_, _) => _ = Do("Compare", () =>
         {
             if (Target() is not { } e) return Task.CompletedTask;
@@ -190,16 +190,16 @@ public partial class MainWindow
             VisualCompare(then, When(e), now, "now", PartDescribe.Changes(then, now), this);
             return Task.CompletedTask;
         });
-        var tag = new MenuItem { Header = "_Tag..." };
+        var tag = new MenuItem { Header = "_Tag…" };
         tag.Click += (_, _) => _ = Do("Tag Revision", async () =>
         {
             if (Target() is not { } e) return;
-            if (await Dialogs.Input(this, "Tag Revision", "Tag (a name for this revision, e.g. Rev A, Sent to shop):", "") is not { } t || t.Trim().Length == 0) return;
+            if (await Dialogs.Input(this, "Tag Revision", "Tag name (e.g. Rev A):", "") is not { } t || t.Trim().Length == 0) return;
             var moved = _revisionEntries.FirstOrDefault(x => x != e && x.Tags.Contains(t.Trim()));
-            if (moved != null && !await Dialogs.YesNo(this, "Tag Revision", $"\"{t.Trim()}\" tags the revision of {When(moved)}. Move it to this one?", "Move", "Cancel")) return;
+            if (moved != null && !await Dialogs.YesNo(this, "Tag Revision", $"Tag \"{t.Trim()}\" is on the revision from {When(moved)}. Move it to this revision?", "Move", "Cancel")) return;
             Session.EditHistory(db => PartHistory.Tag(db, e.Revision.RevisionId, t));
         });
-        var history = new MenuItem { Header = "_History Window..." };
+        var history = new MenuItem { Header = "_History Window…" };
         history.Click += (_, _) => HistoryCommand();
         var menu = new ContextMenu { Items = { revert, open, changes, compare3d, new Separator(), tag, new Separator(), history } };
         menu.Opening += (_, _) =>

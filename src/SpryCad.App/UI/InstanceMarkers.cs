@@ -61,7 +61,7 @@ public sealed class InstanceMarkers : IDisposable
                 Background = off ? Skipped : seed ? SeedFill : Live, BorderBrush = off ? SkippedBorder : seed ? SeedBorder : LiveBorder,
                 Child = label, IsHitTestVisible = !seed, Cursor = seed ? null : new Cursor(StandardCursorType.Hand),
             };
-            ToolTip.SetTip(b, seed ? "Instance 1: the seed" : off ? $"Instance {n} is skipped: click to bring it back" : $"Instance {n}: click to skip it");
+            ToolTip.SetTip(b, seed ? "Instance 1 (seed)" : off ? $"Instance {n} (skipped). Click to restore it." : $"Instance {n}. Click to skip it.");
             if (!seed)
             {
                 int num = n;

@@ -34,7 +34,7 @@ public partial class MainWindow
     bool RepeatLastCommand()
     {
         if (_lastCommand is not { } c || _page != null || _edit != null) return false;
-        Status($"Repeat: {c.name}");
+        Status($"Repeating {c.name}.");
         c.run();
         return true;
     }

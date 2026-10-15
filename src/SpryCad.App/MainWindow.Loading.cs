@@ -22,7 +22,7 @@ public partial class MainWindow
         UpdateLoadingCard();
         if (_loadingCard == null) return;
         _loadingBar.IsIndeterminate = true;
-        _loadingStep.Text = reading ? "Reading the file" : "Rebuilding";
+        _loadingStep.Text = reading ? "Reading file" : "Rebuilding";
     }
 
     void EndLoading(PartTab t)

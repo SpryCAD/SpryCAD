@@ -84,7 +84,7 @@ public partial class MainWindow
         if (_motor != null) { MotorPick(component, face); return; }
         if (_patterning != null) { PatternPick(component, face); return; }
         if (_mating is not { } st || Asm is not { } a) return;
-        PickRef(a.Model.RefTo(component, face), $"{a.Model.NameAt(component)}: that face is not planar or round (it cannot be mated yet)");
+        PickRef(a.Model.RefTo(component, face), $"{a.Model.NameAt(component)}: only planar and cylindrical faces can be mated");
     }
 
     void PickRef(MateRef? r, string notMateable)
@@ -173,8 +173,8 @@ public partial class MainWindow
     {
         if (Asm is not { } a) return;
         if (a.Model.Doc.Components.Count < 1) { Status("Insert components first."); return; }
-        if (_mating != null) { Status("Finish the open Mate page first (OK or Cancel)."); return; }
-        if (_motor != null) { Status("Close the Motor page first (OK or Cancel)."); return; }
+        if (_mating != null) { Status("Close the open Mate PropertyManager first."); return; }
+        if (_motor != null) { Status("Close the Motor PropertyManager first."); return; }
         a.BeginChange();
         // (a screw's lead round in the assembly's units)
         var st = new Mating { Editing = editing, Lead = FeatureDefaults.Mm(Units, 2, 0.1) };
@@ -283,14 +283,14 @@ public partial class MainWindow
         sel.Children.Add(box);
         // origin planes: the assembly's, or a sub-assembly's (at any depth)
         string? planeOwner = null;
-        var owners = new List<(string?, string)> { (null, "the assembly") };
+        var owners = new List<(string?, string)> { (null, "Assembly") };
         owners.AddRange(a.Model.Occurrences().Where(o => o.Component.IsAssembly && a.Model.SubOf(o.Component) != null).Select(o => ((string?)o.Path, a.Model.NameAt(o.Path))));
         if (owners.Count > 1) page.Combo(sel, "Origin planes of", owners, () => planeOwner, v => planeOwner = v);
         var planes = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, Margin = new Thickness(0, 4, 0, 0) };
         foreach (var pl in AssemblyModel.OriginPlanes)
         {
             var b = new Button { Content = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, Children = { Icons.Make("plane", 14), new TextBlock { Text = pl } } }, Padding = new Thickness(6, 2), MinHeight = 0 };
-            ToolTip.SetTip(b, $"The {pl} plane of the assembly (or of the sub-assembly chosen above)");
+            ToolTip.SetTip(b, $"{pl} Plane of the assembly or the sub-assembly selected above");
             b.Click += (_, _) => PickRef(a.Model.RefTo(planeOwner, pl), "");
             // hovered: the plane shown where it is (even with the planes hidden)
             b.PointerEntered += (_, _) => HoverPick(a.Model.RefTo(planeOwner, pl));
@@ -298,7 +298,7 @@ public partial class MainWindow
             planes.Children.Add(b);
         }
         sel.Children.Add(planes);
-        page.Info(sel, "Click two faces (planar or round) on the components, or an origin plane. Click a face again (or Delete in the box) to drop it.");
+        page.Info(sel, "Select two planar or cylindrical faces, or a face and an origin plane. Select a face again to remove it.");
 
         // the types: a row each, its icon and name (those that cannot relate the picks greyed)
         var typeButtons = new Dictionary<MateType, ToggleButton>();
@@ -323,7 +323,7 @@ public partial class MainWindow
         std.Children.Add(TypeList(StandardMates));
         var mech = page.Section("Mechanical Mates");
         mech.Children.Add(TypeList(MechanicalMates));
-        page.Info(mech, "Gear: two round faces turning together at a ratio (their radii unless set). Screw: one turning moves the other along the axis, the lead per turn.");
+        page.Info(mech, "Gear: two cylindrical faces rotate together at a ratio, by default their radii. Screw: rotation of one translates the other along the axis by the lead per turn.");
 
         // a number field: a label and a box (Enter or leaving it applies); its Tag shows the value again. A length or an
         // angle (kind) is shown with its unit, and one typed without gets the assembly's (lengths are millimetres)
@@ -351,9 +351,9 @@ public partial class MainWindow
         }
         var opts = page.Section("Options");
         var offsetRow = Field("Offset", () => st.Offset, v => st.Offset = v ?? st.Offset, () => ValueKind.Length, signed: true);
-        ToolTip.SetTip(offsetRow, "How far apart the references are held: 0 touching; a negative offset puts it on the other side");
+        ToolTip.SetTip(offsetRow, "Distance between the references; a negative value places the component on the other side");
         var angleRow = Field("Angle", () => st.Angle, v => st.Angle = Math.Min(180, v ?? st.Angle), () => ValueKind.Angle);
-        var limits = Check("Limits (it may move between)", () => st.Limits, v => st.Limits = v);
+        var limits = Check("Limits", () => st.Limits, v => st.Limits = v);
         ValueKind Limit() => st.Type == MateType.Angle ? ValueKind.Angle : ValueKind.Length;
         var minRow = Field("Minimum", () => st.Min, v => st.Min = v ?? st.Min, Limit);
         var maxRow = Field("Maximum", () => st.Max, v => st.Max = v ?? st.Max, Limit);
@@ -364,8 +364,8 @@ public partial class MainWindow
         // mate alignment: the second reference's normal (or axis) the same way as the first's, or against it
         var alignSame = new ToggleButton { Content = Icons.Make("align-same", 18), Padding = new Thickness(4), MinHeight = 0, Classes = { "matetype", "framed" } };
         var alignOpp = new ToggleButton { Content = Icons.Make("align-opposite", 18), Padding = new Thickness(4), MinHeight = 0, Classes = { "matetype", "framed" } };
-        ToolTip.SetTip(alignSame, "Aligned: the normals (or axes) point the same way");
-        ToolTip.SetTip(alignOpp, "Anti-aligned: the normals point at each other (faces against each other)");
+        ToolTip.SetTip(alignSame, "Aligned: normals or axes point the same direction");
+        ToolTip.SetTip(alignOpp, "Anti-aligned: normals point toward each other");
         void SetAligned(bool want) { if (st.Preview != null && st.Preview.Aligned != want) { st.Flip = !st.Flip; st.Update?.Invoke(); } else st.Update?.Invoke(); }
         alignSame.Click += (_, _) => SetAligned(true);
         alignOpp.Click += (_, _) => SetAligned(false);
@@ -382,11 +382,11 @@ public partial class MainWindow
         string Label(MateRef r) => r.Component == null ? $"{r.Face} Plane"
             : a.Model.Find(r.Component) is { Component.IsAssembly: true } ? $"{r.Face} Plane@{a.Model.NameAt(r.Component)}"
             : $"{(r.End != null ? "Center" : r.Kind == MateGeomKind.Axis ? "Axis" : "Face")}<{a.Model.FaceName(r)}>@{a.Model.NameAt(r.Component)}";
-        string Describe(MateRef r) => r.Component == null ? $"The assembly's {r.Face} plane" : r.Kind switch
+        string Describe(MateRef r) => r.Component == null ? $"Assembly {r.Face} Plane" : r.Kind switch
         {
             MateGeomKind.Plane => "A planar face",
-            MateGeomKind.Axis => r.R > 0 ? $"A round face, R {r.R:0.###} (its axis)" : "An axis",
-            _ => r.R > 0 ? $"A sphere, R {r.R:0.###} (its centre)" : "A point",
+            MateGeomKind.Axis => r.R > 0 ? $"Cylindrical face axis, R {r.R:0.###}" : "An axis",
+            _ => r.R > 0 ? $"Sphere center, R {r.R:0.###}" : "A point",
         };
 
         st.Update = () =>
@@ -424,7 +424,7 @@ public partial class MainWindow
             ratioA.IsVisible = ratioB.IsVisible = type == MateType.Gear;
             lead.IsVisible = type == MateType.Screw;
             reverse.IsVisible = type is MateType.Gear or MateType.Screw;
-            reverse.Content = type == MateType.Screw ? "Left hand" : "Reverse (turn the same way)";
+            reverse.Content = type == MateType.Screw ? "Left hand" : "Reverse direction";
             limits.IsChecked = st.Limits; reverse.IsChecked = st.Reverse;
             // the gear ratio: the radii unless given
             if (type == MateType.Gear && two) { st.RatioA ??= ga!.R > 0 ? ga.R : 1; st.RatioB ??= gb!.R > 0 ? gb.R : 1; }
@@ -453,13 +453,13 @@ public partial class MainWindow
                     ? a.Model.ReplaceMate(orig, tp, st.Picks[0].Clone(), st.Picks[1].Clone(), value, Setup, EditName(tp))
                     : a.Model.AddMate(tp, st.Picks[0].Clone(), st.Picks[1].Clone(), value, Setup);
                 var err = a.Model.LastSolve?.Errors.GetValueOrDefault(st.Preview.Id) ?? 0;
-                result.Text = err > 1e-6 ? $"Cannot be satisfied with the other mates (off by {err:0.###}): it conflicts, or the components it would move are fixed."
-                    : st.Editing != null ? "Press OK (Enter) to keep the changes." : "Press OK (Enter) to add it.";
+                result.Text = err > 1e-6 ? $"Mate conflicts with existing mates or fixed components. Error: {err:0.###}."
+                    : st.Editing != null ? "Click OK (Enter) to apply the changes." : "Click OK (Enter) to add the mate.";
                 result.Foreground = err > 1e-6 ? red : null;
                 if (result.Foreground == null) result.ClearValue(TextBlock.ForegroundProperty);
             }
             else if (two && st.Picks[0].Component == st.Picks[1].Component)
-                result.Text = "Both faces are on the same component: pick faces on two components (or a component and a plane).";
+                result.Text = "Both faces are on the same component. Select faces on two different components, or a face and a plane.";
             alignSame.IsEnabled = alignOpp.IsEnabled = st.Preview != null;
             alignSame.IsChecked = st.Preview?.Aligned == true;
             alignOpp.IsChecked = st.Preview is { Aligned: false };
@@ -512,10 +512,10 @@ public partial class MainWindow
         page.OnOk = Ok;
         page.OnCancel = Cancel;
         ShowPage(page);
-        ShowConfirmCorner(Ok, Cancel, editing != null ? "OK: keep the changes (Enter)" : "OK: add the mate (Enter); with nothing set up, close", "Cancel (Esc)");
+        ShowConfirmCorner(Ok, Cancel, "OK (Enter)", "Cancel (Esc)");
         st.Update();
-        Status(editing != null ? $"Editing {editing.Name}: change its faces (click one to drop it, then pick another), type or values."
-            : "Mate: click two faces (or a face and an origin plane).");
+        Status(editing != null ? $"Editing {editing.Name}. Change its references, type or values."
+            : "Select two faces, or a face and an origin plane.");
     }
 
     /// <summary>A command from a mate's context menu in the tree.</summary>
@@ -523,9 +523,9 @@ public partial class MainWindow
     {
         if (Asm is not { } a || a.Model.Doc.Mates.FirstOrDefault(m => m.Id == id) is not { } mate) return;
         if (cmd == "edit") { MatePage(mate); return; }
-        if (cmd == "repair") { MatePage(mate, repair: true); Status($"{mate.Name}: pick the missing reference again, then OK."); return; }
+        if (cmd == "repair") { MatePage(mate, repair: true); Status($"{mate.Name}: select the missing reference, then click OK."); return; }
         if (cmd == "rename") { _ = RenameMate(mate); return; }
-        if (_mating != null) { Status("Finish the open Mate page first (OK or Cancel)."); return; }
+        if (_mating != null) { Status("Close the open Mate PropertyManager first."); return; }
         a.BeginChange();
         switch (cmd)
         {
@@ -538,7 +538,7 @@ public partial class MainWindow
         }
         a.Model.SolveMates();
         a.EndChange();
-        Status(cmd switch { "flip" => $"{mate.Name}: flipped.", "suppress" => $"{mate.Name}: {(mate.Suppressed ? "suppressed" : "unsuppressed")}.", _ => $"Deleted {mate.Name}." });
+        Status(cmd switch { "flip" => $"{mate.Name} flipped.", "suppress" => $"{mate.Name} {(mate.Suppressed ? "suppressed" : "unsuppressed")}.", _ => $"Deleted {mate.Name}." });
         RefreshAssemblyScene();
     }
 
@@ -549,7 +549,7 @@ public partial class MainWindow
     async Task RenameComponent(string path)
     {
         if (Asm is not { } a || path.Contains('/') || a.Model.Doc.Find(path) is not { } c) return;
-        var name = (await Dialogs.Input(this, "Rename", "Component name:", c.Name))?.Trim();
+        var name = (await Dialogs.Input(this, "Rename Component", "Name:", c.Name))?.Trim();
         if (string.IsNullOrEmpty(name) || name == c.Name) return;
         if (a.Model.Doc.Components.Any(o => o != c && o.Name == name)) { Status($"Another component is already named {name}."); return; }
         a.BeginChange();
@@ -561,7 +561,7 @@ public partial class MainWindow
     async Task RenameMate(Mate mate)
     {
         if (Asm is not { } a) return;
-        var name = (await Dialogs.Input(this, "Rename", "Mate name:", mate.Name))?.Trim();
+        var name = (await Dialogs.Input(this, "Rename Mate", "Name:", mate.Name))?.Trim();
         if (string.IsNullOrEmpty(name) || name == mate.Name) return;
         if (a.Model.Doc.Mates.Any(m => m != mate && m.Name == name)) { Status($"Another mate is already named {name}."); return; }
         a.BeginChange();

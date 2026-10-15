@@ -138,7 +138,7 @@ public sealed class DocumentSession
     /// <summary>Changes the part's history (tags, purging, compacting): unsaved until the part is saved, like any edit.</summary>
     public void EditHistory(Action<PartDatabase> edit)
     {
-        if (_wc is not { Exists: true } wc) throw new InvalidOperationException("The part has no history yet: save it first.");
+        if (_wc is not { Exists: true } wc) throw new InvalidOperationException("The part has no revision history. Save it first.");
         wc.Edit(edit);
         HistoryVersion++;
         SetDirty();
@@ -158,7 +158,7 @@ public sealed class DocumentSession
 
     /// <summary>Reads the part's history (as last saved, with the changes to it made since).</summary>
     public T ReadHistory<T>(Func<PartDatabase, T> read) =>
-        _wc is { Exists: true } wc ? wc.Read(read) : throw new InvalidOperationException("The part has no history yet: save it first.");
+        _wc is { Exists: true } wc ? wc.Read(read) : throw new InvalidOperationException("The part has no revision history. Save it first.");
 
     /// <summary>
     /// Makes <paramref name="doc"/> the part's state (a revert: <see cref="PartRevert"/>), as one change that can be undone.
@@ -183,7 +183,7 @@ public sealed class DocumentSession
     (string message, int depth, Guid? revision)? _revert;
 
     /// <summary>The part as it was in one of its revisions.</summary>
-    public CadDocument LoadRevision(Guid revisionId) => _wc?.LoadRevision(revisionId) ?? throw new InvalidOperationException("The part has no history yet.");
+    public CadDocument LoadRevision(Guid revisionId) => _wc?.LoadRevision(revisionId) ?? throw new InvalidOperationException("The part has no revision history.");
 
     /// <summary>
     /// Shows an old revision of a part (from <see cref="LoadRevision"/>), read-only: a copy of its own (its own identity),
@@ -620,7 +620,7 @@ public sealed class ShowTiming
     public double TotalMs => Ms(Requested, Shown);
 
     public string Breakdown =>
-        $"On screen {TotalMs:0} ms after the change: copying the part {Ms(Requested, Queued):0} ms, waiting {Ms(Queued, Started):0}, " +
-        $"rebuild {Ms(Started, Rebuilt):0}, display meshes {Ms(Rebuilt, Meshed):0}, to the window {Ms(Meshed, Applied):0}, " +
+        $"Displayed {TotalMs:0} ms after the change. Copy {Ms(Requested, Queued):0} ms, queue {Ms(Queued, Started):0}, " +
+        $"rebuild {Ms(Started, Rebuilt):0}, display meshes {Ms(Rebuilt, Meshed):0}, transfer {Ms(Meshed, Applied):0}, " +
         $"tree and scene {Ms(Applied, Updated):0}, first frame {Ms(Updated, Shown):0}";
 }

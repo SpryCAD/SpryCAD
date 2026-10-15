@@ -56,7 +56,7 @@ public partial class MainWindow
         }
         var collapse = HeaderButton("collapse", "Collapse (Esc)");
         collapse.Click += (_, _) => HideTaskPane();
-        _taskPopOut = HeaderButton("popout", "Pop out: in a window of its own");
+        _taskPopOut = HeaderButton("popout", "Open in a separate window");
         _taskPopOut.Click += (_, _) => { if (_taskCurrent?.PopOut is { } pop) { HideTaskPane(); pop(); } };
         _taskPin = HeaderButton("unpinned", "");
         _taskPin.Click += (_, _) =>
@@ -174,7 +174,7 @@ public partial class MainWindow
             TaskOverlay.Children.Add(_taskPanel);
         }
         _taskPin.Content = UI.Icons.Make(pinned ? "pinned" : "unpinned", 14);
-        ToolTip.SetTip(_taskPin, pinned ? "Unpin: slide away when the model is clicked" : "Pin: keep the pane open beside the model");
+        ToolTip.SetTip(_taskPin, pinned ? "Auto-hide the pane" : "Pin the pane open");
         foreach (var p in _taskPanes)
         {
             var on = mode != TaskMode.Hidden && p == _taskCurrent;

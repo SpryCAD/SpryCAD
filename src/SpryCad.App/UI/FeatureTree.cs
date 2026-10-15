@@ -132,10 +132,10 @@ public sealed class FeatureTree : UserControl
         {
             var st = result?.Status.GetValueOrDefault(f.Id);
             var cond = string.IsNullOrWhiteSpace(f.SuppressWhen) ? null : $"Suppressed when {f.SuppressWhen}";
-            if (f.Suppressed) return cond == null ? null : cond + " (suppressed by hand now)";
-            if (st is { Suppressed: true, SuppressedBy: "condition" }) return cond + ": it holds, so suppressed.";
-            if (st is { Suppressed: true, SuppressedBy: { } by }) return $"Suppressed with {by}, which it uses." + (cond != null ? $"\n{cond}." : "");
-            return cond == null ? null : cond + ": it does not hold now.";
+            if (f.Suppressed) return cond == null ? null : cond + ". Currently suppressed manually.";
+            if (st is { Suppressed: true, SuppressedBy: "condition" }) return cond + ". Condition is true; feature suppressed.";
+            if (st is { Suppressed: true, SuppressedBy: { } by }) return $"Suppressed because it references {by}, which is suppressed." + (cond != null ? $"\n{cond}." : "");
+            return cond == null ? null : cond + ". Condition is currently false.";
         }
 
         var active = doc.ActiveCount;
@@ -234,7 +234,7 @@ public sealed class FeatureTree : UserControl
             Child = new Border { Height = 3, CornerRadius = new CornerRadius(1.5), Background = Palette.Accent, VerticalAlignment = VerticalAlignment.Center },
             Cursor = RollbackCursor, Tag = "__rollback",
         };
-        ToolTip.SetTip(bar, "Rollback bar: drag up or down to roll the model back.");
+        ToolTip.SetTip(bar, "Rollback Bar\nDrag up or down to roll the model back.");
         bar.ZIndex = 1;
         var shift = new TranslateTransform();
         bar.RenderTransform = shift;
@@ -338,7 +338,7 @@ public sealed class FeatureTree : UserControl
             VerticalAlignment = VerticalAlignment.Center, Cursor = new Cursor(StandardCursorType.Hand), Margin = new Thickness(2, 0, 0, 0),
             Opacity = shown ? 1 : 0.7,
         };
-        ToolTip.SetTip(b, shown ? "Hide the sketch" : "Show the sketch (e.g. to use it again in another feature)");
+        ToolTip.SetTip(b, shown ? "Hide in the graphics area" : "Show in the graphics area");
         b.PointerEntered += (_, _) => b.Background = Palette.SelectedBg;
         b.PointerExited += (_, _) => b.Background = Brushes.Transparent;
         b.PointerPressed += (_, e) =>

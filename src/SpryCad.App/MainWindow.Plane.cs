@@ -206,7 +206,7 @@ public partial class MainWindow
             var sec = page.Section(RefTitles[i]);
             var box = page.Selection(sec, RefTitles[i],
                 SelFilter.Plane | SelFilter.Face | SelFilter.PlanarFace | SelFilter.Sketch | SelFilter.Edge | SelFilter.SketchSegment | SelFilter.Vertex | SelFilter.Center,
-                i == 0 ? "A face or plane, an edge or sketch line, a round face (its axis, or tangent to it), or a point." : "", 1);
+                i == 0 ? "Face, plane, edge, sketch line, point, or cylindrical face (its axis, or tangent to it)." : "", 1);
             if (slots[i] is { } r0 && PlaneRefItem(r0, st) is { } it) box.Items.Add(it);
             box.Changed += () =>
             {
@@ -237,7 +237,7 @@ public partial class MainWindow
         page.Check(opts, "Flip normal", () => f.Flip, v => f.Flip = v);
         // its size: dragged by the handles on it, or around what is sketched on it
         page.ButtonRow(opts, "Size to Fit", () => { f.Size = null; page.RaiseChanged(); RefreshScene(); }, "fit");
-        page.Info(opts, "Drag the handles on the plane to size it; Size to Fit sizes it around what is sketched on it.");
+        page.Info(opts, "Drag the handles to resize the plane. Size to Fit sizes it around its sketch geometry.");
 
         // the relations each reference offers, its value and its side
         sync = () =>
@@ -281,9 +281,9 @@ public partial class MainWindow
             (status.Text, status.Foreground) = refs.Count == 0 ? ("", Palette.TextMuted)
                 : PlaneSolver.Defined(refs) switch
                 {
-                    PlaneSolver.Definition.Full => ("✔ Fully defined", Palette.Success),
-                    PlaneSolver.Definition.Under => ("Under defined", Palette.TextSecondary),
-                    _ => ("Over defined", Palette.Danger),
+                    PlaneSolver.Definition.Full => ("✔ Fully Defined", Palette.Success),
+                    PlaneSolver.Definition.Under => ("Under Defined", Palette.TextSecondary),
+                    _ => ("Over Defined", Palette.Danger),
                 };
         };
         sync();

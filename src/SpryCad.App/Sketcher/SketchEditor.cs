@@ -118,11 +118,11 @@ public sealed partial class SketchEditor : IViewportMode
             SketchTool.TangentArc => "Tangent Arc: click the end of a line or arc, then the arc end point.",
             SketchTool.Point => "Point: click to place points.",
             SketchTool.Spline => "Spline: click the points it passes through; click the first again to close it. Double-click, Enter or Esc ends it.",
-            SketchTool.Polygon => $"Polygon ({PolygonSides} sides): click the center, then a vertex.",
+            SketchTool.Polygon => $"Polygon, {PolygonSides} sides: click the center, then a vertex.",
             SketchTool.Slot => "Straight Slot: click the first center, the second center, then the width.",
-            SketchTool.SmartDimension => "Smart Dimension: select one or two entities (the origin's red axis stubs too: an angle to the axis), then click to place the dimension.",
-            SketchTool.Trim => "Trim: click the part of an entity to delete (between intersections).",
-            SketchTool.Fillet => $"Sketch Fillet (R {Units.Length(FilletRadius)}): click corners where two lines or arcs meet, or the two of them. Deleting a fillet's arc restores the corner.",
+            SketchTool.SmartDimension => "Smart Dimension: select one or two entities, or an origin axis for an angle, then click to place the dimension.",
+            SketchTool.Trim => "Trim: click the segment between intersections to delete.",
+            SketchTool.Fillet => $"Sketch Fillet, R {Units.Length(FilletRadius)}: select corners where two lines or arcs meet, or both entities. Deleting the fillet arc restores the corner.",
             _ => "Select sketch entities. Drag to move; double-click a dimension to edit it.",
         });
         _vp.Cursor = Cursor;
@@ -359,7 +359,7 @@ public sealed partial class SketchEditor : IViewportMode
             if (SketchSolver.WouldOverDefine(Sk, c))
             {
                 Undo(); _redo.Clear();
-                return "Adding this relation would over define the sketch.";
+                return "Adding this relation would over-define the sketch.";
             }
             Sk.Constraints.Add(c);
         }
@@ -423,7 +423,7 @@ public sealed partial class SketchEditor : IViewportMode
             if (SketchConvert.Polyline(Sk, pts)) created++;
         }
         Resolve();
-        Message?.Invoke(created > 0 ? $"Converted {created} edge(s): they follow the model as it changes." : "Nothing new to convert: those edges are in the sketch already.");
+        Message?.Invoke(created > 0 ? $"Converted {created} edge{(created == 1 ? "" : "s")}. Converted edges follow changes to the model." : "Nothing new to convert. The selected edges are already in the sketch.");
         _vp.Redraw();
         return created;
     }
@@ -927,7 +927,7 @@ public sealed partial class SketchEditor : IViewportMode
         };
         if (Tool == SketchTool.TangentArc && _clicks.Count == 1 && TangentAt(_clickSnaps[0]) == null)
         {
-            Message?.Invoke("Tangent Arc must start at the end point of a line or arc.");
+            Message?.Invoke("Tangent Arc must start at the endpoint of a line or arc.");
             _clicks.Clear(); _clickSnaps.Clear();
             return;
         }
@@ -1188,7 +1188,7 @@ public sealed partial class SketchEditor : IViewportMode
             Resolve();
             return;
         }
-        if (h is not { Kind: SkRefKind.Entity } || Sk.Entity(h.Value.Id) is not SkLine line) { Message?.Invoke("Trim works on lines and splines: click the segment to remove."); return; }
+        if (h is not { Kind: SkRefKind.Entity } || Sk.Entity(h.Value.Id) is not SkLine line) { Message?.Invoke("Trim works on lines and splines. Click the segment to remove."); return; }
         var a = Sk.P(line.P1); var b = Sk.P(line.P2);
         var m = SketchPos(p);
         var dir = b - a; var len2 = dir.LengthSq;
@@ -1434,7 +1434,7 @@ public sealed partial class SketchEditor : IViewportMode
     {
         if (ModelCandidate(x, y) is not { } m) return null;
         var ent = SketchReferences.Create(Sk, Frame, m.edge, m.body.Id, m.vertex, m.point);
-        if (ent == null) { Message?.Invoke("That edge is seen end-on from this sketch plane."); return null; }
+        if (ent == null) { Message?.Invoke("That edge is perpendicular to the sketch plane and cannot be referenced."); return null; }
         if (ent is SkPointEntity rp) return new SkRef(SkRefKind.Point, rp.P);
         if (ent is SkCircle rc && Vec2.Distance(Sk.P(rc.Center), SketchPos(new PointerInfo(x, y, default, 0))) < rc.R * 0.25)
             return new SkRef(SkRefKind.Point, rc.Center);
@@ -1528,7 +1528,7 @@ public sealed partial class SketchEditor : IViewportMode
         {
             c.Driven = true;
             Sk.Constraints.Add(c);
-            Message?.Invoke("This dimension would over define the sketch, so it was added as a driven (reference) dimension.");
+            Message?.Invoke("This dimension would over-define the sketch, so it was added as a driven dimension.");
             Resolve();
             return;
         }
@@ -1552,7 +1552,7 @@ public sealed partial class SketchEditor : IViewportMode
             BorderBrush = new SolidColorBrush(Color.FromRgb(60, 120, 220)),
             BorderThickness = new Thickness(2),
         };
-        ToolTip.SetTip(tb, $"Enter a value or an expression (e.g. 25, W/2, 1in, 10mm); with no unit, {Units.Symbol()}. Enter = OK, Esc = cancel.");
+        ToolTip.SetTip(tb, $"Enter a value or expression, e.g. 25, W/2, 1in or 10mm; values without a unit are in {Units.Symbol()}. Enter = OK, Esc = Cancel.");
         Canvas.SetLeft(tb, pos.X - 60); Canvas.SetTop(tb, pos.Y - 14);
         tb.KeyDown += (_, e) =>
         {
@@ -2274,7 +2274,7 @@ public sealed partial class SketchEditor : IViewportMode
             if ((hidden > 0) != RelationsThinned)
             {
                 RelationsThinned = hidden > 0;
-                if (RelationsThinned) Message?.Invoke("Some relation marks are not shown here (on small or crowded geometry): zoom in, or select geometry to see its relations.");
+                if (RelationsThinned) Message?.Invoke("Some relation marks are hidden on small or crowded geometry. Zoom in, or select geometry to see its relations.");
             }
         }
         _marks.Set(marks);

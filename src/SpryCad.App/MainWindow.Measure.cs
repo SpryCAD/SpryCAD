@@ -31,13 +31,13 @@ public partial class MainWindow
     void MeasureCommand()
     {
         if (_page == _measurePage && _measurePage != null) { _measurePage.Activate(_measureBox); return; }
-        if (_sketch != null || _edit != null) { Status("Finish the current edit before measuring."); return; }
+        if (_sketch != null || _edit != null) { Status("Exit the current edit before measuring."); return; }
         var page = new PmPage("Measure", "measure");
         page.OnOk = CloseMeasure;
         page.OnCancel = CloseMeasure;
         var s = page.Section("Selections");
         var box = page.Selection(s, "Items", SelFilter.Face | SelFilter.Edge | SelFilter.Vertex | SelFilter.Center,
-            "Click faces, edges, vertices or the centers of circles and arcs: one for its size, two for the distance and angle between them. Click an item again to remove it.");
+            "Select faces, edges, vertices or arc centers: one item for its size, two for the distance and angle between them. Select an item again to remove it.");
         page.ButtonRow(s, "Clear Selections", () => box.Clear());
         var r = page.Section("Results");
         _measureResults = new StackPanel { Spacing = 2 };
@@ -234,7 +234,7 @@ public partial class MainWindow
         string L(double v) => F(v * k) + " " + u;
 
         if (items.Count == 0) rows.Add(("", "Select faces, edges or vertices."));
-        else if (items.Any(i => i == null)) rows.Add(("", "An item could not be measured (it is no longer in the model)."));
+        else if (items.Any(i => i == null)) rows.Add(("", "An item could not be measured because it is no longer in the model."));
         else if (items.Count == 1)
         {
             Single(items[0]!, rows, L);
