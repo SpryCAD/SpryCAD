@@ -51,8 +51,10 @@ static class BlendStress
                 var r0 = new Regenerator().Rebuild(doc0);
                 if (r0.State.Bodies.Count != 1 || r0.State.Bodies[0].Solid.Native is not { } nb) { Console.WriteLine($"skip {shape}: not one exact body"); continue; }
                 body = nb; body.Link();
-                // (sizes against the part's smallest straight edge: small, medium and large blends for it)
-                var lengths = body.Edges.Where(e => e.Curve is NLine).Select(e => e.Length).Where(l => l > 1e-6).ToList();
+                // (sizes against the part's smallest straight edge, of those not tiny beside the part (a sliver's edge
+                // would make every size meaningless): small, medium and large blends for it)
+                var diag = body.Bounds.Diagonal;
+                var lengths = body.Edges.Where(e => e.Curve is NLine).Select(e => e.Length).Where(l => l > 0.03 * diag).ToList();
                 minDim = lengths.Count > 0 ? lengths.Min() : body.Bounds.Diagonal / 10;
             }
             catch (Exception ex) { Console.WriteLine($"skip {shape}: {ex.Message}"); continue; }
@@ -97,7 +99,9 @@ static class BlendStress
     /// </summary>
     static IEnumerable<(string name, List<NEdge> edges)> Selections(NBody body, bool small)
     {
-        var edges = body.Edges.Where(e => e.Uses.Count == 2 && !IsSeam(e)).OrderBy(e => Key(e.Mid)).ToList();
+        // (sharp edges: a smooth one, between faces meeting tangentially, has nothing to blend; the tangent chains of
+        // the sharp ones still follow them)
+        var edges = body.Edges.Where(e => e.Uses.Count == 2 && !IsSeam(e) && Sharp(e)).OrderBy(e => Key(e.Mid)).ToList();
         var faces = body.Faces.OrderBy(f => Key(Centroid(f))).ToList();
         int fi = 0;
         foreach (var f in faces)
@@ -129,6 +133,14 @@ static class BlendStress
         var sz = size.ToString("R", System.Globalization.CultureInfo.InvariantCulture);
         doc.AddFeature<Feature>(kind == "fillet" ? new FilletFeature { Name = "Stress", Radius = sz, Edges = refs } : new ChamferFeature { Name = "Stress", Distance = sz, Edges = refs });
         doc.Save(Path.Combine(dir, string.Concat(name.Select(ch => char.IsLetterOrDigit(ch) ? ch : '-')) + ".sprt"));
+    }
+
+    static bool Sharp(NEdge e)
+    {
+        var (fa, fb) = (e.Uses[0].Face, e.Uses[1].Face);
+        var p = e.Mid;
+        var na = fa.Surface.Normal(p) * (fa.Sense ? 1 : -1); var nb = fb.Surface.Normal(p) * (fb.Sense ? 1 : -1);
+        return Vec3.Dot(na.Normalized, nb.Normalized) < Math.Cos(2 * Math.PI / 180);
     }
 
     static bool IsSeam(NEdge e) => e.Uses.Count == 2 && ReferenceEquals(e.Uses[0].Face, e.Uses[1].Face);
@@ -164,10 +176,23 @@ static class BlendStress
             && (f.Tag.Name.EndsWith(".End", StringComparison.Ordinal) || f.Tag.Name.EndsWith(".Start", StringComparison.Ordinal)
                 || f.Tag.Name.EndsWith(".End0", StringComparison.Ordinal) || f.Tag.Name.EndsWith(".End1", StringComparison.Ordinal))).ToList();
         if (caps.Count > 0) { detail = $"tool end left: {caps.Count} face(s)"; return "wrong"; }
+        // (each edge picked blended: none of the result's sharp edges still runs through its middle; a blend left out
+        // silently leaves a valid body)
+        {
+            var tol = 1e-6 * Math.Max(1, body.Bounds.Diagonal);
+            nb.Link();
+            bool Through(NEdge x, Vec3 p)
+            {
+                var t = x.Curve.Param(p, 0.5 * (x.T0 + x.T1));
+                return t >= Math.Min(x.T0, x.T1) - 1e-9 && t <= Math.Max(x.T0, x.T1) + 1e-9 && Vec3.Distance(x.Curve.Eval(t), p) < tol;
+            }
+            var left = edges.Count(e => nb.Edges.Any(x => x.Uses.Count == 2 && x.Bounds().Contains(e.Mid, tol) && Sharp(x) && Through(x, e.Mid)));
+            if (left > 0) { detail = $"edge not blended: {left} of {edges.Count}"; return "wrong"; }
+        }
         var v0 = NTess.ToSolid(body).Volume(); var v1 = s.Volume();
         if (convex.All(c => c == true) && v1 >= v0 - 1e-9 * Math.Abs(v0)) { detail = $"volume: not less ({v0:0.###} -> {v1:0.###})"; return "wrong"; }
         if (convex.All(c => c == false) && v1 <= v0 + 1e-9 * Math.Abs(v0)) { detail = $"volume: not more ({v0:0.###} -> {v1:0.###})"; return "wrong"; }
-        if (ExportProblem(s) is { } ep) { detail = "export: " + ep; return "wrong"; }
+        if (ExportProblem(s, blend.Id) is { } ep) { detail = "export: " + ep; return "wrong"; }
         detail = st.Warnings.Count > 0 ? "warning: " + Short(st.Warnings[0]) : "ok";
         return "right";
     }
@@ -180,7 +205,7 @@ static class BlendStress
     static readonly MethodInfo Find = ParamSurfaceType.GetMethod("Find")!;
 
     /// <summary>Written as STEP: an error, or a fillet face whose edges are not on its surface as written (no parameter curves for them).</summary>
-    static string? ExportProblem(Solid s)
+    static string? ExportProblem(Solid s, string blendId)
     {
         try
         {
@@ -190,7 +215,7 @@ static class BlendStress
             if (StepWriter.LastError is { } ex) return "write: " + Short(ex.Message);
             var x = ExactBrepFactory.FromNative(s.Native!);
             if (x.Warnings.Count > 0) return "exact: " + Short(x.Warnings[0]);
-            foreach (var f in x.Faces.Where(f => f.Surface.Kind == SurfaceKind.Pipe))
+            foreach (var f in x.Faces.Where(f => f.Surface.Kind == SurfaceKind.Pipe && f.Name.StartsWith(blendId + ".", StringComparison.Ordinal)))
             {
                 var ps = Of.Invoke(null, new[] { PipeFit.Invoke(null, new object[] { f, x })! })!;
                 foreach (var (ei, _) in f.Loops.SelectMany(l => l.Edges))

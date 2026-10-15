@@ -199,12 +199,21 @@ public static class NativeBlend
             var x = e.Uses[0].Face.Tag.Name; var y = e.Uses[1].Face.Tag.Name;
             return x == a && y == b || x == b && y == a;
         }
+        // (the distance to the edge itself: a line's samples are its ends alone, and an edge left whole is then half
+        // its length from its own middle, and was lost)
+        static double DistTo(NEdge x, Vec3 p)
+        {
+            var t = x.Curve.Param(p, 0.5 * (x.T0 + x.T1));
+            t = Math.Clamp(t, Math.Min(x.T0, x.T1), Math.Max(x.T0, x.T1));
+            return Math.Min(Vec3.Distance(x.Curve.Eval(t), p), x.Samples(1e-3).Min(q => Vec3.Distance(q, p)));
+        }
         foreach (var e in edges)
         {
             var a = e.Uses[0].Face.Tag.Name; var b = e.Uses[1].Face.Tag.Name;
             var mid = e.Curve.Eval(0.5 * (e.T0 + e.T1));
-            var best = after.Edges.Where(x => Between(x, a, b)).OrderBy(x => x.Samples(1e-3).Min(q => Vec3.Distance(q, mid))).FirstOrDefault();
-            if (best != null && best.Samples(1e-3).Min(q => Vec3.Distance(q, mid)) < Math.Max(1e-3, 0.5 * Vec3.Distance(e.V0.P, e.V1.P)) && !res.Contains(best)) res.Add(best);
+            var best = after.Edges.Where(x => Between(x, a, b)).OrderBy(x => DistTo(x, mid)).FirstOrDefault();
+            if (best != null && DistTo(best, mid) < Math.Max(1e-3, 0.5 * Vec3.Distance(e.V0.P, e.V1.P)) && !res.Contains(best)) res.Add(best);
+            else Debug?.Invoke($"rest: {e.Curve.GetType().Name} {e.V0.P}->{e.V1.P} [{a}|{b}] not found on the result ({(best == null ? "no edge between those faces" : $"nearest {best.V0.P}->{best.V1.P}")})");
         }
         if (!joins) return res;
         // the remains' faces against the first blends' faces, near the vertices they shared
