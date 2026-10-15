@@ -471,6 +471,7 @@ public sealed class Regenerator
             var key = (hash, f.Id + ".");
             if (!ImportCache.TryGet(key, out var r))
             {
+                Detail?.Invoke($"reading the STEP file ({data.Length / 1048576.0:0.#} MB)");
                 try { r = StepImport.Read(data, f.Id + "."); }
                 catch (InvalidDataException ex) { throw new FeatureException(ex.Message); }
                 ImportCache.Add(key, r);
@@ -478,7 +479,10 @@ public sealed class Regenerator
             status.Warnings.AddRange(r.Warnings);
             var bodies = new List<Body>(State.Bodies);
             for (int i = 0; i < r.Solids.Count; i++)
+            {
+                if (r.Solids.Count > 1) Detail?.Invoke($"solid {i + 1} of {r.Solids.Count}");
                 bodies.Add(new Body { Id = i == 0 ? f.Id : $"{f.Id}-{i + 1}", Solid = Kernel.Native.NTess.ToSolid(r.Solids[i].Body.Clone()) });
+            }
             State = State.With(bodies);
         }
 
