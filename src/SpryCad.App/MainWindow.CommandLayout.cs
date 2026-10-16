@@ -192,8 +192,12 @@ public partial class MainWindow
 
     void FitCommandRow()
     {
-        // (again when the window is resized)
-        if (!_fitHooked && CommandBar.Parent is Control h) { h.SizeChanged += (_, _) => FitCommandRow(); _fitHooked = true; }
+        // (again when the window is made wider or narrower: only the width decides. Its height follows the names shown
+        // or not, so refitting on any size change went round and round, the window hung in layout)
+        if (!_fitHooked && CommandBar.Parent is Control h) { h.SizeChanged += (_, e) => { if (e.WidthChanged) FitCommandRow(); }; _fitHooked = true; }
+        // (one fit at a time: asked again while one waits, that one does)
+        if (_fitPending) return;
+        _fitPending = true;
         CommandBar.Height = LargeBar ? double.NaN : 34;
         foreach (var l in _cmdLabels) l.IsVisible = true;
         foreach (var b in CommandBar.GetLogicalDescendants().OfType<Button>()) b.Classes.Set("iconsonly", false);
@@ -207,3 +211,6 @@ public partial class MainWindow
         }, Avalonia.Threading.DispatcherPriority.Loaded);
     }
 }
+            _fitPending = false;
+
+    bool _fitPending;
