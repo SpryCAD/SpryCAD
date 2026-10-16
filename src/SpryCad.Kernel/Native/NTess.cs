@@ -119,6 +119,10 @@ public static class NTess
         // budget), else the refinement below has to split coarse cells over and over
         int capU = f.Surface.Kind == SurfaceKind.Screw ? 40000 : 400;
         int nu = (int)Math.Clamp(Math.Ceiling(mu / hu), 1, capU), nv = (int)Math.Clamp(Math.Ceiling(mv / hv), 1, 400);
+        // (rows along a straight generator only steady the triangulation: no more than there are columns round it, and
+        // a dozen at most however long it is. None at all left joining a blended spoke's ends across: thousands of
+        // triangles; a row every few columns all along a long, thin bend: thousands too)
+        if (f.Surface.Kind is SurfaceKind.Cylinder or SurfaceKind.Cone) nv = Math.Min(nv, Math.Max(1, Math.Min(nu, 12)));
         if ((long)nu * nv > 40000) { var k = Math.Sqrt(40000.0 / ((long)nu * nv)); nu = Math.Max(1, (int)(nu * k)); nv = Math.Max(1, (int)(nv * k)); }
         var minGap = 0.45 * Math.Min(mu / nu, mv / nv);
         // each row's boundary crossings once (the inside test of its points), and the boundary in boxed runs (the
@@ -341,11 +345,12 @@ public static class NTess
         double Ang(double r) => 2 * Math.Acos(Math.Max(-1, 1 - Math.Min(1, tol / Math.Max(r, 1e-9))));
         switch (s.Kind)
         {
-            // straight along the axis: a line from end to end lies on the surface, so no rows of points along it (only
-            // round it, which the boundary and the refinement against the surface give); a long, thin round (a bend of
-            // sheet metal two metres long) is a few hundred triangles, not tens of thousands
-            case SurfaceKind.Cylinder: { var hu = Ang(s.R) * s.R; return (hu, double.PositiveInfinity); }
-            case SurfaceKind.Cone: { var r = Math.Max(s.R, 1e-3); var hu = Ang(r) * r; return (hu, double.PositiveInfinity); } // (straight along its sides too)
+            // straight along the axis: a line from end to end lies on the surface, so rows of points along it only keep
+            // the triangles from joining far-apart points of the boundary (a spoke blended at both ends); Curved keeps them
+            // few (no more than there are columns round it): a bend of sheet metal two metres long, a few columns wide,
+            // is a few hundred triangles, not tens of thousands
+            case SurfaceKind.Cylinder: { var hu = Ang(s.R) * s.R; return (hu, Math.Max(hu * 8, 1e-6)); }
+            case SurfaceKind.Cone: { var r = Math.Max(s.R, 1e-3); var hu = Ang(r) * r; return (hu, Math.Max(hu * 4, 1e-6)); }
             case SurfaceKind.Sphere: { var h = Ang(s.R) * s.R; return (h, h); }
             case SurfaceKind.Torus: { var hu = Ang(s.R + s.R2) * (s.R + s.R2); var hv = Ang(s.R2) * s.R2; return (hu, hv); }
             case SurfaceKind.Offset:
