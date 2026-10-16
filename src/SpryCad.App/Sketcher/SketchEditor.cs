@@ -2467,10 +2467,10 @@ public sealed partial class SketchEditor : IViewportMode
         var prefix = c.Doubled ? "⌀" : c.Type switch { CType.Diameter => "⌀", CType.Radius => "R", CType.Length => "L ", _ => "" };
         var suffix = c.Type == CType.Angle ? "°" : "";
         var txt = prefix + v + suffix;
-        // driven by an equation: its name with the value ("L = 10")
+        // driven by an equation: its name with the value ("L = 10"), marked Σ as any value worked out is
         if (EquationEntry.IsName(c.Expr)) txt = $"{c.Expr!.Trim()} = {txt}";
         if (c.Driven) txt = "(" + txt + ")";
-        if (!string.IsNullOrEmpty(c.Expr) && !Expr.IsLiteral(c.Expr, out _) && !EquationEntry.IsName(c.Expr))
+        if (!string.IsNullOrEmpty(c.Expr) && !Expr.IsLiteral(c.Expr, out _))
             txt = "Σ " + txt;
         return txt;
     }
