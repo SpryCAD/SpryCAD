@@ -1607,6 +1607,7 @@ public sealed partial class SketchEditor : IViewportMode
         var v = q.Value;
         if (v <= 0 && c.Type != CType.Angle && c.Type != CType.HDistance && c.Type != CType.VDistance) { Message?.Invoke("Value must be greater than zero."); return false; }
         Snapshot();
+        ScaleOnFirstDimension(c, v);
         c.Expr = kept; c.Value = v;
         Resolve();
         if (Status.Status == SketchStatus.OverDefined) Message?.Invoke("The sketch cannot be solved with that value.");
@@ -1615,6 +1616,37 @@ public sealed partial class SketchEditor : IViewportMode
     }
 
     public bool IsEditingDimension => _modifyBox != null;
+
+    /// <summary>
+    /// The sketch's first dimension set: everything drawn scaled with it (it was drawn roughly to size, at a scale not
+    /// known till now), so the shape keeps its proportions rather than one length jumping; about the origin when the
+    /// sketch is tied to it, else about its middle; the view zoomed alike, so the sketch stays the size it was on
+    /// screen. Not for a sketch with fixed points (references to the model): those cannot follow.
+    /// </summary>
+    void ScaleOnFirstDimension(SkConstraint c, double v)
+    {
+        if (c.ValueKind != ValueKind.Length || c.Type == CType.Offset || c.Value <= 1e-9 || v <= 0) return;
+        if (Sk.Constraints.Any(x => x != c && x.IsDimension && !x.Driven)) return;
+        if (Sk.Points.Any(p => p.Fixed && p.Id != Sketch.OriginId)) return;
+        var k = v / c.Value;
+        if (Math.Abs(k - 1) < 1e-9) return;
+        var free = Sk.Points.Where(p => !p.Fixed).ToList();
+        if (free.Count == 0) return;
+        var onOrigin = Sk.Entities.Any(e => e.PointIds.Contains(Sketch.OriginId)) || Sk.Constraints.Any(x => x.Refs.Contains(Sketch.OriginId));
+        var a = onOrigin ? Sk.P(Sketch.OriginId) : new Vec2(free.Average(p => p.X), free.Average(p => p.Y));
+        foreach (var p in free) { p.X = a.X + (p.X - a.X) * k; p.Y = a.Y + (p.Y - a.Y) * k; }
+        foreach (var e in Sk.Entities)
+        {
+            if (e is SkCircle ci) ci.R *= k;
+            else if (e is SkSpline sp) { if (sp.StartDir is { } d0) sp.StartDir = d0 * k; if (sp.EndDir is { } d1) sp.EndDir = d1 * k; }
+        }
+        foreach (var x in Sk.Constraints) { x.LabelX *= k; x.LabelY *= k; }
+        // the view alike: the point scaled about where it is on screen
+        var cam = _vp.Camera;
+        var aw = Camera.F(Frame.ToWorld(a));
+        cam.Target = aw + (cam.Target - aw) * (float)k;
+        cam.HalfHeight *= (float)k;
+    }
 
     // ---------------------------------------------------------------------------------------
     // drawing
