@@ -40,6 +40,8 @@ public partial class MainWindow
         var set = new HashSet<string>();
         if (f == null) return set;
         if (f is SketchFeature s) { if (s.Plane.Std is { } std) set.Add(std); if (s.Plane.Feature is { } pf) set.Add(pf); return set; }
+        // (a plane made from references: its Base, Front unless set, is not used, so not looked at)
+        if (f is PlaneFeature { Mode: PlaneMode.References } byRefs) { var c = (PlaneFeature)byRefs.Clone(); c.Base = new PlaneRef(); f = c; }
         var json = CadDocument.JsonOf(f);
         foreach (var std in new[] { "Front", "Top", "Right" }) if (json.Contains($"\"{std}\"")) set.Add(std);
         foreach (var g in Session.Doc.Features)
