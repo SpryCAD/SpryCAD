@@ -223,8 +223,9 @@ public static class StepImport
             if (wanted != null) { wanted.TryAdd(key, (name, breps)); return -1; }
             if (partIndex.TryGetValue(key, out var i)) return i;
             var (r, error) = built.TryGetValue(key, out var made) ? made : Solids(name, breps);
-            if (error != null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(error);
             res.Warnings.AddRange(r.Warnings);
+            // a part that cannot be read: left out, the rest of the assembly imported
+            if (error != null) { res.Warnings.Add($"{name}: could not be imported ({error.Message}); left out."); return partIndex[key] = -1; }
             if (r.Solids.Count == 0) return partIndex[key] = -1;
             res.Parts.Add(new StepPart(name, r.Solids));
             return partIndex[key] = res.Parts.Count - 1;
@@ -692,6 +693,21 @@ public static class StepImport
             {
                 t1 = Param(curve, v1.P, null);
                 if (closed && curve is NSpline) (t0, t1) = (0, 1);
+                else if (t1 <= t0 && !closed)
+                {
+                    // the vertices run the other way along it (a wrong same_sense, or a vertex well off the curve, as a
+                    // Solid Edge export's sliver had): taken as the curve reversed
+                    var rev = Curve(_f.Get(ec.Args[3]), !same);
+                    double r0 = Param(rev, v0.P, null), r1 = Param(rev, v1.P, null);
+                    if (r1 > r0) (curve, t0, t1) = (rev, r0, r1);
+                    // neither way: the curve does not fit its vertices at all (a Solid Edge sliver: a vertex 0.3 mm off a
+                    // 0.6 mm curve, both projecting to its start): taken straight between them
+                    else if ((v1.P - v0.P).Length > 1e-9)
+                    {
+                        _warn.Add($"Edge #{ec.Id}: its curve does not run between its vertices; taken as a straight edge.");
+                        (curve, t0, t1) = (new NLine(v0.P, v1.P - v0.P), 0, (v1.P - v0.P).Length);
+                    }
+                }
             }
             if (t1 <= t0) throw new InvalidDataException($"STEP: edge #{ec.Id} runs backwards along its curve.");
             List<NEdge> res;
