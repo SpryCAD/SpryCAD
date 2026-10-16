@@ -86,6 +86,23 @@ static class CornerBlend
         Plane? End(NVertex v, Vec3 dirOut) => NativeBlend.EndPlane(v, dirOut, cA.Face, cB.Face, new[] { e }, selected);
         var p0 = a <= 0 ? End(cA.Start, -t) : null;
         var p1 = b <= 0 ? End(cA.End, t) : null;
+        // (an end on a round, as the line tool's: run on past it and cut back to the round; square there, the round fell
+        // away under its end, a sliver of it standing)
+        var c0 = a <= 0 && p0 == null ? NativeBlend.EndCutAt(cA.Start, -t, cA.Face, cB.Face, new[] { e }, selected) is { Plane: null } k0 ? k0 : null : null;
+        var c1 = b <= 0 && p1 == null ? NativeBlend.EndCutAt(cA.End, t, cA.Face, cB.Face, new[] { e }, selected) is { Plane: null } k1 ? k1 : null : null;
+        if (c0 != null || c1 != null)
+        {
+            var ext = 3 * r;
+            var run = NBuild.ExtrudeBetween(new[] { new ProfileRegion(prof) }, frame, c0 == null ? p0 : null, c0 != null ? a - ext : a, c1 == null ? p1 : null, c1 != null ? L - b + ext : L - b, l.Name) is { } rb
+                ? NTess.ToSolid(rb) : Builders.Extrude(new[] { new ProfileRegion(prof) }, frame, c0 != null ? a - ext : a, c1 != null ? L - b + ext : L - b, l.Name);
+            try
+            {
+                if (c0 != null) run = c0.Trim(run);
+                if (c1 != null) run = c1.Trim(run);
+                if (!run.IsEmpty && run.Native != null) return run;
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or Native.NBooleanException) { NativeBlend.Debug?.Invoke($"corner strip {l.Name}: not cut to the round ({ex.Message})"); }
+        }
         if ((p0 != null || p1 != null) && NBuild.ExtrudeBetween(new[] { new ProfileRegion(prof) }, frame, p0, a, p1, L - b, l.Name) is { } nb)
             return NTess.ToSolid(nb);
         return Builders.Extrude(new[] { new ProfileRegion(prof) }, frame, a, L - b, l.Name);

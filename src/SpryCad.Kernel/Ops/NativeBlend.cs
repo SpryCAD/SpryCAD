@@ -1794,10 +1794,17 @@ public static class NativeBlend
                     if (!others.Any(o => o.Surface.CoincidentWith(f.Surface, 1e-9))) others.Add(f);
                 }
             }
-        if (others.Count != 1 || others[0].Surface.Kind != SurfaceKind.Cylinder) return null;
+        if (others.Count != 1 || others[0].Surface.Kind != SurfaceKind.Cylinder)
+        {
+            Debug?.Invoke($"end cut at {v.P}: {others.Count} other face(s) {string.Join(", ", others.Select(o => o.Tag.Name + ":" + o.Surface.Kind))}");
+            return null;
+        }
         var fc = others[0];
         var cos = Math.Abs(Vec3.Dot(fc.Surface.Normal(v.P), dirOut.Normalized));
-        if (cos > 0.9999 || cos < 0.05) return null;
+        // (square to the edge at its end is no match for a round as it is for a plane: the round falls away under the
+        // tool's square end across its width (a boss's side fillet ending on the top of an earlier round), leaving a
+        // sliver of the end standing; cut to the round there too)
+        if (cos < 0.05) return null;
         // the side the edge is on, a little back from its end
         var side = fc.Surface.F_(v.P - dirOut.Normalized * 1e-3);
         return Math.Abs(side) < 1e-12 ? null : new EndCut(fc, Math.Sign(side));
