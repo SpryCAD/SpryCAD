@@ -351,6 +351,11 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
                 _r.DrawMesh(g, new Rgba(1f, 0.82f, 0.25f, 0.55f), vp, view, Camera.Perspective);
                 _r.DrawEdges(g, new Rgba(0.55f, 0.4f, 0.0f, 0.9f), vp);
             }
+            // the selected and highlighted edges again, over the preview: its yellow tinted the selection blue nearly to its own
+            _r.SetupDepth(false, false);
+            foreach (var b in Bodies)
+                foreach (var (er, color) in hl.Edges(b.Id, b.Mesh))
+                    _r.DrawEdges(_gpu[b.Mesh], color.WithAlpha(1), vp, er.VertexStart, er.VertexCount);
             _r.Blend(false);
             _r.SetupDepth(true, true);
         }
