@@ -20,7 +20,8 @@ namespace SpryCad.App.UI;
 /// The part's equations (global variables) in a table: name, value or equation, what it works out to, and for user
 /// variables (shown in Configure) a description and limits. Cells are edited in place; Ctrl+C copies the selected rows
 /// as tab-separated text, as a spreadsheet pastes it, and Ctrl+V pastes rows from one (name, equation, then optionally
-/// user, description, min, max; a heading row is skipped; a name already there is changed, a new one added).
+/// user, description, min, max; a heading row is skipped; a name already there is changed, a new one added). Each
+/// change goes into the part as it is made (a cell's edit ended with Enter, a row added, pasted or deleted): one undo step each.
 /// </summary>
 static class EquationsDialog
 {
@@ -53,11 +54,12 @@ static class EquationsDialog
 
         // what it works out to, or why it does not (red)
         public string Value { get; private set; } = "";
-        public IBrush? ValueBrush { get; private set; }
+        // (the text's own color unless red: a brush left empty would draw nothing)
+        public IBrush ValueBrush { get; private set; } = Palette.Text;
         public string? Problem { get; private set; }
         public void Show(string value, string? problem)
         {
-            (Value, Problem, ValueBrush) = (problem ?? value, problem, problem != null ? Palette.Danger : null);
+            (Value, Problem, ValueBrush) = (problem ?? value, problem, problem != null ? Palette.Danger : Palette.Text);
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Value)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ValueBrush)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Problem)));
@@ -97,6 +99,17 @@ static class EquationsDialog
                         ? $"{name} is set twice" : errs.GetValueOrDefault(r.Name));
                 r.Show(vals.TryGetValue(name, out var v) ? units.Show(v) : "", problem);
             }
+            Apply();
+        }
+        // into the part as made, when it differs from what the part has (one undo step)
+        static string KeyOf(IEnumerable<Equation> eqs) => string.Join("\n", eqs.Select(e => $"{e.Name}\t{e.Expr}\t{e.Exposed}\t{e.Description}\t{e.Min}\t{e.Max}"));
+        bool loaded = false;
+        void Apply()
+        {
+            if (!loaded) return;
+            var result = items.Where(r => r.Name.Trim().Length > 0).Select(r => r.ToEquation()).ToList();
+            if (KeyOf(result) == KeyOf(session.Doc.Equations)) return;
+            session.Change(() => session.Doc.Equations = result);
         }
         Row Make(Equation e) => new(e, Recompute);
         foreach (var e in session.Doc.Equations) items.Add(Make(e));
@@ -210,6 +223,7 @@ static class EquationsDialog
             },
         };
         Recompute();
+        loaded = true;
 
         var add = new Button { Content = "+ Variable" };
         add.Click += (_, _) =>
@@ -225,25 +239,19 @@ static class EquationsDialog
         var info = new TextBlock
         {
             FontSize = TypeScale.Small, Foreground = Palette.TextMuted, TextWrapping = TextWrapping.Wrap,
-            Text = "Variables for any dimension or feature value. Typing L = 10 in a value field adds one here. Ctrl+C copies the rows for a spreadsheet; Ctrl+V pastes them back (name, then value).",
+            Text = "Variables for any dimension or feature value. Typing L = 10 in a value field adds one here. Changes apply as made (Ctrl+Z in the window undoes them). Ctrl+C copies the rows for a spreadsheet; Ctrl+V pastes them back (name, then value).",
         };
         var tableInfo = new TextBlock
         {
             FontSize = TypeScale.Small, Foreground = Palette.TextMuted, TextWrapping = TextWrapping.Wrap, IsVisible = fromTables.Count > 0,
             Text = "Set by design tables (Tools > Design Table): " + string.Join(", ", fromTables) + ".",
         };
-        var ok = new Button { Content = "OK" };
-        var cancel = new Button { Content = "Cancel", IsCancel = true };
+        var close = new Button { Content = "Close", IsCancel = true };
         var sp = new StackPanel { Spacing = 8, Children = { info, tableInfo, dg, add } };
-        var w = Dialogs.MakeWindow("Equations", Dialogs.WithButtons(sp, null, ok, cancel), 900);
-        ok.Click += (_, _) =>
-        {
-            dg.CommitEdit();
-            w.Close();
-            var result = items.Where(r => r.Name.Trim().Length > 0).Select(r => r.ToEquation()).ToList();
-            session.Change(() => session.Doc.Equations = result);
-        };
-        cancel.Click += (_, _) => w.Close();
+        var w = Dialogs.MakeWindow("Equations", Dialogs.WithButtons(sp, null, close), 900);
+        close.Click += (_, _) => { dg.CommitEdit(); w.Close(); };
+        // (a cell being edited when the window is closed otherwise: its edit kept)
+        w.Closing += (_, _) => dg.CommitEdit();
         await w.ShowDialog(owner);
     }
 }
