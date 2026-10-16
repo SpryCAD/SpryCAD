@@ -87,7 +87,7 @@ no slope at either end, so it joins the constant fillet exactly and closes onto 
 length sets how far back from the tangent point it starts (empty: the whole wrap; 0: square ends). Where an edge's own
 faces turn tangent the fillet still stops a few degrees short and ends in a tip to a point (FC_FADE_TANGENT=1 fades
 there instead). The brake duct's tube rim needs its fade inside the composite (face-switching) rolling ball: its ball
-has rolled onto neighbouring faces by the time the chain ends, and that builder takes one radius throughout.
+has rolled onto neighboring faces by the time the chain ends, and that builder takes one radius throughout.
 The pipe surface carries the radius's change along its spine (the envelope of balls); booleans, mass and STEP take
 it as any pipe. Only where the fade fits; a blend failing with fades is done again with square ends. FC_FADE=0:
 square ends.

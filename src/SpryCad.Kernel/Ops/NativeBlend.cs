@@ -302,7 +302,7 @@ public static class NativeBlend
             if (cv.Count == 0 || cc.Count == 0) continue;
             // (fillets, as many of each kind there: the convex first, the concave rolling round their rounds after (a
             // boss's side edge and its foot: its top corner then a corner of three, patched; the foot first left the side
-            // edge's fillet chained round the foot's end, and the corner mitred))
+            // edge's fillet chained round the foot's end, and the corner mitered))
             // (as asked for the feature, where it is: one kind first at every such corner)
             bool convexFirst = _corners switch { MixedCorners.ConvexFirst => true, MixedCorners.ConcaveFirst => false, _ => cv.Count < cc.Count || cv.Count == cc.Count && grow };
             foreach (var e in convexFirst != otherFirst ? cv : cc) if (!first.Contains(e)) first.Add(e);
@@ -1356,8 +1356,8 @@ public static class NativeBlend
             var n = Vec3.Cross(tx, pb - pa);
             return n.Length < 1e-12 ? null : Plane.FromPointNormal(pa, n.Normalized);
         }
-        // (two chamfers meeting at a joint, on a mitre: exactly where their faces meet, the plane through the vertex and
-        // the line the two chamfer faces cross on. The mitre the fillets take (through the corner edge, bisecting the
+        // (two chamfers meeting at a joint, on a miter: exactly where their faces meet, the plane through the vertex and
+        // the line the two chamfer faces cross on. The miter the fillets take (through the corner edge, bisecting the
         // edges) is that only where the faces are square; on a drafted one it left a sliver between the two)
         EndCut? ChamferJoint(NVertex v, Vec3 dirOut)
         {
@@ -1847,7 +1847,7 @@ public static class NativeBlend
                     var shared = g.Uses.Any(u => ReferenceEquals(u.Face, fa)) ? fa : fb;
                     // (both blends convex, round a corner edge leaning or concave (see RunsOnAt): each ends on the face
                     // it runs into, as at any other end; what the two take off then overlaps, meeting where they cross.
-                    // A mitre holding the corner edge leaves a wing of each beside the other there)
+                    // A miter holding the corner edge leaves a wing of each beside the other there)
                     var faces3 = new[] { fa, fb }.Concat(g.Uses.Select(w => w.Face)).ToList();
                     if (blended.All(x => IsConvex(x) == true) && blended.FirstOrDefault(x => ReferenceEquals(x.V0, v) || ReferenceEquals(x.V1, v)) is { } own
                         && RunsOnAt(v, own, g, shared, faces3, selected, squareToo: false))
@@ -1947,7 +1947,7 @@ public static class NativeBlend
         if (CornerEdge(v, shared, faces, new[] { e }, selected) is not { } d) return false;
         var cos = Math.Abs(Vec3.Dot(d, Outward(shared, v.P).Normalized));
         // (concave: leaning as a draft does, not lying along the shared face (a boss flush with the block's side, where
-        // the mitre is as before))
+        // the miter is as before))
         var runs = cos < 0.9999 && (kc == true || cos > 0.5);
         if (runs) Debug?.Invoke($"runs on at {v.P}: corner edge {(kc == true ? "convex" : "concave")} cos {cos:G4}");
         return runs;
@@ -2364,7 +2364,7 @@ public static class NativeBlend
         int k = 0;
         foreach (var (q, g, tq, tEnd) in ends.Values)
         {
-            // (its first ball the chain's end ball there: the centre of the arc on the chain's end face through q)
+            // (its first ball the chain's end ball there: the center of the arc on the chain's end face through q)
             var startCenter = rb.Tool.Native.Faces
                 .Where(f => f.Surface.Kind == SurfaceKind.Plane && Math.Abs(f.Surface.Plane!.Distance(q)) < 1e-7 * Math.Max(1, size) && (f.Tag.Name.EndsWith(".End0") || f.Tag.Name.EndsWith(".End1")))
                 .SelectMany(f => f.Coedges).Select(c => c.Edge.Curve).OfType<NCircle>().Select(c => (Vec3?)c.C).FirstOrDefault();

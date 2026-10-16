@@ -686,7 +686,7 @@ public partial class MainWindow
         }
         if (fillet) page.Check(p, "Tangent propagation", () => ((FilletFeature)f).TangentPropagation, v => ((FilletFeature)f).TangentPropagation = v);
         else page.Check(p, "Tangent propagation", () => ((ChamferFeature)f).TangentPropagation, v => ((ChamferFeature)f).TangentPropagation = v);
-        // SolidWorks "overflow": where the blend runs into neighbouring geometry it is trimmed by it (keep edge)
+        // SolidWorks "overflow": where the blend runs into neighboring geometry it is trimmed by it (keep edge)
         if (fillet)
         {
             page.Check(p, "Overflow: trim at neighboring faces", () => ((FilletFeature)f).Overflow, v => ((FilletFeature)f).Overflow = v);

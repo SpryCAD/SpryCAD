@@ -289,8 +289,8 @@ public sealed class PipeSpine
     }
 
     /// <summary>
-    /// The ball of a pipe of radius r nearest p (its surface nearest): its place s on the spine, its centre and p's
-    /// distance from that. A constant pipe's is the spine's nearest point; a variable one's minimises
+    /// The ball of a pipe of radius r nearest p (its surface nearest): its place s on the spine, its center and p's
+    /// distance from that. A constant pipe's is the spine's nearest point; a variable one's minimizes
     /// |p − c(s)| − ρ(s), from there.
     /// </summary>
     public (double s, Vec3 c, double dist) Ball(Vec3 p, double r)
@@ -306,7 +306,7 @@ public sealed class PipeSpine
             if (flat) return cl;
         }
         // g(s) = d/ds (|p − c| − ρ) = −(p − c)·c′/|p − c| − ρ′, by Newton with a numeric slope, kept within a step of
-        // the spine's nearest point's neighbourhood
+        // the spine's nearest point's neighborhood
         double G(double t)
         {
             var c = Eval(t); var d = p - c; var l = d.Length;
@@ -446,7 +446,7 @@ public sealed class PipeSpine
         return c + d * Rad(s, r);
     }
 
-    /// <summary>The pipe's normal near p (the direction from the nearest ball's centre); r: the pipe's radius, needed where it varies.</summary>
+    /// <summary>The pipe's normal near p (the direction from the nearest ball's center); r: the pipe's radius, needed where it varies.</summary>
     public Vec3 Normal(Vec3 p, double r = 0)
     {
         var (s, c, dist) = Ball(p, r);

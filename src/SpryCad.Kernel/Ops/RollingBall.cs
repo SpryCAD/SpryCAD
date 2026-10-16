@@ -331,7 +331,7 @@ public static class RollingBall
     /// A fillet fading out along an edge: from radius r at <paramref name="ta"/> to nothing at <paramref name="tb"/>,
     /// ρ(u) = r (1 − 3u² + 2u³) over the edge's length (no slope at either end: its start section is a constant
     /// fillet's square end there exactly, and it closes onto the edge smoothly). The ball at each station solved
-    /// exactly at its own radius, the blend the envelope of balls along their centres (a pipe of varying radius), the
+    /// exactly at its own radius, the blend the envelope of balls along their centers (a pipe of varying radius), the
     /// tool closed by a square start and its tip on the edge. One edge between two faces.
     /// </summary>
     public static Result Fade(NEdge e, double ta, double tb, double r, string name, Func<NFace, Vec3, bool> onFaces, bool? kind = null, Vec3? startCenter = null)
@@ -375,7 +375,7 @@ public static class RollingBall
             return tq[lo] + (tq[hi] - tq[lo]) * f;
         }
         static double Rho(double u, double r) => r * (1 - 3 * u * u + 2 * u * u * u);
-        // the ball at a fraction u of the way: its centre and the direction of the section there (the tip: on the edge)
+        // the ball at a fraction u of the way: its center and the direction of the section there (the tip: on the edge)
         // (each ball rolled on from the one before it, as the chain's own end joint is: near tangency the offsets meet along
         // two branches, and a ball solved in its section alone can sit on the other one, or on none; the first the chain's
         // end ball where given)
@@ -432,7 +432,7 @@ public static class RollingBall
             }
             return memo[u] = res;
         }
-        // the spine through the stations: the tangents across each node's neighbours (weighted by their spacing; the start
+        // the spine through the stations: the tangents across each node's neighbors (weighted by their spacing; the start
         // the joint's own, square to the start; the tip the edge's), the radius's change and slope along it
         PipeSpine? Spine(List<double> us)
         {
@@ -457,7 +457,7 @@ public static class RollingBall
             try { return new PipeSpine(S, D, SA, SB) { Dr = dr, DrS = drs }; }
             catch (ArgumentException) { return null; }
         }
-        // stations added midway where the spine strays from the ball solved there (its centre or its radius)
+        // stations added midway where the spine strays from the ball solved there (its center or its radius)
         var tolS = 1e-7 * Math.Max(1, scale);
         var stations = Enumerable.Range(0, 17).Select(k => k / 16.0).ToList();
         if (stations.Any(u => Station(u) == null)) return Fail("the fillet cannot fade out along the edge.");
@@ -1184,7 +1184,7 @@ public static class RollingBall
             double Off0(int ie, double u) { var (V, d) = ChainAt(p0 + (p1 - p0) * u); return Vec3.Dot(ev[ie].S - V, d); }
             double da = Off0(i, 0), db = Off0((i + 1) % ne, 1);
             // (the nearest point of the station's offsets' intersection to the guess: where the offsets meet at a shallow
-            // angle, near tangent faces, a centre held to a section plane runs far off for a small shift of it, as the
+            // angle, near tangent faces, a center held to a section plane runs far off for a small shift of it, as the
             // march, stepping along the intersection, does not. The faded end's held to the chain end's section, for
             // its cap there)
             Vec3? Solve(double u, Vec3 guess)
@@ -1196,7 +1196,7 @@ public static class RollingBall
                 {
                     var A2 = NShell.OffsetSurface(SAi, rr * (fa.Sense ? 1 : -1)); var B2 = NShell.OffsetSurface(SBi, rr * (fb.Sense ? 1 : -1));
                     // (in the plane square to the chain there, held fixed: square to the offsets' own tangent instead, as at a
-                    // joint, the plane turns as the centre moves, and where the offsets meet at a shallow angle the solve runs
+                    // joint, the plane turns as the center moves, and where the offsets meet at a shallow angle the solve runs
                     // far off)
                     var p = guess;
                     for (int it = 0; it < 60; it++)
@@ -1297,7 +1297,7 @@ public static class RollingBall
                 if (add.Count == 0 || us.Count + add.Count > 600) break;
                 us = us.Concat(add).OrderBy(x => x).ToList();
             }
-            // the faded end's joint: its centre, the section square to the spine there, its contacts
+            // the faded end's joint: its center, the section square to the spine there, its contacts
             int iF = fromA ? (i + 1) % ne : i;
             var SF = Station(fromA ? 1 : 0)!.Value;
             var TF = fromA ? sp!.D[^1] : sp!.D[0];

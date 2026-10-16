@@ -285,7 +285,7 @@ static class BlendStress
         // (a minute at most: where the rebuild heeds it)
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         try { r = new Regenerator().Rebuild(doc, null, cts.Token); }
-        catch (OperationCanceledException) { ms = sw.Elapsed.TotalMilliseconds; detail = "slow: cancelled after a minute"; return "wrong"; }
+        catch (OperationCanceledException) { ms = sw.Elapsed.TotalMilliseconds; detail = "slow: canceled after a minute"; return "wrong"; }
         catch (Exception ex) { ms = sw.Elapsed.TotalMilliseconds; detail = "exception: " + ex.Message; return "wrong"; }
         ms = sw.Elapsed.TotalMilliseconds;
         // (a blend taking more than ten seconds is a failure too, whatever it makes)
