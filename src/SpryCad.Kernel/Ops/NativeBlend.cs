@@ -891,7 +891,15 @@ public static class NativeBlend
                 // onto the plate: that face along the edge, no end plane; run on and cut back to its plane)
                 // (not where another blended edge carries on from it: a joint)
                 if (!sel.Any(o => !chain.Contains(o) && (ReferenceEquals(o.V0, v) || ReferenceEquals(o.V1, v)))
-                    && (OntoTangent(v, fa, fb) ?? OntoTangent(v, fb, fa)) is { Plane: { } tp }) { cuts.Add((v.P, tp)); valleys[v.P] = new(); return run; }
+                    && (OntoTangent(v, fa, fb) ?? OntoTangent(v, fb, fa)) is { Plane: { } tp })
+                {
+                    // (the chain's side kept: the face's outside where it is the plate the fillet sits on, but a wrap round a
+                    // side's round ending on the part's end face (the round tangent to it) has its run-on outside that,
+                    // where nothing is, and kept it, a flare standing out past the end)
+                    var ee = chain.FirstOrDefault(x => ReferenceEquals(x.V0, v) || ReferenceEquals(x.V1, v));
+                    if (ee != null && tp.Distance(ee.Mid) < -1e-9 * Math.Max(1, size)) tp = Plane.FromPointNormal(v.P, -tp.Normal);
+                    cuts.Add((v.P, tp)); valleys[v.P] = new(); return run;
+                }
                 if (EndCutAt(v, dirOut, fa, fb, chain, sel) is not { Plane: null } roundCut) return 0;
                 rounds.Add((v.P, roundCut));
                 return run;
@@ -1556,7 +1564,12 @@ public static class NativeBlend
                     }
                     // (not where another blended edge carries on from it: a joint, the blend running on into the next)
                     else if (!selected.Any(o => !arcs.Contains(o) && (ReferenceEquals(o.V0, v) || ReferenceEquals(o.V1, v)))
-                        && OntoTangent(v, cP.Face, cC.Face) is { } t) onto.Add((i, t));
+                        && OntoTangent(v, cP.Face, cC.Face) is { Plane: { } tpl } t)
+                    {
+                        // (the arc's side kept, as the rolling ball's: see there)
+                        var ae = arcs.FirstOrDefault(o => ReferenceEquals(o.V0, v) || ReferenceEquals(o.V1, v));
+                        onto.Add((i, ae != null && tpl.Distance(ae.Mid) < -1e-9 * Math.Max(1, size) ? new EndCut(Plane.FromPointNormal(v.P, -tpl.Normal)) : t));
+                    }
                 }
             }
         }
