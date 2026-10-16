@@ -1882,7 +1882,9 @@ public sealed class Regenerator
             var box = seedTool.Bounds;
             // (exact, from the B-rep: the mesh's volume would tessellate solids nothing else displays)
             static double Vol(Solid s) => s.Native is { } n && Kernel.Native.NMass.Of(n) is { } mp ? mp.Volume : s.Volume();
-            var v0 = Math.Abs(Vol(seedTool));
+            // (the seed's volume only where a copy's box meets the seed's: usually none does, and the exact volume of a
+            // blend's tool is not cheap)
+            double? v0 = null;
             var old = Csg.NoFallback;
             Csg.NoFallback = true;
             try
@@ -1893,7 +1895,8 @@ public sealed class Regenerator
                     try
                     {
                         var x = Csg.Intersect(seedTool, moved[k]);
-                        if (x.IsEmpty || Math.Abs(Vol(x)) <= 1e-6 * v0) continue;
+                        v0 ??= Math.Abs(Vol(seedTool));
+                        if (x.IsEmpty || Math.Abs(Vol(x)) <= 1e-6 * v0.Value) continue;
                     }
                     catch (Exception ex) when (ex is InvalidOperationException or Kernel.Native.NBooleanException) { continue; }
                     var what = fillet ? "fillet" : "chamfer";
