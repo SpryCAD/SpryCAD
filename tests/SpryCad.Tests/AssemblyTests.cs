@@ -154,6 +154,25 @@ static class AssemblyTests
             t.True(!StepImport.IsAssembly(ms.ToArray()) && AssemblyModel.FromStep(ms.ToArray(), "Pin") == null, "a part's STEP is not an assembly");
         });
 
+        t.Test("A saved assembly opens with its embedded sub-assemblies' parts shown at once (their copies, written before the parts were built, given the displays when saved)", () =>
+        {
+            var m = AssemblyModel.FromStep(Demos.AssemblyStep(Demos.Assemblies.First(x => x.file == "hinge.sasm").build(), "Hinge"), "Hinge")!;
+            var sub = m.FormSubAssembly(m.Doc.Components.Skip(1).ToList(), Path.Combine(NewDir("sub-caches"), "Leaves.sasm"), flexible: false, embed: true);
+            // its copy without its parts' displays, as a STEP assembly's sub-assemblies are made (before their parts are built)
+            var copy = AssemblyContainer.Load(m.Doc.Files[sub.Part.Embedded!], "s.sasm");
+            foreach (var (ck, name) in copy.Caches.ToList()) { copy.Caches.Remove(ck); copy.Files.Remove(name); }
+            m.UpdateEmbedded(sub.Part.Embedded!, AssemblyContainer.ToBytes(copy, m.Doc.Files[sub.Part.Embedded!]), defer: true);
+            t.True(m.PendingJobs().Count > 0, "its parts to build");
+            foreach (var j in m.PendingJobs()) m.Install(j, j.Build());
+            t.True(m.PendingJobs().Count == 0, "every part built");
+            var path = Path.Combine(NewDir("sub-caches-saved"), "Hinge.sasm");
+            m.Save(path);
+            var o = AssemblyModel.Open(AssemblyDocument.Load(path), path, null, defer: true);
+            t.True(o.PendingJobs().Count == 0, $"{o.PendingJobs().Count} parts still to build when opened again");
+            t.True(o.PlacedParts().All(x => x.Item2.Mesh.Indices.Length > 0), "every part shown at once");
+            t.True(AssemblyContainer.Load(o.Doc.Files[sub.Part.Embedded!], "s.sasm").Revision == sub.Part.Revision, "the sub-assembly's copy kept its revision");
+        });
+
         t.Test("A part embedded in an embedded sub-assembly saved back: into the sub-assembly's file, that into the assembly's, shown as it now is", () =>
         {
             var m = AssemblyModel.FromStep(Demos.AssemblyStep(Demos.Assemblies.First(x => x.file == "hinge.sasm").build(), "Hinge"), "Hinge")!;
