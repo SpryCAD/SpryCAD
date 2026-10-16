@@ -172,6 +172,9 @@ public static class Expr
 
     static bool IsUnit(string id) => UnitTable.Any(u => u.name.Equals(id, StringComparison.OrdinalIgnoreCase));
 
+    /// <summary>Whether a word is a unit ("mm", "in", "deg"): not a name a variable can have.</summary>
+    public static bool IsUnitName(string id) => IsUnit(id);
+
     /// <summary>Whether the text is a bare number ("10", "-2.5", "1e3"), without units or anything else.</summary>
     public static bool IsPlainNumber(string? text) =>
         text != null && double.TryParse(text.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out _);

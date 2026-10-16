@@ -41,6 +41,7 @@ public partial class MainWindow
         page.OnOk = CommitEdit;
         page.OnCancel = CancelEdit;
         page.Changed += SchedulePreview;
+        ClearPendingEquations(); // (equations typed on this page wait with it)
         page.Message = hint;
         Selection.Clear();
         ShowPage(page);
@@ -87,6 +88,7 @@ public partial class MainWindow
             if (i >= 0) { doc.Features[i] = clone; doc.RollbackIndex = Math.Min(doc.ActiveCount, i + 1); }
         }
         _edit.ApplyToDoc?.Invoke(doc);
+        ApplyPendingEquations(doc);
         // a preview that rebuilds slow features says so up front (from how long they took last time)
         if (_page != null && !_edit.IsNew)
         {
@@ -100,6 +102,7 @@ public partial class MainWindow
     void CommitEdit()
     {
         if (_edit == null) return;
+        _page?.Flush(); // ("L = 10" still in its field: made first)
         // do not commit what the user did not type, or a feature the preview already showed to fail
         if (_page?.FirstInvalidField is { } bad)
         {
@@ -128,7 +131,9 @@ public partial class MainWindow
                 if (i >= 0) Session.Doc.Features[i] = f;
             }
             e.ApplyToDoc?.Invoke(Session.Doc);
+            ApplyPendingEquations(Session.Doc); // (the equations typed on the page: one undo step with it)
         });
+        ClearPendingEquations();
         Session.EndPreview();
         ShowPage(null);
         HideConfirmCorner();
@@ -140,6 +145,7 @@ public partial class MainWindow
     {
         var cancelled = _edit?.OnCancelled;
         _edit = null;
+        ClearPendingEquations(); // (those typed on the page go with it)
         _previewTimer.Stop();
         Session.EndPreview();
         ShowPage(null);

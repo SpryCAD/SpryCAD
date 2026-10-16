@@ -603,6 +603,8 @@ public partial class MainWindow : Window
     void OnWindowKeyDown(object? sender, KeyEventArgs e)
     {
         if (UI.Card.IsOpen) return; // a question is up (its card has the keys): no shortcuts meanwhile
+        // names suggested under a field: Enter, Tab, Esc and the arrows are its list's
+        if (UI.NameSuggest.IsOpen && e.Key is Key.Enter or Key.Tab or Key.Escape or Key.Up or Key.Down) return;
         var ctrl = e.KeyModifiers.HasFlag(KeyModifiers.Control);
         var shift = e.KeyModifiers.HasFlag(KeyModifiers.Shift);
         var alt = e.KeyModifiers.HasFlag(KeyModifiers.Alt);
@@ -801,7 +803,8 @@ public partial class MainWindow : Window
             return;
         }
         PmHost.Content = page.View;
-        page.Lookup = Session.Lookup;
+        InitEquationEntry();
+        page.Lookup = EditLookup; // (with the equations typed on the page)
         page.ActiveBoxChanged += () => UpdateFilterFromPage();
         page.Changed += () => UpdateEmphasis();
         foreach (var b in page.Boxes) b.LabelOf = i => i.Label(Session.Doc);

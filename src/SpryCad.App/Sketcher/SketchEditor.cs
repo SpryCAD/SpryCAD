@@ -5,6 +5,7 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Media.Immutable;
 using SpryCad.App.Session;
+using SpryCad.App.UI;
 using SpryCad.App.Viewport;
 using SpryCad.Core;
 using SpryCad.Core.Model;
@@ -1569,8 +1570,9 @@ public sealed partial class SketchEditor : IViewportMode
             BorderBrush = new SolidColorBrush(Color.FromRgb(60, 120, 220)),
             BorderThickness = new Thickness(2),
         };
-        ToolTip.SetTip(tb, $"Enter a value or expression, e.g. 25, W/2, 1in or 10mm; values without a unit are in {Units.Symbol()}. Enter = OK, Esc = Cancel.");
+        ToolTip.SetTip(tb, $"Enter a value or expression, e.g. 25, W/2, 1in or 10mm; values without a unit are in {Units.Symbol()}. L = 10 makes the equation L. Enter = OK, Esc = Cancel.");
         Canvas.SetLeft(tb, pos.X - 60); Canvas.SetTop(tb, pos.Y - 14);
+        NameSuggest.Attach(tb, PmPage.EquationNames);
         tb.KeyDown += (_, e) =>
         {
             if (e.Key == Key.Enter) { CloseModifyBox(true); e.Handled = true; }
@@ -1602,6 +1604,12 @@ public sealed partial class SketchEditor : IViewportMode
     {
         text = text?.Trim();
         if (string.IsNullOrEmpty(text)) return false;
+        // "L = 10": the equation made (waiting with the sketch), the dimension then driven by L
+        if (EquationEntry.TryParse(text, out var eqName, out var eqExpr))
+        {
+            if (PmPage.DefineEquation?.Invoke(eqName, eqExpr, c.ValueKind) is { } problem) { Message?.Invoke(problem); return false; }
+            text = eqName;
+        }
         if (!Units.TryEnter(text, c.ValueKind, Lookup, out var kept, out var q, out var err)) { Message?.Invoke("Invalid value: " + err); return false; }
         if (kept == c.Expr) return false;
         var v = q.Value;
@@ -2459,8 +2467,10 @@ public sealed partial class SketchEditor : IViewportMode
         var prefix = c.Doubled ? "⌀" : c.Type switch { CType.Diameter => "⌀", CType.Radius => "R", CType.Length => "L ", _ => "" };
         var suffix = c.Type == CType.Angle ? "°" : "";
         var txt = prefix + v + suffix;
+        // driven by an equation: its name with the value ("L = 10")
+        if (EquationEntry.IsName(c.Expr)) txt = $"{c.Expr!.Trim()} = {txt}";
         if (c.Driven) txt = "(" + txt + ")";
-        if (!string.IsNullOrEmpty(c.Expr) && !Expr.IsLiteral(c.Expr, out _))
+        if (!string.IsNullOrEmpty(c.Expr) && !Expr.IsLiteral(c.Expr, out _) && !EquationEntry.IsName(c.Expr))
             txt = "Σ " + txt;
         return txt;
     }

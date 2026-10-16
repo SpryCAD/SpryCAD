@@ -176,6 +176,19 @@ public sealed class PmPage
     public void RaiseChanged() => Changed?.Invoke();
 
     /// <summary>
+    /// Makes the equation typed in a field ("L = 10"): name, expression, the field's kind; the problem, or null (the
+    /// window's, waiting with the page or sketch). And the equations' names with their values, suggested as names are typed.
+    /// </summary>
+    public static Func<string, string, ValueKind, string?>? DefineEquation { get; set; }
+    public static Func<IEnumerable<(string name, string shown)>>? EquationNames { get; set; }
+
+    // the fields' equations typed and not yet made (made when the field is left or Enter pressed; OK makes them first)
+    readonly List<Action> _flush = new();
+
+    /// <summary>Makes the equations typed in the page's fields and not yet made ("L = 10" with the field still focused).</summary>
+    public void Flush() { foreach (var f in _flush) f(); }
+
+    /// <summary>
     /// Whether the page shows <paramref name="c"/>: nothing between it and the page is hidden (whether the page itself
     /// is on screen does not matter).
     /// </summary>
@@ -291,6 +304,14 @@ public sealed class PmPage
                 Changed?.Invoke();
                 return;
             }
+            // "L = 10": the equation is made when the field is left or Enter pressed, not at each key typed
+            if (EquationEntry.TryParse(t, out var eqName, out var eqExpr))
+            {
+                var problem = EquationEntry.NameProblem(eqName) ?? (Units.TryEnter(eqExpr, kind, Lookup, out string _, out _, out var e2) ? null : e2);
+                tb.Classes.Set("invalid", problem != null);
+                ToolTip.SetTip(tb, problem ?? $"Enter or leave the field: makes {eqName} = {eqExpr} (in the equations)");
+                return;
+            }
             if (Units.TryEnter(t, kind, Lookup, out var kept, out var v, out var err))
             {
                 MarkInvalid(false);
@@ -310,8 +331,20 @@ public sealed class PmPage
         }
         _numbers.Add(tb);
         tb.TextChanged += (_, _) => { _lastEdited = tb; Validate(); };
+        // "L = 10" typed: the equation made, the field then holding its name
+        void MakeEquation()
+        {
+            if (DefineEquation == null || !EquationEntry.TryParse(tb.Text, out var name, out var expr)) return;
+            if (DefineEquation(name, expr, kind) is { } problem) { MarkInvalid(true); tb.Classes.Set("invalid", true); ToolTip.SetTip(tb, problem); return; }
+            MarkInvalid(false);
+            tb.Text = name;
+        }
+        _flush.Add(MakeEquation);
+        tb.LostFocus += (_, _) => MakeEquation();
+        NameSuggest.Attach(tb, EquationNames);
         tb.KeyDown += (_, e) =>
         {
+            if (e.Key == Key.Enter) { MakeEquation(); return; }
             if (e.Key is not (Key.Up or Key.Down) || !Units.TryEnter(tb.Text, kind, Lookup, out string _, out var v, out string? _)) return;
             var step = e.KeyModifiers.HasFlag(KeyModifiers.Shift) ? 10 : e.KeyModifiers.HasFlag(KeyModifiers.Control) ? 0.1 : 1;
             if (e.Key == Key.Down) step = -step;

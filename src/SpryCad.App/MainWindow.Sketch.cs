@@ -112,7 +112,9 @@ public partial class MainWindow
         Selection.Clear();
         _sketchIsNew = isNew;
         var u = Session.Doc.Units;
-        _sketch = new SketchEditor(Viewport, sf, frame, Session.Lookup)
+        InitEquationEntry();
+        ClearPendingEquations(); // (equations typed in the sketch's dimensions wait with it)
+        _sketch = new SketchEditor(Viewport, sf, frame, EditLookup)
         {
             PointsOnly = pointsOnly, Units = u,
             // (round in the part's units)
@@ -225,10 +227,13 @@ public partial class MainWindow
             {
                 if (_sketchIsNew) Session.Doc.AddFeature(ed.Feature);
                 else if (Session.Doc.Find(id) is SketchFeature existing) existing.Sketch = ed.Feature.Sketch;
+                ApplyPendingEquations(Session.Doc); // (the equations typed in its dimensions: one undo step with it)
             });
             Status($"{Session.Doc.Find(id)?.Name} saved.");
         }
         else if (save && _sketchIsNew) { Status("Empty sketch discarded."); pending = null; hole = null; }
+        else if (save && _pendingEquations.Count > 0) Session.Change(() => ApplyPendingEquations(Session.Doc));
+        ClearPendingEquations();
         // a sketch a feature asked for (an extrude, a revolve, a hole): back on the Features tab, with that feature
         ShowTab(save && (pending != null || hole != null) ? "Features" : _activeTab);
         if (save && Session.Doc.Find(id) is SketchFeature sf)
