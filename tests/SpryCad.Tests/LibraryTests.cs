@@ -54,7 +54,7 @@ static class LibraryTests
             t.Eq(lib.LibraryId, BuiltInStandards.LibraryId);
             t.Eq(lib.RevisionId, rev);
             t.Eq(lib.Layer, LibraryLayer.Standards);
-            t.Eq(J(lib.Tables), J(BuiltInStandards.Tables.OrderBy(x => x.Key, StringComparer.Ordinal).ToList()));
+            t.Eq(J(lib.Tables), J(LibraryFile.BuiltInTables.OrderBy(x => x.Key, StringComparer.Ordinal).ToList()));
             t.True(LibraryFile.IsLibrary(path) && PartDatabase.IsFile(path), "a SpryCAD database, its root a library");
         });
 

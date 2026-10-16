@@ -82,7 +82,7 @@ public partial class MainWindow
             if (filling || combo.SelectedItem is not string name || name == Session.Doc.MaterialName) return;
             if (name == NoMaterial) { if (Session.Doc.MaterialItem != null) Changed(() => PartMaterial.Set(Session.Doc, null)); return; }
             // (the part's own, custom or no longer offered, is listed as it is: nothing to take)
-            if (materials.FindIndex(x => x.name == name) is var i && i >= 0) Changed(() => PartMaterial.Set(Session.Doc, materials[i].item));
+            if (materials.FindIndex(x => x.name == name) is var i && i >= 0) { Changed(() => PartMaterial.Set(Session.Doc, materials[i].item)); NoteRecentMaterial(materials[i].item); }
         };
         void ApplyDensity()
         {
@@ -113,6 +113,10 @@ public partial class MainWindow
         mat.Children.Add(new TextBlock { Text = "Density", VerticalAlignment = VerticalAlignment.Center, Foreground = LabelBrush, Margin = new Thickness(8, 0, 0, 0) });
         mat.Children.Add(dens);
         mat.Children.Add(unit);
+        // the material's properties, its look, the library's other materials and custom ones: Edit Material
+        var editMaterial = new Button { Content = "Edit Material...", Margin = new Thickness(8, 0, 0, 0) };
+        editMaterial.Click += (_, _) => EditMaterialCommand();
+        mat.Children.Add(editMaterial);
         materialRow.Children.Add(mat);
 
         // the report: plain text on white, as a printout (SolidWorks' report box)
@@ -139,7 +143,7 @@ public partial class MainWindow
         var w = new Window
         {
             Title = "Mass Properties - " + Session.Title.TrimEnd(' ', '*'),
-            Width = 640, SizeToContent = SizeToContent.Height, CanResize = false, CanMinimize = false, CanMaximize = false,
+            Width = 720, SizeToContent = SizeToContent.Height, CanResize = false, CanMinimize = false, CanMaximize = false,
             WindowStartupLocation = WindowStartupLocation.CenterOwner, ShowInTaskbar = false,
             Content = new Border { Padding = new Thickness(12), Child = content },
         };

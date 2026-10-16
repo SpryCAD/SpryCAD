@@ -9,6 +9,7 @@ using SpryCad.App.Sketcher;
 using SpryCad.App.UI;
 using SpryCad.App.Viewport;
 using SpryCad.Core.Model;
+using SpryCad.Core.Library;
 using SpryCad.Core.Storage;
 using SpryCad.Core.Regen;
 using SpryCad.Kernel;
@@ -213,6 +214,7 @@ public partial class MainWindow
             PartMenu(Item("_Configure...", () => _ = Dialogs.ConfigurePart(this), null, "configure")),
             Item("Mea_sure...", MeasureCommand, null, "measure"),
             Item("_Mass Properties...", MassPropertiesCommand, null, "mass"),
+            PartMenu(Item("Edit Ma_terial...", EditMaterialCommand, null, "material")),
             PartMenu(Item("_Library Updates...", () => _ = LibraryUpdatesCommand(), null, "table")),
             Sub("Li_braries",
                 Item("_Edit Library...", () => _ = LibraryEditor.Open(this), null, "table"),
@@ -349,6 +351,7 @@ public partial class MainWindow
                 Cmd("mass", "Mass\nProperties", MassPropertiesCommand);
                 if (Asm == null)
                 {
+                    Cmd("material", "Edit\nMaterial", EditMaterialCommand);
                     Cmd("equations", "Equations", () => _ = Dialogs.Equations(this));
                     Cmd("table", "Design\nTable", () => _ = Dialogs.DesignTables(this));
                     Cmd("configure", "Configure", () => _ = Dialogs.ConfigurePart(this));
@@ -420,6 +423,7 @@ public partial class MainWindow
         ["Add Relations"] = "Relates points and entities you click (coincident, horizontal, tangent…), no Ctrl needed.",
         ["Measure"] = "Distance, angle, radius, length and area of the faces, edges and vertices you click.",
         ["Mass Properties"] = "Mass, volume, surface area, center of mass and moments of inertia, with the part's material.",
+        ["Edit Material"] = "Gives the part a material from the libraries: its density for mass properties, its properties and its look.",
         ["Equations"] = "Global variables that drive dimensions; conditions on them suppress features (right-click a feature: Suppress When).",
         ["Design Table"] = "Rows of values for sets of variables (a screw's sizes): choosing a row sets them all.",
         ["Configure"] = "Sets the part's user-facing parameters: its design tables' rows and the variables marked User.",
@@ -778,6 +782,22 @@ public partial class MainWindow
     {
         var menu = new ContextMenu();
         var f = Session.Doc.Find(id);
+        // the part's material: edit, remove, a recent one, and the library's change when there is one
+        if (id is FeatureTree.MaterialRow or "__part")
+        {
+            menu.Items.Add(Item("Edit Material...", EditMaterialCommand, null, "material"));
+            foreach (var item in _recentMaterials.Where(i => i != Session.Doc.MaterialItem && LibraryLink.Current.Snapshot(i) != null).Take(5))
+            {
+                var it = item;
+                menu.Items.Add(Item(LibrarySnapshot.Split(it).row, () => SetPartMaterial(it), null, "material"));
+            }
+            if (Session.Doc.MaterialItem is { } mi)
+            {
+                if (LibraryLink.Updates(Session.Doc).Any(u => u.Item == mi)) menu.Items.Add(Item("Update from Library...", () => _ = LibraryUpdatesCommand(), null, "table"));
+                menu.Items.Add(Item("Remove Material", () => SetPartMaterial(null), null, "delete"));
+            }
+            if (id == "__part" && Session.Doc.RollbackIndex != null) menu.Items.Add(new Separator());
+        }
         if (id is "Front" or "Top" or "Right")
         {
             menu.Items.Add(Item("Sketch", () => StartSketchCommand(), null, "sketch"));

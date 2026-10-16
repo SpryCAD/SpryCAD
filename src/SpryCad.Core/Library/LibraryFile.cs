@@ -142,7 +142,10 @@ public static class LibraryFile
         return new Guid(root.ToBytes().AsSpan(0, 16));
     }
 
-    /// <summary>The built-in standards written as a library file (the start of a shared standards library).</summary>
+    /// <summary>The built-in standards and materials written as a library file (the start of a shared standards library, to correct and add to).</summary>
     public static Guid WriteBuiltIn(string path, string author) =>
-        Publish(path, BuiltInStandards.LibraryId, BuiltInStandards.Name, LibraryLayer.Standards, BuiltInStandards.Tables, null, author, "SpryCAD built-in standards");
+        Publish(path, BuiltInStandards.LibraryId, BuiltInStandards.Name, LibraryLayer.Standards, BuiltInTables, null, author, "SpryCAD built-in standards and materials");
+
+    /// <summary>The built-in standards' and materials' tables, as a standards library file starts with them.</summary>
+    public static IEnumerable<LibraryTable> BuiltInTables => BuiltInStandards.Tables.Concat(BuiltInMaterials.Tables);
 }

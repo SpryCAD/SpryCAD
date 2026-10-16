@@ -119,6 +119,12 @@ static class MaterialTests
             t.Near(200e9 / Materials.Unit("modulus", UnitSystem.IPS).scale, 29.0, 0.01);
             t.Near(12e-6 / Materials.Unit("expansion", UnitSystem.IPS).scale, 6.667, 0.001);
             t.Eq(Materials.Unit("poisson", UnitSystem.IPS), (1.0, ""));
+            // a material table shown metric or inch-pound (the library editor and CSV files), as a size table in mm or inches
+            var steelTable = BuiltInMaterials.Tables.Single(x => x.Key == "Materials-steel");
+            t.Eq(steelTable.Scale("yield"), 1e6); t.Eq(steelTable.UnitLabel("density"), "g/cm³");
+            var inch = new LibraryTable { Kind = TableKinds.Material, Units = LibraryTable.Inch };
+            t.Eq(inch.UnitLabel("yield"), "ksi"); t.Near(inch.Scale("density"), 27679.9, 0.1); t.Eq(inch.UnitLabel("r"), "");
+            t.Eq(BuiltInStandards.Tables.Single(x => x.Key == "ASME-B18.6.3-csink").UnitLabel("diameter"), "in");
             var steel = Materials.Of(LibrarySet.BuiltIn.Snapshot("Materials-steel/Steel (plain carbon)")!)!;
             t.Near(steel.Shear!.Value, 200e9 / (2 * 1.29), 1);
             t.Eq(steel.Appearance!.Metallic, 1.0);

@@ -67,6 +67,20 @@ public static class Materials
     /// <summary>The type a "type" text names (<see cref="MaterialType.Other"/> when none, or one from a newer SpryCAD).</summary>
     public static MaterialType TypeOf(string? text) => Enum.TryParse<MaterialType>(text, out var t) ? t : MaterialType.Other;
 
+    /// <summary>How a type is listed ("Stainless steel", "Copper alloys").</summary>
+    public static string TypeName(MaterialType t) => t switch
+    {
+        MaterialType.StainlessSteel => "Stainless steel",
+        MaterialType.CastIron => "Cast iron",
+        MaterialType.CopperAlloy => "Copper alloys",
+        MaterialType.Nickel => "Nickel alloys",
+        MaterialType.Plastic => "Plastics",
+        MaterialType.Elastomer => "Elastomers",
+        MaterialType.Composite => "Composites",
+        MaterialType.Ceramic => "Ceramics",
+        _ => t.ToString(),
+    };
+
     /// <summary>A material row read (null if the table is not a material table).</summary>
     public static MaterialInfo? Of(LibraryTable t, LibraryRow r) =>
         t.Kind == TableKinds.Material ? new MaterialInfo(r.Key, t.Columns, r.Values, r.Text) : null;
