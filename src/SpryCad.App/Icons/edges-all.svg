@@ -1,8 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
   <!-- Concave and convex: every corner -->
   <g stroke-linejoin="miter" stroke-linecap="square" fill="none">
-    <path d="M4.5 27.5V10.5Q4.5 4.5 10.5 4.5H14.5V16.5Q14.5 20.5 18.5 20.5H27.5V27.5Z" fill="#D5DBE3" stroke="#24364F"/>
-    <path d="M4.5 10.5Q4.5 4.5 10.5 4.5H4.5Z" fill="#9CC2EE" stroke="#2F7BD6"/>
-    <path d="M14.5 16.5Q14.5 20.5 18.5 20.5H14.5Z" fill="#9CC2EE" stroke="#2F7BD6"/>
+    <path d="M4.5 27.5V13.5Q4.5 4.5 13.5 4.5H15.5V12.5Q15.5 19.5 22.5 19.5H27.5V27.5Z" fill="#D5DBE3" stroke="#24364F"/>
+    <path d="M4.5 13.5Q4.5 4.5 13.5 4.5H4.5Z" fill="#9CC2EE" stroke="#2F7BD6"/>
+    <path d="M15.5 12.5Q15.5 19.5 22.5 19.5H15.5Z" fill="#9CC2EE" stroke="#2F7BD6"/>
   </g>
 </svg>

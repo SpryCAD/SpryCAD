@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
   <!-- Convex: outside corners -->
   <g stroke-linejoin="miter" stroke-linecap="square" fill="none">
-    <path d="M4.5 27.5V10.5Q4.5 4.5 10.5 4.5H27.5V27.5Z" fill="#D5DBE3" stroke="#24364F"/>
-    <path d="M4.5 10.5Q4.5 4.5 10.5 4.5H4.5Z" fill="#9CC2EE" stroke="#2F7BD6"/>
+    <path d="M4.5 27.5V17.5Q4.5 4.5 17.5 4.5H27.5V27.5Z" fill="#D5DBE3" stroke="#24364F"/>
+    <path d="M4.5 17.5Q4.5 4.5 17.5 4.5H4.5Z" fill="#9CC2EE" stroke="#2F7BD6"/>
   </g>
 </svg>

@@ -6,9 +6,9 @@
     </pattern>
   </defs>
   <g stroke-linejoin="miter" stroke-linecap="square">
-    <path d="M3.5 7.5H8.5L13 12V28.5H3.5Z" fill="url(#hatch)" stroke="#24364F"/>
-    <path d="M28.5 7.5H23.5L19 12V28.5H28.5Z" fill="url(#hatch)" stroke="#24364F"/>
-    <path d="M8.5 7.5L13 12V28.5 M23.5 7.5L19 12V28.5" fill="none" stroke="#2F7BD6" stroke-width="2"/>
+    <path d="M2.5 7.5H5.5L11 13V28.5H2.5Z" fill="url(#hatch)" stroke="#24364F"/>
+    <path d="M29.5 7.5H26.5L21 13V28.5H29.5Z" fill="url(#hatch)" stroke="#24364F"/>
+    <path d="M5.5 7.5L11 13V28.5 M26.5 7.5L21 13V28.5" fill="none" stroke="#2F7BD6" stroke-width="2"/>
     <path d="M16 3.5V30.5" fill="none" stroke="#2F7BD6" stroke-width="0.9" stroke-dasharray="3 1.5 1 1.5"/>
   </g>
 </svg>
