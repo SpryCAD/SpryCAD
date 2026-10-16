@@ -108,6 +108,23 @@ static class ConfigTests
             t.Eq(back.Find(cut.Id)!.SuppressWhen, "Nope > 1");
         });
 
+        t.Test("Threads start at the free end whatever the length: the socket screw's at its tip, running to the head (the point picked stays put)", () =>
+        {
+            foreach (var len in new[] { "12", "20", "60" })
+            {
+                var doc = Demos.SocketScrew();
+                doc.Equations.First(e => e.Name == "L").Expr = len;
+                var r = new Regenerator().Rebuild(doc);
+                var th = doc.Features.First(f => f is ThreadFeature);
+                t.True(r.Status[th.Id].Ok, $"L {len}: {r.Status[th.Id].Error}");
+                var c = r.State.Cosmetics[th.Id];
+                // (the head on the Front plane, the shank from its underside at k = 6 to the tip at k + L, M6 the size in use)
+                var tip = 6 + double.Parse(len, System.Globalization.CultureInfo.InvariantCulture);
+                t.Near(Math.Abs(c.Origin.Z), tip, 1e-6);
+                t.True(Math.Abs(c.Origin.Z + c.Axis.Z * c.Length) < tip, $"L {len}: the thread runs from the tip toward the head");
+            }
+        });
+
         t.Test("Design tables: one named after an equation lists its standard values (each row's key one), user-facing as a choice in its place", () =>
         {
             var doc = new CadDocument();

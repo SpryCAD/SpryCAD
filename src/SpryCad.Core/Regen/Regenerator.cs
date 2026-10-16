@@ -842,9 +842,34 @@ public sealed class Regenerator
             var clearance = Len(t.Clearance, "Clearance");
             if (clearance < 0) throw new FeatureException("The clearance cannot be negative.");
             var faceLen = hmax - hmin;
-            // from the end nearest the picked point (or the other one), running into the face
+            // from the free end (a shaft's tip, a hole's opening), running into the face up to the shoulder (a head, a
+            // hole's bottom): told by the faces at the ends, so it holds whatever sizes the part takes (the point picked
+            // stays where it was: at another length it can be nearer the other end). When that does not tell (both ends
+            // free, or neither), from the end nearest the point picked; Reverse: the other one
+            bool? Free(double hEnd)
+            {
+                bool any = false, beyond = false;
+                foreach (var c in face.Coedges)
+                {
+                    var pts = c.Edge.Samples(1e-3);
+                    if (pts.Count == 0 || pts.Any(p => Math.Abs(Vec3.Dot(p - axisO, axisDir) - hEnd) > 1e-4 * Math.Max(1, faceLen))) continue;
+                    foreach (var u in c.Edge.Uses)
+                    {
+                        if (u.Face == face) continue;
+                        any = true;
+                        // (the face beside this end reaching out past the cylinder: a shaft's shoulder, a hole's opening)
+                        foreach (var q in u.Face.Coedges.SelectMany(x => x.Edge.Samples(1e-3)))
+                        {
+                            var rel = q - axisO;
+                            if ((rel - axisDir * Vec3.Dot(rel, axisDir)).Length > surfaceR * (1 + 1e-4) + 1e-6) { beyond = true; break; }
+                        }
+                    }
+                }
+                return any ? external ? !beyond : beyond : null;
+            }
             var hs = Vec3.Dot(t.Face.Hint - axisO, axisDir);
-            bool fromMin = Math.Abs(hs - hmin) <= Math.Abs(hs - hmax);
+            var (minFree, maxFree) = (Free(hmin), Free(hmax));
+            bool fromMin = minFree == true && maxFree == false || !(minFree == false && maxFree == true) && Math.Abs(hs - hmin) <= Math.Abs(hs - hmax);
             if (t.Reverse) fromMin = !fromMin;
             var dir = fromMin ? axisDir : -axisDir;
             var hStart = fromMin ? hmin : hmax;
