@@ -10,11 +10,16 @@ public sealed class FeatureContext
     readonly Action<ModelState> _set;
     readonly Func<string?, string, ValueKind, double> _value;
 
+    readonly Action<string> _warn;
+
     internal FeatureContext(CadDocument doc, Func<ModelState> get, Action<ModelState> set,
-        Func<string?, string, ValueKind, double> value, CancellationToken cancel)
+        Func<string?, string, ValueKind, double> value, CancellationToken cancel, Action<string> warn)
     {
-        Doc = doc; _get = get; _set = set; _value = value; Cancel = cancel;
+        Doc = doc; _get = get; _set = set; _value = value; Cancel = cancel; _warn = warn;
     }
+
+    /// <summary>Says something about the feature that is not an error (a design rule it breaks): shown with it.</summary>
+    public void Warn(string message) => _warn(message);
 
     public CadDocument Doc { get; }
     public CancellationToken Cancel { get; }

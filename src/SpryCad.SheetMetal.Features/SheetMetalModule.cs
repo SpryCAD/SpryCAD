@@ -48,6 +48,27 @@ public static class SheetMetalModule
     public static FlatPattern2D? FlatOf(ModelState state, string body) =>
         state.Sheets.TryGetValue(body, out var s) ? FlatPattern2D.From(s.Graph) : null;
 
+    /// <summary>Text with the features' ids in entity ids ("Fx3k….0.B") said by the features' names.</summary>
+    public static string Named(CadDocument doc, string text) => SheetRebuild.Named(doc, text);
+
+    /// <summary>
+    /// Sets (or, with <paramref name="treatment"/> and <paramref name="gap"/> both null, clears) a corner's override of
+    /// the profile's corner rule (sheet metal spec section 7). An edit of the part: the caller makes it undoable.
+    /// </summary>
+    public static void SetCorner(CadDocument doc, CornerId corner, CornerTreatment? treatment, string? gap)
+    {
+        var list = doc.SheetOverrides ??= new();
+        var o = list.FirstOrDefault(x => x.Target == corner.Value);
+        if (o == null) { o = new SheetMetalOverride { Target = corner.Value }; list.Add(o); }
+        o.Values.Remove("sm.corners/treatment");
+        o.Values.Remove("sm.corners/gap");
+        if (treatment is { } tr) o.Values["sm.corners/treatment"] = tr.ToString();
+        if (!string.IsNullOrWhiteSpace(gap)) o.Values["sm.corners/gap"] = gap.Trim();
+        if (o.Values.Count == 0) list.Remove(o);
+        list.Sort((a, b) => string.CompareOrdinal(a.Target, b.Target));
+        if (list.Count == 0) doc.SheetOverrides = null;
+    }
+
     /// <summary>The sheet metal edge a face name names ("BaseFlange1.P0.Edge(2)"): for edge flanges (null: not one).</summary>
     public static bool IsPanelEdge(string faceName) => FoldedSolid.ParseEdge(faceName) != null;
 }

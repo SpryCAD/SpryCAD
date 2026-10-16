@@ -206,6 +206,7 @@ public partial class MainWindow
             Sub("Sheet _Metal",
                 Item("_Base Flange...", BaseFlangeCommand, null, "baseflange"),
                 Item("_Edge Flange...", EdgeFlangeCommand, null, "edgeflange"),
+                Item("_Corners...", CornersCommand, null, "corners"),
                 Item("Fla_tten", ToggleFlattenCommand, null, "flatten"),
                 Item("E_xport Flat Pattern...", () => _ = ExportFlatCommand(), null, "export-dxf"))));
         MainMenu.Items.Add(Sub("_Tools",
@@ -341,6 +342,7 @@ public partial class MainWindow
             case "Sheet Metal":
                 Cmd("baseflange", "Base\nFlange", BaseFlangeCommand);
                 Cmd("edgeflange", "Edge\nFlange", EdgeFlangeCommand);
+                Cmd("corners", "Corners", CornersCommand);
                 Cmd("flatten", "Flatten", ToggleFlattenCommand);
                 Sep();
                 Cmd("export-dxf", "Export\nFlat", () => _ = ExportFlatCommand());
@@ -409,6 +411,7 @@ public partial class MainWindow
         ["Combine"] = "Adds, subtracts or intersects bodies.",
         ["Base Flange"] = "Starts a sheet metal part: a plate from a closed sketch, or a bent profile from lines (material and gauge from the shop profile).",
         ["Edge Flange"] = "Adds flanges on the sheet's edges: length to the outside or inside mold line or the tangent, bend angle, up or down.",
+        ["Corners"] = "Lists where flanges meet, how each corner is made, and its gap check; a corner's treatment and gap can be set apart from the profile's rule.",
         ["Flatten"] = "Shows the sheet metal flat or folded.",
         ["Export Flat"] = "Writes the flat pattern as DXF or SVG, on the shop profile's layers, with bend notes and the bend table.",
         ["Sketch"] = "Starts a sketch on the selected plane or planar face.",

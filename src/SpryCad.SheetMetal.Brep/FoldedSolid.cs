@@ -45,13 +45,15 @@ public static class FoldedSolid
         const double tol = 1e-7;
         static string PKey(Vec2 p) => FormattableString.Invariant($"{Math.Round(p.X / tol)}:{Math.Round(p.Y / tol)}");
 
-        // every directed segment of every piece: a segment run both ways is between two pieces (no side face)
+        // the pieces' edges split where another piece's corner lies on them; every directed segment: a segment run
+        // both ways is between two pieces (no side face)
+        var split = FlatPattern2D.Split(pieces, tol);
         var directed = new HashSet<string>();
-        foreach (var piece in pieces)
-            foreach (var loop in Loops(piece))
-                for (int i = 0; i < loop.Count; i++) directed.Add(PKey(loop[i]) + ">" + PKey(loop[(i + 1) % loop.Count]));
+        foreach (var (_, ls) in split)
+            foreach (var loop in ls)
+                for (int i = 0; i < loop.Count; i++) directed.Add(PKey(loop[i].p) + ">" + PKey(loop[(i + 1) % loop.Count].p));
 
-        foreach (var piece in pieces)
+        foreach (var (piece, splitLoops) in split)
         {
             var map = new PieceMap(g, piece, world, flat);
             NVertex V(Vec2 p, bool top)
@@ -78,7 +80,7 @@ public static class FoldedSolid
             }
 
             // top and bottom
-            var loops = Loops(piece).ToList();
+            var loops = splitLoops.Select(l => l.Select(x => x.p).ToList()).ToList();
             var topFace = map.Face(true);
             var bottomFace = map.Face(false);
             foreach (var loop in loops)
@@ -101,7 +103,7 @@ public static class FoldedSolid
                 {
                     Vec2 a = loop[i], b = loop[(i + 1) % loop.Count];
                     if (directed.Contains(PKey(b) + ">" + PKey(a))) continue;
-                    var face = map.SideFace(a, b, -t, SideName(piece, li, i));
+                    var face = map.SideFace(a, b, -t, SideName(piece, li, splitLoops[li][i].edge));
                     var l = new NLoop();
                     l.Coedges.Add(E(a, b, false));
                     l.Coedges.Add(Up(b, true));

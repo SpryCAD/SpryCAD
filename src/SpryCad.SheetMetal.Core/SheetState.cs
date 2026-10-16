@@ -10,4 +10,7 @@ public sealed record SheetState(string BodyId, BendGraph Graph, SheetRules Rules
     public IReadOnlyDictionary<BendId, SheetRules> BendRules { get; init; } = new Dictionary<BendId, SheetRules>();
 
     public SheetRules RulesOf(BendId bend) => BendRules.TryGetValue(bend, out var r) ? r : Rules;
+
+    /// <summary>The checks' results on the body as it is (sheet metal spec section 9), passed and failed.</summary>
+    public IReadOnlyList<RuleResult> Checks { get; init; } = Array.Empty<RuleResult>();
 }

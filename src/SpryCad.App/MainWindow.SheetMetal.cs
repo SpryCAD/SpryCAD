@@ -119,6 +119,51 @@ public partial class MainWindow
         BeginEdit(f, isNew, page, overlay: true, hint: f.Edges.Count == 0 ? "Select the edges (the sheet's thin side faces) to put flanges on." : null);
     }
 
+    /// <summary>
+    /// Lists the sheet metal's corners (where flanges on two edges meet) with how each is made and what its check says;
+    /// a corner's treatment and gap can be set apart from the profile's rule (one undoable change for all).
+    /// </summary>
+    void CornersCommand()
+    {
+        if (PartOnly("Corners")) return;
+        var sheets = Session.Result?.State.Sheets.Values.ToList() ?? new();
+        var corners = sheets.SelectMany(s => s.Graph.Corners.Where(c => double.IsFinite(c.Gap)).Select(c => (s, c))).ToList();
+        if (corners.Count == 0) { Status("The sheet metal has no corners: they are where flanges on two edges of a panel meet."); return; }
+        if (_edit != null) CancelEdit();
+        var page = new PmPage("Corners", "edgeflange");
+        var edits = new Dictionary<CornerId, (CornerTreatment? treatment, string gap)>();
+        foreach (var (s, c) in corners)
+        {
+            var o = Session.Doc.SheetOverrides?.FirstOrDefault(x => x.Target == c.Id.Value);
+            CornerTreatment? tr = o != null && o.Values.TryGetValue("sm.corners/treatment", out var ts) && Enum.TryParse<CornerTreatment>(ts, out var parsed) ? parsed : null;
+            var gapText = o != null && o.Values.TryGetValue("sm.corners/gap", out var gs) ? gs : "";
+            edits[c.Id] = (tr, gapText);
+            var id = c.Id;
+            var sec = page.Section(SheetMetalModule.Named(Session.Doc, $"Corner {c.Id}"));
+            var check = s.Checks.FirstOrDefault(x => x.Entity == c.Id.Value && !x.Passed);
+            page.Info(sec, $"Now: {c.Treatment}, gap {c.Gap:0.###} mm." + (check != null ? " ⚠ " + SheetMetalModule.Named(Session.Doc, check.Message) : ""));
+            page.Combo(sec, "Treatment", new (CornerTreatment?, string)[]
+            {
+                (null, "The profile's rule"), (CornerTreatment.Open, "Open (both short of the other)"),
+                (CornerTreatment.OverlapA, "Overlap A (the first covers the second)"), (CornerTreatment.OverlapB, "Overlap B (the second covers the first)"),
+                (CornerTreatment.Closed, "Closed (overlapping, to the gap)"),
+            }, () => edits[id].treatment, v => edits[id] = (v, edits[id].gap));
+            page.Number(sec, "Gap", () => edits[id].gap, v => edits[id] = (edits[id].treatment, v), optional: true);
+        }
+        void Close() { ShowPage(null); HideConfirmCorner(); }
+        void Ok()
+        {
+            Session.Change(() => { foreach (var (id, e) in edits) SheetMetalModule.SetCorner(Session.Doc, id, e.treatment, e.gap); });
+            Close();
+            Status("Corners updated.");
+            RefreshScene();
+        }
+        page.OnOk = Ok;
+        page.OnCancel = Close;
+        ShowPage(page);
+        ShowConfirmCorner(Ok, Close, "OK (Enter)", "Cancel (Esc)");
+    }
+
     /// <summary>Shows the sheet metal bodies flat or folded (undoable, saved with the part).</summary>
     void ToggleFlattenCommand()
     {

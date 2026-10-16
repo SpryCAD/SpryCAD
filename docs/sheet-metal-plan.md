@@ -35,8 +35,32 @@ Differences from the structure below:
   - **Library editor:** the **Shop Profile** button imports or exports each profile table as CSV (mm or inches), or starts from the starter profile.
 - **Tests:** 8 more in `tests/SpryCad.SheetMetal.Tests`, 27 in all, all passing. They cover the plate, flange positions and dimensions, opposite flanges and a flange on a flange, the bent profile's bounding box, a save/load round trip with byte-identical objects, stable ids and flat layout after an unrelated edit, flat export, and snapshot sync and update.
 
+### Phase 3 (done, not yet run in the app)
+
+- **Corners** (`SheetCorners`): flanges on two edges of one panel that meet. On every rebuild the flanges are fitted to their panel's current edges, so an edge moved by the other flange's setback moves its flange too. Then they are lengthened toward the corner by its treatment:
+  - **Open:** both stop the gap short of the other's inside face.
+  - **Overlap A, or Closed:** the first flange reaches the other's outside face; the second stops the gap short of the first's inside face.
+  - **Overlap B:** the same the other way round.
+
+  Treatment and gap come from `sm.corners` (the gap is an expression of t and R); a `SheetMetalOverride` on the corner's id (`B1+B2`) can set them apart. Flanges that bend opposite ways part without a corner.
+- **Corner relief:** the notch the bend zones leave at the corner (rectangular, stepped). Edges keep their numbers: the flat and the solid split edges where another piece's corner lies on them, so face names don't change.
+- **Checks**, on the graph, in plain words, as warnings on the feature whose bends they concern:
+  - SM-CORN-01: the corner gap against the profile's gap rule, the allowed treatments, and zero gap.
+  - SM-FOLD-01: flanges crossing at a corner.
+  - SM-FLAT-01: the flat overlapping itself.
+  - SM-REL-01: a bend zone ending inside material.
+
+  Results are kept in `SheetState.Checks`.
+- **App:** Sheet Metal > Corners lists each corner with how it is made and its check, and sets a corner's treatment and gap as one undoable change.
+- **Tests:** 31 sheet metal tests, all passing, including:
+  - a four-flange tray: open corners at the profile's gap, outside faces flush, exact volume, the flat one contour with stepped notches;
+  - overlap with zero gap failing SM-CORN-01, with the corner named;
+  - a disallowed treatment;
+  - flanges bending opposite ways at a corner;
+  - the overlap and relief checks.
+
 Limits for now (later phases):
-- **Corners:** flanges on edges that meet are refused until phase 3 adds corners.
+- **Corners:** between two 90° bends the same way round on a square, outside corner of their panel; others are refused with a message. No corners for a flange beside the bend its panel hangs from, for bends of a bent base profile, or between three bends. No round or tear corner reliefs (they need arcs in outlines). Folded collisions are checked at corners only.
 - **Base flange shape:** the outline is straight lines only (no arcs or splines).
 - **Edge flange width:** always the whole edge (no width or offsets).
 - **Inside radius:** must be more than 0.

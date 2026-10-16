@@ -444,7 +444,7 @@ public sealed class Regenerator
                 case FastenerFeature fa: DoFastener(fa); break;
                 default:
                     // features of other projects (sheet metal)
-                    var ctx = new FeatureContext(doc, () => State, s => State = s, (e, what, kind) => Value(e, what, kind, lookup), Cancel);
+                    var ctx = new FeatureContext(doc, () => State, s => State = s, (e, what, kind) => Value(e, what, kind, lookup), Cancel, status.Warnings.Add);
                     if (!FeatureRegistry.TryExecute(f, ctx)) throw new FeatureException($"{f.Kind} features cannot be built by this version of SpryCAD.");
                     break;
             }

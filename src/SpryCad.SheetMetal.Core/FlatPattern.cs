@@ -58,6 +58,47 @@ public sealed class FlatPattern2D
         return pieces;
     }
 
+    /// <summary>
+    /// Each piece's loops with their edges split where another piece's corner lies on them (a flange running on past
+    /// its bend zone: the zone's corner on the flange's edge), so pieces that meet share whole segments. Each point
+    /// carries the index of the piece's own edge it starts a piece of (for naming the edge's faces).
+    /// </summary>
+    public static List<(FlatPiece piece, List<List<(Vec2 p, int edge)>> loops)> Split(List<FlatPiece> pieces, double tol = 1e-7)
+    {
+        var all = pieces.SelectMany(x => x.Outline.Points).ToList();
+        var result = new List<(FlatPiece, List<List<(Vec2, int)>>)>();
+        foreach (var piece in pieces)
+        {
+            var loops = new List<List<(Vec2, int)>>();
+            foreach (var loop in new[] { piece.Outline.Outer }.Concat(piece.Outline.Holes))
+            {
+                var split = new List<(Vec2, int)>();
+                for (int i = 0; i < loop.Count; i++)
+                {
+                    Vec2 a = loop[i], b = loop[(i + 1) % loop.Count];
+                    var d = b - a;
+                    var len2 = Vec2.Dot(d, d);
+                    split.Add((a, i));
+                    if (len2 <= 0) continue;
+                    var len = Math.Sqrt(len2);
+                    var on = all.Select(v => (v, s: Vec2.Dot(v - a, d) / len2))
+                        .Where(x => x.s * len > tol && (1 - x.s) * len > tol && Math.Abs(Vec2.Cross(d, x.v - a)) / len < tol)
+                        .OrderBy(x => x.s).Select(x => x.v).ToList();
+                    Vec2? last = null;
+                    foreach (var v in on)
+                    {
+                        if (last is { } l && (v - l).Length < tol) continue;
+                        split.Add((v, i));
+                        last = v;
+                    }
+                }
+                loops.Add(split);
+            }
+            result.Add((piece, loops));
+        }
+        return result;
+    }
+
     /// <summary>A bend's zone in the flat: A's edge it starts at, moved out by the allowance (counterclockwise).</summary>
     public static Polygon2 Strip(BendGraph g, Bend b)
     {
@@ -75,9 +116,9 @@ public sealed class FlatPattern2D
         var pieces = Pieces(g);
         // the outline: every piece's edges but those two pieces share (run both ways), joined into loops
         var segs = new List<(Vec2 a, Vec2 b)>();
-        foreach (var piece in pieces)
-            foreach (var loop in new[] { piece.Outline.Outer }.Concat(piece.Outline.Holes))
-                for (int i = 0; i < loop.Count; i++) segs.Add((loop[i], loop[(i + 1) % loop.Count]));
+        foreach (var (_, ls) in Split(pieces))
+            foreach (var loop in ls)
+                for (int i = 0; i < loop.Count; i++) segs.Add((loop[i].p, loop[(i + 1) % loop.Count].p));
         var tol = 1e-6;
         string K(Vec2 p) => FormattableString.Invariant($"{Math.Round(p.X / tol)}:{Math.Round(p.Y / tol)}");
         var directed = segs.GroupBy(s => K(s.a) + ">" + K(s.b)).ToDictionary(x => x.Key, x => x.Count());

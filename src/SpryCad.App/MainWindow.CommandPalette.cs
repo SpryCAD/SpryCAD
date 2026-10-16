@@ -116,6 +116,7 @@ public partial class MainWindow
             C("combine", "Combine", CombineCommand);
             C("baseflange", "Base Flange", BaseFlangeCommand);
             C("edgeflange", "Edge Flange", EdgeFlangeCommand);
+            C("corners", "Corners", CornersCommand);
             C("flatten", "Flatten", ToggleFlattenCommand);
             C("export-dxf", "Export Flat Pattern", () => _ = ExportFlatCommand());
             C("measure", "Measure", MeasureCommand);

@@ -28,7 +28,7 @@ static class SheetRebuild
         if (!ctx.State.Sketches.TryGetValue(f.SketchId, out var sk)) throw Error("The base flange's sketch is missing.");
         var bendRules = new Dictionary<BendId, SheetRules>();
         var (graph, world) = sk.Regions.Count > 0 ? Plate(f, sk, rules) : Profile(f, sk, rules, ctx, bendRules);
-        Finish(ctx, sb, graph, world, rules, bendRules);
+        Finish(ctx, f, sb, graph, world, rules, bendRules);
     }
 
     static string Name(SheetMetalBody b) => string.IsNullOrEmpty(b.Name) ? b.Id : b.Name;
@@ -176,11 +176,11 @@ static class SheetRebuild
             int m = outer.Count;
             if (i < 0 || i >= m) throw Error($"The edge {f.Edges[k]} is not in the part any more.");
             if (Used(pid, i)) throw Error($"{f.Edges[k]} already has a bend.");
-            // flanges on edges that meet need a corner between them (open, closed, overlapping): not yet
+            // flanges on a panel's edges that meet make a corner (SheetCorners); a flange on the side of a flange
+            // (beside the bend it hangs from) cannot be made yet
             int prev = (i + m - 1) % m, next = (i + 1) % m;
-            if (bends.Any(b => (b.A == pid && (b.EdgeA == prev || b.EdgeA == next)) || (b.B == pid && (b.EdgeB == prev || b.EdgeB == next)))
-                || edges.Any(e => e.panel == pid && (e.edge == prev || e.edge == next)))
-                throw Error($"{f.Edges[k]} meets an edge that has a bend: flanges on edges that meet need a corner, which is not modelled yet.");
+            if (bends.Any(b => b.B == pid && (b.EdgeB == prev || b.EdgeB == next)))
+                throw Error($"{f.Edges[k]} is beside the bend its panel hangs from: a flange there cannot be made yet.");
 
             var id = new BendId($"{f.Id}.{k}.B");
             var r = SheetProfiles.RulesOf(ctx.Doc, rules, id);
@@ -204,7 +204,7 @@ static class SheetRebuild
             bends.Add(new Bend(id, pid, pnew, new Line2(a + n * (ba / 2), (a - b).Normalized()), angle, f.Direction, R, ba, r.Toolset, source)
                 { EdgeA = i, EdgeB = 0 });
         }
-        Finish(ctx, sb, g with { Panels = panels, Bends = bends }, st.World, rules, bendRules);
+        Finish(ctx, f, sb, g with { Panels = panels, Bends = bends }, st.World, rules, bendRules);
     }
 
     static string Words(FlangeReference r) => r switch
@@ -246,13 +246,20 @@ static class SheetRebuild
     }
 
     /// <summary>
-    /// The body as the feature leaves it: re-rooted at its fixed panel (when it names one the graph has; the part does
-    /// not move), its solid made again (folded, or flat when it is shown flattened).
+    /// The body as the feature leaves it: its flanges fitted to their edges and their corners made (by the profile's
+    /// corner rules and the part's corner overrides), checked, re-rooted at its fixed panel (when it names one the
+    /// graph has; the part does not move), its solid made again (folded, or flat when it is shown flattened). The
+    /// checks that fail on what this feature made are its warnings.
     /// </summary>
-    static void Finish(FeatureContext ctx, SheetMetalBody sb, BendGraph g, Frame3 world, SheetRules rules, Dictionary<BendId, SheetRules> bendRules)
+    static void Finish(FeatureContext ctx, Feature f, SheetMetalBody sb, BendGraph g, Frame3 world, SheetRules rules, Dictionary<BendId, SheetRules> bendRules)
     {
+        var checks = new List<RuleResult>();
         try
         {
+            g = SheetCorners.Apply(g, (id, b1, b2) => CornerSpecOf(ctx.Doc, rules, id, b1), checks);
+            checks.AddRange(SheetChecks.Flat(g));
+            foreach (var c in checks.Where(c => !c.Passed && c.Entity.Contains(f.Id + ".", StringComparison.Ordinal)))
+                ctx.Warn($"{c.Rule}: {Named(ctx.Doc, c.Message)}");
             if (sb.FixedPanel is { } fp && g.Panels.Any(p => p.Id.Value == fp) && g.FixedPanel.Value != fp)
             {
                 var place = g.Fold().Panel(new PanelId(fp)).FoldedFrame;
@@ -260,10 +267,37 @@ static class SheetRebuild
                 g = g with { FixedPanel = new PanelId(fp) };
             }
             var body = FoldedSolid.Build(g, world, sb.Flattened);
-            var state = new SheetState(sb.Id, g, rules, world) { BendRules = bendRules };
+            var state = new SheetState(sb.Id, g, rules, world) { BendRules = bendRules, Checks = checks };
             ctx.State = ctx.State.WithSheet(state, NTess.ToSolid(body));
         }
-        catch (BendGraphException ex) { throw Error(ex.Message); }
+        catch (BendGraphException ex) { throw Error(Named(ctx.Doc, ex.Message)); }
+    }
+
+    /// <summary>A message with the features' ids in the entities' ids ("Fx3k….0.B") said by the features' names.</summary>
+    public static string Named(CadDocument doc, string message)
+    {
+        foreach (var feature in doc.Features)
+            if (feature.Id.Length > 0 && message.Contains(feature.Id, StringComparison.Ordinal)) message = message.Replace(feature.Id, feature.Name);
+        return message;
+    }
+
+    /// <summary>
+    /// How a corner is made: the profile's corner rule for the sheet (treatment, gap at the first bend's radius), or the
+    /// part's override for the corner (sheet metal spec section 7). The profile's gap is what the check holds it to.
+    /// </summary>
+    public static CornerSpec CornerSpecOf(CadDocument doc, SheetRules rules, CornerId id, Bend first)
+    {
+        try
+        {
+            var o = doc.SheetOverrides?.FirstOrDefault(x => x.Target == id.Value);
+            var r = o is { Values.Count: > 0 } ? rules.WithOverrides(o.Values) : rules;
+            CornerTreatment Parse(string s) => Enum.TryParse<CornerTreatment>(s.Replace(" ", ""), true, out var c) ? c
+                : throw new ProfileMissException(ProfileTables.Corners, $"\"{s}\" is not a corner treatment (Open, Closed, OverlapA, OverlapB).");
+            var allowed = rules.RuleText(ProfileTables.Corners, "allowed").Split(new[] { ' ', ',' }, StringSplitOptions.RemoveEmptyEntries).Select(Parse).ToList();
+            return new CornerSpec(Parse(r.RuleText(ProfileTables.Corners, "treatment")), r.Rule(ProfileTables.Corners, "gap", first.InsideRadius),
+                rules.Rule(ProfileTables.Corners, "gap", first.InsideRadius), allowed, rules.RuleText(ProfileTables.Corners, "zero gap allowed") == "1", o != null);
+        }
+        catch (Exception ex) when (ex is ProfileMissException or RuleExprException) { throw Error($"Corner {id}: {ex.Message}"); }
     }
 
     static Vec3 V(Kernel.Vec3 v) => new(v.X, v.Y, v.Z);

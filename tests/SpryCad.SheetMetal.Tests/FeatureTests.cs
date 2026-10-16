@@ -114,7 +114,7 @@ static class FeatureTests
             t.Near(box2.Min.Y, -(st.Rules.InsideRadius + th), 1e-9);
         });
 
-        t.Test("Features: flanges on opposite edges; on edges that meet: refused until corners come", () =>
+        t.Test("Features: flanges on opposite edges; a flange on a flange's far edge; on the side of a flange: refused", () =>
         {
             var (doc, body, bf) = Plate();
             var ef = doc.AddFeature(new EdgeFlangeFeature { Body = body.Id, Edges = { E(bf, "bottom"), E(bf, "top") }, Length = "25", Direction = BendDirection.Down });
@@ -122,15 +122,14 @@ static class FeatureTests
             t.Eq(Solid(r).Validate(), null);
             t.Near(Volume(Solid(r)), FoldedVolume(r.State.Sheets[body.Id]), 1e-6);
             t.Near(Solid(r).TightBounds().Min.Z, -(25 - 0) + 0, 1e-9); // down: the outside is the top side; 25 to the OML at z = 0
-            ef.Edges.Add(E(bf, "right"));
-            var bad = new Regenerator().Rebuild(doc);
-            t.True(bad.Status[ef.Id].Error?.Contains("need a corner") == true, bad.Status[ef.Id].Error ?? "no error");
-            // a flange on a flange's far edge
-            ef.Edges.RemoveAt(2);
             var ef2 = doc.AddFeature(new EdgeFlangeFeature { Body = body.Id, Edges = { ef.Id + ".0.P.Edge(2)" }, Length = "15", Angle = "45" });
             var r2 = Build(t, doc);
             t.Eq(Solid(r2).Validate(), null);
             t.Near(Volume(Solid(r2)), FoldedVolume(r2.State.Sheets[body.Id]), 1e-6);
+            // beside the bend a flange hangs from: refused, said
+            var side = doc.AddFeature(new EdgeFlangeFeature { Body = body.Id, Edges = { ef.Id + ".0.P.Edge(1)" }, Length = "10" });
+            var bad = new Regenerator().Rebuild(doc);
+            t.True(bad.Status[side.Id].Error?.Contains("beside the bend") == true, bad.Status[side.Id].Error ?? "no error");
         });
 
         t.Test("Features: a bent profile from an open sketch: the lines are the top side, each corner a bend", () =>
