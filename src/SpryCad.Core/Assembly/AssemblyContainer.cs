@@ -31,16 +31,8 @@ public static class AssemblyContainer
     /// </summary>
     public static byte[] ToBytes(AssemblyDocument asm, byte[]? previous = null, bool durable = true)
     {
-        // a new file (no history to go on from): made in memory
-        if (previous == null || !Storage.PartDatabase.Is(previous)) return Storage.AssemblyFile.ToNewBytes(asm, "Assembly");
-        var tmp = Path.Combine(Path.GetTempPath(), "sprycad-" + Guid.NewGuid().ToString("N") + AssemblyDocument.FileExtension);
-        try
-        {
-            File.WriteAllBytes(tmp, previous);
-            Storage.AssemblyFile.Save(asm, tmp, durable: durable);
-            return File.ReadAllBytes(tmp);
-        }
-        finally { try { File.Delete(tmp); } catch { /* best effort */ } }
+        // (made in memory, its history going on from the bytes it had)
+        return Storage.AssemblyFile.ToBytes(asm, previous, "Assembly");
     }
 
     public static AssemblyDocument Load(string path) =>
@@ -49,12 +41,7 @@ public static class AssemblyContainer
     /// <summary>An assembly from the bytes of its file (<paramref name="name"/>: what to call it in messages).</summary>
     public static AssemblyDocument Load(byte[] bytes, string name)
     {
-        if (Storage.PartDatabase.Is(bytes))
-        {
-            var tmp = Path.Combine(Path.GetTempPath(), "sprycad-" + Guid.NewGuid().ToString("N") + AssemblyDocument.FileExtension);
-            try { File.WriteAllBytes(tmp, bytes); return Storage.AssemblyFile.Load(tmp); }
-            finally { try { File.Delete(tmp); } catch { /* best effort */ } }
-        }
+        if (Storage.PartDatabase.Is(bytes)) return Storage.AssemblyFile.Load(bytes); // (read in memory)
         var path = name;
         using var zip = new ZipArchive(new MemoryStream(bytes), ZipArchiveMode.Read);
         var model = zip.GetEntry(ModelEntry) ?? throw new InvalidDataException("Not a SpryCAD assembly (no assembly.json in the container).");

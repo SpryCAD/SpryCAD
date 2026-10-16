@@ -64,24 +64,35 @@ public static class AssemblyFile
     }
 
     /// <summary>
-    /// The assembly as the bytes of a new file (no history before it), made in memory: an assembly embedded in another
-    /// as it is first made (a STEP assembly's sub-assemblies), no file written and read back.
+    /// The assembly as the bytes of its file, made in memory (an assembly embedded in another; no file written and read
+    /// back): its history going on from <paramref name="previous"/>, the bytes it had, when those hold it (and kept as
+    /// it was when nothing changed); else a new file.
     /// </summary>
-    public static byte[] ToNewBytes(AssemblyDocument doc, string name)
+    public static byte[] ToBytes(AssemblyDocument doc, byte[]? previous, string name)
     {
         foreach (var n in doc.Files.Keys) DocumentContainer.CheckName(n);
         doc.Id ??= CadDocument.NewGuid();
+        var asmId = Guid.Parse(doc.Id);
+        PartDatabase? had = null;
+        if (previous != null && PartDatabase.Is(previous))
+        {
+            had = PartDatabase.FromBytes(previous, writable: true);
+            if (!Guid.TryParse(had.Manifest("RootPartId"), out var root) || root != asmId) { had.Dispose(); had = null; }
+        }
         RevisionInfo head;
         byte[] bytes;
-        using (var db = PartDatabase.CreateInMemory())
+        using (var db = had ?? PartDatabase.CreateInMemory())
         {
-            head = Write(db, doc, Guid.Parse(doc.Id), name, null, "");
+            head = Write(db, doc, asmId, name, null, "");
             bytes = db.ToBytes();
         }
         doc.Revision = head.RevisionId.ToString("D");
         doc.SaveMessage = null; doc.SaveKind = RevisionKind.Save;
         return bytes;
     }
+
+    /// <summary>The assembly as the bytes of a new file (no history before it), made in memory.</summary>
+    public static byte[] ToNewBytes(AssemblyDocument doc, string name) => ToBytes(doc, null, name);
 
     /// <summary>The assembly written into a database (a new one, or its file's to append to): its new head revision.</summary>
     static RevisionInfo Write(PartDatabase db, AssemblyDocument doc, Guid asmId, string name, string? author, string message)
@@ -132,6 +143,19 @@ public static class AssemblyFile
     public static AssemblyDocument Load(string path)
     {
         using var db = PartDatabase.Open(path);
+        return Load(db, dst => dst.Execute("ATTACH DATABASE $f AS src", ("$f", path)));
+    }
+
+    /// <summary>An assembly from the bytes of its file (embedded in another), read in memory, its embedded documents with it.</summary>
+    public static AssemblyDocument Load(byte[] bytes)
+    {
+        using var db = PartDatabase.FromBytes(bytes);
+        return Load(db, dst => dst.AttachBytes("src", bytes));
+    }
+
+    // (attachSource: the file read attached to a new database as "src", its embedded documents copied out of it)
+    static AssemblyDocument Load(PartDatabase db, Action<PartDatabase> attachSource)
+    {
         var asmId = RootOf(db);
         if (db.Manifest("RootKind") != RootKindAssembly) throw new InvalidDataException("Not a SpryCAD assembly (the file holds a part).");
         var head = db.GetHead(asmId) ?? throw new InvalidDataException("The file holds no saved assembly.");
@@ -142,7 +166,7 @@ public static class AssemblyFile
         AssemblyObjects.ApplyState(doc, db.Manifest("AssemblyState"));
         doc.Thumbnail = db.GetThumbnail();
         LoadCaches(db, doc, db.Manifest("AssemblyCaches"));
-        foreach (var (name, id) in embedded) doc.Files[name] = Extract(db, path, Guid.Parse(id));
+        foreach (var (name, id) in embedded) doc.Files[name] = Extract(db, attachSource, Guid.Parse(id));
         return doc;
     }
 
@@ -215,7 +239,7 @@ public static class AssemblyFile
     /// An embedded document copied out of the assembly's database into one of its own (its bytes): its history, tags,
     /// display caches and state, and those of the documents embedded in it.
     /// </summary>
-    static byte[] Extract(PartDatabase db, string path, Guid id)
+    static byte[] Extract(PartDatabase db, Action<PartDatabase> attachSource, Guid id)
     {
         var ids = new List<Guid>();
         void Collect(Guid d)
@@ -227,56 +251,50 @@ public static class AssemblyFile
         }
         Collect(id);
         var kind = db.GetHead(id) is { } head && db.GetObjects(head.RevisionId).ContainsKey(PartObjects.Single(ObjectKind.AssemblySettings)) ? RootKindAssembly : RootKindPart;
-        var tmp = Path.Combine(Path.GetTempPath(), "sprycad-" + Guid.NewGuid().ToString("N") + (kind == RootKindAssembly ? ".sasm" : ".sprt"));
+        // (made in memory: no file written and read back)
+        using var dst = PartDatabase.CreateInMemory();
+        attachSource(dst);
         try
         {
-            using (var dst = PartDatabase.Create(tmp))
+            dst.Begin();
+            try
             {
-                dst.Execute("ATTACH DATABASE $f AS src", ("$f", path));
-                try
+                foreach (var d in ids)
                 {
-                    dst.Begin();
-                    try
-                    {
-                        foreach (var d in ids)
-                        {
-                            var p = ("$p", (object)d.ToByteArray());
-                            dst.Execute("""
-                                INSERT OR IGNORE INTO Blobs SELECT b.* FROM src.Blobs b WHERE b.Hash IN (
-                                  SELECT o.Hash FROM src.RevisionObjects o JOIN src.Revisions r ON r.RevisionId = o.RevisionId WHERE r.PartId = $p AND r.Kind <> 1
-                                  UNION SELECT Hash FROM src.Cache WHERE PartId = $p)
-                                """, p);
-                            dst.Execute("INSERT OR IGNORE INTO Parts (PartId, Name, HeadRevisionId, WorkingRevisionId) SELECT PartId, Name, HeadRevisionId, NULL FROM src.Parts WHERE PartId = $p", p);
-                            dst.Execute("INSERT OR IGNORE INTO Revisions SELECT * FROM src.Revisions WHERE PartId = $p AND Kind <> 1", p);
-                            dst.Execute("INSERT OR IGNORE INTO RevisionObjects SELECT o.* FROM src.RevisionObjects o JOIN src.Revisions r ON r.RevisionId = o.RevisionId WHERE r.PartId = $p AND r.Kind <> 1", p);
-                            dst.Execute("INSERT OR IGNORE INTO Tags SELECT * FROM src.Tags WHERE PartId = $p", p);
-                            dst.Execute("INSERT OR IGNORE INTO Cache SELECT * FROM src.Cache WHERE PartId = $p", p);
-                            var prefix = $"doc/{d:D}/";
-                            if (d == id)
-                                foreach (var key in DocumentKeys)
-                                    dst.Execute("INSERT OR REPLACE INTO Manifest (Key, Value) SELECT $k, Value FROM src.Manifest WHERE Key = $s", ("$k", key), ("$s", prefix + key));
-                            else dst.Execute("INSERT OR REPLACE INTO Manifest SELECT Key, Value FROM src.Manifest WHERE substr(Key, 1, length($x)) = $x", ("$x", prefix));
-                        }
-                        dst.SetManifest("FormatVersion", CadDocument.CurrentFormatVersion.ToString(CultureInfo.InvariantCulture));
-                        dst.SetManifest("RootPartId", id.ToString("D"));
-                        dst.SetManifest("RootKind", kind);
-                        // its preview back where a file keeps its own
-                        var p0 = ("$p", (object)id.ToByteArray()); var pk = ("$k", (object)PreviewKind);
-                        if (dst.Query("SELECT Hash FROM Cache WHERE PartId = $p AND Kind = $k", r => (byte[])r[0], p0, pk).FirstOrDefault() is { } ph)
-                        {
-                            dst.SetThumbnail(dst.Blobs.Get(Hash.From(ph)));
-                            dst.Execute("DELETE FROM Cache WHERE PartId = $p AND Kind = $k", p0, pk);
-                            dst.DeleteBlobIfUnused(ph);
-                        }
-                        dst.CommitTransaction();
-                    }
-                    catch { dst.Rollback(); throw; }
+                    var p = ("$p", (object)d.ToByteArray());
+                    dst.Execute("""
+                        INSERT OR IGNORE INTO Blobs SELECT b.* FROM src.Blobs b WHERE b.Hash IN (
+                          SELECT o.Hash FROM src.RevisionObjects o JOIN src.Revisions r ON r.RevisionId = o.RevisionId WHERE r.PartId = $p AND r.Kind <> 1
+                          UNION SELECT Hash FROM src.Cache WHERE PartId = $p)
+                        """, p);
+                    dst.Execute("INSERT OR IGNORE INTO Parts (PartId, Name, HeadRevisionId, WorkingRevisionId) SELECT PartId, Name, HeadRevisionId, NULL FROM src.Parts WHERE PartId = $p", p);
+                    dst.Execute("INSERT OR IGNORE INTO Revisions SELECT * FROM src.Revisions WHERE PartId = $p AND Kind <> 1", p);
+                    dst.Execute("INSERT OR IGNORE INTO RevisionObjects SELECT o.* FROM src.RevisionObjects o JOIN src.Revisions r ON r.RevisionId = o.RevisionId WHERE r.PartId = $p AND r.Kind <> 1", p);
+                    dst.Execute("INSERT OR IGNORE INTO Tags SELECT * FROM src.Tags WHERE PartId = $p", p);
+                    dst.Execute("INSERT OR IGNORE INTO Cache SELECT * FROM src.Cache WHERE PartId = $p", p);
+                    var prefix = $"doc/{d:D}/";
+                    if (d == id)
+                        foreach (var key in DocumentKeys)
+                            dst.Execute("INSERT OR REPLACE INTO Manifest (Key, Value) SELECT $k, Value FROM src.Manifest WHERE Key = $s", ("$k", key), ("$s", prefix + key));
+                    else dst.Execute("INSERT OR REPLACE INTO Manifest SELECT Key, Value FROM src.Manifest WHERE substr(Key, 1, length($x)) = $x", ("$x", prefix));
                 }
-                finally { dst.Execute("DETACH DATABASE src"); }
+                dst.SetManifest("FormatVersion", CadDocument.CurrentFormatVersion.ToString(CultureInfo.InvariantCulture));
+                dst.SetManifest("RootPartId", id.ToString("D"));
+                dst.SetManifest("RootKind", kind);
+                // its preview back where a file keeps its own
+                var p0 = ("$p", (object)id.ToByteArray()); var pk = ("$k", (object)PreviewKind);
+                if (dst.Query("SELECT Hash FROM Cache WHERE PartId = $p AND Kind = $k", r => (byte[])r[0], p0, pk).FirstOrDefault() is { } ph)
+                {
+                    dst.SetThumbnail(dst.Blobs.Get(Hash.From(ph)));
+                    dst.Execute("DELETE FROM Cache WHERE PartId = $p AND Kind = $k", p0, pk);
+                    dst.DeleteBlobIfUnused(ph);
+                }
+                dst.CommitTransaction();
             }
-            return File.ReadAllBytes(tmp);
+            catch { dst.Rollback(); throw; }
         }
-        finally { try { File.Delete(tmp); } catch { /* best effort */ } }
+        finally { dst.Execute("DETACH DATABASE src"); }
+        return dst.ToBytes();
     }
 
     // ------------------------------------------------------------------------------------------

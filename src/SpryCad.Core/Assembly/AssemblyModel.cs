@@ -999,7 +999,32 @@ public sealed partial class AssemblyModel
             Doc.Files.Remove(name);
         }
         if (!KeepMeshes) DropEmbeddedMeshes(Doc);
+        else FillEmbeddedMeshes();
     }
+
+    /// <summary>
+    /// The embedded sub-assemblies' copies given the displays of the parts they show here, all the way down, where a
+    /// copy has none for them (written before its parts were built: a STEP assembly's), so they show at once when the
+    /// assembly is opened again. Only a copy the model shown was made from (the same revision); each keeps its
+    /// revision (only its caches change).
+    /// </summary>
+    void FillEmbeddedMeshes()
+    {
+        foreach (var g in Doc.Components.Where(c => c is { IsAssembly: true, Part.Embedded: not null }).GroupBy(c => c.Part.Embedded!).ToList())
+        {
+            if (SubOf(g.First()) is not { Source: SubSource.Embedded, Model: { } sm } || sm.Doc.Revision is not { } rev || rev != g.First().Part.Revision
+                || !Doc.Files.TryGetValue(g.Key, out var bytes) || !sm.MissingCaches()) continue;
+            sm.RefreshCaches(); // (its own embedded sub-assemblies' copies too)
+            Doc.Files[g.Key] = AssemblyContainer.ToBytes(sm.Doc, bytes);
+        }
+    }
+
+    /// <summary>Whether a part shown here, or in an embedded sub-assembly below, has a display not yet cached in its copy.</summary>
+    bool MissingCaches() =>
+        Threads == ThreadDisplay.AsSet
+        && (Parts.Values.Any(pd => !pd.Building && pd.Source is PartSource.File or PartSource.Embedded && pd.Doc?.Id is { } id && pd.Mesh.Indices.Length > 0
+                && !Doc.Caches.ContainsKey(AssemblyDocument.CacheKey(id, pd.Revision, pd.Config)))
+            || Subs.Values.Any(s => s is { Source: SubSource.Embedded, Model: { } m } && m.MissingCaches()));
 
     /// <summary>
     /// The caches of an assembly's embedded sub-assemblies dropped, all the way down, but for their lightweight

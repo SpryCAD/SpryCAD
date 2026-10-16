@@ -75,12 +75,12 @@ public sealed class PartDatabase : IDisposable
         return new PartDatabase(db);
     }
 
-    /// <summary>A database given as its file's bytes, in memory (to read).</summary>
-    public static PartDatabase FromBytes(byte[] bytes)
+    /// <summary>A database given as its file's bytes, in memory: to read, or (<paramref name="writable"/>) to add to and take back with <see cref="ToBytes"/>.</summary>
+    public static PartDatabase FromBytes(byte[] bytes, bool writable = false)
     {
         if (!Is(bytes)) throw new InvalidDataException("Not a SpryCAD file.");
         var db = Connect(":memory:", SqliteOpenMode.ReadWriteCreate);
-        try { Deserialize(db, "main", bytes); }
+        try { Deserialize(db, "main", bytes, writable); }
         catch { db.Dispose(); throw; }
         return new PartDatabase(db);
     }
@@ -110,14 +110,14 @@ public sealed class PartDatabase : IDisposable
 
     // (a copy SQLite owns and frees when done with it: not marked read only, as a transaction locks every attached
     // database for writing; nothing writes to it)
-    static void Deserialize(SqliteConnection db, string schema, byte[] bytes)
+    static void Deserialize(SqliteConnection db, string schema, byte[] bytes, bool writable = false)
     {
-        const int FreeOnClose = 1;
+        const int FreeOnClose = 1, Resizeable = 2;
         var mem = SQLitePCL.raw.sqlite3_malloc64(bytes.Length);
         if (mem == IntPtr.Zero) throw new OutOfMemoryException();
         System.Runtime.InteropServices.Marshal.Copy(bytes, 0, mem, bytes.Length);
         // (on failure SQLite frees the copy itself)
-        var rc = SQLitePCL.raw.sqlite3_deserialize(db.Handle, schema, mem, bytes.Length, bytes.Length, FreeOnClose);
+        var rc = SQLitePCL.raw.sqlite3_deserialize(db.Handle, schema, mem, bytes.Length, bytes.Length, FreeOnClose | (writable ? Resizeable : 0));
         if (rc != 0) throw new InvalidDataException($"The file could not be read (SQLite error {rc}).");
     }
 

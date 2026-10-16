@@ -93,16 +93,17 @@ public sealed class AssemblySession
             for (var jobs = Model.PendingJobs(); jobs.Count > 0; jobs = Model.PendingJobs())
             {
                 var built = new System.Collections.Concurrent.ConcurrentQueue<(AssemblyModel.PendingJob job, PartDisplay? display, string? problem)>();
-                // a part used in several sub-assemblies (one document: a STEP assembly's): built once, shown in each
-                // (a document's jobs run one after another, so no two build it at once)
-                var made = new System.Collections.Concurrent.ConcurrentDictionary<(object doc, string config, PartSource source, SpryCad.Core.Regen.ThreadDisplay threads), PartDisplay>();
+                // a part used several times (one document, or copies of one saved part at one revision: a saved STEP
+                // assembly's sub-assemblies each read their own) built once, shown in each: one document's jobs run one
+                // after another, and a copy's job waits for the one building it
+                var made = new System.Collections.Concurrent.ConcurrentDictionary<(object part, string config, PartSource source, SpryCad.Core.Regen.ThreadDisplay threads), Lazy<PartDisplay>>();
                 var run = Task.Run(() => PartWork.Each(jobs, j => j.Placeholder.Part!, job =>
                 {
                     try
                     {
                         var p = job.Placeholder;
-                        var k = ((object)p.Part!, p.Config, p.Source, job.Threads);
-                        if (!made.TryGetValue(k, out var d)) made[k] = d = job.Build();
+                        var part = p.Part!.Id is { } id && p.Part.Revision is { } rev ? (object)(id, rev) : p.Part;
+                        var d = made.GetOrAdd((part, p.Config, p.Source, job.Threads), _ => new Lazy<PartDisplay>(job.Build)).Value;
                         built.Enqueue((job, d, null));
                     }
                     catch (Exception ex) { App.Log(ex, "Build component part " + job.Name); built.Enqueue((job, null, ex.Message)); }

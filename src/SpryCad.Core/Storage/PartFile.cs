@@ -141,6 +141,18 @@ public static class PartFile
     public static CadDocument Load(string path, bool working = false, Guid? revision = null)
     {
         using var db = PartDatabase.Open(path);
+        return Load(db, working, revision);
+    }
+
+    /// <summary>A part from the bytes of its file (embedded in an assembly), read in memory.</summary>
+    public static CadDocument Load(byte[] bytes)
+    {
+        using var db = PartDatabase.FromBytes(bytes);
+        return Load(db, false, null);
+    }
+
+    static CadDocument Load(PartDatabase db, bool working, Guid? revision)
+    {
         var partId = RootPart(db);
         if (db.Manifest("RootKind") == AssemblyFile.RootKindAssembly) throw new InvalidDataException("Not a SpryCAD part (the file holds an assembly).");
         var head = (revision is { } r ? db.GetRevision(r) ?? throw new InvalidDataException("The file has no such revision.") : null)
