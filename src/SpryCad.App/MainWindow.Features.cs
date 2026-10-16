@@ -265,6 +265,37 @@ public partial class MainWindow
         return null;
     }
 
+    // the sketch to turn the view to once its rebuild is in (a sketch just closed is not in the model yet)
+    string? _isoPending;
+
+    /// <summary>
+    /// The view turned to look at a sketch's plane from an isometric angle, its profile in sight of the model (an
+    /// extrude or revolve made from it); once the sketch is built when it is not yet.
+    /// </summary>
+    void ViewSketchIso(string sketchId)
+    {
+        _isoPending = null;
+        if (Session.Result is not { } r || Session.ResultRevision < Session.RequestedRevision || !r.State.Sketches.TryGetValue(sketchId, out var sr))
+        { _isoPending = sketchId; return; }
+        // points of the sketch (at most 24 of its segments' ends) and their middle
+        var pts = new List<Vec3>();
+        foreach (var (a, c) in SpryCad.App.Viewport.SketchDrawing.Segments(sr)) { pts.Add(a); pts.Add(c); }
+        if (pts.Count == 0) return;
+        var step = Math.Max(1, pts.Count / 24);
+        var samples = pts.Where((_, i) => i % step == 0).ToList();
+        samples.Add(new Vec3(pts.Average(p => p.X), pts.Average(p => p.Y), pts.Average(p => p.Z)));
+        Viewport.IsoTo(sr.Frame, samples);
+    }
+
+    /// <summary>A rebuild is in: the view turned to a sketch waiting for it (<see cref="ViewSketchIso"/>).</summary>
+    void IsoWhenBuilt()
+    {
+        if (_isoPending is { } id && Session.Result is { } r && Session.ResultRevision >= Session.RequestedRevision)
+        {
+            if (r.State.Sketches.ContainsKey(id)) ViewSketchIso(id); else _isoPending = null;
+        }
+    }
+
     // ------------------------------------------------------------------------------------------
     // Extrude
 
@@ -279,13 +310,12 @@ public partial class MainWindow
         var sk = SketchFromSelection();
         if (sk == null)
         {
-            if (Selection.First is { } s && (s.Kind == SelKind.Plane || s.Kind == SelKind.Face && s.Planar))
-            {
-                StartSketchCommand(cut ? "cut" : "extrude");
-                Status("Sketch the profile, then click Exit Sketch to continue.");
-                return;
-            }
+            // no sketch to use: one first (on the plane or face selected, else one asked for), then this command
+            StartSketchCommand(cut ? "cut" : "extrude");
+            Status("Sketch the profile, then click Exit Sketch to continue.");
+            return;
         }
+        ViewSketchIso(sk);
         OpenExtrudePage(new ExtrudeFeature { SketchId = sk ?? "", IsCut = cut, End = cut ? EndCondition.ThroughAll : EndCondition.Blind, Reverse = cut }.Sized(Units), true);
     }
 
@@ -336,12 +366,13 @@ public partial class MainWindow
             return;
         }
         var sk = SketchFromSelection();
-        if (sk == null && Selection.First is { } s && (s.Kind == SelKind.Plane || s.Kind == SelKind.Face && s.Planar))
+        if (sk == null)
         {
             StartSketchCommand(cut ? "cutrevolve" : "revolve");
             Status("Sketch the profile and a centerline, then click Exit Sketch.");
             return;
         }
+        ViewSketchIso(sk);
         OpenRevolvePage(new RevolveFeature { SketchId = sk ?? "", IsCut = cut }, true);
     }
 

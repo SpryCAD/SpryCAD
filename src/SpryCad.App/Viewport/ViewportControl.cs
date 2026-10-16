@@ -1599,6 +1599,61 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         AnimateTo(q, Camera.F(proj));
     }
 
+    /// <summary>
+    /// Turns to look at a sketch's plane from an isometric angle (as for an extrude from it), zoomed to fit the model
+    /// and the sketch. Of the four diagonal views on the side its normal points to (the four behind only if those are
+    /// worse), the one from which the fewest of <paramref name="samples"/> (points of the sketch) are hidden by the
+    /// bodies; on a tie the one looking down, then the one nearest the current view.
+    /// </summary>
+    public void IsoTo(Frame f, IReadOnlyList<Vec3> samples)
+    {
+        var box = SceneBounds();
+        foreach (var p in samples) box.Add(p);
+        if (box.IsEmpty) return;
+        // (a ray starting on a face must not hit that face: begins a little off it)
+        var eps = 1e-4 * Math.Max(1, box.Diagonal);
+        Vector3 bestBack = default; double bestScore = double.MaxValue;
+        foreach (var side in new[] { 1.0, -1.0 })
+            foreach (var (a, b) in new[] { (1.0, 1.0), (-1.0, 1.0), (1.0, -1.0), (-1.0, -1.0) })
+            {
+                var dir = (f.Normal * side + f.XDir * (0.7 * a) + f.YDir * (0.7 * b)).Normalized;
+                var hidden = samples.Count(p => Blocked(p + dir * eps, dir));
+                var back = Camera.F(dir);
+                var score = hidden * 10.0 + (side < 0 ? 5 : 0) - dir.Y - 0.5 * Vector3.Dot(back, Camera.Back);
+                if (score < bestScore) { bestScore = score; bestBack = back; }
+            }
+        var up = MathF.Abs(bestBack.Y) > 0.95f ? Camera.F(f.YDir) : Vector3.UnitY;
+        var q = Camera.LookRotation(bestBack, up);
+        var tmp = new Camera { Width = Camera.Width, Height = Camera.Height, Perspective = Camera.Perspective, Fov = Camera.Fov, SceneRadius = Camera.SceneRadius, Rotation = q };
+        tmp.Fit(box);
+        AnimateTo(q, tmp.Target, tmp.HalfHeight);
+    }
+
+    /// <summary>Whether a ray from <paramref name="o"/> along <paramref name="d"/> meets a body shown.</summary>
+    bool Blocked(Vec3 o, Vec3 d)
+    {
+        var of = Camera.F(o); var df = Camera.F(d);
+        foreach (var body in Bodies)
+        {
+            var m = body.Mesh;
+            if (!RayHitsBox(of, df, m.Bounds)) continue;
+            bool covered = FacesCoverAll(m);
+            if (covered)
+            {
+                foreach (var fr in m.Faces)
+                {
+                    if (!RayHitsBox(of, df, fr.Bounds, FloatPad(fr.Bounds))) continue;
+                    for (int k = fr.IndexStart; k + 2 < fr.IndexStart + fr.IndexCount; k += 3)
+                        if (RayTriangle(o, d, P(m, m.Indices[k]), P(m, m.Indices[k + 1]), P(m, m.Indices[k + 2])) > 0) return true;
+                }
+            }
+            else
+                for (int k = 0; k + 2 < m.Indices.Length; k += 3)
+                    if (RayTriangle(o, d, P(m, m.Indices[k]), P(m, m.Indices[k + 1]), P(m, m.Indices[k + 2])) > 0) return true;
+        }
+        return false;
+    }
+
     public void Rotate(float yawDeg, float pitchDeg)
     {
         var pivot = ComputePivot();

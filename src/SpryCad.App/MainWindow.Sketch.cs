@@ -238,7 +238,12 @@ public partial class MainWindow
                 hole.SketchId = sf.Id;
                 OpenHolePage(hole, isNew: true);
             }
-            else switch (pending)
+            else if (pending != null)
+            {
+                // on to the command that asked for the sketch, the view turned to look at it from an isometric angle
+                ViewSketchIso(sf.Id);
+            }
+            if (hole == null) switch (pending)
             {
                 case "extrude": OpenExtrudePage(new ExtrudeFeature { SketchId = sf.Id }.Sized(Units), true); break;
                 case "cut": OpenExtrudePage(new ExtrudeFeature { SketchId = sf.Id, IsCut = true, End = EndCondition.ThroughAll, Reverse = true }.Sized(Units), true); break;

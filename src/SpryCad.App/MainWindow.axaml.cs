@@ -117,6 +117,7 @@ public partial class MainWindow : Window
         // (it rebuilds a copy; a change to the document rebuilds the tree itself)
         if (!(Session.PreviewActive && Asm == null && ReferenceEquals(_treeDoc, Session.Doc) && ReferenceEquals(_treeResult, Session.Result)))
             RebuildTree();
+        IsoWhenBuilt();
         var r = Session.Result;
         if (r != null)
         {
