@@ -47,15 +47,28 @@ public sealed class PmSelectionBox
 
     public void Clear() { Items.Clear(); Refresh(); Changed?.Invoke(); }
 
-    /// <summary>Removes the items selected in the list; the one after them is selected next (Delete again removes it).</summary>
+    /// <summary>
+    /// Removes the items selected in the list, and selects the one that took the first's place (the one below), or the
+    /// one above when the last was removed; it has the keyboard focus, so Delete again removes it.
+    /// </summary>
     public void RemoveSelected()
     {
         var picked = List.Selection.SelectedIndexes.Where(i => i >= 0 && i < Items.Count).Distinct().OrderByDescending(i => i).ToList();
         if (picked.Count == 0) return;
+        var hadFocus = List.IsKeyboardFocusWithin;
         foreach (var i in picked) Items.RemoveAt(i);
         Refresh();
-        if (Items.Count > 0) List.SelectedIndex = Math.Min(picked[^1], Items.Count - 1);
+        var next = Math.Min(picked[^1], Items.Count - 1);
+        if (next >= 0) List.SelectedIndex = next;
         Changed?.Invoke();
+        // (the list's rows are made anew: the focus, on a row now gone, is given to the one selected once it is made)
+        if (hadFocus)
+            Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+            {
+                if (next >= 0 && next < Items.Count) List.SelectedIndex = next;
+                if (next >= 0 && List.ContainerFromIndex(next) is { } row) row.Focus(NavigationMethod.Directional);
+                else List.Focus();
+            }, Avalonia.Threading.DispatcherPriority.Loaded);
     }
 
     public void Refresh()
