@@ -64,6 +64,35 @@
   <Style Selector="UniformGrid > Button.cmd.big">
     <Setter Property="Margin" Value="1" />
   </Style>
+  <!-- a command family's button: the command used last, and at its right an arrow dropping the family's grid; under the
+       pointer the two outlined as one, a line between them, each part lit as it is pointed at -->
+  <Style Selector="Border.splitbox">
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="BorderBrush" Value="Transparent" />
+    <Setter Property="CornerRadius" Value="3" />
+    <Setter Property="Margin" Value="1,0" />
+    <Setter Property="ClipToBounds" Value="True" />
+  </Style>
+  <Style Selector="Border.splitbox:pointerover">
+    <Setter Property="BorderBrush" Value="{DynamicResource Spry.HoverBorder}" />
+  </Style>
+  <Style Selector="Border.splitbox Border.splitdivider">
+    <Setter Property="Width" Value="1" />
+    <Setter Property="Margin" Value="0,6" />
+    <Setter Property="Background" Value="Transparent" />
+  </Style>
+  <Style Selector="Border.splitbox:pointerover Border.splitdivider">
+    <Setter Property="Background" Value="{DynamicResource Spry.HoverBorder}" />
+  </Style>
+  <Style Selector="Border.splitbox Button.cmd">
+    <Setter Property="Margin" Value="0" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="CornerRadius" Value="0" />
+  </Style>
+  <Style Selector="Border.splitbox Button.cmd.drop">
+    <Setter Property="Padding" Value="4,0" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+  </Style>
   <Style Selector="TextBlock.cmdgridhead">
     <Setter Property="FontWeight" Value="SemiBold" />
     <Setter Property="Foreground" Value="{DynamicResource Spry.TextSecondary}" />
@@ -154,6 +183,10 @@
     <Setter Property="Background" Value="{DynamicResource Spry.Surface}" />
     <Setter Property="BorderBrush" Value="{DynamicResource Spry.Accent}" />
     <Setter Property="Foreground" Value="{DynamicResource Spry.AccentText}" />
+  </Style>
+  <!-- tabs below what they switch (the CommandManager's): the line along their top, against it -->
+  <Style Selector="ToggleButton.tab.below">
+    <Setter Property="BorderThickness" Value="0,2,0,0" />
   </Style>
 
   <!-- left panel tabs (FeatureManager / PropertyManager / ...): compact icon tabs; the selected one is white,

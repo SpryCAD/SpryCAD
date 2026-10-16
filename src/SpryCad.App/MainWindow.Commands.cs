@@ -293,7 +293,7 @@ public partial class MainWindow
         foreach (var name in new[] { "Assembly", "Features", "Sketch", "Sheet Metal", "Evaluate" })
         {
             // the Assembly tab only while an assembly is active (ApplyDocumentKind)
-            var t = new ToggleButton { Content = name, Classes = { "tab" }, IsVisible = name != "Assembly" };
+            var t = new ToggleButton { Content = name, Classes = { "tab", "below" }, IsVisible = name != "Assembly" };
             t.Click += (_, _) => ShowTab(name);
             _tabs[name] = t;
             CommandTabs.Children.Add(t);

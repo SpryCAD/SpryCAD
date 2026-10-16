@@ -90,21 +90,19 @@ public partial class MainWindow
         int Current() => Math.Clamp(_dropChoice.GetValueOrDefault(key), 0, family.Length - 1);
         var text = new TextBlock();
         _cmdLabels.Add(text);
-        var iconHost = new ContentControl();
-        // (the chevron beside the icon: a two-line name keeps the button the others' height)
-        var chevron = Chevron(7);
-        chevron.Margin = new Thickness(0, 0, -11, 0);
-        if (LargeBar)
-        {
-            var top = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, HorizontalAlignment = HorizontalAlignment.Center, Children = { iconHost, chevron } };
-            main.Content = new StackPanel { Spacing = 4, Children = { top, text } };
-        }
-        else
-        {
-            // compact: the icon, the name and the chevron in a line
-            chevron.Margin = new Thickness(1, 0, 0, 0);
-            main.Content = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 5, Children = { iconHost, text, chevron } };
-        }
+        var iconHost = new ContentControl { HorizontalAlignment = HorizontalAlignment.Center };
+        main.Content = LargeBar
+            ? new StackPanel { Spacing = 4, Children = { iconHost, text } }
+            : new StackPanel { Orientation = Orientation.Horizontal, Spacing = 5, Children = { iconHost, text } };
+        // the arrow at its right, centred in its height: clicked, it drops the family's grid (as hovering the button
+        // does, for those who do not know to hover); the two outlined as one, a line between them, under the pointer
+        var arrow = new Button { Classes = { "cmd", "drop" }, Content = Chevron(7) };
+        var divider = new Border { Classes = { "splitdivider" } };
+        var row = new DockPanel();
+        DockPanel.SetDock(arrow, Dock.Right);
+        DockPanel.SetDock(divider, Dock.Right);
+        row.Children.Add(arrow); row.Children.Add(divider); row.Children.Add(main);
+        var box = new Border { Classes = { "splitbox" }, Child = row };
         void Show(int i)
         {
             // (no tooltip of its own: it would cover the grid, whose buttons have theirs)
@@ -116,7 +114,7 @@ public partial class MainWindow
         var panel = new Border { Classes = { "cmdgrid" } };
         // (not light-dismissed: its layer over the window would take the pointer off the button, which closed the grid,
         // and the pointer back on the button opened it again, over and over; it closes as below instead)
-        var popup = new Popup { PlacementTarget = main, Placement = PlacementMode.BottomEdgeAlignedLeft, VerticalOffset = 2, Child = panel };
+        var popup = new Popup { PlacementTarget = box, Placement = PlacementMode.BottomEdgeAlignedLeft, VerticalOffset = 2, Child = panel };
         void Pick(int i)
         {
             popup.IsOpen = false;
@@ -151,14 +149,15 @@ public partial class MainWindow
         _dropGroups.Add(new DropGroup { Key = key, Commands = family, Show = Show });
         Show(Current());
         main.Click += (_, _) => { popup.IsOpen = false; var c = family[Current()]; NoteCommand(c.Name, c.Icon, c.Run); c.Run(); };
+        arrow.Click += (_, _) => Open();
 
         // hovering the button a moment opens the grid; leaving both (a moment, to cross the gap) closes it
         var opening = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(350) };
         var closing = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(300) };
-        opening.Tick += (_, _) => { opening.Stop(); if (main.IsPointerOver && main.IsEffectivelyEnabled) Open(); };
-        closing.Tick += (_, _) => { closing.Stop(); if (!main.IsPointerOver && !panel.IsPointerOver) popup.IsOpen = false; };
-        main.PointerEntered += (_, _) => { closing.Stop(); if (!popup.IsOpen) opening.Start(); };
-        main.PointerExited += (_, _) => { opening.Stop(); closing.Start(); };
+        opening.Tick += (_, _) => { opening.Stop(); if (box.IsPointerOver && main.IsEffectivelyEnabled) Open(); };
+        closing.Tick += (_, _) => { closing.Stop(); if (!box.IsPointerOver && !panel.IsPointerOver) popup.IsOpen = false; };
+        box.PointerEntered += (_, _) => { closing.Stop(); if (!popup.IsOpen) opening.Start(); };
+        box.PointerExited += (_, _) => { opening.Stop(); closing.Start(); };
         panel.PointerEntered += (_, _) => closing.Stop();
         panel.PointerExited += (_, _) => closing.Start();
         // (pressed: the click runs the button's command, the grid not wanted)
@@ -171,13 +170,13 @@ public partial class MainWindow
         {
             if (TopLevel.GetTopLevel(main) is not Window w || main.Tag != null) return;
             main.Tag = w;
-            w.AddHandler(PointerPressedEvent, (_, _) => { if (popup.IsOpen && !main.IsPointerOver && !panel.IsPointerOver) popup.IsOpen = false; },
+            w.AddHandler(PointerPressedEvent, (_, _) => { if (popup.IsOpen && !box.IsPointerOver && !panel.IsPointerOver) popup.IsOpen = false; },
                 Avalonia.Interactivity.RoutingStrategies.Tunnel, handledEventsToo: true);
         };
 
         // the family's sketch tools light the button (in use, it shows that kind: UpdateDropGroups)
         foreach (var c in family) if (c.Tool is { } t) _toolButtons[t] = main;
-        CommandBar.Children.Add(new Panel { Children = { main, popup } });
+        CommandBar.Children.Add(new Panel { Children = { box, popup } });
     }
 
     /// <summary>A drop-down chevron in the text's colour, <paramref name="w"/> wide.</summary>

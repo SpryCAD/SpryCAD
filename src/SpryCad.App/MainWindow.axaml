@@ -22,8 +22,8 @@
     <!-- CommandManager -->
     <Border DockPanel.Dock="Top" Background="{DynamicResource Spry.SurfaceAlt}" BorderBrush="{DynamicResource Spry.Border}" BorderThickness="0,0,0,1">
       <DockPanel>
-        <!-- the command sets, above their commands -->
-        <StackPanel x:Name="CommandTabs" DockPanel.Dock="Top" Orientation="Horizontal" Background="{DynamicResource Spry.Strip}" />
+        <!-- the command sets, below their commands (the one shown marked by a line along its top) -->
+        <StackPanel x:Name="CommandTabs" DockPanel.Dock="Bottom" Orientation="Horizontal" Background="{DynamicResource Spry.Strip}" />
         <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
           <StackPanel x:Name="CommandBar" Orientation="Horizontal" Margin="4,3" />
         </ScrollViewer>
