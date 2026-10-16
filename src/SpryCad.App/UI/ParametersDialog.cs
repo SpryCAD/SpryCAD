@@ -605,7 +605,7 @@ static class ParametersDialog
             // its name, user-facing and description
             var name = new TextBox { Text = t.Name, Width = 140 };
             ToolTip.SetTip(name, "The table's name: the choice in Configure, and a variable holding the row in use (1 = first).");
-            void Rename() { if (name.Text?.Trim() is { } n && n != t.Name) RenameVariable(t.Name, n, () => t.Name = n); }
+            void Rename() { if (name.Text?.Trim() is { } n && n != t.Name) RenameVariable(t.Name, n, () => t.Name = n, t, column: false); }
             name.LostFocus += (_, _) => Rename();
             name.KeyDown += (_, e) => { if (e.Key == Key.Enter) { Rename(); e.Handled = true; } };
             var user = new CheckBox { Content = "User-facing", IsChecked = t.Exposed };
@@ -643,7 +643,7 @@ static class ParametersDialog
                         Item("Rename Column...", null, async () =>
                         {
                             if (TopLevel.GetTopLevel(dg) is not Window w || await Dialogs.Input(w, "Rename Column", "Variable", t.Columns[cc]) is not { } n || n.Trim().Length == 0) return;
-                            RenameVariable(t.Columns[cc], n.Trim(), () => t.Columns[cc] = n.Trim());
+                            RenameVariable(t.Columns[cc], n.Trim(), () => t.Columns[cc] = n.Trim(), t, column: true);
                         }),
                         Item("Move Left", null, () => MoveColumn(t, cc, -1)),
                         Item("Move Right", null, () => MoveColumn(t, cc, 1)),
@@ -846,11 +846,22 @@ static class ParametersDialog
         Feature? Switched(string column) => session.Doc.Features.FirstOrDefault(f => f.SuppressWhen is { } w
             && System.Text.RegularExpressions.Regex.IsMatch(w, $@"(^|\bor\s+)not\s+{System.Text.RegularExpressions.Regex.Escape(column)}\s*$", System.Text.RegularExpressions.RegexOptions.IgnoreCase));
         // a variable of the tables renamed: everywhere it is used too (one undo step), the tables then shown again from the part
-        void RenameVariable(string from, string to, Action here)
+        void RenameVariable(string from, string to, Action here, DesignTable t, bool column)
         {
+            bool Is(string a) => a.Trim().Equals(to, StringComparison.OrdinalIgnoreCase);
+            var equation = session.Doc.Equations.Any(e => Is(e.Name));
+            var table = tables.Any(x => x != t && Is(x.Name));
+            // what the new name makes it: a table named after an equation lists its standard values; a column named after an
+            // equation sets it, after another table picks its row. Those are not renames of a variable: done here only
+            if (!column && equation && !table || column && (equation || table) && !t.Columns.Any(c => c != from && Is(c)))
+            {
+                here(); Relist(); Apply();
+                owner.Status(column ? (equation ? $"Each row now sets {to}." : $"Each row now picks a row of {to}.") : $"{to}'s standard values: make each row's key a value of it (12, 16, 20); its columns are not needed.");
+                return;
+            }
             if (!IsName(to)) { error.Text = $"\"{to}\" cannot name a variable."; return; }
             var known = session.Doc.Equations.Select(e => e.Name.Trim()).Concat(tables.SelectMany(x => new[] { x.Name }.Concat(x.Columns)));
-            if (known.Any(k => k.Equals(to, StringComparison.OrdinalIgnoreCase))) { error.Text = $"{to} is already a variable."; return; }
+            if (known.Any(Is)) { error.Text = $"{to} is already a variable."; return; }
             // (a table not in the part yet, or wrong: renamed here, applied when right)
             if (Problem() != null || !(session.Doc.Tables ?? new()).Any(x => x.Name.Equals(from, StringComparison.OrdinalIgnoreCase) || x.Columns.Contains(from, StringComparer.OrdinalIgnoreCase)))
             { here(); Relist(); Apply(); return; }
