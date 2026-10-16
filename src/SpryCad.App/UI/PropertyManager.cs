@@ -338,6 +338,8 @@ public sealed class PmPage
             if (DefineEquation(name, expr, kind) is { } problem) { MarkInvalid(true); tb.Classes.Set("invalid", true); ToolTip.SetTip(tb, problem); return; }
             MarkInvalid(false);
             tb.Text = name;
+            // (now: the text's change is reported later, after an OK that made the equation would have taken the old value)
+            Validate();
         }
         _flush.Add(MakeEquation);
         tb.LostFocus += (_, _) => MakeEquation();
