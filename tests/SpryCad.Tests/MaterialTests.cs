@@ -255,5 +255,52 @@ static class MaterialTests
         });
     }
 
+    /// <summary>Appearances (plan phase 4): kept by display caches, and as components' overrides.</summary>
+    public static void RunAppearance(TestRunner t)
+    {
+        t.Test("Appearance: a display cache keeps the finish after all an older SpryCAD reads; one without it is plastic in its color", () =>
+        {
+            var dir = AppContext.BaseDirectory;
+            while (dir != null && !Directory.Exists(Path.Combine(dir, "samples"))) dir = Path.GetDirectoryName(dir);
+            var doc = CadDocument.Load(Path.Combine(dir!, "samples", "bracket.sprt"));
+            var r = new SpryCad.Core.Regen.Regenerator().Rebuild(doc);
+            PartMaterial.Set(doc, "Materials-copper/Brass", LibrarySet.BuiltIn);
+            doc.Appearance = doc.EffectiveAppearance with { Opacity = 0.5 };
+            var bytes = SpryCad.Core.Assembly.MeshCache.Of(r, doc.EffectiveAppearance);
+            var e = SpryCad.Core.Assembly.MeshCache.Read(bytes);
+            t.Near(e.Appearance.Metallic, 1, 1e-6); t.Near(e.Appearance.Roughness, 0.3, 1e-6); t.Near(e.Appearance.Opacity, 0.5, 1e-6);
+            t.Near(e.Color[0], 0.78, 1e-6);
+            // what an older SpryCAD wrote: the same bytes but the finish
+            var old = SpryCad.Core.Assembly.MeshCache.Read(bytes[..^16]);
+            t.True(old.Appearance.Metallic == 0 && old.Appearance.Roughness == 0.5 && old.Appearance.Opacity == 1, "plastic");
+            t.Eq(old.Mesh.Indices.Length, e.Mesh.Indices.Length);
+            // rewritten (faces renamed) keeps it
+            t.Near(SpryCad.Core.Assembly.MeshCache.Read(SpryCad.Core.Assembly.MeshCache.Renamed(bytes, n => n)).Appearance.Opacity, 0.5, 1e-6);
+        });
+
+        t.Test("Appearance: a component's own in full and as a color for older readers; a color an older SpryCAD changed keeps the finish; serialized and read back", () =>
+        {
+            var c = new SpryCad.Core.Assembly.Component();
+            t.Eq(c.Look, null);
+            var brushed = new Appearance(new[] { 0.78, 0.79, 0.80 }, 1, 0.4, 1, "Brushed aluminum");
+            c.SetLook(brushed);
+            t.True(c.Color!.SequenceEqual(brushed.Color) && c.Look == brushed, "both written");
+            c.Color = new[] { 0.2, 0.3, 0.4 }; // (as an older SpryCAD recolors it)
+            t.True(c.Look is { Metallic: 1, Roughness: 0.4, Name: null } l && l.Color.SequenceEqual(new[] { 0.2, 0.3, 0.4 }), "the new color, the finish kept");
+            c.Color = null;
+            t.Eq(c.Look, null);
+            var plain = new SpryCad.Core.Assembly.Component { Color = new[] { 1.0, 0, 0 } };
+            t.True(plain.Look is { Metallic: 0, Roughness: 0.5, Opacity: 1 }, "an older file's color: plastic");
+            c.SetLook(brushed with { Opacity = 0.3 });
+            var back = System.Text.Json.JsonSerializer.Deserialize<SpryCad.Core.Assembly.Component>(System.Text.Json.JsonSerializer.Serialize(c, Serialization.Options), Serialization.Options)!;
+            t.Eq(back.Look, c.Look);
+            var ov = new SpryCad.Core.Assembly.ComponentOverride();
+            ov.SetLook(brushed);
+            t.True(!ov.IsEmpty && ov.Look == brushed, "an override");
+            ov.SetLook(null);
+            t.True(ov.IsEmpty, "cleared");
+        });
+    }
+
     static bool Throws(Action a) { try { a(); return false; } catch (ArgumentException) { return true; } }
 }

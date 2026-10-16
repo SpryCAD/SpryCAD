@@ -395,14 +395,17 @@ public partial class MainWindow : IAssemblyHost
         foreach (var (o, pd) in a.Model.PlacedParts())
         {
             if (pd.Mesh.Indices.Length == 0 || IsolatedOut(o.Path)) continue;
-            var col = partColor != null ? FeatureColors.Color(partColor[PartKey(o.Component)]) : o.Color ?? pd.Color;
-            var rgba = new Rgba((float)col[0], (float)col[1], (float)col[2]);
+            // its appearance: the component's own (or a sub-assembly's for it), else its part's; Color by Part only colors (plastic)
+            var look = partColor != null ? new Appearance(FeatureColors.Color(partColor[PartKey(o.Component)])) : o.Appearance ?? pd.Appearance;
+            var col = look.Color;
+            var rgba = new Rgba((float)col[0], (float)col[1], (float)col[2], (float)look.Opacity);
+            var finish = new Finish((float)look.Metallic, (float)look.Roughness);
             // while faces are picked (Mate, Motor) the components keep their colors: the faces are highlighted
             if (_clashes?.Contains(o.Path) == true) rgba = MixColor(rgba, new Rgba(0.95f, 0.15f, 0.1f), 0.75f);
             else if (!PickingFaces && Under(o.Path, a.Selected)) rgba = MixColor(rgba, ViewportControl.SelectColor, 0.55f);
             else if (!PickingFaces && Under(o.Path, _asmHover)) rgba = MixColor(rgba, new Rgba(1f, 0.8f, 0.5f), 0.35f);
             var t = Drawn(o, explode);
-            inst.Add(new MeshInstance(o.Path, pd.Mesh, ModelMatrix(t), rgba, FaceHighlights(o.Path)));
+            inst.Add(new MeshInstance(o.Path, pd.Mesh, ModelMatrix(t), rgba, FaceHighlights(o.Path), finish));
             // its cosmetic threads, placed with it
             foreach (var th in pd.Threads)
                 threads.Add(th with { Origin = t.Point(th.Origin), Axis = t.Vector(th.Axis), RefDir = t.Vector(th.RefDir) });

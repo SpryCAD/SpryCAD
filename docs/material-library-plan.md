@@ -138,8 +138,9 @@ public Appearance? Appearance { get; set; }
   - a metal's specular tinted by its base color and its diffuse darkened (`mix(base*d, base*d*0.35, metal)`);
   - a simple fake environment for metals (sky/ground gradient sampled by the reflected view vector) so polished metal does not
     look like flat grey plastic. No textures, no environment maps.
-- `MeshInstance` carries an `Appearance` instead of `Rgba`; the display cache (`FCMESH4`) gains two floats
-  (`FCMESH5`; older caches are rebuilt, as they are today when the version differs).
+- `MeshInstance` carries a `Finish` (metallic, roughness) beside its `Rgba` (alpha = opacity). The display cache keeps
+  `FCMESH4` and appends the finish after the threads (tagged `FNSH`): an older SpryCAD stops reading before it, so it
+  still opens new files, and a cache without it reads as plastic in its color (*as built in phase 4*).
 - Opacity < 1 uses the existing blended pass, for parts as well as assembly components.
 - Color by Part / Color by Feature still override the color only (metallic/roughness set to a neutral plastic).
 

@@ -21,6 +21,19 @@ public partial class MainWindow
     /// <summary>The library materials given to parts lately, latest first (offered on the material row's menu).</summary>
     readonly List<string> _recentMaterials = new();
 
+    /// <summary>The part's appearance: one of its own (color, finish, opacity), or its material's (the default grey with none).</summary>
+    async Task PartAppearanceCommand()
+    {
+        if (IsAssemblyActive) { Status("Right-click a component for its appearance in the assembly."); return; }
+        var doc = Session.Doc;
+        var otherwise = doc.MaterialInfo?.Appearance ?? Appearance.Default;
+        var choice = await AppearanceDialog.Show(this, "Appearance: " + Session.Title.TrimEnd(' ', '*'), "How the part looks, wherever it is used:",
+            doc.Appearance, otherwise, doc.MaterialItem != null ? "Material's Appearance" : "Default Appearance");
+        if (choice == null || IsAssemblyActive || Session.Doc != doc || choice.Look == doc.Appearance) return;
+        Session.Change(() => doc.Appearance = choice.Look);
+        Status(choice.Look == null ? "Appearance: the material's." : $"Appearance: {choice.Look.Name ?? "the part's own"}.");
+    }
+
     /// <summary>Gives the active part a library material (null: none), one undo step.</summary>
     void SetPartMaterial(string? item)
     {

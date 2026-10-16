@@ -14,7 +14,9 @@ public enum PartSource { File, Embedded, Cache, None }
 public sealed class PartDisplay
 {
     public required DisplayMesh Mesh { get; init; }
-    public required double[] Color { get; init; }
+    /// <summary>How it looks: its part's appearance (own, else its material's), or a cache's.</summary>
+    public required Appearance Appearance { get; init; }
+    public double[] Color => Appearance.Color;
     public required PartSource Source { get; init; }
     /// <summary>Its cosmetic threads, in the part's coordinates.</summary>
     public IReadOnlyList<CosmeticThread> Threads { get; init; } = Array.Empty<CosmeticThread>();
@@ -176,7 +178,7 @@ public sealed partial class AssemblyModel
                     try
                     {
                         var e = MeshCache.Read(current);
-                        Parts[g.Key] = new PartDisplay { Mesh = e.Mesh, Threads = e.Threads, Color = doc.Color, Source = src, Revision = doc.Revision, Doc = built, Part = doc, Config = config, Cached = true };
+                        Parts[g.Key] = new PartDisplay { Mesh = e.Mesh, Threads = e.Threads, Appearance = doc.EffectiveAppearance, Source = src, Revision = doc.Revision, Doc = built, Part = doc, Config = config, Cached = true };
                         continue;
                     }
                     catch { } // (a damaged cache: rebuilt)
@@ -187,7 +189,7 @@ public sealed partial class AssemblyModel
                     var old = CachedOf(first) is { } oc ? MeshCache.Read(oc) : null;
                     Parts[g.Key] = new PartDisplay
                     {
-                        Mesh = old?.Mesh ?? new DisplayMesh(), Threads = old?.Threads ?? Array.Empty<CosmeticThread>(), Color = doc.Color, Source = src,
+                        Mesh = old?.Mesh ?? new DisplayMesh(), Threads = old?.Threads ?? Array.Empty<CosmeticThread>(), Appearance = doc.EffectiveAppearance, Source = src,
                         Revision = r.Revision, Doc = built, Part = doc, Config = config, Building = true,
                     };
                     Pending.Add(g.Key);
@@ -204,10 +206,10 @@ public sealed partial class AssemblyModel
             if (CachedOf(first) is { } cache)
             {
                 var e = MeshCache.Read(cache);
-                Parts[g.Key] = new PartDisplay { Mesh = e.Mesh, Threads = e.Threads, Color = e.Color, Source = PartSource.Cache, Revision = r.Revision, Part = doc, Config = config, Problem = why };
+                Parts[g.Key] = new PartDisplay { Mesh = e.Mesh, Threads = e.Threads, Appearance = e.Appearance, Source = PartSource.Cache, Revision = r.Revision, Part = doc, Config = config, Problem = why };
                 continue;
             }
-            Parts[g.Key] = new PartDisplay { Mesh = new DisplayMesh(), Color = new[] { 0.74, 0.76, 0.80 }, Source = PartSource.None, Part = doc, Config = config, Problem = why ?? "not found" };
+            Parts[g.Key] = new PartDisplay { Mesh = new DisplayMesh(), Appearance = Model.Appearance.Default, Source = PartSource.None, Part = doc, Config = config, Problem = why ?? "not found" };
         }
     }
 
@@ -215,7 +217,7 @@ public sealed partial class AssemblyModel
     static PartDisplay BuildDisplay(CadDocument part, CadDocument built, PartSource src, string config, ThreadDisplay mode)
     {
         var (mesh, threads) = Build(built, mode);
-        return new PartDisplay { Mesh = mesh, Threads = threads, Color = part.Color, Source = src, Revision = part.Revision, Doc = built, Part = part, Config = config };
+        return new PartDisplay { Mesh = mesh, Threads = threads, Appearance = part.EffectiveAppearance, Source = src, Revision = part.Revision, Doc = built, Part = part, Config = config };
     }
 
     /// <summary>Displays waiting to be built (<see cref="LoadPart"/> with defer), by <see cref="DisplayKey"/>.</summary>
@@ -274,7 +276,7 @@ public sealed partial class AssemblyModel
         var p = job.Placeholder;
         Parts[job.Key] = built ?? new PartDisplay
         {
-            Mesh = p.Mesh, Threads = p.Threads, Color = p.Color, Source = p.Mesh.Indices.Length > 0 ? PartSource.Cache : PartSource.None,
+            Mesh = p.Mesh, Threads = p.Threads, Appearance = p.Appearance, Source = p.Mesh.Indices.Length > 0 ? PartSource.Cache : PartSource.None,
             Revision = p.Revision, Part = p.Part, Config = p.Config, Problem = problem ?? "could not be built",
         };
         return true;
@@ -411,7 +413,7 @@ public sealed partial class AssemblyModel
         if (!Parts.ContainsKey(key))
         {
             var (mesh, threads) = Build(doc, Threads);
-            Parts[key] = new PartDisplay { Mesh = mesh, Threads = threads, Color = doc.Color, Source = embed ? PartSource.Embedded : PartSource.File, Revision = doc.Revision, Doc = doc, Part = doc };
+            Parts[key] = new PartDisplay { Mesh = mesh, Threads = threads, Appearance = doc.EffectiveAppearance, Source = embed ? PartSource.Embedded : PartSource.File, Revision = doc.Revision, Doc = doc, Part = doc };
         }
         return c;
     }
@@ -446,12 +448,12 @@ public sealed partial class AssemblyModel
             if (made is { mesh: null })
             {
                 // its display left to build (PendingJobs): shown empty until then
-                Parts[key] = new PartDisplay { Mesh = new DisplayMesh(), Threads = Array.Empty<CosmeticThread>(), Color = doc.Color, Source = PartSource.Embedded, Revision = doc.Revision, Doc = doc, Part = doc, Building = true };
+                Parts[key] = new PartDisplay { Mesh = new DisplayMesh(), Threads = Array.Empty<CosmeticThread>(), Appearance = doc.EffectiveAppearance, Source = PartSource.Embedded, Revision = doc.Revision, Doc = doc, Part = doc, Building = true };
                 Pending.Add(key);
                 return c;
             }
             var (mesh, threads) = made is { mesh: { } mm } m ? (mm, m.threads!) : Build(doc, Threads);
-            Parts[key] = new PartDisplay { Mesh = mesh, Threads = threads, Color = doc.Color, Source = PartSource.Embedded, Revision = doc.Revision, Doc = doc, Part = doc };
+            Parts[key] = new PartDisplay { Mesh = mesh, Threads = threads, Appearance = doc.EffectiveAppearance, Source = PartSource.Embedded, Revision = doc.Revision, Doc = doc, Part = doc };
         }
         return c;
     }
@@ -972,7 +974,7 @@ public sealed partial class AssemblyModel
                 // (a configuration's: named by a hash of it)
                 var config = pd.Config.Length > 0 ? "-" + DocumentContainer.Hash(System.Text.Encoding.UTF8.GetBytes(pd.Config))[..12] : "";
                 var name = $"cache/{id}-{pd.Revision ?? "none"}{config}.mesh";
-                Doc.Files[name] = MeshCache.Write(pd.Mesh, pd.Doc.Color, pd.Threads);
+                Doc.Files[name] = MeshCache.Write(pd.Mesh, pd.Doc.EffectiveAppearance, pd.Threads);
                 Doc.Caches[ck] = name;
             }
             foreach (var c in ComponentsShowing(key)) c.Part.Revision = pd.Revision;

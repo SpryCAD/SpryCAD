@@ -12,6 +12,15 @@ public readonly record struct Rgba(float R, float G, float B, float A = 1)
     public Rgba WithAlpha(float a) => this with { A = a };
 }
 
+/// <summary>
+/// How a surface takes the light besides its color (an appearance's): metallic 0 (plastic, paint) to 1 (metal), and
+/// roughness 0 (polished) to 1 (matte). <see cref="Plastic"/> is how every surface was lit before appearances.
+/// </summary>
+public readonly record struct Finish(float Metallic, float Roughness)
+{
+    public static readonly Finish Plastic = new(0, 0.5f);
+}
+
 /// <summary>Immediate-mode style geometry rebuilt every frame (sketches, planes, previews, overlays).</summary>
 public sealed class DynamicGeometry
 {
@@ -131,7 +140,7 @@ public sealed unsafe class GlRenderer : IDisposable
     // the shaded and flat programs, plain and cutting at the section plane: a fragment shader that may discard turns off
     // early depth rejection, so every hidden fragment of every triangle is shaded (slow with large models, and very slow
     // on a software renderer): the cutting ones only while there is a section
-    sealed record LitProgram(uint P, int VP, int View, int Color, int Persp, int Clip);
+    sealed record LitProgram(uint P, int VP, int View, int Color, int Persp, int Clip, int Finish);
     sealed record FlatProgram(uint P, int VP, int Color, int Clip);
     LitProgram _litPlain = null!, _litCut = null!;
     FlatProgram _flatPlain = null!, _flatCut = null!;
@@ -183,6 +192,7 @@ public sealed unsafe class GlRenderer : IDisposable
         const string litFs = """
             in vec3 vN; in vec3 vPosV; in float vClip;
             uniform vec4 uColor; uniform float uPersp;
+            uniform vec2 uFinish; // metallic, roughness (0, 0.5: plastic, as everything was lit before appearances)
             out vec4 oColor;
             void main() {
             #ifdef SECTION
@@ -197,9 +207,16 @@ public sealed unsafe class GlRenderer : IDisposable
               vec3 l2 = normalize(vec3(-0.8, 0.7, 0.4));
               vec3 l3 = normalize(vec3(0.8, -0.3, 0.5));
               float d = 0.55 * max(dot(n, l1), 0.0) + 0.18 * max(dot(n, l2), 0.0) + 0.12 * max(dot(n, l3), 0.0) + 0.30;
+              // the highlight: tighter and brighter the smoother the surface (exponent 60, strength 0.22 at roughness 0.5);
+              // a metal's tinted by its color, stronger, its diffuse light mostly replaced by a reflected sky over a dark ground
+              float metal = uFinish.x, rough = uFinish.y;
               vec3 h = normalize(l1 + v);
-              float s = pow(max(dot(n, h), 0.0), 60.0) * 0.22;
-              oColor = vec4(uColor.rgb * d + vec3(s), uColor.a);
+              float shin = 60.0 * exp2(3.0 * (1.0 - 2.0 * rough));
+              float s = pow(max(dot(n, h), 0.0), shin) * 0.22 * (1.0 + 1.2 * (0.5 - rough)) * mix(1.0, 2.5, metal);
+              vec3 r = reflect(-v, n);
+              vec3 env = uColor.rgb * mix(0.25, 1.05, smoothstep(-0.4, 0.6, r.y)) * mix(1.0, 0.7, rough);
+              vec3 col = uColor.rgb * d * (1.0 - 0.65 * metal) + env * (0.65 * metal) + mix(vec3(1.0), uColor.rgb, metal) * s;
+              oColor = vec4(col, uColor.a);
             }
             """;
         const string flatVs = """
@@ -234,7 +251,7 @@ public sealed unsafe class GlRenderer : IDisposable
         {
             var p = Program(defines + litVs, defines + litFs, ("aPos", 0), ("aNormal", 1));
             return new LitProgram(p, _gl.GetUniformLocation(p, "uViewProj"), _gl.GetUniformLocation(p, "uView"),
-                _gl.GetUniformLocation(p, "uColor"), _gl.GetUniformLocation(p, "uPersp"), _gl.GetUniformLocation(p, "uClip"));
+                _gl.GetUniformLocation(p, "uColor"), _gl.GetUniformLocation(p, "uPersp"), _gl.GetUniformLocation(p, "uClip"), _gl.GetUniformLocation(p, "uFinish"));
         }
         FlatProgram MakeFlat(string defines)
         {
@@ -348,13 +365,16 @@ public sealed unsafe class GlRenderer : IDisposable
         _gl.DepthMask(depthWrite);
     }
 
-    public void DrawMesh(GpuMesh m, Rgba color, Matrix4x4 viewProj, Matrix4x4 view, bool persp, int start = 0, int count = -1)
+    /// <param name="finish">How the surface takes the light (null: <see cref="Finish.Plastic"/>, as highlights and previews are).</param>
+    public void DrawMesh(GpuMesh m, Rgba color, Matrix4x4 viewProj, Matrix4x4 view, bool persp, int start = 0, int count = -1, Finish? finish = null)
     {
         if (m.IndexCount == 0) return;
         var lp = Lit;
         _gl.UseProgram(lp.P);
         SetMat(lp.VP, viewProj); SetMat(lp.View, view);
         _gl.Uniform4(lp.Color, color.R, color.G, color.B, color.A);
+        var f = finish ?? Finish.Plastic;
+        _gl.Uniform2(lp.Finish, f.Metallic, f.Roughness);
         _gl.Uniform1(lp.Persp, persp ? 1f : 0f);
         var clip = ModelClip;
         _gl.Uniform4(lp.Clip, clip.X, clip.Y, clip.Z, clip.W);

@@ -52,9 +52,9 @@ public sealed record SketchDisplay(string FeatureId, SketchResult Result);
 /// <summary>
 /// A mesh drawn where a rigid placement puts it, in a color (an assembly's component: one GPU mesh for all the
 /// components of a part). <c>Model</c> is the placement as a row-vector matrix (rotation, then translation).
-/// <c>Faces</c>: faces drawn over it in other colors (hover, selection), by name.
+/// <c>Faces</c>: faces drawn over it in other colors (hover, selection), by name. <c>Finish</c>: how it takes the light (null: plastic).
 /// </summary>
-public readonly record struct MeshInstance(string Id, DisplayMesh Mesh, Matrix4x4 Model, Rgba Color, IReadOnlyList<(string face, Rgba color)>? Faces = null);
+public readonly record struct MeshInstance(string Id, DisplayMesh Mesh, Matrix4x4 Model, Rgba Color, IReadOnlyList<(string face, Rgba color)>? Faces = null, Finish? Finish = null);
 
 public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICustomHitTest
 {
@@ -77,6 +77,8 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
     /// <summary>Placed meshes (an assembly's components), drawn in the display style with their own colors.</summary>
     public IReadOnlyList<MeshInstance> Instances { get; set; } = Array.Empty<MeshInstance>();
     public Rgba PartColor = new(0.74f, 0.76f, 0.80f);
+    /// <summary>How the part takes the light (its appearance: metallic, roughness); its opacity is <see cref="PartColor"/>'s alpha.</summary>
+    public Finish PartFinish = Finish.Plastic;
     /// <summary>
     /// Color by Feature: each feature's color, by id (see <see cref="Core.Model.FeatureColors"/>); the part's faces are
     /// shaded in the colors of the features that made them (others in the part color). Null: off.
@@ -222,7 +224,9 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
 
         // solids
         _r.SetupDepth(true, true);
-        var ghost = Ghosted && Style is DisplayStyle.ShadedWithEdges or DisplayStyle.Shaded;
+        // faded (the View Selector), or a see-through part (its appearance's opacity): drawn the same way
+        var ghostAlpha = Ghosted ? GhostAlpha : PartColor.A;
+        var ghost = (Ghosted || PartColor.A < 1 && ColorByFeature == null) && Style is DisplayStyle.ShadedWithEdges or DisplayStyle.Shaded;
         if (ghost)
         {
             // faded: depth first so only the nearest surface shows, then its colour blended over the background
@@ -235,9 +239,9 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
             foreach (var b in Bodies)
             {
                 var g = _gpu[b.Mesh];
-                DrawBody(g, GhostAlpha, vp, view);
+                DrawBody(g, ghostAlpha, vp, view);
                 foreach (var (fr, color) in hl.Faces(b.Id, b.Mesh))
-                    _r.DrawMesh(g, color.WithAlpha(GhostAlpha), vp, view, Camera.Perspective, fr.IndexStart, fr.IndexCount);
+                    _r.DrawMesh(g, color.WithAlpha(ghostAlpha), vp, view, Camera.Perspective, fr.IndexStart, fr.IndexCount);
             }
             _r.Blend(false);
             _r.SetupDepth(true, true);
@@ -267,7 +271,7 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         foreach (var b in Bodies)
         {
             var g = _gpu[b.Mesh];
-            if (Style != DisplayStyle.Shaded) _r.DrawEdges(g, ghost ? EdgeColor.WithAlpha(GhostAlpha) : EdgeColor, vp);
+            if (Style != DisplayStyle.Shaded) _r.DrawEdges(g, ghost ? EdgeColor.WithAlpha(ghostAlpha) : EdgeColor, vp);
             foreach (var (er, color) in hl.Edges(b.Id, b.Mesh))
             {
                 _r.SetupDepth(false, false);
@@ -398,7 +402,7 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
     /// <summary>A body shaded in the part color, or (Color by Feature) each run of one feature's faces in its color.</summary>
     void DrawBody(GpuMesh g, float alpha, Matrix4x4 vp, Matrix4x4 view)
     {
-        if (ColorByFeature is not { } colors) { _r!.DrawMesh(g, PartColor.WithAlpha(alpha), vp, view, Camera.Perspective); return; }
+        if (ColorByFeature is not { } colors) { _r!.DrawMesh(g, PartColor.WithAlpha(alpha), vp, view, Camera.Perspective, finish: PartFinish); return; }
         foreach (var (start, count, feature) in _runs.GetValue(g.Source, Core.Model.FeatureColors.Runs))
         {
             var c = feature != null && colors.TryGetValue(feature, out var fc) ? fc : PartColor;
@@ -430,7 +434,7 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
             {
                 _r.Model = i.Model;
                 // (an instance see-through by its color: its own faces solid now, the rest blended over after)
-                if (i.Color.A >= 1) _r.DrawMesh(_gpu[i.Mesh], i.Color, i.Model * vp, i.Model * view, Camera.Perspective);
+                if (i.Color.A >= 1) _r.DrawMesh(_gpu[i.Mesh], i.Color, i.Model * vp, i.Model * view, Camera.Perspective, finish: i.Finish);
                 if (i.Faces != null && Style != DisplayStyle.HiddenLinesVisible)
                     foreach (var (name, color) in i.Faces)
                         foreach (var fr in i.Mesh.Faces)
@@ -443,7 +447,7 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
                 foreach (var i in Instances)
                 {
                     _r.Model = i.Model;
-                    if (i.Color.A is > 0 and < 1) _r.DrawMesh(_gpu[i.Mesh], i.Color, i.Model * vp, i.Model * view, Camera.Perspective);
+                    if (i.Color.A is > 0 and < 1) _r.DrawMesh(_gpu[i.Mesh], i.Color, i.Model * vp, i.Model * view, Camera.Perspective, finish: i.Finish);
                 }
                 _r.Blend(false);
             }

@@ -55,7 +55,7 @@ public sealed partial class AssemblyModel
                 c.Parameters = seed.Parameters == null ? null : new Dictionary<string, string>(seed.Parameters);
                 c.Configuration = seed.Configuration;
                 c.Flexible = seed.Flexible;
-                c.Color = seed.Color;
+                c.SetLook(seed.Look);
                 keep.Add(new PatternInstance { Seed = seedId, Index = k, Component = c.Id });
             }
         }

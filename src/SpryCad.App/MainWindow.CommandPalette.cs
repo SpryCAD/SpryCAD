@@ -119,6 +119,7 @@ public partial class MainWindow
             C("measure", "Measure", MeasureCommand);
             C("mass", "Mass Properties", MassPropertiesCommand);
             C("material", "Edit Material", EditMaterialCommand);
+            C("appearance", "Appearance", () => _ = PartAppearanceCommand());
             C("equations", "Equations", () => _ = Dialogs.Equations(this));
             C("table", "Design Table", () => _ = Dialogs.DesignTables(this));
             C("configure", "Configure", () => _ = Dialogs.ConfigurePart(this));

@@ -341,7 +341,7 @@ public sealed class DocumentSession
     {
         if (UserSettings.KeepDisplay == KeepDisplay.Never || Result is not { } r || ResultRevision != RequestedRevision || r.State.Bodies.Count == 0) return null;
         if (UserSettings.KeepDisplay == KeepDisplay.SlowParts && MeshCache.BuildSeconds(r) < UserSettings.KeepDisplaySeconds) return null;
-        try { return MeshCache.Of(r, Doc.Color); }
+        try { return MeshCache.Of(r, Doc.EffectiveAppearance); }
         catch { return null; } // (never worth failing a save)
     }
 

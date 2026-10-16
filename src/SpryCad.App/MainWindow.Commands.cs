@@ -215,6 +215,7 @@ public partial class MainWindow
             Item("Mea_sure...", MeasureCommand, null, "measure"),
             Item("_Mass Properties...", MassPropertiesCommand, null, "mass"),
             PartMenu(Item("Edit Ma_terial...", EditMaterialCommand, null, "material")),
+            PartMenu(Item("_Appearance...", () => _ = PartAppearanceCommand(), null, "appearance")),
             PartMenu(Item("_Library Updates...", () => _ = LibraryUpdatesCommand(), null, "table")),
             Sub("Li_braries",
                 Item("_Edit Library...", () => _ = LibraryEditor.Open(this), null, "table"),
@@ -786,6 +787,7 @@ public partial class MainWindow
         if (id is FeatureTree.MaterialRow or "__part")
         {
             menu.Items.Add(Item("Edit Material...", EditMaterialCommand, null, "material"));
+            menu.Items.Add(Item("Appearance...", () => _ = PartAppearanceCommand(), null, "appearance"));
             foreach (var item in _recentMaterials.Where(i => i != Session.Doc.MaterialItem && LibraryLink.Current.Snapshot(i) != null).Take(5))
             {
                 var it = item;

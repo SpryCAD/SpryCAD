@@ -70,7 +70,7 @@ public partial class MainWindow
             case "hide" or "show": ShowComponent(path, cmd == "show"); break;
             case "suppress" or "unsuppress": SuppressComponent(path, cmd == "suppress"); break;
             case "isolate": Isolate(path); break;
-            case "appearance": _ = Appearance(path); break;
+            case "appearance": _ = ComponentAppearance(path); break;
             case "replace": _ = ReplaceComponent(path); break;
             case "form": FormSubAssemblyPage(path); break;
             case "dissolve": _ = DissolveSub(path); break;
@@ -151,51 +151,22 @@ public partial class MainWindow
         Status($"{a.Model.NameAt(path)} isolated: Isolate again shows everything.");
     }
 
-    static readonly (string name, double[]? rgb)[] Swatches =
-    {
-        ("As its part", null), ("Steel", new[] { 0.74, 0.76, 0.80 }), ("Dark grey", new[] { 0.35, 0.36, 0.38 }), ("White", new[] { 0.95, 0.95, 0.95 }),
-        ("Red", new[] { 0.85, 0.20, 0.18 }), ("Orange", new[] { 0.95, 0.55, 0.15 }), ("Yellow", new[] { 0.95, 0.82, 0.20 }), ("Green", new[] { 0.25, 0.65, 0.30 }),
-        ("Blue", new[] { 0.20, 0.45, 0.85 }), ("Purple", new[] { 0.55, 0.35, 0.75 }), ("Brass", new[] { 0.80, 0.65, 0.30 }), ("Copper", new[] { 0.78, 0.45, 0.30 }),
-    };
-
-    /// <summary>A component's appearance: a color of its own (for a sub-assembly's component, in this instance), or its part's.</summary>
-    async Task Appearance(string path)
+    /// <summary>
+    /// A component's appearance: one of its own in this assembly (color, finish, opacity; for a sub-assembly's
+    /// component, in this instance only), or its part's.
+    /// </summary>
+    async Task ComponentAppearance(string path)
     {
         if (Asm is not { } a || a.Model.Find(path) is not { } o) return;
-        double[]? chosen = null; bool picked = false;
-        var grid = new WrapPanel { Orientation = Orientation.Horizontal, MaxWidth = 330 };
-        var w = Dialogs.MakeWindow($"Appearance: {o.Component.Name}", new StackPanel
-        {
-            Spacing = 8,
-            Children =
-            {
-                new TextBlock { Text = path.Contains('/') ? "Its color in this assembly (its sub-assembly is not changed):" : "Its color in this assembly (its part is not changed):", TextWrapping = TextWrapping.Wrap },
-                grid,
-            },
-        }, 360);
-        foreach (var (name, rgb) in Swatches)
-        {
-            var c = rgb ?? o.Display?.Color ?? new[] { 0.74, 0.76, 0.80 };
-            var b = new Button
-            {
-                Width = 76, Height = 52, Margin = new Thickness(3), Padding = new Thickness(2),
-                Content = new StackPanel
-                {
-                    Spacing = 2,
-                    Children =
-                    {
-                        new Border { Height = 22, CornerRadius = new CornerRadius(3), Background = new SolidColorBrush(Color.FromRgb((byte)(c[0] * 255), (byte)(c[1] * 255), (byte)(c[2] * 255))), BorderBrush = Palette.TextMuted, BorderThickness = new Thickness(rgb == null ? 1 : 0) },
-                        new TextBlock { Text = name, FontSize = TypeScale.Small, HorizontalAlignment = HorizontalAlignment.Center },
-                    },
-                },
-            };
-            b.Click += (_, _) => { chosen = rgb; picked = true; w.Close(); };
-            grid.Children.Add(b);
-        }
-        await w.ShowDialog(this);
-        if (!picked) return;
+        // its own: on it, or (a sub-assembly's component) this instance's override
+        var own = o.Rel == null ? o.Component.Look : o.Top.Overrides?.GetValueOrDefault(o.Rel)?.Look;
+        var part = o.Display?.Appearance ?? Core.Model.Appearance.Default;
+        var choice = await AppearanceDialog.Show(this, $"Appearance: {o.Component.Name}",
+            path.Contains('/') ? "How it looks in this assembly (its sub-assembly is not changed):" : "How it looks in this assembly (its part is not changed):",
+            own, part, "Part's Appearance");
+        if (choice == null || choice.Look == own) return;
         a.BeginChange();
-        a.Model.SetColor(path, chosen);
+        a.Model.SetAppearance(path, choice.Look);
         a.EndChange();
     }
 

@@ -254,6 +254,7 @@ static class Program
             FastenerTests.Run(t);
             MaterialTests.Run(t);
             MaterialTests.RunPart(t);
+            MaterialTests.RunAppearance(t);
             AssemblyStorageTests.Run(t);
             TransferTests.Run(t);
             TransferTests.RunPins(t);

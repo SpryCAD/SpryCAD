@@ -28,13 +28,15 @@ public sealed class SubAssembly
 /// <c>Top</c> ("C2"; null for <c>Top</c> itself). <c>Driven</c>: this assembly places it (its own components, and those
 /// of flexible sub-assemblies all the way down); the others are where their sub-assembly's file has them.
 /// </summary>
-/// <para><c>Hidden</c>, <c>Suppressed</c> and <c>Color</c>: as this assembly shows it (its own and the sub-assemblies'
+/// <para><c>Hidden</c>, <c>Suppressed</c> and <c>Appearance</c>: as this assembly shows it (its own and the sub-assemblies'
 /// state, with this assembly's overrides for the instance: <see cref="Component.Overrides"/>).</para>
 public sealed record Occurrence(string Path, Component Component, AssemblyModel Owner, Transform World, Component Top, string? Rel, bool Driven,
-    bool Hidden = false, bool Suppressed = false, double[]? Color = null)
+    bool Hidden = false, bool Suppressed = false, Appearance? Appearance = null)
 {
     /// <summary>The part's display (null for a sub-assembly, or a part not shown).</summary>
     public PartDisplay? Display => Component.IsAssembly ? null : Owner.DisplayOf(Component);
+    /// <summary>The appearance's color (null: the part's own).</summary>
+    public double[]? Color => Appearance?.Color;
 }
 
 /// <summary>
@@ -327,13 +329,13 @@ public sealed partial class AssemblyModel
     /// </summary>
     static Occurrence Make(AssemblyModel owner, Component c, Occurrence? parent)
     {
-        if (parent == null) return new Occurrence(c.Id, c, owner, c.Placement.ToTransform(), c, null, true, c.Hidden, c.Suppressed, c.Color);
+        if (parent == null) return new Occurrence(c.Id, c, owner, c.Placement.ToTransform(), c, null, true, c.Hidden, c.Suppressed, c.Look);
         var top = parent.Top;
         var rel = parent.Rel == null ? c.Id : parent.Rel + "/" + c.Id;
         var driven = parent.Driven && parent.Component.Flexible;
         var ov = top.Overrides?.GetValueOrDefault(rel);
         return new Occurrence(parent.Path + "/" + c.Id, c, owner, parent.World * PoseOf(c, top, rel, driven).ToTransform(), top, rel, driven,
-            parent.Hidden || (ov?.Hidden ?? c.Hidden), parent.Suppressed || (ov?.Suppressed ?? c.Suppressed), ov?.Color ?? c.Color ?? parent.Color);
+            parent.Hidden || (ov?.Hidden ?? c.Hidden), parent.Suppressed || (ov?.Suppressed ?? c.Suppressed), ov?.Look ?? c.Look ?? parent.Appearance);
     }
 
     /// <summary>The parts shown, where they are (suppressed ones left out; hidden ones too unless <paramref name="hidden"/>).</summary>
