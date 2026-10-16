@@ -27,6 +27,10 @@ public sealed class SheetRules
     public double Tolerance { get; }
     public FlangeReference DefaultFlangeReference { get; }
     public IReadOnlyDictionary<string, string> Overrides { get; }
+    /// <summary>Whether the material's grain matters to its bends (sheet metal spec SM-GRAIN-01).</summary>
+    public bool GrainSensitive { get; }
+    /// <summary>The least angle (degrees) a bend line should cross the grain at (0: any).</summary>
+    public double MinGrainAngle { get; }
 
     readonly SortedSet<string> _items = new(StringComparer.Ordinal);
 
@@ -40,7 +44,9 @@ public sealed class SheetRules
         Gauge = gauge;
         Overrides = overrides ?? new Dictionary<string, string>();
 
-        Use(Profile.Find(ProfileTables.Materials, material));
+        var mat = Use(Profile.Find(ProfileTables.Materials, material));
+        GrainSensitive = Cell(mat, "grain sensitive") == "1";
+        MinGrainAngle = GrainSensitive ? Num(mat, "min grain angle", 0) : 0;
         var g = Use(Profile.Find(ProfileTables.Gauges, material, gauge));
         // the thickness is the sheet's: never overridden (another thickness is another sheet body)
         Thickness = RuleExpr.Eval(g.Cell("thickness"));

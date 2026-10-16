@@ -9,7 +9,7 @@ static class BendMathTests
     public static ShopProfile Profile(string method, string k = "", bool interpolate = false, params (string angle, string value)[] table)
     {
         var s = StarterProfile.Tables.ToDictionary(x => x.Key, x => x.Clone());
-        s[ProfileTables.Materials].Rows = new() { new(new[] { "Steel" }, "7850", "0", "") };
+        s[ProfileTables.Materials].Rows = new() { new(new[] { "Steel" }, "7850", "0", "0", "") };
         s[ProfileTables.Gauges].Rows = new() { new(new[] { "Steel", "1.5" }, "1.5", "0.05", "0.05") };
         s[ProfileTables.Gauges].Units = null;
         s[ProfileTables.Tooling].Rows = new() { new(new[] { "Steel", "1.5", "V12" }, "1", "1.5", "88", "12", "88", "1", "1.5", "6", "") };

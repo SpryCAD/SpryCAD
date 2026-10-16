@@ -218,6 +218,8 @@ public sealed class FeatureTree : UserControl
         CombineFeature => "combine",
         SpryCad.SheetMetal.Features.BaseFlangeFeature => "baseflange",
         SpryCad.SheetMetal.Features.EdgeFlangeFeature => "edgeflange",
+        SpryCad.SheetMetal.Features.HemFeature => "hem",
+        SpryCad.SheetMetal.Features.SheetCutFeature => "sheetcut",
         _ => "part",
     };
 

@@ -16,6 +16,8 @@ public static class SheetMetalModule
     {
         FeatureRegistry.Register<BaseFlangeFeature>("baseFlange", SheetRebuild.BaseFlange, (f, d) => SheetProfiles.KeyOf(d, f.Body));
         FeatureRegistry.Register<EdgeFlangeFeature>("edgeFlange", SheetRebuild.EdgeFlange, (f, d) => SheetProfiles.KeyOf(d, f.Body));
+        FeatureRegistry.Register<HemFeature>("hem", SheetRebuild.Hem, (f, d) => SheetProfiles.KeyOf(d, f.Body));
+        FeatureRegistry.Register<SheetCutFeature>("sheetCut", SheetRebuild.Cut, (f, d) => SheetProfiles.KeyOf(d, f.Body));
     }
 
     /// <summary>
@@ -41,6 +43,8 @@ public static class SheetMetalModule
     {
         BaseFlangeFeature b => b.Body,
         EdgeFlangeFeature e => e.Body,
+        HemFeature h => h.Body,
+        SheetCutFeature c => c.Body,
         _ => null,
     };
 

@@ -59,9 +59,43 @@ Differences from the structure below:
   - flanges bending opposite ways at a corner;
   - the overlap and relief checks.
 
+### Phase 4, first part (done, not yet run in the app)
+
+- **Arcs in outlines:** an edge carries a DXF-style bulge (`Seg2`, `Polygon2.OuterBulge` and `HoleBulges`), so edge numbers don't change.
+  - A plate's sketch arcs become true arcs again (a faceted run is one arc; a circle is two halves).
+  - In the solid, round edges are cylinders.
+  - The flat keeps true arcs: DXF writes them as vertex bulges (code 42), SVG as arc commands.
+  - Area and cut length are exact.
+  - Flanges and hems go on straight edges only.
+- **Sheet Cut:** closed profiles (lines and arcs) cut normal to the sheet, through every panel parallel to the sketch that a profile lies inside, so a cut goes through both walls of a channel. A profile that crosses a panel's edge, or lies on no panel, is said.
+- **Hem:**
+  - **Closed:** 180°, flat against the panel. The flat uses the hem table's allowance (the layers in contact); the solid keeps the profile's 0.127 mm modelling gap.
+  - **Open:** 180°, with a gap from the feature or the profile.
+  - **Teardrop:** past 180° by its angle.
+  - **Options:** length from the fold's outside, folds over the top or bottom side, and "material inside" trims the panel by R + t.
+  - **Rules:** the hem table's "allowed" flag and its limits.
+- **Checks:**
+  - SM-HEM-01: a return running into its panel is an error, and gives the longest length that fits.
+  - SM-HEM-02: a hem meeting another bend at a corner is an error.
+  - SM-HEM-03: a hem type the profile doesn't allow is an error; lengths outside the rule's range are a warning.
+  - SM-DIST-01: hole to bend, by the bend's radius.
+  - SM-DIST-02: hole to free edge.
+  - SM-FLG-01: a flange shorter than its tooling's minimum, measured to the outside mold line.
+  - SM-GRAIN-01: a bend too close to the grain. The materials table has a new `min grain angle` column, and the base flange page has a grain direction field.
+- **App:** Hem and Sheet Cut on the Sheet Metal tab, the Insert menu and the command palette.
+- **Tests:** 37 sheet metal tests, all passing. They cover a plate with a round hole (exact volume, cylinder wall, arcs in the DXF); cuts in the plate and through both walls of a channel; DIST, FLG and GRAIN warnings; closed, open and teardrop hems as valid solids; and HEM-01, HEM-02 and HEM-03.
+
+Not done yet, phase 4's remainder:
+- Sketched bend and jog: splitting a panel and moving everything beyond the new bend by its allowance in the flat.
+- Miter flange.
+- Rolled hems (refused with a message).
+- Cuts across a panel's edge or a bend (notches, and cuts mapped through bend zones).
+- The Hole Wizard link (main spec section 25).
+- Sketching on the flat.
+
 Limits for now (later phases):
 - **Corners:** between two 90° bends the same way round on a square, outside corner of their panel; others are refused with a message. No corners for a flange beside the bend its panel hangs from, for bends of a bent base profile, or between three bends. No round or tear corner reliefs (they need arcs in outlines). Folded collisions are checked at corners only.
-- **Base flange shape:** the outline is straight lines only (no arcs or splines).
+- **Base flange shape:** lines and arcs since phase 4 (no splines). A bent profile is lines only.
 - **Edge flange width:** always the whole edge (no width or offsets).
 - **Inside radius:** must be more than 0.
 - **Fixed panel:** `SheetMetalBody.FixedPanel` re-roots the flat but has no UI yet.

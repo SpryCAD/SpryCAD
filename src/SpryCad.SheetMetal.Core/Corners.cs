@@ -62,6 +62,8 @@ public static class SheetCorners
             int m = a.Count;
             var e1 = (a[(b1.EdgeA + 1) % m] - a[b1.EdgeA]).Normalized();
             var e2 = (a[(b2.EdgeA + 1) % m] - a[b2.EdgeA]).Normalized();
+            if (b1.IsHem || b2.IsHem)
+                throw new BendGraphException($"SM-HEM-02: the hem {(b1.IsHem ? b1.Id : b2.Id)} meets {(b1.IsHem ? b2.Id : b1.Id)} at a corner with no treatment; hem corners (relieved, mitred) cannot be made yet.");
             if (!IsFlange(g, b1) || !IsFlange(g, b2))
                 throw new BendGraphException($"Corner {id}: a flange meets a bend of the base flange's profile there; that corner cannot be made yet.");
             if (b1.Direction != b2.Direction)
@@ -120,7 +122,7 @@ public static class SheetCorners
             // and q: where it reaches past its bend zone the near edge runs on beside it (the flat and the solid split
             // edges where another piece's corner lies on them)
             var outline = new[] { q + e * xq + nb, p - e * xp + nb, p - e * xp + nf, q + e * xq + nf };
-            panels[b.B] = panels[b.B] with { FlatOutline = new Polygon2(outline, panels[b.B].FlatOutline.Holes) };
+            panels[b.B] = panels[b.B] with { FlatOutline = panels[b.B].FlatOutline with { Outer = outline } };
         }
         return g with { Panels = g.Panels.Select(p => panels[p.Id]).ToList(), Corners = corners };
     }

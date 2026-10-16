@@ -38,19 +38,64 @@ static class SheetRebuild
     {
         if (sk.Regions.Count > 1) throw Error("The sketch has more than one closed profile: a base flange takes one.");
         var region = sk.Regions[0].Normalized();
-        List<Vec2> Loop(Kernel.ProfileLoop l)
+        var outer = Loop(region.Outer);
+        var holes = region.Holes.Select(Loop).ToList();
+        var outline = new Polygon2(outer.points, holes.Select(h => (IReadOnlyList<Vec2>)h.points).ToList())
         {
-            if (l.Verts.Any(v => v.Arc != null || v.Spline != null))
-                throw Error("A base flange's outline is straight lines for now: arcs and splines come with cuts.");
-            return l.Verts.Select(v => new Vec2(v.P.X, v.P.Y)).ToList();
-        }
-        var outline = new Polygon2(Loop(region.Outer), region.Holes.Select(h => (IReadOnlyList<Vec2>)Loop(h)).ToList());
+            OuterBulge = outer.bulges, HoleBulges = holes.Select(h => (IReadOnlyList<double>?)h.bulges).ToList(),
+        };
         var panel = new Panel(new PanelId(f.Id + ".P0"), outline, Frame3.Identity);
         var fr = sk.Frame;
         var world = new Frame3(V(fr.XDir), V(fr.YDir), V(fr.Normal), V(fr.Origin));
         // the material above the sketch plane: the top side a thickness up
         if (f.ReverseSide) world = world with { Origin = world.Origin + world.Z * rules.Thickness };
         return (new BendGraph(rules.Thickness, new[] { panel }, Array.Empty<Bend>(), panel.Id), world);
+    }
+
+    /// <summary>
+    /// A sketch profile loop as an outline loop: its straight edges, and its arcs as true arcs again (a profile carries
+    /// an arc as facets marked with it: a run of them is one arc; a whole circle two halves). Splines are refused.
+    /// </summary>
+    public static (List<Vec2> points, List<double> bulges) Loop(Kernel.ProfileLoop l)
+    {
+        if (l.Verts.Any(v => v.Spline != null)) throw Error("A sheet's outline cannot have splines: use lines and arcs.");
+        var v = l.Verts;
+        int n = v.Count;
+        Vec2 P(int i) => new(v[(i % n + n) % n].P.X, v[(i % n + n) % n].P.Y);
+        var points = new List<Vec2>();
+        var bulges = new List<double>();
+        if (v.All(x => x.Arc != null && x.Arc == v[0].Arc))
+        {
+            // a whole circle: two half circles, the same way round as the loop
+            var c = new Vec2(v[0].Arc!.Center.X, v[0].Arc!.Center.Y);
+            var sign = Math.Sign(Polygon2.LoopArea(Enumerable.Range(0, n).Select(P).ToList()));
+            var a = P(0);
+            points.Add(a); points.Add(c * 2 - a);
+            bulges.Add(sign); bulges.Add(sign);
+            return (points, bulges);
+        }
+        // start where a run starts (a straight edge, or the first facet of an arc after another kind of edge)
+        int start = Enumerable.Range(0, n).First(i => v[i].Arc == null || v[(i + n - 1) % n].Arc != v[i].Arc);
+        for (int k = 0; k < n;)
+        {
+            int i = (start + k) % n;
+            var arc = v[i].Arc;
+            if (arc == null) { points.Add(P(i)); bulges.Add(0); k++; continue; }
+            // the run of facets of this arc: its sweep summed facet by facet
+            var c = new Vec2(arc.Center.X, arc.Center.Y);
+            double sweep = 0;
+            int j = k;
+            while (j < n && v[(start + j) % n].Arc == arc)
+            {
+                Vec2 p = P(start + j) - c, q = P(start + j + 1) - c;
+                sweep += Math.Atan2(Vec2.Cross(p, q), Vec2.Dot(p, q));
+                j++;
+            }
+            points.Add(P(i));
+            bulges.Add(Math.Tan(sweep / 4));
+            k = j;
+        }
+        return (points, bulges);
     }
 
     /// <summary>
@@ -164,24 +209,11 @@ static class SheetRebuild
         var panels = g.Panels.ToList();
         var bends = g.Bends.ToList();
         var bendRules = new Dictionary<BendId, SheetRules>(st.BendRules);
-        var edges = f.Edges.Select(e => FoldedSolid.ParseEdge(e) ?? throw Error($"\"{e}\" is not a sheet metal edge.")).ToList();
-        bool Used(PanelId p, int i) => bends.Any(b => (b.A == p && b.EdgeA == i) || (b.B == p && b.EdgeB == i))
-            || edges.Count(e => e.panel == p && e.edge == i) > 1;
+        var edges = Edges(f.Edges);
         for (int k = 0; k < edges.Count; k++)
         {
             var (pid, i) = edges[k];
-            int pi = panels.FindIndex(p => p.Id == pid);
-            if (pi < 0) throw Error($"The edge {f.Edges[k]} is not in the part any more.");
-            var outer = panels[pi].FlatOutline.Outer;
-            int m = outer.Count;
-            if (i < 0 || i >= m) throw Error($"The edge {f.Edges[k]} is not in the part any more.");
-            if (Used(pid, i)) throw Error($"{f.Edges[k]} already has a bend.");
-            // flanges on a panel's edges that meet make a corner (SheetCorners); a flange on the side of a flange
-            // (beside the bend it hangs from) cannot be made yet
-            int prev = (i + m - 1) % m, next = (i + 1) % m;
-            if (bends.Any(b => b.B == pid && (b.EdgeB == prev || b.EdgeB == next)))
-                throw Error($"{f.Edges[k]} is beside the bend its panel hangs from: a flange there cannot be made yet.");
-
+            var (pi, next) = TakeEdge(panels, bends, edges, k, f.Edges[k]);
             var id = new BendId($"{f.Id}.{k}.B");
             var r = SheetProfiles.RulesOf(ctx.Doc, rules, id);
             if (!ReferenceEquals(r, rules)) bendRules[id] = r;
@@ -193,18 +225,190 @@ static class SheetRebuild
                 _ => 0,
             };
             if (trim > 0) panels[pi] = panels[pi] with { FlatOutline = MoveEdge(panels[pi].FlatOutline, i, trim, f.Edges[k]) };
-            outer = panels[pi].FlatOutline.Outer;
-            Vec2 a = outer[i], b = outer[next];
             var (ba, source) = Allowance(r, angle, id);
             var flat = BendMath.FlatContribution(length, f.Reference, angle, R, t);
             if (flat <= 1e-9) throw Error($"The flange is too short for its bend: at least {length - flat:0.###} mm measured {Words(f.Reference)}.");
-            var n = new Vec2((b - a).Y, -(b - a).X).Normalized();
-            var pnew = new PanelId($"{f.Id}.{k}.P");
-            panels.Add(new Panel(pnew, new Polygon2(new[] { b + n * ba, a + n * ba, a + n * (ba + flat), b + n * (ba + flat) }), Frame3.Identity));
-            bends.Add(new Bend(id, pid, pnew, new Line2(a + n * (ba / 2), (a - b).Normalized()), angle, f.Direction, R, ba, r.Toolset, source)
-                { EdgeA = i, EdgeB = 0 });
+            AddFlange(panels, bends, pi, i, next, id, new PanelId($"{f.Id}.{k}.P"), angle, f.Direction, R, ba, flat, r.Toolset, source, hem: false);
         }
         Finish(ctx, f, sb, g with { Panels = panels, Bends = bends }, st.World, rules, bendRules);
+    }
+
+    static List<(PanelId panel, int edge)> Edges(List<string> names) =>
+        names.Select(e => FoldedSolid.ParseEdge(e) ?? throw Error($"\"{e}\" is not a sheet metal edge.")).ToList();
+
+    /// <summary>
+    /// Edge <paramref name="k"/> of a feature checked as a place for a bend: in the part, straight, free, and not
+    /// beside the bend its panel hangs from. The panel's index and the edge's next one.
+    /// </summary>
+    static (int pi, int next) TakeEdge(List<Panel> panels, List<Bend> bends, List<(PanelId panel, int edge)> edges, int k, string name)
+    {
+        var (pid, i) = edges[k];
+        int pi = panels.FindIndex(p => p.Id == pid);
+        if (pi < 0) throw Error($"The edge {name} is not in the part any more.");
+        int m = panels[pi].FlatOutline.Outer.Count;
+        if (i < 0 || i >= m) throw Error($"The edge {name} is not in the part any more.");
+        if (bends.Any(b => (b.A == pid && b.EdgeA == i) || (b.B == pid && b.EdgeB == i)) || edges.Count(e => e.panel == pid && e.edge == i) > 1)
+            throw Error($"{name} already has a bend.");
+        if (panels[pi].FlatOutline.Bulge(0, i) != 0) throw Error($"{name} is round: a flange or hem goes on a straight edge.");
+        // bends on a panel's edges that meet make a corner (SheetCorners); one beside the bend its panel hangs from cannot be made yet
+        int prev = (i + m - 1) % m, next = (i + 1) % m;
+        if (bends.Any(b => b.B == pid && (b.EdgeB == prev || b.EdgeB == next)))
+            throw Error($"{name} is beside the bend its panel hangs from: a flange or hem there cannot be made yet.");
+        return (pi, next);
+    }
+
+    /// <summary>A bend on panel <paramref name="pi"/>'s edge i→next and its panel beyond, <paramref name="flat"/> deep, the whole edge long.</summary>
+    static void AddFlange(List<Panel> panels, List<Bend> bends, int pi, int i, int next, BendId id, PanelId pnew, double angle, BendDirection dir,
+        double R, double ba, double flat, string toolset, AllowanceSource source, bool hem)
+    {
+        var outer = panels[pi].FlatOutline.Outer;
+        Vec2 a = outer[i], b = outer[next];
+        var n = new Vec2((b - a).Y, -(b - a).X).Normalized();
+        panels.Add(new Panel(pnew, new Polygon2(new[] { b + n * ba, a + n * ba, a + n * (ba + flat), b + n * (ba + flat) }), Frame3.Identity));
+        bends.Add(new Bend(id, panels[pi].Id, pnew, new Line2(a + n * (ba / 2), (a - b).Normalized()), angle, dir, R, ba, toolset, source)
+            { EdgeA = i, EdgeB = 0, IsHem = hem });
+    }
+
+    // ---- hem ----
+
+    public static void Hem(HemFeature f, FeatureContext ctx)
+    {
+        var sb = BodyOf(ctx, f.Body);
+        if (!ctx.State.Sheets.TryGetValue(sb.Id, out var st)) throw Error($"{Name(sb)} has no base flange before this hem.");
+        if (f.Edges.Count == 0) throw Error("Select the edges to hem.");
+        if (f.Type == HemType.Rolled) throw Error("Rolled hems cannot be made yet: use closed, open or teardrop.");
+        var g = st.Graph;
+        var rules = st.Rules;
+        double t = g.Thickness;
+        var type = f.Type.ToString();
+        double Rule(string col, double r)
+        {
+            try { return rules.Rule(ProfileTables.Hems, col, r, type); }
+            catch (Exception ex) when (ex is ProfileMissException or RuleExprException) { throw Error($"SM-HEM-03: {ex.Message}"); }
+        }
+        string RuleText(string col)
+        {
+            try { return rules.RuleText(ProfileTables.Hems, col, type); }
+            catch (ProfileMissException ex) { throw Error($"SM-HEM-03: {ex.Message}"); }
+        }
+        if (RuleText("allowed") != "1") throw Error($"SM-HEM-03: the shop profile does not allow {type.ToLowerInvariant()} hems in {rules.Material} {rules.Gauge}.");
+        var length = ctx.Length(f.Length, "Length");
+        if (length <= 0) throw Error("The length must be greater than zero.");
+        // the hem's inside radius in the folded solid and its angle: closed, the layers the modelling gap apart (in
+        // contact for the flat and the checks); open, half the gap; a teardrop as given, past 180° by its angle
+        double R, angle;
+        switch (f.Type)
+        {
+            case HemType.Closed: R = Rule("model gap", 0) / 2; angle = Math.PI; break;
+            case HemType.Open:
+                var gap = string.IsNullOrWhiteSpace(f.Gap) ? Rule("gap", 0) : ctx.Length(f.Gap, "Gap");
+                if (gap <= 0) throw Error("An open hem's gap must be greater than zero (a closed hem has none).");
+                R = gap / 2; angle = Math.PI; break;
+            default:
+                R = string.IsNullOrWhiteSpace(f.Radius) ? t : ctx.Length(f.Radius, "Radius");
+                var past = ctx.Angle(f.Angle, "Angle");
+                if (!(past > 0 && past < 90)) throw Error("A teardrop's angle must be more than 0° and less than 90°.");
+                R = Math.Max(R, 1e-3); angle = Math.PI + past * Math.PI / 180; break;
+        }
+        if (R <= 0) throw Error($"SM-HEM-03: the shop profile gives {type.ToLowerInvariant()} hems no modelling gap: the folded solid needs one.");
+        var ba = Rule("allowance", f.Type == HemType.Closed ? 0 : R);
+        var source = new AllowanceSource(AllowanceMethod.BendTable, $"Hem allowance ({type}, {rules.Material} {rules.Gauge})");
+        // the return, from the fold's outside (R + t beyond the bend's start)
+        var flat = length - (R + t);
+        if (flat <= 1e-9) throw Error($"The hem is too short: at least {R + t:0.###} mm (its fold).");
+        double min = Rule("min length", R), max = Rule("max length", R);
+        var warnings = new List<string>();
+        if (length < min - 1e-9 || length > max + 1e-9)
+            warnings.Add($"SM-HEM-03: a {type.ToLowerInvariant()} hem in {rules.Material} {rules.Gauge} is {min:0.###} to {max:0.###} mm long by the shop's rule; this one is {length:0.###} mm.");
+
+        var panels = g.Panels.ToList();
+        var bends = g.Bends.ToList();
+        var edges = Edges(f.Edges);
+        for (int k = 0; k < edges.Count; k++)
+        {
+            var (_, i) = edges[k];
+            var (pi, next) = TakeEdge(panels, bends, edges, k, f.Edges[k]);
+            if (f.MaterialInside) panels[pi] = panels[pi] with { FlatOutline = MoveEdge(panels[pi].FlatOutline, i, R + t, f.Edges[k]) };
+            AddFlange(panels, bends, pi, i, next, new BendId($"{f.Id}.{k}.B"), new PanelId($"{f.Id}.{k}.P"), angle, f.Direction, R, ba, flat, "hem", source, hem: true);
+        }
+        var graph = g with { Panels = panels, Bends = bends };
+        // a teardrop's return must stay clear of the panel it folds back over (SM-HEM-01)
+        try
+        {
+            var folded = graph.Fold();
+            foreach (var b in bends.Where(b => b.Id.Value.StartsWith(f.Id + ".", StringComparison.Ordinal)))
+                if (SheetChecks.HemClearance(folded, b) is { } clash)
+                    throw Error("SM-HEM-01: " + Named(ctx.Doc, clash.message.Replace(" past the bend", $" past the bend (a length of {clash.maxFlat + R + t:0.###} mm)")));
+        }
+        catch (BendGraphException ex) { throw Error(Named(ctx.Doc, ex.Message)); }
+        foreach (var w in warnings) ctx.Warn(w);
+        Finish(ctx, f, sb, graph, st.World, rules, new Dictionary<BendId, SheetRules>(st.BendRules));
+    }
+
+    // ---- cut ----
+
+    /// <summary>
+    /// Holes from the sketch's closed profiles, through every panel parallel to the sketch that one lies inside (mapped
+    /// into the panel's flat). A profile that crosses a panel's edge, or lies on no panel, is said.
+    /// </summary>
+    public static void Cut(SheetCutFeature f, FeatureContext ctx)
+    {
+        var sb = BodyOf(ctx, f.Body);
+        if (!ctx.State.Sheets.TryGetValue(sb.Id, out var st)) throw Error($"{Name(sb)} has no base flange before this cut.");
+        if (!ctx.State.Sketches.TryGetValue(f.SketchId, out var sk)) throw Error("The cut's sketch is missing.");
+        if (sk.Regions.Count == 0) throw Error("The cut's sketch has no closed profile.");
+        var g = st.Graph;
+        BendGraph folded;
+        try { folded = g.Fold(); } catch (BendGraphException ex) { throw Error(ex.Message); }
+        var fr = sk.Frame;
+        var skNormal = V(fr.Normal);
+        var panels = g.Panels.ToList();
+        var own = new List<string>();
+        int profile = 0;
+        foreach (var region in sk.Regions)
+        {
+            profile++;
+            if (region.Holes.Count > 0) throw Error($"Profile {profile} has an island inside it: a cut cannot leave loose material.");
+            var (pts, bulges) = Loop(region.Normalized().Outer);
+            bool cutAny = false;
+            for (int pi = 0; pi < panels.Count; pi++)
+            {
+                // the panel's place in the part, and the sketch's plane parallel to it
+                var place = st.World.Compose(folded.Panel(panels[pi].Id).FoldedFrame);
+                var dot = Vec3.Dot(place.Z, skNormal);
+                if (Math.Abs(Math.Abs(dot) - 1) > 1e-9) continue;
+                // the profile in the panel's flat (seen from the other side: mirrored, its arcs the other way round)
+                var local = pts.Select(p => ToFlat(place, V(fr.ToWorld(p.X, p.Y, 0)))).ToList();
+                var lb = bulges.Select(b => dot > 0 ? b : -b).ToList();
+                var cut = new Polygon2(local) { OuterBulge = lb };
+                var panel = panels[pi].FlatOutline;
+                var straight = cut.Straightened();
+                var shape = panel.Straightened();
+                bool inside = straight.Outer.All(x => SheetChecks.Inside(shape, x));
+                bool crosses = SheetChecks.Overlap(straight, shape) && !inside;
+                if (!inside)
+                {
+                    if (crosses) throw Error($"Profile {profile} crosses {panels[pi].Id}'s edge: cuts across a panel's edge or a bend cannot be made yet.");
+                    continue;
+                }
+                // a hole runs clockwise (the material on its left)
+                if (cut.LoopArea(0) > 0) { local.Reverse(); lb = Enumerable.Range(0, lb.Count).Select(j => -lb[lb.Count - 1 - j]).ToList(); }
+                var holes = panel.Holes.Append(local).ToList();
+                var holeBulges = Enumerable.Range(1, panel.LoopCount - 1).Select(h => panel.Bulges(h)).Append(lb).ToList();
+                panels[pi] = panels[pi] with { FlatOutline = panel with { Holes = holes, HoleBulges = holeBulges } };
+                own.Add($"{panels[pi].Id}.Hole{holes.Count - 1}");
+                cutAny = true;
+            }
+            if (!cutAny) throw Error($"Profile {profile} lies on no panel: sketch it on a plane parallel to a panel, inside it.");
+        }
+        Finish(ctx, f, sb, g with { Panels = panels }, st.World, st.Rules, new Dictionary<BendId, SheetRules>(st.BendRules), own);
+    }
+
+    /// <summary>A point of the part in a panel's flat (its place's inverse; the height dropped).</summary>
+    static Vec2 ToFlat(Frame3 place, Vec3 p)
+    {
+        var d = p - place.Origin;
+        return new Vec2(Vec3.Dot(d, place.X), Vec3.Dot(d, place.Y));
     }
 
     static string Words(FlangeReference r) => r switch
@@ -218,6 +422,8 @@ static class SheetRebuild
     static Polygon2 MoveEdge(Polygon2 poly, int i, double d, string what)
     {
         var o = poly.Outer.ToList();
+        if (poly.Bulge(0, (i + o.Count - 1) % o.Count) != 0 || poly.Bulge(0, (i + 1) % o.Count) != 0)
+            throw Error($"{what}: a round edge meets it, which its setback cannot move yet (use Bend outside).");
         int m = o.Count, prev = (i + m - 1) % m, next = (i + 1) % m, after = (i + 2) % m;
         var dir = (o[next] - o[i]).Normalized();
         var inward = dir.Left;
@@ -251,14 +457,23 @@ static class SheetRebuild
     /// graph has; the part does not move), its solid made again (folded, or flat when it is shown flattened). The
     /// checks that fail on what this feature made are its warnings.
     /// </summary>
-    static void Finish(FeatureContext ctx, Feature f, SheetMetalBody sb, BendGraph g, Frame3 world, SheetRules rules, Dictionary<BendId, SheetRules> bendRules)
+    static void Finish(FeatureContext ctx, Feature f, SheetMetalBody sb, BendGraph g, Frame3 world, SheetRules rules, Dictionary<BendId, SheetRules> bendRules,
+        IReadOnlyCollection<string>? own = null)
     {
         var checks = new List<RuleResult>();
         try
         {
             g = SheetCorners.Apply(g, (id, b1, b2) => CornerSpecOf(ctx.Doc, rules, id, b1), checks);
             checks.AddRange(SheetChecks.Flat(g));
-            foreach (var c in checks.Where(c => !c.Passed && c.Entity.Contains(f.Id + ".", StringComparison.Ordinal)))
+            SheetRules Of(Bend b) => bendRules.TryGetValue(b.Id, out var r) ? r : rules;
+            try
+            {
+                checks.AddRange(SheetChecks.Distances(g, b => Of(b).Rule(ProfileTables.Distances, "hole to bend", b.InsideRadius), rules.Rule(ProfileTables.Distances, "hole to edge")));
+                checks.AddRange(SheetChecks.MinFlange(g, b => Of(b).MinFlange));
+                if (rules.GrainSensitive && sb.GrainAngle is { } grain) checks.AddRange(SheetChecks.Grain(g, grain, rules.MinGrainAngle));
+            }
+            catch (Exception ex) when (ex is ProfileMissException or RuleExprException) { ctx.Warn($"A check could not be made: {ex.Message}"); }
+            foreach (var c in checks.Where(c => !c.Passed && (c.Entity.Contains(f.Id + ".", StringComparison.Ordinal) || own?.Contains(c.Entity) == true)))
                 ctx.Warn($"{c.Rule}: {Named(ctx.Doc, c.Message)}");
             if (sb.FixedPanel is { } fp && g.Panels.Any(p => p.Id.Value == fp) && g.FixedPanel.Value != fp)
             {

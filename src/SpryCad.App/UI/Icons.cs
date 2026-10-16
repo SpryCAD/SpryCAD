@@ -75,6 +75,9 @@ public static class Icons
         ["flatten"] = ("M3 20h18 M3 4v6a3 3 0 0 0 3 3h3", "M14 6l5 5 M19 6v5h-5"),
         // base flange: a plate in perspective; edge flange: a plate with a flange turned up at its edge
         ["baseflange"] = ("M2 15l8-5h12l-8 5z M2 15v3h12v-3 M14 18l8-5v-3", null),
+        // hem: a sheet's edge folded back on itself; sheet cut: a plate with a round hole
+        ["hem"] = ("M2 18h14a3 3 0 0 0 0-6H6", null),
+        ["sheetcut"] = ("M2 17l8-5h12l-8 5z", "M13 14.5m-2.5 0a2.5 1.5 0 1 0 5 0a2.5 1.5 0 1 0-5 0"),
         // corners: two flanges meeting at a corner, a gap between them
         ["corners"] = ("M3 21V9h4v8h8v4z", "M11 3v10 M21 13H11 M17 3v4 M21 7h-4"),
         ["edgeflange"] =("M2 18l7-4h11l-7 4z", "M13 18v-3a2 2 0 0 1 2-2 M20 14V5l-5 3v4"),

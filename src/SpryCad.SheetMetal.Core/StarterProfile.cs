@@ -33,9 +33,9 @@ public static class StarterProfile
         return new[]
         {
             Table(ProfileTables.Materials, null,
-                R(new[] { steel }, "7850", "0", "Cold rolled steel"),
-                R(new[] { stainless }, "8000", "0", ""),
-                R(new[] { aluminum }, "2680", "1", "Bend across the grain where possible")),
+                R(new[] { steel }, "7850", "0", "0", "Cold rolled steel"),
+                R(new[] { stainless }, "8000", "0", "0", ""),
+                R(new[] { aluminum }, "2680", "1", "45", "Bend across the grain where possible")),
             Table(ProfileTables.Gauges, ShopProfileTable.Inch,
                 G(steel, "20 ga", "0.0359"), G(steel, "18 ga", "0.0478"), G(steel, "16 ga", "0.0598"),
                 G(steel, "14 ga", "0.0747"), G(steel, "12 ga", "0.1046"), G(steel, "10 ga", "0.1345"),

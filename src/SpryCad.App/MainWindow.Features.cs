@@ -196,6 +196,8 @@ public partial class MainWindow
             case CombineFeature c: OpenCombinePage((CombineFeature)c.Clone(), false); break;
             case SheetMetal.Features.BaseFlangeFeature bf: OpenBaseFlangePage((SheetMetal.Features.BaseFlangeFeature)bf.Clone(), false); break;
             case SheetMetal.Features.EdgeFlangeFeature ef: OpenEdgeFlangePage((SheetMetal.Features.EdgeFlangeFeature)ef.Clone(), false); break;
+            case SheetMetal.Features.HemFeature hm: OpenHemPage((SheetMetal.Features.HemFeature)hm.Clone(), false); break;
+            case SheetMetal.Features.SheetCutFeature sc: OpenSheetCutPage((SheetMetal.Features.SheetCutFeature)sc.Clone(), false); break;
         }
     }
 

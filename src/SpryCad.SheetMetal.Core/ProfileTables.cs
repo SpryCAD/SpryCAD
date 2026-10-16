@@ -31,7 +31,7 @@ public static class ProfileTables
     public static readonly IReadOnlyList<Template> All = new Template[]
     {
         new(Materials, "Materials", new[] { "material" },
-            new[] { N("density"), B("grain sensitive"), T("notes") }),
+            new[] { N("density"), B("grain sensitive"), A("min grain angle"), T("notes") }),
         new(Gauges, "Gauges", new[] { "material", "gauge" },
             new[] { L("thickness"), L("thickness tol plus"), L("thickness tol minus") }),
         new(Tooling, "Tooling", new[] { "material", "gauge", "toolset" },

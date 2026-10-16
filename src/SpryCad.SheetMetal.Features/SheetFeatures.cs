@@ -22,6 +22,44 @@ public sealed class BaseFlangeFeature : Feature
     public override IEnumerable<string> Consumes => new[] { SketchId };
 }
 
+/// <summary>
+/// Holes cut through the sheet, normal to it (sheet metal spec section 6): the closed profiles of a sketch on a plane
+/// parallel to panels, cut through every such panel the profile lies inside (so through both walls of a channel).
+/// Lines and arcs; for now each profile within one panel (not across its edge or a bend).
+/// </summary>
+public sealed class SheetCutFeature : Feature
+{
+    public override string Kind => "Sheet-Cut";
+    public string Body { get; set; } = "";
+    public string SketchId { get; set; } = "";
+    public override IEnumerable<string> Consumes => new[] { SketchId };
+}
+
+/// <summary>
+/// Hems on panel edges (sheet metal spec section 8): the edge folded back on itself. Closed: flat against the panel
+/// (in contact for the flat; the folded solid keeps the profile's small modelling gap so it stays one valid solid).
+/// Open: with a gap. Teardrop: past 180°, its return angled back toward the panel.
+/// </summary>
+public sealed class HemFeature : Feature
+{
+    public override string Kind => "Hem";
+    public string Body { get; set; } = "";
+    public List<string> Edges { get; set; } = new();
+    public HemType Type { get; set; } = HemType.Closed;
+    /// <summary>The hem's length, from its fold's outside to the return's end.</summary>
+    public string Length { get; set; } = "10";
+    /// <summary>An open hem's gap between the layers (blank: the profile's).</summary>
+    public string? Gap { get; set; }
+    /// <summary>A teardrop's inside radius (blank: the thickness).</summary>
+    public string? Radius { get; set; }
+    /// <summary>A teardrop's return angle toward the panel, degrees past 180°.</summary>
+    public string Angle { get; set; } = "30";
+    /// <summary>Which side the hem folds over: Up over the top side.</summary>
+    public BendDirection Direction { get; set; } = BendDirection.Up;
+    /// <summary>The hem's outside at the edge (the panel shortened by it); else the hem added beyond the edge.</summary>
+    public bool MaterialInside { get; set; }
+}
+
 /// <summary>Where an edge flange's bend sits relative to the edge it is made on (sheet metal spec section 5).</summary>
 public enum FlangePosition
 {

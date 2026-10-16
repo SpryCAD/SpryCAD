@@ -26,26 +26,39 @@ public sealed record FlatBendLine(BendId Id, Vec2 A, Vec2 B, BendDirection Direc
 
 /// <summary>
 /// The flat pattern in 2D (sheet metal spec section 10): the outline (closed loops, outer counterclockwise, holes
-/// clockwise) and the bends, in the flat's coordinates, laid out by the fixed panel so it does not move between edits.
-/// Made from the bend graph alone.
+/// clockwise; straight edges and true arcs) and the bends, in the flat's coordinates, laid out by the fixed panel so
+/// it does not move between edits. Made from the bend graph alone.
 /// </summary>
 public sealed class FlatPattern2D
 {
     public required double Thickness { get; init; }
+    /// <summary>The outline's loops' points (outer counterclockwise, holes clockwise).</summary>
     public required IReadOnlyList<IReadOnlyList<Vec2>> Loops { get; init; }
+    /// <summary>Each loop's edges' bulges (0: straight; see <see cref="Seg2"/>).</summary>
+    public required IReadOnlyList<IReadOnlyList<double>> LoopBulges { get; init; }
     public required IReadOnlyList<FlatBendLine> Bends { get; init; }
 
+    /// <summary>A loop's edges.</summary>
+    public IEnumerable<Seg2> Segs(int loop)
+    {
+        var l = Loops[loop];
+        for (int i = 0; i < l.Count; i++) yield return new Seg2(l[i], l[(i + 1) % l.Count], LoopBulges[loop][i]);
+    }
+
     /// <summary>The length of the outline (cut length, for costing: main spec section 43).</summary>
-    public double CutLength => Loops.Sum(l => l.Select((p, i) => (l[(i + 1) % l.Count] - p).Length).Sum());
+    public double CutLength => Enumerable.Range(0, Loops.Count).Sum(i => Segs(i).Sum(s => s.Length));
 
     /// <summary>The number of closed contours (pierces, for costing).</summary>
     public int PierceCount => Loops.Count;
+
+    /// <summary>The material's area in the flat (the outer loops less the holes).</summary>
+    public double Area => Enumerable.Range(0, Loops.Count).Sum(i => Polygon2.LoopArea(Loops[i]) + Segs(i).Sum(s => s.SegmentArea));
 
     public (Vec2 Min, Vec2 Max) Bounds
     {
         get
         {
-            var pts = Loops.SelectMany(l => l).ToList();
+            var pts = Enumerable.Range(0, Loops.Count).SelectMany(i => Segs(i).SelectMany(s => s.Points(Math.PI / 720))).ToList();
             return (new Vec2(pts.Min(p => p.X), pts.Min(p => p.Y)), new Vec2(pts.Max(p => p.X), pts.Max(p => p.Y)));
         }
     }
@@ -59,27 +72,30 @@ public sealed class FlatPattern2D
     }
 
     /// <summary>
-    /// Each piece's loops with their edges split where another piece's corner lies on them (a flange running on past
-    /// its bend zone: the zone's corner on the flange's edge), so pieces that meet share whole segments. Each point
-    /// carries the index of the piece's own edge it starts a piece of (for naming the edge's faces).
+    /// Each piece's loops with their straight edges split where another piece's corner lies on them (a flange running
+    /// on past its bend zone: the zone's corner on the flange's edge), so pieces that meet share whole segments. Each
+    /// point carries the index of the piece's own edge it starts a piece of (for naming the edge's faces) and the
+    /// piece's bulge (arcs are never split).
     /// </summary>
-    public static List<(FlatPiece piece, List<List<(Vec2 p, int edge)>> loops)> Split(List<FlatPiece> pieces, double tol = 1e-7)
+    public static List<(FlatPiece piece, List<List<(Vec2 p, int edge, double bulge)>> loops)> Split(List<FlatPiece> pieces, double tol = 1e-7)
     {
         var all = pieces.SelectMany(x => x.Outline.Points).ToList();
-        var result = new List<(FlatPiece, List<List<(Vec2, int)>>)>();
+        var result = new List<(FlatPiece, List<List<(Vec2, int, double)>>)>();
         foreach (var piece in pieces)
         {
-            var loops = new List<List<(Vec2, int)>>();
-            foreach (var loop in new[] { piece.Outline.Outer }.Concat(piece.Outline.Holes))
+            var loops = new List<List<(Vec2, int, double)>>();
+            for (int li = 0; li < piece.Outline.LoopCount; li++)
             {
-                var split = new List<(Vec2, int)>();
+                var loop = piece.Outline.Loop(li);
+                var split = new List<(Vec2, int, double)>();
                 for (int i = 0; i < loop.Count; i++)
                 {
+                    var bulge = piece.Outline.Bulge(li, i);
                     Vec2 a = loop[i], b = loop[(i + 1) % loop.Count];
+                    split.Add((a, i, bulge));
                     var d = b - a;
                     var len2 = Vec2.Dot(d, d);
-                    split.Add((a, i));
-                    if (len2 <= 0) continue;
+                    if (bulge != 0 || len2 <= 0) continue;
                     var len = Math.Sqrt(len2);
                     var on = all.Select(v => (v, s: Vec2.Dot(v - a, d) / len2))
                         .Where(x => x.s * len > tol && (1 - x.s) * len > tol && Math.Abs(Vec2.Cross(d, x.v - a)) / len < tol)
@@ -88,7 +104,7 @@ public sealed class FlatPattern2D
                     foreach (var v in on)
                     {
                         if (last is { } l && (v - l).Length < tol) continue;
-                        split.Add((v, i));
+                        split.Add((v, i, 0));
                         last = v;
                     }
                 }
@@ -102,8 +118,10 @@ public sealed class FlatPattern2D
     /// <summary>A bend's zone in the flat: A's edge it starts at, moved out by the allowance (counterclockwise).</summary>
     public static Polygon2 Strip(BendGraph g, Bend b)
     {
-        var a = g.Panel(b.A).FlatOutline.Outer;
+        var poly = g.Panel(b.A).FlatOutline;
+        var a = poly.Outer;
         if (b.EdgeA < 0 || b.EdgeA >= a.Count) throw new BendGraphException($"{b.Id} is not on an edge of {b.A}.");
+        if (poly.Bulge(0, b.EdgeA) != 0) throw new BendGraphException($"{b.Id} is on a round edge of {b.A}: bends are on straight edges.");
         var p = a[b.EdgeA];
         var q = a[(b.EdgeA + 1) % a.Count];
         var n = b.FlatAxis.Normal * b.Allowance;
@@ -115,31 +133,34 @@ public sealed class FlatPattern2D
     {
         var pieces = Pieces(g);
         // the outline: every piece's edges but those two pieces share (run both ways), joined into loops
-        var segs = new List<(Vec2 a, Vec2 b)>();
+        var segs = new List<(Vec2 a, Vec2 b, double bulge)>();
         foreach (var (_, ls) in Split(pieces))
             foreach (var loop in ls)
-                for (int i = 0; i < loop.Count; i++) segs.Add((loop[i].p, loop[(i + 1) % loop.Count].p));
+                for (int i = 0; i < loop.Count; i++) segs.Add((loop[i].p, loop[(i + 1) % loop.Count].p, loop[i].bulge));
         var tol = 1e-6;
         string K(Vec2 p) => FormattableString.Invariant($"{Math.Round(p.X / tol)}:{Math.Round(p.Y / tol)}");
-        var directed = segs.GroupBy(s => K(s.a) + ">" + K(s.b)).ToDictionary(x => x.Key, x => x.Count());
-        var outer = segs.Where(s => !directed.ContainsKey(K(s.b) + ">" + K(s.a))).ToList();
+        var directed = segs.Where(s => s.bulge == 0).GroupBy(s => K(s.a) + ">" + K(s.b)).ToDictionary(x => x.Key, x => x.Count());
+        var outer = segs.Where(s => s.bulge != 0 || !directed.ContainsKey(K(s.b) + ">" + K(s.a))).ToList();
         var used = new bool[outer.Count];
         var loops = new List<IReadOnlyList<Vec2>>();
+        var bulges = new List<IReadOnlyList<double>>();
         for (int s0 = 0; s0 < outer.Count; s0++)
         {
             if (used[s0]) continue;
-            var loop = new List<Vec2>();
+            var loop = new List<(Vec2 p, double bulge)>();
             int cur = s0;
             while (true)
             {
                 used[cur] = true;
-                loop.Add(outer[cur].a);
+                loop.Add((outer[cur].a, outer[cur].bulge));
                 var end = K(outer[cur].b);
                 if (end == K(outer[s0].a)) break;
                 cur = Enumerable.Range(0, outer.Count).FirstOrDefault(i => !used[i] && K(outer[i].a) == end, -1);
                 if (cur < 0) throw new BendGraphException("The flat pattern's outline does not close.");
             }
-            loops.Add(Simplify(loop));
+            var simple = Simplify(loop);
+            loops.Add(simple.Select(x => x.p).ToList());
+            bulges.Add(simple.Select(x => x.bulge).ToList());
         }
         var bends = g.Bends.Select(b =>
         {
@@ -149,20 +170,22 @@ public sealed class FlatPattern2D
             return new FlatBendLine(b.Id, p + half, q + half, b.Direction, b.Angle, b.InsideRadius, b.Allowance, b.Tooling, b.Source,
                 p, q, strip[2], strip[3]);
         }).ToList();
-        return new FlatPattern2D { Thickness = g.Thickness, Loops = loops, Bends = bends };
+        return new FlatPattern2D { Thickness = g.Thickness, Loops = loops, LoopBulges = bulges, Bends = bends };
     }
 
     /// <summary>A loop without the points where it runs straight on (a panel's edge continuing along a bend zone's).</summary>
-    static List<Vec2> Simplify(List<Vec2> loop)
+    static List<(Vec2 p, double bulge)> Simplify(List<(Vec2 p, double bulge)> loop)
     {
-        var r = new List<Vec2>(loop);
+        var r = new List<(Vec2 p, double bulge)>(loop);
         bool changed = true;
         while (changed && r.Count > 3)
         {
             changed = false;
             for (int i = 0; i < r.Count; i++)
             {
-                var a = r[(i + r.Count - 1) % r.Count]; var b = r[i]; var c = r[(i + 1) % r.Count];
+                int h = (i + r.Count - 1) % r.Count;
+                if (r[h].bulge != 0 || r[i].bulge != 0) continue;
+                var a = r[h].p; var b = r[i].p; var c = r[(i + 1) % r.Count].p;
                 var u = b - a; var v = c - b;
                 if (Math.Abs(Vec2.Cross(u, v)) <= 1e-9 * u.Length * v.Length && Vec2.Dot(u, v) > 0) { r.RemoveAt(i); changed = true; break; }
             }

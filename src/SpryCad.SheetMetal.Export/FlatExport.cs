@@ -43,11 +43,16 @@ public static class FlatExport
         G(0, "ENDTAB"); G(0, "ENDSEC");
 
         G(0, "SECTION"); G(2, "ENTITIES");
-        foreach (var loop in flat.Loops)
+        for (int li = 0; li < flat.Loops.Count; li++)
         {
-            // a closed polyline: one contour, closed (CAM needs no gaps)
+            var loop = flat.Loops[li];
+            // a closed polyline: one contour, closed (CAM needs no gaps); arcs as true arcs (a vertex's bulge)
             G(0, "POLYLINE"); G(8, style.OutlineLayer); G(66, "1"); G(70, "1"); P(10, new Vec2(0, 0));
-            foreach (var p in loop) { G(0, "VERTEX"); G(8, style.OutlineLayer); P(10, p); }
+            for (int i = 0; i < loop.Count; i++)
+            {
+                G(0, "VERTEX"); G(8, style.OutlineLayer); P(10, loop[i]);
+                if (flat.LoopBulges[li][i] != 0) N(42, flat.LoopBulges[li][i]);
+            }
             G(0, "SEQEND"); G(8, style.OutlineLayer);
         }
         var height = Math.Max(2.5, flat.Thickness * 2);
@@ -83,7 +88,18 @@ public static class FlatExport
         w.WriteLine($"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{F(wd)}mm\" height=\"{F(ht)}mm\" viewBox=\"{F(x0)} {F(y0)} {F(wd)} {F(ht)}\">");
         w.WriteLine($"  <g id=\"{Esc(style.OutlineLayer)}\" fill=\"none\" stroke=\"black\" stroke-width=\"0.2\">");
         var path = new StringBuilder();
-        foreach (var loop in flat.Loops) path.Append('M').Append(string.Join(" L", loop.Select(Pt))).Append(" Z ");
+        for (int li = 0; li < flat.Loops.Count; li++)
+        {
+            path.Append('M').Append(Pt(flat.Loops[li][0]));
+            foreach (var s in flat.Segs(li))
+            {
+                if (!s.IsArc) { path.Append(" L").Append(Pt(s.B)); continue; }
+                // mirrored into SVG's y-down: a counterclockwise arc is drawn clockwise (sweep flag 0)
+                var large = Math.Abs(s.Sweep) > Math.PI ? 1 : 0;
+                path.Append($" A{F(s.Radius)},{F(s.Radius)} 0 {large} {(s.Sweep > 0 ? 0 : 1)} ").Append(Pt(s.B));
+            }
+            path.Append(" Z ");
+        }
         w.WriteLine($"    <path fill-rule=\"evenodd\" d=\"{path.ToString().Trim()}\"/>");
         w.WriteLine("  </g>");
         foreach (var dir in new[] { BendDirection.Up, BendDirection.Down })

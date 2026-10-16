@@ -55,6 +55,7 @@ static class Program
         GraphTests.Run(t);
         FeatureTests.Run(t);
         CornerTests.Run(t);
+        Phase4Tests.Run(t);
         Console.WriteLine($"{t.Passed} passed, {t.Failed} failed");
         return t.Failed == 0 ? 0 : 1;
     }

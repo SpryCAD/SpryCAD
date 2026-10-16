@@ -51,7 +51,8 @@ public static class FoldedSolid
         var directed = new HashSet<string>();
         foreach (var (_, ls) in split)
             foreach (var loop in ls)
-                for (int i = 0; i < loop.Count; i++) directed.Add(PKey(loop[i].p) + ">" + PKey(loop[(i + 1) % loop.Count].p));
+                for (int i = 0; i < loop.Count; i++)
+                    if (loop[i].bulge == 0) directed.Add(PKey(loop[i].p) + ">" + PKey(loop[(i + 1) % loop.Count].p));
 
         foreach (var (piece, splitLoops) in split)
         {
@@ -62,13 +63,16 @@ public static class FoldedSolid
                 if (!vertices.TryGetValue(k, out var v)) vertices[k] = v = new NVertex(K(map.Point(p, top ? 0 : -t)));
                 return v;
             }
-            NCoedge E(Vec2 a, Vec2 b, bool top)
+            // an edge on the top or bottom: straight, or an arc (bulge for a→b; the two halves of a circle have the same
+            // ends, so an arc is known by its middle too)
+            NCoedge E(Vec2 a, Vec2 b, double bulge, bool top)
             {
                 var (ka, kb) = (PKey(a), PKey(b));
                 var key = string.CompareOrdinal(ka, kb) < 0 ? $"{ka}|{kb}" : $"{kb}|{ka}";
+                if (bulge != 0) key += "|" + PKey(new Seg2(a, b, bulge).At(0.5));
                 key += top ? "T" : "B";
                 var va = V(a, top); var vb = V(b, top);
-                if (!edges.TryGetValue(key, out var e)) edges[key] = e = map.Edge(a, b, top ? 0 : -t, va, vb);
+                if (!edges.TryGetValue(key, out var e)) edges[key] = e = map.Edge(a, b, bulge, top ? 0 : -t, va, vb);
                 return new NCoedge(e, ReferenceEquals(e.V0, va));
             }
             NCoedge Up(Vec2 p, bool up)
@@ -83,13 +87,15 @@ public static class FoldedSolid
             var loops = splitLoops.Select(l => l.Select(x => x.p).ToList()).ToList();
             var topFace = map.Face(true);
             var bottomFace = map.Face(false);
-            foreach (var loop in loops)
+            for (int li = 0; li < loops.Count; li++)
             {
+                var loop = loops[li];
+                double B(int i) => splitLoops[li][i].bulge;
                 var lt = new NLoop();
-                for (int i = 0; i < loop.Count; i++) lt.Coedges.Add(E(loop[i], loop[(i + 1) % loop.Count], true));
+                for (int i = 0; i < loop.Count; i++) lt.Coedges.Add(E(loop[i], loop[(i + 1) % loop.Count], B(i), true));
                 topFace.Loops.Add(lt);
                 var lb = new NLoop();
-                for (int i = loop.Count - 1; i >= 0; i--) lb.Coedges.Add(E(loop[(i + 1) % loop.Count], loop[i], false));
+                for (int i = loop.Count - 1; i >= 0; i--) lb.Coedges.Add(E(loop[(i + 1) % loop.Count], loop[i], -B(i), false));
                 bottomFace.Loops.Add(lb);
             }
             body.Faces.Add(topFace);
@@ -102,12 +108,13 @@ public static class FoldedSolid
                 for (int i = 0; i < loop.Count; i++)
                 {
                     Vec2 a = loop[i], b = loop[(i + 1) % loop.Count];
-                    if (directed.Contains(PKey(b) + ">" + PKey(a))) continue;
-                    var face = map.SideFace(a, b, -t, SideName(piece, li, splitLoops[li][i].edge));
+                    var bulge = splitLoops[li][i].bulge;
+                    if (bulge == 0 && directed.Contains(PKey(b) + ">" + PKey(a))) continue;
+                    var face = map.SideFace(a, b, bulge, -t, SideName(piece, li, splitLoops[li][i].edge));
                     var l = new NLoop();
-                    l.Coedges.Add(E(a, b, false));
+                    l.Coedges.Add(E(a, b, bulge, false));
                     l.Coedges.Add(Up(b, true));
-                    l.Coedges.Add(E(b, a, true));
+                    l.Coedges.Add(E(b, a, -bulge, true));
                     l.Coedges.Add(Up(a, false));
                     face.Loops.Add(l);
                     body.Faces.Add(face);
@@ -176,8 +183,18 @@ public static class FoldedSolid
             return _place.Apply(rot.Apply(new Vec3(foot.X, foot.Y, z)));
         }
 
-        public NEdge Edge(Vec2 a, Vec2 b, double z, NVertex va, NVertex vb)
+        public NEdge Edge(Vec2 a, Vec2 b, double bulge, double z, NVertex va, NVertex vb)
         {
+            if (bulge != 0)
+            {
+                if (_wrap) throw new BendGraphException($"{_bend!.Id}: a round edge across a bend zone cannot be modelled yet.");
+                // an arc of a panel's outline: about the panel's normal, counterclockwise for a positive bulge
+                var s = new Seg2(a, b, bulge);
+                var c = s.Center;
+                var center = _place.Apply(new Vec3(c.X, c.Y, z));
+                var axis = _place.ApplyDir(new Vec3(0, 0, Math.Sign(s.Sweep)));
+                return new NEdge(new NCircle(K(center), K(axis), va.P - K(center), s.Radius), 0, Math.Abs(s.Sweep), va, vb);
+            }
             if (_wrap)
             {
                 var d = (b - a).Normalized();
@@ -227,8 +244,22 @@ public static class FoldedSolid
         }
 
         /// <summary>A side face along the flat segment a→b (the piece on its left), its normal outward.</summary>
-        public NFace SideFace(Vec2 a, Vec2 b, double zBottom, string name)
+        public NFace SideFace(Vec2 a, Vec2 b, double bulge, double zBottom, string name)
         {
+            if (bulge != 0)
+            {
+                // a round side: a cylinder about the panel's normal; facing away from its axis where the outline bulges
+                // out (a counterclockwise arc on its left), toward it where it bulges in (a hole's, run clockwise)
+                var s = new Seg2(a, b, bulge);
+                var c = s.Center;
+                var def = new SurfaceDef
+                {
+                    Kind = SurfaceKind.Cylinder, Origin = K(_place.Apply(new Vec3(c.X, c.Y, zBottom))), Axis = K(_place.ApplyDir(new Vec3(0, 0, 1))),
+                    RefDir = K(_place.ApplyDir(Vec3.From(a - c))), Radius = s.Radius, Segments = 64,
+                };
+                var mid = s.At(0.5);
+                return new NFace(new NSurface(def), s.Sweep > 0, new FaceTag(name, def), K(_place.Apply(new Vec3(mid.X, mid.Y, zBottom / 2))));
+            }
             var d = (b - a).Normalized();
             var nFlat = new Vec3(d.Y, -d.X, 0);
             // a bend zone's end faces are across its axis: their normal is along the axis, which wrapping keeps

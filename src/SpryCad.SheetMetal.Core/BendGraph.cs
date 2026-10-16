@@ -36,6 +36,8 @@ public sealed record Bend(
     public int EdgeA { get; init; } = -1;
     /// <summary>The index of B's outline edge the bend ends at.</summary>
     public int EdgeB { get; init; } = -1;
+    /// <summary>A hem's bend (sheet metal spec section 8): up to a whole turn round (180° for closed and open hems).</summary>
+    public bool IsHem { get; init; }
 
     /// <summary>The tangent line on A's side (where the bend starts) in the flat.</summary>
     public Line2 TangentA => FlatAxis.Offset(-Allowance / 2);
@@ -92,7 +94,8 @@ public sealed record BendGraph(
             if (!bendIds.Add(b.Id)) throw new BendGraphException($"Two bends are named {b.Id}.");
             if (!ids.Contains(b.A) || !ids.Contains(b.B)) throw new BendGraphException($"{b.Id} joins a panel the sheet does not have.");
             if (b.A == b.B) throw new BendGraphException($"{b.Id} joins {b.A} to itself.");
-            if (!(b.Angle > 0 && b.Angle < Math.PI)) throw new BendGraphException($"{b.Id}: a bend angle must be more than 0° and less than 180°.");
+            if (!(b.Angle > 0 && (b.Angle < Math.PI || b.IsHem && b.Angle < 2 * Math.PI)))
+                throw new BendGraphException($"{b.Id}: a bend angle must be more than 0° and less than 180° (a hem's less than 360°).");
             if (b.InsideRadius < 0) throw new BendGraphException($"{b.Id}: the inside radius cannot be negative.");
             if (b.Allowance < 0) throw new BendGraphException($"{b.Id}: the bend allowance cannot be negative.");
         }
