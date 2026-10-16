@@ -80,13 +80,21 @@ public static class UnitFormat
         if (kind == ValueKind.Number)
         {
             if (value.IsNumber) return true;
-            error = $"Expected a number without units, not {Expr.Kind(value)}";
+            error = $"Expected a number without units, not {u.Described(value)}";
             return false;
         }
         if (kind == ValueKind.Length ? value.IsLength : value.IsAngle) return true;
+        // a unit added to a name when it was a plain number ("(Shell)in"), the name since given a unit of its own (an
+        // area now): the name alone again
+        if (Wrapped.Match(kept) is { Success: true } w && Expr.TryEvaluate(w.Groups[1].Value, lookup, out var inner, out _)
+            && (kind == ValueKind.Length ? inner.IsLength : inner.IsAngle))
+        {
+            (kept, value, error) = (w.Groups[1].Value.Trim(), inner, null);
+            return true;
+        }
         if (!value.IsNumber)
         {
-            error = $"Expected {(kind == ValueKind.Length ? "a length" : "an angle")}, not {Expr.Kind(value)}";
+            error = $"Expected {(kind == ValueKind.Length ? "a length" : "an angle")}, not {u.Described(value)}";
             return false;
         }
         var unit = kind == ValueKind.Length ? u.Symbol() : "deg";
@@ -94,6 +102,14 @@ public static class UnitFormat
         value = kind == ValueKind.Length ? Quantity.Mm(value.Value * u.MmPer()) : Quantity.Deg(value.Value);
         return true;
     }
+
+    // "(expression)unit", as TryEnter keeps an expression whose value had no unit
+    static readonly System.Text.RegularExpressions.Regex Wrapped = new(@"^\((.+)\)\s*(mm|cm|m|in|ft|deg|rad|°|"")$");
+
+    /// <summary>What a value is, in the units ("an area (0.125 in²)", "a plain number (3)"), for a message.</summary>
+    public static string Described(this UnitSystem u, Quantity q) =>
+        (q.IsNumber ? "a plain number" : q.IsLength ? "a length" : q.IsAngle ? "an angle"
+            : q.Angle == 0 && q.Length == 2 ? "an area" : q.Angle == 0 && q.Length == 3 ? "a volume" : "a value") + $" ({u.Show(q)})";
 
     /// <summary>A kept length's value in millimetres, as features are built (a bare number is millimetres).</summary>
     public static bool TryLength(string? kept, Func<string, Quantity?>? lookup, out double mm, out string? error)
