@@ -2456,7 +2456,7 @@ public sealed partial class SketchEditor : IViewportMode
     /// <summary>A dimension's value from its expression (millimetres or degrees), null when it does not evaluate.</summary>
     double? Evaluate(SkConstraint c, string expr)
     {
-        try { return c.ValueKind == ValueKind.Angle ? Expr.Angle(expr, Lookup) : Expr.Length(expr, Lookup); }
+        try { return c.ValueKind == ValueKind.Angle ? Expr.Angle(expr, Lookup) : Expr.Length(expr, Lookup, Units.MmPer()); }
         catch (Expr.ExprException) { return null; }
     }
 

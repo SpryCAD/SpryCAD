@@ -229,9 +229,9 @@ public sealed class Regenerator
     /// against the model state before the pattern; null for other features. Throws <see cref="FeatureException"/>
     /// for invalid parameters.
     /// </summary>
-    public static List<Transform>? PatternTransforms(Feature f, ModelState state, Func<string, Quantity?> lookup)
+    public static List<Transform>? PatternTransforms(Feature f, ModelState state, Func<string, Quantity?> lookup, UnitSystem units = UnitSystem.MMGS)
     {
-        double Num(string? expr, string what, ValueKind kind = ValueKind.Number) => Value(expr, what, kind, lookup);
+        double Num(string? expr, string what, ValueKind kind = ValueKind.Number) => Value(expr, what, kind, lookup, units.MmPer());
         var ts = new List<Transform>();
         switch (f)
         {
@@ -274,16 +274,18 @@ public sealed class Regenerator
 
     /// <summary>
     /// A feature's value of the given kind: a length in millimetres, an angle in degrees, a plain number. A bare number
-    /// for a length or an angle is millimetres or degrees. Throws <see cref="FeatureException"/> naming the value.
+    /// for a length or an angle is millimetres or degrees; a length worked out from variables without units is in the
+    /// part's units (<paramref name="namedPlainMm"/>: <see cref="Expr.Length(string, Func{string, Quantity?}, double)"/>).
+    /// Throws <see cref="FeatureException"/> naming the value.
     /// </summary>
-    static double Value(string? expr, string what, ValueKind kind, Func<string, Quantity?> lookup)
+    static double Value(string? expr, string what, ValueKind kind, Func<string, Quantity?> lookup, double namedPlainMm = 1)
     {
         if (string.IsNullOrWhiteSpace(expr)) throw new FeatureException($"{what}: Empty value");
         try
         {
             return kind switch
             {
-                ValueKind.Length => Expr.Length(expr, lookup),
+                ValueKind.Length => Expr.Length(expr, lookup, namedPlainMm),
                 ValueKind.Angle => Expr.Angle(expr, lookup),
                 _ => Expr.Number(expr, lookup),
             };
@@ -398,7 +400,7 @@ public sealed class Regenerator
         MixedCorners _blendCorners;
 
         // a value: a length in millimetres, an angle in degrees, a plain number (a count, a ratio)
-        double Len(string? expr, string what) => Value(expr, what, ValueKind.Length, lookup);
+        double Len(string? expr, string what) => Value(expr, what, ValueKind.Length, lookup, doc.Units.MmPer());
         double Ang(string? expr, string what) => Value(expr, what, ValueKind.Angle, lookup);
         double Num(string? expr, string what) => Value(expr, what, ValueKind.Number, lookup);
 
@@ -2041,9 +2043,9 @@ public sealed class Regenerator
 
         string Describe(string featureId) => doc.Features.FirstOrDefault(x => x.Id == featureId)?.Name ?? featureId;
 
-        void DoLinearPattern(LinearPatternFeature lp) => ApplyInstances(lp.Seeds, PatternTransforms(lp, State, lookup)!, lp.Skip);
+        void DoLinearPattern(LinearPatternFeature lp) => ApplyInstances(lp.Seeds, PatternTransforms(lp, State, lookup, doc.Units)!, lp.Skip);
 
-        void DoCircularPattern(CircularPatternFeature cp) => ApplyInstances(cp.Seeds, PatternTransforms(cp, State, lookup)!, cp.Skip);
+        void DoCircularPattern(CircularPatternFeature cp) => ApplyInstances(cp.Seeds, PatternTransforms(cp, State, lookup, doc.Units)!, cp.Skip);
 
         void DoMirror(MirrorFeature m)
         {

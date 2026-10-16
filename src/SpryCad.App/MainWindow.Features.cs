@@ -1117,7 +1117,7 @@ public partial class MainWindow
                     front = c + ax * (lo - dc); back = c + ax * (hi - dc);
                 }
             }
-            var ts = Regenerator.PatternTransforms(f, st, Session.Lookup) ?? new();
+            var ts = Regenerator.PatternTransforms(f, st, Session.Lookup, Session.Doc.Units) ?? new();
             var res = new List<(int, Vec3, Vec3)> { (1, front, back) };
             for (int i = 0; i < ts.Count; i++) res.Add((i + 2, ts[i].Point(front), ts[i].Point(back)));
             return res;

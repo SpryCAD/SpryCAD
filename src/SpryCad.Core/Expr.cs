@@ -86,10 +86,19 @@ public static class Expr
     /// A length in millimetres: one with units as it is, a plain number as millimetres (the units a part keeps).
     /// Throws <see cref="ExprException"/> for anything else (an area, an angle).
     /// </summary>
-    public static double Length(string text, Func<string, Quantity?>? lookup)
+    public static double Length(string text, Func<string, Quantity?>? lookup) => Length(text, lookup, 1);
+
+    /// <summary>
+    /// A length in millimetres: one with units as it is; a plain number as millimetres when written as a number ("10",
+    /// as files keep values), but in the part's units (<paramref name="namedPlainMm"/> millimetres each) when worked out
+    /// from variables without units ("T", "T*2", T = 0.25 in an inch part being a quarter inch, as SolidWorks globals are).
+    /// </summary>
+    public static double Length(string text, Func<string, Quantity?>? lookup, double namedPlainMm)
     {
         var q = Evaluate(text, lookup);
-        return q.IsLength || q.IsNumber ? q.Value : throw new ExprException($"Expected a length, not {Kind(q)}");
+        if (q.IsLength) return q.Value;
+        if (!q.IsNumber) throw new ExprException($"Expected a length, not {Kind(q)}");
+        return lookup != null && Identifiers(text).Any(n => lookup(n) != null) ? q.Value * namedPlainMm : q.Value;
     }
 
     /// <summary>An angle in degrees: one with units as it is, a plain number as degrees.</summary>
