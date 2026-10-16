@@ -125,6 +125,18 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
     public static readonly Rgba DarkPartEdgeColor = new(0.52f, 0.54f, 0.58f);
 
     /// <summary>
+    /// A cut's fill (Section View) in its part's color, set apart from the part's faces: lighter on a dark part (black
+    /// plastic: a grey of its hue), darker on a light one, so the cut reads as the solid material it is.
+    /// </summary>
+    static Rgba CapColor(Rgba c)
+    {
+        var luma = 0.2126f * c.R + 0.7152f * c.G + 0.0722f * c.B;
+        return luma < 0.35f
+            ? new Rgba(c.R + (1 - c.R) * 0.3f, c.G + (1 - c.G) * 0.3f, c.B + (1 - c.B) * 0.3f)
+            : new Rgba(c.R * 0.7f, c.G * 0.7f, c.B * 0.7f);
+    }
+
+    /// <summary>
     /// The edges' color over faces of this color in a shaded view: the usual dark, or over a dark part the mid grey
     /// (in wireframe and hidden lines the edges are over the background: always the usual).
     /// </summary>
@@ -544,11 +556,12 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         float[] Quad(Rgba col)
         {
             var k = new[] { Corner(-1, -1), Corner(1, -1), Corner(1, 1), Corner(-1, -1), Corner(1, 1), Corner(-1, 1) };
+            var cap = CapColor(col);
             var d = new float[k.Length * 7];
             for (int i = 0; i < k.Length; i++)
             {
                 d[i * 7] = (float)k[i].X; d[i * 7 + 1] = (float)k[i].Y; d[i * 7 + 2] = (float)k[i].Z;
-                d[i * 7 + 3] = col.R * 0.7f; d[i * 7 + 4] = col.G * 0.7f; d[i * 7 + 5] = col.B * 0.7f; d[i * 7 + 6] = 1;
+                d[i * 7 + 3] = cap.R; d[i * 7 + 4] = cap.G; d[i * 7 + 5] = cap.B; d[i * 7 + 6] = 1;
             }
             return d;
         }
