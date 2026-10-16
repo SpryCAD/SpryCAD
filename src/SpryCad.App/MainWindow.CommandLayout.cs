@@ -203,6 +203,7 @@ public partial class MainWindow
         foreach (var b in CommandBar.GetLogicalDescendants().OfType<Button>()) b.Classes.Set("iconsonly", false);
         Avalonia.Threading.Dispatcher.UIThread.Post(() =>
         {
+            _fitPending = false;
             if (CommandBar.Parent is not Control host) return;
             CommandBar.Measure(Size.Infinity);
             var fits = CommandBar.DesiredSize.Width <= host.Bounds.Width - 8;
@@ -210,7 +211,6 @@ public partial class MainWindow
             foreach (var b in CommandBar.GetLogicalDescendants().OfType<Button>()) b.Classes.Set("iconsonly", !fits);
         }, Avalonia.Threading.DispatcherPriority.Loaded);
     }
-}
-            _fitPending = false;
 
     bool _fitPending;
+}
