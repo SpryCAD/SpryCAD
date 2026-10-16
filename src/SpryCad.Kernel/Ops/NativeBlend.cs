@@ -11,6 +11,9 @@ namespace SpryCad.Kernel;
 /// fillets on any other pair of faces use rolling-ball tools (<see cref="RollingBall"/>), chamfers the chamfer's
 /// cross-section swept along the edges' tangent chain (<see cref="SweptChamfer"/>).
 /// </summary>
+/// <summary>Where convex and concave blended edges meet at a corner, which kind is blended first (the other rolling round it).</summary>
+public enum MixedCorners { Auto, ConvexFirst, ConcaveFirst }
+
 public static class NativeBlend
 {
     /// <summary>
@@ -21,14 +24,19 @@ public static class NativeBlend
     /// </summary>
     public static Solid Apply(Solid body, IReadOnlyList<NEdge> edges, double size, bool fillet, string prefix, List<string> errors,
         bool overflow = true, List<Vec3[]>? problemEdges = null, List<(Solid tool, bool cut)>? applied = null, ChamferSize? chamfer = null,
-        bool buildOnly = false, System.Runtime.CompilerServices.StrongBox<bool>? trimmedOut = null, double? fadeLength = null)
+        bool buildOnly = false, System.Runtime.CompilerServices.StrongBox<bool>? trimmedOut = null, double? fadeLength = null,
+        MixedCorners corners = MixedCorners.Auto)
     {
-        // (a fillet's fade (see Faded): over the length given, the whole wrap where none is, square ends for 0)
-        var oldFade = _fadeLength;
-        _fadeLength = fadeLength;
+        // (a fillet's fade (see Faded): over the length given, the whole wrap where none is, square ends for 0; the order
+        // of kinds where they meet at a corner)
+        var (oldFade, oldCorners) = (_fadeLength, _corners);
+        (_fadeLength, _corners) = (fadeLength, corners);
         try { return ApplyFaded(body, edges, size, fillet, prefix, errors, overflow, problemEdges, applied, chamfer, buildOnly, trimmedOut); }
-        finally { _fadeLength = oldFade; }
+        finally { (_fadeLength, _corners) = (oldFade, oldCorners); }
     }
+
+    // (the blend's order of kinds at mixed corners on this thread)
+    [ThreadStatic] static MixedCorners _corners;
 
     static Solid ApplyFaded(Solid body, IReadOnlyList<NEdge> edges, double size, bool fillet, string prefix, List<string> errors,
         bool overflow, List<Vec3[]>? problemEdges, List<(Solid tool, bool cut)>? applied, ChamferSize? chamfer,
@@ -102,8 +110,8 @@ public static class NativeBlend
             var errs = new List<string>(); var probs = problemEdges == null ? null : new List<Vec3[]>(); var app = applied == null ? null : new List<(Solid, bool)>();
             // (all at once only where it may do better: three or more blends of one kind at a vertex get a corner of
             // their own there; else it fails where the kinds meet, and only costs time)
-            var once = Corner3(edges) ? ApplyOne(body, edges, size, fillet, prefix, errs, overflow, probs, app, chamfer, false, trimmedOut) : body;
-            if (!Corner3(edges)) errs.Add("staged");
+            var once = Corner3(edges) && _corners == MixedCorners.Auto ? ApplyOne(body, edges, size, fillet, prefix, errs, overflow, probs, app, chamfer, false, trimmedOut) : body;
+            if (!Corner3(edges) || _corners != MixedCorners.Auto) errs.Add("staged");
             // (all at once without errors, but a tool's end left standing where the kinds meet: staged too, the one that
             // leaves fewer kept)
             int onceCaps = errs.Count == 0 && once.Native != null ? CapsLeft(once.Native, prefix) : int.MaxValue;
@@ -133,7 +141,7 @@ public static class NativeBlend
             // running down onto a concave one (a boss's side edge onto its foot) is filleted first: the foot's ball then
             // rolls round its round, where the other way the side's ball rolls in the foot's round, as big as itself.
             // Fillets only: chamfers have no round to roll in, and a second staging doubled hard cases' time)
-            if (fillet && stagedCaps > 0 && Mixed(body.Native!, edges, otherFirst: true, grow: true) is { } other && !other.ToHashSet(ReferenceEqualityComparer.Instance).SetEquals(first))
+            if (fillet && _corners == MixedCorners.Auto && stagedCaps > 0 && Mixed(body.Native!, edges, otherFirst: true, grow: true) is { } other && !other.ToHashSet(ReferenceEqualityComparer.Instance).SetEquals(first))
             {
                 var alt = Staged(other);
                 Debug?.Invoke($"mixed blends: staged {(stagedCaps == int.MaxValue ? "failed" : stagedCaps.ToString())}, the other kind first {(alt.caps == int.MaxValue ? "failed" : alt.caps.ToString())}");
@@ -292,7 +300,12 @@ public static class NativeBlend
         {
             var cv = l.Where(e => kind[e] == true).ToList(); var cc = l.Where(e => kind[e] == false).ToList();
             if (cv.Count == 0 || cc.Count == 0) continue;
-            foreach (var e in (cv.Count < cc.Count) != otherFirst ? cv : cc) if (!first.Contains(e)) first.Add(e);
+            // (fillets, as many of each kind there: the convex first, the concave rolling round their rounds after (a
+            // boss's side edge and its foot: its top corner then a corner of three, patched; the foot first left the side
+            // edge's fillet chained round the foot's end, and the corner mitred))
+            // (as asked for the feature, where it is: one kind first at every such corner)
+            bool convexFirst = _corners switch { MixedCorners.ConvexFirst => true, MixedCorners.ConcaveFirst => false, _ => cv.Count < cc.Count || cv.Count == cc.Count && grow };
+            foreach (var e in convexFirst != otherFirst ? cv : cc) if (!first.Contains(e)) first.Add(e);
         }
         // (with the edges of their kind they meet: those blended together, a corner of three getting its patch; left
         // for later, one would roll over the round of another as big as itself (a boss's top edge over its side edges'))
@@ -440,10 +453,17 @@ public static class NativeBlend
                 // foot, an ellipse): one rolling-ball tool for all of it; separate tools meet face to face at the joint,
                 // each square there to its own edge, and do not join)
                 bool preset = false;
-                if (fillet && !ForceRollingBall && _wholeChains)
+                // (and one whose end runs on tangentially into an edge not picked (a foot fillet wrapped round a side's
+                // round): the rolling ball, which fades out there; the exact tools end square)
+                if (fillet && !ForceRollingBall)
                 {
                     var whole = TangentChain(e, edges, done);
-                    if (whole.Count > 1 && whole.Any(Analytic) && !whole.All(Analytic) && !whole.Any(failedChains.Contains))
+                    bool mixedKinds = _wholeChains && whole.Count > 1 && whole.Any(Analytic) && !whole.All(Analytic);
+                    // (only wrapping round a fillet (the end's edge on a blend's face): elsewhere the exact tools' square end was
+                    // right, and the rolling ball's pipe is written to STEP less exactly)
+                    bool fades = Fades && !_noFades && _fadeLength != 0 && ChainEnds(whole).Any(x => RunsOnInto(x.v, x.dirOut, whole, edges as IReadOnlyCollection<NEdge> ?? edges.ToList()) != null
+                        && whole.FirstOrDefault(w => ReferenceEquals(w.V0, x.v) || ReferenceEquals(w.V1, x.v)) is { } we && we.Uses.Any(u => IsBlendFaceName(u.Face.Tag.Name)));
+                    if ((mixedKinds || fades) && !whole.Any(failedChains.Contains))
                     {
                         var r0 = Ball(whole, size, name, edges);
                         Debug?.Invoke($"mixed tangent chain {name}: {whole.Count} edges -> {r0.Error ?? (r0.Fits ? "fits" : "overflows")}");
@@ -2372,6 +2392,10 @@ public static class NativeBlend
         }
         return found;
     }
+
+    /// <summary>A fillet's or chamfer's own face, by its name (a blend's surface, a swept or revolved tool's).</summary>
+    static bool IsBlendFaceName(string n)
+        => n.EndsWith(".Blend", StringComparison.Ordinal) || n.EndsWith(".S.F", StringComparison.Ordinal) || n.EndsWith(".R.F", StringComparison.Ordinal);
 
     /// <summary>The parameter of the point a length d along the edge from tv towards tf (its far end where it is shorter).</summary>
     static double AlongEdge(NEdge g, double tv, double tf, double d)

@@ -1780,6 +1780,9 @@ public static class RollingBall
     {
         if (ReferenceEquals(a, b) || a.CoincidentWith(b, 1e-9)) return true;
         if (a.Spine is not { } sa || b.Spine is not { } sb || Math.Abs(a.R - b.R) > 1e-9 * Math.Max(1, a.R)) return false;
+        // (a fading pipe is a piece of no other: it starts where the constant one ends, along the same tangent, but its
+        // radius falls away from it)
+        if (sa.Variable || sb.Variable) return false;
         var tol = 1e-7 * Math.Max(1, a.R);
         for (int i = 0; i < sa.P.Length; i++)
             for (int j = 0; j < sb.P.Length; j++)

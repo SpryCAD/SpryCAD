@@ -262,6 +262,13 @@ public sealed class FilletFeature : Feature
     /// </summary>
     public string FadeLength { get; set; } = "";
     /// <summary>
+    /// Where convex and concave edges of the fillet meet at a corner (a boss's side edge and its foot): which kind is
+    /// filleted first, the other rolling round it. Convex first: the foot wraps round the side's round and fades out
+    /// (a blended foot); concave first: the side's round runs down onto the foot's (one continuous foot). Auto: convex
+    /// first where as many of each meet, else the fewer first.
+    /// </summary>
+    public SpryCad.Kernel.MixedCorners MixedCorners { get; set; } = SpryCad.Kernel.MixedCorners.Auto;
+    /// <summary>
     /// Also every edge of the body of the kind <see cref="ScopeKind"/> (a casting's blends in one feature); with
     /// <see cref="Features"/> as well, the edges between those features' faces only.
     /// </summary>

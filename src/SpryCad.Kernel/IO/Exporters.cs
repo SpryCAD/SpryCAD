@@ -657,8 +657,14 @@ public static class StepWriter
         }
         // chord-length parameters of the interpolation ≈ spine arc length: s ↦ t linear
         double T(double s) => Math.Clamp((s - sa) / (sb - sa), 0, 1);
-        Vec3 C(double s) => c2.Eval(T(s));
-        Vec3 Tan(double s) { const double h = 1e-6; var t = T(s); double a = Math.Max(0, t - h), z = Math.Min(1, t + h); return (c2.Eval(z) - c2.Eval(a)).Normalized; }
+        // (a fading pipe: its own spine and tangent, its section's set-back and size being the spine's own; along the C2
+        // curve's they missed the fade's start by ~5e-3)
+        Vec3 C(double s) => sp.VariesAt(s) ? sp.Eval(s) : c2.Eval(T(s));
+        Vec3 Tan(double s)
+        {
+            if (sp.VariesAt(s)) return sp.Deriv(s).Normalized;
+            const double h = 1e-6; var t = T(s); double a = Math.Max(0, t - h), z = Math.Min(1, t + h); return (c2.Eval(z) - c2.Eval(a)).Normalized;
+        }
         // frame: a fixed reference direction made perpendicular to the tangent (the normal of the plane the spine turns
         // in, else any direction across it)
         var refv = Vec3.Zero;

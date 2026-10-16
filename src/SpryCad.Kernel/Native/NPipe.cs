@@ -329,6 +329,15 @@ public sealed class PipeSpine
         return (s, cs, Vec3.Distance(p, cs));
     }
 
+    /// <summary>Whether the radius changes round s (the nodes about its segment).</summary>
+    public bool VariesAt(double s)
+    {
+        if (Dr == null) return false;
+        int i0 = Math.Max(0, Seg(s) - 1), i1 = Math.Min(S.Length - 1, Seg(s) + 2);
+        for (int i = i0; i <= i1; i++) if (Dr[i] != 0 || DrS![i] != 0) return true;
+        return false;
+    }
+
     /// <summary>Signed distance from a pipe of radius r (positive outside).</summary>
     public double Dist(Vec3 p, double r) { var b = Ball(p, r); return b.dist - Rad(b.s, r); }
 

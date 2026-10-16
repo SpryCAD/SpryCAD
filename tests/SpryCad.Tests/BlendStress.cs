@@ -212,6 +212,41 @@ static class BlendStress
     }
 
     /// <summary>A case as a part file (FC_STRESS_SAVE=dir: the wrong ones), to look at.</summary>
+    /// <summary>
+    /// <c>-- bossfillet out.sprt radius [shape]</c>: a stress shape's boss (block with boss by default) with every edge of
+    /// the boss filleted in one feature (its top, its sides, its foot), saved to look at.
+    /// </summary>
+    public static int BossFillet(string path, double radius, string shape = "block with boss")
+    {
+        var doc0 = Demos.StressShapes.First(s => s.name == shape).build();
+        var r0 = new Regenerator().Rebuild(doc0);
+        var body = r0.State.Bodies.Single().Solid.Native!;
+        body.Link();
+        var boss = doc0.Features.First(f => f.Name == "Boss").Id;
+        var edges = body.Edges.Where(e => e.Uses.Count == 2 && e.Uses.Any(u => u.Face.Tag.Name.StartsWith(boss + ".", StringComparison.Ordinal)) && Sharp(e)).ToList();
+        Console.WriteLine($"{edges.Count} edges");
+        Save(Path.GetDirectoryName(Path.GetFullPath(path))!, doc0, edges, "fillet", radius, Path.GetFileNameWithoutExtension(path));
+        // (FC_BOSS_ORDERS=n: the edges in n orders, each built, its corner patches counted: the result should not depend on it)
+        if (Environment.GetEnvironmentVariable("FC_BOSS_ORDERS") is { } no)
+            for (int seed = 0; seed < int.Parse(no); seed++)
+            {
+                var order = new List<NEdge>(edges);
+                var rng = new Random(seed);
+                for (int i = order.Count - 1; i > 0 && seed > 1; i--) { int j = rng.Next(i + 1); (order[i], order[j]) = (order[j], order[i]); }
+                if (seed == 1) order.Reverse();
+                var doc = doc0.Clone();
+                var refs = order.Select(e => new EdgeRef { A = e.Uses[0].Face.Tag.Name, B = e.Uses[1].Face.Tag.Name, Hint = e.Mid }).ToList();
+                var fi = doc.AddFeature(new FilletFeature { Name = "Stress", Radius = radius.ToString("R", System.Globalization.CultureInfo.InvariantCulture), Edges = refs });
+                var rr = new Regenerator().Rebuild(doc);
+                var faces = rr.State.Bodies.Single().Solid.Native!.Faces.Where(f => f.Tag.Name.StartsWith(fi.Id + ".", StringComparison.Ordinal)).ToList();
+                var spheres = faces.Count(f => f.Surface.Kind == SurfaceKind.Sphere);
+                var order12 = string.Join(",", order.Select(e => edges.IndexOf(e)));
+                Console.WriteLine($"order {seed} [{order12}]: ok={rr.Status[fi.Id].Ok} spheres {spheres}, faces {faces.Count}");
+                if (spheres < 4) doc.Save(Path.Combine(Path.GetDirectoryName(Path.GetFullPath(path))!, $"boss-order{seed}.sprt"));
+            }
+        return 0;
+    }
+
     static void Save(string dir, CadDocument doc0, List<NEdge> edges, string kind, double size, string name)
     {
         Directory.CreateDirectory(dir);
@@ -332,6 +367,20 @@ static class BlendStress
                                     for (int j = 0; j <= 200; j++)
                                         best = Math.Min(best, Vec3.Distance(p, fit.Eval(fit.KnotsU[0] + (fit.KnotsU[^1] - fit.KnotsU[0]) * i / 200, fit.KnotsV[0] + (fit.KnotsV[^1] - fit.KnotsV[0]) * j / 200)));
                                 var bs = sp.Ball(p, f.Surface.Def.Radius).s;
+                                // (the lookup itself, from the grid's nearest: whether the point is on the fit and only the
+                                // lookup along the edge lost it)
+                                {
+                                    double bu = 0, bv = 0, bdd = double.MaxValue;
+                                    for (int i = 0; i <= 200; i++)
+                                        for (int j = 0; j <= 200; j++)
+                                        {
+                                            double uu = fit.KnotsU[0] + (fit.KnotsU[^1] - fit.KnotsU[0]) * i / 200, vv = fit.KnotsV[0] + (fit.KnotsV[^1] - fit.KnotsV[0]) * j / 200;
+                                            var dd = Vec3.Distance(p, fit.Eval(uu, vv));
+                                            if (dd < bdd) { bdd = dd; bu = uu; bv = vv; }
+                                        }
+                                    var again = Find.Invoke(ps, new object?[] { p, new Vec2(bu, bv), 1e-4, false });
+                                    Console.WriteLine($"    from the grid's nearest the lookup {(again == null ? "fails too" : "finds it")}; the edge {x.Edges[ei].Curve.GetType().Name} {x.Edges[ei].Points[0]} -> {x.Edges[ei].Points[^1]}, its other face {string.Join(",", x.Faces.Where(g => g != f && g.Loops.Any(l => l.Edges.Any(q => q.Edge == ei))).Select(g => g.Name + ":" + g.Surface.Kind))}");
+                                }
                                 // (densely near the point's place along the spine)
                                 double vlo = Math.Max(fit.KnotsV[0], bs - 0.05 * (sp.S1 - sp.S0)), vhi = Math.Min(fit.KnotsV[^1], bs + 0.05 * (sp.S1 - sp.S0));
                                 for (int i = 0; i <= 400; i++)

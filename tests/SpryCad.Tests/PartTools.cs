@@ -99,6 +99,17 @@ public static class PartTools
         return 0;
     }
 
+    /// <summary><c>-- corners part fillet Auto|ConvexFirst|ConcaveFirst out.sprt</c>: a fillet's order at mixed corners set, saved as a copy.</summary>
+    public static int Corners(string[] a)
+    {
+        if (a.Length < 4) { Console.WriteLine("corners part fillet Auto|ConvexFirst|ConcaveFirst out.sprt"); return 1; }
+        var doc = Part(a[0]);
+        var fi = doc.Features.OfType<FilletFeature>().First(f => f.Name == a[1]);
+        fi.MixedCorners = Enum.Parse<MixedCorners>(a[2]);
+        doc.Save(a[3]);
+        return 0;
+    }
+
     public static int FeatureTimes(string[] a)
     {
         if (a.Length < 2) { Console.WriteLine("feattime part reps [features;…]"); return 1; }

@@ -193,8 +193,10 @@ static class Program
         if (args.Length > 0 && args[0] == "feattime") return PartTools.FeatureTimes(args[1..]);
         if (args.Length > 0 && args[0] == "zoom") return PartTools.Zoom(args[1..]);
         if (args.Length > 0 && args[0] == "blenddbg") return PartTools.BlendDebug(args[1..]);
+        if (args.Length > 0 && args[0] == "corners") return PartTools.Corners(args[1..]);
         if (args.Length > 0 && args[0] == "blendtime") return BlendStress.Time(args.Length > 1 ? int.Parse(args[1]) : 5, args.Length > 2 ? args[2] : null);
         if (args.Length > 0 && args[0] == "blendstress") return BlendStress.Run(args.Length > 1 ? args[1] : null);
+        if (args.Length > 2 && args[0] == "bossfillet") return BlendStress.BossFillet(args[1], double.Parse(args[2], System.Globalization.CultureInfo.InvariantCulture), args.Length > 3 ? args[3] : "block with boss");
         if (args.Length > 0 && args[0] == "blendab") return BlendAB.Run(args.Length > 1 ? args[1] : null);
         if (args.Length > 3 && args[0] == "occtprep") return OcctPrep.Run(args[1], args[2], args[3], args.Length > 4 ? int.Parse(args[4]) : 7);
         if (args.Length > 1 && args[0] == "steptime") return StepTime.Run(args[1], args.Length > 2 ? int.Parse(args[2]) : 5);
