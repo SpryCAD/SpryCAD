@@ -821,6 +821,15 @@ public partial class MainWindow
     void OnTreeContext(string id, Point pos, Control row)
     {
         var menu = new ContextMenu();
+        // the configuration: the quick configurator, Configure, Parameters
+        if (id == FeatureTree.ConfigRow)
+        {
+            menu.Items.Add(Item("Quick Configure", () => ShowConfigurator(Tree.RowFor(id)), null, "configure"));
+            menu.Items.Add(Item("Configure...", () => _ = Dialogs.ConfigurePart(this), null, "configure"));
+            menu.Items.Add(Item("Parameters...", () => _ = UI.ParametersDialog.Show(this, tables: true), null, "equations"));
+            menu.Open(row);
+            return;
+        }
         // a design table: its rows (the one in use ticked; one picked used, one undo step), and Parameters on it
         if (id.StartsWith(FeatureTree.TablePrefix) && Session.Doc.Tables?.FirstOrDefault(t => t.Name == id[FeatureTree.TablePrefix.Length..]) is { } table)
         {

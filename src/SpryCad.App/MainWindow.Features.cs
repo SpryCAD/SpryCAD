@@ -160,6 +160,8 @@ public partial class MainWindow
     {
         // a design table's row in the tree: Parameters on it
         if (id.StartsWith(FeatureTree.TablePrefix)) { _ = ParametersDialog.Show(this, select: id[FeatureTree.TablePrefix.Length..]); return; }
+        // the configuration's row: the quick configurator
+        if (id == FeatureTree.ConfigRow) { ShowConfigurator(Tree.RowFor(id)); return; }
         var f = Session.Doc.Find(id);
         if (f == null) return;
         if (_sketch != null) ExitSketch(true);

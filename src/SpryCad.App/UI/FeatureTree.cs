@@ -116,9 +116,11 @@ public sealed class FeatureTree : UserControl
         // the design tables, each with the row in use (right-click: the rows; double-click: Parameters)
         if (!Flyout)
         {
-            // (the row in use as the tables work out together: one table may pick another's row)
+            // the configuration: the user-facing parameters as set (clicked: the quick configurator); the design tables
+            // not user-facing, each with the row in use (as the tables work out together: one may pick another's row)
+            if (doc.UserParameters().Count > 0) AddRow(ConfigRow, $"Configuration: {doc.Label(null)}", "configure", 1, null);
             var inUse = doc.Tables is { Count: > 0 } ? TableConfig.Resolve(doc).Rows : new();
-            foreach (var t in doc.Tables ?? new())
+            foreach (var t in (doc.Tables ?? new()).Where(t => !t.Exposed))
                 AddRow(TablePrefix + t.Name, $"{t.Name}: {inUse.GetValueOrDefault(t.Name.Trim()) ?? t.Current?.Key ?? "(no rows)"}", "table", 1, null);
         }
         // the origin: a folder of the three planes, the three axes and the origin point
@@ -376,6 +378,11 @@ public sealed class FeatureTree : UserControl
     public const string MaterialRow = "__material";
     /// <summary>A design table's row in the tree: this, then the table's name.</summary>
     public const string TablePrefix = "__table:";
+    /// <summary>The configuration's row in the tree (the part's user-facing parameters).</summary>
+    public const string ConfigRow = "__config";
+
+    /// <summary>A row's control (to show something beside it), or null.</summary>
+    public Control? RowFor(string id) => _rowById.GetValueOrDefault(id);
 
     Border AddRow(string id, string text, string icon, int indent, FeatureStatus? status, bool isHeader = false, bool suppressed = false, bool hasChildren = false,
         bool? sketchShown = null, string? condition = null, Color? swatchColor = null)

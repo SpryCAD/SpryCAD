@@ -65,6 +65,7 @@ public partial class MainWindow : Window
         SetupUnitsSwitch();
 
         Tree.SelectedChanged += OnTreeSelected;
+        Tree.SelectedChanged += id => { if (id == FeatureTree.ConfigRow) ShowConfigurator(Tree.RowFor(id)); };
         Tree.EditRequested += id => { if (id == FeatureTree.MaterialRow) EditMaterialCommand(); else EditFeature(id); };
         Tree.ContextRequested += OnTreeContext;
         Tree.SketchVisibilityToggled += id => SetSketchShown(id, null);
