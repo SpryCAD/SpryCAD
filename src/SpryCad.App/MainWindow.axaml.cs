@@ -36,6 +36,7 @@ public partial class MainWindow : Window
         InitializeComponent();
         Instance = this;
         Icons.Scaling = Screens.Primary?.Scaling ?? 1; // (before any icon is made: at 100% the 16 px drawings are used where there are any)
+        HideUntilDrawn();
         _modelMode = new ModelMode(Selection);
         Viewport.Mode = _modelMode;
         Viewport.ReverseWheel = UserSettings.ReverseWheel;
@@ -105,6 +106,38 @@ public partial class MainWindow : Window
         // every part's local copy let go of (and its lock): what was not saved was chosen not to be
         Closed += (_, _) => { foreach (var t in _parts) t.Session.Close(); };
     }
+
+    /// <summary>
+    /// The window shown only once it is drawn: hidden from the screen (cloaked: Windows draws it, but does not put it on
+    /// the screen) until the view's first frame is drawn, else Windows shows an empty frame for half a second or more
+    /// and the window comes forward when its contents appear. Shown anyway after a few seconds, should the view never
+    /// draw. Windows only (elsewhere the window shows as it opens).
+    /// </summary>
+    void HideUntilDrawn()
+    {
+        if (!OperatingSystem.IsWindows() || TryGetPlatformHandle()?.Handle is not { } hwnd || hwnd == IntPtr.Zero) return;
+        if (!Cloak(hwnd, true)) return;
+        var shown = false;
+        void Show()
+        {
+            if (shown) return;
+            shown = true;
+            Cloak(hwnd, false);
+        }
+        Viewport.FirstFrameDrawn += Show;
+        DispatcherTimer.RunOnce(Show, TimeSpan.FromSeconds(3));
+    }
+
+    static bool Cloak(IntPtr hwnd, bool on)
+    {
+        const int DWMWA_CLOAK = 13;
+        int value = on ? 1 : 0;
+        try { return DwmSetWindowAttribute(hwnd, DWMWA_CLOAK, ref value, sizeof(int)) == 0; }
+        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException) { return false; }
+    }
+
+    [System.Runtime.InteropServices.DllImport("dwmapi.dll")]
+    static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
 
     // ------------------------------------------------------------------------------------------
     // rebuild results -> scene

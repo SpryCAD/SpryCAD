@@ -183,6 +183,10 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
     }
 
     Action<long>? _afterFrame;
+    bool _drawnOnce;
+
+    /// <summary>Raised once, when the view is first drawn (the main window is put on the screen only then).</summary>
+    public event Action? FirstFrameDrawn;
 
     /// <summary>
     /// Calls <paramref name="done"/> (on the UI thread) with the time the next frame finished drawing (a Stopwatch
@@ -405,6 +409,7 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
             var at = Stopwatch.GetTimestamp();
             Avalonia.Threading.Dispatcher.UIThread.Post(() => done(at));
         }
+        if (!_drawnOnce) { _drawnOnce = true; Avalonia.Threading.Dispatcher.UIThread.Post(() => FirstFrameDrawn?.Invoke()); }
         if (RenderProfile) NoteRender(t0, tDyn0, tDyn1);
         if (PickProfile) ProfilePick();
 
