@@ -774,7 +774,10 @@ public partial class MainWindow
         // a sketch picked (or, nothing picked, the last one not used yet): the holes at its points, or its circles'
         // centers (a sketch made for a cut used again for holes)
         void UseSketch(string id) { hole.SketchId = id; ViewSketchIso(id); OpenHolePage(hole, isNew: true); }
-        if (sel is { Kind: SelKind.Sketch, FeatureId: { } picked }) { UseSketch(picked); return; }
+        // (a point or a curve of a sketch, its center point or its circle clicked: that sketch)
+        string? SketchOf(SelItem? it) => it is { Kind: SelKind.Sketch or SelKind.SketchSegment or SelKind.Vertex, FeatureId: { } fid }
+            && Session.Doc.Find(fid) is SketchFeature ? fid : null;
+        if (SketchOf(sel) is { } picked) { UseSketch(picked); return; }
         if (sel == null && SketchFromSelection() is { } unused) { UseSketch(unused); return; }
         if (sel != null && TryPlaneOf(sel, out var pr, out var frame))
         {
@@ -786,11 +789,14 @@ public partial class MainWindow
         var page = new PmPage("Hole Position", "hole");
         var s = page.Section("Positions");
         page.Info(s, "Select the planar face or plane on which to place the holes, or a sketch: the holes at its points, or its circles' centers.");
-        var box = page.Selection(s, "Face", SelFilter.PlanarFace | SelFilter.Plane | SelFilter.Sketch, "Face, plane or sketch", 1);
+        var box = page.Selection(s, "Face", SelFilter.PlanarFace | SelFilter.Plane | SelFilter.Sketch | SelFilter.SketchSegment | SelFilter.Vertex,
+            "Face, plane or sketch", 1);
         box.Changed += () =>
         {
             var it = box.Items.FirstOrDefault();
-            if (it is { Kind: SelKind.Sketch, FeatureId: { } sid }) { ShowPage(null); UseSketch(sid); return; }
+            if (SketchOf(it) is { } sid) { ShowPage(null); UseSketch(sid); return; }
+            // (a model vertex: not a place for holes)
+            if (it is { Kind: SelKind.Vertex }) { box.Items.Clear(); Status("Select a planar face, a plane, or a sketch."); return; }
             if (TryPlaneOf(it, out var p2, out var f2))
             {
                 ShowPage(null);
@@ -803,7 +809,8 @@ public partial class MainWindow
         ShowPage(page);
     }
 
-    void OpenHolePage(HoleFeature f, bool isNew)
+    /// <param name="madeSketch">A new hole whose position sketch the wizard made just before: cancelling removes it.</param>
+    void OpenHolePage(HoleFeature f, bool isNew, bool madeSketch = false)
     {
         var page = new PmPage("Hole Specification", "hole");
         var t = page.Section("Hole Type");
@@ -910,7 +917,15 @@ public partial class MainWindow
         var pos = page.Section("Positions");
         page.ButtonRow(pos, "Edit Hole Positions…", () =>
         {
-            if (isNew) { Status("Click OK to create the hole, then use Edit Hole Positions in the design tree."); return; }
+            if (isNew)
+            {
+                // the sketch opened, and this page back with the hole as set when it is closed (its sketch kept)
+                if (_edit != null) _edit.OnCancelled = null;
+                CancelEdit();
+                _pendingHole = f; _pendingHoleMadeSketch = madeSketch;
+                EditFeature(f.SketchId);
+                return;
+            }
             CancelEdit();
             EditFeature(f.SketchId);
         }, "sketch");
@@ -925,7 +940,7 @@ public partial class MainWindow
                 && (f.Type != HoleType.Countersink || (sized.CsDiameter == f.CsDiameter && sized.CsAngle == f.CsAngle));
             if (!same) { f.Standard = null; f.Size = null; f.Fit = null; }
         };
-        if (isNew && _edit != null)
+        if (isNew && madeSketch && _edit != null)
         {
             // the position sketch was committed just before this page opened: cancelling removes it
             var sketchId = f.SketchId;

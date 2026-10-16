@@ -19,6 +19,8 @@ public partial class MainWindow
     string? _pendingAfterSketch;
     SketchTool? _pendingTool;
     HoleFeature? _pendingHole;
+    // (the hole's position sketch made by the Hole Wizard, opened again from its page: cancelling the hole removes it)
+    bool _pendingHoleMadeSketch;
 
     void SetSketchTool(SketchTool t)
     {
@@ -220,6 +222,7 @@ public partial class MainWindow
         StatusSketch.Text = "";
         var pending = _pendingAfterSketch; _pendingAfterSketch = null;
         var hole = _pendingHole; _pendingHole = null;
+        var madeSketch = _sketchIsNew || _pendingHoleMadeSketch; _pendingHoleMadeSketch = false;
         var id = ed.Feature.Id;
         if (save && (ed.Modified || _sketchIsNew) && ed.Sk.Entities.Count > 0)
         {
@@ -235,14 +238,14 @@ public partial class MainWindow
         else if (save && _pendingEquations.Count > 0) Session.Change(() => ApplyPendingEquations(Session.Doc));
         ClearPendingEquations();
         // a sketch a feature asked for (an extrude, a revolve, a hole): back on the Features tab, with that feature
-        ShowTab(save && (pending != null || hole != null) ? "Features" : _activeTab);
+        ShowTab((save && pending != null) || hole != null ? "Features" : _activeTab);
         if (save && Session.Doc.Find(id) is SketchFeature sf)
         {
             Selection.Set(new SelItem { Kind = SelKind.Sketch, FeatureId = sf.Id, Frame = ed.Frame });
             if (hole != null)
             {
                 hole.SketchId = sf.Id;
-                OpenHolePage(hole, isNew: true);
+                OpenHolePage(hole, isNew: true, madeSketch);
             }
             else if (pending != null)
             {
@@ -256,6 +259,12 @@ public partial class MainWindow
                 case "revolve": OpenRevolvePage(new RevolveFeature { SketchId = sf.Id }, true); break;
                 case "cutrevolve": OpenRevolvePage(new RevolveFeature { SketchId = sf.Id, IsCut = true }, true); break;
             }
+        }
+        // the hole's positions opened from its page and the sketch cancelled: back to the hole as it was
+        else if (!save && !_sketchIsNew && hole != null && Session.Doc.Find(id) is SketchFeature back)
+        {
+            hole.SketchId = back.Id;
+            OpenHolePage(hole, isNew: true, madeSketch);
         }
         RefreshScene();
     }
