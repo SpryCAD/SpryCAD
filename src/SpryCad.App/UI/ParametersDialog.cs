@@ -88,6 +88,15 @@ static class ParametersDialog
 
     static string Cell(string s) => s.Replace('\t', ' ').Replace('\r', ' ').Replace('\n', ' ');
 
+    /// <summary>A design table's "1"/"0" as a checkbox, and back.</summary>
+    sealed class OnOff : Avalonia.Data.Converters.IValueConverter
+    {
+        public static readonly OnOff Instance = new();
+        public object? Convert(object? value, Type targetType, object? parameter, System.Globalization.CultureInfo culture) =>
+            !(value is string s && (s.Trim() == "0" || s.Trim().Equals("false", StringComparison.OrdinalIgnoreCase)));
+        public object? ConvertBack(object? value, Type targetType, object? parameter, System.Globalization.CultureInfo culture) => value is true ? "1" : "0";
+    }
+
     static bool IsName(string? s) => !string.IsNullOrEmpty(s) && (char.IsLetter(s[0]) || s[0] == '_') && s.All(c => char.IsLetterOrDigit(c) || c == '_') && EquationEntry.NameProblem(s) == null;
 
     // ---- the equations -------------------------------------------------------------------------------------------
@@ -114,7 +123,18 @@ static class ParametersDialog
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
             _changed();
         }
-        public string Name { get => _name; set => Set(ref _name, value?.Trim() ?? "", nameof(Name)); }
+        /// <summary>Renames the variable everywhere it is used (old name, new name); false: renamed here only.</summary>
+        public Func<string, string, bool>? Renaming;
+        public string Name
+        {
+            get => _name;
+            set
+            {
+                var now = value?.Trim() ?? "";
+                if (FromTable == null && Renaming != null && _name.Length > 0 && now.Length > 0 && now != _name && Renaming(_name, now)) return;
+                Set(ref _name, now, nameof(Name));
+            }
+        }
         public string Equation { get => _expr; set => Set(ref _expr, string.IsNullOrWhiteSpace(value) ? "0" : value.Trim(), nameof(Equation)); }
         public bool User { get => _exposed; set => Set(ref _exposed, value, nameof(User)); }
         public string Description { get => _description; set => Set(ref _description, value ?? "", nameof(Description)); }
@@ -129,6 +149,21 @@ static class ParametersDialog
         {
             (Value, Problem, ValueBrush) = (problem ?? value, problem, problem != null ? Palette.Danger : FromTable != null ? Palette.TextMuted : Palette.Text);
             foreach (var p in new[] { nameof(Value), nameof(ValueBrush), nameof(Problem) }) PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(p));
+        }
+
+        // where it is used: the features and values (clicked: the first feature selected in the tree), or unused
+        public string UsedBy { get; private set; } = "";
+        public string? UsedTip { get; private set; }
+        public IBrush UsedBrush { get; private set; } = Palette.Text;
+        public string? FirstFeature { get; private set; }
+        public void Uses(List<VariableUses.Use>? uses)
+        {
+            uses ??= new();
+            UsedBy = uses.Count == 0 ? "unused" : string.Join(", ", uses.Select(u => u.FeatureId != null && u.What != u.Owner ? $"{u.Owner} ({u.What})" : u.Owner).Distinct());
+            UsedTip = uses.Count == 0 ? "Nothing uses it." : "Used by:\n" + string.Join("\n", uses.Select(u => $"{u.Owner}: {u.What}").Distinct()) + (uses.Any(u => u.FeatureId != null) ? "\nClick to select the first feature in the tree." : "");
+            UsedBrush = uses.Count == 0 ? Palette.TextMuted : Palette.Text;
+            FirstFeature = uses.FirstOrDefault(u => u.FeatureId != null)?.FeatureId;
+            foreach (var p in new[] { nameof(UsedBy), nameof(UsedTip), nameof(UsedBrush) }) PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(p));
         }
 
         static double? Number(string text) => Expr.TryEval(text, null, out var v, out _) ? v : null;
@@ -176,8 +211,21 @@ static class ParametersDialog
                 r.Show(vals.TryGetValue(name, out var v) ? units.Show(v) : "", problem);
             }
             Apply();
+            // (from the part as it now is)
+            var uses = VariableUses.Map(session.Doc);
+            foreach (var r in items) r.Uses(uses.GetValueOrDefault(r.Name.Trim()));
         }
-        EqRow Make(Equation e) => new(e, Recompute);
+        // a variable renamed: everywhere it is used too, the table then shown again from the part
+        bool Rename(string from, string to)
+        {
+            if (!IsName(to) || items.Any(r => r.Name.Trim().Equals(to, StringComparison.OrdinalIgnoreCase))) return false;
+            int n = 0;
+            session.Change(() => n = VariableUses.Rename(session.Doc, from, to));
+            owner.Status(n == 0 ? $"Renamed {from} to {to}." : $"Renamed {from} to {to}, and in the {n} value{(n == 1 ? "" : "s")} using it.");
+            Avalonia.Threading.Dispatcher.UIThread.Post(Refresh);
+            return true;
+        }
+        EqRow Make(Equation e) => new(e, Recompute) { Renaming = Rename };
 
         var dg = NewGrid();
         dg.ItemsSource = items;
@@ -195,6 +243,23 @@ static class ParametersDialog
                 [!TextBlock.TextProperty] = new Binding(nameof(EqRow.Value)),
                 [!TextBlock.ForegroundProperty] = new Binding(nameof(EqRow.ValueBrush)),
                 [!ToolTip.TipProperty] = new Binding(nameof(EqRow.Problem)),
+            }),
+        });
+        dg.Columns.Add(new DataGridTemplateColumn
+        {
+            Header = Header("Used By", "The features and values using it (clicked: the first feature selected in the tree); unused when nothing does."),
+            Width = new DataGridLength(170), IsReadOnly = true,
+            CellTemplate = new FuncDataTemplate<EqRow>((_, _) =>
+            {
+                var t = new TextBlock
+                {
+                    VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0), TextTrimming = TextTrimming.CharacterEllipsis, Cursor = new Cursor(StandardCursorType.Hand),
+                    [!TextBlock.TextProperty] = new Binding(nameof(EqRow.UsedBy)),
+                    [!TextBlock.ForegroundProperty] = new Binding(nameof(EqRow.UsedBrush)),
+                    [!ToolTip.TipProperty] = new Binding(nameof(EqRow.UsedTip)),
+                };
+                t.PointerPressed += (_, _) => { if (t.DataContext is EqRow { FirstFeature: { } id }) owner.ShowFeature(id); };
+                return t;
             }),
         });
         dg.Columns.Add(new DataGridTemplateColumn
@@ -423,7 +488,7 @@ static class ParametersDialog
             // its name, user-facing and description
             var name = new TextBox { Text = t.Name, Width = 140 };
             ToolTip.SetTip(name, "The table's name: the choice in Configure, and a variable holding the row in use (1 = first).");
-            void Rename() { if (name.Text?.Trim() is { } n && n != t.Name) { t.Name = n; Relist(); Apply(); } }
+            void Rename() { if (name.Text?.Trim() is { } n && n != t.Name) RenameVariable(t.Name, n, () => t.Name = n); }
             name.LostFocus += (_, _) => Rename();
             name.KeyDown += (_, e) => { if (e.Key == Key.Enter) { Rename(); e.Handled = true; } };
             var user = new CheckBox { Content = "User-facing", IsChecked = t.Exposed };
@@ -459,16 +524,27 @@ static class ParametersDialog
                         Item("Rename Column...", null, async () =>
                         {
                             if (TopLevel.GetTopLevel(dg) is not Window w || await Dialogs.Input(w, "Rename Column", "Variable", t.Columns[cc]) is not { } n || n.Trim().Length == 0) return;
-                            t.Columns[cc] = n.Trim(); ShowPicked(); Apply();
+                            RenameVariable(t.Columns[cc], n.Trim(), () => t.Columns[cc] = n.Trim());
                         }),
-                        Item("Delete Column", null, () =>
-                        {
-                            t.Columns.RemoveAt(cc);
-                            foreach (var r in t.Rows) if (cc < r.Values.Count) r.Values.RemoveAt(cc);
-                            ShowPicked(); Apply();
-                        }),
+                        Item("Delete Column", null, () => DeleteColumn(t, cc)),
                     },
                 };
+                // a feature's on/off column (its Suppress When is "not" the column): a checkbox per row
+                if (Switched(t.Columns[c]) is { } sw)
+                {
+                    head.Text = sw.Name;
+                    ToolTip.SetTip(head, $"{sw.Name} is built in the rows ticked (its Suppress When: not {t.Columns[c]}). Right-click to rename or delete the column.");
+                    dg.Columns.Add(new DataGridTemplateColumn
+                    {
+                        Header = head, Width = new DataGridLength(1, DataGridLengthUnitType.SizeToHeader),
+                        CellTemplate = new FuncDataTemplate<TRow>((_, _) => new CheckBox
+                        {
+                            HorizontalAlignment = HorizontalAlignment.Center, MinHeight = 0, Padding = new Thickness(0),
+                            [!ToggleButton.IsCheckedProperty] = new Binding($"[{cc}]") { Mode = BindingMode.TwoWay, Converter = OnOff.Instance },
+                        }),
+                    });
+                    continue;
+                }
                 dg.Columns.Add(new DataGridTextColumn { Header = head, Binding = new Binding($"[{cc}]") { Mode = BindingMode.TwoWay }, Width = new DataGridLength(90) });
             }
             var group = "dt" + Guid.NewGuid().ToString("N");
@@ -539,8 +615,85 @@ static class ParametersDialog
                 foreach (var r in t.Rows) r.Values.Add("0");
                 ShowPicked(); Apply();
             };
-            right.Children.Add(new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Children = { addRow, addCol } });
+            // a feature switched on and off by the table: a column of checkboxes, the feature's Suppress When reading it
+            var addFeature = new Button { Content = "+ Feature On/Off" };
+            ToolTip.SetTip(addFeature, "A column of checkboxes turning a feature on or off in each row (it sets the feature's Suppress When).");
+            addFeature.Click += (_, _) =>
+            {
+                var menu = new MenuFlyout { Placement = PlacementMode.BottomEdgeAlignedLeft };
+                foreach (var f in session.Doc.Features.Where(f => f is not SketchFeature && f.Name.Length > 0))
+                {
+                    var ff = f;
+                    var mi = new MenuItem { Header = f.Name };
+                    mi.Click += (_, _) => AddSwitch(t, ff);
+                    menu.Items.Add(mi);
+                }
+                if (menu.Items.Count == 0) menu.Items.Add(new MenuItem { Header = "(no features yet)", IsEnabled = false });
+                menu.ShowAt(addFeature);
+            };
+            right.Children.Add(new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Children = { addRow, addCol, addFeature } });
             right.Children.Add(error);
+        }
+
+        // a feature whose Suppress When is "not" this variable: the table's column switches it on and off
+        Feature? Switched(string column) => session.Doc.Features.FirstOrDefault(f => f.SuppressWhen is { } w
+            && System.Text.RegularExpressions.Regex.IsMatch(w, $@"(^|\bor\s+)not\s+{System.Text.RegularExpressions.Regex.Escape(column)}\s*$", System.Text.RegularExpressions.RegexOptions.IgnoreCase));
+        // a variable of the tables renamed: everywhere it is used too (one undo step), the tables then shown again from the part
+        void RenameVariable(string from, string to, Action here)
+        {
+            if (!IsName(to)) { error.Text = $"\"{to}\" cannot name a variable."; return; }
+            var known = session.Doc.Equations.Select(e => e.Name.Trim()).Concat(tables.SelectMany(x => new[] { x.Name }.Concat(x.Columns)));
+            if (known.Any(k => k.Equals(to, StringComparison.OrdinalIgnoreCase))) { error.Text = $"{to} is already a variable."; return; }
+            // (a table not in the part yet, or wrong: renamed here, applied when right)
+            if (Problem() != null || !(session.Doc.Tables ?? new()).Any(x => x.Name.Equals(from, StringComparison.OrdinalIgnoreCase) || x.Columns.Contains(from, StringComparer.OrdinalIgnoreCase)))
+            { here(); Relist(); Apply(); return; }
+            int n = 0;
+            session.Change(() => n = VariableUses.Rename(session.Doc, from, to));
+            owner.Status(n == 0 ? $"Renamed {from} to {to}." : $"Renamed {from} to {to}, and in the {n} value{(n == 1 ? "" : "s")} using it.");
+            tables = (session.Doc.Tables ?? new()).Select(Serialization.Clone).ToList();
+            Relist();
+        }
+        // a column deleted (a feature's on/off column: its Suppress When cleared too, in the same undo step)
+        void DeleteColumn(DesignTable t, int c)
+        {
+            var col = t.Columns[c];
+            var sw = Switched(col);
+            t.Columns.RemoveAt(c);
+            foreach (var r in t.Rows) if (c < r.Values.Count) r.Values.RemoveAt(c);
+            if (sw == null || Problem() != null) { ShowPicked(); Apply(); return; }
+            var copy = tables.Select(Serialization.Clone).ToList();
+            session.Change(() =>
+            {
+                session.Doc.Tables = copy.Count == 0 ? null : copy;
+                if (session.Doc.Find(sw.Id) is { } f) f.SuppressWhen = Unswitched(f.SuppressWhen, col);
+            });
+            ShowPicked();
+        }
+        static string? Unswitched(string? when, string col)
+        {
+            var w = System.Text.RegularExpressions.Regex.Replace(when ?? "", $@"(^|\s+or\s+)not\s+{System.Text.RegularExpressions.Regex.Escape(col)}\s*$", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase).Trim();
+            if (w.StartsWith("(") && w.EndsWith(")")) w = w[1..^1].Trim();
+            return w.Length == 0 ? null : w;
+        }
+        // a feature switched on and off by a table: a column (on in every row to start), its Suppress When "not" it
+        void AddSwitch(DesignTable t, Feature f)
+        {
+            var known = new HashSet<string>(session.Doc.Equations.Select(e => e.Name.Trim()).Concat(tables.SelectMany(x => new[] { x.Name }.Concat(x.Columns))), StringComparer.OrdinalIgnoreCase);
+            var stem = new string(f.Name.Select(ch => char.IsLetterOrDigit(ch) ? ch : '_').ToArray());
+            if (stem.Length == 0 || !char.IsLetter(stem[0])) stem = "F" + stem;
+            var col = stem + "_On"; int k = 2;
+            while (known.Contains(col)) col = stem + "_On" + k++;
+            t.Columns.Add(col);
+            foreach (var r in t.Rows) r.Values.Add("1");
+            if (Problem() is { } p) { error.Text = p + " Not applied until corrected."; ShowPicked(); return; }
+            var copy = tables.Select(Serialization.Clone).ToList();
+            session.Change(() =>
+            {
+                session.Doc.Tables = copy.Count == 0 ? null : copy;
+                if (session.Doc.Find(f.Id) is { } df) df.SuppressWhen = string.IsNullOrWhiteSpace(df.SuppressWhen) ? $"not {col}" : $"({df.SuppressWhen}) or not {col}";
+            });
+            owner.Status($"{f.Name} is now switched on and off by {t.Name}: untick it in the rows without it.");
+            ShowPicked();
         }
 
         addTable.Click += (_, _) =>

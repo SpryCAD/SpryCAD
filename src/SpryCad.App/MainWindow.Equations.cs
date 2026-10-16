@@ -22,6 +22,9 @@ public partial class MainWindow
         PmPage.EquationText = n => EquationsWithPending().FirstOrDefault(e => e.Name.Trim().Equals(n, StringComparison.OrdinalIgnoreCase))?.Expr;
     }
 
+    /// <summary>Selects a feature in the tree, as clicking it there does (a variable's use picked in Parameters).</summary>
+    public void ShowFeature(string id) { Tree.Select(id); OnTreeSelected(id); }
+
     /// <summary>Drops the equations waiting (a new page or sketch, or the one they were typed on cancelled).</summary>
     void ClearPendingEquations() { _pendingEquations.Clear(); _editValues = null; }
 
