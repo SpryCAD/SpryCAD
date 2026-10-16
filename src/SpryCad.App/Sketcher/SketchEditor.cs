@@ -2467,11 +2467,16 @@ public sealed partial class SketchEditor : IViewportMode
         var prefix = c.Doubled ? "⌀" : c.Type switch { CType.Diameter => "⌀", CType.Radius => "R", CType.Length => "L ", _ => "" };
         var suffix = c.Type == CType.Angle ? "°" : "";
         var txt = prefix + v + suffix;
-        // driven by an equation: its name with the value ("L = 10"), marked Σ as any value worked out is
-        if (EquationEntry.IsName(c.Expr)) txt = $"{c.Expr!.Trim()} = {txt}";
+        // driven by an equation: its name with the value ("W = 2"); worked out from a formula (the variable's, L = W*2, or
+        // the dimension's own), the formula too when short ("L = W*2 = 4", "W/2 = 1"), else marked Σ ("Σ L = 4")
+        var named = EquationEntry.IsName(c.Expr);
+        var formula = (named ? PmPage.EquationText?.Invoke(c.Expr!.Trim()) : c.Expr)?.Trim();
+        var worked = !string.IsNullOrEmpty(formula) && !Expr.IsLiteral(formula, out _);
+        var shown = worked && formula!.Length <= 12;
+        if (shown) txt = $"{formula} = {txt}";
+        if (named) txt = $"{c.Expr!.Trim()} = {txt}";
         if (c.Driven) txt = "(" + txt + ")";
-        if (!string.IsNullOrEmpty(c.Expr) && !Expr.IsLiteral(c.Expr, out _))
-            txt = "Σ " + txt;
+        if (worked && !shown) txt = "Σ " + txt;
         return txt;
     }
 

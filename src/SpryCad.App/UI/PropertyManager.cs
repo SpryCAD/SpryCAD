@@ -181,6 +181,8 @@ public sealed class PmPage
     /// </summary>
     public static Func<string, string, ValueKind, string?>? DefineEquation { get; set; }
     public static Func<IEnumerable<(string name, string shown)>>? EquationNames { get; set; }
+    /// <summary>An equation's expression by its name ("W*2"; with those typed on the open page or sketch), or null.</summary>
+    public static Func<string, string?>? EquationText { get; set; }
 
     // the fields' equations typed and not yet made (made when the field is left or Enter pressed; OK makes them first)
     readonly List<Action> _flush = new();

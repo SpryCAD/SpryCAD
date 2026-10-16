@@ -19,6 +19,7 @@ public partial class MainWindow
     {
         PmPage.DefineEquation = DefineEquation;
         PmPage.EquationNames = () => EditValues().Select(kv => (kv.Key, Session.Doc.Units.Show(kv.Value)));
+        PmPage.EquationText = n => EquationsWithPending().FirstOrDefault(e => e.Name.Trim().Equals(n, StringComparison.OrdinalIgnoreCase))?.Expr;
     }
 
     /// <summary>Drops the equations waiting (a new page or sketch, or the one they were typed on cancelled).</summary>
