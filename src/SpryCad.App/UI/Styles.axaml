@@ -197,6 +197,33 @@
     <Setter Property="Margin" Value="4,3" />
     <Setter Property="Padding" Value="6,4" />
   </Style>
+  <!-- a value on a page: a plain tinted rectangle (white with the accent while typed in); red when it does not evaluate
+       (.invalid) or the feature fails with it (.failed) -->
+  <Style Selector="Border.pmsection TextBox">
+    <Setter Property="CornerRadius" Value="0" />
+    <Setter Property="Background" Value="{DynamicResource Spry.FieldBg}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Spry.FieldBorder}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="MinHeight" Value="26" />
+    <Setter Property="Padding" Value="6,3" />
+  </Style>
+  <Style Selector="Border.pmsection TextBox:pointerover /template/ Border#PART_BorderElement">
+    <Setter Property="Background" Value="{DynamicResource Spry.FieldBg}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Spry.HoverBorder}" />
+  </Style>
+  <Style Selector="Border.pmsection TextBox:focus /template/ Border#PART_BorderElement">
+    <Setter Property="Background" Value="{DynamicResource Spry.Surface}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Spry.Accent}" />
+    <Setter Property="BorderThickness" Value="1" />
+  </Style>
+  <Style Selector="Border.pmsection TextBox.invalid, Border.pmsection TextBox.failed">
+    <Setter Property="Background" Value="{DynamicResource Spry.DangerBg}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Spry.Danger}" />
+  </Style>
+  <Style Selector="Border.pmsection TextBox.invalid:pointerover /template/ Border#PART_BorderElement, Border.pmsection TextBox.failed:pointerover /template/ Border#PART_BorderElement, Border.pmsection TextBox.invalid:focus /template/ Border#PART_BorderElement, Border.pmsection TextBox.failed:focus /template/ Border#PART_BorderElement">
+    <Setter Property="Background" Value="{DynamicResource Spry.DangerBg}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Spry.Danger}" />
+  </Style>
   <Style Selector="TextBlock.pmheader">
     <Setter Property="FontWeight" Value="SemiBold" />
     <Setter Property="Foreground" Value="{DynamicResource Spry.Heading}" />

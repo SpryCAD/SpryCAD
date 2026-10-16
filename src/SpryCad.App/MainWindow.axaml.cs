@@ -146,6 +146,7 @@ public partial class MainWindow : Window
         {
             var st = pr.Status.GetValueOrDefault(_edit.Feature.Id);
             _page.Message = st?.Error ?? (st is { Warnings.Count: > 0 } ? string.Join("\n", st.Warnings) : _edit.Hint);
+            _page.ShowFailure(st?.Error); // (the value typed last, red)
         }
         UpdateProblemEdges();
         if (_firstRebuild) { _firstRebuild = false; }

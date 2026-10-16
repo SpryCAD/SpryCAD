@@ -20,6 +20,7 @@
       <SolidColorBrush x:Key="Spry.Border" Color="#FFD5DCE6" />         <!-- between the window's areas, separators -->
       <SolidColorBrush x:Key="Spry.BorderStrong" Color="#FFC5CFDC" />   <!-- around a control or section -->
       <SolidColorBrush x:Key="Spry.FieldBorder" Color="#FFB0BCCC" />    <!-- around a box holding values -->
+      <SolidColorBrush x:Key="Spry.FieldBg" Color="#FFF1F6FC" />        <!-- a value on a page, not being typed in -->
 
       <!-- the accent and the selection blues -->
       <SolidColorBrush x:Key="Spry.Accent" Color="#FF2F7BD6" />         <!-- = the theme's Accent (App.axaml) -->
@@ -41,6 +42,7 @@
 
       <!-- status -->
       <SolidColorBrush x:Key="Spry.Danger" Color="#FFC62828" />         <!-- errors, Cancel, a skipped instance -->
+      <SolidColorBrush x:Key="Spry.DangerBg" Color="#FFFDE8E8" />       <!-- a value that is invalid, or that the feature fails with -->
       <SolidColorBrush x:Key="Spry.Success" Color="#FF149628" />        <!-- OK -->
       <SolidColorBrush x:Key="Spry.Warning" Color="#FFA8661A" />        <!-- warnings, dangling geometry -->
       <SolidColorBrush x:Key="Spry.NoteBg" Color="#FFFFF8DC" />         <!-- the PropertyManager's message box -->

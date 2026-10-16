@@ -119,6 +119,30 @@ public sealed class PmPage
 
     public void RaiseChanged() => Changed?.Invoke();
 
+    // the page's value fields, the one typed in last, and the one shown as the failure's (its tooltip before)
+    readonly List<TextBox> _numbers = new();
+    TextBox? _lastEdited, _failed;
+    object? _failedTip;
+
+    /// <summary>
+    /// The feature fails as the page has it (<paramref name="error"/>; null: it builds): the value typed in last is
+    /// shown red, the reason in its tooltip (none is when no value was typed: the message above says why).
+    /// </summary>
+    public void ShowFailure(string? error)
+    {
+        var target = error == null ? null : _lastEdited;
+        if (_failed != null && _failed != target)
+        {
+            _failed.Classes.Set("failed", false);
+            ToolTip.SetTip(_failed, _failedTip);
+            _failed = null;
+        }
+        if (target == null) return;
+        if (_failed != target) { _failedTip = ToolTip.GetTip(target); _failed = target; }
+        target.Classes.Set("failed", true);
+        ToolTip.SetTip(target, error);
+    }
+
     public StackPanel Section(string title)
     {
         var panel = new StackPanel { Spacing = 4 };
@@ -172,7 +196,7 @@ public sealed class PmPage
             if (optional && string.IsNullOrWhiteSpace(t))
             {
                 MarkInvalid(false);
-                tb.BorderBrush = null; ToolTip.SetTip(tb, null);
+                tb.Classes.Set("invalid", false); ToolTip.SetTip(tb, null);
                 set("");
                 Changed?.Invoke();
                 return;
@@ -180,7 +204,7 @@ public sealed class PmPage
             if (Units.TryEnter(t, kind, Lookup, out var kept, out var v, out var err))
             {
                 MarkInvalid(false);
-                tb.BorderBrush = null;
+                tb.Classes.Set("invalid", false);
                 // (what a formula, or a value in other units, comes to in the document's)
                 var plain = Expr.IsLiteral(t, out var u) && (u == "" || kind == ValueKind.Length && u == Units.Symbol() || kind == ValueKind.Angle);
                 ToolTip.SetTip(tb, plain ? null : $"= {Units.Show(v)}");
@@ -190,11 +214,12 @@ public sealed class PmPage
             else
             {
                 MarkInvalid(true);
-                tb.BorderBrush = Palette.Danger;
+                tb.Classes.Set("invalid", true);
                 ToolTip.SetTip(tb, err);
             }
         }
-        tb.TextChanged += (_, _) => Validate();
+        _numbers.Add(tb);
+        tb.TextChanged += (_, _) => { _lastEdited = tb; Validate(); };
         tb.KeyDown += (_, e) =>
         {
             if (e.Key is not (Key.Up or Key.Down) || !Units.TryEnter(tb.Text, kind, Lookup, out string _, out var v, out string? _)) return;
@@ -233,8 +258,8 @@ public sealed class PmPage
                     for (int k = a; k <= b; k++) res.Add(k);
                 else { err = $"\"{part}\" is not a valid instance. Enter a number of {min} or more, or a range such as {min}-{min + 2}."; break; }
             }
-            if (err != null) { _invalid[tb] = label; tb.BorderBrush = Palette.Danger; ToolTip.SetTip(tb, err); return; }
-            _invalid.Remove(tb); tb.BorderBrush = null; ToolTip.SetTip(tb, tip);
+            if (err != null) { _invalid[tb] = label; tb.Classes.Set("invalid", true); ToolTip.SetTip(tb, err); return; }
+            _invalid.Remove(tb); tb.Classes.Set("invalid", false); ToolTip.SetTip(tb, tip);
             set(res.ToList());
             Changed?.Invoke();
         };
