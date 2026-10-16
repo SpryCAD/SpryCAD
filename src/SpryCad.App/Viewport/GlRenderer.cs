@@ -14,7 +14,7 @@ public readonly record struct Rgba(float R, float G, float B, float A = 1)
 
 /// <summary>
 /// How a surface takes the light besides its color (an appearance's): metallic 0 (plastic, paint) to 1 (metal), and
-/// roughness 0 (polished) to 1 (matte). <see cref="Plastic"/> is how every surface was lit before appearances.
+/// roughness 0 (polished) to 1 (matte). <see cref="Plastic"/> is near how every surface was lit before appearances (a faint rim added).
 /// </summary>
 public readonly record struct Finish(float Metallic, float Roughness)
 {
@@ -192,7 +192,7 @@ public sealed unsafe class GlRenderer : IDisposable
         const string litFs = """
             in vec3 vN; in vec3 vPosV; in float vClip;
             uniform vec4 uColor; uniform float uPersp;
-            uniform vec2 uFinish; // metallic, roughness (0, 0.5: plastic, as everything was lit before appearances)
+            uniform vec2 uFinish; // metallic, roughness (0, 0.5: plastic, near how everything was lit before appearances)
             out vec4 oColor;
             void main() {
             #ifdef SECTION
@@ -216,6 +216,10 @@ public sealed unsafe class GlRenderer : IDisposable
               vec3 r = reflect(-v, n);
               vec3 env = uColor.rgb * mix(0.25, 1.05, smoothstep(-0.4, 0.6, r.y)) * mix(1.0, 0.7, rough);
               vec3 col = uColor.rgb * d * (1.0 - 0.65 * metal) + env * (0.65 * metal) + mix(vec3(1.0), uColor.rgb, metal) * s;
+              // a plastic's or paint's reflection of the sky, strong only at glancing angles (Fresnel): rounds and
+              // silhouettes catch a light rim, so a dark part's shape reads while its faces stay dark
+              float fres = pow(1.0 - max(dot(n, v), 0.0), 5.0);
+              col += vec3(mix(0.3, 1.0, smoothstep(-0.4, 0.6, r.y))) * mix(0.04, 1.0, fres) * (1.0 - metal) * (1.0 - 0.8 * rough) * 0.45;
               oColor = vec4(col, uColor.a);
             }
             """;

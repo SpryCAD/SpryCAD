@@ -121,6 +121,15 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
     public static readonly Rgba HoverColor = new(1.0f, 0.50f, 0.05f);
     public static readonly Rgba SelectColor = new(0.20f, 0.55f, 1.0f);
     public static readonly Rgba EdgeColor = new(0.08f, 0.08f, 0.10f);
+    /// <summary>Edges over a dark part (black plastic, black oxide): a mid grey, which shows on it where the usual dark would not.</summary>
+    public static readonly Rgba DarkPartEdgeColor = new(0.52f, 0.54f, 0.58f);
+
+    /// <summary>
+    /// The edges' color over faces of this color in a shaded view: the usual dark, or over a dark part the mid grey
+    /// (in wireframe and hidden lines the edges are over the background: always the usual).
+    /// </summary>
+    Rgba EdgeOver(Rgba face) =>
+        Style is DisplayStyle.ShadedWithEdges or DisplayStyle.Shaded && 0.2126f * face.R + 0.7152f * face.G + 0.0722f * face.B < 0.2f ? DarkPartEdgeColor : EdgeColor;
 
     GlRenderer? _r;
     readonly Dictionary<DisplayMesh, GpuMesh> _gpu = new(ReferenceEqualityComparer.Instance);
@@ -296,7 +305,8 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         {
             var g = _gpu[b.Mesh];
             // (a see-through part's edges whatever the style: without them glass is hard to make out)
-            if (Style != DisplayStyle.Shaded || seeThrough) _r.DrawEdges(g, ghost ? EdgeColor.WithAlpha(ghostAlpha) : EdgeColor, vp);
+            var edge = ColorByFeature == null ? EdgeOver(PartColor) : EdgeColor;
+            if (Style != DisplayStyle.Shaded || seeThrough) _r.DrawEdges(g, ghost ? edge.WithAlpha(ghostAlpha) : edge, vp);
             foreach (var (er, color) in hl.Edges(b.Id, b.Mesh))
             {
                 _r.SetupDepth(false, false);
@@ -509,9 +519,9 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         foreach (var i in Instances)
         {
             _r.Model = i.Model;
-            if (i.SeeThrough && i.Color.A > 0) _r.DrawEdges(_gpu[i.Mesh], EdgeColor, i.Model * vp);
+            if (i.SeeThrough && i.Color.A > 0) _r.DrawEdges(_gpu[i.Mesh], EdgeOver(i.Color), i.Model * vp);
             else if (Style == DisplayStyle.Shaded) continue;
-            else if (i.Color.A >= 1) _r.DrawEdges(_gpu[i.Mesh], EdgeColor, i.Model * vp);
+            else if (i.Color.A >= 1) _r.DrawEdges(_gpu[i.Mesh], EdgeOver(i.Color), i.Model * vp);
             else if (i.Color.A > 0) { _r.Blend(true); _r.DrawEdges(_gpu[i.Mesh], EdgeColor.WithAlpha(i.Color.A), i.Model * vp); _r.Blend(false); }
         }
         _r.Model = Matrix4x4.Identity;
