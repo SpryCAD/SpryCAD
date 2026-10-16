@@ -295,6 +295,7 @@ public partial class MainWindow : Window
     {
         UpdateColorByLabels();
         UpdateHudStates();
+        if (Asm != null) { RefreshAssemblyScene(); return; }
         Viewport.Instances = Array.Empty<MeshInstance>();
         var doc = Session.Doc;
         var result = Session.DisplayResult;
