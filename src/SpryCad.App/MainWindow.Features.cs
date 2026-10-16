@@ -765,6 +765,10 @@ public partial class MainWindow
     // ------------------------------------------------------------------------------------------
     // Hole Wizard
 
+    // the Hole Position page while it is open: every sketch shown, those features use too, to be picked by a point or curve
+    PmPage? _holePickPage;
+    bool ShowAllSketches => _page != null && _page == _holePickPage;
+
     void HoleCommand()
     {
         if (PartOnly("Hole Wizard")) return;
@@ -804,9 +808,11 @@ public partial class MainWindow
                 StartSketch(p2!, f2, pointsOnly: true);
             }
         };
-        page.OnCancel = () => ShowPage(null);
+        page.OnCancel = () => { ShowPage(null); RefreshScene(); };
         page.OnOk = page.OnCancel;
+        _holePickPage = page;
         ShowPage(page);
+        RefreshScene();
     }
 
     /// <param name="madeSketch">A new hole whose position sketch the wizard made just before: cancelling removes it.</param>
