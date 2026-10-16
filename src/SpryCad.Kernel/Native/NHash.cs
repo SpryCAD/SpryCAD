@@ -39,7 +39,7 @@ public static class NHash
             h.Add(m.O); h.Add(m.X); h.Add(m.Y); h.Add(m.A); h.Add(m.K); h.Add(sc.U0); h.Add(sc.U1);
             for (int k = 0; k <= 4; k++) h.Add(sc.Gen.Eval(sc.V0 + (sc.V1 - sc.V0) * k / 4));
         }
-        else if (s.Kind == SurfaceKind.Pipe) { h.Add(s.R); foreach (var p in s.Spine!.P) h.Add(p); foreach (var d in s.Spine.D) h.Add(d); }
+        else if (s.Kind == SurfaceKind.Pipe) { h.Add(s.R); foreach (var p in s.Spine!.P) h.Add(p); foreach (var d in s.Spine.D) h.Add(d); if (s.Spine.Dr != null) { foreach (var x in s.Spine.Dr) h.Add(x); foreach (var x in s.Spine.DrS!) h.Add(x); } }
         else if (s.Kind == SurfaceKind.Offset) { h.Add(s.R); var bn = s.Base!.Nurbs!; foreach (var p in bn.P) h.Add(p); foreach (var k in bn.U) h.Add(k); foreach (var k in bn.V) h.Add(k); }
         else if (s.Kind == SurfaceKind.BSpline) { foreach (var p in s.Nurbs!.P) h.Add(p); foreach (var k in s.Nurbs.U) h.Add(k); foreach (var k in s.Nurbs.V) h.Add(k); if (s.Nurbs.W != null) foreach (var w in s.Nurbs.W) h.Add(w); }
         else { h.Add(s.Origin); h.Add(s.Axis); h.Add(s.F.XDir); h.Add(s.R); h.Add(s.R2); }

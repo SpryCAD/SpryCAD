@@ -787,7 +787,9 @@ public static class NIntersect
                 if (Math.Abs(pl.Distance(sp.P[i])) < tol && Math.Abs(Vec3.Dot(pl.Normal, sp.D[i])) > 1 - 1e-12)
                 {
                     // the node's cross-section; other crossings of a short blend pipe with such a plane do not occur
-                    return new List<NCurve> { new NCircle(sp.P[i], sp.D[i], sp.D[i].AnyPerpendicular(), pipe.R) };
+                    // (a variable radius's only where it is not changing there: elsewhere its section is set back)
+                    if (sp.Variable && Math.Abs(sp.DrS![i]) > 1e-12) return null;
+                    return new List<NCurve> { new NCircle(sp.P[i], sp.D[i], sp.D[i].AnyPerpendicular(), sp.Rad(sp.S[i], pipe.R)) };
                 }
         }
         return null;

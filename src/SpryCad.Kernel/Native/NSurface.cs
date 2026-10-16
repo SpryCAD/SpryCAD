@@ -163,7 +163,7 @@ public sealed class NSurface
                     var phi = Math.Atan2(l.Z, r - R);
                     return new Vec2(Theta(l, uHint), double.IsNaN(vHint) ? phi : NCurve.Wrap(phi, vHint));
                 }
-            case SurfaceKind.Pipe: return Spine!.UV(p, uHint);
+            case SurfaceKind.Pipe: return Spine!.UV(p, uHint, R);
             case SurfaceKind.Screw: { var c = Screw!.Closest(p, uHint, vHint); return new Vec2(c.u, c.v); }
             case SurfaceKind.Offset: return Base!.UV(p, uHint, vHint);
             case SurfaceKind.BSpline:
@@ -232,7 +232,7 @@ public sealed class NSurface
     /// <summary>Signed distance, positive on the side of the natural normal (exact for all kinds but the cone, which is scaled).</summary>
     public double F_(Vec3 p)
     {
-        if (Kind == SurfaceKind.Pipe) return Spine!.Closest(p).dist - R;
+        if (Kind == SurfaceKind.Pipe) return Spine!.Dist(p, R);
         if (Kind == SurfaceKind.Screw) return Screw!.SignedDistance(p);
         if (Kind == SurfaceKind.Offset) return Base!.F_(p) - R;
         if (Kind == SurfaceKind.BSpline)
@@ -265,7 +265,7 @@ public sealed class NSurface
     public Vec3 Grad(Vec3 p)
     {
         if (Kind == SurfaceKind.Plane) return F.Normal;
-        if (Kind == SurfaceKind.Pipe) return Spine!.Normal(p);
+        if (Kind == SurfaceKind.Pipe) return Spine!.Normal(p, R);
         if (Kind == SurfaceKind.Screw) return Screw!.Normal(p);
         if (Kind == SurfaceKind.BSpline) { var c = Nurbs!.Closest(p); return Nurbs.Normal(c.u, c.v); }
         if (Kind == SurfaceKind.Offset) return Base!.Grad(p);
@@ -302,9 +302,9 @@ public sealed class NSurface
             case SurfaceKind.Plane: grad = F.Normal; return F.ToLocal3(p).Z;
             case SurfaceKind.Pipe:
                 {
-                    var (s, c, dist) = Spine!.Closest(p);
+                    var (s, c, dist) = Spine!.Ball(p, R);
                     grad = dist > 1e-300 ? (p - c) / dist : Spine.Frame(s).N1;
-                    return dist - R;
+                    return dist - Spine.Rad(s, R);
                 }
             case SurfaceKind.Screw:
                 {

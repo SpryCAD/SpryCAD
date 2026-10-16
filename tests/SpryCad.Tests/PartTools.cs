@@ -75,9 +75,19 @@ public static class PartTools
         reg.Rebuild(doc, k);
         NativeBlend.Debug = s => Console.WriteLine("NB " + s); DirectBlend.Debug = s => Console.WriteLine("DB " + s);
         RollingBall.Debug = s => Console.WriteLine("RB " + s); SweptChamfer.Debug = s => Console.WriteLine("SC " + s);
+        if (Environment.GetEnvironmentVariable("FC_SEAM_DEBUG") != null) Kernel.Native.NSeamSplit.Debug = s => Console.WriteLine("SS " + s);
         Console.WriteLine("---- " + a[1]);
+        // (FC_TIME_PROF: where the feature's time goes)
+        bool prof = Environment.GetEnvironmentVariable("FC_TIME_PROF") != null;
+        if (prof) { Prof.Reset(); Prof.Enabled = true; }
         var r = reg.Rebuild(doc, k + 1);
         NativeBlend.Debug = null; DirectBlend.Debug = null; RollingBall.Debug = null; SweptChamfer.Debug = null;
+        if (prof)
+        {
+            Prof.Enabled = false;
+            foreach (var (pn, pms, calls) in Prof.Results().OrderByDescending(x => x.ms).Take(80))
+                Console.WriteLine($"PROF {pn,-36} {pms,9:0.0} ms x{calls}");
+        }
         var st = r.Status[doc.Features[k].Id];
         Console.WriteLine($"status ok={st.Ok} {st.Error} {string.Join("; ", st.Warnings)}");
         foreach (var b in r.State.Bodies.Where(b => b.Solid.Native != null))
@@ -86,6 +96,17 @@ public static class PartTools
                 Console.WriteLine($"{f.Tag.Name} {f.Surface.Kind} sense={f.Sense} {(f.Surface.Plane is { } pl ? $"n={pl.Normal} d={pl.Distance(Vec3.Zero)}" : "")}");
                 foreach (var l in f.Loops) Console.WriteLine("   loop: " + string.Join(" ", l.Coedges.Select(c => $"{(c.Forward ? c.Edge.V0 : c.Edge.V1).P}")));
             }
+        return 0;
+    }
+
+    /// <summary><c>-- corners part fillet Auto|ConvexFirst|ConcaveFirst out.sprt</c>: a fillet's order at mixed corners set, saved as a copy.</summary>
+    public static int Corners(string[] a)
+    {
+        if (a.Length < 4) { Console.WriteLine("corners part fillet Auto|ConvexFirst|ConcaveFirst out.sprt"); return 1; }
+        var doc = Part(a[0]);
+        var fi = doc.Features.OfType<FilletFeature>().First(f => f.Name == a[1]);
+        fi.MixedCorners = Enum.Parse<MixedCorners>(a[2]);
+        doc.Save(a[3]);
         return 0;
     }
 

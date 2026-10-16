@@ -686,8 +686,21 @@ public partial class MainWindow
         }
         if (fillet) page.Check(p, "Tangent propagation", () => ((FilletFeature)f).TangentPropagation, v => ((FilletFeature)f).TangentPropagation = v);
         else page.Check(p, "Tangent propagation", () => ((ChamferFeature)f).TangentPropagation, v => ((ChamferFeature)f).TangentPropagation = v);
-        // SolidWorks "overflow": where the blend runs into neighbouring geometry it is trimmed by it (keep edge)
-        if (fillet) page.Check(p, "Overflow: trim at neighboring faces", () => ((FilletFeature)f).Overflow, v => ((FilletFeature)f).Overflow = v);
+        // SolidWorks "overflow": where the blend runs into neighboring geometry it is trimmed by it (keep edge)
+        if (fillet)
+        {
+            page.Check(p, "Overflow: trim at neighboring faces", () => ((FilletFeature)f).Overflow, v => ((FilletFeature)f).Overflow = v);
+            // (where it wraps round another fillet into an edge not picked: faded out to nothing at that fillet's
+            // tangent point, over this length back from it; empty: the whole wrap, 0: a square end)
+            var fade = page.Number(p, "Fade length (empty: whole wrap, 0: none)", () => ((FilletFeature)f).FadeLength, v => ((FilletFeature)f).FadeLength = v, "fillet", optional: true);
+            ToolTip.SetTip(fade, "Where the fillet wraps round another fillet into an edge not picked, it fades out to nothing at that fillet's tangent point, over this length back from it. Empty: the whole wrap. 0: a square end.");
+            // (where convex and concave edges meet at a corner: which is filleted first, the other rolling round it)
+            var ff = (FilletFeature)f;
+            page.Combo(p, "Mixed corners", new List<(MixedCorners, string)>
+            {
+                (MixedCorners.Auto, "Auto"), (MixedCorners.ConvexFirst, "Convex first (blended foot)"), (MixedCorners.ConcaveFirst, "Concave first (continuous foot)"),
+            }, () => ff.MixedCorners, v => ff.MixedCorners = v);
+        }
         else
         {
             page.Check(p, "Overflow: trim at neighboring faces", () => ((ChamferFeature)f).Overflow, v => ((ChamferFeature)f).Overflow = v);

@@ -9,6 +9,18 @@ static class DirectBlendTests
 {
     public static void Run(TestRunner t)
     {
+        // (the blend stress run's shapes that come out right throughout: every face's edges, every corner's, single
+        // edges, pairs and all edges, filleted and chamfered, small to large; none may come out wrong again)
+        t.Test("Blend stress: prisms of many outlines, drafted and not, and blocks with round features, never wrong", () =>
+        {
+            var shapes = new[] { "block", "block drafted", "corner cut", "corner cut drafted", "trapezoid", "thin wedge", "hexagon", "triangle",
+                "block with round boss", "block with round pocket" };
+            var cases = BlendStress.Cases(shapes);
+            t.True(cases.Count > 1000, $"only {cases.Count} cases");
+            var wrong = cases.Where(c => c.outcome == "wrong").ToList();
+            t.True(wrong.Count == 0, $"{wrong.Count} wrong, as {string.Join("; ", wrong.Take(3).Select(w => w.name + ": " + w.detail))}");
+        });
+
         foreach (var flat in new[] { false, true })
             t.Test($"Chamfer: three edges meeting at a block's corner{(flat ? ", its corner cut flat" : ", a point")}", () =>
             {

@@ -61,6 +61,10 @@ public static class Csg
             catch (TimeoutException) { throw new InvalidOperationException($"the geometry could not be computed ({reason})"); }
             finally { BspNode.Deadline = old; }
         }
+        // (exact or failed asked for, an operand faceted: failed, not the facet engine without a time limit (a blend's
+        // tool faceted by a fallback upstream took twelve minutes here, and left the part faceted))
+        if (NoFallback && UseNative && !a.IsEmpty && !b.IsEmpty && (a.Native == null || b.Native == null) && a.Bounds.Overlaps(b.Bounds, 1e-6))
+            throw new InvalidOperationException(LastFallbackReason = "an operand is not exact");
         return RunFacets(a, b, op);
     }
 

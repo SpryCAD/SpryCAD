@@ -11,6 +11,9 @@ namespace SpryCad.Kernel;
 /// fillets on any other pair of faces use rolling-ball tools (<see cref="RollingBall"/>), chamfers the chamfer's
 /// cross-section swept along the edges' tangent chain (<see cref="SweptChamfer"/>).
 /// </summary>
+/// <summary>Where convex and concave blended edges meet at a corner, which kind is blended first (the other rolling round it).</summary>
+public enum MixedCorners { Auto, ConvexFirst, ConcaveFirst }
+
 public static class NativeBlend
 {
     /// <summary>
@@ -21,7 +24,60 @@ public static class NativeBlend
     /// </summary>
     public static Solid Apply(Solid body, IReadOnlyList<NEdge> edges, double size, bool fillet, string prefix, List<string> errors,
         bool overflow = true, List<Vec3[]>? problemEdges = null, List<(Solid tool, bool cut)>? applied = null, ChamferSize? chamfer = null,
-        bool buildOnly = false, System.Runtime.CompilerServices.StrongBox<bool>? trimmedOut = null)
+        bool buildOnly = false, System.Runtime.CompilerServices.StrongBox<bool>? trimmedOut = null, double? fadeLength = null,
+        MixedCorners corners = MixedCorners.Auto)
+    {
+        // (a fillet's fade (see Faded): over the length given, the whole wrap where none is, square ends for 0; the order
+        // of kinds where they meet at a corner)
+        var (oldFade, oldCorners) = (_fadeLength, _corners);
+        (_fadeLength, _corners) = (fadeLength, corners);
+        try { return ApplyFaded(body, edges, size, fillet, prefix, errors, overflow, problemEdges, applied, chamfer, buildOnly, trimmedOut); }
+        finally { (_fadeLength, _corners) = (oldFade, oldCorners); }
+    }
+
+    // (the blend's order of kinds at mixed corners on this thread)
+    [ThreadStatic] static MixedCorners _corners;
+
+    static Solid ApplyFaded(Solid body, IReadOnlyList<NEdge> edges, double size, bool fillet, string prefix, List<string> errors,
+        bool overflow, List<Vec3[]>? problemEdges, List<(Solid tool, bool cut)>? applied, ChamferSize? chamfer,
+        bool buildOnly, System.Runtime.CompilerServices.StrongBox<bool>? trimmedOut)
+    {
+        // (every boolean of a blend exact or failed, its tools' trims too: a tool faceted by a fallback while it was built
+        // was then joined to the body by the facet engine, unbounded in time, the part left faceted)
+        var oldNoFallback = Csg.NoFallback;
+        Csg.NoFallback = true;
+        int fades0 = _fadesMade;
+        bool outer = !_noFades;
+        try
+        {
+            var errs = new List<string>(); var probs = problemEdges == null ? null : new List<Vec3[]>(); var app = applied == null ? null : new List<(Solid, bool)>();
+            var r = ApplyExact(body, edges, size, fillet, prefix, errs, overflow, probs, app, chamfer, buildOnly, trimmedOut);
+            // (failed where fillets faded out: again with square ends, as before, kept where that works)
+            if (outer && errs.Count > 0 && _fadesMade > fades0)
+            {
+                var errs2 = new List<string>(); var probs2 = problemEdges == null ? null : new List<Vec3[]>(); var app2 = applied == null ? null : new List<(Solid, bool)>();
+                _noFades = true;
+                Solid r2;
+                try { r2 = ApplyExact(body, edges, size, fillet, prefix, errs2, overflow, probs2, app2, chamfer, buildOnly, trimmedOut); }
+                finally { _noFades = false; }
+                Debug?.Invoke($"faded: {errs.Count} error(s) ({string.Join(" | ", errs)}); square ends: {errs2.Count}");
+                if (errs2.Count == 0) (r, errs, probs, app) = (r2, errs2, probs2, app2);
+            }
+            errors.AddRange(errs);
+            if (probs != null) problemEdges!.AddRange(probs);
+            if (app != null) applied!.AddRange(app);
+            return r;
+        }
+        finally { Csg.NoFallback = oldNoFallback; }
+    }
+
+    // (fades made on this thread, and a run without them)
+    [ThreadStatic] static int _fadesMade;
+    [ThreadStatic] static bool _noFades;
+
+    static Solid ApplyExact(Solid body, IReadOnlyList<NEdge> edges, double size, bool fillet, string prefix, List<string> errors,
+        bool overflow, List<Vec3[]>? problemEdges, List<(Solid tool, bool cut)>? applied, ChamferSize? chamfer,
+        bool buildOnly, System.Runtime.CompilerServices.StrongBox<bool>? trimmedOut)
     {
         if (size <= 0) { errors.Add("Size must be greater than zero."); return body; }
         // (edges turning from concave to convex along their length split where their faces are tangent, only the part
@@ -49,24 +105,60 @@ public static class NativeBlend
         // one out at each such vertex first, then the others on the body it leaves, running on round what it blended
         // (as two features would). At once, their tools can collide where they meet
         // (only where all at once fails: where it works, a corner of three blends gets its patch, as before)
-        if (!buildOnly && Mixed(body.Native!, edges) is { } first)
+        if (!buildOnly && Mixed(body.Native!, edges, grow: fillet) is { } first)
         {
             var errs = new List<string>(); var probs = problemEdges == null ? null : new List<Vec3[]>(); var app = applied == null ? null : new List<(Solid, bool)>();
             // (all at once only where it may do better: three or more blends of one kind at a vertex get a corner of
             // their own there; else it fails where the kinds meet, and only costs time)
-            var once = Corner3(edges) ? ApplyOne(body, edges, size, fillet, prefix, errs, overflow, probs, app, chamfer, false, trimmedOut) : body;
-            if (!Corner3(edges)) errs.Add("staged");
-            if (errs.Count == 0)
+            var once = Corner3(edges) && _corners == MixedCorners.Auto ? ApplyOne(body, edges, size, fillet, prefix, errs, overflow, probs, app, chamfer, false, trimmedOut) : body;
+            if (!Corner3(edges) || _corners != MixedCorners.Auto) errs.Add("staged");
+            // (all at once without errors, but a tool's end left standing where the kinds meet: staged too, the one that
+            // leaves fewer kept)
+            int onceCaps = errs.Count == 0 && once.Native != null ? CapsLeft(once.Native, prefix) : int.MaxValue;
+            Debug?.Invoke($"mixed blends: {first.Count} of {edges.Count} first; at once {(onceCaps == int.MaxValue ? "failed" : onceCaps.ToString())}");
+            if (errs.Count == 0 && onceCaps == 0)
             {
                 if (probs != null) problemEdges!.AddRange(probs);
                 if (app != null) applied!.AddRange(app);
                 return once;
             }
-            var nb1 = Apply(body, first, size, fillet, prefix + ".c", errors, overflow, problemEdges, applied, chamfer, false, trimmedOut);
-            if (ReferenceEquals(nb1, body) || nb1.Native == null) return nb1;
-            var rest = Rest(body.Native!, nb1.Native, edges.Except(first).ToList(), prefix + ".c", size);
-            Debug?.Invoke($"mixed blends: {first.Count} first, then {rest.Count} edges");
-            return rest.Count == 0 ? nb1 : Apply(nb1, rest, size, fillet, prefix, errors, overflow, problemEdges, applied, chamfer, false, trimmedOut);
+            (Solid staged, List<string> serrs, List<Vec3[]>? sprobs, List<(Solid, bool)>? sapp, int caps) Staged(List<NEdge> first)
+            {
+                var serrs = new List<string>(); var sprobs = problemEdges == null ? null : new List<Vec3[]>(); var sapp = applied == null ? null : new List<(Solid, bool)>();
+                Solid staged;
+                var nb1 = Apply(body, first, size, fillet, prefix + ".c", serrs, overflow, sprobs, sapp, chamfer, false, trimmedOut);
+                if (ReferenceEquals(nb1, body) || nb1.Native == null) staged = nb1;
+                else
+                {
+                    var rest = Rest(body.Native!, nb1.Native, edges.Except(first).ToList(), prefix + ".c", size);
+                    Debug?.Invoke($"mixed blends: {first.Count} first, then {rest.Count} edges");
+                    staged = rest.Count == 0 ? nb1 : Apply(nb1, rest, size, fillet, prefix, serrs, overflow, sprobs, sapp, chamfer, false, trimmedOut);
+                }
+                return (staged, serrs, sprobs, sapp, serrs.Count == 0 && staged.Native != null ? CapsLeft(staged.Native, prefix) : int.MaxValue);
+            }
+            var (staged, serrs, sprobs, sapp, stagedCaps) = Staged(first);
+            // (a tool's end left standing, or failed: the other kind first, the one leaving fewer kept. A convex edge
+            // running down onto a concave one (a boss's side edge onto its foot) is filleted first: the foot's ball then
+            // rolls round its round, where the other way the side's ball rolls in the foot's round, as big as itself.
+            // Fillets only: chamfers have no round to roll in, and a second staging doubled hard cases' time)
+            if (fillet && _corners == MixedCorners.Auto && stagedCaps > 0 && Mixed(body.Native!, edges, otherFirst: true, grow: true) is { } other && !other.ToHashSet(ReferenceEqualityComparer.Instance).SetEquals(first))
+            {
+                var alt = Staged(other);
+                Debug?.Invoke($"mixed blends: staged {(stagedCaps == int.MaxValue ? "failed" : stagedCaps.ToString())}, the other kind first {(alt.caps == int.MaxValue ? "failed" : alt.caps.ToString())}");
+                // (over a failure only when clean: a refusal says so, a tool's end standing does not)
+                if (alt.caps == 0 || stagedCaps != int.MaxValue && alt.caps < stagedCaps) (staged, serrs, sprobs, sapp, stagedCaps) = alt;
+            }
+            if (errs.Count == 0 && onceCaps <= stagedCaps)
+            {
+                Debug?.Invoke($"mixed blends: at once {onceCaps} tool end(s) left, staged {(stagedCaps == int.MaxValue ? "failed" : stagedCaps.ToString())}: at once");
+                if (probs != null) problemEdges!.AddRange(probs);
+                if (app != null) applied!.AddRange(app);
+                return once;
+            }
+            errors.AddRange(serrs);
+            if (sprobs != null) problemEdges!.AddRange(sprobs);
+            if (sapp != null) applied!.AddRange(sapp);
+            return staged;
         }
         // (the ball pivoting round convex corners: where that leaves errors, the fillets mitred there instead, as before,
         // when that does better)
@@ -100,6 +192,20 @@ public static class NativeBlend
             // (a pivot not glued: that run is incomplete)
             if (pivotFailed || inexact && r2.Native != null || errs2.Count < errs1.Count) (r1, errs1, probs1, app1) = (r2, errs2, probs2, app2);
         }
+        // (a tool's end left standing in the result (a wing): where a tangent chain of edges the exact tools take runs
+        // on into ones only the rolling ball does, separate tools square at the joint; again with such chains one
+        // rolling-ball tool each, kept where that leaves fewer)
+        if (fillet && !buildOnly && !_wholeChains && errs1.Count == 0 && r1.Native != null && MixedChains(edges) && CapsLeft(r1.Native, prefix) is var caps1 && caps1 > 0)
+        {
+            var errs3 = new List<string>(); var probs3 = problemEdges == null ? null : new List<Vec3[]>(); var app3 = applied == null ? null : new List<(Solid, bool)>();
+            _wholeChains = true;
+            Solid r3;
+            try { r3 = ApplyOne(body, edges, size, fillet, prefix, errs3, overflow, probs3, app3, chamfer, buildOnly, trimmedOut); }
+            finally { _wholeChains = false; }
+            var caps3 = errs3.Count == 0 && r3.Native != null ? CapsLeft(r3.Native, prefix) : int.MaxValue;
+            Debug?.Invoke($"{prefix}: tool ends left: {caps1} ({string.Join(", ", r1.Native.Faces.Where(f => f.Tag.Name.StartsWith(prefix + ".", StringComparison.Ordinal) && (f.Tag.Name.EndsWith(".End") || f.Tag.Name.EndsWith(".Start") || f.Tag.Name.EndsWith(".End0") || f.Tag.Name.EndsWith(".End1"))).Select(f => f.Tag.Name))}); with whole tangent chains: {(caps3 == int.MaxValue ? "failed" : caps3.ToString())}");
+            if (caps3 < caps1) (r1, errs1, probs1, app1) = (r3, errs3, probs3, app3);
+        }
         errors.AddRange(errs1);
         if (probs1 != null) problemEdges!.AddRange(probs1);
         if (app1 != null) applied!.AddRange(app1);
@@ -112,6 +218,35 @@ public static class NativeBlend
     /// <summary>The most corners a blend feature pivots round (more: mitred, as before).</summary>
     public static int MaxPivots = 4;
     [ThreadStatic] static bool _noPivots;
+    [ThreadStatic] static bool _wholeChains;
+
+    /// <summary>The faces of a blend's tools' ends (named prefix.k.Start / .End / .End0 / .End1) still in a body: a tool square where it should meet the next or run onto a face, standing.</summary>
+    /// <summary>Whether a tangent chain of the edges mixes ones the exact tools take with ones only the rolling ball does (what building such chains whole changes).</summary>
+    static bool MixedChains(IReadOnlyList<NEdge> edges)
+    {
+        var seen = new HashSet<NEdge>(ReferenceEqualityComparer.Instance);
+        foreach (var e in edges)
+        {
+            if (seen.Contains(e)) continue;
+            var chain = TangentChain(e, edges, new HashSet<NEdge>(ReferenceEqualityComparer.Instance));
+            foreach (var x in chain) seen.Add(x);
+            if (chain.Count > 1 && chain.Any(Analytic) && !chain.All(Analytic)) return true;
+        }
+        return false;
+    }
+
+    public static int CapsLeft(NBody body, string prefix)
+    {
+        body.Link();
+        var tol = 1e-7 * Math.Max(1, body.Bounds.Diagonal);
+        return body.Faces.Count(f => f.Tag.Name.StartsWith(prefix + ".", StringComparison.Ordinal)
+            && (f.Tag.Name.EndsWith(".End", StringComparison.Ordinal) || f.Tag.Name.EndsWith(".Start", StringComparison.Ordinal)
+                || f.Tag.Name.EndsWith(".End0", StringComparison.Ordinal) || f.Tag.Name.EndsWith(".End1", StringComparison.Ordinal))
+            // (an end flush with a face beside it, in its plane (a concave blend ending on a face it runs out onto): the
+            // face carried on, not a tool standing)
+            && !f.Coedges.SelectMany(c => c.Edge.Uses).Select(u => u.Face)
+                .Any(g => !ReferenceEquals(g, f) && g.Surface.Kind == SurfaceKind.Plane && f.Surface.Kind == SurfaceKind.Plane && g.Surface.CoincidentWith(f.Surface, tol)));
+    }
 
     /// <summary>The corners the ball would pivot round (convex corner edges two selected edges turn round).</summary>
     static int PivotCorners(IReadOnlyList<NEdge> edges)
@@ -149,7 +284,7 @@ public static class NativeBlend
     /// The edges to blend first where selected edges of both kinds (convex, concave) meet at a vertex: at each such
     /// vertex those of the kind fewer edges there have (concave on a tie). Null when there is no such vertex.
     /// </summary>
-    static List<NEdge>? Mixed(NBody body, IReadOnlyList<NEdge> edges)
+    static List<NEdge>? Mixed(NBody body, IReadOnlyList<NEdge> edges, bool otherFirst = false, bool grow = false)
     {
         var kind = new Dictionary<NEdge, bool?>(ReferenceEqualityComparer.Instance);
         foreach (var e in edges) kind[e] = e.Curve.Periodic && ReferenceEquals(e.V0, e.V1) ? null : Convex(e, e.Curve.Eval(0.5 * (e.T0 + e.T1)));
@@ -165,7 +300,26 @@ public static class NativeBlend
         {
             var cv = l.Where(e => kind[e] == true).ToList(); var cc = l.Where(e => kind[e] == false).ToList();
             if (cv.Count == 0 || cc.Count == 0) continue;
-            foreach (var e in cv.Count < cc.Count ? cv : cc) if (!first.Contains(e)) first.Add(e);
+            // (fillets, as many of each kind there: the convex first, the concave rolling round their rounds after (a
+            // boss's side edge and its foot: its top corner then a corner of three, patched; the foot first left the side
+            // edge's fillet chained round the foot's end, and the corner mitered))
+            // (as asked for the feature, where it is: one kind first at every such corner)
+            bool convexFirst = _corners switch { MixedCorners.ConvexFirst => true, MixedCorners.ConcaveFirst => false, _ => cv.Count < cc.Count || cv.Count == cc.Count && grow };
+            foreach (var e in convexFirst != otherFirst ? cv : cc) if (!first.Contains(e)) first.Add(e);
+        }
+        // (with the edges of their kind they meet: those blended together, a corner of three getting its patch; left
+        // for later, one would roll over the round of another as big as itself (a boss's top edge over its side edges'))
+        // (fillets, or the other kind first: chamfers have no round to roll over, and grown, a pocket's corner edges
+        // took its floor along and the edges where the wall meets their chamfers were taken on after, again and again;
+        // a first of one kind, not grown to all)
+        if (grow && first.Count > 0 && first.All(e => kind[e] == kind[first[0]]))
+        {
+            var grown = new List<NEdge>(first);
+            for (int i = 0; i < grown.Count; i++)
+                foreach (var v in new[] { grown[i].V0, grown[i].V1 })
+                    foreach (var g in at[v])
+                        if (kind[g] == kind[grown[i]] && kind[g] != null && !grown.Contains(g)) grown.Add(g);
+            if (grown.Count < edges.Count) first = grown;
         }
         return first.Count == 0 || first.Count == edges.Count ? null : first;
     }
@@ -199,12 +353,21 @@ public static class NativeBlend
             var x = e.Uses[0].Face.Tag.Name; var y = e.Uses[1].Face.Tag.Name;
             return x == a && y == b || x == b && y == a;
         }
+        // (the distance to the edge itself: a line's samples are its ends alone, and an edge left whole is then half
+        // its length from its own middle, and was lost)
+        static double DistTo(NEdge x, Vec3 p)
+        {
+            var t = x.Curve.Param(p, 0.5 * (x.T0 + x.T1));
+            t = Math.Clamp(t, Math.Min(x.T0, x.T1), Math.Max(x.T0, x.T1));
+            return Math.Min(Vec3.Distance(x.Curve.Eval(t), p), x.Samples(1e-3).Min(q => Vec3.Distance(q, p)));
+        }
         foreach (var e in edges)
         {
             var a = e.Uses[0].Face.Tag.Name; var b = e.Uses[1].Face.Tag.Name;
             var mid = e.Curve.Eval(0.5 * (e.T0 + e.T1));
-            var best = after.Edges.Where(x => Between(x, a, b)).OrderBy(x => x.Samples(1e-3).Min(q => Vec3.Distance(q, mid))).FirstOrDefault();
-            if (best != null && best.Samples(1e-3).Min(q => Vec3.Distance(q, mid)) < Math.Max(1e-3, 0.5 * Vec3.Distance(e.V0.P, e.V1.P)) && !res.Contains(best)) res.Add(best);
+            var best = after.Edges.Where(x => Between(x, a, b)).OrderBy(x => DistTo(x, mid)).FirstOrDefault();
+            if (best != null && DistTo(best, mid) < Math.Max(1e-3, 0.5 * Vec3.Distance(e.V0.P, e.V1.P)) && !res.Contains(best)) res.Add(best);
+            else Debug?.Invoke($"rest: {e.Curve.GetType().Name} {e.V0.P}->{e.V1.P} [{a}|{b}] not found on the result ({(best == null ? "no edge between those faces" : $"nearest {best.V0.P}->{best.V1.P}")})");
         }
         if (!joins) return res;
         // the remains' faces against the first blends' faces, near the vertices they shared
@@ -217,6 +380,9 @@ public static class NativeBlend
             bool blend0 = n0.StartsWith(firstPrefix + ".", StringComparison.Ordinal), blend1 = n1.StartsWith(firstPrefix + ".", StringComparison.Ordinal);
             if (!(blend0 && names.Contains(n1) || blend1 && names.Contains(n0))) continue;
             var m = x.Curve.Eval(0.5 * (x.T0 + x.T1));
+            // (not where the first blend meets a face smoothly, as a fillet does its own faces: nothing to blend, and the
+            // rest was refused for it)
+            if (Vec3.Dot(Outward(x.Uses[0].Face, m).Normalized, Outward(x.Uses[1].Face, m).Normalized) > Math.Cos(Math.PI / 180)) continue;
             if (ends.Any(p => Vec3.Distance(p, m) < 3 * size)) res.Add(x);
         }
         return res;
@@ -281,9 +447,39 @@ public static class NativeBlend
             void Fail(string msg) => fails.Add((group, $"Edge {fa.Tag.Name} / {fb.Tag.Name}: {msg}"));
             try
             {
-                List<Solid>? tools; bool convex, fits; Solid? strip;
-                using (Prof.Time("blend.tools")) (tools, convex, fits, strip) = ForceRollingBall ? (null, false, false, null)
-                    : e.Curve is NCircle ? ArcTools(group, size, fillet, name, ch, RefIsFirst, direct, body.Native!, edges) : LineTool(e, size, fillet, name, ch, RefIsFirst, direct, body.Native!, edges);
+                List<Solid>? tools = null; bool convex = false, fits = false; Solid? strip = null;
+                // (a tangent chain of edges the exact tools take (lines between planes, arcs on a round square to a plane)
+                // and ones only the rolling ball does (a drafted boss's edge running on round the end of the fillet at its
+                // foot, an ellipse): one rolling-ball tool for all of it; separate tools meet face to face at the joint,
+                // each square there to its own edge, and do not join)
+                bool preset = false;
+                // (and one whose end runs on tangentially into an edge not picked (a foot fillet wrapped round a side's
+                // round): the rolling ball, which fades out there; the exact tools end square)
+                if (fillet && !ForceRollingBall)
+                {
+                    var whole = TangentChain(e, edges, done);
+                    bool mixedKinds = _wholeChains && whole.Count > 1 && whole.Any(Analytic) && !whole.All(Analytic);
+                    // (only wrapping round a fillet (the end's edge on a blend's face): elsewhere the exact tools' square end was
+                    // right, and the rolling ball's pipe is written to STEP less exactly)
+                    bool fades = Fades && !_noFades && _fadeLength != 0 && ChainEnds(whole).Any(x => RunsOnInto(x.v, x.dirOut, whole, edges as IReadOnlyCollection<NEdge> ?? edges.ToList()) != null
+                        && whole.FirstOrDefault(w => ReferenceEquals(w.V0, x.v) || ReferenceEquals(w.V1, x.v)) is { } we && we.Uses.Any(u => IsBlendFaceName(u.Face.Tag.Name)));
+                    if ((mixedKinds || fades) && !whole.Any(failedChains.Contains))
+                    {
+                        var r0 = Ball(whole, size, name, edges);
+                        Debug?.Invoke($"mixed tangent chain {name}: {whole.Count} edges -> {r0.Error ?? (r0.Fits ? "fits" : "overflows")}");
+                        // (taken for its fade alone, only where it fits: cut back where it runs past its faces, it left an end standing where
+                        // the exact tools did not)
+                        if (r0.Error == null && (mixedKinds || r0.Fits))
+                        {
+                            foreach (var o in whole) if (!group.Contains(o)) { group.Add(o); done.Add(o); }
+                            (tools, convex, fits, strip) = (new List<Solid> { r0.Tool! }, r0.Convex, r0.Fits, Pivoted(r0.Tool!) ? null : r0.Tool);
+                            preset = true;
+                        }
+                    }
+                }
+                if (!preset)
+                    using (Prof.Time("blend.tools")) (tools, convex, fits, strip) = ForceRollingBall ? (null, false, false, null)
+                        : e.Curve is NCircle ? ArcTools(group, size, fillet, name, ch, RefIsFirst, direct, body.Native!, edges) : LineTool(e, size, fillet, name, ch, RefIsFirst, direct, body.Native!, edges);
                 if (tools == null && fillet)
                 {
                     // any other pair of faces: rolling ball along the chain of edges this edge belongs to; first across
@@ -397,6 +593,18 @@ public static class NativeBlend
                     }
                 }
             }
+        // (an edge already refused: the blend fails as a whole, and its body is not used; the booleans joining the other
+        // tools (on a shelled loft, seconds each) only cost time)
+        if (!buildOnly && fails.Count > 0)
+        {
+            Debug?.Invoke($"{fails.Count} edge(s) refused: the tools not trimmed or applied");
+            foreach (var (group, msg) in fails)
+            {
+                errors.Add(msg);
+                problemEdges?.AddRange(group.Select(g => g.Samples(1e-3).ToArray()));
+            }
+            return body;
+        }
         if (pending.Count > 0)
         {
             using var _tr = Prof.Time("blend.trim");
@@ -572,6 +780,18 @@ public static class NativeBlend
 
     static (NFace a, NFace b) Faces(NEdge e) => (e.Uses[0].Face, e.Uses[1].Face);
 
+    /// <summary>Whether the exact tools take an edge: a line between two planes, an arc on a cylinder or cone square to a plane.</summary>
+    static bool Analytic(NEdge e)
+    {
+        if (e.Uses.Count != 2) return false;
+        var (a, b) = Faces(e);
+        if (e.Curve is NLine) return a.Surface.Kind == SurfaceKind.Plane && b.Surface.Kind == SurfaceKind.Plane;
+        if (e.Curve is not NCircle) return false;
+        var (p, c) = a.Surface.Kind == SurfaceKind.Plane ? (a, b) : (b, a);
+        return p.Surface.Kind == SurfaceKind.Plane && c.Surface.Kind is SurfaceKind.Cylinder or SurfaceKind.Cone
+            && Math.Abs(Vec3.Dot(c.Surface.Axis.Normalized, p.Surface.Plane!.Normal)) > 0.999;
+    }
+
     /// <summary>
     /// The rolling-ball tool for a chain; where it runs past its faces and an open end meets a face at an angle (a
     /// boss's foot running into a wall), or the next blended edge at a corner (mitred, as the line and arc tools'),
@@ -589,7 +809,21 @@ public static class NativeBlend
             if (EndPlane(v, dirOut, fa, fb, chain, sel) is { } pl0 && RoundCorner(v, fa, fb, chain, sel, pl0, size, name) is { } rc0 && rc0.Patch() is { } p0)
                 pivots.Add((v, rc0, p0));
         Vec3? EndAt(NVertex v) => pivots.Where(x => ReferenceEquals(x.v, v)).Select(x => (Vec3?)x.p.QOwn).FirstOrDefault() ?? TangentStop(v, chain);
-        var rb = RollingBall.Build(chain, size, name, OnFaces, endAt: EndAt);
+        // (an end where the edge runs on tangentially into one not picked, or its faces turn tangent: faded out along it;
+        // not with a pivot at the other end (its patch joined below). Where the fade fails, the chain built for it is the
+        // one wanted here when its ends are the same)
+        RollingBall.Result? built = null;
+        if (retry && endCuts == null && pivots.Count == 0 && Fades && !_noFades && _fadeLength != 0)
+        {
+            if (Faded(chain, size, name, sel, out built) is { } faded) { _fadesMade++; return faded; }
+        }
+        // (a composite chain stopping where its faces turn tangent fades down to a quarter of its size over its stretch
+        // past its last switch, the tip carrying that on to the point)
+        double? FadeTo(Vec3 p) => FadeComposite && Fades && !_noFades && _fadeLength != 0 && ChainEnds(chain).Any(x => !pivots.Any(y => ReferenceEquals(y.v, x.v))
+            && TangentStop(x.v, chain) is { } q && Vec3.Distance(q, p) < 1e-7 * Math.Max(1, size)) ? TipFadeTo * size : null;
+        var rb = built ?? RollingBall.Build(chain, size, name, OnFaces, endAt: EndAt, fadeTo: FadeTo);
+        // (counted: a blend failing with it is done again with square ends)
+        if (rb.FadedEnds.Count > 0) _fadesMade++;
         // (a chain failing only for a sliver of an edge at an end, far shorter than the ball, on which it would have to
         // roll backwards (a round the chain just touches, its last few thousandths): built without that piece, left sharp)
         // First run on over the piece and cut back where it ended (on the face it ran into there): the piece covered,
@@ -628,7 +862,7 @@ public static class NativeBlend
         // As the line tools, run on and cut back to the face; a fitting tool with square ends is left as it is)
         bool skew = rb.Fits && ChainEnds(chain).Any(x => !pivots.Any(p => ReferenceEquals(p.v, x.v)) && (endCuts?.ContainsKey(x.v) == true
             || EndPlane(x.v, x.dirOut, x.fa, x.fb, chain, sel, out _, nearSquare: true) != null || EndCutAt(x.v, x.dirOut, x.fa, x.fb, chain, sel) is { Plane: null }));
-        if (rb.Fits && !skew) return JoinPivots(rb, rb.Tool, rb.Fits, pivots, chain, size);
+        if (rb.Fits && !skew) return JoinPivots(rb, rb.Tool, rb.Fits, pivots, chain, size, rb.FadedEnds);
         var cuts = new List<(Vec3 v, Plane pl)>();
         var valleys = new Dictionary<Vec3, List<Valley>>();
         var corners = new List<RoundCornerCut>();
@@ -653,6 +887,19 @@ public static class NativeBlend
             }
             if (EndPlane(v, dirOut, fa, fb, chain, sel, out _, nearSquare: true) is not { } pl)
             {
+                // (running onto a face tangentially, as a drafted boss's edge round the end of the fillet at its foot
+                // onto the plate: that face along the edge, no end plane; run on and cut back to its plane)
+                // (not where another blended edge carries on from it: a joint)
+                if (!sel.Any(o => !chain.Contains(o) && (ReferenceEquals(o.V0, v) || ReferenceEquals(o.V1, v)))
+                    && (OntoTangent(v, fa, fb) ?? OntoTangent(v, fb, fa)) is { Plane: { } tp })
+                {
+                    // (the chain's side kept: the face's outside where it is the plate the fillet sits on, but a wrap round a
+                    // side's round ending on the part's end face (the round tangent to it) has its run-on outside that,
+                    // where nothing is, and kept it, a flare standing out past the end)
+                    var ee = chain.FirstOrDefault(x => ReferenceEquals(x.V0, v) || ReferenceEquals(x.V1, v));
+                    if (ee != null && tp.Distance(ee.Mid) < -1e-9 * Math.Max(1, size)) tp = Plane.FromPointNormal(v.P, -tp.Normal);
+                    cuts.Add((v.P, tp)); valleys[v.P] = new(); return run;
+                }
                 if (EndCutAt(v, dirOut, fa, fb, chain, sel) is not { Plane: null } roundCut) return 0;
                 rounds.Add((v.P, roundCut));
                 return run;
@@ -666,7 +913,7 @@ public static class NativeBlend
         if (cuts.Count + corners.Count + rounds.Count == 0 || on.Error != null || on.Tool?.Native == null)
         {
             Debug?.Invoke($"rolling ball {name}: no cut back ({cuts.Count} planes, {rounds.Count} rounds, {corners.Count} corners, run on: {on.Error ?? (on.Tool?.Native == null ? "faceted" : "ok")})");
-            return JoinPivots(rb, rb.Tool, rb.Fits, pivots, chain, size);
+            return JoinPivots(rb, rb.Tool, rb.Fits, pivots, chain, size, rb.FadedEnds);
         }
         var old = Csg.NoFallback;
         Csg.NoFallback = true;
@@ -695,9 +942,9 @@ public static class NativeBlend
                 if (withValleys) Debug?.Invoke($"rolling ball {name}: ends kept under {valleys.Values.Sum(x => x.Count)} valley round(s) beside the cut");
                 Debug?.Invoke($"rolling ball {name}: {cuts.Count + corners.Count + rounds.Count} end(s) cut back ({(rb.Fits ? "fits" : "overflows")} -> {(on.Fits ? "fits" : "overflows")}; {t.Bounds.Min}..{t.Bounds.Max}, cut at {string.Join(", ", cuts.Select(c => c.v + " n " + c.pl.Normal))})");
                 // (fitting but for what was cut off)
-                return JoinPivots(rb, t, on.Fits, pivots, chain, size);
+                return JoinPivots(rb, t, on.Fits, pivots, chain, size, on.FadedEnds);
             }
-            return JoinPivots(rb, rb.Tool, rb.Fits, pivots, chain, size);
+            return JoinPivots(rb, rb.Tool, rb.Fits, pivots, chain, size, rb.FadedEnds);
         }
         finally { Csg.NoFallback = old; }
 
@@ -731,7 +978,8 @@ public static class NativeBlend
     /// A rolling-ball tool, its ends fading out where its faces turn tangent carried on to a point there
     /// (<see cref="RollingBall.Tip"/>), the pivots at its ends joined to it unless another tool carries them.
     /// </summary>
-    static RollingBall.Result JoinPivots(RollingBall.Result rb, Solid tool, bool fits, List<(NVertex v, RoundCornerCut c, CornerPatch.Result p)> pivots, List<NEdge> chain, double size)
+    static RollingBall.Result JoinPivots(RollingBall.Result rb, Solid tool, bool fits, List<(NVertex v, RoundCornerCut c, CornerPatch.Result p)> pivots, List<NEdge> chain, double size,
+        IReadOnlyList<(Vec3 at, double r)>? faded = null)
     {
         var t = tool;
         if (t != null && t.Native != null)
@@ -740,7 +988,9 @@ public static class NativeBlend
                 if (pivots.Any(x => ReferenceEquals(x.v, v)) || TangentStop(v, chain) is not { } q) continue;
                 var e = chain.First(x => ReferenceEquals(x.V0, v) || ReferenceEquals(x.V1, v));
                 Solid? tipped;
-                using (Prof.Time("blend.tip")) tipped = RollingBall.Tip(t, e, v, q, size, rb.Convex);
+                // (at an end the tool fades out at, the radius it has come down to)
+                var rTip = faded?.Where(x => Vec3.Distance(x.at, q) < 1e-7 * Math.Max(1, size)).Select(x => (double?)x.r).FirstOrDefault() ?? size;
+                using (Prof.Time("blend.tip")) tipped = RollingBall.Tip(t, e, v, q, rTip, rb.Convex);
                 Debug?.Invoke($"tip at {v.P}: {(tipped == null ? "not made, capped" : "to a point")}");
                 if (tipped != null) t = tipped;
             }
@@ -1090,6 +1340,50 @@ public static class NativeBlend
         var ext = 3 * Math.Max(size, Math.Max(tlA, tlB));
         // (a fillet turning round a corner onto the next: ended where the ball starts to pivot round it)
         var pivots = new List<(RoundCornerCut c, CornerPatch.Result patch)>();
+        // (a chamfer's face: the plane through the lines its legs end on, along a straight edge between planes)
+        Plane? ChamferPlane(NEdge x)
+        {
+            if (x.Curve is not NLine || x.Uses.Count != 2) return null;
+            var (xa, xb) = (x.Uses[0], x.Uses[1]);
+            if (xa.Face.Surface.Kind != SurfaceKind.Plane || xb.Face.Surface.Kind != SurfaceKind.Plane) return null;
+            var p = xa.Start.P; var tx = (xa.End.P - p).Normalized;
+            var na = Outward(xa.Face, p); var nbx = Outward(xb.Face, p);
+            var ua = Vec3.Cross(na, tx).Normalized; var ub = Vec3.Cross(nbx, -tx).Normalized;
+            var fx = ua; var fy = Vec3.Cross(tx, fx).Normalized;
+            Vec2 Q(Vec3 w) => new(Vec3.Dot(w, fx), Vec3.Dot(w, fy));
+            var (la, lb) = EdgeBlend.ChamferLegs(Q(ua), Q(ub), ch, refIsFirst(xa.Face, xb.Face));
+            var pa = p + ua * la; var pb = p + ub * lb;
+            var n = Vec3.Cross(tx, pb - pa);
+            return n.Length < 1e-12 ? null : Plane.FromPointNormal(pa, n.Normalized);
+        }
+        // (two chamfers meeting at a joint, on a miter: exactly where their faces meet, the plane through the vertex and
+        // the line the two chamfer faces cross on. The miter the fillets take (through the corner edge, bisecting the
+        // edges) is that only where the faces are square; on a drafted one it left a sliver between the two)
+        EndCut? ChamferJoint(NVertex v, Vec3 dirOut)
+        {
+            var others = new[] { cA.Face, cB.Face }.SelectMany(f => f.Coedges).Select(c => c.Edge)
+                .Where(g => !ReferenceEquals(g, e) && (ReferenceEquals(g.V0, v) || ReferenceEquals(g.V1, v)) && selected.Contains(g) && !IsSeam(g))
+                .Distinct(ReferenceEqualityComparer.Instance).Cast<NEdge>().ToList();
+            if (others.Count != 1) return null;
+            var g = others[0];
+            // (both convex round a convex corner: each runs to the face it meets, as EndPlane has it)
+            var shared = g.Uses.Any(u => ReferenceEquals(u.Face, cA.Face)) ? cA.Face : cB.Face;
+            if (RunsOnAt(v, e, g, shared, new[] { cA.Face, cB.Face }.Concat(g.Uses.Select(u => u.Face)), selected, squareToo: true)) return null;
+            if (ChamferPlane(e) is not { } me || ChamferPlane(g) is not { } them) return null;
+            var n1 = me.Normal; var n2 = them.Normal;
+            var dd = Vec3.Cross(n1, n2);
+            if (dd.Length < 1e-9) return null;
+            var d = dd.Normalized;
+            // a point of the line where the two faces cross (n1·x = h1, n2·x = h2), then the nearest to v
+            var h1 = Vec3.Dot(n1, me.Project(v.P)); var h2 = Vec3.Dot(n2, them.Project(v.P));
+            var q = (Vec3.Cross(n2, dd) * h1 + Vec3.Cross(dd, n1) * h2) / Vec3.Dot(dd, dd);
+            q += d * Vec3.Dot(v.P - q, d);
+            var n = Vec3.Cross(d, q - v.P);
+            if (n.Length < 1e-9 * Math.Max(1, size)) return null;
+            var pl = Plane.FromPointNormal(v.P, n.Normalized);
+            if (pl.Distance(v.P - dirOut * size) < 0) pl = Plane.FromPointNormal(v.P, -n.Normalized);
+            return new EndCut(pl);
+        }
         EndCut? End(NVertex v, Vec3 dirOut)
         {
             if (fillet && EndPlane(v, dirOut, cA.Face, cB.Face, new[] { e }, selected) is { } pl
@@ -1098,6 +1392,7 @@ public static class NativeBlend
                 pivots.Add((rc, patch));
                 return new EndCut(patch.EndOwn);
             }
+            if (!fillet && ChamferJoint(v, dirOut) is { } joint) return joint;
             return EndCutAt(v, dirOut, cA.Face, cB.Face, new[] { e }, selected);
         }
         var p0 = End(cA.Start, -t);
@@ -1241,6 +1536,10 @@ public static class NativeBlend
         // chain ends meeting a face at an angle (e.g. a keyway wall across a bore): extensions past the ends, each
         // cut back to its face
         var extensions = new List<(double a0, double sweep, EndCut plane, int arc)>();
+        // (ends where the round runs onto a face tangentially (a concave fillet's end, the arc down its end into the face
+        // it rounds into): that face along the edge there, no end plane; the profile revolved on past the tangent point
+        // reaches through that face into the material beyond. Cut on its plane, the side outside it kept)
+        var onto = new List<(int arc, EndCut cut)>();
         if (ranges.Sum(r => r.sweep) < 2 * Math.PI - 1e-6)
         {
             var delta = Math.Min(Math.Min(3 * Math.Max(size, tlc) / rE, Math.PI / 4), (2 * Math.PI - ranges.Sum(r => r.sweep)) / 2);
@@ -1262,6 +1561,14 @@ public static class NativeBlend
                         // the rolling ball's tool is cut back to the other fillet instead)
                         if (fillet && pl.Plane != null && RoundCorner(v, cP.Face, cC.Face, arcs, selected, pl.Plane, size, name) != null) return (null, false, false, null);
                         extensions.Add((atStart ? a0 - delta : a0 + sweep, delta, pl, i));
+                    }
+                    // (not where another blended edge carries on from it: a joint, the blend running on into the next)
+                    else if (!selected.Any(o => !arcs.Contains(o) && (ReferenceEquals(o.V0, v) || ReferenceEquals(o.V1, v)))
+                        && OntoTangent(v, cP.Face, cC.Face) is { Plane: { } tpl } t)
+                    {
+                        // (the arc's side kept, as the rolling ball's: see there)
+                        var ae = arcs.FirstOrDefault(o => ReferenceEquals(o.V0, v) || ReferenceEquals(o.V1, v));
+                        onto.Add((i, ae != null && tpl.Distance(ae.Mid) < -1e-9 * Math.Max(1, size) ? new EndCut(Plane.FromPointNormal(v.P, -tpl.Normal)) : t));
                     }
                 }
             }
@@ -1321,6 +1628,7 @@ public static class NativeBlend
             }
             return (s, e, e - s > 1e-9 && mine.Any(x => Reaches(x.plane, s, e)));
         }
+        Solid Onto(int k, Solid s) { foreach (var (arc, cut) in onto) if (arc == k && !s.IsEmpty) s = cut.Trim(s); return s; }
         for (int k = 0; k < ranges.Count; k++)
         {
             var (a0, sweep) = ranges[k];
@@ -1332,6 +1640,7 @@ public static class NativeBlend
                 var piece = Piece(prof, a0, sweep);
                 // cut back to the faces its ends meet at an angle (as the line tool's)
                 foreach (var x in mine) piece = x.plane.Trim(piece);
+                piece = Onto(k, piece);
                 if (!piece.IsEmpty) tools.Add(piece);
                 continue;
             }
@@ -1339,10 +1648,11 @@ public static class NativeBlend
             foreach (var x in mine)
             {
                 var atStart = Math.Abs(x.a0 + x.sweep - a0) < 1e-9;
-                var end = x.plane.Trim(atStart ? Piece(prof, a0, ms - a0) : Piece(prof, me, a0 + sweep - me));
+                var end = Onto(k, x.plane.Trim(atStart ? Piece(prof, a0, ms - a0) : Piece(prof, me, a0 + sweep - me)));
                 if (!end.IsEmpty) tools.Add(end);
             }
-            tools.Add(Piece(prof, ms, me - ms));
+            var middle = Onto(k, Piece(prof, ms, me - ms));
+            if (!middle.IsEmpty) tools.Add(middle);
         }
         Solid? strip = null;
         if (sprof != null && (direct || !fits) && ranges.Count(r => r.sweep >= 1e-9) == 1)
@@ -1363,10 +1673,47 @@ public static class NativeBlend
                 }
                 strip = Piece(sprof, from, to - from);
                 foreach (var x in mine) strip = x.plane.Trim(strip);
+                strip = Onto(k, strip);
                 if (strip.IsEmpty || strip.Native == null) strip = null;
             }
         }
         return (tools, convex, fits, strip);
+    }
+
+    /// <summary>
+    /// At vertex v, the end of an arc between plane face p and round face c: a planar face there that the round runs onto
+    /// tangentially (the round's cylinder touching its plane along a line, its axis along the plane), as a concave
+    /// fillet's surface runs into the face it rounds into. Its plane, the side outside that face's material kept. Null
+    /// where there is none.
+    /// </summary>
+    static EndCut? OntoTangent(NVertex v, NFace p, NFace c)
+    {
+        var cs = c.Surface;
+        if (cs.Kind != SurfaceKind.Cylinder) return null;
+        var scale = Math.Max(1, cs.R);
+        foreach (var f in FacesAt(v, p, c))
+        {
+            if (ReferenceEquals(f, p) || ReferenceEquals(f, c) || f.Surface.Kind != SurfaceKind.Plane) continue;
+            var pl = f.Surface.Plane!;
+            if (Math.Abs(Vec3.Dot(pl.Normal, cs.Axis.Normalized)) > 1e-9) continue;
+            if (Math.Abs(Math.Abs(pl.Distance(cs.Origin)) - cs.R) > 1e-7 * scale) continue;
+            return new EndCut(Plane.FromPointNormal(v.P, Outward(f, v.P)));
+        }
+        return null;
+    }
+
+    /// <summary>The faces with a corner at v: from the faces given, through the edges at v, round the vertex.</summary>
+    static List<NFace> FacesAt(NVertex v, params NFace[] from)
+    {
+        var faces = new List<NFace>(from);
+        for (int i = 0; i < faces.Count && faces.Count < 32; i++)
+            foreach (var co in faces[i].Coedges)
+            {
+                var e = co.Edge;
+                if (!ReferenceEquals(e.V0, v) && !ReferenceEquals(e.V1, v)) continue;
+                foreach (var u in e.Uses) if (!faces.Contains(u.Face)) faces.Add(u.Face);
+            }
+        return faces;
     }
 
     /// <summary>
@@ -1447,10 +1794,17 @@ public static class NativeBlend
                     if (!others.Any(o => o.Surface.CoincidentWith(f.Surface, 1e-9))) others.Add(f);
                 }
             }
-        if (others.Count != 1 || others[0].Surface.Kind != SurfaceKind.Cylinder) return null;
+        if (others.Count != 1 || others[0].Surface.Kind != SurfaceKind.Cylinder)
+        {
+            Debug?.Invoke($"end cut at {v.P}: {others.Count} other face(s) {string.Join(", ", others.Select(o => o.Tag.Name + ":" + o.Surface.Kind))}");
+            return null;
+        }
         var fc = others[0];
         var cos = Math.Abs(Vec3.Dot(fc.Surface.Normal(v.P), dirOut.Normalized));
-        if (cos > 0.9999 || cos < 0.05) return null;
+        // (square to the edge at its end is no match for a round as it is for a plane: the round falls away under the
+        // tool's square end across its width (a boss's side fillet ending on the top of an earlier round), leaving a
+        // sliver of the end standing; cut to the round there too)
+        if (cos < 0.05) return null;
         // the side the edge is on, a little back from its end
         var side = fc.Surface.F_(v.P - dirOut.Normalized * 1e-3);
         return Math.Abs(side) < 1e-12 ? null : new EndCut(fc, Math.Sign(side));
@@ -1491,14 +1845,12 @@ public static class NativeBlend
                     // standing out of a drafted or round face, the bisector's leaves one blend's edge past the corner
                     // (edges running on tangentially: square to them, as before)
                     var shared = g.Uses.Any(u => ReferenceEquals(u.Face, fa)) ? fa : fb;
-                    // (both blends convex, round a convex corner (the edges of a face, a block's angled one, filleted or
-                    // chamfered all round, the corner edge between the faces beside it left sharp): each ends on the
-                    // face it runs into, as at any other end; what the two take off then overlaps, meeting where they
-                    // cross. A mitre holding the corner edge is that only where the edge stands square to the shared
-                    // face; leaning, it leaves a wing of each beside the other)
+                    // (both blends convex, round a corner edge leaning or concave (see RunsOnAt): each ends on the face
+                    // it runs into, as at any other end; what the two take off then overlaps, meeting where they cross.
+                    // A miter holding the corner edge leaves a wing of each beside the other there)
                     var faces3 = new[] { fa, fb }.Concat(g.Uses.Select(w => w.Face)).ToList();
-                    if (blended.All(x => IsConvex(x) == true) && IsConvex(g) == true
-                        && CornerEdgeOf(v, shared, faces3, blended, selected) is { } ce && IsConvex(ce) == true)
+                    if (blended.All(x => IsConvex(x) == true) && blended.FirstOrDefault(x => ReferenceEquals(x.V0, v) || ReferenceEquals(x.V1, v)) is { } own
+                        && RunsOnAt(v, own, g, shared, faces3, selected, squareToo: false))
                         continue;
                     if (CornerEdge(v, shared, faces3, blended, selected) is { } cd && (a + b).Length > 1e-3 && Vec3.Cross((a + b).Normalized, cd) is var m && m.Length > 1e-3)
                         n = Vec3.Dot(m, a) < 0 ? -m : m;
@@ -1575,6 +1927,31 @@ public static class NativeBlend
     /// </summary>
     static Vec3? CornerEdge(NVertex v, NFace shared, IEnumerable<NFace> faces, IEnumerable<NEdge> blended, IReadOnlyCollection<NEdge> selected)
         => CornerEdgeOf(v, shared, faces, blended, selected) is { } u ? (ReferenceEquals(u.V0, v) ? u.Curve.Deriv(u.T0) : -u.Curve.Deriv(u.T1)).Normalized : null;
+
+    /// <summary>
+    /// Two convex blends on a shared face meeting at v (edge e, and g the next): whether each runs on to the face it
+    /// meets, the two overlapping (joined), rather than both ending on one plane through the corner. So where the corner
+    /// edge (between their other faces) leans from square to the shared face, convex (a drafted block's corner) or
+    /// concave (a drafted boss's side edge running down onto its foot's chamfer): their faces and the two beside them
+    /// meet at no one point, and a plane leaves a sliver or wing of one. Square to it (a box's corner, an L's inside
+    /// one) the plane is exact; convex chamfers run on there too (<paramref name="squareToo"/>). Concave blends meet on
+    /// the plane (their tools are not joined).
+    /// </summary>
+    static bool RunsOnAt(NVertex v, NEdge e, NEdge g, NFace shared, IEnumerable<NFace> faces, IReadOnlyCollection<NEdge> selected, bool squareToo)
+    {
+        if (IsConvex(e) != true || IsConvex(g) != true) return false;
+        if (CornerEdgeOf(v, shared, faces, new[] { e }, selected) is not { } ce) return false;
+        var kc = IsConvex(ce);
+        if (kc == null) return false;
+        if (kc == true && squareToo) return true;
+        if (CornerEdge(v, shared, faces, new[] { e }, selected) is not { } d) return false;
+        var cos = Math.Abs(Vec3.Dot(d, Outward(shared, v.P).Normalized));
+        // (concave: leaning as a draft does, not lying along the shared face (a boss flush with the block's side, where
+        // the miter is as before))
+        var runs = cos < 0.9999 && (kc == true || cos > 0.5);
+        if (runs) Debug?.Invoke($"runs on at {v.P}: corner edge {(kc == true ? "convex" : "concave")} cos {cos:G4}");
+        return runs;
+    }
 
     /// <summary>The edge <see cref="CornerEdge"/> gives the direction of.</summary>
     static NEdge? CornerEdgeOf(NVertex v, NFace shared, IEnumerable<NFace> faces, IEnumerable<NEdge> blended, IReadOnlyCollection<NEdge> selected)
@@ -1913,14 +2290,158 @@ public static class NativeBlend
     /// where the faces are a few degrees from tangent (the ball there a sliver; at the vertex itself it has no
     /// centre). Null for any other end.
     /// </summary>
-    static Vec3? TangentStop(NVertex v, List<NEdge> chain)
+    /// <summary>Fillets fading out where their edge runs on tangentially into one not picked (FC_FADE=0: square ends).</summary>
+    public static bool Fades = Environment.GetEnvironmentVariable("FC_FADE") != "0";
+
+    /// <summary>Fades where an edge's own faces turn tangent too (FC_FADE_TANGENT); else the tip to a point there.</summary>
+    public static bool FadeTangentStops = Environment.GetEnvironmentVariable("FC_FADE_TANGENT") != null;
+
+    /// <summary>What a composite fillet fades down to before the tip, where its faces turn tangent, as a part of its size.</summary>
+    public const double TipFadeTo = 0.25;
+
+    /// <summary>
+    /// Composite chains fading out before the tip (FC_FADE_COMPOSITE=1): only over the stretch past the last switch, its
+    /// slope held to 0.3, so short stretches (the brake duct's rim, R0.3 to 0.263) show little, and the faded tool can
+    /// make the splice's checks far slower before a blend that fails falls back. Fading through switches is the rest.
+    /// </summary>
+    public static bool FadeComposite = Environment.GetEnvironmentVariable("FC_FADE_COMPOSITE") != null;
+
+    // (the blend's fade length on this thread: null the whole wrap, 0 none)
+    [ThreadStatic] static double? _fadeLength;
+
+    /// <summary>
+    /// A rolling-ball chain faded out at its ends where the edge runs on tangentially into one not picked, between the
+    /// same face on one side and a face meeting the other smoothly (a boss's foot fillet, wrapped round its side fillet,
+    /// reaching the next face's foot): the radius falling to nothing along the wrap, at the tangent point of the fillet it
+    /// wraps round (the edge's end), over the fade length asked for (Apply's), else the whole wrap; and where the edge's
+    /// own faces turn tangent, from where they are a few degrees apart to the vertex (<see cref="RollingBall.Fade"/>).
+    /// The chain stops where the fade starts, the two glued at their common section. Null where there is no such end,
+    /// or any of it fails (the square end, as before).
+    /// </summary>
+    static RollingBall.Result? Faded(List<NEdge> chain, double size, string name, IReadOnlyCollection<NEdge> sel, out RollingBall.Result? chainBuilt)
+    {
+        const double stopDeg = 5;
+        chainBuilt = null;
+        var runs = new List<(NVertex v, NEdge g)>();
+        // (and ends where the edge's own faces turn tangent: the chain stops where they are a few degrees apart, as
+        // before, and fades out from there to the vertex along the edge)
+        var stops = new List<(NVertex v, NEdge e, double tq)>();
+        foreach (var (v, dirOut, fa, fb) in ChainEnds(chain))
+        {
+            if (RunsOnInto(v, dirOut, chain, sel) is { } g) runs.Add((v, g));
+            // (where the edge's own faces turn tangent: only on asking (FC_FADE_TANGENT), the tip to a point there
+            // otherwise (Tip): there the fillet is a sliver already, and the fade left the duct's drop with sharp edges
+            // beside its side rounds where the tip left none)
+            else if (FadeTangentStops && TangentStop(v, chain, stopDeg) is { } q && chain.FirstOrDefault(x => ReferenceEquals(x.V0, v) || ReferenceEquals(x.V1, v)) is { } e)
+                stops.Add((v, e, e.Curve.Param(q, 0.5 * (e.T0 + e.T1))));
+        }
+        if (runs.Count == 0 && stops.Count == 0) return null;
+        // each end's last edge: the chain stopping on it, the rest of it faded out
+        var ends = new Dictionary<NVertex, (Vec3 q, NEdge g, double tq, double tEnd)>(ReferenceEqualityComparer.Instance);
+        foreach (var (v, e, tq) in stops) ends[v] = (e.Curve.Eval(tq), e, tq, ReferenceEquals(e.V0, v) ? e.T0 : e.T1);
+        // (wrapping round a fillet into an edge not picked: faded out along the wrap, to nothing at that fillet's tangent
+        // point, over the length asked for or the whole wrap, but for a quarter radius at its start: the ball there rolls
+        // onto the round it wraps, at a constant radius, as at any switch)
+        foreach (var (v, _) in runs)
+        {
+            var e = chain.First(x => ReferenceEquals(x.V0, v) || ReferenceEquals(x.V1, v));
+            double tv = ReferenceEquals(e.V0, v) ? e.T0 : e.T1, tf = ReferenceEquals(e.V0, v) ? e.T1 : e.T0;
+            var len = e.Length;
+            var most = len - Math.Min(0.25 * size, 0.2 * len);
+            var fadeLen = _fadeLength is { } asked ? Math.Min(asked, most) : most;
+            if (fadeLen < 1e-6 * Math.Max(1, size)) continue;
+            var tq = AlongEdge(e, tv, tf, fadeLen);
+            ends[v] = (e.Curve.Eval(tq), e, tq, tv);
+        }
+        if (ends.Count == 0) return null;
+        Vec3? EndAt(NVertex v) => ends.TryGetValue(v, out var x) ? x.q : TangentStop(v, chain);
+        var rb = RollingBall.Build(chain, size, name, OnFaces, endAt: EndAt);
+        // (only tangent stops: the chain as it would be built without fades, the same ends)
+        if (runs.Count == 0) chainBuilt = rb;
+        if (rb.Error != null || rb.Tool?.Native == null) { Debug?.Invoke($"fade {name}: the chain stopping short -> {rb.Error ?? "not exact"}"); return null; }
+        var tools = new List<DirectBlend.Tool> { new(rb.Tool, rb.Convex, name, size) };
+        bool fits = rb.Fits;
+        int k = 0;
+        foreach (var (q, g, tq, tEnd) in ends.Values)
+        {
+            // (its first ball the chain's end ball there: the center of the arc on the chain's end face through q)
+            var startCenter = rb.Tool.Native.Faces
+                .Where(f => f.Surface.Kind == SurfaceKind.Plane && Math.Abs(f.Surface.Plane!.Distance(q)) < 1e-7 * Math.Max(1, size) && (f.Tag.Name.EndsWith(".End0") || f.Tag.Name.EndsWith(".End1")))
+                .SelectMany(f => f.Coedges).Select(c => c.Edge.Curve).OfType<NCircle>().Select(c => (Vec3?)c.C).FirstOrDefault();
+            var fade = RollingBall.Fade(g, tq, tEnd, size, $"{name}.Fade{k++}", OnFaces, rb.Convex, startCenter);
+            // (only where it fits as it is: one running into the geometry beside it, cut back, was not joined where the
+            // square end was)
+            if (fade.Error != null || fade.Tool?.Native == null || fade.Convex != rb.Convex || !fade.Fits)
+            { Debug?.Invoke($"fade {name}: {fade.Error ?? (fade.Convex != rb.Convex ? "not the chain's kind" : "it does not fit")}"); return null; }
+            tools.Add(new(fade.Tool, fade.Convex, name, size));
+            fits &= fade.Fits;
+        }
+        if (DirectBlend.Glue(tools, out var why) is not { } glued) { Debug?.Invoke($"fade {name}: not glued ({why})"); return null; }
+        Debug?.Invoke($"fade {name}: {ends.Count} end(s) faded out");
+        return new RollingBall.Result(glued.Strip, rb.Convex, fits, null);
+    }
+
+    /// <summary>
+    /// The edge an open chain end runs on into tangentially, not picked, of the same kind (convex or concave), between
+    /// the end edge's face on one side and, on the other, its face or one meeting it smoothly. Null where there is none.
+    /// </summary>
+    static NEdge? RunsOnInto(NVertex v, Vec3 dirOut, List<NEdge> chain, IReadOnlyCollection<NEdge> sel)
+    {
+        var e = chain.FirstOrDefault(x => ReferenceEquals(x.V0, v) || ReferenceEquals(x.V1, v));
+        if (e == null || e.Uses.Count != 2 || chain.Count(x => ReferenceEquals(x.V0, v) || ReferenceEquals(x.V1, v)) != 1) return null;
+        var kind = IsConvex(e);
+        if (kind == null) return null;
+        var faces = e.Uses.Select(u => u.Face).ToList();
+        NEdge? found = null;
+        foreach (var g in faces.SelectMany(f => f.Coedges).Select(c => c.Edge).Distinct(ReferenceEqualityComparer.Instance).Cast<NEdge>())
+        {
+            if (ReferenceEquals(g, e) || g.Uses.Count != 2 || sel.Contains(g) || chain.Contains(g) || IsSeam(g)) continue;
+            if (!ReferenceEquals(g.V0, v) && !ReferenceEquals(g.V1, v)) continue;
+            var dir = (ReferenceEquals(g.V0, v) ? g.Curve.Deriv(g.T0) : -g.Curve.Deriv(g.T1)).Normalized;
+            if (Vec3.Dot(dir, dirOut.Normalized) < 1 - 1e-6) continue;
+            if (IsConvex(g) != kind) continue;
+            // one side the same face, the other the same or meeting it smoothly across an edge at v
+            var gf = g.Uses.Select(u => u.Face).ToList();
+            var same = gf.Where(f => faces.Contains(f)).ToList();
+            if (same.Count == 2) continue;
+            if (same.Count != 1) continue;
+            var other = gf.First(f => !ReferenceEquals(f, same[0]));
+            var mine = faces.First(f => !ReferenceEquals(f, same[0]));
+            var between = mine.Coedges.Select(c => c.Edge).FirstOrDefault(x => x.Uses.Any(u => ReferenceEquals(u.Face, other)) && (ReferenceEquals(x.V0, v) || ReferenceEquals(x.V1, v)));
+            if (between == null || Vec3.Dot(Outward(mine, v.P).Normalized, Outward(other, v.P).Normalized) < 1 - 1e-6) continue;
+            if (found != null) return null;
+            found = g;
+        }
+        return found;
+    }
+
+    /// <summary>A fillet's or chamfer's own face, by its name (a blend's surface, a swept or revolved tool's).</summary>
+    static bool IsBlendFaceName(string n)
+        => n.EndsWith(".Blend", StringComparison.Ordinal) || n.EndsWith(".S.F", StringComparison.Ordinal) || n.EndsWith(".R.F", StringComparison.Ordinal);
+
+    /// <summary>The parameter of the point a length d along the edge from tv towards tf (its far end where it is shorter).</summary>
+    static double AlongEdge(NEdge g, double tv, double tf, double d)
+    {
+        const int n = 512;
+        double acc = 0; var p = g.Curve.Eval(tv);
+        for (int i = 1; i <= n; i++)
+        {
+            var t = tv + (tf - tv) * i / n; var q = g.Curve.Eval(t);
+            var step = Vec3.Distance(p, q);
+            if (acc + step >= d) return tv + (tf - tv) * ((i - 1) + (d - acc) / Math.Max(step, 1e-300)) / n;
+            acc += step; p = q;
+        }
+        return tf;
+    }
+
+    static Vec3? TangentStop(NVertex v, List<NEdge> chain, double stopDeg = 5)
     {
         var e = chain.FirstOrDefault(x => ReferenceEquals(x.V0, v) || ReferenceEquals(x.V1, v));
         if (e == null || e.Uses.Count != 2 || chain.Count(x => ReferenceEquals(x.V0, v) || ReferenceEquals(x.V1, v)) != 1) return null;
         double tv = ReferenceEquals(e.V0, v) ? e.T0 : e.T1, tf = ReferenceEquals(e.V0, v) ? e.T1 : e.T0;
         // (at 5° the end cap of a ball of radius r is about r/11 across; much nearer tangent the cap's edges are too
         // short to join)
-        const double stop = 5 * Math.PI / 180;
+        var stop = stopDeg * Math.PI / 180;
         if (NormalsAngle(e, tv) > 0.9 * stop) return null;
         // (from the vertex towards the far end, the first place the faces open to the stop angle)
         double a = tv, b = tf;
@@ -2029,6 +2550,9 @@ public static class NativeBlend
                 foreach (var o in others)
                 {
                     if (seen.Contains(o)) continue;
+                    // (not onto an edge between faces meeting smoothly (two pieces of one loft's surface): nothing to
+                    // blend there, and the whole chain was refused for it)
+                    if (o.Uses.Count == 2 && Vec3.Dot(Outward(o.Uses[0].Face, o.Mid).Normalized, Outward(o.Uses[1].Face, o.Mid).Normalized) > Math.Cos(Math.PI / 180)) continue;
                     // the other pieces of a seam-split edge: same named faces on the same surfaces
                     bool sibling = SameFaces(e, o) && (e.Curve is NCircle ec && o.Curve is NCircle oc ? SameCircle(ec, oc) : RollingBall.SameSurfaces(e, o));
                     bool cont = false;

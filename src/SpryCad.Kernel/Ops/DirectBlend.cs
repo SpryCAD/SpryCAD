@@ -57,6 +57,28 @@ public static class DirectBlend
             var attempts = new List<(Tool tool, List<int> members)>();
             string? glueWhy = null;
             if (cluster.Count > 1 && Glue(cluster.Select(k => tools[k]).ToList(), out glueWhy) is { } glued) attempts.Add((glued, cluster));
+            // (tools of one kind overlapping, not meeting end to end (two convex edges' fillets round a convex corner,
+            // each run on to the face it meets): joined by the boolean, small and exact, as one tool; one at a time
+            // they run into each other)
+            // (only where they do overlap: tools merely side by side go one at a time as before, without the boolean)
+            else if (cluster.Count > 1 && Overlap(cluster.Select(k => tools[k]).ToList()) && Join(cluster.Select(k => tools[k]).ToList()) is { } joined)
+            {
+                work ??= body.Clone();
+                NBody? jn; string? jwhy;
+                using (Prof.Time("blend.direct"))
+                {
+                    jn = Try(work, joined, out jwhy, crossings: false);
+                    if (jn == null && jwhy != null && jwhy.StartsWith("other edges of ", StringComparison.Ordinal)) jn = Try(work, joined, out jwhy, crossings: true);
+                }
+                if (jn != null)
+                {
+                    work = jn; any = true;
+                    foreach (var _ in cluster) Interlocked.Increment(ref _applied);
+                    continue;
+                }
+                glueWhy = $"joined: {jwhy}";
+                attempts.AddRange(cluster.Select(k => (tools[k], new List<int> { k })));
+            }
             else attempts.AddRange(cluster.Select(k => (tools[k], new List<int> { k })));
             foreach (var (tool, members) in attempts)
             {
@@ -82,6 +104,65 @@ public static class DirectBlend
             }
         }
         return any ? work : null;
+    }
+
+    /// <summary>
+    /// Whether two of the tools may overlap: their edges come within the reach of a blend of each other (cheap; tools
+    /// side by side whose boxes merely overlap go one at a time, without the boolean).
+    /// </summary>
+    static bool Overlap(List<Tool> tools)
+    {
+        if (tools.Any(t => t.Strip.Native == null || !t.Convex)) return false;
+        using var _ = Prof.Time("blend.overlap");
+        // (overlapping, the edges of each pass within a blend's size or so of the other's (tools round a corner: their
+        // edges cross); side by side (concentric rims, a pocket's opposite walls), several sizes apart. Sampled at
+        // about its size, each sample standing for the half step to the next)
+        var samples = tools.Select(t =>
+        {
+            var step = Math.Max(1e-6, t.Size);
+            var l = new List<(Vec3 p, double h)>();
+            foreach (var e in t.Strip.Native!.Faces.SelectMany(f => f.Coedges).Select(c => c.Edge).Distinct(Ref).Cast<NEdge>())
+            {
+                double len = 0; var q = e.Curve.Eval(e.T0);
+                for (int k = 1; k <= 16; k++) { var r = e.Curve.Eval(e.T0 + (e.T1 - e.T0) * k / 16); len += Vec3.Distance(q, r); q = r; }
+                int n = Math.Clamp((int)Math.Ceiling(len / step), 1, 64);
+                for (int k = 0; k <= n; k++) l.Add((e.Curve.Eval(e.T0 + (e.T1 - e.T0) * k / n), len / n / 2));
+            }
+            return l;
+        }).ToList();
+        for (int i = 0; i < tools.Count; i++)
+            for (int j = i + 1; j < tools.Count; j++)
+            {
+                var reach = 1.5 * (tools[i].Size + tools[j].Size);
+                var bj = tools[j].Strip.Native!.Bounds;
+                foreach (var (p, hp) in samples[i])
+                {
+                    if (!bj.Contains(p, reach + hp)) continue;
+                    foreach (var (q, hq) in samples[j])
+                        if (Vec3.Distance(p, q) < reach + hp + hq) return true;
+                }
+            }
+        return false;
+    }
+
+    /// <summary>
+    /// Tools of one kind joined by an exact union (they overlap: blends round a corner each run on to the face it meets).
+    /// Null where they are of both kinds, one is not exact, or the union fails.
+    /// </summary>
+    static Tool? Join(List<Tool> tools)
+    {
+        if (tools.Any(t => t.Strip.Native == null || t.Convex != tools[0].Convex)) return null;
+        var old = Csg.NoFallback;
+        Csg.NoFallback = true;
+        try
+        {
+            Solid u;
+            using (Prof.Time("blend.join")) u = Csg.UnionAll(tools.Select(t => t.Strip).ToList());
+            if (u.IsEmpty || u.Native == null || u.Native.Validate() != null) return null;
+            return new Tool(u, tools[0].Convex, tools[0].Name, tools.Min(t => t.Size));
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or NBooleanException) { return null; }
+        finally { Csg.NoFallback = old; }
     }
 
     /// <summary>

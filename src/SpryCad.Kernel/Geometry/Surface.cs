@@ -89,7 +89,7 @@ public sealed record SurfaceDef
                     break;
                 }
             case SurfaceKind.Pipe:
-                n = Spine!.Normal(p);
+                n = Spine!.Normal(p, Radius);
                 break;
             case SurfaceKind.BSpline:
                 {

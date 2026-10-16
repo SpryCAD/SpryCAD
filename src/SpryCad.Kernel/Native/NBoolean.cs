@@ -194,6 +194,13 @@ public sealed class NBoolean
             if (r <= _r) return Find(p);
             var (x, y, z) = K(p);
             long n = (long)Math.Ceiling(r / _cell);
+            // (more cells within reach than vertices (a fitted surface's noise, many cells wide): the vertices scanned in
+            // order, the same answer; the cells took milliseconds a call, tens of thousands of them empty)
+            if ((2 * n + 1) * (2 * n + 1) * (2 * n + 1) > _items.Count)
+            {
+                for (int i = 0; i < _items.Count; i++) if (Vec3.Distance(_items[i].P, p) < r) return _items[i];
+                return null;
+            }
             int best = int.MaxValue;
             for (long dx = -n; dx <= n; dx++)
                 for (long dy = -n; dy <= n; dy++)
@@ -464,6 +471,15 @@ public sealed class NBoolean
                 if (mp == null && fa.Surface.Kind == SurfaceKind.BSpline && fb.Surface.Kind == SurfaceKind.BSpline)
                     foreach (var q in mirrors) if (Apart(fa, fb, q)) { mp = q; apart = true; break; }
                 var against = mp is { } mpp ? NSurface.FromPlane(mpp) : fb.Surface;
+                // (both distances slow, an offset's or a B-spline's (a shelled loft's inner wall against a swept
+                // chamfer): the smaller face proved clear of the other's surface first, as for the trace from the other
+                // side below; most such pairs, boxes overlapping, do not meet, and each trace was a long search)
+                if (mp == null && fa.Surface.Kind is SurfaceKind.Offset or SurfaceKind.BSpline && fb.Surface.Kind is SurfaceKind.Offset or SurfaceKind.BSpline)
+                {
+                    var (small, other) = fa.Bounds().Diagonal <= fb.Bounds().Diagonal ? (fa, fb) : (fb, fa);
+                    bool clear0; using (Prof.Time("tr0.apart")) clear0 = Apart(small, other.Surface, _onTol, traceDoms[small]);
+                    if (clear0) { pairCurves[i] = new(); return; }
+                }
                 List<NCurve> c; using (Prof.Time(Prof.Enabled ? $"tr.{fa.Surface.Kind}x{against.Kind}" : "")) c = mp == null ? Traced(fa, against) : NIntersect.Trace(fa, against, traceTol, traceDoms[fa]).Cast<NCurve>().ToList();
                 if (apart) c = OnSurface(c, fb.Surface, traceTol);
                 if (Prof.Enabled && c.Count == 0) Prof.Add($"tr.empty.{fa.Surface.Kind}x{fb.Surface.Kind}", 0);
@@ -827,7 +843,8 @@ public sealed class NBoolean
                 var p = e.Curve.Eval(t);
                 // traced boundaries are splines fitted within _sampleTol * 5 of the exact curve: a point on
                 // the true boundary may sit that far outside the spline
-                if (Dom(f).Classify(f.Surface.Project(p), Math.Max(_onTol, _sampleTol * 12)) < 0) continue;
+                var inside = Dom(f).Classify(f.Surface.Project(p), Math.Max(_onTol, _sampleTol * 12));
+                if (inside < 0) continue;
                 if (Vec3.Distance(p, e.V0.P) < _tol * 10 || Vec3.Distance(p, e.V1.P) < _tol * 10) continue;
                 // the edge runs along the surface here (e.g. a seam crossing a fillet's contact line): the hit is a
                 // double root, accurate only to about the square root of the solver tolerance. Where a vertex of the

@@ -393,6 +393,10 @@ public sealed class Regenerator
         /// <summary>Progress within the feature (e.g. "instance 7 of 24").</summary>
         public Action<string>? Detail;
 
+        // (the fade length of the fillet being built: null its whole wrap, 0 square ends)
+        double? _blendFade;
+        MixedCorners _blendCorners;
+
         // a value: a length in millimetres, an angle in degrees, a plain number (a count, a ratio)
         double Len(string? expr, string what) => Value(expr, what, ValueKind.Length, lookup);
         double Ang(string? expr, string what) => Value(expr, what, ValueKind.Angle, lookup);
@@ -416,6 +420,7 @@ public sealed class Regenerator
                 case ThreadFeature th: DoThread(th); break;
                 case FilletFeature fi:
                     DoBlend(fi.Edges, PosLen(fi.Radius, "Radius"), true, fi.TangentPropagation, fi.Overflow,
+                        fade: string.IsNullOrWhiteSpace(fi.FadeLength) ? null : Math.Max(0, Len(fi.FadeLength, "Fade length")), corners: fi.MixedCorners,
                         scope: fi.WholeBody || fi.Features.Count > 0 ? (fi.Features.Count > 0 ? fi.Features : null, fi.ScopeKind) : null);
                     break;
                 case ChamferFeature ch:
@@ -1174,10 +1179,12 @@ public sealed class Regenerator
         }
 
         void DoBlend(List<EdgeRef> refs, double size, bool fillet, bool propagate, bool overflow = true, ChamferSize? chamfer = null,
-            (List<string>? features, BlendScopeKind kind)? scope = null)
+            (List<string>? features, BlendScopeKind kind)? scope = null, double? fade = null, MixedCorners corners = MixedCorners.Auto)
         {
             if (refs.Count == 0 && scope == null) throw new FeatureException("No edges selected.");
-            if (TryNativeBlend(refs, size, fillet, propagate, overflow, chamfer, scope)) return;
+            _blendFade = fade; _blendCorners = corners;
+            try { if (TryNativeBlend(refs, size, fillet, propagate, overflow, chamfer, scope)) return; }
+            finally { _blendFade = null; _blendCorners = MixedCorners.Auto; }
             if (scope != null) throw new FeatureException("A fillet of a whole body or between features needs an exact body.");
             var byBody = new Dictionary<string, List<TopoEdge>>();
             foreach (var r in refs)
@@ -1254,7 +1261,7 @@ public sealed class Regenerator
                 using var _bt = Prof.Time("blend.total");
                 var r = scope != null
                     ? ApplyScoped(b.Solid, edges, size, fillet, overflow, chamfer, applied, oneAtATime)
-                    : NativeBlend.Apply(b.Solid, edges, size, fillet, f.Id, errors, overflow, status.ProblemEdges, applied, chamfer, trimmedOut: oneAtATime);
+                    : NativeBlend.Apply(b.Solid, edges, size, fillet, f.Id, errors, overflow, status.ProblemEdges, applied, chamfer, trimmedOut: oneAtATime, fadeLength: _blendFade, corners: _blendCorners);
                 bodies.Add(new Body { Id = b.Id, Solid = r });
             }
             // a blend on one body with tools of one kind can be patterned/mirrored like a cut or boss (its copies
@@ -1273,7 +1280,7 @@ public sealed class Regenerator
                     finally { Csg.NoFallback = old; }
                 }, applied[0].cut, true)
                 {
-                    Blend = new BlendSpec(refs.Select(r => r.Clone()).ToList(), size, fillet, propagate, overflow, chamfer, blended, blendedLength) { OneAtATime = oneAtATime.Value },
+                    Blend = new BlendSpec(refs.Select(r => r.Clone()).ToList(), size, fillet, propagate, overflow, chamfer, blended, blendedLength) { OneAtATime = oneAtATime.Value, FadeLength = _blendFade, Corners = _blendCorners },
                 };
             }
             // all or nothing (as SolidWorks): a fillet that cannot be made on every edge fails as a whole,
@@ -1300,7 +1307,7 @@ public sealed class Regenerator
             {
                 var errs = new List<string>(); var tools = new List<(Solid, bool)>(); var tr = new System.Runtime.CompilerServices.StrongBox<bool>();
                 Solid r;
-                try { r = NativeBlend.Apply(body, es, size, fillet, f.Id, errs, overflow, null, tools, chamfer, trimmedOut: tr); }
+                try { r = NativeBlend.Apply(body, es, size, fillet, f.Id, errs, overflow, null, tools, chamfer, trimmedOut: tr, fadeLength: _blendFade, corners: _blendCorners); }
                 catch (Exception ex) when (ex is InvalidOperationException or Kernel.Native.NBooleanException) { errs.Add(ex.Message); r = body; }
                 return (r, errs, tools, tr.Value);
             }
@@ -1719,7 +1726,7 @@ public sealed class Regenerator
                             var applied = new List<(Solid tool, bool cut)>();
                             var trimmed = new System.Runtime.CompilerServices.StrongBox<bool>();
                             NativeBlend.Apply(Kernel.Native.NTess.ToSolid(copy), mine!, bs.Size, bs.Fillet, $"{f.Id}.{i + 1}.{seedId}", errors, bs.Overflow,
-                                problems, applied, bs.Chamfer, buildOnly: true, trimmedOut: trimmed);
+                                problems, applied, bs.Chamfer, buildOnly: true, trimmedOut: trimmed, fadeLength: bs.FadeLength, corners: bs.Corners);
                             built[k] = errors.Count > 0 ? (null, errors[0], problems, false) : (applied, null, problems, trimmed.Value);
                         }
                         catch (Exception ex) when (ex is FeatureException or InvalidOperationException or Kernel.Native.NBooleanException)

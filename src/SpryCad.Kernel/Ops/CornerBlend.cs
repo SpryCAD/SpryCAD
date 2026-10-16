@@ -54,8 +54,9 @@ static class CornerBlend
                 cut[e] = ReferenceEquals(e.V0, v) ? (t[i], c.t1) : (c.t0, t[i]);
             }
         }
+        var selected = lines.Select(l => l.E).ToList();
         foreach (var l in lines)
-            if (cut.TryGetValue(l.E, out var c) && Strip(l, r, c.t0, c.t1) is { } s) strips[l.E] = s;
+            if (cut.TryGetValue(l.E, out var c) && Strip(l, r, c.t0, c.t1, selected) is { } s) strips[l.E] = s;
         return (strips, corners);
     }
 
@@ -63,9 +64,10 @@ static class CornerBlend
 
     /// <summary>
     /// The line's direct blend tool (as <see cref="NativeBlend"/>'s line tool builds it) from t0 past its start to t1
-    /// short of its end.
+    /// short of its end. An end with no corner (t 0) ends as the line tool's does: on the face it runs into, where
+    /// that meets the edge at an angle (square there, it stood past that face on one side, a wing beside the fillet).
     /// </summary>
-    static Solid? Strip(Line l, double r, double t0, double t1)
+    static Solid? Strip(Line l, double r, double t0, double t1, IReadOnlyCollection<NEdge> selected)
     {
         var e = l.E;
         var cA = e.Uses[0]; var cB = e.Uses[1];
@@ -80,7 +82,30 @@ static class CornerBlend
         Vec2 P(Vec3 v) => new(Vec3.Dot(v, x), Vec3.Dot(v, y));
         var prof = EdgeBlend.Profile2D(P(uA), P(uB), P(nA), P(nB), Vec2.Zero, r, true, l.Convex, r, atCorner: true);
         if (prof == null) return null;
-        return Builders.Extrude(new[] { new ProfileRegion(prof) }, new Frame(E, x, y, t), a, L - b, l.Name);
+        var frame = new Frame(E, x, y, t);
+        Plane? End(NVertex v, Vec3 dirOut) => NativeBlend.EndPlane(v, dirOut, cA.Face, cB.Face, new[] { e }, selected);
+        var p0 = a <= 0 ? End(cA.Start, -t) : null;
+        var p1 = b <= 0 ? End(cA.End, t) : null;
+        // (an end on a round, as the line tool's: run on past it and cut back to the round; square there, the round fell
+        // away under its end, a sliver of it standing)
+        var c0 = a <= 0 && p0 == null ? NativeBlend.EndCutAt(cA.Start, -t, cA.Face, cB.Face, new[] { e }, selected) is { Plane: null } k0 ? k0 : null : null;
+        var c1 = b <= 0 && p1 == null ? NativeBlend.EndCutAt(cA.End, t, cA.Face, cB.Face, new[] { e }, selected) is { Plane: null } k1 ? k1 : null : null;
+        if (c0 != null || c1 != null)
+        {
+            var ext = 3 * r;
+            var run = NBuild.ExtrudeBetween(new[] { new ProfileRegion(prof) }, frame, c0 == null ? p0 : null, c0 != null ? a - ext : a, c1 == null ? p1 : null, c1 != null ? L - b + ext : L - b, l.Name) is { } rb
+                ? NTess.ToSolid(rb) : Builders.Extrude(new[] { new ProfileRegion(prof) }, frame, c0 != null ? a - ext : a, c1 != null ? L - b + ext : L - b, l.Name);
+            try
+            {
+                if (c0 != null) run = c0.Trim(run);
+                if (c1 != null) run = c1.Trim(run);
+                if (!run.IsEmpty && run.Native != null) return run;
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or Native.NBooleanException) { NativeBlend.Debug?.Invoke($"corner strip {l.Name}: not cut to the round ({ex.Message})"); }
+        }
+        if ((p0 != null || p1 != null) && NBuild.ExtrudeBetween(new[] { new ProfileRegion(prof) }, frame, p0, a, p1, L - b, l.Name) is { } nb)
+            return NTess.ToSolid(nb);
+        return Builders.Extrude(new[] { new ProfileRegion(prof) }, frame, a, L - b, l.Name);
     }
 
     /// <summary>

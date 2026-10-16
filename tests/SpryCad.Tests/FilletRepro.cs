@@ -115,6 +115,8 @@ static class FilletRepro
             // (PROPAGATE: the tube fillets run on along tangent edges)
             if (Environment.GetEnvironmentVariable("PROPAGATE") != null) foreach (var tf in doc.Features.OfType<FilletFeature>().Where(f => f.Name.StartsWith("Tube"))) tf.TangentPropagation = true;
             if (Environment.GetEnvironmentVariable("RIM_R") is { } rr) doc.Features.OfType<FilletFeature>().First(f => f.Name == "Tube rim").Radius = rr;
+            // (RIM_ALONE: the rim not run on along tangent edges)
+            if (Environment.GetEnvironmentVariable("RIM_ALONE") != null) doc.Features.OfType<FilletFeature>().First(f => f.Name == "Tube rim").TangentPropagation = false;
             return doc;
         }
         if (si >= 0) doc.Features.RemoveRange(si, doc.Features.Count - si);
@@ -231,7 +233,8 @@ static class FilletRepro
                     {
                         object? hint = null; int missed = 0;
                         foreach (var p in x.Edges[ei].Points)
-                            if (find.Invoke(ps, new object?[] { p, hint, 1e-4, false }) is { } uv) hint = uv; else missed++;
+                            if (find.Invoke(ps, new object?[] { p, hint, 1e-4, false }) is { } uv) hint = uv;
+                            else { missed++; if (Environment.GetEnvironmentVariable("STEP_CHECK") == "2" && find.Invoke(ps, new object?[] { p, null, 1.0, false }) is Vec2 lu) { var srfE = (Func<double, double, Vec3>)ps.GetType().GetProperty("Eval")!.GetValue(ps)!; Console.WriteLine($"    missed {p}: nearest found {Vec3.Distance(srfE(lu.X, lu.Y), p):g3} at uv {lu}"); } }
                         if (missed > 0) { bad++; Console.WriteLine($"  off its written surface: {f.Name} edge {ei} ({missed} of {x.Edges[ei].Points.Count} points)"); }
                     }
                 }

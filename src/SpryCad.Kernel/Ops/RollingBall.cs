@@ -14,7 +14,11 @@ public static class RollingBall
 {
     public static Action<string>? Debug;
 
-    public sealed record Result(Solid? Tool, bool Convex, bool Fits, string? Error);
+    public sealed record Result(Solid? Tool, bool Convex, bool Fits, string? Error)
+    {
+        /// <summary>The radius the tool has come down to at an open end where it fades out (by the end's point), none where it does not.</summary>
+        public IReadOnlyList<(Vec3 at, double r)> FadedEnds { get; init; } = Array.Empty<(Vec3, double)>();
+    }
 
     /// <summary>A piece of an edge, traversed from Ta to Tb.</summary>
     /// <summary>
@@ -128,7 +132,8 @@ public static class RollingBall
     /// into at an angle. Contact points <paramref name="cutOff"/> says are cut off with it are not checked for fit.
     /// </summary>
     public static Result Build(IReadOnlyList<NEdge> chain, double r, string name, Func<NFace, Vec3, bool> onFaces,
-        Func<NVertex, Vec3, NFace, NFace, double>? runOn = null, Func<Vec3, bool>? cutOff = null, Func<NVertex, Vec3?>? endAt = null)
+        Func<NVertex, Vec3, NFace, NFace, double>? runOn = null, Func<Vec3, bool>? cutOff = null, Func<NVertex, Vec3?>? endAt = null,
+        Func<Vec3, double?>? fadeTo = null)
     {
         if (cutOff != null) { var of = onFaces; onFaces = (f, p) => cutOff(p) || of(f, p); }
         var pieces = Order(chain, out var closed);
@@ -179,7 +184,7 @@ public static class RollingBall
         {
             var a = FaceOn(p.E, SA); var b = FaceOn(p.E, SB);
             if (a == null || b == null || ReferenceEquals(a, b) || a.Sense != fA.Sense || b.Sense != fB.Sense)
-                return BuildComposite(pieces, closed, r, name, onFaces);
+                return BuildComposite(pieces, closed, r, name, onFaces, fadeTo);
         }
 
         // convex (material removed) or concave (material added), at the middle of the first piece
@@ -323,6 +328,221 @@ public static class RollingBall
     }
 
     /// <summary>
+    /// A fillet fading out along an edge: from radius r at <paramref name="ta"/> to nothing at <paramref name="tb"/>,
+    /// ρ(u) = r (1 − 3u² + 2u³) over the edge's length (no slope at either end: its start section is a constant
+    /// fillet's square end there exactly, and it closes onto the edge smoothly). The ball at each station solved
+    /// exactly at its own radius, the blend the envelope of balls along their centers (a pipe of varying radius), the
+    /// tool closed by a square start and its tip on the edge. One edge between two faces.
+    /// </summary>
+    public static Result Fade(NEdge e, double ta, double tb, double r, string name, Func<NFace, Vec3, bool> onFaces, bool? kind = null, Vec3? startCenter = null)
+    {
+        static Result Fail(string m) => new(null, false, false, m);
+        if (e.Uses.Count != 2) return Fail("the edge is not between two faces.");
+        var fA = e.Uses[0].Face; var fB = e.Uses[1].Face;
+        NSurface SA = fA.Surface, SB = fB.Surface;
+        var pc = new Piece(e, ta, tb);
+        var V0 = pc.Start; var t0d = pc.Dir(ta);
+        var cA = e.Uses[0]; var cB = e.Uses[1];
+        var nA = Outward(fA, V0); var nB = Outward(fB, V0);
+        var uB = Vec3.Cross(nB, e.Curve.Deriv(ta) * (cB.Forward ? 1 : -1)).Normalized;
+        if (Math.Abs(Vec3.Dot(nA, nB)) > 1 - 1e-9) return Fail("the faces are tangent along the edge: there is nothing to fillet.");
+        // (the chain's kind where given: near tangency the faces' own turn at the fade's start can read the other way)
+        bool convex = kind ?? Vec3.Dot(uB, nA) < 0;
+        var len = pc.Length;
+        var scale = Math.Max(len, r);
+
+        // the edge's parameter at a fraction of its length
+        const int M = 1024;
+        var cum = new double[M + 1]; var tq = new double[M + 1];
+        {
+            var prev = pc.Start;
+            for (int i = 0; i <= M; i++)
+            {
+                tq[i] = ta + (tb - ta) * i / M;
+                var q = e.Curve.Eval(tq[i]);
+                cum[i] = i == 0 ? 0 : cum[i - 1] + Vec3.Distance(prev, q);
+                prev = q;
+            }
+        }
+        double TAt(double u)
+        {
+            if (u <= 0) return ta;
+            if (u >= 1) return tb;
+            var want = cum[M] * u;
+            int lo = 0, hi = M;
+            while (hi - lo > 1) { int m = (lo + hi) / 2; if (cum[m] < want) lo = m; else hi = m; }
+            var f = cum[hi] > cum[lo] ? (want - cum[lo]) / (cum[hi] - cum[lo]) : 0;
+            return tq[lo] + (tq[hi] - tq[lo]) * f;
+        }
+        static double Rho(double u, double r) => r * (1 - 3 * u * u + 2 * u * u * u);
+        // the ball at a fraction u of the way: its center and the direction of the section there (the tip: on the edge)
+        // (each ball rolled on from the one before it, as the chain's own end joint is: near tangency the offsets meet along
+        // two branches, and a ball solved in its section alone can sit on the other one, or on none; the first the chain's
+        // end ball where given)
+        var memo = new SortedDictionary<double, (Vec3 S, Vec3 T)?>();
+        (Vec3 S, Vec3 T)? Solve(double u, Vec3? from)
+        {
+            var t = TAt(u);
+            var V = u <= 0 ? pc.Start : u >= 1 ? pc.End : e.Curve.Eval(t);
+            var dir = pc.Dir(t);
+            if (u >= 1) return (V, dir);
+            var rho = Rho(u, r) * (convex ? -1 : 1);
+            try
+            {
+                var A2 = NShell.OffsetSurface(SA, rho * (fA.Sense ? 1 : -1)); var B2 = NShell.OffsetSurface(SB, rho * (fB.Sense ? 1 : -1));
+                if (from is { } g && SolveJoint(A2, B2, V, g, dir, scale) is { } j) return j;
+                var na = Outward(fA, V); var nb = Outward(fB, V);
+                return SolveJoint(A2, B2, V, V + (na + nb) * (rho / (1 + Vec3.Dot(na, nb))), dir, scale);
+            }
+            catch (InvalidOperationException) { return null; }
+        }
+        // the guess for u from a ball solved at u0: moved along with the edge, scaled to u's radius
+        Vec3 From(double u0, Vec3 S0, double u)
+        {
+            var V0 = u0 <= 0 ? pc.Start : e.Curve.Eval(TAt(u0));
+            var V = e.Curve.Eval(TAt(u));
+            var r0 = Rho(u0, r);
+            return V + (S0 - V0) * (r0 > 1e-300 ? Rho(u, r) / r0 : 1);
+        }
+        (Vec3 S, Vec3 T)? Station(double u)
+        {
+            if (memo.TryGetValue(u, out var got)) return got;
+            (Vec3 S, Vec3 T)? res;
+            if (u <= 0) res = Solve(0, startCenter);
+            else if (u >= 1) res = Solve(1, null);
+            else
+            {
+                // from the nearest solved before it; where that fails, crept up on in smaller steps
+                var below = memo.LastOrDefault(x => x.Key < u && x.Value != null);
+                if (below.Value is not { } b) { var s0 = Station(0); below = new(0, s0); b = s0 ?? default; if (s0 == null) return memo[u] = null; }
+                res = Solve(u, From(below.Key, b.S, u));
+                if (res == null)
+                {
+                    var (uc, sc) = (below.Key, b.S);
+                    for (int k = 1; k <= 8; k++)
+                    {
+                        var uk = below.Key + (u - below.Key) * k / 8;
+                        var jk = Solve(uk, From(uc, sc, uk));
+                        if (jk == null) break;
+                        (uc, sc) = (uk, jk.Value.S);
+                        if (k == 8) res = jk;
+                    }
+                }
+                if (res == null) Debug?.Invoke($"fade {name}: no ball at u {u:g3}, radius {Rho(u, r):g4}, the faces {Math.Acos(Math.Clamp(Vec3.Dot(Outward(fA, e.Curve.Eval(TAt(u))).Normalized, Outward(fB, e.Curve.Eval(TAt(u))).Normalized), -1, 1)) * 180 / Math.PI:g3}° apart ({SA.Kind}/{SB.Kind})");
+            }
+            return memo[u] = res;
+        }
+        // the spine through the stations: the tangents across each node's neighbors (weighted by their spacing; the start
+        // the joint's own, square to the start; the tip the edge's), the radius's change and slope along it
+        PipeSpine? Spine(List<double> us)
+        {
+            int n = us.Count - 1;
+            var S = new Vec3[n + 1]; var Tn = new Vec3[n + 1];
+            for (int k = 0; k <= n; k++) { var st = Station(us[k])!.Value; S[k] = st.S; Tn[k] = st.T; }
+            var sArc = new double[n + 1];
+            for (int k = 1; k <= n; k++) sArc[k] = sArc[k - 1] + Vec3.Distance(S[k], S[k - 1]);
+            var D = new Vec3[n + 1]; var dr = new double[n + 1]; var drs = new double[n + 1];
+            for (int k = 0; k <= n; k++)
+            {
+                dr[k] = Rho(us[k], r) - r;
+                if (k == 0 || k == n) { D[k] = Tn[k]; continue; }
+                double h0 = sArc[k] - sArc[k - 1], h1 = sArc[k + 1] - sArc[k];
+                D[k] = ((S[k + 1] - S[k]) / h1 * h0 + (S[k] - S[k - 1]) / h0 * h1).Normalized;
+                // dρ/du over ds/du (Bessel's weights again)
+                var dRdu = r * (-6 * us[k] + 6 * us[k] * us[k]);
+                double g0 = us[k] - us[k - 1], g1 = us[k + 1] - us[k];
+                var dsdu = (h1 / g1 * g0 + h0 / g0 * g1) / (g0 + g1);
+                drs[k] = dsdu > 1e-12 ? dRdu / dsdu : 0;
+            }
+            try { return new PipeSpine(S, D, SA, SB) { Dr = dr, DrS = drs }; }
+            catch (ArgumentException) { return null; }
+        }
+        // stations added midway where the spine strays from the ball solved there (its center or its radius)
+        var tolS = 1e-7 * Math.Max(1, scale);
+        var stations = Enumerable.Range(0, 17).Select(k => k / 16.0).ToList();
+        if (stations.Any(u => Station(u) == null)) return Fail("the fillet cannot fade out along the edge.");
+        // (its contacts off its faces already at these (the ball rolling onto a face beside them): not refined further)
+        for (int k = 1; k < 16; k++)
+        {
+            var st = Station(stations[k])!.Value;
+            if (!onFaces(fA, SA.Project(st.S)) || !onFaces(fB, SB.Project(st.S)))
+            { Debug?.Invoke($"fade {name}: at u {stations[k]:g3} a contact off its face"); return Fail("the fade does not fit on the faces."); }
+        }
+        PipeSpine? sp = null;
+        for (int round = 0; round < 10; round++)
+        {
+            sp = Spine(stations);
+            if (sp == null) return Fail("internal: the fade's spine");
+            var add = new List<double>();
+            for (int k = 0; k + 1 < stations.Count; k++)
+            {
+                var um = 0.5 * (stations[k] + stations[k + 1]);
+                if (Station(um) is not { } st) return Fail("the fillet cannot fade out along the edge.");
+                var (s, c, _) = sp.Ball(st.S, r);
+                var off = Vec3.Distance(st.S, sp.Eval(s)) + Math.Abs(Rho(um, r) - sp.Rad(s, r));
+                if (off > tolS) add.Add(um);
+            }
+            if (add.Count == 0 || stations.Count + add.Count > 600) break;
+            stations = stations.Concat(add).OrderBy(x => x).ToList();
+        }
+        Debug?.Invoke($"fade {name}: {stations.Count} stations");
+        var S0p = Station(0)!.Value;
+        var S = new[] { S0p.S }; var Tn = new[] { S0p.T };
+        var pipe = NSurface.Pipe(sp!, r);
+
+        // ---- topology: start section (as a constant fillet's end), the tip on the edge
+        var A0 = SA.Project(S[0]); var B0 = SB.Project(S[0]);
+        var VV = new NVertex(V0); var AV = new NVertex(A0); var BV = new NVertex(B0); var tip = new NVertex(pc.End);
+        var plane0 = NSurface.FromPlane(Plane.FromPointNormal(S[0], Tn[0]));
+        var secA = new NEdge(new NSection(SA, plane0, V0, A0), 0, 1, VV, AV);
+        var secB = new NEdge(new NSection(SB, plane0, V0, B0), 0, 1, VV, BV);
+        var circle = new NCircle(S[0], Tn[0], A0 - S[0], r);
+        var tb0 = circle.Param(B0);
+        if (tb0 < 0) { circle = new NCircle(S[0], -Tn[0], A0 - S[0], r); tb0 = circle.Param(B0); }
+        var arc = new NEdge(circle, 0, tb0, AV, BV);
+        var fwd = tb > ta;
+        var E = fwd ? new NEdge(e.Curve, ta, tb, VV, tip) : new NEdge(e.Curve, tb, ta, tip, VV);
+        var cAe = new NEdge(new NContact(sp, false), sp.S0, sp.S1, AV, tip);
+        var cBe = new NEdge(new NContact(sp, true), sp.S0, sp.S1, BV, tip);
+        var body = new NBody();
+        var Mp = e.Curve.Eval(pc.Mid); var tm = pc.Dir(pc.Mid);
+        var sm = 0.5 * (sp.S0 + sp.S1); var C = sp.Eval(sm);
+        var qa = SA.Project(C); var qb = SB.Project(C);
+        foreach (var (fsurf, face, sec, cont, q, suffix) in new[] { (SA, fA, secA, cAe, qa, "A"), (SB, fB, secB, cBe, qb, "B") })
+        {
+            var nT = Outward(face, Mp) * (convex ? 1 : -1);
+            var loop = new List<(NEdge, bool)> { (E, fwd), (cont, false), (sec, false) };
+            if (Vec3.Dot(Vec3.Cross(nT, tm), q - Mp) < 0) loop = Reverse(loop);
+            body.Faces.Add(MakeFace(fsurf, convex ? face.Sense : !face.Sense, new FaceTag(name + "." + suffix, fsurf.Kind == SurfaceKind.Plane ? SurfaceDef.PlaneDef : fsurf.Def), loop, fsurf.Project((Mp + q) * 0.5)));
+        }
+        {
+            var nT = -pipe.Normal(qa);
+            var loop = new List<(NEdge, bool)> { (cAe, true), (cBe, false), (arc, false) };
+            if (Vec3.Dot(Vec3.Cross(nT, sp.Deriv(sm).Normalized), qb - qa) < 0) loop = Reverse(loop);
+            body.Faces.Add(MakeFace(pipe, false, new FaceTag(name + ".Blend", pipe.Def), loop, pipe.Project((qa + qb) * 0.5)));
+        }
+        {
+            var outward = -Tn[0];
+            var loop = new List<(NEdge, bool)> { (secA, true), (arc, true), (secB, false) };
+            if (Vec3.Dot(LoopNormal(loop), outward) < 0) loop = Reverse(loop);
+            if (body.Faces.SelectMany(f => f.Loops).SelectMany(l => l.Coedges).FirstOrDefault(c => ReferenceEquals(c.Edge, secA)) is { } useA
+                && loop.First(x => ReferenceEquals(x.Item1, secA)).Item2 == useA.Forward) loop = Reverse(loop);
+            body.Faces.Add(MakeFace(NSurface.FromPlane(Plane.FromPointNormal(S[0], outward)), true, new FaceTag(name + ".End0", SurfaceDef.PlaneDef), loop, null));
+        }
+        bool fits = true;
+        // (its start the chain's own end ball, checked with the chain)
+        for (int i = 1; i <= 8 && fits; i++)
+        {
+            var c = sp.Eval(sp.S0 + (sp.S1 - sp.S0) * i / 8);
+            fits = onFaces(fA, SA.Project(c)) && onFaces(fB, SB.Project(c));
+            if (!fits) Debug?.Invoke($"fade {name}: at {i}/8 a contact off its face ({(onFaces(fA, SA.Project(c)) ? "" : fA.Tag.Name + " at " + SA.Project(c))} {(onFaces(fB, SB.Project(c)) ? "" : fB.Tag.Name + " at " + SB.Project(c))})");
+        }
+        body.Link();
+        if (body.Validate() is { } err) return Fail("internal: " + err);
+        return new Result(NTess.ToSolid(body), convex, fits, null);
+    }
+
+    /// <summary>
     /// Whether the blend face folds over itself. Where the spine bends tighter than the ball's radius the pipe folds,
     /// but only on the side towards the bend's centre: the blend is the arc between the ball's two contacts, which
     /// round a convex corner (an edge's round running round a rounded corner) faces away from it.
@@ -368,7 +588,7 @@ public static class RollingBall
     /// boundary curve, so the spine stays C1), and the tool's side is split along the boundary curve from the chain
     /// vertex to the foot point. A side with no switch is one face between the chain ends (a band for a closed chain).
     /// </summary>
-    static Result BuildComposite(List<Piece> pieces, bool closed, double r, string name, Func<NFace, Vec3, bool> onFaces)
+    static Result BuildComposite(List<Piece> pieces, bool closed, double r, string name, Func<NFace, Vec3, bool> onFaces, Func<Vec3, double?>? fadeTo = null)
     {
         static Result Fail(string m) => new(null, false, false, m);
         int n = pieces.Count;
@@ -917,11 +1137,191 @@ public static class RollingBall
 
         // every surface the ball rolls on along the chain (the boolean does not trace a segment's blend against them)
         var rolls = support.Select(Sup).Concat(supportA.Select(SupA)).Distinct().ToList();
+
+        // ---- fading out at an open end (fadeTo: the radius there): over the chain's segment there (past its last switch,
+        // the ball on one pair of faces), the radius falling from r to that smoothly, no slope at either end (its section
+        // at the segment's other end is the constant fillet's, exactly). Each event's radius, r but at a faded end
+        var evR = Enumerable.Repeat(r, ne).ToArray();
+        var fadeSeg = new Dictionary<int, (double ra, double rb)>();
+        if (!closed && fadeTo != null && nseg >= 1)
+        {
+            // (no steeper than a slope of 0.3 at its steepest (the smoothstep's is 1.5 times its mean): a canal surface whose
+            // radius changes as fast as it runs along folds, and a short segment past the last switch left a dent; none
+            // where that leaves too little to show)
+            double Limited(int seg, double want)
+            {
+                var len = Math.Abs(Key(events[seg + 1].pos) - Key(events[seg].pos));
+                var rr = Math.Max(want, r - 0.2 * len);
+                return r - rr < 0.05 * r ? r : rr;
+            }
+            if (fadeTo(pieces[n - 1].End) is { } rEnd && rEnd > 0 && !events[ne - 1].sw && Limited(nseg - 1, rEnd) is var le && le < r) fadeSeg[nseg - 1] = (r, le);
+            if (fadeTo(pieces[0].Start) is { } rStart && rStart > 0 && !events[0].sw && !fadeSeg.ContainsKey(0) && Limited(0, rStart) is var ls && ls < r) fadeSeg[0] = (ls, r);
+        }
+        // a chain point at a length along it, and its direction there
+        (Vec3 V, Vec3 dir) ChainAt(double pos)
+        {
+            pos = Math.Clamp(pos, 0, total);
+            int q = 0;
+            while (q < n - 1 && cum[q + 1] < pos) q++;
+            var pc = pieces[q];
+            var t = pc.Ta + (pc.Tb - pc.Ta) * Math.Clamp((pos - cum[q]) / Math.Max(pc.Length, 1e-300), 0, 1);
+            return (pc.E.Curve.Eval(t), pc.Dir(t));
+        }
+        // the segment's spine, its balls solved at stations along it at their own radii, each rolled on from the one before
+        // (from the joint at the constant end), stations added where the spine strays from the ball solved midway
+        PipeSpine? FadeSpine(int i, double ra, double rb)
+        {
+            bool fromA = ra >= rb;   // the constant end: the segment's start (fading towards its end) or its end
+            int iK = fromA ? i : (i + 1) % ne;
+            double p0 = Key(events[i].pos), p1 = Key(events[(i + 1) % ne].pos);
+            var fa = supportA[i]; var fb = support[i];
+            NSurface SAi = SupA(fa), SBi = Sup(fb);
+            double Rho(double u) { var h = u * u * (3 - 2 * u); return ra + (rb - ra) * h; }
+            var memo = new SortedDictionary<double, Vec3?>();
+            // (a switch's section is set by where the ball meets the boundary, not by the chain: it passes the chain point
+            // its position gives a little off. Each station's section is moved along so, from the one end's offset to the
+            // other's, so the stations at the ends are the joints themselves)
+            double Off0(int ie, double u) { var (V, d) = ChainAt(p0 + (p1 - p0) * u); return Vec3.Dot(ev[ie].S - V, d); }
+            double da = Off0(i, 0), db = Off0((i + 1) % ne, 1);
+            // (the nearest point of the station's offsets' intersection to the guess: where the offsets meet at a shallow
+            // angle, near tangent faces, a center held to a section plane runs far off for a small shift of it, as the
+            // march, stepping along the intersection, does not. The faded end's held to the chain end's section, for
+            // its cap there)
+            Vec3? Solve(double u, Vec3 guess)
+            {
+                var (V, dir) = ChainAt(p0 + (p1 - p0) * u);
+                V += dir * (da + (db - da) * u);
+                var rr = Rho(u) * (convex ? -1 : 1);
+                try
+                {
+                    var A2 = NShell.OffsetSurface(SAi, rr * (fa.Sense ? 1 : -1)); var B2 = NShell.OffsetSurface(SBi, rr * (fb.Sense ? 1 : -1));
+                    // (in the plane square to the chain there, held fixed: square to the offsets' own tangent instead, as at a
+                    // joint, the plane turns as the center moves, and where the offsets meet at a shallow angle the solve runs
+                    // far off)
+                    var p = guess;
+                    for (int it = 0; it < 60; it++)
+                    {
+                        var gA = A2.Grad(p); var gB = B2.Grad(p);
+                        var f = new Vec3(A2.F_(p), B2.F_(p), Vec3.Dot(dir, p - V));
+                        var det = Vec3.Dot(gA, Vec3.Cross(gB, dir));
+                        if (Math.Abs(det) < 1e-14) return null;
+                        var delta = (Vec3.Cross(gB, dir) * f.X + Vec3.Cross(dir, gA) * f.Y + Vec3.Cross(gA, gB) * f.Z) / det;
+                        p -= delta;
+                        if (delta.Length < 1e-14 * Math.Max(1, scale)) break;
+                    }
+                    if (Math.Abs(A2.F_(p)) > 1e-9 * scale || Math.Abs(B2.F_(p)) > 1e-9 * scale || Math.Abs(Vec3.Dot(dir, p - V)) > 1e-8 * scale) return null;
+                    // (no further than a step's reach from the guess: not another branch)
+                    if (Vec3.Distance(p, guess) > 0.5 * Math.Max(Rho(u), 1e-3 * r) + 2 * Vec3.Distance(V, ChainAt(p0 + (p1 - p0) * u).V)) return null;
+                    return p;
+                }
+                catch (InvalidOperationException) { return null; }
+            }
+            Vec3 Guess(double u0, Vec3 S0, double u)
+            {
+                var V0 = ChainAt(p0 + (p1 - p0) * u0).V; var V = ChainAt(p0 + (p1 - p0) * u).V;
+                var r0 = Rho(u0);
+                return V + (S0 - V0) * (r0 > 1e-300 ? Rho(u) / r0 : 1);
+            }
+            // (from the constant end: u counted from there)
+            double Uc(double u) => fromA ? u : 1 - u;
+            Vec3? Station(double u)
+            {
+                if (memo.TryGetValue(u, out var got)) return got;
+                if (Uc(u) == 0) return memo[u] = ev[iK].S;
+                // the nearest solved on the constant side
+                var near = memo.Where(x => x.Value != null && Uc(x.Key) < Uc(u)).OrderBy(x => Math.Abs(x.Key - u)).FirstOrDefault();
+                if (near.Value is not { } nS) { if (Station(fromA ? 0 : 1) is not { } s0) return memo[u] = null; near = new(fromA ? 0 : 1, s0); nS = s0; }
+                var res = Solve(u, Guess(near.Key, nS, u));
+                if (res == null)
+                {
+                    var (uc, sc) = (near.Key, nS);
+                    for (int k = 1; k <= 8; k++)
+                    {
+                        var uk = near.Key + (u - near.Key) * k / 8;
+                        var sk = Solve(uk, Guess(uc, sc, uk));
+                        if (sk == null) break;
+                        (uc, sc) = (uk, sk.Value);
+                        if (k == 8) res = sk;
+                    }
+                }
+                return memo[u] = res;
+            }
+            PipeSpine? Spine(List<double> us)
+            {
+                int m = us.Count - 1;
+                var S = new Vec3[m + 1];
+                for (int k = 0; k <= m; k++) S[k] = Station(us[k])!.Value;
+                var sArc = new double[m + 1];
+                for (int k = 1; k <= m; k++) sArc[k] = sArc[k - 1] + Vec3.Distance(S[k], S[k - 1]);
+                var D = new Vec3[m + 1]; var dr = new double[m + 1]; var drs = new double[m + 1];
+                for (int k = 0; k <= m; k++)
+                {
+                    dr[k] = Rho(us[k]) - r;
+                    if (k == 0 || k == m)
+                    {
+                        // (the ends' own tangents: the offsets' at that radius)
+                        var (V, dir) = ChainAt(p0 + (p1 - p0) * us[k]);
+                        var rr = Rho(us[k]) * (convex ? -1 : 1);
+                        var A2 = NShell.OffsetSurface(SAi, rr * (fa.Sense ? 1 : -1)); var B2 = NShell.OffsetSurface(SBi, rr * (fb.Sense ? 1 : -1));
+                        var t = Vec3.Cross(A2.Grad(S[k]), B2.Grad(S[k]));
+                        D[k] = t.Length > 1e-12 ? (Vec3.Dot(t, dir) < 0 ? -t : t).Normalized : dir;
+                        continue;
+                    }
+                    double h0 = sArc[k] - sArc[k - 1], h1 = sArc[k + 1] - sArc[k];
+                    D[k] = ((S[k + 1] - S[k]) / h1 * h0 + (S[k] - S[k - 1]) / h0 * h1).Normalized;
+                    var u = us[k];
+                    var dRdu = (rb - ra) * 6 * u * (1 - u);
+                    double g0 = us[k] - us[k - 1], g1 = us[k + 1] - us[k];
+                    var dsdu = (h1 / g1 * g0 + h0 / g0 * g1) / (g0 + g1);
+                    drs[k] = dsdu > 1e-12 ? dRdu / dsdu : 0;
+                }
+                try { return new PipeSpine(S, D, SAi, SBi) { Rolls = rolls, Dr = dr, DrS = drs }; }
+                catch (ArgumentException) { return null; }
+            }
+            var us = Enumerable.Range(0, 17).Select(k => k / 16.0).ToList();
+            foreach (var u in us.OrderBy(Uc)) if (Station(u) == null) { Debug?.Invoke($"  fade: no ball at {u:g3} on segment {i}"); return null; }
+            PipeSpine? sp = null;
+            var tolF = 1e-7 * Math.Max(1, scale);
+            for (int round = 0; round < 10; round++)
+            {
+                sp = Spine(us);
+                if (sp == null) return null;
+                var add = new List<double>();
+                for (int k = 0; k + 1 < us.Count; k++)
+                {
+                    var um = 0.5 * (us[k] + us[k + 1]);
+                    if (Station(um) is not { } sm) return null;
+                    var (s, _, _) = sp.Ball(sm, r);
+                    if (Vec3.Distance(sm, sp.Eval(s)) + Math.Abs(Rho(um) - sp.Rad(s, r)) > tolF) add.Add(um);
+                }
+                if (add.Count == 0 || us.Count + add.Count > 600) break;
+                us = us.Concat(add).OrderBy(x => x).ToList();
+            }
+            // the faded end's joint: its center, the section square to the spine there, its contacts
+            int iF = fromA ? (i + 1) % ne : i;
+            var SF = Station(fromA ? 1 : 0)!.Value;
+            var TF = fromA ? sp!.D[^1] : sp!.D[0];
+            if (Vec3.Dot(TF, ev[iF].T) < 0) TF = -TF;
+            ev[iF] = new Joint(ev[iF].V, SF, TF, SAi.Project(SF), SBi.Project(SF));
+            evR[iF] = fromA ? rb : ra;
+            Debug?.Invoke($"  fade on segment {i}: {us.Count} stations, the radius {ra:g3} -> {rb:g3}");
+            return sp;
+        }
+
         // spine segments between consecutive events, on the offsets of the faces the ball rolls on
         var spines = new PipeSpine[nseg]; var range = new (double s0, double s1)[nseg];
         for (int i = 0; i < nseg; i++)
         {
             var ja = ev[i]; var jb = ev[(i + 1) % ne];
+            if (fadeSeg.TryGetValue(i, out var fr))
+            {
+                if (FadeSpine(i, fr.ra, fr.rb) is not { } fsp)
+                {
+                    Debug?.Invoke($"  fade on segment {i} failed: square");
+                    fadeSeg.Remove(i);
+                }
+                else { spines[i] = fsp; range[i] = (fsp.S0, fsp.S1); continue; }
+            }
             var len = Key(events[(i + 1) % ne].pos) - Key(events[i].pos);
             if (closed && i == ne - 1) len += total;
             var SAi = SupA(supportA[i]);
@@ -946,9 +1346,9 @@ public static class RollingBall
         {
             var j = ev[i];
             AV[i] = new NVertex(j.A); BV[i] = new NVertex(j.B);
-            var circle = new NCircle(j.S, j.T, j.A - j.S, r);
+            var circle = new NCircle(j.S, j.T, j.A - j.S, evR[i]);
             var tb = circle.Param(j.B);
-            if (tb < 0) { circle = new NCircle(j.S, -j.T, j.A - j.S, r); tb = circle.Param(j.B); }
+            if (tb < 0) { circle = new NCircle(j.S, -j.T, j.A - j.S, evR[i]); tb = circle.Param(j.B); }
             arc[i] = new NEdge(circle, 0, tb, AV[i], BV[i]);
         }
         int EvOf(int k, bool sw) => events.FindIndex(e => e.k == k && e.sw == sw);
@@ -1032,7 +1432,9 @@ public static class RollingBall
         var cA = new NEdge[nseg]; var cB = new NEdge[nseg];
         var bFaces = walkedB.Concat(faB).Distinct().ToList();
         var aFaces = walkedA.Concat(faA).Distinct().ToList();
-        var oneBlendC = !closed && nseg > 1 && Joined(spines, range) is { } jsc ? NSurface.Pipe(jsc, r) : null;
+        // (one surface for the whole chain, a faded end's radius carried on it)
+        int j0 = 0, j1 = nseg;
+        var oneBlendC = !closed && j1 - j0 > 1 && Joined(spines[j0..j1], range[j0..j1]) is { } jsc ? NSurface.Pipe(jsc, r) : null;
         for (int i = 0; i < nseg; i++)
         {
             var sp = spines[i]; var (s0, s1) = range[i];
@@ -1231,7 +1633,9 @@ public static class RollingBall
             foreach (var f in body.Faces)
                 Debug($"  tool {f.Tag.Name} {f.Surface.Kind}: " + string.Join(" | ", f.Loops.Select(l => string.Join(" ", l.Coedges.Select(c => $"{c.Start.P}{c.Edge.Curve.GetType().Name[1..3]}")))));
         if (err != null) return Fail("internal: " + err);
-        return new Result(NTess.ToSolid(body), convex, fits, null);
+        var fadedEnds = new List<(Vec3, double)>();
+        foreach (var (i, (ra, rb)) in fadeSeg) fadedEnds.Add(ra < rb ? (pieces[0].Start, ra) : (pieces[n - 1].End, rb));
+        return new Result(NTess.ToSolid(body), convex, fits, null) { FadedEnds = fadedEnds };
     }
 
     /// <summary>
@@ -1376,6 +1780,9 @@ public static class RollingBall
     {
         if (ReferenceEquals(a, b) || a.CoincidentWith(b, 1e-9)) return true;
         if (a.Spine is not { } sa || b.Spine is not { } sb || Math.Abs(a.R - b.R) > 1e-9 * Math.Max(1, a.R)) return false;
+        // (a fading pipe is a piece of no other: it starts where the constant one ends, along the same tangent, but its
+        // radius falls away from it)
+        if (sa.Variable || sb.Variable) return false;
         var tol = 1e-7 * Math.Max(1, a.R);
         for (int i = 0; i < sa.P.Length; i++)
             for (int j = 0; j < sb.P.Length; j++)
@@ -1396,14 +1803,19 @@ public static class RollingBall
     static PipeSpine? Joined(PipeSpine[] spines, (double s0, double s1)[] range)
     {
         var P = new List<Vec3>(); var D = new List<Vec3>();
+        // (a radius fading at an end: its change and slope carried, none on the constant pieces; the nodes as they are,
+        // so the slopes along the joined spine are the pieces' own)
+        bool variable = spines.Any(s => s.Variable);
+        var Dr = new List<double>(); var DrS = new List<double>();
         for (int i = 0; i < spines.Length; i++)
         {
             var sp = spines[i]; var (s0, s1) = range[i];
             for (int j = 0; j < sp.P.Length; j++)
             {
                 var s = sp.S[j];
-                // (inside the range; the first segment's run-on before it, the last's after it)
+                // (inside the range; the first segment's run-on before it, the last's after it; a faded piece has none)
                 if (i > 0 && s < s0 - 1e-12 || i < spines.Length - 1 && s > s1 + 1e-12) continue;
+                if (variable && (s < s0 - 1e-12 || s > s1 + 1e-12) && (sp.Variable || i > 0 && spines[i - 1].Variable || i < spines.Length - 1 && spines[i + 1].Variable)) continue;
                 if (P.Count > 0)
                 {
                     var d = Vec3.Distance(P[^1], sp.P[j]);
@@ -1412,13 +1824,14 @@ public static class RollingBall
                     if (i > 0 && s <= s0 + 1e-12) { if (d > 1e-6 || Vec3.Dot(D[^1], sp.D[j]) < 1 - 1e-6) { Debug?.Invoke($"  not joined at segment {i}: {d:g3} apart, tangents {Vec3.Dot(D[^1], sp.D[j]):R}"); return null; } }
                 }
                 P.Add(sp.P[j]); D.Add(sp.D[j]);
+                Dr.Add(sp.Variable ? sp.Dr![j] : 0); DrS.Add(sp.Variable ? sp.DrS![j] : 0);
             }
         }
         Debug?.Invoke($"  joined {spines.Length} spines into {P.Count} nodes");
         // (every surface the pieces' balls roll on: the boolean does not trace the blend against them, where it only
         // touches them, tangentially, along its contact)
         var rolls = spines.SelectMany(s => new[] { s.SupportA, s.SupportB }.Concat(s.Rolls)).OfType<NSurface>().Distinct().ToList();
-        try { return P.Count >= 2 ? new PipeSpine(P, D, spines[0].SupportA, null) { Rolls = rolls } : null; }
+        try { return P.Count >= 2 ? new PipeSpine(P, D, spines[0].SupportA, null) { Rolls = rolls, Dr = variable ? Dr.ToArray() : null, DrS = variable ? DrS.ToArray() : null } : null; }
         catch (ArgumentException) { return null; }
     }
 
@@ -1612,29 +2025,32 @@ public static class RollingBall
         return null;
     }
 
-    static (Vec3 S, Vec3 T)? SolveJoint(NSurface A2, NSurface B2, Vec3 V, Vec3 guess, Vec3 dir, double scale)
+    static (Vec3 S, Vec3 T)? SolveJoint(NSurface A2, NSurface B2, Vec3 V, Vec3 guess, Vec3 dir, double scale) => SolveJoint(A2, B2, V, guess, dir, scale, out _);
+
+    static (Vec3 S, Vec3 T)? SolveJoint(NSurface A2, NSurface B2, Vec3 V, Vec3 guess, Vec3 dir, double scale, out string? why)
     {
+        why = null;
         var p = guess;
         Vec3 T = dir;
         for (int it = 0; it < 60; it++)
         {
             var gA = A2.Grad(p); var gB = B2.Grad(p);
             var tt = Vec3.Cross(gA, gB);
-            if (tt.Length < 1e-9) return null;
+            if (tt.Length < 1e-9) { why = $"the offsets parallel at {p}"; return null; }
             T = tt.Normalized;
             if (Vec3.Dot(T, dir) < 0) T = -T;
             var f = new Vec3(A2.F_(p), B2.F_(p), Vec3.Dot(T, p - V));
             // Newton step with rows gA, gB, T (T treated as constant)
             var det = Vec3.Dot(gA, Vec3.Cross(gB, T));
-            if (Math.Abs(det) < 1e-14) return null;
+            if (Math.Abs(det) < 1e-14) { why = "singular"; return null; }
             var delta = (Vec3.Cross(gB, T) * f.X + Vec3.Cross(T, gA) * f.Y + Vec3.Cross(gA, gB) * f.Z) / det;
             p -= delta;
             if (delta.Length < 1e-14 * Math.Max(1, scale)) break;
         }
-        if (Math.Abs(A2.F_(p)) > 1e-9 * scale || Math.Abs(B2.F_(p)) > 1e-9 * scale) return null;
+        if (Math.Abs(A2.F_(p)) > 1e-9 * scale || Math.Abs(B2.F_(p)) > 1e-9 * scale) { why = $"off the offsets by {A2.F_(p):g3} / {B2.F_(p):g3} at {p}"; return null; }
         var gT = Vec3.Cross(A2.Grad(p), B2.Grad(p)).Normalized;
         if (Vec3.Dot(gT, dir) < 0) gT = -gT;
-        if (Math.Abs(Vec3.Dot(gT, p - V)) > 1e-8 * scale) return null;
+        if (Math.Abs(Vec3.Dot(gT, p - V)) > 1e-8 * scale) { why = $"off the section by {Vec3.Dot(gT, p - V):g3}"; return null; }
         return (p, gT);
     }
 

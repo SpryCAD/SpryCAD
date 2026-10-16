@@ -91,6 +91,17 @@ public sealed record BSplineSurface(int DegreeU, int DegreeV, Vec3[,] Poles, dou
                 if (worst > tol) bad.Add(j);
             }
             Debug?.Invoke($"fit {nu}x{vs.Count - 1} (adaptive): err u {eu:g2} v {ev:g2}, {bad.Count} intervals over");
+            if (Debug != null && bad.Count > 0)
+            {
+                // (where along v the worst is)
+                double wv = 0, we = 0;
+                foreach (var j in bad)
+                {
+                    var vm = v0 + (v1 - v0) * 0.5 * (vs[j] + vs[j + 1]);
+                    for (int i = 0; i < nu; i++) { double ui = u0 + (u1 - u0) * i / nu; var d = Vec3.Distance(s.Eval(ui, vm), f(ui, vm)); if (d > we) { we = d; wv = vm; } }
+                }
+                Debug($"  worst {we:g2} at v {wv:g4} (interval {(v1 - v0) * (vs[bad[0] + 1] - vs[bad[0]]):g2} wide at its first bad)");
+            }
             bool refU = eu > tol && nu < maxU;
             if (!refU && (bad.Count == 0 || vs.Count + bad.Count > maxSites)) return s;
             if (refU) nu = Math.Min(maxU, nu * 2);
