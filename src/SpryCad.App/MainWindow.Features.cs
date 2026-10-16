@@ -667,7 +667,7 @@ public partial class MainWindow
             var ch = (ChamferFeature)f;
             TextBox? d2 = null, angle = null;
             CheckBox? flip = null;
-            static Control RowOf(Control field) => (Control)field.Parent!.Parent!; // number field -> its label row
+            static Control RowOf(Control field) => PmPage.RowOf(field);
             void ShowFields()
             {
                 RowOf(d2!).IsVisible = ch.Type == ChamferType.DistanceDistance;

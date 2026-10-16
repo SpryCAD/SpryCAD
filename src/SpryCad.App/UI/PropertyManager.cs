@@ -119,6 +119,17 @@ public sealed class PmPage
 
     public void RaiseChanged() => Changed?.Invoke();
 
+    /// <summary>
+    /// A field's row in its section (the field with its label, or the field alone): what to hide to hide the field.
+    /// Found by what it is in, not by counting levels up (a field wrapped with its unit is a level deeper).
+    /// </summary>
+    public static Control RowOf(Control field)
+    {
+        var c = field;
+        while (c.Parent is Control p && !(p.Parent is Border b && b.Classes.Contains("pmsection"))) c = p;
+        return c;
+    }
+
     // the page's value fields, the one typed in last, and the one shown as the failure's (its tooltip before)
     readonly List<TextBox> _numbers = new();
     TextBox? _lastEdited, _failed;
