@@ -8,6 +8,8 @@ static class Program
     public static void Main(string[] args)
     {
         MoveSettings();
+        // sheet metal features (before any part is read: their JSON names)
+        SpryCad.SheetMetal.Features.SheetMetalModule.Register();
         // (before the app is built: which graphics API it draws through is chosen there)
         Session.UserSettings.Load();
         // files opened while SpryCAD already runs open there, in tabs

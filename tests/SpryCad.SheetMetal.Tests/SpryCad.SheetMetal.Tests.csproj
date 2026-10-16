@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\SpryCad.SheetMetal.Core\SpryCad.SheetMetal.Core.csproj" />
+    <ProjectReference Include="..\..\src\SpryCad.SheetMetal.Features\SpryCad.SheetMetal.Features.csproj" />
+    <ProjectReference Include="..\..\src\SpryCad.SheetMetal.Export\SpryCad.SheetMetal.Export.csproj" />
+  </ItemGroup>
+
+</Project>

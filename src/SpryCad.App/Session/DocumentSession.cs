@@ -377,6 +377,8 @@ public sealed class DocumentSession
     {
         // the library rows the features now use copied in, those none uses dropped (part of this undo step)
         Core.Library.LibraryLink.Sync(Doc);
+        // and the shop profile rows its sheet metal can use (copied when a material or gauge is new to the part)
+        SheetMetal.Features.SheetProfiles.Sync(Doc);
         SetDirty();
         DocumentChanged?.Invoke();
         RequestRebuild();

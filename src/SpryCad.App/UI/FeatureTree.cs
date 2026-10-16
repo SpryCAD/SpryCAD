@@ -216,7 +216,8 @@ public sealed class FeatureTree : UserControl
         PlaneFeature => "plane",
         AxisFeature => "axis",
         CombineFeature => "combine",
-        FlatPatternFeature => "flatpattern",
+        SpryCad.SheetMetal.Features.BaseFlangeFeature => "baseflange",
+        SpryCad.SheetMetal.Features.EdgeFlangeFeature => "edgeflange",
         _ => "part",
     };
 

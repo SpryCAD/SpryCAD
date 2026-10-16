@@ -77,10 +77,10 @@ public sealed class Regenerator
             // (the condition and what it uses are covered by the key: the equations and every feature before)
             var (suppressed, by, condError) = SuppressionOf(f, json, off, lookup);
             if (suppressed) off[f.Id] = f.Name;
-            // a flat pattern also depends on the part's sheet metal settings
-            if (f is FlatPatternFeature) key = Hash(key, JsonSerializer.Serialize(doc.SheetMetal, Serialization.Compact));
             // a thread also on how threads are shown
             if (f is ThreadFeature) key = Hash(key, ThreadOverride.ToString());
+            // a feature of another project also on what else of the part it reads (a sheet metal body, its profile)
+            if (FeatureRegistry.KeyOf(f, doc) is { } extra) key = Hash(key, extra);
             CacheEntry? hit;
             lock (_cache) if (_cache.TryGetValue(key, out hit) && epoch == _epoch) hit.Used = ++_uses; else hit = null;
             if (hit != null)
@@ -222,20 +222,6 @@ public sealed class Regenerator
     {
         var values = EvaluateEquations(doc).values;
         return n => values.TryGetValue(n, out var v) ? v : null;
-    }
-
-    /// <summary>
-    /// The bend rule of a flat pattern: its own method and K-factor where it sets them, else the part's
-    /// (<see cref="CadDocument.SheetMetal"/>, K-factor 0.5 when unset).
-    /// </summary>
-    public static BendRule RuleOf(CadDocument doc, FlatPatternFeature fp, Func<string?, string, double> eval)
-    {
-        var part = doc.SheetMetal ?? new SheetMetalSettings();
-        var method = fp.Method ?? part.Method;
-        var kExpr = string.IsNullOrWhiteSpace(fp.KFactor) ? part.KFactor : fp.KFactor;
-        var k = method == BendAllowanceMethod.KFactor ? eval(kExpr, "K-factor") : 0.5;
-        if (k < 0 || k > 1) throw new FeatureException("The K-factor must be between 0 and 1.");
-        return new BendRule(method, k);
     }
 
     /// <summary>
@@ -455,8 +441,12 @@ public sealed class Regenerator
                 case AxisFeature ax: State.Axes[f.Id] = AxisSolver.Solve(ax.Refs, State); break;
                 case CombineFeature c: DoCombine(c); break;
                 case ImportFeature im: DoImport(im); break;
-                case FlatPatternFeature fp: DoFlatPattern(fp); break;
                 case FastenerFeature fa: DoFastener(fa); break;
+                default:
+                    // features of other projects (sheet metal)
+                    var ctx = new FeatureContext(doc, () => State, s => State = s, (e, what, kind) => Value(e, what, kind, lookup), Cancel);
+                    if (!FeatureRegistry.TryExecute(f, ctx)) throw new FeatureException($"{f.Kind} features cannot be built by this version of SpryCAD.");
+                    break;
             }
         }
 
@@ -1637,35 +1627,6 @@ public sealed class Regenerator
             }
             catch (DraftFailedException ex) { throw new FeatureException(ex.Message); }
             State = State.With(bodies);
-        }
-
-        // ---- sheet metal ----
-
-        void DoFlatPattern(FlatPatternFeature fp)
-        {
-            var rule = RuleOf(doc, fp, Num);
-            if (State.Bodies.Count == 0) throw new FeatureException("There is no body to flatten.");
-            var targets = new List<(Body body, Kernel.Native.NFace? face)>();
-            if (fp.FixedFace != null)
-            {
-                var (b, name) = Resolver.ResolveFaceName(fp.FixedFace, State);
-                var face = b.Solid.Native?.Faces.FirstOrDefault(x => x.Tag.Name == name);
-                if (face != null && face.Surface.Kind != SurfaceKind.Plane) throw new FeatureException("The fixed face must be planar.");
-                targets.Add((b, face));
-            }
-            else targets.AddRange(State.Bodies.Select(b => (b, (Kernel.Native.NFace?)null)));
-
-            var bodies = new List<Body>(State.Bodies);
-            foreach (var (body, face) in targets)
-            {
-                var native = body.Solid.Native ?? throw new FeatureException("The body has no exact geometry to unfold.");
-                FlatPattern flat;
-                try { flat = SheetUnfold.Unfold(native, rule, face, f.Id); }
-                catch (UnfoldException ex) { throw new FeatureException(targets.Count > 1 ? $"{body.Id}: {ex.Message}" : ex.Message); }
-                State.Flats[body.Id] = flat;
-                if (fp.Flatten) bodies[bodies.IndexOf(body)] = new Body { Id = body.Id, Solid = Kernel.Native.NTess.ToSolid(flat.Body) };
-            }
-            if (fp.Flatten) State = State.With(bodies);
         }
 
         // ---- patterns / mirror ----

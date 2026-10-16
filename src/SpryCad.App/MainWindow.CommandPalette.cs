@@ -114,14 +114,15 @@ public partial class MainWindow
             C("plane", "Reference Plane", PlaneCommand);
             C("axis", "Reference Axis", AxisCommand);
             C("combine", "Combine", CombineCommand);
-            C("flatpattern", "Flat Pattern", FlatPatternCommand);
-            C("flatten", "Flatten", ToggleFlatten);
+            C("baseflange", "Base Flange", BaseFlangeCommand);
+            C("edgeflange", "Edge Flange", EdgeFlangeCommand);
+            C("flatten", "Flatten", ToggleFlattenCommand);
+            C("export-dxf", "Export Flat Pattern", () => _ = ExportFlatCommand());
             C("measure", "Measure", MeasureCommand);
             C("mass", "Mass Properties", MassPropertiesCommand);
             C("equations", "Equations", () => _ = Dialogs.Equations(this));
             C("table", "Design Table", () => _ = Dialogs.DesignTables(this));
             C("configure", "Configure", () => _ = Dialogs.ConfigurePart(this));
-            C("export-dxf", "Export Flat Pattern DXF", () => _ = ExportDxf());
             C("import", "Import STEP", () => _ = ImportDialog());
         }
         // the view, in any mode

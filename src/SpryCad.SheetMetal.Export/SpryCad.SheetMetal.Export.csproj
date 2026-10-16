@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Flat pattern output (sheet metal spec section 10): DXF and SVG by the shop profile's layer mapping. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SpryCad.SheetMetal.Core\SpryCad.SheetMetal.Core.csproj" />
+  </ItemGroup>
+
+</Project>

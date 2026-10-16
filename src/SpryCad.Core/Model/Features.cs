@@ -74,7 +74,6 @@ public sealed class DirRef
 [JsonDerivedType(typeof(AxisFeature), "axis")]
 [JsonDerivedType(typeof(CombineFeature), "combine")]
 [JsonDerivedType(typeof(ImportFeature), "import")]
-[JsonDerivedType(typeof(FlatPatternFeature), "flatPattern")]
 [JsonDerivedType(typeof(FastenerFeature), "fastener")]
 public abstract class Feature
 {
@@ -542,31 +541,6 @@ public sealed class FastenerFeature : Feature
     /// <summary>How the fastener is named in a bill of materials ("ISO 4762 M8x30").</summary>
     public string Designation { get; set; } = "";
     public override IEnumerable<string> LibraryItems() => new[] { Item };
-}
-
-/// <summary>A part's sheet metal settings: how long its bends are in the flat.</summary>
-public sealed class SheetMetalSettings
-{
-    public BendAllowanceMethod Method { get; set; } = BendAllowanceMethod.KFactor;
-    /// <summary>Where the neutral fiber lies in a bend, as a fraction of the thickness from the inside (0..1).</summary>
-    public string KFactor { get; set; } = "0.5";
-    public SheetMetalSettings Clone() => (SheetMetalSettings)MemberwiseClone();
-}
-
-/// <summary>
-/// The flat pattern of sheet metal bodies (any body of uniform thickness whose bends are cylinders), unfolded about
-/// a fixed face. It is always computed (for DXF export); <see cref="Flatten"/> shows the part flat.
-/// </summary>
-public sealed class FlatPatternFeature : Feature
-{
-    public override string Kind => "Flat-Pattern";
-    /// <summary>The planar face that stays in place; none: every body about its largest planar face.</summary>
-    public FaceRef? FixedFace { get; set; }
-    /// <summary>Overrides the part's bend allowance method (null: the part's, <see cref="CadDocument.SheetMetal"/>).</summary>
-    public BendAllowanceMethod? Method { get; set; }
-    /// <summary>Overrides the part's K-factor (null or blank: the part's).</summary>
-    public string? KFactor { get; set; }
-    public bool Flatten { get; set; }
 }
 
 public sealed class Equation

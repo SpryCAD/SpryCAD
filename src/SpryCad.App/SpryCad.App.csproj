@@ -42,6 +42,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\SpryCad.Core\SpryCad.Core.csproj" />
+    <ProjectReference Include="..\SpryCad.SheetMetal.Features\SpryCad.SheetMetal.Features.csproj" />
+    <ProjectReference Include="..\SpryCad.SheetMetal.Export\SpryCad.SheetMetal.Export.csproj" />
   </ItemGroup>
 
   <!--

@@ -164,6 +164,9 @@ public static class PartRevert
         ObjectKind.Material => "Material",
         ObjectKind.Settings => "Part settings",
         ObjectKind.LibrarySnapshot => "Library data " + PartObjects.SnapshotName(after.TryGetValue(id, out var s) ? s : before[id]),
+        ObjectKind.SheetMetalBody => "Sheet metal body " + System.Text.Encoding.ASCII.GetString(id.Bytes[1..]).TrimEnd('\0'),
+        ObjectKind.SheetMetalOverride => "Sheet metal override",
+        ObjectKind.SheetProfile => "Shop profile rows",
         _ => id.Kind.ToString(),
     };
 

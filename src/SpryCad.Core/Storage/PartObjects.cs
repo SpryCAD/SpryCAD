@@ -17,7 +17,7 @@ public enum ObjectKind : byte
     Variables = 3,
     /// <summary>Color, material and density (exactly one).</summary>
     Material = 4,
-    /// <summary>Units, sheet metal settings and the embedded files' names (exactly one).</summary>
+    /// <summary>Units and the embedded files' names (exactly one).</summary>
     Settings = 5,
     /// <summary>One per embedded file: its bytes as they are (no envelope).</summary>
     File = 6,
@@ -28,6 +28,12 @@ public enum ObjectKind : byte
     NameCounters = 7,
     /// <summary>One per library item the part uses ("ISO261-coarse/M8"): the rows it rebuilds from (section 34).</summary>
     LibrarySnapshot = 8,
+    /// <summary>One per sheet metal body, by its id: material, gauge, fixed panel, overrides (sheet metal spec section 4).</summary>
+    SheetMetalBody = 9,
+    /// <summary>One per bend, corner or hem whose profile values were overridden, by its persistent id.</summary>
+    SheetMetalOverride = 10,
+    /// <summary>The shop profile rows the sheet metal bodies can use (at most one).</summary>
+    SheetProfile = 11,
 
     // an assembly's (AssemblyObjects)
     /// <summary>Units and the documents (parts, sub-assemblies) embedded in it by name (exactly one).</summary>
@@ -52,6 +58,8 @@ public enum ObjectKind : byte
     LibraryTable = 40,
     /// <summary>What a company library allows of the tables below it (at most one).</summary>
     LibraryRestrictions = 41,
+    /// <summary>One per shop profile table (sheet metal), by its key.</summary>
+    ShopProfileTable = 42,
 }
 
 /// <summary>
@@ -83,13 +91,18 @@ public static class PartObjects
         var files = doc.Files.Keys.Order(StringComparer.Ordinal).ToList();
         objects.Add(Single(ObjectKind.Settings), Envelope(ObjectKind.Settings, Json(new SettingsData
         {
-            Units = doc.Units, SheetMetal = doc.SheetMetal,
+            Units = doc.Units,
             Files = files.Count > 0 ? files : null,
         })));
         objects.Add(Single(ObjectKind.NameCounters), Envelope(ObjectKind.NameCounters, Json(new SortedDictionary<string, int>(doc.NameCounters, StringComparer.Ordinal))));
         foreach (var name in files) objects.Add(FileId(name), doc.Files[name]);
         foreach (var (item, snap) in doc.Library ?? new())
             objects.Add(IdOf(ObjectKind.LibrarySnapshot, item), Envelope(ObjectKind.LibrarySnapshot, Json(snap)));
+        foreach (var b in doc.SheetBodies ?? new())
+            objects.Add(IdOf(ObjectKind.SheetMetalBody, b.Id), Envelope(ObjectKind.SheetMetalBody, Json(b)));
+        foreach (var o in doc.SheetOverrides ?? new())
+            objects.Add(IdOf(ObjectKind.SheetMetalOverride, o.Target), Envelope(ObjectKind.SheetMetalOverride, Json(o)));
+        if (doc.SheetProfile != null) objects.Add(Single(ObjectKind.SheetProfile), Envelope(ObjectKind.SheetProfile, Json(doc.SheetProfile)));
         return objects;
     }
 
@@ -109,7 +122,7 @@ public static class PartObjects
         var m = Data<MaterialData>(ObjectKind.Material);
         doc.Color = m.Color ?? doc.Color; doc.Material = m.Material; doc.Density = m.Density;
         var s = Data<SettingsData>(ObjectKind.Settings);
-        doc.Units = s.Units; doc.SheetMetal = s.SheetMetal;
+        doc.Units = s.Units;
         // (in the settings in files saved before they had an object of their own)
         doc.NameCounters = new Dictionary<string, int>(objects.TryGetValue(Single(ObjectKind.NameCounters), out var nc)
             ? Open<SortedDictionary<string, int>>(nc, ObjectKind.NameCounters) : s.NameCounters ?? new());
@@ -121,6 +134,15 @@ public static class PartObjects
                 var snap = Open<Library.LibrarySnapshot>(b, ObjectKind.LibrarySnapshot);
                 (doc.Library ??= new(StringComparer.Ordinal))[snap.Item] = snap;
             }
+        // sheet metal: bodies and overrides in a stable order (by id), whatever order the objects come in
+        foreach (var (id, b) in objects.OrderBy(kv => kv.Key))
+        {
+            if (id.Kind == ObjectKind.SheetMetalBody) (doc.SheetBodies ??= new()).Add(Open<SheetMetal.SheetMetalBody>(b, ObjectKind.SheetMetalBody));
+            else if (id.Kind == ObjectKind.SheetMetalOverride) (doc.SheetOverrides ??= new()).Add(Open<SheetMetal.SheetMetalOverride>(b, ObjectKind.SheetMetalOverride));
+        }
+        doc.SheetBodies?.Sort((x, y) => string.CompareOrdinal(x.Id, y.Id));
+        doc.SheetOverrides?.Sort((x, y) => string.CompareOrdinal(x.Target, y.Target));
+        if (objects.TryGetValue(Single(ObjectKind.SheetProfile), out var sp)) doc.SheetProfile = Open<SheetMetal.ProfileSnapshot>(sp, ObjectKind.SheetProfile);
         return doc;
     }
 
@@ -211,7 +233,6 @@ public static class PartObjects
     sealed class SettingsData
     {
         public UnitSystem Units { get; set; }
-        public SheetMetalSettings? SheetMetal { get; set; }
         /// <summary>Only in files saved before <see cref="ObjectKind.NameCounters"/> (read, never written).</summary>
         public SortedDictionary<string, int>? NameCounters { get; set; }
         public List<string>? Files { get; set; }

@@ -40,7 +40,6 @@ public static class OptionsDialog
     {
         new("Units", "measure", UnitsPage),
         new("Appearance", "display", AppearancePage),
-        new("Sheet Metal", "flatpattern", SheetMetalPage),
     };
 
     // the tab and page shown last, shown again next time (this run only)
@@ -476,28 +475,6 @@ public static class OptionsDialog
         return new Commit(
             () => Parse() == null ? "Color: three numbers from 0 to 255, separated by commas." : null,
             () => text.Text != shown && Parse() is { } rgb && !rgb.SequenceEqual(doc.Color) ? () => doc.Color = rgb : null);
-    }
-
-    static Commit SheetMetalPage(Form f, Context c)
-    {
-        var s = c.Part;
-        var sheet = s.Doc.SheetMetal ?? new SheetMetalSettings();
-        f.Section("Bend allowance");
-        var method = f.Row("Method", Combo(new[] { "K-factor", "DIN 6935" }, sheet.Method == BendAllowanceMethod.Din6935 ? 1 : 0));
-        var k = f.Row("K-factor", new TextBox { Text = sheet.KFactor, Width = 120, HorizontalAlignment = HorizontalAlignment.Left },
-            "0 to 1, or an expression of the part's variables. For this part's flat patterns (a Flat Pattern can override it).");
-        void Sync() => k.IsEnabled = method.SelectedIndex == 0;
-        method.SelectionChanged += (_, _) => Sync();
-        Sync();
-        return new Commit(
-            () => method.SelectedIndex != 0 || (Expr.TryEvaluate((k.Text ?? "").Trim(), s.Lookup, out var v, out _) && v.IsNumber && v.Value >= 0 && v.Value <= 1) ? null
-                : "K-factor: a number from 0 to 1, or an expression of the part's variables.",
-            () =>
-            {
-                var m = method.SelectedIndex == 1 ? BendAllowanceMethod.Din6935 : BendAllowanceMethod.KFactor;
-                var kText = m == BendAllowanceMethod.KFactor ? (k.Text ?? "").Trim() : sheet.KFactor;
-                return m == sheet.Method && kText == sheet.KFactor ? null : () => s.Doc.SheetMetal = new SheetMetalSettings { Method = m, KFactor = kText };
-            });
     }
 
     static ComboBox Combo(string[] items, int selected) => new() { ItemsSource = items, SelectedIndex = selected, MinWidth = 260, HorizontalAlignment = HorizontalAlignment.Left };
