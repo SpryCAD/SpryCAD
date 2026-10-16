@@ -58,6 +58,11 @@
     <Setter Property="TextAlignment" Value="Center" />
     <Setter Property="HorizontalAlignment" Value="Center" />
   </Style>
+  <!-- a row too wide for the window: narrower, the names kept -->
+  <Style Selector="Button.cmd.big.narrow">
+    <Setter Property="Width" Value="76" />
+    <Setter Property="Padding" Value="2,5,2,3" />
+  </Style>
   <Style Selector="Button.cmd.big.iconsonly">
     <Setter Property="Width" Value="48" />
   </Style>

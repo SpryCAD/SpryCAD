@@ -202,7 +202,10 @@ public partial class MainWindow
         }
     }
 
-    /// <summary>The row's names shown when the row fits the window, else its icons only (the names in the tooltips).</summary>
+    /// <summary>
+    /// A row too wide for the window: large buttons made narrower, their names kept (every tab alike, names under the
+    /// icons), and past that it scrolls; compact ones show their icons only (the names in the tooltips).
+    /// </summary>
     bool _fitHooked;
 
     void FitCommandRow()
@@ -215,15 +218,17 @@ public partial class MainWindow
         _fitPending = true;
         CommandBar.Height = LargeBar ? double.NaN : 34;
         foreach (var l in _cmdLabels) l.IsVisible = true;
-        foreach (var b in CommandBar.GetLogicalDescendants().OfType<Button>()) b.Classes.Set("iconsonly", false);
+        foreach (var b in CommandBar.GetLogicalDescendants().OfType<Button>()) { b.Classes.Set("iconsonly", false); b.Classes.Set("narrow", false); }
         Avalonia.Threading.Dispatcher.UIThread.Post(() =>
         {
             _fitPending = false;
             if (CommandBar.Parent is not Control host) return;
             CommandBar.Measure(Size.Infinity);
-            var fits = CommandBar.DesiredSize.Width <= host.Bounds.Width - 8;
-            foreach (var l in _cmdLabels) l.IsVisible = fits;
-            foreach (var b in CommandBar.GetLogicalDescendants().OfType<Button>()) b.Classes.Set("iconsonly", !fits);
+            if (CommandBar.DesiredSize.Width <= host.Bounds.Width - 8) return;
+            var buttons = CommandBar.GetLogicalDescendants().OfType<Button>().ToList();
+            if (LargeBar) { foreach (var b in buttons) b.Classes.Set("narrow", true); return; }
+            foreach (var l in _cmdLabels) l.IsVisible = false;
+            foreach (var b in buttons) b.Classes.Set("iconsonly", true);
         }, Avalonia.Threading.DispatcherPriority.Loaded);
     }
 
