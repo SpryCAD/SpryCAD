@@ -810,27 +810,74 @@ public partial class MainWindow
             if (Core.Library.HoleSizes.Missing(f, Resolve) is { } missing) Status(missing);
             dia!.Text = f.Diameter; cbd!.Text = f.CbDiameter; cbdp!.Text = f.CbDepth; csd!.Text = f.CsDiameter; csa!.Text = f.CsAngle;
         }
-        page.Combo(t, "Type", new List<(HoleType, string)> { (HoleType.Simple, "Simple"), (HoleType.Counterbore, "Counterbore"), (HoleType.Countersink, "Countersink") },
-            () => f.Type, v => { f.Type = v; syncSections(); Fill(); });
-        var std = page.Section("Size");
-        var sizes = new List<(string, string)> { ("custom", "Custom") };
-        foreach (var tbl in Core.Library.LibraryLink.Current.Offered(Core.Library.TableKinds.Clearance))
-            sizes.AddRange(tbl.Rows.Select(r => (tbl.Key + "|" + r.Key, $"{r.Key} clearance ({tbl.Standard})")));
+        // the hole type as a row of pictures of it in section (as SolidWorks): simple, counterbore, countersink
+        Action refreshType = () => { };
+        page.IconChoice(t, new List<(HoleType, string, string)>
+        {
+            (HoleType.Simple, "hole-simple", "Simple: drilled straight, through or to a depth"),
+            (HoleType.Counterbore, "hole-cbore", "Counterbore: a socket head screw's head sunk below the face"),
+            (HoleType.Countersink, "hole-csink", "Countersink: a flat head screw's head flush with the face"),
+        }, () => f.Type, v => { f.Type = v; syncSections(); refreshType(); Fill(); });
+        // the standard (the clearance holes' table), then the screw type it sizes the hole for, then the size and fit
+        var clearance = Core.Library.LibraryLink.Current.Offered(Core.Library.TableKinds.Clearance).ToList();
         // a hole made before libraries, with an ISO 273 normal diameter, shows its size (editing an M6 hole shows M6, not Custom)
         if (f.Standard == null && UnitFormat.TryLength(f.Diameter, Session.Lookup, out var d0, out _)
             && Core.Library.LibraryLink.Current.Table("ISO273") is { } iso && iso.Rows.FirstOrDefault(r => Math.Abs(r.Values[iso.Column("normal")] - d0) < 1e-9) is { } guess)
         { f.Standard = "ISO273"; f.Size = guess.Key; }
-        string StdValue() => f.Standard != null && f.Size != null ? f.Standard + "|" + f.Size : "custom";
-        if (!sizes.Any(s => s.Item1 == StdValue())) sizes.Insert(1, (StdValue(), $"{f.Size} clearance (not offered by the libraries)"));
-        page.Combo(std, "Standard", sizes, StdValue, v =>
+        var standards = new List<(string, string)> { ("custom", "Custom (diameters typed)") };
+        standards.AddRange(clearance.Select(c => (c.Key, $"{c.Title} ({c.Standard})")));
+        if (f.Standard != null && clearance.All(c => c.Key != f.Standard)) standards.Add((f.Standard, $"{f.Standard} (not offered by the libraries)"));
+        var typeBox = new ComboBox { HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Stretch, FontSize = TypeScale.Body };
+        var sizeBox = new ComboBox { HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Stretch, FontSize = TypeScale.Body };
+        Control? sizeRow = null, fitRow = null;
+        // the screw type the standard and the hole type size it for (the counterbore's or countersink's table)
+        refreshType = () =>
         {
-            var i = v.IndexOf('|');
-            if (i < 0) { f.Standard = null; f.Size = null; f.Fit = null; return; }
-            f.Standard = v[..i]; f.Size = v[(i + 1)..];
-            Fill();
+            string? key = f.Standard == null ? null : f.Type switch
+            {
+                HoleType.Counterbore => Core.Library.HoleSizes.Companions(f.Standard).cbore,
+                HoleType.Countersink => Core.Library.HoleSizes.Companions(f.Standard).csink,
+                _ => null,
+            };
+            var tbl = key == null ? null : Core.Library.LibraryLink.Current.Table(key);
+            static string Screw(string title) =>
+                title.IndexOf(" for ", StringComparison.Ordinal) is var i and >= 0 ? char.ToUpper(title[i + 5]) + title[(i + 6)..].Split(" (")[0].Replace("screws", "screw") : title;
+            typeBox.ItemsSource = new[]
+            {
+                f.Standard == null ? "Custom" : f.Type == HoleType.Simple ? "Clearance hole"
+                    : tbl != null ? $"{Screw(tbl.Title)} ({tbl.Standard})" : $"{key} (not offered by the libraries)",
+            };
+            typeBox.SelectedIndex = 0;
+            typeBox.IsEnabled = f.Standard != null;
+        };
+        // the sizes of the standard picked (its size kept when it has it, else the first)
+        bool listing = false;
+        void ListSizes()
+        {
+            listing = true;
+            var tbl = f.Standard == null ? null : clearance.FirstOrDefault(c => c.Key == f.Standard);
+            var keys = tbl?.Rows.Select(r => r.Key).ToList() ?? new List<string>();
+            if (f.Size != null && !keys.Contains(f.Size) && tbl == null && f.Standard != null) keys.Add(f.Size);
+            if (f.Standard != null && (f.Size == null || !keys.Contains(f.Size))) f.Size = keys.FirstOrDefault();
+            sizeBox.ItemsSource = keys;
+            sizeBox.SelectedItem = f.Size;
+            listing = false;
+            if (sizeRow != null) sizeRow.IsVisible = f.Standard != null;
+            if (fitRow != null) fitRow.IsVisible = f.Standard != null;
+        }
+        page.Combo(t, "Standard", standards, () => f.Standard ?? "custom", v =>
+        {
+            if (v == "custom") { f.Standard = null; f.Size = null; f.Fit = null; }
+            else f.Standard = v;
+            ListSizes(); refreshType(); Fill();
         });
-        page.Combo(std, "Fit", new List<(string, string)> { ("close", "Close"), ("normal", "Normal"), ("loose", "Loose") },
-            () => f.Fit ?? "normal", v => { f.Fit = v == "normal" ? null : v; Fill(); });
+        page.Field(t, "Type", typeBox);
+        var std = page.Section("Hole Specifications");
+        sizeRow = PmPage.RowOf(page.Field(std, "Size", sizeBox));
+        sizeBox.SelectionChanged += (_, _) => { if (!listing && sizeBox.SelectedItem is string sz) { f.Size = sz; Fill(); page.RaiseChanged(); } };
+        fitRow = PmPage.RowOf(page.Combo(std, "Fit", new List<(string, string)> { ("close", "Close"), ("normal", "Normal"), ("loose", "Loose") },
+            () => f.Fit ?? "normal", v => { f.Fit = v == "normal" ? null : v; Fill(); }));
+        ListSizes(); refreshType();
         dia = page.Number(std, "Diameter", () => f.Diameter, v => f.Diameter = v, "hole");
         var end = page.Section("End Condition");
         TextBox? depth = null;

@@ -279,6 +279,27 @@
     <Setter Property="Background" Value="{DynamicResource Spry.DangerBg}" />
     <Setter Property="BorderBrush" Value="{DynamicResource Spry.Danger}" />
   </Style>
+  <!-- a page's choice as a row of icons (the Hole Wizard's hole types): square, the one chosen pressed in the selection blue -->
+  <Style Selector="ToggleButton.iconchoice">
+    <Setter Property="Width" Value="40" />
+    <Setter Property="Height" Value="40" />
+    <Setter Property="Padding" Value="3" />
+    <Setter Property="Margin" Value="0,0,4,4" />
+    <Setter Property="CornerRadius" Value="2" />
+    <Setter Property="Background" Value="{DynamicResource Spry.Surface}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Spry.FieldBorder}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+  </Style>
+  <Style Selector="ToggleButton.iconchoice:pointerover /template/ ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource Spry.HoverBg}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Spry.HoverBorder}" />
+  </Style>
+  <Style Selector="ToggleButton.iconchoice:checked /template/ ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource Spry.SelectedBg}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Spry.SelectedBorder}" />
+  </Style>
   <Style Selector="TextBlock.pmheader">
     <Setter Property="FontWeight" Value="SemiBold" />
     <Setter Property="Foreground" Value="{DynamicResource Spry.Heading}" />

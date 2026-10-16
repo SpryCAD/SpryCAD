@@ -431,6 +431,35 @@ public sealed class PmPage
         return cb;
     }
 
+    /// <summary>A field of the page's own making, with its label beside it as the others have.</summary>
+    public T Field<T>(StackPanel s, string label, T field, string? icon = null) where T : Control
+    {
+        s.Children.Add(Row(label, field, icon));
+        return field;
+    }
+
+    /// <summary>
+    /// A choice as a row of icon buttons, each showing its option (the Hole Wizard's hole types): the one chosen pressed;
+    /// its name and what it is in its tooltip.
+    /// </summary>
+    public void IconChoice<T>(StackPanel s, IReadOnlyList<(T value, string icon, string tip)> options, Func<T> get, Action<T> set)
+    {
+        var row = new WrapPanel { Orientation = Orientation.Horizontal };
+        var buttons = new List<(Avalonia.Controls.Primitives.ToggleButton b, T v)>();
+        void Mark() { var cur = get(); foreach (var (b, v) in buttons) b.IsChecked = EqualityComparer<T>.Default.Equals(v, cur); }
+        foreach (var (value, icon, tip) in options)
+        {
+            var b = new Avalonia.Controls.Primitives.ToggleButton { Classes = { "iconchoice" }, Content = Icons.Make(icon, 30) };
+            ToolTip.SetTip(b, tip);
+            var v = value;
+            b.Click += (_, _) => { set(v); Mark(); Changed?.Invoke(); };
+            buttons.Add((b, v));
+            row.Children.Add(b);
+        }
+        Mark();
+        s.Children.Add(row);
+    }
+
     public Button ButtonRow(StackPanel s, string text, Action click, string? icon = null)
     {
         var content = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
