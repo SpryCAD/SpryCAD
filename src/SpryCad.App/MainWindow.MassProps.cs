@@ -115,7 +115,7 @@ public partial class MainWindow
         mat.Children.Add(dens);
         mat.Children.Add(unit);
         // the material's properties, its look, the library's other materials and custom ones: Edit Material
-        var editMaterial = new Button { Content = "Edit Material...", Margin = new Thickness(8, 0, 0, 0) };
+        var editMaterial = new Button { Content = "Edit Material…", Margin = new Thickness(8, 0, 0, 0) };
         editMaterial.Click += (_, _) => EditMaterialCommand();
         mat.Children.Add(editMaterial);
         materialRow.Children.Add(mat);
@@ -270,7 +270,7 @@ public partial class MainWindow
 
         var dShown = (ips ? kgm3 * KgM3ToLbIn3 : kgm3).ToString(ips ? "0.######" : "0.##", CultureInfo.InvariantCulture);
         Line($"Mass properties of {Session.Title.TrimEnd(' ', '*')}", true);
-        Line($"    Material: {Session.Doc.MaterialName ?? "Not specified (steel's density assumed)"}");
+        Line($"    Material: {Session.Doc.MaterialName ?? "Not specified (steel density used)"}");
         if (bodies.Count > 1) Line($"    Bodies: {bodies.Count}");
         Line();
         Line($"Density = {dShown} {(ips ? "lb/in³" : "kg/m³")}");

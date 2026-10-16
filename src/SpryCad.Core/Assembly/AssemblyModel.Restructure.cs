@@ -295,7 +295,7 @@ public sealed partial class AssemblyModel
     /// </summary>
     public string MoveInto(Component x, Component s)
     {
-        if (x == s || !s.IsAssembly || !Doc.Components.Contains(x) || !Doc.Components.Contains(s)) throw new ArgumentException("Pick a component and a sub-assembly of this assembly.");
+        if (x == s || !s.IsAssembly || !Doc.Components.Contains(x) || !Doc.Components.Contains(s)) throw new ArgumentException("Select a component and a sub-assembly of this assembly.");
         if (x.Pattern != null || Doc.Patterns?.Any(p => p.Seeds.Contains(x.Id)) == true) throw new InvalidOperationException("A pattern's component cannot be moved: delete the pattern first.");
         if (SubOf(s) is not { Model: not null, Source: not SubSource.Cache }) throw new InvalidOperationException($"{s.Name} is not found, so it cannot be changed.");
         // (a sub-assembly moved into one it holds would hold itself)
@@ -342,7 +342,7 @@ public sealed partial class AssemblyModel
     {
         var segs = path.Split('/');
         if (segs.Length != 2 || Doc.Find(segs[0]) is not { IsAssembly: true } s || Find(path) is not { } o)
-            throw new ArgumentException("Pick a component of one of this assembly's sub-assemblies.", nameof(path));
+            throw new ArgumentException("Select a component of one of this assembly's sub-assemblies.", nameof(path));
         if (SubOf(s) is not { Model: not null, Source: not SubSource.Cache }) throw new InvalidOperationException($"{s.Name} is not found, so it cannot be changed.");
         var sd = LoadSubDoc(s, out var file);
         var cid = segs[1];

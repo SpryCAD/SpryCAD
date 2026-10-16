@@ -437,13 +437,13 @@ public partial class MainWindow
         ["Mirror"] = "Mirrors features about a plane or planar face.",
         ["Reference Plane"] = "Creates a plane offset from a plane or planar face.",
         ["Combine"] = "Adds, subtracts or intersects bodies.",
-        ["Base Flange"] = "Creates a sheet metal part from a closed sketch (a plate) or open lines (a bent profile), using the shop profile's material and gauge.",
-        ["Edge Flange"] = "Adds flanges to sheet edges, measured to the outside or inside mold line or the tangent, with a bend angle and direction.",
-        ["Hem"] = "Folds sheet edges back on themselves (closed, open or teardrop), checked against the shop's hem rules.",
-        ["Sheet Cut"] = "Cuts closed sketch profiles normal to the sheet, through every parallel panel they lie on.",
-        ["Corners"] = "Lists where flanges meet, how each corner is made and its gap check; each corner's treatment and gap can be overridden.",
-        ["Flatten"] = "Toggles the sheet metal between flattened and folded.",
-        ["Export Flat"] = "Exports the flat pattern as DXF or SVG on the shop profile's layers, with bend notes and a bend table.",
+        ["Base Flange"] = "Creates sheet metal from a closed sketch (plate) or open sketch (bent profile) in a shop profile gauge.",
+        ["Edge Flange"] = "Adds flanges to the selected sheet edges at a set length, angle and direction.",
+        ["Hem"] = "Adds closed, open or teardrop hems to the selected sheet edges.",
+        ["Sheet Cut"] = "Cuts closed sketch profiles normal to the sheet through every parallel panel.",
+        ["Corners"] = "Lists the corners where flanges meet and sets each corner's treatment and gap.",
+        ["Flatten"] = "Toggles the sheet metal between flat and folded.",
+        ["Export Flat"] = "Exports the flat pattern as DXF or SVG with bend lines, notes and a bend table.",
         ["Sketch"] = "Starts a sketch on the selected plane or planar face.",
         ["Smart Dimension"] = "Dimensions sketch entities and model edges or vertices.",
         ["Line"] = "Sketches lines, adding relations when they snap to entities, model edges, midpoints and centers.",
@@ -456,7 +456,7 @@ public partial class MainWindow
         ["Add Relations"] = "Adds relations such as coincident, horizontal or tangent between the selected entities.",
         ["Measure"] = "Measures distance, angle, radius, length and area of the selected faces, edges and vertices.",
         ["Mass Properties"] = "Calculates mass, volume, surface area, center of mass and moments of inertia from the part's material.",
-        ["Edit Material"] = "Assigns a material from the libraries: its density for mass properties, its properties and its appearance.",
+        ["Edit Material"] = "Assigns a library material, which sets the part's density, properties and appearance.",
         ["Equations"] = "Defines global variables that drive dimensions and conditions that suppress features.",
         ["Design Table"] = "Defines rows of variable values; selecting a row applies them all.",
         ["Configure"] = "Sets the part's design table rows and the variables marked User.",
@@ -825,8 +825,8 @@ public partial class MainWindow
         if (id == FeatureTree.ConfigRow)
         {
             menu.Items.Add(Item("Quick Configure", () => ShowConfigurator(Tree.RowFor(id)), null, "configure"));
-            menu.Items.Add(Item("Configure...", () => _ = Dialogs.ConfigurePart(this), null, "configure"));
-            menu.Items.Add(Item("Parameters...", () => _ = UI.ParametersDialog.Show(this, tables: true), null, "equations"));
+            menu.Items.Add(Item("Configure…", () => _ = Dialogs.ConfigurePart(this), null, "configure"));
+            menu.Items.Add(Item("Parameters…", () => _ = UI.ParametersDialog.Show(this, tables: true), null, "equations"));
             menu.Open(row);
             return;
         }
@@ -840,7 +840,7 @@ public partial class MainWindow
                 menu.Items.Add(mi);
             }
             menu.Items.Add(new Separator());
-            menu.Items.Add(Item("Edit Table...", () => _ = UI.ParametersDialog.Show(this, select: table.Name), null, "table"));
+            menu.Items.Add(Item("Edit Table…", () => _ = UI.ParametersDialog.Show(this, select: table.Name), null, "table"));
             menu.Open(row);
             return;
         }
@@ -848,8 +848,8 @@ public partial class MainWindow
         // the part's material: edit, remove, a recent one, and the library's change when there is one
         if (id is FeatureTree.MaterialRow or "__part")
         {
-            menu.Items.Add(Item("Edit Material...", EditMaterialCommand, null, "material"));
-            menu.Items.Add(Item("Appearance...", () => _ = PartAppearanceCommand(), null, "appearance"));
+            menu.Items.Add(Item("Edit Material…", EditMaterialCommand, null, "material"));
+            menu.Items.Add(Item("Appearance…", () => _ = PartAppearanceCommand(), null, "appearance"));
             foreach (var item in _recentMaterials.Where(i => i != Session.Doc.MaterialItem && LibraryLink.Current.Snapshot(i) != null).Take(5))
             {
                 var it = item;
@@ -857,7 +857,7 @@ public partial class MainWindow
             }
             if (Session.Doc.MaterialItem is { } mi)
             {
-                if (LibraryLink.Updates(Session.Doc).Any(u => u.Item == mi)) menu.Items.Add(Item("Update from Library...", () => _ = LibraryUpdatesCommand(), null, "table"));
+                if (LibraryLink.Updates(Session.Doc).Any(u => u.Item == mi)) menu.Items.Add(Item("Update from Library…", () => _ = LibraryUpdatesCommand(), null, "table"));
                 menu.Items.Add(Item("Remove Material", () => SetPartMaterial(null), null, "delete"));
             }
             if (id == "__part" && Session.Doc.RollbackIndex != null) menu.Items.Add(new Separator());

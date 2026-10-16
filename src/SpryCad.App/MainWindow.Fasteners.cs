@@ -39,10 +39,10 @@ public partial class MainWindow
         var holeSec = page.Section("Hole");
         var holeLbl = new TextBlock { TextWrapping = Avalonia.Media.TextWrapping.Wrap, FontSize = TypeScale.Body };
         holeSec.Children.Add(new Border { Classes = { "pmsection" }, Child = holeLbl, Padding = new Thickness(6, 4) });
-        page.Info(holeSec, "Click the wall of a hole made with the Hole Wizard from a clearance hole size: the screw goes in from the end nothing is in the way of.");
+        page.Info(holeSec, "Select the wall of a Hole Wizard clearance hole. The screw enters from the unobstructed end.");
 
         var fast = page.Section("Fastener");
-        page.Combo(fast, "Held by", new List<(FastenerEnd, string)> { (FastenerEnd.Auto, "A tapped part, else a nut"), (FastenerEnd.Nut, "A nut"), (FastenerEnd.Tapped, "A tapped part") },
+        page.Combo(fast, "Held by", new List<(FastenerEnd, string)> { (FastenerEnd.Auto, "Auto (tapped part, else nut)"), (FastenerEnd.Nut, "Nut"), (FastenerEnd.Tapped, "Tapped part") },
             () => st.Options.End, v => { st.Options.End = v; Replan(); });
         page.Check(fast, "Washer under the nut", () => st.Options.NutWasher, v => { st.Options.NutWasher = v; Replan(); });
         page.Check(fast, "Washer under the head", () => st.Options.HeadWasher, v => { st.Options.HeadWasher = v; Replan(); });
@@ -85,7 +85,7 @@ public partial class MainWindow
                 foreach (var r in p.Screws)
                 {
                     var tooShort = r.Values[lcol] < p.Needed - 1e-6;
-                    screwBox.Items.Add(new ComboBoxItem { Content = $"{r.Key}{(r.Key == p.Screw?.Key ? "  (the standard length to use)" : tooShort ? "  (too short)" : "")}" });
+                    screwBox.Items.Add(new ComboBoxItem { Content = $"{r.Key}{(r.Key == p.Screw?.Key ? "  (recommended)" : tooShort ? "  (too short)" : "")}" });
                 }
                 screwBox.SelectedIndex = st.Screw != null ? p.Screws.FindIndex(r => r.Key == st.Screw) : -1;
                 noteLbl.Text = string.Join("\n", p.Notes);
@@ -108,13 +108,13 @@ public partial class MainWindow
         }
         void Ok()
         {
-            if (st.Plan is not { } p || st.Screw == null) { Status(st.Problem ?? "Pick the wall of a hole first."); return; }
+            if (st.Plan is not { } p || st.Screw == null) { Status(st.Problem ?? "Select the wall of a hole first."); return; }
             a.BeginChange();
             try
             {
                 var ins = a.Model.InsertFastener(p, st.Screw);
                 a.EndChange();
-                Status($"Added {ins.Designation}{(ins.Nut != null ? " with a nut" : "")}{(ins.Washers.Count > 0 ? $" and {ins.Washers.Count} washer{(ins.Washers.Count > 1 ? "s" : "")}" : "")}, mated to the hole. Pick the next hole, or Cancel.");
+                Status($"Added {ins.Designation}{(ins.Nut != null ? " with a nut" : "")}{(ins.Washers.Count > 0 ? $" and {ins.Washers.Count} washer{(ins.Washers.Count > 1 ? "s" : "")}" : "")}, mated to the hole. Select the next hole, or click Close.");
             }
             catch (InvalidOperationException ex)
             {
@@ -129,16 +129,16 @@ public partial class MainWindow
         page.OnOk = Ok;
         page.OnCancel = Close;
         ShowPage(page);
-        ShowConfirmCorner(Ok, Close, "OK: add the fastener (Enter)", "Close (Esc)");
+        ShowConfirmCorner(Ok, Close, "OK (Enter)", "Close (Esc)");
         st.Update();
-        Status("Insert Fastener: click the wall of a hole sized from the library.");
+        Status("Insert Fastener: select the wall of a Hole Wizard clearance hole.");
     }
 
     /// <summary>A face clicked while the Insert Fastener page is open: the hole to fasten, if it is round.</summary>
     void FastenerPick(string component, string face)
     {
         if (_fastening is not { } st || Asm is not { } a) return;
-        if (a.Model.RefTo(component, face) is not { Kind: MateGeomKind.Axis } r) { Status($"{a.Model.NameAt(component)}: pick the round wall of a hole."); return; }
+        if (a.Model.RefTo(component, face) is not { Kind: MateGeomKind.Axis } r) { Status($"{a.Model.NameAt(component)}: select the cylindrical wall of a hole."); return; }
         st.Hole = r;
         st.Plan = null; st.Problem = null; st.Screw = null;
         try

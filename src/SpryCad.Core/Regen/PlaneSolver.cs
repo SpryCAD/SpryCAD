@@ -170,7 +170,7 @@ public static class PlaneSolver
         if (planes.FirstOrDefault(p => p.r.Relation == PlaneRelation.Angle) is { r: not null } ang)
         {
             if (lines.FirstOrDefault(l => l.r.Relation == PlaneRelation.Coincident) is not { r: not null } axis)
-                throw new FeatureException("At an angle to a plane: also pick the line (an edge, sketch line or axis) it turns about.");
+                throw new FeatureException("At an angle to a plane: also select the line (an edge, sketch line or axis) it turns about.");
             var deg = angle(ang.r.Value, "Angle") * (ang.r.Flip ? -1 : 1);
             var rot = Transform.Rotation(axis.o, axis.d, deg * Math.PI / 180);
             var f = ang.f;
@@ -194,7 +194,7 @@ public static class PlaneSolver
             through = n.Value * (dd / len);
             if (Math.Abs(Math.Abs(dot) - 1) < 1e-9) basis = a;
         }
-        else if (mids.Count == 1) throw new FeatureException("Mid plane: pick the second face or plane, also Mid Plane.");
+        else if (mids.Count == 1) throw new FeatureException("Mid plane: select the second face or plane, also Mid Plane.");
 
         // --- the normal fixed by one reference
         if (n == null)
@@ -223,7 +223,7 @@ public static class PlaneSolver
             throw new FeatureException("The references disagree: a line or axis the plane runs along is not square to its normal.");
         if (n == null)
         {
-            if (rounds.Count > 1) throw new FeatureException("Tangent to two round faces is not supported: pick one, and a point or a plane.");
+            if (rounds.Count > 1) throw new FeatureException("Tangent to two round faces is not supported: select one, and a point or a plane.");
             if (rounds.Count == 1 && inPlane.Count(v => Vec3.Cross(v, rounds[0].d).Length > 1e-6) == 0 && on.Count > 0)
             {
                 // tangent to a cylinder through a point (or a line along its axis): one of the two tangents, on the side picked
@@ -313,16 +313,16 @@ public static class PlaneSolver
             {
                 RefKind.Plane => refs[0].Relation switch
                 {
-                    PlaneRelation.Parallel => "also pick a point it passes through, or choose Offset.",
-                    PlaneRelation.Perpendicular => "also pick the line or point it passes through.",
-                    PlaneRelation.MidPlane => "pick the second face or plane, also Mid Plane.",
-                    _ => "also pick the line (an edge, sketch line or axis) it turns about.",
+                    PlaneRelation.Parallel => "also select a point it passes through, or choose Offset.",
+                    PlaneRelation.Perpendicular => "also select the line or point it passes through.",
+                    PlaneRelation.MidPlane => "select the second face or plane, also Mid Plane.",
+                    _ => "also select the line (an edge, sketch line or axis) it turns about.",
                 },
-                RefKind.Point => "also pick a face or plane it is parallel to, or a line it is perpendicular to.",
-                RefKind.Round => "also pick a point it passes through, or a face or plane.",
-                _ => "also pick a point, a face or another line.",
+                RefKind.Point => "also select a face or plane it is parallel to, or a line it is perpendicular to.",
+                RefKind.Round => "also select a point it passes through, or a face or plane.",
+                _ => "also select a point, a face or another line.",
             };
-        return "pick another reference (a face, edge, axis or point), or choose another relation.";
+        return "select another reference (a face, edge, axis or point), or choose another relation.";
     }
 
     /// <summary>The end of a curve reference nearest where it was picked (a closed curve: the point on it there).</summary>

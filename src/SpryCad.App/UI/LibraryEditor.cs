@@ -132,7 +132,7 @@ public static class LibraryEditor
             {
                 var key = t.Key.Trim();
                 if (key.Length == 0 || key.Contains('/')) return (tables, new(), $"A table needs a key without '/' (\"{t.Key}\").");
-                if (!keys.Add(key)) return (tables, new(), $"Two tables are keyed {key}.");
+                if (!keys.Add(key)) return (tables, new(), $"Two tables have the key {key}.");
                 var cols = t.Columns.Select(c => c.Trim()).ToList();
                 if (cols.Any(c => c.Length == 0)) return (tables, new(), $"{key}: every column needs a name.");
                 if (cols.Distinct().Count() != cols.Count) return (tables, new(), $"{key}: two columns have the same name.");
@@ -426,7 +426,7 @@ public static class LibraryEditor
         try { s = FromLibrary((await Task.Run(() => ReadCopy(path))).lib, path); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or Microsoft.Data.Sqlite.SqliteException)
         {
-            await Dialogs.Message(owner, "Edit Library failed", $"{System.IO.Path.GetFileName(path)} could not be read: {ex.Message}");
+            await Dialogs.Message(owner, "Edit Library Failed", $"Could not read {System.IO.Path.GetFileName(path)}: {ex.Message}");
             return;
         }
         await Show(owner, s, table);
@@ -443,10 +443,10 @@ public static class LibraryEditor
         if (f?.TryGetLocalPath() is not { } path) return;
         if (File.Exists(path))
         {
-            await Dialogs.Message(owner, "New Company Library", $"{System.IO.Path.GetFileName(path)} already exists: open it with Edit Library instead, or choose another name.");
+            await Dialogs.Message(owner, "New Company Library", $"{System.IO.Path.GetFileName(path)} already exists. Open it with Edit Library, or choose another name.");
             return;
         }
-        var name = await Dialogs.Input(owner, "New Company Library", "The library's name, as Options lists it:", System.IO.Path.GetFileNameWithoutExtension(path));
+        var name = await Dialogs.Input(owner, "New Company Library", "Library name (shown in Options):", System.IO.Path.GetFileNameWithoutExtension(path));
         if (string.IsNullOrWhiteSpace(name)) return;
         await Show(owner, new State { Path = path, Id = Guid.NewGuid(), Name = name.Trim(), Layer = LibraryLayer.Company, Dirty = true });
     }
@@ -478,10 +478,10 @@ public static class LibraryEditor
         {
             nameBox.Text = s.Name;
             pathText.Text = s.BuiltIn
-                ? "SpryCAD's built-in standards and materials: no library set is in use (Options > Libraries). Publish saves your copy, with your changes, as standards.sprlib in a folder you choose, "
-                    + "with a libraries.json listing it: a library set to share."
+                ? "SpryCAD built-in standards and materials (no library set in use; see Options > Libraries). Publish saves this copy as standards.sprlib "
+                    + "with a libraries.json, creating a shareable library set."
                 : $"{s.Layer} library · {s.Path}";
-            info.Text = s.BuiltIn ? "Built in: published to a folder." : s.ReadRevision == null ? "New: written when first published." : $"Editing revision {s.ReadRevision.Value.ToString()[..8]}.";
+            info.Text = s.BuiltIn ? "Built-in; publishing writes it to a folder." : s.ReadRevision == null ? "New; saved when first published." : $"Editing revision {s.ReadRevision.Value.ToString()[..8]}.";
         }
 
         // the left list: the library's tables, then tables it only restricts (another library's)
@@ -525,8 +525,8 @@ public static class LibraryEditor
             heading.IsVisible = selected != null;
             if (selected == null)
             {
-                Top(Muted("No tables. Add one with + Table (rows of your own: in-house sizes, part numbers), or restrict another library's table "
-                    + "with Restrict a Table (the sizes the pickers offer)."));
+                Top(Muted("No tables. Click + Table to add in-house sizes or part numbers, "
+                    + "or Restrict a Table to limit the sizes another library offers."));
                 return;
             }
             Section(selected);
@@ -562,13 +562,13 @@ public static class LibraryEditor
             // another library's rows are shown when this library adds to its table (the same columns) or has none of its own
             var inh = Inherited(key) is { } i0 && (t == null || t.Columns.SequenceEqual(i0.table.Columns)) ? i0 : ((LibraryTable table, string[] from)?)null;
             if (t != null) TableProps(t);
-            var hidden = new CheckBox { Content = "Hide the whole table from the Thread and Hole Wizard pickers", IsChecked = s.Restrictions.TryGetValue(key, out var r0) && r0.Hidden };
+            var hidden = new CheckBox { Content = "Hide table in Thread and Hole Wizard", IsChecked = s.Restrictions.TryGetValue(key, out var r0) && r0.Hidden };
             hidden.IsCheckedChanged += (_, _) => { s.Restriction(key).Hidden = hidden.IsChecked == true; Changed(); Relist(key, body: false); };
             Top(hidden);
             Top(Muted((t == null ? $"This library has no rows of its own for {key}. " : "")
-                + (inh != null ? $"Greyed rows are from {string.Join(", ", inh.Value.from.Distinct())}: edit one to override its values in this library. " : "")
-                + "Enabled: offered by the Thread and Hole Wizard pickers; uncheck the sizes not to use (parts that already use one keep it). "
-                + "Select rows (click, Shift- or Ctrl-click, Ctrl+A) to copy, paste or delete them, or right-click to enable or disable them. Click a header to sort: rows are saved in the order shown."));
+                + (inh != null ? $"Gray rows come from {string.Join(", ", inh.Value.from.Distinct())}; edit one to override it here. " : "")
+                + "Enabled rows are offered in Thread and Hole Wizard; existing parts keep disabled sizes. "
+                + "Right-click rows to enable or disable them. Rows are saved in the order shown; click a header to sort."));
 
             var cols = t?.Columns.ToList() ?? inh?.table.Columns.ToList() ?? new List<string>();
             var texts = t?.TextColumns.ToList() ?? (inh != null ? LibraryCsv.TextColumns(inh.Value.table.Rows) : new List<string>());
@@ -679,7 +679,7 @@ public static class LibraryEditor
                 ToolTip.SetTip(tb, tip + (rename != null ? " Right-click to rename or delete the column." : ""));
                 if (rename != null && delete != null)
                 {
-                    var rn = new MenuItem { Header = "Rename Column..." }; rn.Click += (_, _) => rename();
+                    var rn = new MenuItem { Header = "Rename Column…" }; rn.Click += (_, _) => rename();
                     var dl = new MenuItem { Header = "Delete Column" }; dl.Click += (_, _) => delete();
                     tb.ContextMenu = new ContextMenu { Items = { rn, dl } };
                 }
@@ -703,7 +703,7 @@ public static class LibraryEditor
             Check("Enabled", "Offered by the Thread and Hole Wizard pickers. Uncheck the sizes your company does not use; parts that already use one keep it.", nameof(GridRow.Enabled), g => g.Enabled);
             dg.Columns.Add(new DataGridTextColumn
             {
-                Header = Header("Designation", "The row's designation (M8, 1/4-20 UNC): what parts name it by.", false, null, null),
+                Header = Header("Designation", "Designation parts reference the row by, e.g. M8 or 1/4-20 UNC.", false, null, null),
                 Binding = new Binding(nameof(GridRow.Key)) { Mode = BindingMode.TwoWay }, Width = DataGridLength.Auto, MinWidth = 90,
                 CustomSortComparer = new Comparer((a, b) => Natural(a.Key, b.Key)),
             });
@@ -713,7 +713,7 @@ public static class LibraryEditor
                 // clicked: a color typed as #RRGGBB, into the r, g and b columns
                 dg.Columns.Add(new DataGridTemplateColumn
                 {
-                    Header = Header("Color", "The row's r, g and b columns. Click a swatch to set them from a color (#RRGGBB).", false, null, null), Width = ToHeader,
+                    Header = Header("Color", "The row's r, g, b values. Click a swatch to pick a color.", false, null, null), Width = ToHeader,
                     CellTemplate = new FuncDataTemplate<GridRow>((_, _) =>
                     {
                         var sw = new Border
@@ -755,7 +755,7 @@ public static class LibraryEditor
                     Header = Header(unit.Length > 0 ? $"{cols[c]} ({unit})" : cols[c], "A column of numbers: the commands read values by its name (major, pitch; close, normal, loose).", false,
                         t == null ? null : async () =>
                         {
-                            if (await ColumnName("Rename Column", "The column's new name (the commands read values by it):", cols[cc]) is not { } n) return;
+                            if (await ColumnName("Rename Column", "New column name (commands read values by name):", cols[cc]) is not { } n) return;
                             t.Columns[cc] = n;
                             foreach (var r in t.Rows) if (cc < r.Exact.Count) r.Exact[cc] = null; // (an angle column now a length, or the other way: as shown)
                             Changed(); Body();
@@ -772,10 +772,10 @@ public static class LibraryEditor
                 var n = texts[c];
                 dg.Columns.Add(new DataGridTextColumn
                 {
-                    Header = Header(n, "Text the rows carry (a part number, a supplier), not a value.", true,
+                    Header = Header(n, "Text column, e.g. part number or supplier.", true,
                         t == null ? null : async () =>
                         {
-                            if (await ColumnName("Rename Text Column", "The text's new name:", n) is not { } nn) return;
+                            if (await ColumnName("Rename Text Column", "New column name:", n) is not { } nn) return;
                             t.TextColumns[t.TextColumns.IndexOf(n)] = nn;
                             foreach (var r in t.Rows) if (r.Text.Remove(n, out var v)) r.Text[nn] = v;
                             Changed(); Body();
@@ -809,7 +809,7 @@ public static class LibraryEditor
             {
                 var sel = Selected();
                 if (sel.Count == 0) return;
-                if (sel.All(g => !g.Own)) { error.Text = "Those rows are another library's: uncheck Enabled to stop the pickers offering them."; return; }
+                if (sel.All(g => !g.Own)) { error.Text = "These rows belong to another library and cannot be deleted. Clear Enabled to hide them."; return; }
                 foreach (var g in sel.Where(g => g.Own))
                 {
                     t!.Rows.Remove(g.Row!);
@@ -910,11 +910,11 @@ public static class LibraryEditor
                 dg.BeginEdit();
             };
             var delRows = new Button { Content = "Delete Rows" };
-            ToolTip.SetTip(delRows, "Deletes the rows selected (or press Delete). Another library's rows cannot be deleted here: uncheck Enabled instead");
+            ToolTip.SetTip(delRows, "Deletes the selected rows (Delete). Rows from another library can only be disabled.");
             delRows.Click += (_, _) => DeleteRows();
             Bottom(t != null ? Bar(new Control[] { addRow, delRows }.Concat(TableButtons(t)).ToArray()) : Bar(addRow));
             Fill(cols.Count == 0 && items.Count == 0
-                ? Muted("No columns yet: choose what the table is for (it adds the columns the commands read), add columns with + Column, or import a CSV file.")
+                ? Muted("No columns. Choose the table type to add its standard columns, click + Column, or import a CSV file.")
                 : dg);
         }
 
@@ -924,7 +924,7 @@ public static class LibraryEditor
             void Cell(Control c, int row, int col) { Grid.SetRow(c, row); Grid.SetColumn(c, col); props.Children.Add(c); }
             TextBlock Label(string text) => new() { Text = text, VerticalAlignment = VerticalAlignment.Center };
             var key = new TextBox { Text = t.Key, IsEnabled = !t.Published };
-            ToolTip.SetTip(key, t.Published ? "Parts name the table by its key, so a published table's key cannot change" : "The table's stable key: parts name it by this. A table with the key of another library's adds rows to it");
+            ToolTip.SetTip(key, t.Published ? "Parts reference the table by key; a published table's key cannot change." : "Stable key that parts reference. Using another library's key adds rows to that table.");
             key.LostFocus += (_, _) =>
             {
                 var k = (key.Text ?? "").Trim();
@@ -938,9 +938,9 @@ public static class LibraryEditor
             standard.TextChanged += (_, _) => { if (standard.Text != t.Standard) { t.Standard = standard.Text ?? ""; Changed(); } };
             var kinds = Kinds.Select(k => k.label).ToList();
             if (t.Kind.Length > 0 && Kinds.All(k => k.kind != t.Kind)) kinds.Add(t.Kind);
-            var kind = new ComboBox { ItemsSource = kinds, HorizontalAlignment = HorizontalAlignment.Stretch, PlaceholderText = "Choose what it is for" };
+            var kind = new ComboBox { ItemsSource = kinds, HorizontalAlignment = HorizontalAlignment.Stretch, PlaceholderText = "Table type" };
             kind.SelectedIndex = Kinds.ToList().FindIndex(k => k.kind == t.Kind) is var ki && ki >= 0 ? ki : t.Kind.Length > 0 ? kinds.Count - 1 : -1;
-            ToolTip.SetTip(kind, "The commands that offer the table's rows: Thread for thread sizes, Hole Wizard for the others");
+            ToolTip.SetTip(kind, "Which command offers the rows: Thread for thread sizes, Hole Wizard for the rest.");
             kind.SelectionChanged += (_, _) =>
             {
                 if (kind.SelectedIndex < 0 || kind.SelectedIndex >= Kinds.Length || Kinds[kind.SelectedIndex].kind == t.Kind) return;
@@ -957,12 +957,12 @@ public static class LibraryEditor
             Cell(Label("For"), 2, 0); Cell(kind, 2, 1); Cell(Label("Standard"), 2, 3); Cell(standard, 2, 4);
             var units = new ComboBox
             {
-                ItemsSource = t.Material ? new[] { "Metric (g/cm³, GPa, MPa)", "Inch-pound (lb/in³, Msi, ksi)" } : new[] { "Millimetres (mm)", "Inches (in)" },
+                ItemsSource = t.Material ? new[] { "Metric (g/cm³, GPa, MPa)", "Inch-pound (lb/in³, Msi, ksi)" } : new[] { "Millimeters (mm)", "Inches (in)" },
                 SelectedIndex = t.Units == LibraryTable.Inch ? 1 : 0, HorizontalAlignment = HorizontalAlignment.Stretch,
             };
             ToolTip.SetTip(units, t.Material
-                ? "The units the table's properties are shown and typed in (and CSV files use). They are stored in SI units either way"
-                : "The units the table's lengths are shown and typed in (and CSV files use): inches for an inch standard. They are stored in millimetres either way");
+                ? "Display, entry and CSV units for properties. Values are stored in SI."
+                : "Display, entry and CSV units for lengths. Values are stored in millimeters.");
             units.SelectionChanged += (_, _) =>
             {
                 var u = units.SelectedIndex == 1 ? LibraryTable.Inch : null;
@@ -973,9 +973,9 @@ public static class LibraryEditor
             Cell(Label("Units"), 4, 0); Cell(units, 4, 1); Cell(verified, 4, 3); Grid.SetColumnSpan(verified, 2);
             Top(props);
             Top(Muted((t.Material
-                    ? $"Properties in {(t.Units == LibraryTable.Inch ? "inch-pound" : "metric")} units, as each column's heading says; leave a cell blank when the value is not known (all but density). "
-                        + $"The type text is one of {string.Join(", ", Enum.GetNames<MaterialType>())}; r, g, b, metallic, roughness and opacity (0 to 1) are how it looks. "
-                    : $"Lengths in {(t.Units == LibraryTable.Inch ? "inches" : "millimetres")}, angles (columns named angle) in degrees. ")
+                    ? $"Properties in {(t.Units == LibraryTable.Inch ? "inch-pound" : "metric")} units, as each column header shows. Leave unknown values blank (density is required). "
+                        + $"Type is one of {string.Join(", ", Enum.GetNames<MaterialType>())}; r, g, b, metallic, roughness and opacity (0 to 1) set the appearance. "
+                    : $"Lengths in {(t.Units == LibraryTable.Inch ? "inches" : "millimeters")}; angle columns in degrees. ")
                 + "A table keyed as one in an earlier library adds rows to it and overrides rows of the same designation, "
                 + "as long as its columns are the same (otherwise it replaces the table). Text columns carry part numbers, suppliers and the like."));
         }
@@ -987,7 +987,7 @@ public static class LibraryEditor
             ToolTip.SetTip(addCol, "A column of numbers");
             addCol.Click += async (_, _) =>
             {
-                var n = (await Dialogs.Input(w, "Add Column", "The column's name (a column of numbers):", ""))?.Trim();
+                var n = (await Dialogs.Input(w, "Add Column", "Column name (numeric):", ""))?.Trim();
                 if (string.IsNullOrEmpty(n)) return;
                 if (t.Columns.Contains(n) || t.TextColumns.Contains(n)) { error.Text = $"{t.Key} already has a column {n}."; return; }
                 t.Columns.Add(n);
@@ -998,13 +998,13 @@ public static class LibraryEditor
             ToolTip.SetTip(addText, "A column of text: a part number, a supplier");
             addText.Click += async (_, _) =>
             {
-                var n = (await Dialogs.Input(w, "Add Text Column", "The text's name (e.g. part number, supplier):", ""))?.Trim();
+                var n = (await Dialogs.Input(w, "Add Text Column", "Column name (text, e.g. part number):", ""))?.Trim();
                 if (string.IsNullOrEmpty(n)) return;
                 if (t.Columns.Contains(n) || t.TextColumns.Contains(n)) { error.Text = $"{t.Key} already has a column {n}."; return; }
                 t.TextColumns.Add(n);
                 Changed(); Body();
             };
-            var import = new Button { Content = "Import CSV..." };
+            var import = new Button { Content = "Import CSV…" };
             ToolTip.SetTip(import, $"Replaces the table's columns and rows with a CSV file's: a header row (row, the columns, {LibraryCsv.TextPrefix}name for text), then a row per designation");
             import.Click += async (_, _) =>
             {
@@ -1026,7 +1026,7 @@ public static class LibraryEditor
                     error.Text = $"{System.IO.Path.GetFileName(p)} could not be imported: {ex.Message}";
                 }
             };
-            var export = new Button { Content = "Export CSV..." };
+            var export = new Button { Content = "Export CSV…" };
             export.Click += async (_, _) =>
             {
                 var (tables, _, problem) = s.Build();
@@ -1047,7 +1047,7 @@ public static class LibraryEditor
             delTable.Click += async (_, _) =>
             {
                 if (t.Published && !await Dialogs.YesNo(w, "Delete Table",
-                        $"Delete {t.Key} from the library? Parts that use its rows keep the values they were made with; new ones can no longer choose them.", "Delete", "Cancel"))
+                        $"Delete {t.Key} from the library? Existing parts keep their values; new parts cannot use it.", "Delete", "Cancel"))
                     return;
                 s.Tables.Remove(t); Changed(); Relist();
             };
@@ -1059,7 +1059,7 @@ public static class LibraryEditor
         ToolTip.SetTip(addTable, "A table of rows of this library's own: new sizes, or rows added to (or overriding) another library's table of the same key");
         addTable.Click += async (_, _) =>
         {
-            var k = (await Dialogs.Input(w, "Add Table", "The table's key (e.g. ACME-screws, or ISO273 to add rows to that table):", ""))?.Trim();
+            var k = (await Dialogs.Input(w, "Add Table", "Table key (e.g. ACME-screws; an existing key such as ISO273 adds rows to it):", ""))?.Trim();
             if (string.IsNullOrEmpty(k)) return;
             if (k.Contains('/')) { error.Text = "A table's key cannot hold '/'."; return; }
             if (s.Table(k) != null) { error.Text = $"The library already has a table {k}."; return; }
@@ -1068,7 +1068,7 @@ public static class LibraryEditor
             Changed(); Relist(k);
         };
         var restrict = new Button { Content = "Restrict a Table" };
-        ToolTip.SetTip(restrict, "Choose the sizes the pickers offer of a table in the libraries in use");
+        ToolTip.SetTip(restrict, "Limits which sizes of another library's table are offered.");
         var menu = new MenuFlyout();
         restrict.Flyout = menu;
         menu.Opening += (_, _) =>
@@ -1085,12 +1085,12 @@ public static class LibraryEditor
                     mi.Click += (_, _) => Relist(key);
                     menu.Items.Add(mi);
                 }
-            if (menu.Items.Count == 0) menu.Items.Add(new MenuItem { Header = "Every table in use is listed", IsEnabled = false });
+            if (menu.Items.Count == 0) menu.Items.Add(new MenuItem { Header = "All tables in use are listed", IsEnabled = false });
         };
 
         // ---- the shop profile (sheet metal): its tables from CSV, one per kind; the profile in use is the last library's that has one
         var profile = new Button { Content = "Shop Profile" };
-        ToolTip.SetTip(profile, "Sheet metal: import the shop's tables (gauges, tooling, allowances, rules) from CSV. A library with a shop profile is the one every sheet metal part uses.");
+        ToolTip.SetTip(profile, "Imports sheet metal tables (gauges, tooling, allowances, rules) from CSV. All sheet metal parts use this profile.");
         var profileMenu = new MenuFlyout();
         profile.Flyout = profileMenu;
         profileMenu.Opening += (_, _) =>
@@ -1100,7 +1100,7 @@ public static class LibraryEditor
             {
                 var have = s.ProfileTables.FirstOrDefault(x => x.Key == tpl.Key);
                 var item = new MenuItem { Header = $"{tpl.Title}{(have != null ? $"  ({have.Rows.Count} rows)" : "")}" };
-                foreach (var (units, words) in new[] { ((string?)null, "Import CSV (mm)..."), (SpryCad.SheetMetal.ShopProfileTable.Inch, "Import CSV (inches)...") })
+                foreach (var (units, words) in new[] { ((string?)null, "Import CSV (mm)…"), (SpryCad.SheetMetal.ShopProfileTable.Inch, "Import CSV (inches)…") })
                 {
                     var imp = new MenuItem { Header = words };
                     var key = tpl.Key;
@@ -1109,7 +1109,7 @@ public static class LibraryEditor
                 }
                 if (have != null)
                 {
-                    var exp = new MenuItem { Header = "Export CSV..." };
+                    var exp = new MenuItem { Header = "Export CSV…" };
                     exp.Click += async (_, _) =>
                     {
                         var f = await w.StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions { Title = $"Export {have.Title}", SuggestedFileName = have.Key + ".csv", DefaultExtension = "csv", FileTypeChoices = new[] { CsvType } });
@@ -1122,13 +1122,13 @@ public static class LibraryEditor
                 }
                 profileMenu.Items.Add(item);
             }
-            var starter = new MenuItem { Header = "Start from SpryCAD's starter profile (example values)" };
+            var starter = new MenuItem { Header = "Start from Example Profile" };
             starter.Click += (_, _) =>
             {
                 foreach (var tb in SpryCad.SheetMetal.StarterProfile.Tables)
                     if (!s.ProfileTables.Any(x => x.Key == tb.Key)) s.ProfileTables.Add(tb.Clone());
                 Changed();
-                owner.Status("The starter profile's tables added where the library had none (not yet published).");
+                owner.Status("Example profile tables added. Publish to share them.");
             };
             profileMenu.Items.Add(new Separator());
             profileMenu.Items.Add(starter);
@@ -1154,8 +1154,8 @@ public static class LibraryEditor
         }
 
         // ---- the bottom: history, publish, close
-        var history = new Button { Content = "History..." };
-        var publish = new Button { Content = "Publish...", IsDefault = true };
+        var history = new Button { Content = "History…" };
+        var publish = new Button { Content = "Publish…", IsDefault = true };
         var close = new Button { Content = "Close", IsCancel = true };
 
         void Reload(State fresh)
@@ -1173,7 +1173,7 @@ public static class LibraryEditor
             string? folder = null;
             if (s.BuiltIn)
             {
-                var picked = await w.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = "Folder for the library set (e.g. on the file server)" });
+                var picked = await w.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = "Library Set Folder" });
                 if (picked.FirstOrDefault()?.TryGetLocalPath() is not { } f) return false;
                 if (File.Exists(System.IO.Path.Combine(f, "standards" + LibraryFile.Extension)))
                 {
@@ -1182,7 +1182,7 @@ public static class LibraryEditor
                 }
                 folder = f;
             }
-            var message = await Dialogs.Input(w, "Publish", "What changed (shown in the library's history):", s.BuiltIn ? "SpryCAD built-in standards" : "");
+            var message = await Dialogs.Input(w, "Publish", "Change description (shown in history):", s.BuiltIn ? "SpryCAD built-in standards" : "");
             if (message == null) return false;
             if (folder != null) s.Path = System.IO.Path.Combine(folder, "standards" + LibraryFile.Extension);
             var file = System.IO.Path.GetFileName(s.Path);
@@ -1197,7 +1197,7 @@ public static class LibraryEditor
                     var config = System.IO.Path.Combine(folder, LibraryConfig.FileName);
                     LibraryConfig.Add(config, s.Path);
                     if (Libraries.Location.source == LibraryConfigSource.None
-                        && await Dialogs.YesNo(w, "Publish", $"Published {file} and {LibraryConfig.FileName} in {folder}. Use this library set on this computer?", "Use It", "Not Now"))
+                        && await Dialogs.YesNo(w, "Publish", $"Published {file} and {LibraryConfig.FileName} in {folder}. Use this library set on this computer?", "Use Library Set", "Not Now"))
                     {
                         UserSettings.LibrariesPath = folder;
                         UserSettings.Save();
@@ -1207,21 +1207,21 @@ public static class LibraryEditor
             catch (LibraryConflictException)
             {
                 if (await Dialogs.YesNo(w, "Publish",
-                        $"Someone else published {file} since you opened it, so yours was not published (it would have lost their changes). "
-                        + "Reload it to see theirs? Your changes here are lost: export tables as CSV first to keep them.", "Reload", "Keep Editing"))
+                        $"{file} was published by someone else after you opened it, so your changes were not published. "
+                        + "Reload their version? Your changes will be lost; export tables as CSV first to keep them.", "Reload", "Keep Editing"))
                     await ReloadFromFile();
                 return false;
             }
             catch (UnauthorizedAccessException)
             {
                 Unwritten();
-                await Dialogs.Message(w, "Publish failed", $"You cannot write to {s.Path}: only the library's owners can publish it (the folder's permissions).");
+                await Dialogs.Message(w, "Publish failed", $"No write access to {s.Path}. Only library owners can publish.");
                 return false;
             }
             catch (Exception ex) when (ex is IOException or InvalidDataException or ArgumentException or Microsoft.Data.Sqlite.SqliteException)
             {
                 Unwritten();
-                await Dialogs.Message(w, "Publish failed", $"{file} was not published: {ex.Message}");
+                await Dialogs.Message(w, "Publish failed", $"Could not publish {file}: {ex.Message}");
                 return false;
             }
             // the built-in standards not written after all: still the built-in ones, unsaved
@@ -1231,7 +1231,7 @@ public static class LibraryEditor
             foreach (var t in s.Tables) t.Published = true;
             s.Dirty = false;
             Header(); Body();
-            owner.Status(same ? $"Nothing changed in {file}: nothing was published." : $"Published {file}. Everyone using it gets it within a few minutes.");
+            owner.Status(same ? $"No changes to publish in {file}." : $"Published {file}. Other users receive it within a few minutes.");
             Libraries.Reload();
             if (isNew) await OfferToList();
             return true;
@@ -1244,11 +1244,11 @@ public static class LibraryEditor
             var config = File.Exists(beside) ? beside : Libraries.Location.path is { } p && File.Exists(p) ? p : null;
             if (config == null)
             {
-                await Dialogs.Message(w, "Publish", $"Published. No library set ({LibraryConfig.FileName}) lists it yet: add \"{System.IO.Path.GetFileName(s.Path)}\" to one, or create one in Options > Libraries.");
+                await Dialogs.Message(w, "Publish", $"Published, but no library set ({LibraryConfig.FileName}) lists it. Add \"{System.IO.Path.GetFileName(s.Path)}\" to one, or create one in Options > Libraries.");
                 return;
             }
             if (LibraryConfig.Lists(config, s.Path)) return;
-            if (!await Dialogs.YesNo(w, "Publish", $"Add {System.IO.Path.GetFileName(s.Path)} to the library set ({config}), so everyone using it gets this library?", "Add", "Not Now")) return;
+            if (!await Dialogs.YesNo(w, "Publish", $"Add {System.IO.Path.GetFileName(s.Path)} to the library set ({config})? Everyone using the set will receive it.", "Add", "Not Now")) return;
             try
             {
                 LibraryConfig.Add(config, s.Path);
@@ -1257,7 +1257,7 @@ public static class LibraryEditor
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
             {
-                await Dialogs.Message(w, "Publish failed", $"{config} could not be changed: {ex.Message}");
+                await Dialogs.Message(w, "Publish failed", $"Could not update {config}: {ex.Message}");
             }
         }
 
@@ -1273,12 +1273,12 @@ public static class LibraryEditor
         publish.Click += async (_, _) => await Publish();
         history.Click += async (_, _) =>
         {
-            if (s.ReadRevision == null) { error.Text = "Nothing is published yet: the library has no history."; return; }
+            if (s.ReadRevision == null) { error.Text = "No history. The library has not been published."; return; }
             List<RevisionInfo> revs;
             try { revs = (await Task.Run(() => ReadCopy(s.Path))).history; }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or Microsoft.Data.Sqlite.SqliteException)
             {
-                error.Text = $"The history could not be read: {ex.Message}";
+                error.Text = $"Could not read history: {ex.Message}";
                 return;
             }
             await ShowHistory(w, s.Name, revs, s.ReadRevision.Value);

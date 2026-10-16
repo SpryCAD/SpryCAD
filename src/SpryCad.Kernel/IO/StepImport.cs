@@ -417,7 +417,7 @@ public static class StepImport
             }
             if (skipped > 0)
             {
-                _warn.Add($"{name}: {skipped} face(s) use geometry that cannot be imported yet ({string.Join(", ", reasons)}); the solid was skipped.");
+                _warn.Add($"{name}: {skipped} face{(skipped == 1 ? "" : "s")} use geometry that cannot be imported yet ({string.Join(", ", reasons)}); the solid was skipped.");
                 return;
             }
             body.Link();
@@ -446,7 +446,7 @@ public static class StepImport
                 try { if (NDomain.Of(f, Math.Max(1e-3, box.Diagonal * 1e-3)).SignedArea() < 0) { f.Sense = !f.Sense; flipped++; } }
                 catch (InvalidOperationException) { }
             }
-            if (flipped > 0) _warn.Add($"{name}: {flipped} face(s) had their orientation flag reversed in the file; corrected from their edges.");
+            if (flipped > 0) _warn.Add($"{name}: {flipped} face{(flipped == 1 ? "" : "s")} had their orientation flag reversed in the file; corrected from their edges.");
             try { NSeamSplit.Apply(body); }
             catch (Exception ex) when (ex is NotSupportedException or InvalidOperationException) { _warn.Add($"{name}: {ex.Message}; the solid was skipped."); return; }
             body.Link();

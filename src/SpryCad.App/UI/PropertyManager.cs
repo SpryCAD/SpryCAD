@@ -313,7 +313,7 @@ public sealed class PmPage
             {
                 var problem = EquationEntry.NameProblem(eqName) ?? (Units.TryEnter(eqExpr, kind, Lookup, out string _, out _, out var e2) ? null : e2);
                 tb.Classes.Set("invalid", problem != null);
-                ToolTip.SetTip(tb, problem ?? $"Enter or leave the field: makes {eqName} = {eqExpr} (in the equations)");
+                ToolTip.SetTip(tb, problem ?? $"Press Enter or leave the field to create equation {eqName} = {eqExpr}.");
                 return;
             }
             if (Units.TryEnter(t, kind, Lookup, out var kept, out var v, out var err))

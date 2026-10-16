@@ -439,7 +439,7 @@ static class SheetRebuild
         }
         var na = Meet(o[prev], o[i]);
         var nb = Meet(o[next], o[after]);
-        if (na == null || nb == null) throw Error($"{what}: its neighbouring edges run along it.");
+        if (na == null || nb == null) throw Error($"{what}: its neighboring edges run along it.");
         if (Vec2.Dot(nb.Value - na.Value, dir) <= 1e-9) throw Error($"{what}: the panel is too small for this flange's setback.");
         o[i] = na.Value; o[next] = nb.Value;
         return poly with { Outer = o };

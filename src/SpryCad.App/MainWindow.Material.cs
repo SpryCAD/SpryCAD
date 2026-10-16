@@ -27,11 +27,11 @@ public partial class MainWindow
         if (IsAssemblyActive) { Status("Right-click a component for its appearance in the assembly."); return; }
         var doc = Session.Doc;
         var otherwise = doc.MaterialInfo?.Appearance ?? Appearance.Default;
-        var choice = await AppearanceDialog.Show(this, "Appearance: " + Session.Title.TrimEnd(' ', '*'), "How the part looks, wherever it is used:",
+        var choice = await AppearanceDialog.Show(this, "Appearance: " + Session.Title.TrimEnd(' ', '*'), "Part appearance, used wherever the part is used:",
             doc.Appearance, otherwise, doc.MaterialItem != null ? "Material's Appearance" : "Default Appearance");
         if (choice == null || IsAssemblyActive || Session.Doc != doc || choice.Look == doc.Appearance) return;
         Session.Change(() => doc.Appearance = choice.Look);
-        Status(choice.Look == null ? "Appearance: the material's." : $"Appearance: {choice.Look.Name ?? "the part's own"}.");
+        Status(choice.Look == null ? "Appearance set to the material's." : $"Appearance set to {choice.Look.Name ?? "custom"}.");
     }
 
     /// <summary>Gives the active part a library material (null: none), one undo step.</summary>
@@ -40,7 +40,7 @@ public partial class MainWindow
         if (IsAssemblyActive || item == Session.Doc.MaterialItem) return;
         Session.Change(() => PartMaterial.Set(Session.Doc, item));
         NoteRecentMaterial(item);
-        Status(item == null ? "Material removed: steel's density assumed." : $"Material: {Session.Doc.MaterialName}.");
+        Status(item == null ? "Material removed. Steel density is used for mass." : $"Material: {Session.Doc.MaterialName}.");
     }
 
     void NoteRecentMaterial(string? item)
@@ -59,13 +59,13 @@ public partial class MainWindow
         var search = new TextBox { Watermark = "Search materials", Margin = new Thickness(0, 0, 0, 6) };
         var tree = new TreeView { Width = 270, Height = 430, BorderBrush = Palette.FieldBorder, BorderThickness = new Thickness(1) };
         var details = new StackPanel { Spacing = 6, Width = 380 };
-        var useMaterialLook = new CheckBox { Content = "Use the material's appearance (clear the part's own)" };
+        var useMaterialLook = new CheckBox { Content = "Use material appearance" };
         var apply = new Button { Content = "Apply", IsDefault = true };
-        var custom = new Button { Content = "Custom..." };
-        var inLibrary = new Button { Content = "Edit in Library..." };
+        var custom = new Button { Content = "Custom…" };
+        var inLibrary = new Button { Content = "Edit in Library…" };
         var close = new Button { Content = "Close", IsCancel = true };
         ToolTip.SetTip(custom, "A material of the part's own: the selected material with another density (never offered for update)");
-        ToolTip.SetTip(inLibrary, "Opens the library editor at the selected material's table (to correct it or add materials, for library owners)");
+        ToolTip.SetTip(inLibrary, "Opens the selected material's table in the library editor (library owners).");
 
         // what is listed: (item, snapshot) by the libraries' order, and the part's own if they do not offer it
         string? selected = null;
@@ -118,7 +118,7 @@ public partial class MainWindow
             var doc = Session.Doc;
             if (selected == null || !rows.TryGetValue(selected, out var s) || Materials.Of(s) is not { } m)
             {
-                details.Children.Add(new TextBlock { Text = doc.MaterialName == null ? "The part has no material: its mass is figured with steel's density." : "Select a material.", Foreground = Palette.TextMuted, TextWrapping = TextWrapping.Wrap });
+                details.Children.Add(new TextBlock { Text = doc.MaterialName == null ? "No material assigned. Steel density is used for mass." : "Select a material.", Foreground = Palette.TextMuted, TextWrapping = TextWrapping.Wrap });
                 apply.IsEnabled = custom.IsEnabled = inLibrary.IsEnabled = false;
                 useMaterialLook.IsVisible = doc.Appearance != null;
                 return;
@@ -127,7 +127,7 @@ public partial class MainWindow
             inLibrary.IsEnabled = !PartMaterial.IsCustom(selected);
             details.Children.Add(new TextBlock { Text = m.Name, FontSize = TypeScale.Title, FontWeight = FontWeight.SemiBold, Foreground = Palette.Heading, TextWrapping = TextWrapping.Wrap });
             var table = LibraryLink.Current.Table(s.Table);
-            var from = PartMaterial.IsCustom(selected) ? "The part's own material (no library's)"
+            var from = PartMaterial.IsCustom(selected) ? "Custom material (not from a library)"
                 : $"{Materials.TypeName(m.Type)} · {(s.LibraryName.Length > 0 ? s.LibraryName : "library")}, {table?.Title ?? s.Table}";
             details.Children.Add(new TextBlock { Text = from, Foreground = Palette.TextMuted, TextWrapping = TextWrapping.Wrap });
             if (table is { Verified: false }) details.Children.Add(new TextBlock { Text = $"{table.Standard}: not verified. Check the values before you rely on them.", Foreground = Palette.Warning, TextWrapping = TextWrapping.Wrap, FontSize = TypeScale.Small });
@@ -213,14 +213,14 @@ public partial class MainWindow
         custom.Click += async (_, _) =>
         {
             if (selected == null || !rows.TryGetValue(selected, out var s) || Materials.Of(s) is not { } m || _materialWindow is not { } w) return;
-            var name = (await Dialogs.Input(w, "Custom Material", "The part's own material, named:", PartMaterial.IsCustom(selected) ? m.Name : m.Name + ", custom density"))?.Trim();
+            var name = (await Dialogs.Input(w, "Custom Material", "Material name:", PartMaterial.IsCustom(selected) ? m.Name : m.Name + ", custom density"))?.Trim();
             if (string.IsNullOrEmpty(name)) return;
             var (scale, unit) = Materials.Unit("density", Session.Doc.Units);
-            var typed = await Dialogs.Input(w, "Custom Material", $"Its density ({unit}):", (m.Density / scale).ToString("G6", CultureInfo.InvariantCulture));
+            var typed = await Dialogs.Input(w, "Custom Material", $"Density ({unit}):", (m.Density / scale).ToString("G6", CultureInfo.InvariantCulture));
             if (typed == null) return;
             if (!double.TryParse(typed.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var d) || !(d > 0) || !double.IsFinite(d))
             {
-                await Dialogs.Message(w, "Custom Material", $"\"{typed.Trim()}\" is not a density: type a positive number, in {unit}.");
+                await Dialogs.Message(w, "Custom Material", $"\"{typed.Trim()}\" is not a valid density. Enter a positive number in {unit}.");
                 return;
             }
             if (IsAssemblyActive) return;

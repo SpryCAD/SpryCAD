@@ -164,7 +164,7 @@ public partial class MainWindow
         var part = o.Display?.Appearance ?? Core.Model.Appearance.Default;
         var many = all is { Count: > 1 };
         var choice = await AppearanceDialog.Show(this, many ? $"Appearance: {o.Component.Name.Split('<')[0]} (all {all!.Count})" : $"Appearance: {o.Component.Name}",
-            path.Contains('/') ? "How it looks in this assembly (its sub-assembly is not changed):" : "How it looks in this assembly (its part is not changed):",
+            path.Contains('/') ? "Appearance in this assembly only; the sub-assembly is unchanged:" : "Appearance in this assembly only; the part is unchanged:",
             own, part, "Part's Appearance");
         if (choice == null || (!many && choice.Look == own)) return;
         a.BeginChange();
@@ -733,7 +733,7 @@ public partial class MainWindow
         {
             rows = Bom.Build(a.Model, kind, mass: measured);
             var totalMass = rows.Where(x => x.Level == 0 && x.Mass != null).Sum(x => x.Mass!.Value * x.Quantity);
-            total.Text = measured ? $"Total mass: {MassUnits.Text(totalMass, units)}" + (rows.Any(x => x.Material == Bom.NoMaterial) ? $" (parts with no material: steel's density)" : "") : "Measuring the parts…";
+            total.Text = measured ? $"Total mass: {MassUnits.Text(totalMass, units)}" + (rows.Any(x => x.Material == Bom.NoMaterial) ? $" (steel density used for parts without a material)" : "") : "Measuring the parts…";
             grid.Children.Clear(); grid.RowDefinitions.Clear();
             void Cell(int r, int c, string text, bool head = false, double indent = 0, bool right = false)
             {

@@ -2011,7 +2011,7 @@ public sealed class Regenerator
                     Detail?.Invoke($"{Describe(seedId)}, instance {i + 2} of {count}");
                     if (trimmed ? OneByOne(tools) : Union(tools)) everything.AddRange(tools.Select(x => x.tool));
                     else status.Warnings.Add(trimmed
-                        ? $"Instance {i + 2} is not {kindName}: its blend, cut back where it runs into neighbouring geometry, cannot be joined to the body ({why})."
+                        ? $"Instance {i + 2} is not {kindName}: its blend, cut back where it runs into neighboring geometry, cannot be joined to the body ({why})."
                         : $"Instance {i + 2} of {Describe(seedId)} is skipped: its blend cannot be applied ({why}).");
                 }
             }

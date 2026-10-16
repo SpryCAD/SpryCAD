@@ -74,16 +74,16 @@ public partial class MainWindow
         switch (s.Kind)
         {
             case SelKind.Face when s.Planar:
-                Add("sketch", "Sketch on this face", () => StartSketchCommand());
+                Add("sketch", "Sketch on Face", () => StartSketchCommand());
                 Add("normalto", "Normal To", NormalTo);
                 EditOwner();
-                Add("fillet", "Fillet its edges", () => BlendCommand(true));
-                Add("shell", "Shell (this face open)", ShellCommand);
+                Add("fillet", "Fillet Face Edges", () => BlendCommand(true));
+                Add("shell", "Shell (Remove Face)", ShellCommand);
                 Add("measure", "Measure", MeasureCommand);
                 break;
             case SelKind.Face:
                 EditOwner();
-                Add("fillet", "Fillet its edges", () => BlendCommand(true));
+                Add("fillet", "Fillet Face Edges", () => BlendCommand(true));
                 Add("measure", "Measure", MeasureCommand);
                 break;
             case SelKind.Edge:
@@ -93,8 +93,8 @@ public partial class MainWindow
                 Add("measure", "Measure", MeasureCommand);
                 break;
             case SelKind.Plane:
-                Add("sketch", "Sketch on this plane", () => StartSketchCommand());
-                Add("plane", "Reference Plane from it", PlaneCommand);
+                Add("sketch", "Sketch on Plane", () => StartSketchCommand());
+                Add("plane", "Reference Plane", PlaneCommand);
                 Add("normalto", "Normal To", NormalTo);
                 if (s.FeatureId is { } pf && Session.Doc.Find(pf) is PlaneFeature pfe)
                 {

@@ -742,8 +742,8 @@ public static class NativeBlend
                 // (the boolean's own reason too: the first tool failing alone is no collision of blends)
                 var what = fillet ? "fillet" : "chamfer";
                 errors.Add(appliedOk == 0
-                    ? $"the {what}, cut back where it runs into neighbouring geometry, cannot be joined to the body ({ex.Message}). Try a smaller size."
-                    : $"the {what}s that run into neighbouring geometry also run into each other ({ex.Message}). Remove one of these edges or use a smaller size.");
+                    ? $"the {what}, cut back where it runs into neighboring geometry, cannot be joined to the body ({ex.Message}). Try a smaller size."
+                    : $"the {what}s that run into neighboring geometry also run into each other ({ex.Message}). Remove one of these edges or use a smaller size.");
                 problemEdges?.AddRange(trimmedEdges.Select(g => g.Samples(1e-3).ToArray()));
                 return body;
             }

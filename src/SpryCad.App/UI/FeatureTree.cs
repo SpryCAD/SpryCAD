@@ -108,7 +108,7 @@ public sealed class FeatureTree : UserControl
             var look = doc.EffectiveAppearance.Color;
             FeatureStatus? note = null;
             if (doc.MaterialItem is { } item && Core.Library.LibraryLink.Updates(doc).Any(u => u.Item == item))
-                note = new FeatureStatus { Warnings = { "The library has changed this material: Tools > Library Updates." } };
+                note = new FeatureStatus { Warnings = { "This material has changed in the library. See Tools > Library Updates." } };
             AddRow(MaterialRow, doc.MaterialName ?? "Material <not specified>", "material", 1, note,
                 swatchColor: doc.MaterialItem != null ? Color.FromRgb(Byte(look[0]), Byte(look[1]), Byte(look[2])) : null);
             static byte Byte(double v) => (byte)Math.Round(Math.Clamp(v, 0, 1) * 255);

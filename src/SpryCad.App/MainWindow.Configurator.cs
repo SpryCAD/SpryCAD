@@ -62,10 +62,10 @@ public partial class MainWindow
                 var tb = new TextBox { Text = p.Default, MinWidth = 130 };
                 ToolTip.SetTip(tb, (p.Min, p.Max) switch
                 {
-                    ({ } lo, { } hi) => $"From {Expr.Format(lo)} to {Expr.Format(hi)}. Enter or leave the field to apply.",
-                    ({ } lo, null) => $"At least {Expr.Format(lo)}. Enter or leave the field to apply.",
-                    (null, { } hi) => $"At most {Expr.Format(hi)}. Enter or leave the field to apply.",
-                    _ => "Enter or leave the field to apply.",
+                    ({ } lo, { } hi) => $"Range {Expr.Format(lo)} to {Expr.Format(hi)}. Press Enter or leave the field to apply.",
+                    ({ } lo, null) => $"Minimum {Expr.Format(lo)}. Press Enter or leave the field to apply.",
+                    (null, { } hi) => $"Maximum {Expr.Format(hi)}. Press Enter or leave the field to apply.",
+                    _ => "Press Enter or leave the field to apply.",
                 });
                 void Commit() { if (!string.IsNullOrWhiteSpace(tb.Text)) Set(name, tb.Text.Trim()); }
                 tb.KeyDown += (_, e) => { if (e.Key == Key.Enter) { Commit(); e.Handled = true; } };
@@ -77,7 +77,7 @@ public partial class MainWindow
             row++;
         }
         var parameters = new Button { Content = "Parameters…", HorizontalAlignment = HorizontalAlignment.Right };
-        ToolTip.SetTip(parameters, "Equations and design tables, every variable");
+        ToolTip.SetTip(parameters, "Opens Parameters: all equations and design tables.");
         parameters.Click += (_, _) => { _configurator?.Hide(); _ = ParametersDialog.Show(this, tables: true); };
         var panel = new StackPanel
         {

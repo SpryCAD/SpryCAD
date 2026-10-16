@@ -75,7 +75,7 @@ public partial class MainWindow
         {
             if (had) _pendingEquations[name] = before!; else _pendingEquations.Remove(name);
             _editValues = null;
-            return errors.FirstOrDefault(kv => kv.Key.Trim().Equals(name, StringComparison.OrdinalIgnoreCase)).Value ?? $"{name} cannot be worked out.";
+            return errors.FirstOrDefault(kv => kv.Key.Trim().Equals(name, StringComparison.OrdinalIgnoreCase)).Value ?? $"{name} cannot be evaluated.";
         }
         Status($"{name} = {kept}: added to the equations with this.");
         return null;

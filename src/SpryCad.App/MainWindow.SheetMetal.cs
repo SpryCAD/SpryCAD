@@ -55,7 +55,7 @@ public partial class MainWindow
             () => (body.Material, body.Gauge), v => { body.Material = v.Item1; body.Gauge = v.Item2; });
         page.Number(sheet, "Grain direction", () => body.GrainAngle?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "",
             v => body.GrainAngle = double.TryParse(v, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var d) ? d : null, unit: "°", optional: true);
-        page.Info(sheet, $"From the shop profile \"{LibraryLink.Current.Profile.Name}\": the gauge sets the thickness, its tooling the inside radius and bend allowance. Every part of the same material and gauge bends the same.");
+        page.Info(sheet, $"From shop profile \"{LibraryLink.Current.Profile.Name}\". The gauge sets thickness; its tooling sets inside radius and bend allowance.");
         var p = page.Section("Profile");
         var sketch = page.Selection(p, "Sketch", SelFilter.Sketch, "A closed sketch (a plate), or lines end to end (a bent profile)", 1);
         if (f.SketchId.Length > 0) sketch.Items.Add(new SelItem { Kind = SelKind.Sketch, FeatureId = f.SketchId });
@@ -87,7 +87,7 @@ public partial class MainWindow
     {
         if (PartOnly("Edge Flange")) return;
         var sheets = Session.Doc.SheetBodies;
-        if (sheets is not { Count: > 0 }) { Status("Make a base flange first (Sheet Metal > Base Flange)."); return; }
+        if (sheets is not { Count: > 0 }) { Status("Create a base flange first (Sheet Metal > Base Flange)."); return; }
         var edges = Selection.Items.Select(SheetEdge).OfType<string>().Distinct().ToList();
         var bodyId = Selection.Items.FirstOrDefault(s => SheetEdge(s) != null)?.BodyId;
         var body = sheets.FirstOrDefault(b => b.Id == bodyId) ?? sheets[^1];
@@ -98,7 +98,7 @@ public partial class MainWindow
     {
         var page = new PmPage("Edge-Flange", "edgeflange");
         var p = page.Section("Edges");
-        var box = page.Selection(p, "Edges", SelFilter.Face | SelFilter.Edge, "The sheet's edges (its thin side faces) to put flanges on", accept: s => SheetEdge(s) != null);
+        var box = page.Selection(p, "Edges", SelFilter.Face | SelFilter.Edge, "Sheet edges (thin side faces) to flange", accept: s => SheetEdge(s) != null);
         foreach (var e in f.Edges) box.Items.Add(new SelItem { Kind = SelKind.Face, Name = e, BodyId = f.Body });
         box.Changed += () => f.Edges = box.Items.Select(SheetEdge).OfType<string>().Distinct().ToList();
         var l = page.Section("Flange");
@@ -107,25 +107,25 @@ public partial class MainWindow
         {
             (FlangeReference.OutsideMoldLine, "Outside mold line (virtual sharp)"),
             (FlangeReference.InsideMoldLine, "Inside mold line"),
-            (FlangeReference.Tangent, "Tangent line (where the bend starts)"),
+            (FlangeReference.Tangent, "Tangent line"),
         }, () => f.Reference, v => f.Reference = v);
         page.Number(l, "Angle", () => f.Angle, v => f.Angle = v, unit: "°");
-        page.Combo(l, "Direction", new[] { (BendDirection.Up, "Up (toward the top side)"), (BendDirection.Down, "Down") }, () => f.Direction, v => f.Direction = v);
+        page.Combo(l, "Direction", new[] { (BendDirection.Up, "Up"), (BendDirection.Down, "Down") }, () => f.Direction, v => f.Direction = v);
         page.Combo(l, "Position", new[]
         {
-            (FlangePosition.MaterialInside, "Material inside (outside face at the edge)"),
-            (FlangePosition.MaterialOutside, "Material outside (inside face at the edge)"),
-            (FlangePosition.BendOutside, "Bend outside (the bend starts at the edge)"),
+            (FlangePosition.MaterialInside, "Material inside"),
+            (FlangePosition.MaterialOutside, "Material outside"),
+            (FlangePosition.BendOutside, "Bend outside"),
         }, () => f.Position, v => f.Position = v);
-        page.Info(l, "The angle is the bend angle: 90° for a square flange, 45° for a shallow one. The inside radius and allowance come from the shop profile.");
-        BeginEdit(f, isNew, page, overlay: true, hint: f.Edges.Count == 0 ? "Select the edges (the sheet's thin side faces) to put flanges on." : null);
+        page.Info(l, "Angle is the bend angle (90° for a square flange). Inside radius and allowance come from the shop profile.");
+        BeginEdit(f, isNew, page, overlay: true, hint: f.Edges.Count == 0 ? "Select the sheet edges (thin side faces) to flange." : null);
     }
 
     void HemCommand()
     {
         if (PartOnly("Hem")) return;
         var sheets = Session.Doc.SheetBodies;
-        if (sheets is not { Count: > 0 }) { Status("Make a base flange first (Sheet Metal > Base Flange)."); return; }
+        if (sheets is not { Count: > 0 }) { Status("Create a base flange first (Sheet Metal > Base Flange)."); return; }
         var edges = Selection.Items.Select(SheetEdge).OfType<string>().Distinct().ToList();
         var bodyId = Selection.Items.FirstOrDefault(s => SheetEdge(s) != null)?.BodyId;
         var body = sheets.FirstOrDefault(b => b.Id == bodyId) ?? sheets[^1];
@@ -136,29 +136,29 @@ public partial class MainWindow
     {
         var page = new PmPage("Hem", "hem");
         var p = page.Section("Edges");
-        var box = page.Selection(p, "Edges", SelFilter.Face | SelFilter.Edge, "The sheet's edges (its thin side faces) to hem", accept: s => SheetEdge(s) != null);
+        var box = page.Selection(p, "Edges", SelFilter.Face | SelFilter.Edge, "Sheet edges (thin side faces) to hem", accept: s => SheetEdge(s) != null);
         foreach (var e in f.Edges) box.Items.Add(new SelItem { Kind = SelKind.Face, Name = e, BodyId = f.Body });
         box.Changed += () => f.Edges = box.Items.Select(SheetEdge).OfType<string>().Distinct().ToList();
         var h = page.Section("Hem");
         page.Combo(h, "Type", new[]
         {
-            (HemType.Closed, "Closed (flat against the sheet)"), (HemType.Open, "Open (with a gap)"), (HemType.Teardrop, "Teardrop (past 180°)"),
+            (HemType.Closed, "Closed"), (HemType.Open, "Open"), (HemType.Teardrop, "Teardrop"),
         }, () => f.Type, v => f.Type = v);
         page.Number(h, "Length", () => f.Length, v => f.Length = v);
         page.Number(h, "Gap (open)", () => f.Gap ?? "", v => f.Gap = string.IsNullOrWhiteSpace(v) ? null : v, optional: true);
         page.Number(h, "Radius (teardrop)", () => f.Radius ?? "", v => f.Radius = string.IsNullOrWhiteSpace(v) ? null : v, optional: true);
         page.Number(h, "Angle (teardrop)", () => f.Angle, v => f.Angle = v, unit: "°");
-        page.Combo(h, "Folds over", new[] { (BendDirection.Up, "The top side"), (BendDirection.Down, "The bottom side") }, () => f.Direction, v => f.Direction = v);
+        page.Combo(h, "Folds over", new[] { (BendDirection.Up, "Top side"), (BendDirection.Down, "Bottom side") }, () => f.Direction, v => f.Direction = v);
         page.Check(h, "Hem's outside at the edge (material inside)", () => f.MaterialInside, v => f.MaterialInside = v);
-        page.Info(h, "Length from the fold's outside to the return's end. Hem lengths and gaps are checked against the shop profile's hem rules; a blank gap is the profile's.");
-        BeginEdit(f, isNew, page, overlay: true, hint: f.Edges.Count == 0 ? "Select the edges (the sheet's thin side faces) to hem." : null);
+        page.Info(h, "Length is measured from the outside of the fold. Lengths and gaps are checked against the shop profile; a blank gap uses the profile default.");
+        BeginEdit(f, isNew, page, overlay: true, hint: f.Edges.Count == 0 ? "Select the sheet edges (thin side faces) to hem." : null);
     }
 
     void SheetCutCommand()
     {
         if (PartOnly("Sheet Cut")) return;
         var sheets = Session.Doc.SheetBodies;
-        if (sheets is not { Count: > 0 }) { Status("Make a base flange first (Sheet Metal > Base Flange)."); return; }
+        if (sheets is not { Count: > 0 }) { Status("Create a base flange first (Sheet Metal > Base Flange)."); return; }
         OpenSheetCutPage(new SheetCutFeature { Body = sheets[^1].Id, SketchId = SketchFromSelection() ?? "" }, true);
     }
 
@@ -169,7 +169,7 @@ public partial class MainWindow
         var sketch = page.Selection(p, "Sketch", SelFilter.Sketch, "Closed profiles on a plane parallel to the panels to cut", 1);
         if (f.SketchId.Length > 0) sketch.Items.Add(new SelItem { Kind = SelKind.Sketch, FeatureId = f.SketchId });
         sketch.Changed += () => f.SketchId = sketch.Items.FirstOrDefault()?.FeatureId ?? "";
-        page.Info(p, "Cut normal to the sheet, through every panel parallel to the sketch that a profile lies inside (both walls of a channel). For now a profile must lie inside one panel. Holes are checked against the shop's distances to bends and edges.");
+        page.Info(p, "Cuts normal to the sheet through every parallel panel the profile lies inside. Each profile must lie within one panel; hole distances to bends and edges are checked.");
         BeginEdit(f, isNew, page, overlay: true, hint: f.SketchId.Length == 0 ? "Select a sketch of closed profiles." : null);
     }
 
@@ -182,7 +182,7 @@ public partial class MainWindow
         if (PartOnly("Corners")) return;
         var sheets = Session.Result?.State.Sheets.Values.ToList() ?? new();
         var corners = sheets.SelectMany(s => s.Graph.Corners.Where(c => double.IsFinite(c.Gap)).Select(c => (s, c))).ToList();
-        if (corners.Count == 0) { Status("The sheet metal has no corners: they are where flanges on two edges of a panel meet."); return; }
+        if (corners.Count == 0) { Status("No corners. A corner forms where flanges on two edges of a panel meet."); return; }
         if (_edit != null) CancelEdit();
         var page = new PmPage("Corners", "edgeflange");
         var edits = new Dictionary<CornerId, (CornerTreatment? treatment, string gap)>();
@@ -195,12 +195,12 @@ public partial class MainWindow
             var id = c.Id;
             var sec = page.Section(SheetMetalModule.Named(Session.Doc, $"Corner {c.Id}"));
             var check = s.Checks.FirstOrDefault(x => x.Entity == c.Id.Value && !x.Passed);
-            page.Info(sec, $"Now: {c.Treatment}, gap {c.Gap:0.###} mm." + (check != null ? " ⚠ " + SheetMetalModule.Named(Session.Doc, check.Message) : ""));
+            page.Info(sec, $"Current: {c.Treatment}, gap {c.Gap:0.###} mm." + (check != null ? " ⚠ " + SheetMetalModule.Named(Session.Doc, check.Message) : ""));
             page.Combo(sec, "Treatment", new (CornerTreatment?, string)[]
             {
-                (null, "The profile's rule"), (CornerTreatment.Open, "Open (both short of the other)"),
-                (CornerTreatment.OverlapA, "Overlap A (the first covers the second)"), (CornerTreatment.OverlapB, "Overlap B (the second covers the first)"),
-                (CornerTreatment.Closed, "Closed (overlapping, to the gap)"),
+                (null, "Shop profile default"), (CornerTreatment.Open, "Open"),
+                (CornerTreatment.OverlapA, "Overlap A (first over second)"), (CornerTreatment.OverlapB, "Overlap B (second over first)"),
+                (CornerTreatment.Closed, "Closed (to gap)"),
             }, () => edits[id].treatment, v => edits[id] = (v, edits[id].gap));
             page.Number(sec, "Gap", () => edits[id].gap, v => edits[id] = (edits[id].treatment, v), optional: true);
         }
@@ -237,7 +237,7 @@ public partial class MainWindow
         var sheets = state?.Sheets.Values.ToList();
         if (sheets is not { Count: > 0 })
         {
-            await Dialogs.Message(this, "Export Flat Pattern", "The part has no sheet metal: make a base flange first (Sheet Metal tab).");
+            await Dialogs.Message(this, "Export Flat Pattern", "The part has no sheet metal. Create a base flange first.");
             return;
         }
         var baseName = Session.FilePath != null ? Path.GetFileNameWithoutExtension(Session.FilePath) : Session.UntitledName;
@@ -283,6 +283,6 @@ public partial class MainWindow
         if (IsAssemblyActive || Session.ReadOnly) return;
         if (SheetProfiles.Update(Session.Doc) is not { } u) return;
         Session.Change(() => Session.Doc.SheetProfile = u.Fresh);
-        Status($"Shop profile changes taken into this part ({u.Changes.Count}): {string.Join("; ", u.Changes.Take(3))}{(u.Changes.Count > 3 ? "…" : "")} (Undo to keep the old values).");
+        Status($"Applied {u.Changes.Count} shop profile change{(u.Changes.Count == 1 ? "" : "s")}: {string.Join("; ", u.Changes.Take(3))}{(u.Changes.Count > 3 ? "…" : "")}. Ctrl+Z to undo.");
     }
 }

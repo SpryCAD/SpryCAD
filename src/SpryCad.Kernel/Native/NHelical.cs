@@ -47,7 +47,7 @@ public static class NHelical
         if (rMin < 1e-6 * scale) throw new ArgumentException("the profile touches the axis of the helix");
         // a profile in a plane through the axis taller than the lead would run into its next turn
         if (Math.Abs(Vec3.Dot(n, a)) < 1e-9 && hMax - hMin >= Math.Abs(lead) - 1e-9 * scale && angle > 2 * Math.PI - 1e-9)
-            throw new ArgumentException("the profile is taller than the pitch: neighbouring turns would overlap");
+            throw new ArgumentException("the profile is taller than the pitch: neighboring turns would overlap");
         // left hand: turning the other way (the mirrored frame) while advancing the same way (a plain negative lead
         // would turn the same way and advance backwards: a left-hand helix too, but behind the profile)
         var motion = ScrewMotion.About(axisOrigin, a, Math.Abs(lead), refDir);

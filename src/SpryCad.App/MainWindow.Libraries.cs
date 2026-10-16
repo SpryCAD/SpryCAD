@@ -25,24 +25,24 @@ public partial class MainWindow
     {
         if (IsAssemblyActive) return;
         var n = LibraryLink.Updates(Session.Doc).Count;
-        if (n > 0) Status($"Library update available for {n} item{(n == 1 ? "" : "s")} this part uses: Tools > Library Updates.");
+        if (n > 0) Status($"Library update available for {n} item{(n == 1 ? "" : "s")} in this part. See Tools > Library Updates.");
     }
 
     /// <summary>Lists the part's library updates and, if the user accepts, takes them in (one undoable edit).</summary>
     async Task LibraryUpdatesCommand()
     {
-        if (IsAssemblyActive) { Status("Library updates are a part's: open the part."); return; }
+        if (IsAssemblyActive) { Status("Library updates are available for parts only. Open the part."); return; }
         var updates = LibraryLink.Updates(Session.Doc);
         if (updates.Count == 0)
         {
             var from = string.Join(", ", LibraryLink.Current.Libraries.Select(l => l.Name));
-            await Dialogs.Message(this, "Library Updates", $"The part's library data is the same as in the libraries in use ({from}).");
+            await Dialogs.Message(this, "Library Updates", $"The part's library data is up to date ({from}).");
             return;
         }
-        var text = "The libraries have changed values this part was made with:\n\n"
+        var text = "These library values have changed since the part used them:\n\n"
             + string.Join("\n", updates.Select(u => "• " + u.Describe()))
             + "\n\nUpdate the part? Holes sized from these are sized again; the change is in the part's history and can be undone.";
-        if (!await Dialogs.YesNo(this, "Library Updates", text, "Update", "Keep As Is")) return;
+        if (!await Dialogs.YesNo(this, "Library Updates", text, "Update", "Keep Current")) return;
         Session.Change(() => LibraryLink.Accept(Session.Doc, updates));
         Status($"Updated {updates.Count} library item{(updates.Count == 1 ? "" : "s")}.");
         RefreshScene();

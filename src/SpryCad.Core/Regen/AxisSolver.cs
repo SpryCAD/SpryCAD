@@ -29,9 +29,9 @@ public static class AxisSolver
         if (refs.Count == 0) throw new FeatureException("Select a line, edge or round face; or two planes; or two points; or a point and a plane.");
         if (TypeOf(refs) == null)
             throw new FeatureException(refs.Count == 1
-                ? refs[0].Plane != null ? "A plane: also pick a second plane (where they meet) or a point (square to it through the point)."
-                : "A point: also pick a second point, or a plane (square to it through the point)."
-                : "These references make no axis: pick one line, edge or round face; two planes; two points; or a point and a plane.");
+                ? refs[0].Plane != null ? "A plane: also select a second plane (where they meet) or a point (perpendicular to it, through the point)."
+                : "A point: also select a second point, or a plane (perpendicular to it, through the point)."
+                : "These references make no axis: select one line, edge or round face; two planes; two points; or a point and a plane.");
 
         Vec3 o, d;
         var span = new List<Vec3>();

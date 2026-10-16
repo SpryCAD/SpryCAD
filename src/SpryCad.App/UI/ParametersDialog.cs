@@ -232,7 +232,7 @@ static class ParametersDialog
                 string? problem = null;
                 if (r.FromTable == null)
                     // (one set twice has a value, from where it was set first: the second is the error)
-                    problem = name.Length == 0 ? "Give it a name"
+                    problem = name.Length == 0 ? "Name required"
                         : EquationEntry.NameProblem(name)
                         ?? (Own().Count(x => x.Name.Trim().Equals(name, StringComparison.OrdinalIgnoreCase)) > 1 || fromTables.Contains(name, StringComparer.OrdinalIgnoreCase)
                             ? $"{name} is set twice (an equation and a design table, or two equations)" : errs.GetValueOrDefault(r.Name));
@@ -278,7 +278,7 @@ static class ParametersDialog
             nameof(EqRow.Equation), new DataGridLength(1, DataGridLengthUnitType.Star));
         dg.Columns.Add(new DataGridTemplateColumn
         {
-            Header = Header("Evaluates To", "What it works out to, in the part's units; why not, in red."), Width = new DataGridLength(130), IsReadOnly = true,
+            Header = Header("Evaluates To", "The evaluated value in the part's units; errors in red."), Width = new DataGridLength(130), IsReadOnly = true,
             CellTemplate = new FuncDataTemplate<EqRow>((_, _) => new TextBlock
             {
                 VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0), TextTrimming = TextTrimming.CharacterEllipsis,
@@ -289,7 +289,7 @@ static class ParametersDialog
         });
         dg.Columns.Add(new DataGridTemplateColumn
         {
-            Header = Header("Kind", "What it is: a length, an angle, or a plain number (a count, a ratio, 1/0 for yes/no). A plain number in a length is read in the part's units."),
+            Header = Header("Kind", "Length, angle or number (count, ratio, 1/0). A plain number used as a length is in the part's units."),
             Width = new DataGridLength(70), IsReadOnly = true,
             CellTemplate = new FuncDataTemplate<EqRow>((_, _) => new TextBlock
             {
@@ -299,7 +299,7 @@ static class ParametersDialog
         });
         dg.Columns.Add(new DataGridTemplateColumn
         {
-            Header = Header("Used By", "The features and values using it (clicked: the first feature selected in the tree); unused when nothing does."),
+            Header = Header("Used By", "Features and values that use it. Click to select the first feature."),
             Width = new DataGridLength(170), IsReadOnly = true,
             CellTemplate = new FuncDataTemplate<EqRow>((_, _) =>
             {
@@ -316,7 +316,7 @@ static class ParametersDialog
         });
         dg.Columns.Add(new DataGridTemplateColumn
         {
-            Header = Header("User", "Shown in Configure, where an assembly sets it for each instance."), Width = new DataGridLength(1, DataGridLengthUnitType.SizeToHeader),
+            Header = Header("User", "Shown in Configure, so assemblies can set it per instance."), Width = new DataGridLength(1, DataGridLengthUnitType.SizeToHeader),
             CellTemplate = new FuncDataTemplate<EqRow>((r, _) => new CheckBox
             {
                 HorizontalAlignment = HorizontalAlignment.Center, MinHeight = 0, Padding = new Thickness(0), IsEnabled = r?.FromTable == null,
@@ -430,11 +430,11 @@ static class ParametersDialog
         };
         // the equations nothing uses, deleted (one undo step)
         var unused = new Button { Content = "Delete Unused" };
-        ToolTip.SetTip(unused, "Deletes the equations nothing uses (Used By: unused).");
+        ToolTip.SetTip(unused, "Deletes equations that nothing uses.");
         unused.Click += (_, _) =>
         {
             var gone = Own().Where(r => r.UsedBy == "unused").ToList();
-            if (gone.Count == 0) { owner.Status("Every equation is used."); return; }
+            if (gone.Count == 0) { owner.Status("No unused equations."); return; }
             foreach (var r in gone) items.Remove(r);
             Recompute();
             owner.Status($"Deleted {gone.Count} unused equation{(gone.Count == 1 ? "" : "s")}: {string.Join(", ", gone.Select(r => r.Name))}.");
@@ -450,8 +450,8 @@ static class ParametersDialog
             Spacing = 8,
             Children =
             {
-                Note("Variables for any dimension or feature value; typing L = 10 in a value field adds one here. Those a design table sets are listed greyed. "
-                    + "Changes apply as made (Ctrl+Z in the window undoes them). Ctrl+C copies rows for a spreadsheet, Ctrl+V pastes them back (name, then value); Alt+Up/Down moves a row."),
+                Note("Variables for dimensions and feature values; typing L = 10 in a value field adds one. Variables set by a design table are gray. "
+                    + "Changes apply immediately (Ctrl+Z undoes). Ctrl+C/Ctrl+V copy and paste rows with a spreadsheet; Alt+Up/Down moves a row."),
                 problems, host,
                 new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Children = { add, unused } },
             },
@@ -521,7 +521,7 @@ static class ParametersDialog
         var addTable = new Button { Content = "+", MinWidth = 32 };
         ToolTip.SetTip(addTable, "Add a design table");
         var delTable = new Button { Content = "−", MinWidth = 32 };
-        ToolTip.SetTip(delTable, "Delete the design table picked (Equations stays)");
+        ToolTip.SetTip(delTable, "Delete the selected design table");
 
         // what stops the tables going in the part (named as variables, unique, with rows), or null
         string? Problem()
@@ -598,18 +598,18 @@ static class ParametersDialog
             }
             var t = tables[current];
             right.Children.Add(Note((session.Doc.Equations.Any(e => e.Name.Trim().Equals(t.Name.Trim(), StringComparison.OrdinalIgnoreCase))
-                ? $"Named after the equation {t.Name.Trim()}: its standard values, each row's key one (12, 16, 20). The row picked sets {t.Name.Trim()}; user-facing, Configure offers them. "
-                : "") + "Each row sets values for a set of variables (values or expressions); the table's name holds the row in use (1 = first), for conditions such as "
-                + "Size >= 3 (Suppress When). Changes apply as made. Ctrl+C copies the table for a spreadsheet; Ctrl+V pastes one back (a heading row of variable names, then a row per configuration)."));
+                ? $"Standard values for {t.Name.Trim()}: each row's key is a value (12, 16, 20). The active row sets {t.Name.Trim()}; Configure offers them when marked User. "
+                : "") + "Each row sets a group of variables. The table name holds the active row number (1 = first) for conditions such as "
+                + "Size >= 3 (Suppress When). Changes apply immediately. Ctrl+C/Ctrl+V copy and paste the table with a spreadsheet (header row of variable names, then one row per configuration)."));
 
             // its name, user-facing and description
             var name = new TextBox { Text = t.Name, Width = 140 };
-            ToolTip.SetTip(name, "The table's name: the choice in Configure, and a variable holding the row in use (1 = first).");
+            ToolTip.SetTip(name, "Table name, shown in Configure; also a variable holding the active row (1 = first).");
             void Rename() { if (name.Text?.Trim() is { } n && n != t.Name) RenameVariable(t.Name, n, () => t.Name = n, t, column: false); }
             name.LostFocus += (_, _) => Rename();
             name.KeyDown += (_, e) => { if (e.Key == Key.Enter) { Rename(); e.Handled = true; } };
             var user = new CheckBox { Content = "User-facing", IsChecked = t.Exposed };
-            ToolTip.SetTip(user, "Shows the rows as a list in Configure; set per instance in assemblies.");
+            ToolTip.SetTip(user, "Lists the rows in Configure, set per instance in assemblies.");
             user.IsCheckedChanged += (_, _) => { t.Exposed = user.IsChecked == true; Apply(); };
             var desc = new TextBox { Text = t.Description ?? "", Watermark = "Description for Configure", MinWidth = 220 };
             desc.LostFocus += (_, _) => { if ((desc.Text ?? "") != (t.Description ?? "")) { t.Description = desc.Text; Apply(); } };
@@ -635,12 +635,12 @@ static class ParametersDialog
             {
                 int cc = c;
                 var head = new TextBlock { Text = t.Columns[c], FontWeight = FontWeight.SemiBold, Background = Brushes.Transparent };
-                ToolTip.SetTip(head, $"The variable {t.Columns[c]}: each row's value (a value or an expression). Right-click to rename or delete the column.");
+                ToolTip.SetTip(head, $"Variable {t.Columns[c]}: a value or expression per row. Right-click to rename or delete.");
                 head.ContextMenu = new ContextMenu
                 {
                     Items =
                     {
-                        Item("Rename Column...", null, async () =>
+                        Item("Rename Column…", null, async () =>
                         {
                             if (TopLevel.GetTopLevel(dg) is not Window w || await Dialogs.Input(w, "Rename Column", "Variable", t.Columns[cc]) is not { } n || n.Trim().Length == 0) return;
                             RenameVariable(t.Columns[cc], n.Trim(), () => t.Columns[cc] = n.Trim(), t, column: true);
@@ -657,8 +657,8 @@ static class ParametersDialog
                 {
                     head.Text = TableConfig.Label(colName);
                     ToolTip.SetTip(head, colName.Trim() == TableConfig.Material
-                        ? "The material of the part in each row (the Bill of Materials, its mass and look). Right-click to move or delete the column."
-                        : $"The part's {TableConfig.Label(colName).ToLowerInvariant()} in each row, as the Bill of Materials and drawings show it. Right-click to move or delete the column.");
+                        ? "Part material per row (sets BOM material, mass and appearance). Right-click to move or delete."
+                        : $"Part {TableConfig.Label(colName).ToLowerInvariant()} per row, shown in the BOM and drawings. Right-click to move or delete.");
                     if (colName.Trim() == TableConfig.Material)
                     {
                         var materials = Materials();
@@ -679,7 +679,7 @@ static class ParametersDialog
                 // another table's name: the row of it each row picks (a combination of configurations)
                 if (tables.FirstOrDefault(o => o != t && o.Name.Trim().Equals(colName.Trim(), StringComparison.OrdinalIgnoreCase)) is { } picks)
                 {
-                    ToolTip.SetTip(head, $"The row of {picks.Name} each row picks: a row of this table combines it with the rest. Right-click to rename, move or delete the column.");
+                    ToolTip.SetTip(head, $"Row of {picks.Name} selected by each row. Right-click to rename, move or delete.");
                     var keys = picks.Rows.Select(r => r.Key).ToList();
                     dg.Columns.Add(new DataGridTemplateColumn
                     {
@@ -694,7 +694,7 @@ static class ParametersDialog
                 }
                 // an equation's name: the value each row sets it to
                 if (session.Doc.Equations.Any(e => e.Name.Trim().Equals(colName.Trim(), StringComparison.OrdinalIgnoreCase)))
-                    ToolTip.SetTip(head, $"The value of the equation {colName} in each row (in place of its own). Right-click to rename, move or delete the column.");
+                    ToolTip.SetTip(head, $"Overrides equation {colName} per row. Right-click to rename, move or delete.");
                 // a feature's on/off column (its Suppress When is "not" the column): a checkbox per row
                 if (Switched(t.Columns[c]) is { } sw)
                 {
@@ -716,7 +716,7 @@ static class ParametersDialog
             var group = "dt" + Guid.NewGuid().ToString("N");
             dg.Columns.Add(new DataGridTemplateColumn
             {
-                Header = Header("Active", "The row the part uses unless an assembly picks another."), Width = new DataGridLength(1, DataGridLengthUnitType.SizeToHeader),
+                Header = Header("Active", "Row the part uses unless an assembly selects another."), Width = new DataGridLength(1, DataGridLengthUnitType.SizeToHeader),
                 CellTemplate = new FuncDataTemplate<TRow>((_, _) => new RadioButton
                 {
                     GroupName = group, HorizontalAlignment = HorizontalAlignment.Center, MinHeight = 0, Padding = new Thickness(0),
@@ -739,7 +739,7 @@ static class ParametersDialog
             async Task Paste()
             {
                 if (TopLevel.GetTopLevel(dg)?.Clipboard is not { } clip || DesignTable.Parse(await clip.GetTextAsync()) is not { } pasted)
-                { error.Text = "No table on the clipboard: copy a heading row of variable names and a row per configuration (its key, then its values)."; return; }
+                { error.Text = "No table on the clipboard. Copy a header row of variable names, then one row per configuration (key, then values)."; return; }
                 // the same columns: rows changed by key and added; other columns: the table becomes the cells pasted
                 if (pasted.Columns.Count == t.Columns.Count && pasted.Columns.Zip(t.Columns).All(p => p.First.Equals(p.Second, StringComparison.OrdinalIgnoreCase)))
                     foreach (var pr in pasted.Rows)
@@ -856,7 +856,7 @@ static class ParametersDialog
             if (!column && equation && !table || column && (equation || table) && !t.Columns.Any(c => c != from && Is(c)))
             {
                 here(); Relist(); Apply();
-                owner.Status(column ? (equation ? $"Each row now sets {to}." : $"Each row now picks a row of {to}.") : $"{to}'s standard values: make each row's key a value of it (12, 16, 20); its columns are not needed.");
+                owner.Status(column ? (equation ? $"Each row now sets {to}." : $"Each row now picks a row of {to}.") : $"Standard values for {to}. Set each row's key to a value (12, 16, 20); other columns are not needed.");
                 return;
             }
             if (!IsName(to)) { error.Text = $"\"{to}\" cannot name a variable."; return; }

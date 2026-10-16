@@ -24,7 +24,7 @@ public static class DraftOp
         {
             var msg = ex.Message.StartsWith("draft: ") ? ex.Message["draft: ".Length..] : ex.Message;
             if (msg.Contains("no solution") || msg.StartsWith("invalid") || msg.Contains("open"))
-                msg = "at this angle the drafted faces no longer meet their neighbours as they did (a face would vanish, or a fillet or " +
+                msg = "at this angle the drafted faces no longer meet their neighbors as they did (a face would vanish, or a fillet or " +
                       "tangent face next to them is not drafted with them). Try a smaller angle, include the tangent faces, or draft before filleting";
             throw new DraftFailedException("The draft cannot be made: " + msg + ".");
         }

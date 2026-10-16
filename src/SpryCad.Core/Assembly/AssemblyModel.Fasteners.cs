@@ -72,13 +72,13 @@ public sealed partial class AssemblyModel
     {
         options ??= new FastenerOptions();
         var set = options.Set ?? LibraryLink.Current;
-        if (Find(componentId) is not { Display: { } pd } occ || occ.Rel != null) throw new InvalidOperationException("Pick a hole in a part of this assembly.");
+        if (Find(componentId) is not { Display: { } pd } occ || occ.Rel != null) throw new InvalidOperationException("Select a hole in a part of this assembly.");
         var doc = pd.Part ?? pd.Doc ?? throw new InvalidOperationException($"{occ.Component.Name} is shown from its cache; resolve it to fasten its holes.");
         var hole = doc.Features.OfType<HoleFeature>().FirstOrDefault(h => holeFace.StartsWith(h.Id + ".", StringComparison.Ordinal))
-            ?? throw new InvalidOperationException("Pick the wall of a hole made with the Hole Wizard.");
+            ?? throw new InvalidOperationException("Select the wall of a hole made with the Hole Wizard.");
         if (string.IsNullOrEmpty(hole.Standard) || string.IsNullOrEmpty(hole.Size) || Fasteners.TablesFor(hole.Standard) is not { } tables)
             throw new InvalidOperationException($"{(string.IsNullOrEmpty(hole.Name) ? "The hole" : hole.Name)} was not sized from a clearance hole table, so its screw is not known.");
-        if (FaceGeom(componentId, holeFace) is not { Kind: MateGeomKind.Axis } axis) throw new InvalidOperationException("Pick the round wall of the hole.");
+        if (FaceGeom(componentId, holeFace) is not { Kind: MateGeomKind.Axis } axis) throw new InvalidOperationException("Select the round wall of the hole.");
         var size = hole.Size;
         var screws = Fasteners.Offered(set, tables.screws, size);
         if (screws.Count == 0) throw new InvalidOperationException($"No {size} screws are offered ({tables.screws}): the company library leaves them out.");

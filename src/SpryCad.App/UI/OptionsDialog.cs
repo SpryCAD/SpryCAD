@@ -184,7 +184,7 @@ public static class OptionsDialog
         var persp = f.Check("Perspective view", vp.Camera.Perspective, "Clear for orthographic projection.");
         f.Section("Command bar");
         var bar = f.Row("Buttons", Combo(new[] { "Large (default)", "Compact" }, (int)UserSettings.CommandBar),
-            "Large: the icon above the name. Compact: a small icon beside it. Right-click the command bar to switch.");
+            "Large: icon above the name. Compact: small icon beside it. Right-click the command bar to switch.");
         return new Commit(() => null, () => () =>
         {
             if (bar.SelectedIndex >= 0) c.Owner.SetCommandBarLayout((CommandBarLayout)bar.SelectedIndex);
@@ -267,11 +267,11 @@ public static class OptionsDialog
         var (path, source) = Libraries.Location;
         var byAdmin = source is LibraryConfigSource.Environment or LibraryConfigSource.MachinePolicy;
         f.Section("Library set");
-        var box = new TextBox { Text = UserSettings.LibrariesPath ?? "", MinWidth = 300, IsEnabled = !byAdmin, Watermark = "None: SpryCAD's built-in standards" };
-        var browse = new Button { Content = "Browse...", IsEnabled = !byAdmin };
+        var box = new TextBox { Text = UserSettings.LibrariesPath ?? "", MinWidth = 300, IsEnabled = !byAdmin, Watermark = "None (built-in standards)" };
+        var browse = new Button { Content = "Browse…", IsEnabled = !byAdmin };
         f.Row("Location", new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Children = { box, browse } },
-            "The folder on a shared drive (or its libraries.json) listing the libraries everyone uses: thread sizes, clearance holes, a company's preferred sizes. "
-            + "They are copied to this computer and read from there, so SpryCAD works offline with the copies last read.");
+            "Shared folder (or its libraries.json) listing the company libraries: thread sizes, clearance holes, preferred sizes. "
+            + "Libraries are cached locally, so SpryCAD works offline.");
         if (byAdmin)
             f.Hint($"Set by your administrator ({(source == LibraryConfigSource.Environment ? $"the {LibrarySync.EnvironmentVariable} environment variable" : LibrarySync.MachinePolicyFile)}): {path}", 150, Palette.Warning);
         async Task<string?> PickFolder(string title)
@@ -279,7 +279,7 @@ public static class OptionsDialog
             var picked = await c.Owner.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = title });
             return picked.FirstOrDefault()?.TryGetLocalPath();
         }
-        browse.Click += async (_, _) => { if (await PickFolder("Library set folder") is { } p) box.Text = p; };
+        browse.Click += async (_, _) => { if (await PickFolder("Library Set Folder") is { } p) box.Text = p; };
 
         f.Section("In use");
         foreach (var lib in LibraryLink.Current.Libraries)
@@ -289,21 +289,21 @@ public static class OptionsDialog
                 TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center,
             });
         if (LibraryLink.Current.Libraries.Any(l => l.Tables.Any(t => !t.Verified)))
-            f.Hint("Some tables are not yet verified against their published standards: check values before relying on them.", 0, Palette.Warning);
+            f.Hint("Some tables are not verified against their published standards. Check values before use.", 0, Palette.Warning);
         foreach (var p in Libraries.Problems) f.Hint(p, 0, Palette.Danger);
         var reload = new Button { Content = "Reload Now" };
-        reload.Click += (_, _) => { Libraries.Reload(); c.Owner.Status("Reading the standards libraries again (Options shows them next time it opens)."); };
-        f.Row("", reload, "SpryCAD reads them again every few minutes; parts keep the values they were made with until you accept an update (Tools > Library Updates).");
+        reload.Click += (_, _) => { Libraries.Reload(); c.Owner.Status("Reloading libraries. Reopen Options to see the result."); };
+        f.Row("", reload, "Libraries refresh every few minutes. Parts keep their values until updated (Tools > Library Updates).");
 
         f.Section("Set up a shared library set");
-        var create = new Button { Content = "Create in a Folder..." };
+        var create = new Button { Content = "Create in a Folder…" };
         f.Row("Administrators", create,
-            "Writes standards.sprlib (SpryCAD's standards, to correct or extend) and libraries.json listing it into a folder, e.g. on a file server. "
-            + $"Give everyone read access and only the libraries' owners write access, then point each computer at it: the {LibrarySync.EnvironmentVariable} environment variable, "
+            "Writes standards.sprlib (SpryCAD standards to edit) and libraries.json to a folder, e.g. on a file server. "
+            + $"Grant users read access and owners write access, then set each computer to it with the {LibrarySync.EnvironmentVariable} environment variable, "
             + $"the first line of {LibrarySync.MachinePolicyFile}, or this page.");
         create.Click += async (_, _) =>
         {
-            if (await PickFolder("Folder for the shared library set") is not { } folder) return;
+            if (await PickFolder("Shared Library Set Folder") is not { } folder) return;
             var json = Path.Combine(folder, LibraryConfig.FileName);
             if (File.Exists(json)) { await Dialogs.Message(c.Owner, "Libraries", $"{json} already exists: it was left as it is."); return; }
             try
@@ -316,7 +316,7 @@ public static class OptionsDialog
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                await Dialogs.Message(c.Owner, "Libraries", "The library set could not be created: " + ex.Message);
+                await Dialogs.Message(c.Owner, "Libraries", "Could not create the library set: " + ex.Message);
             }
         };
 
@@ -469,7 +469,7 @@ public static class OptionsDialog
             : Brushes.Transparent;
         text.TextChanged += (_, _) => Preview();
         Preview();
-        f.Row("Color", new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Children = { text, swatch } }, "Red, green, blue: 0 to 255 each. Its finish, opacity and the presets: Tools > Appearance.");
+        f.Row("Color", new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Children = { text, swatch } }, "RGB, 0 to 255 each. Finish, opacity and presets: Tools > Appearance.");
         // shown rounded to whole numbers: untouched, the stored color is kept as it is (not marked changed)
         var shown = text.Text;
         return new Commit(
