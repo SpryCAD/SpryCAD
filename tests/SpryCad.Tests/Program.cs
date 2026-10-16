@@ -250,6 +250,8 @@ static class Program
             RollingBallTool.Tests(t);
             ContainerTests.Run(t);
             StorageTests.Run(t);
+            LibraryTests.Run(t);
+            FastenerTests.Run(t);
             AssemblyStorageTests.Run(t);
             TransferTests.Run(t);
             TransferTests.RunPins(t);

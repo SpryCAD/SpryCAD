@@ -36,7 +36,7 @@ public partial class MainWindow
     Motoring? _motor;
 
     /// <summary>The faces the open page has picked (Mate's two, or the Motor's axis): drawn highlighted.</summary>
-    List<MateRef>? PagePicks => _mating?.Picks ?? (_motor?.Axis is { } ax ? new List<MateRef> { ax } : null);
+    List<MateRef>? PagePicks => _mating?.Picks ?? (_motor?.Axis is { } ax ? new List<MateRef> { ax } : _fastening?.Hole is { } hole ? new List<MateRef> { hole } : null);
 
     void MotorCommand()
     {

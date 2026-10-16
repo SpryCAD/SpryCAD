@@ -63,7 +63,7 @@ public partial class MainWindow
     /// <summary>The color a mate's i-th reference is drawn in: full selection blue, paler while another is selected in the box.</summary>
     Rgba PickColor(int i) => _mating is { Focus: >= 0 } mt && mt.Focus != i ? PaleSelect : ViewportControl.SelectColor;
 
-    public bool PickingFaces => (_mating != null || _motor != null || _patterning != null || SectionPageOpen || MeasureOpen || _normalToPick) && Asm != null;
+    public bool PickingFaces => (_mating != null || _motor != null || _patterning != null || _fastening != null || SectionPageOpen || MeasureOpen || _normalToPick) && Asm != null;
 
     /// <summary>The picks not selected in the Mate Selections box while one is: a paler selection blue.</summary>
     static readonly Rgba PaleSelect = new(0.62f, 0.78f, 1.0f);
@@ -83,6 +83,7 @@ public partial class MainWindow
         if (MeasureOpen) { _measureBox?.Add(new SpryCad.App.Session.SelItem { Kind = SpryCad.App.Session.SelKind.Face, BodyId = component, Name = face }); RefreshAssemblyScene(); return; }
         if (_motor != null) { MotorPick(component, face); return; }
         if (_patterning != null) { PatternPick(component, face); return; }
+        if (_fastening != null) { FastenerPick(component, face); return; }
         if (_mating is not { } st || Asm is not { } a) return;
         PickRef(a.Model.RefTo(component, face), $"{a.Model.NameAt(component)}: only planar and cylindrical faces can be mated");
     }

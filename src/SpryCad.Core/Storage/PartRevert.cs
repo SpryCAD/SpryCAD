@@ -163,6 +163,7 @@ public static class PartRevert
         ObjectKind.Variables => "Equations",
         ObjectKind.Material => "Material",
         ObjectKind.Settings => "Part settings",
+        ObjectKind.LibrarySnapshot => "Library data " + PartObjects.SnapshotName(after.TryGetValue(id, out var s) ? s : before[id]),
         _ => id.Kind.ToString(),
     };
 

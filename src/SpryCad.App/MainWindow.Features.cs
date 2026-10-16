@@ -553,10 +553,26 @@ public partial class MainWindow
         if (!string.IsNullOrEmpty(f.Face.Name)) box.Items.Add(FaceItem(f.Face));
         box.Changed += () => f.Face = box.Items.FirstOrDefault()?.ToFaceRef() ?? new FaceRef();
         var spec = page.Section("Specification");
-        var sizes = new List<(string, string)> { ("Auto", "Auto (fits the face)") };
-        sizes.AddRange(SpryCad.Core.Regen.Threads.MetricCoarse.Select(x => (x.name, $"{x.name} × {x.p}")));
+        // the sizes the libraries offer (a company's preferred ones), as "table|size"; ISO metric coarse is a thread's
+        // table when it names none (threads made before libraries)
+        const string coarse = "ISO261-coarse";
+        var sizes = new List<(string, string)> { ("Auto", "Auto (ISO metric, fits the face)") };
+        foreach (var tbl in Core.Library.LibraryLink.Current.Offered(Core.Library.TableKinds.Thread))
+        {
+            var pitch = tbl.Column("pitch");
+            if (pitch < 0) continue;
+            sizes.AddRange(tbl.Rows.Select(r => (tbl.Key + "|" + r.Key, r.Key.StartsWith('M') && !r.Key.Contains('x') ? $"{r.Key} × {Core.Expr.Format(r.Values[pitch])}" : r.Key)));
+        }
         sizes.Add(("Custom", "Custom pitch"));
-        page.Combo(spec, "Size", sizes, () => f.Size, v => f.Size = v, "thread");
+        string SizeValue() => f.Size is "Auto" or "Custom" ? f.Size : Core.Library.ThreadSizes.TableOf(f) + "|" + f.Size;
+        // a size the libraries no longer offer stays this thread's
+        if (!sizes.Any(s => s.Item1 == SizeValue())) sizes.Insert(1, (SizeValue(), $"{f.Size} (not offered by the libraries)"));
+        page.Combo(spec, "Size", sizes, SizeValue, v =>
+        {
+            var i = v.IndexOf('|');
+            f.Size = i < 0 ? v : v[(i + 1)..];
+            f.Standard = i < 0 || v[..i] == coarse ? null : v[..i];
+        }, "thread");
         page.Number(spec, "Pitch (custom)", () => f.Pitch, v => f.Pitch = v, "dimension");
         page.Combo(spec, "End", new List<(ThreadEnd, string)>
         {
@@ -714,31 +730,38 @@ public partial class MainWindow
         var page = new PmPage("Hole Specification", "hole");
         var t = page.Section("Hole Type");
         Action syncSections = () => { };
+        TextBox? dia = null, cbd = null, cbdp = null, csd = null, csa = null;
+        // sizes from the libraries (section 34): the diameters set from the standard, size and fit picked
+        Core.Library.LibrarySnapshot? Resolve(string item) => Core.Library.LibraryLink.Resolve(Session.Doc, item);
+        void Fill()
+        {
+            if (f.Standard == null) return;
+            Core.Library.HoleSizes.Apply(f, Resolve);
+            // a size the counterbore or countersink table lacks keeps the values it had: said, so they are typed
+            if (Core.Library.HoleSizes.Missing(f, Resolve) is { } missing) Status(missing);
+            dia!.Text = f.Diameter; cbd!.Text = f.CbDiameter; cbdp!.Text = f.CbDepth; csd!.Text = f.CsDiameter; csa!.Text = f.CsAngle;
+        }
         page.Combo(t, "Type", new List<(HoleType, string)> { (HoleType.Simple, "Simple"), (HoleType.Counterbore, "Counterbore"), (HoleType.Countersink, "Countersink") },
-            () => f.Type, v => { f.Type = v; syncSections(); });
+            () => f.Type, v => { f.Type = v; syncSections(); Fill(); });
         var std = page.Section("Size");
-        var sizes = new List<(string, string)>
+        var sizes = new List<(string, string)> { ("custom", "Custom") };
+        foreach (var tbl in Core.Library.LibraryLink.Current.Offered(Core.Library.TableKinds.Clearance))
+            sizes.AddRange(tbl.Rows.Select(r => (tbl.Key + "|" + r.Key, $"{r.Key} clearance ({tbl.Standard})")));
+        // a hole made before libraries, with an ISO 273 normal diameter, shows its size (editing an M6 hole shows M6, not Custom)
+        if (f.Standard == null && UnitFormat.TryLength(f.Diameter, Session.Lookup, out var d0, out _)
+            && Core.Library.LibraryLink.Current.Table("ISO273") is { } iso && iso.Rows.FirstOrDefault(r => Math.Abs(r.Values[iso.Column("normal")] - d0) < 1e-9) is { } guess)
+        { f.Standard = "ISO273"; f.Size = guess.Key; }
+        string StdValue() => f.Standard != null && f.Size != null ? f.Standard + "|" + f.Size : "custom";
+        if (!sizes.Any(s => s.Item1 == StdValue())) sizes.Insert(1, (StdValue(), $"{f.Size} clearance (not offered by the libraries)"));
+        page.Combo(std, "Standard", sizes, StdValue, v =>
         {
-            ("custom", "Custom"),
-            ("M3", "M3 clearance (3.4 mm)"), ("M4", "M4 clearance (4.5 mm)"), ("M5", "M5 clearance (5.5 mm)"), ("M6", "M6 clearance (6.6 mm)"),
-            ("M8", "M8 clearance (9 mm)"), ("M10", "M10 clearance (11 mm)"), ("M12", "M12 clearance (13.5 mm)"),
-        };
-        TextBox? dia = null, cbd = null, cbdp = null, csd = null;
-        // shows the standard size matching the current diameter (editing an M6 hole shows M6, not Custom)
-        string CurrentStd() => UnitFormat.TryLength(f.Diameter, Session.Lookup, out var d, out _)
-            ? sizes.Skip(1).FirstOrDefault(s => s.Item2.Contains($"({Core.Expr.Format(d)} mm)")).Item1 ?? "custom" : "custom";
-        page.Combo(std, "Standard", sizes, CurrentStd, v =>
-        {
-            var spec = v switch
-            {
-                "M3" => (3.4, 6.5, 3.3, 6.6), "M4" => (4.5, 8.0, 4.4, 8.6), "M5" => (5.5, 10.0, 5.4, 10.4), "M6" => (6.6, 11.0, 6.5, 12.4),
-                "M8" => (9.0, 15.0, 8.6, 16.4), "M10" => (11.0, 18.0, 10.8, 20.4), "M12" => (13.5, 20.0, 13.0, 24.4), _ => (0, 0, 0, 0),
-            };
-            if (spec.Item1 == 0) return;
-            // (metric sizes: in millimetres in an inch part too)
-            static string Mm(double v) => Core.Expr.Format(v) + "mm";
-            dia!.Text = Mm(spec.Item1); cbd!.Text = Mm(spec.Item2); cbdp!.Text = Mm(spec.Item3); csd!.Text = Mm(spec.Item4);
+            var i = v.IndexOf('|');
+            if (i < 0) { f.Standard = null; f.Size = null; f.Fit = null; return; }
+            f.Standard = v[..i]; f.Size = v[(i + 1)..];
+            Fill();
         });
+        page.Combo(std, "Fit", new List<(string, string)> { ("close", "Close"), ("normal", "Normal"), ("loose", "Loose") },
+            () => f.Fit ?? "normal", v => { f.Fit = v == "normal" ? null : v; Fill(); });
         dia = page.Number(std, "Diameter", () => f.Diameter, v => f.Diameter = v, "hole");
         var end = page.Section("End Condition");
         TextBox? depth = null;
@@ -751,7 +774,7 @@ public partial class MainWindow
         cbdp = page.Number(cb, "C'bore depth", () => f.CbDepth, v => f.CbDepth = v);
         var cs = page.Section("Countersink");
         csd = page.Number(cs, "C'sink dia.", () => f.CsDiameter, v => f.CsDiameter = v);
-        page.Number(cs, "C'sink angle", () => f.CsAngle, v => f.CsAngle = v, null, "°");
+        csa = page.Number(cs, "C'sink angle", () => f.CsAngle, v => f.CsAngle = v, null, "°");
         // only the section of the chosen hole type is shown
         syncSections = () =>
         {
@@ -767,6 +790,16 @@ public partial class MainWindow
             EditFeature(f.SketchId);
         }, "sketch");
         BeginEdit(f, isNew, page, overlay: false);
+        // diameters typed over the standard's: a custom hole (a library update must not size it again)
+        if (_edit != null) _edit.BeforeCommit = () =>
+        {
+            if (f.Standard == null) return;
+            var sized = (HoleFeature)f.Clone();
+            Core.Library.HoleSizes.Apply(sized, Resolve);
+            bool same = sized.Diameter == f.Diameter && (f.Type != HoleType.Counterbore || (sized.CbDiameter == f.CbDiameter && sized.CbDepth == f.CbDepth))
+                && (f.Type != HoleType.Countersink || (sized.CsDiameter == f.CsDiameter && sized.CsAngle == f.CsAngle));
+            if (!same) { f.Standard = null; f.Size = null; f.Fit = null; }
+        };
         if (isNew && _edit != null)
         {
             // the position sketch was committed just before this page opened: cancelling removes it

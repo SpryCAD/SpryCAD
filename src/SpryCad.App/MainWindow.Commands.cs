@@ -222,6 +222,10 @@ public partial class MainWindow
             PartMenu(Item("_Configure…", () => _ = Dialogs.ConfigurePart(this), null, "configure")),
             Item("Mea_sure…", MeasureCommand, null, "measure"),
             Item("_Mass Properties…", MassPropertiesCommand, null, "mass"),
+            PartMenu(Item("_Library Updates…", () => _ = LibraryUpdatesCommand(), null, "table")),
+            Sub("Li_braries",
+                Item("_Edit Library…", () => _ = LibraryEditor.Open(this), null, "table"),
+                Item("_New Company Library…", () => _ = LibraryEditor.New(this))),
             "-",
             Item("_Options…", () => _ = Dialogs.Options(this), null, "options")));
         MainMenu.Items.Add(Sub("_Help",
@@ -1015,6 +1019,7 @@ public partial class MainWindow
             BeginLoading(tab, "Opening " + Path.GetFileName(path)); // (read: now rebuilding)
             if (!IsAutosave(path) && !IsEmbeddedCopy(path)) RecentFiles.Add(path);
             Status("Opened " + path);
+            NoteLibraryUpdates();
             tab.FitAfterLoad = tab.Session.RequestedRevision;
             UpdateSupersededBanner();
             // someone else has it open: read-only (saving makes a copy elsewhere), unless the user says otherwise

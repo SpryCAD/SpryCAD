@@ -299,7 +299,7 @@ public sealed class WorkingCopy : IDisposable
     /// What tells a file saved again from the one opened, cheaply even over a network: its size, last write time and the
     /// hash of its first 64 KB (a database's header holds a counter SQLite changes on every write).
     /// </summary>
-    static string? Fingerprint(string path)
+    internal static string? Fingerprint(string path)
     {
         try
         {

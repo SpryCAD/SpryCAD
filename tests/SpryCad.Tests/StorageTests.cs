@@ -107,6 +107,7 @@ static class StorageTests
         doc.SketchVisibility = new() { [hole.Id] = false };
         doc.RollbackIndex = doc.Features.Count - 1;
         doc.DerivedFrom = CadDocument.NewGuid();
+        doc.Library = new(StringComparer.Ordinal) { ["ISO273/M8"] = SpryCad.Core.Library.LibrarySet.BuiltIn.Snapshot("ISO273/M8")! };
         return doc;
     }
 

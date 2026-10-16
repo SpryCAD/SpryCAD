@@ -456,7 +456,18 @@ public sealed class Regenerator
                 case CombineFeature c: DoCombine(c); break;
                 case ImportFeature im: DoImport(im); break;
                 case FlatPatternFeature fp: DoFlatPattern(fp); break;
+                case FastenerFeature fa: DoFastener(fa); break;
             }
+        }
+
+        // ---- fasteners ----
+
+        void DoFastener(FastenerFeature fa)
+        {
+            // (from the part's snapshot of the row: the same with or without the library installed)
+            var row = Library.LibraryLink.Resolve(doc, fa.Item) ?? throw new FeatureException($"No library has {fa.Item}, and the part keeps no copy of it.");
+            if (Library.Fasteners.KindOf(row) == null) throw new FeatureException($"{fa.Item} is not a screw, nut or washer.");
+            State = State.With(new List<Body>(State.Bodies) { new Body { Id = f.Id, Solid = Library.Fasteners.Body(row) } });
         }
 
         // ---- imported solids ----
@@ -809,8 +820,10 @@ public sealed class Regenerator
             }
             else
             {
-                var std = t.Size == "Auto" ? Threads.Fit(2 * surfaceR, external) : Threads.MetricCoarse.FirstOrDefault(x => x.name == t.Size);
-                if (std.name == null) throw new FeatureException($"Unknown thread size '{t.Size}'.");
+                // (a standard size from the part's library snapshot: the same with or without the library installed)
+                var std = t.Size == "Auto" ? Threads.Fit(2 * surfaceR, external)
+                    : Library.ThreadSizes.Resolve(doc, t) is { } r ? (name: t.Size, d: r.major, p: r.pitch)
+                    : throw new FeatureException($"Unknown thread size '{t.Size}'.");
                 pitch = std.p;
                 major = std.d / 2;
                 if (external && Math.Abs(major - surfaceR) > 0.15 * major)

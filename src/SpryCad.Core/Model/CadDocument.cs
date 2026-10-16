@@ -55,6 +55,11 @@ public sealed class CadDocument
     /// <summary>How bends unfold in this part (null: K-factor 0.5); a Flat Pattern may override it.</summary>
     public SheetMetalSettings? SheetMetal { get; set; }
     /// <summary>
+    /// The library rows the features use (thread sizes, clearance holes), by item ("ISO261-coarse/M8"), copied in so the
+    /// part rebuilds the same with or without the library (<see cref="Library.LibraryLink"/>); null when none.
+    /// </summary>
+    public SortedDictionary<string, Library.LibrarySnapshot>? Library { get; set; }
+    /// <summary>
     /// Sketches, reference planes and axes shown (true) or hidden (false) by the user, by feature id; one not listed is shown while no
     /// feature uses it. Display only: kept out of the features, so showing or hiding one rebuilds nothing.
     /// Null when nothing is set.

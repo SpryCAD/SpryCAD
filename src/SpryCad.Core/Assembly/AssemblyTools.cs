@@ -66,6 +66,8 @@ public static class Bom
         var file = r.Embedded == null ? o.Owner.Resolution.Parts.GetValueOrDefault(ComponentResolver.Key(r))?.Path ?? r.AbsolutePath ?? r.Path : null;
         var name = System.IO.Path.GetFileNameWithoutExtension(r.Path ?? r.AbsolutePath ?? r.Embedded ?? c.Name);
         if (string.IsNullOrEmpty(name)) name = c.Name.Split('<')[0];
+        // a fastener by its standard and designation, with its length ("ISO 4762 M8x30"), not by its file
+        if (Library.Fasteners.Of(o.Display?.Part ?? o.Display?.Doc) is { } fastener) name = fastener.Designation;
         string config, material = "";
         if (c.IsAssembly) config = c.Configuration ?? "";
         else
