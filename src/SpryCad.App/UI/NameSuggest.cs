@@ -42,7 +42,15 @@ public static class NameSuggest
         tb.AttachedToVisualTree += (_, _) => Host();
         if (tb.IsAttachedToVisualTree()) Host();
         // (the field gone, its list with it: a grid makes a field for each cell edited)
-        tb.DetachedFromVisualTree += (_, _) => { popup.IsOpen = false; if (_open == popup) _open = null; (popup.Parent as Panel)?.Children.Remove(popup); };
+        // (a moment later: taken off while Avalonia walks the panel's children to detach them, the list shrank under it
+        // and the walk ran past its end, an exception that left the page half drawn when OK closed it; still off by then)
+        tb.DetachedFromVisualTree += (_, _) => Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            if (tb.IsAttachedToVisualTree()) return;
+            popup.IsOpen = false;
+            if (_open == popup) _open = null;
+            (popup.Parent as Panel)?.Children.Remove(popup);
+        });
         List<string> shown = new();
         (int start, int length) token = default;
 
