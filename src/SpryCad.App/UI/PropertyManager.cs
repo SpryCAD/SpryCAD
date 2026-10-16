@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.VisualTree;
 using SpryCad.App.Session;
 using SpryCad.Core;
 using SpryCad.Core.Model;
@@ -118,14 +119,30 @@ public sealed class PmPage
         }
         DockPanel.SetDock(header, Dock.Top);
         _root.Children.Add(header);
+        // the page's message (a feature's error, a warning, a hint): beside the page over the graphics area, as a tooltip
+        // is, not above the fields (a long one moved every field down); shown while the page is on screen, and clicks
+        // go through it to the model
         _msgBorder = new Border
         {
             Background = Palette.NoteBg, BorderBrush = Palette.NoteBorder,
-            BorderThickness = new Thickness(1), Margin = new Thickness(4, 2), Padding = new Thickness(6, 4), CornerRadius = new CornerRadius(3),
-            Child = _msg, IsVisible = false,
+            BorderThickness = new Thickness(1), Padding = new Thickness(8, 5), CornerRadius = new CornerRadius(3),
+            MaxWidth = 300, Child = _msg, IsVisible = false, IsHitTestVisible = false,
         };
-        DockPanel.SetDock(_msgBorder, Dock.Top);
-        _root.Children.Add(_msgBorder);
+        var msgPopup = new Avalonia.Controls.Primitives.Popup
+        {
+            PlacementTarget = header, Placement = PlacementMode.RightEdgeAlignedTop, HorizontalOffset = 8, VerticalOffset = 4,
+            ShouldUseOverlayLayer = true, IsHitTestVisible = false, Child = _msgBorder,
+        };
+        header.Children.Add(msgPopup);
+        void SyncMessage()
+        {
+            var open = _msgBorder.IsVisible && _root.GetVisualRoot() != null && _root.IsEffectivelyVisible;
+            if (msgPopup.IsOpen != open) msgPopup.IsOpen = open;
+        }
+        _msgBorder.PropertyChanged += (_, e) => { if (e.Property == Visual.IsVisibleProperty) SyncMessage(); };
+        _root.AttachedToVisualTree += (_, _) => SyncMessage();
+        _root.DetachedFromVisualTree += (_, _) => msgPopup.IsOpen = false;
+        _root.LayoutUpdated += (_, _) => SyncMessage(); // (the page hidden or shown again with the panel)
         _root.Children.Add(new ScrollViewer { Content = _body, HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled });
     }
 
