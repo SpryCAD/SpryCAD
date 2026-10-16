@@ -26,12 +26,20 @@ namespace SpryCad.App.UI;
 /// </summary>
 static class ParametersDialog
 {
-    /// <summary>Opens on the equations, or (<paramref name="tables"/>) on the first design table.</summary>
-    public static async Task Show(MainWindow owner, bool tables = false)
+    /// <summary>
+    /// Opens on the equations, or (<paramref name="tables"/>) the first design table; or on what <paramref name="select"/>
+    /// names: a table (or one of its columns' variables) shown, an equation selected.
+    /// </summary>
+    public static async Task Show(MainWindow owner, bool tables = false, string? select = null)
     {
         if (owner.PartOnly("Parameters")) return;
         var equations = Equations(owner);
-        var body = Body(owner, equations, tables);
+        var doc = owner.Session.Doc;
+        var table = select == null ? null : (doc.Tables ?? new()).FirstOrDefault(t => t.Name.Equals(select, StringComparison.OrdinalIgnoreCase)
+            || t.Columns.Any(c => c.Equals(select, StringComparison.OrdinalIgnoreCase)));
+        var startTable = table?.Name ?? (tables && select == null ? doc.Tables?.FirstOrDefault()?.Name : null);
+        var body = Body(owner, (equations.view, equations.refresh), startTable);
+        if (select != null && table == null) Avalonia.Threading.Dispatcher.UIThread.Post(() => equations.select(select), Avalonia.Threading.DispatcherPriority.Loaded);
         var close = new Button { Content = "Close", IsCancel = true };
         var w = Dialogs.MakeWindow("Parameters", Dialogs.WithButtons(body, null, close), 1000);
         close.Click += (_, _) => w.Close();
@@ -67,8 +75,8 @@ static class ParametersDialog
         return m;
     }
 
-    /// <summary>Ctrl+C, Ctrl+V and Delete on a grid (not while a cell is edited), and its menu with them.</summary>
-    static void Keys(DataGrid dg, Func<Task> copy, Func<Task> paste, Action delete)
+    /// <summary>Ctrl+C, Ctrl+V, Delete and Alt+Up/Down (a row moved) on a grid (not while a cell is edited), and its menu with them.</summary>
+    static void Keys(DataGrid dg, Func<Task> copy, Func<Task> paste, Action delete, Action<int> move)
     {
         var editing = false;
         dg.BeginningEdit += (_, e) => { if (!e.Cancel) editing = true; };
@@ -79,10 +87,16 @@ static class ParametersDialog
             if (e.Key == Key.Delete && e.KeyModifiers == KeyModifiers.None) { e.Handled = true; delete(); }
             else if (e.Key == Key.C && e.KeyModifiers == KeyModifiers.Control) { e.Handled = true; await copy(); }
             else if (e.Key == Key.V && e.KeyModifiers == KeyModifiers.Control) { e.Handled = true; await paste(); }
+            else if (e.Key is Key.Up or Key.Down && e.KeyModifiers == KeyModifiers.Alt) { e.Handled = true; move(e.Key == Key.Up ? -1 : 1); }
         }, RoutingStrategies.Tunnel);
         dg.ContextMenu = new ContextMenu
         {
-            Items = { Item("Copy", "Ctrl+C", () => _ = copy()), Item("Paste", "Ctrl+V", () => _ = paste()), new Separator(), Item("Delete Rows", "Delete", delete) },
+            Items =
+            {
+                Item("Copy", "Ctrl+C", () => _ = copy()), Item("Paste", "Ctrl+V", () => _ = paste()), new Separator(),
+                Item("Move Up", "Alt+Up", () => move(-1)), Item("Move Down", "Alt+Down", () => move(1)), new Separator(),
+                Item("Delete Rows", "Delete", delete),
+            },
         };
     }
 
@@ -145,10 +159,12 @@ static class ParametersDialog
         public string Value { get; private set; } = "";
         public IBrush ValueBrush { get; private set; } = Palette.Text;
         public string? Problem { get; private set; }
-        public void Show(string value, string? problem)
+        // what kind of value it is: a length, an angle, a plain number (a count, a ratio, a yes/no)
+        public string Kind { get; private set; } = "";
+        public void Show(string value, string? problem, string kind = "")
         {
-            (Value, Problem, ValueBrush) = (problem ?? value, problem, problem != null ? Palette.Danger : FromTable != null ? Palette.TextMuted : Palette.Text);
-            foreach (var p in new[] { nameof(Value), nameof(ValueBrush), nameof(Problem) }) PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(p));
+            (Value, Problem, ValueBrush, Kind) = (problem ?? value, problem, problem != null ? Palette.Danger : FromTable != null ? Palette.TextMuted : Palette.Text, problem != null ? "" : kind);
+            foreach (var p in new[] { nameof(Value), nameof(ValueBrush), nameof(Problem), nameof(Kind) }) PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(p));
         }
 
         // where it is used: the features and values (clicked: the first feature selected in the tree), or unused
@@ -176,11 +192,16 @@ static class ParametersDialog
         };
     }
 
-    static (Control view, Action refresh) Equations(MainWindow owner)
+    static string KindOf(Quantity q) => q.IsLength ? "length" : q.IsAngle ? "angle" : q.IsNumber ? "number"
+        : q.Angle == 0 && q.Length == 2 ? "area" : q.Angle == 0 && q.Length == 3 ? "volume" : "";
+
+    static (Control view, Action refresh, Action<string> select) Equations(MainWindow owner)
     {
         var session = owner.Session;
         var units = session.Doc.Units;
         var items = new ObservableCollection<EqRow>();
+        // a count of the rows with a problem, clicked: the first selected
+        var problems = new TextBlock { Foreground = Palette.Danger, FontWeight = FontWeight.SemiBold, Cursor = new Cursor(StandardCursorType.Hand), IsVisible = false };
         bool loading = true;
         IEnumerable<EqRow> Own() => items.Where(r => r.FromTable == null);
 
@@ -208,8 +229,11 @@ static class ParametersDialog
                         : EquationEntry.NameProblem(name)
                         ?? (Own().Count(x => x.Name.Trim().Equals(name, StringComparison.OrdinalIgnoreCase)) > 1 || fromTables.Contains(name, StringComparer.OrdinalIgnoreCase)
                             ? $"{name} is set twice (an equation and a design table, or two equations)" : errs.GetValueOrDefault(r.Name));
-                r.Show(vals.TryGetValue(name, out var v) ? units.Show(v) : "", problem);
+                r.Show(vals.TryGetValue(name, out var v) ? units.Show(v) : "", problem, vals.TryGetValue(name, out var q) ? KindOf(q) : "");
             }
+            var bad = items.Count(r => r.Problem != null);
+            problems.Text = bad == 0 ? "" : $"\u26A0 {bad} problem{(bad == 1 ? "" : "s")}: click to show {(bad == 1 ? "it" : "the first")}";
+            problems.IsVisible = bad > 0;
             Apply();
             // (from the part as it now is)
             var uses = VariableUses.Map(session.Doc);
@@ -229,6 +253,13 @@ static class ParametersDialog
 
         var dg = NewGrid();
         dg.ItemsSource = items;
+        // a count of the rows with a problem, clicked: the first selected
+        problems.PointerPressed += (_, _) =>
+        {
+            if (items.FirstOrDefault(r => r.Problem != null) is not { } first) return;
+            dg.SelectedItem = first;
+            dg.ScrollIntoView(first, dg.Columns[0]);
+        };
         void Text(string header, string tip, string property, DataGridLength width) =>
             dg.Columns.Add(new DataGridTextColumn { Header = Header(header, tip), Binding = new Binding(property) { Mode = BindingMode.TwoWay }, Width = width });
         Text("Name", "The variable's name, used in any value (W, Teeth).", nameof(EqRow.Name), new DataGridLength(120));
@@ -243,6 +274,16 @@ static class ParametersDialog
                 [!TextBlock.TextProperty] = new Binding(nameof(EqRow.Value)),
                 [!TextBlock.ForegroundProperty] = new Binding(nameof(EqRow.ValueBrush)),
                 [!ToolTip.TipProperty] = new Binding(nameof(EqRow.Problem)),
+            }),
+        });
+        dg.Columns.Add(new DataGridTemplateColumn
+        {
+            Header = Header("Kind", "What it is: a length, an angle, or a plain number (a count, a ratio, 1/0 for yes/no). A plain number in a length is read in the part's units."),
+            Width = new DataGridLength(70), IsReadOnly = true,
+            CellTemplate = new FuncDataTemplate<EqRow>((_, _) => new TextBlock
+            {
+                VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0), Foreground = Palette.TextMuted, FontSize = TypeScale.Small,
+                [!TextBlock.TextProperty] = new Binding(nameof(EqRow.Kind)),
             }),
         });
         dg.Columns.Add(new DataGridTemplateColumn
@@ -320,7 +361,25 @@ static class ParametersDialog
             Recompute();
             owner.Status($"Pasted {n} variable{(n == 1 ? "" : "s")}.");
         }
-        Keys(dg, Copy, Paste, Delete);
+        // the row picked moved up or down among the equations (their order is the part's)
+        void Move(int by)
+        {
+            if (Selected() is not [var r]) return;
+            var own = Own().ToList();
+            var i = own.IndexOf(r);
+            if (i + by < 0 || i + by >= own.Count) return;
+            items.Move(items.IndexOf(r), items.IndexOf(own[i + by]));
+            Recompute();
+            dg.SelectedItem = r;
+        }
+        Keys(dg, Copy, Paste, Delete, Move);
+        // names suggested while an equation is typed in its cell
+        var host = new Panel { Children = { dg } };
+        dg.PreparingCellForEdit += (_, e) =>
+        {
+            if (e.EditingElement is TextBox tb && e.Column.DisplayIndex == 1)
+                NameSuggest.Attach(tb, () => items.Where(x => x.Name.Trim().Length > 0 && x.Problem == null).Select(x => (x.Name.Trim(), x.Value)), host);
+        };
 
         // the part's equations, then the variables its design tables set
         void Refresh()
@@ -347,17 +406,35 @@ static class ParametersDialog
             dg.SelectedItem = r;
             dg.ScrollIntoView(r, dg.Columns[0]);
         };
+        // the equations nothing uses, deleted (one undo step)
+        var unused = new Button { Content = "Delete Unused" };
+        ToolTip.SetTip(unused, "Deletes the equations nothing uses (Used By: unused).");
+        unused.Click += (_, _) =>
+        {
+            var gone = Own().Where(r => r.UsedBy == "unused").ToList();
+            if (gone.Count == 0) { owner.Status("Every equation is used."); return; }
+            foreach (var r in gone) items.Remove(r);
+            Recompute();
+            owner.Status($"Deleted {gone.Count} unused equation{(gone.Count == 1 ? "" : "s")}: {string.Join(", ", gone.Select(r => r.Name))}.");
+        };
+        void Select(string name)
+        {
+            if (items.FirstOrDefault(r => r.Name.Trim().Equals(name, StringComparison.OrdinalIgnoreCase)) is not { } r) return;
+            dg.SelectedItem = r;
+            dg.ScrollIntoView(r, dg.Columns[0]);
+        }
         var view = new StackPanel
         {
             Spacing = 8,
             Children =
             {
                 Note("Variables for any dimension or feature value; typing L = 10 in a value field adds one here. Those a design table sets are listed greyed. "
-                    + "Changes apply as made (Ctrl+Z in the window undoes them). Ctrl+C copies rows for a spreadsheet, Ctrl+V pastes them back (name, then value)."),
-                dg, add,
+                    + "Changes apply as made (Ctrl+Z in the window undoes them). Ctrl+C copies rows for a spreadsheet, Ctrl+V pastes them back (name, then value); Alt+Up/Down moves a row."),
+                problems, host,
+                new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Children = { add, unused } },
             },
         };
-        return (view, Refresh);
+        return (view, Refresh, Select);
     }
 
     // ---- the design tables ---------------------------------------------------------------------------------------
@@ -404,12 +481,13 @@ static class ParametersDialog
     }
 
     /// <summary>The list (Equations, then the design tables) and, beside it, the one picked.</summary>
-    static Control Body(MainWindow owner, (Control view, Action refresh) equations, bool startOnTables)
+    static Control Body(MainWindow owner, (Control view, Action refresh) equations, string? startTable)
     {
         var session = owner.Session;
         var tables = new List<DesignTable>();
-        int current = 0;
-        bool onEquations = !(startOnTables && (session.Doc.Tables?.Count ?? 0) > 0);
+        var start = (session.Doc.Tables ?? new()).FindIndex(t => t.Name.Equals(startTable ?? "", StringComparison.OrdinalIgnoreCase));
+        int current = Math.Max(0, start);
+        bool onEquations = start < 0;
         var list = new ListBox { Classes = { "selbox" } };
         var right = new StackPanel { Spacing = 6 };
         var error = new TextBlock { Foreground = Palette.Danger, FontSize = TypeScale.Small, TextWrapping = TextWrapping.Wrap };
@@ -526,6 +604,9 @@ static class ParametersDialog
                             if (TopLevel.GetTopLevel(dg) is not Window w || await Dialogs.Input(w, "Rename Column", "Variable", t.Columns[cc]) is not { } n || n.Trim().Length == 0) return;
                             RenameVariable(t.Columns[cc], n.Trim(), () => t.Columns[cc] = n.Trim());
                         }),
+                        Item("Move Left", null, () => MoveColumn(t, cc, -1)),
+                        Item("Move Right", null, () => MoveColumn(t, cc, 1)),
+                        new Separator(),
                         Item("Delete Column", null, () => DeleteColumn(t, cc)),
                     },
                 };
@@ -589,8 +670,24 @@ static class ParametersDialog
                 ShowPicked(); Apply();
                 owner.Status($"Pasted {pasted.Rows.Count} row{(pasted.Rows.Count == 1 ? "" : "s")} into {t.Name}.");
             }
-            Keys(dg, Copy, Paste, Delete);
-            right.Children.Add(dg);
+            void Move(int by)
+            {
+                if (Selected() is not [var r]) return;
+                var i = t.Rows.IndexOf(r.Row);
+                if (i + by < 0 || i + by >= t.Rows.Count) return;
+                t.Rows.RemoveAt(i); t.Rows.Insert(i + by, r.Row);
+                rows.Move(rows.IndexOf(r), rows.IndexOf(r) + by);
+                Changed();
+                dg.SelectedItem = r;
+            }
+            Keys(dg, Copy, Paste, Delete, Move);
+            var host = new Panel { Children = { dg } };
+            dg.PreparingCellForEdit += (_, e) =>
+            {
+                if (e.EditingElement is TextBox tb && e.Column.DisplayIndex > 0)
+                    NameSuggest.Attach(tb, () => Regenerator.EvaluateEquations(session.Doc).values.Select(kv => (kv.Key, session.Doc.Units.Show(kv.Value))), host);
+            };
+            right.Children.Add(host);
 
             var addRow = new Button { Content = "+ Row" };
             addRow.Click += (_, _) =>
@@ -652,6 +749,18 @@ static class ParametersDialog
             owner.Status(n == 0 ? $"Renamed {from} to {to}." : $"Renamed {from} to {to}, and in the {n} value{(n == 1 ? "" : "s")} using it.");
             tables = (session.Doc.Tables ?? new()).Select(Serialization.Clone).ToList();
             Relist();
+        }
+        // a column moved left or right (its values with it)
+        void MoveColumn(DesignTable t, int c, int by)
+        {
+            if (c + by < 0 || c + by >= t.Columns.Count) return;
+            (t.Columns[c], t.Columns[c + by]) = (t.Columns[c + by], t.Columns[c]);
+            foreach (var r in t.Rows)
+            {
+                while (r.Values.Count < t.Columns.Count) r.Values.Add("0");
+                (r.Values[c], r.Values[c + by]) = (r.Values[c + by], r.Values[c]);
+            }
+            ShowPicked(); Apply();
         }
         // a column deleted (a feature's on/off column: its Suppress When cleared too, in the same undo step)
         void DeleteColumn(DesignTable t, int c)

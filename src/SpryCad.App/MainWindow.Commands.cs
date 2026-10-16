@@ -821,6 +821,20 @@ public partial class MainWindow
     void OnTreeContext(string id, Point pos, Control row)
     {
         var menu = new ContextMenu();
+        // a design table: its rows (the one in use ticked; one picked used, one undo step), and Parameters on it
+        if (id.StartsWith(FeatureTree.TablePrefix) && Session.Doc.Tables?.FirstOrDefault(t => t.Name == id[FeatureTree.TablePrefix.Length..]) is { } table)
+        {
+            foreach (var r in table.Rows)
+            {
+                var key = r.Key;
+                var mi = Item(key, () => { if (table.Current?.Key != key) Session.Change(() => table.Selected = key); }, null, ReferenceEquals(r, table.Current) ? "ok" : null);
+                menu.Items.Add(mi);
+            }
+            menu.Items.Add(new Separator());
+            menu.Items.Add(Item("Edit Table...", () => _ = UI.ParametersDialog.Show(this, select: table.Name), null, "table"));
+            menu.Open(row);
+            return;
+        }
         var f = Session.Doc.Find(id);
         // the part's material: edit, remove, a recent one, and the library's change when there is one
         if (id is FeatureTree.MaterialRow or "__part")

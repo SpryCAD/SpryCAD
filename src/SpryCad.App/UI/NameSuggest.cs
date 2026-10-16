@@ -4,6 +4,7 @@ using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
+using Avalonia.VisualTree;
 
 namespace SpryCad.App.UI;
 
@@ -19,7 +20,7 @@ public static class NameSuggest
     static Popup? _open;
 
     /// <summary>Suggests <paramref name="names"/> (name, value shown) in <paramref name="tb"/> as names are typed.</summary>
-    public static void Attach(TextBox tb, Func<IEnumerable<(string name, string shown)>>? names)
+    public static void Attach(TextBox tb, Func<IEnumerable<(string name, string shown)>>? names, Panel? host = null)
     {
         if (names == null) return;
         var list = new ListBox { Classes = { "suggest" }, MaxHeight = 180, MinWidth = 160 };
@@ -31,12 +32,17 @@ public static class NameSuggest
         // the popup in the field's logical tree (its styles and theme), taking no room: in the nearest panel up from the
         // field that lays out by position (a grid, a canvas, a plain panel; not a dock panel, where it would take the
         // field's place, nor a stack panel, which would space it)
-        tb.AttachedToVisualTree += (_, _) =>
+        void Host()
         {
             if (popup.Parent != null) return;
+            if (host != null) { host.Children.Add(popup); return; }
             for (var p = tb.Parent; p != null; p = p.Parent)
                 if (p is Grid or Canvas || p.GetType() == typeof(Panel)) { ((Panel)p).Children.Add(popup); break; }
-        };
+        }
+        tb.AttachedToVisualTree += (_, _) => Host();
+        if (tb.IsAttachedToVisualTree()) Host();
+        // (the field gone, its list with it: a grid makes a field for each cell edited)
+        tb.DetachedFromVisualTree += (_, _) => { popup.IsOpen = false; if (_open == popup) _open = null; (popup.Parent as Panel)?.Children.Remove(popup); };
         List<string> shown = new();
         (int start, int length) token = default;
 

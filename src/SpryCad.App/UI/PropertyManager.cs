@@ -183,6 +183,8 @@ public sealed class PmPage
     public static Func<IEnumerable<(string name, string shown)>>? EquationNames { get; set; }
     /// <summary>An equation's expression by its name ("W*2"; with those typed on the open page or sketch), or null.</summary>
     public static Func<string, string?>? EquationText { get; set; }
+    /// <summary>Opens Parameters on a variable (a field holding its name double-clicked).</summary>
+    public static Action<string>? OpenParameters { get; set; }
 
     // the fields' equations typed and not yet made (made when the field is left or Enter pressed; OK makes them first)
     readonly List<Action> _flush = new();
@@ -320,7 +322,15 @@ public sealed class PmPage
                 tb.Classes.Set("invalid", false);
                 // (what a formula, or a value in other units, comes to in the document's)
                 var plain = Expr.IsLiteral(t, out var u) && (u == "" || kind == ValueKind.Length && u == Units.Symbol() || kind == ValueKind.Angle);
-                ToolTip.SetTip(tb, plain ? null : $"= {Units.Show(v)}");
+                // a variable's name: what it is ("L = W*2 = 4 in"), and where to change it
+                if (EquationEntry.IsName(t))
+                {
+                    var name = t.Trim();
+                    var formula = EquationText?.Invoke(name);
+                    var shown = formula != null && !Expr.IsLiteral(formula, out _) ? $"{name} = {formula} = {Units.Show(v)}" : $"{name} = {Units.Show(v)}";
+                    ToolTip.SetTip(tb, shown + (OpenParameters != null ? "\nDouble-click to open it in Parameters." : ""));
+                }
+                else ToolTip.SetTip(tb, plain ? null : $"= {Units.Show(v)}");
                 set(kept);
                 Changed?.Invoke();
             }
@@ -344,6 +354,7 @@ public sealed class PmPage
             Validate();
         }
         _flush.Add(MakeEquation);
+        tb.DoubleTapped += (_, _) => { if (EquationEntry.IsName(tb.Text) && OpenParameters is { } open) open(tb.Text!.Trim()); };
         tb.LostFocus += (_, _) => MakeEquation();
         NameSuggest.Attach(tb, EquationNames);
         tb.KeyDown += (_, e) =>

@@ -158,6 +158,8 @@ public partial class MainWindow
     /// <summary>Opens the editor for an existing feature (double-click in the tree).</summary>
     public void EditFeature(string id)
     {
+        // a design table's row in the tree: Parameters on it
+        if (id.StartsWith(FeatureTree.TablePrefix)) { _ = ParametersDialog.Show(this, select: id[FeatureTree.TablePrefix.Length..]); return; }
         var f = Session.Doc.Find(id);
         if (f == null) return;
         if (_sketch != null) ExitSketch(true);

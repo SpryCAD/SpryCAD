@@ -19,6 +19,7 @@ public partial class MainWindow
     {
         PmPage.DefineEquation = DefineEquation;
         PmPage.EquationNames = () => EditValues().Select(kv => (kv.Key, Session.Doc.Units.Show(kv.Value)));
+        PmPage.OpenParameters = n => _ = ParametersDialog.Show(this, select: n);
         PmPage.EquationText = n => EquationsWithPending().FirstOrDefault(e => e.Name.Trim().Equals(n, StringComparison.OrdinalIgnoreCase))?.Expr;
     }
 

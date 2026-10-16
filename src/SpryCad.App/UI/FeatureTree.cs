@@ -113,6 +113,10 @@ public sealed class FeatureTree : UserControl
                 swatchColor: doc.MaterialItem != null ? Color.FromRgb(Byte(look[0]), Byte(look[1]), Byte(look[2])) : null);
             static byte Byte(double v) => (byte)Math.Round(Math.Clamp(v, 0, 1) * 255);
         }
+        // the design tables, each with the row in use (right-click: the rows; double-click: Parameters)
+        if (!Flyout)
+            foreach (var t in doc.Tables ?? new())
+                AddRow(TablePrefix + t.Name, $"{t.Name}: {t.Current?.Key ?? "(no rows)"}", "table", 1, null);
         // the origin: a folder of the three planes, the three axes and the origin point
         AddRow("Origin", "Origin", "folder", 1, null, hasChildren: true);
         if (_expanded.Contains("Origin"))
@@ -366,6 +370,8 @@ public sealed class FeatureTree : UserControl
 
     /// <summary>The part's material row's id (under the part's row: right-click for its menu, double-click to edit it).</summary>
     public const string MaterialRow = "__material";
+    /// <summary>A design table's row in the tree: this, then the table's name.</summary>
+    public const string TablePrefix = "__table:";
 
     Border AddRow(string id, string text, string icon, int indent, FeatureStatus? status, bool isHeader = false, bool suppressed = false, bool hasChildren = false,
         bool? sketchShown = null, string? condition = null, Color? swatchColor = null)
