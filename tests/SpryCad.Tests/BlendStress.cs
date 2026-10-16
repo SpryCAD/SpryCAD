@@ -379,6 +379,7 @@ static class BlendStress
                                             if (dd < bdd) { bdd = dd; bu = uu; bv = vv; }
                                         }
                                     var again = Find.Invoke(ps, new object?[] { p, new Vec2(bu, bv), 1e-4, false });
+                                    Console.WriteLine($"    off the exact pipe itself by {Vec3.Distance(p, f.Surface.Project(p)):g3}");
                                     Console.WriteLine($"    from the grid's nearest the lookup {(again == null ? "fails too" : "finds it")}; the edge {x.Edges[ei].Curve.GetType().Name} {x.Edges[ei].Points[0]} -> {x.Edges[ei].Points[^1]}, its other face {string.Join(",", x.Faces.Where(g => g != f && g.Loops.Any(l => l.Edges.Any(q => q.Edge == ei))).Select(g => g.Name + ":" + g.Surface.Kind))}");
                                 }
                                 // (densely near the point's place along the spine)

@@ -467,7 +467,9 @@ public static class NativeBlend
                     {
                         var r0 = Ball(whole, size, name, edges);
                         Debug?.Invoke($"mixed tangent chain {name}: {whole.Count} edges -> {r0.Error ?? (r0.Fits ? "fits" : "overflows")}");
-                        if (r0.Error == null)
+                        // (taken for its fade alone, only where it fits: cut back where it runs past its faces, it left an end standing where
+                        // the exact tools did not)
+                        if (r0.Error == null && (mixedKinds || r0.Fits))
                         {
                             foreach (var o in whole) if (!group.Contains(o)) { group.Add(o); done.Add(o); }
                             (tools, convex, fits, strip) = (new List<Solid> { r0.Tool! }, r0.Convex, r0.Fits, Pivoted(r0.Tool!) ? null : r0.Tool);

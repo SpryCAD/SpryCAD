@@ -665,12 +665,11 @@ public static class StepWriter
             if (sp.VariesAt(s)) return sp.Deriv(s).Normalized;
             const double h = 1e-6; var t = T(s); double a = Math.Max(0, t - h), z = Math.Min(1, t + h); return (c2.Eval(z) - c2.Eval(a)).Normalized;
         }
-        // frame: a fixed reference direction made perpendicular to the tangent (the normal of the plane the spine turns
-        // in, else any direction across it)
-        var refv = Vec3.Zero;
-        for (int k = 0; k < 16; k++) refv += Vec3.Cross(Tan(sa + (sb - sa) * k / 16), Tan(sa + (sb - sa) * (k + 1) / 16));
-        refv = refv.Length > 1e-9 ? refv.Normalized : Tan(sa).AnyPerpendicular();
-        (Vec3 n1, Vec3 n2) Frame(double s) { var t = Tan(s); var n = (refv - t * Vec3.Dot(refv, t)).Normalized; return (n, Vec3.Cross(t, n)); }
+        // frame: the spine's own rotation-minimizing one, made square to this tangent. (A fixed direction made square to
+        // the tangent (the normal of the plane the spine turns in) flips where the tangent comes near it: a composite
+        // fillet's spine turns in more than one plane (along a foot, then round a corner), and its surface jumped half
+        // a turn there, the fit run out of sites 0.03 off and its edges up to 2e-3 off it)
+        (Vec3 n1, Vec3 n2) Frame(double s) { var t = Tan(s); var r = sp.Frame(s).N1; var n = (r - t * Vec3.Dot(r, t)).Normalized; return (n, Vec3.Cross(t, n)); }
         // (a variable radius: its section at s, set back along the spine and smaller)
         Vec3 Surface(double th, double s)
         {
@@ -709,8 +708,12 @@ public static class StepWriter
         // (Over the band the face takes up around the pipe at each place along it, between its contact edges, rather
         // than the angles it takes up anywhere along it: a long fillet turning round, as a rim rolling up a cut's side,
         // takes up a different band at each end, and all of them at once take in the pipe's inner side where its spine
-        // bends tighter than its radius, where it folds over itself)
-        if (Band(samples, v0, v1, rad) is { } band)
+        // bends tighter than its radius, where it folds over itself). Only where it is needed: the angles the face takes
+        // up anywhere along it more than half a turn, or its spine bending tighter than 1.5 radii. Elsewhere the plain
+        // rectangle of angles: the band, through windows' least and greatest angles, ripples where the face's edge
+        // crosses the pipe aslant (an edge split along it), and fitted so the surface ran out of sites up to 2e-3 off
+        bool needBand = u1 - u0 > Math.PI || sp.MinCurvatureRadius < 1.5 * rad;
+        if (needBand && Band(samples, v0, v1, rad) is { } band)
         {
             Vec3 OnBand(double u, double s) { var (l, h) = band(s); return Surface(l + (h - l) * u, s); }
             var width = Enumerable.Range(0, 65).Max(k => { var (l, h) = band(v0 + (v1 - v0) * k / 64); return h - l; });
@@ -765,6 +768,7 @@ public static class StepWriter
             outside = Math.Max(outside, Math.Max(lo - th, th - hi));
         }
         var margin = 0.02 * widest + 0.02 + 1.25 * outside;
+
         if (widest + 2 * margin > 2 * Math.PI - 0.1) return null;
         return s => { var (lo, hi) = Raw(s); return (lo - margin, hi + margin); };
     }
