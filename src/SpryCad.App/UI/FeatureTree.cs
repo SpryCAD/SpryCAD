@@ -115,8 +115,12 @@ public sealed class FeatureTree : UserControl
         }
         // the design tables, each with the row in use (right-click: the rows; double-click: Parameters)
         if (!Flyout)
+        {
+            // (the row in use as the tables work out together: one table may pick another's row)
+            var inUse = doc.Tables is { Count: > 0 } ? TableConfig.Resolve(doc).Rows : new();
             foreach (var t in doc.Tables ?? new())
-                AddRow(TablePrefix + t.Name, $"{t.Name}: {t.Current?.Key ?? "(no rows)"}", "table", 1, null);
+                AddRow(TablePrefix + t.Name, $"{t.Name}: {inUse.GetValueOrDefault(t.Name.Trim()) ?? t.Current?.Key ?? "(no rows)"}", "table", 1, null);
+        }
         // the origin: a folder of the three planes, the three axes and the origin point
         AddRow("Origin", "Origin", "folder", 1, null, hasChildren: true);
         if (_expanded.Contains("Origin"))

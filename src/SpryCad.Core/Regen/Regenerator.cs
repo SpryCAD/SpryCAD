@@ -308,17 +308,27 @@ public sealed class Regenerator
     {
         var values = new Dictionary<string, Quantity>(StringComparer.OrdinalIgnoreCase);
         var errors = new Dictionary<string, string>();
-        // design tables first: each its row number, and its columns the row's values; then the equations. A name
-        // given twice is an error at the second (the first keeps its value).
+        // design tables first: each its row number (the row in use: as another table picks it, TableConfig), and its
+        // columns the row's values; then the equations, those a table sets with its value. A name given twice is an
+        // error at the second (the first keeps its value). Property columns ($PartNumber) are text, not variables; a
+        // column picking another table's row, or setting an equation, is not a variable of its own either.
         var all = new List<Equation>();
+        var config = TableConfig.Resolve(doc);
         foreach (var t in doc.Tables ?? new())
         {
-            if (string.IsNullOrWhiteSpace(t.Name) || t.Current is not { } row) continue;
+            if (string.IsNullOrWhiteSpace(t.Name)) continue;
+            var row = config.Rows.TryGetValue(t.Name.Trim(), out var key) ? t.Row(key) ?? t.Current : t.Current;
+            if (row == null) continue;
             all.Add(new Equation { Name = t.Name.Trim(), Expr = (t.Rows.IndexOf(row) + 1).ToString(System.Globalization.CultureInfo.InvariantCulture) });
             for (int c = 0; c < t.Columns.Count; c++)
-                if (!string.IsNullOrWhiteSpace(t.Columns[c])) all.Add(new Equation { Name = t.Columns[c].Trim(), Expr = row.ValueAt(c) });
+            {
+                var col = t.Columns[c];
+                if (string.IsNullOrWhiteSpace(col) || TableConfig.IsProperty(col) || TableConfig.PicksTable(doc, t, col) != null || TableConfig.SetsEquation(doc, col)) continue;
+                all.Add(new Equation { Name = col.Trim(), Expr = row.ValueAt(c) });
+            }
         }
-        all.AddRange(doc.Equations.Where(e => !string.IsNullOrWhiteSpace(e.Name)));
+        all.AddRange(doc.Equations.Where(e => !string.IsNullOrWhiteSpace(e.Name))
+            .Select(e => config.Sets.TryGetValue(e.Name.Trim(), out var set) ? new Equation { Name = e.Name, Expr = set } : e));
         var pending = new List<Equation>();
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var twice = new Dictionary<string, string>();

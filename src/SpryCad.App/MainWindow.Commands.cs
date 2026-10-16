@@ -827,7 +827,7 @@ public partial class MainWindow
             foreach (var r in table.Rows)
             {
                 var key = r.Key;
-                var mi = Item(key, () => { if (table.Current?.Key != key) Session.Change(() => table.Selected = key); }, null, ReferenceEquals(r, table.Current) ? "ok" : null);
+                var mi = Item(key, () => { if (table.Current?.Key != key) Session.Change(() => { table.Selected = key; TableConfig.ApplyMaterial(Session.Doc); }); }, null, ReferenceEquals(r, table.Current) ? "ok" : null);
                 menu.Items.Add(mi);
             }
             menu.Items.Add(new Separator());

@@ -102,6 +102,19 @@ static class ParametersDialog
 
     static string Cell(string s) => s.Replace('\t', ' ').Replace('\r', ' ').Replace('\n', ' ');
 
+    /// <summary>The library's materials (item, name), and none first.</summary>
+    static List<(string item, string name)> Materials()
+    {
+        var list = new List<(string item, string name)> { ("", "(the part's own)") };
+        foreach (var t in Core.Library.LibraryLink.Current.Offered(Core.Library.TableKinds.Material))
+            foreach (var r in t.Rows)
+            {
+                var item = Core.Library.LibrarySnapshot.ItemKey(t.Key, r.Key);
+                if (list.All(m => m.item != item)) list.Add((item, r.Key));
+            }
+        return list;
+    }
+
     /// <summary>A design table's "1"/"0" as a checkbox, and back.</summary>
     sealed class OnOff : Avalonia.Data.Converters.IValueConverter
     {
@@ -466,7 +479,8 @@ static class ParametersDialog
             set
             {
                 while (Row.Values.Count <= c) Row.Values.Add("0");
-                var now = string.IsNullOrWhiteSpace(value) ? "0" : value.Trim();
+                var now = value?.Trim() ?? "";
+                if (now.Length == 0 && !(c < _t.Columns.Count && TableConfig.IsProperty(_t.Columns[c]))) now = "0";
                 if (Row.Values[c] == now) return;
                 Row.Values[c] = now;
                 Notify("Item[]"); _changed();
@@ -507,6 +521,14 @@ static class ParametersDialog
                 if (!names.Add(t.Name)) return $"{t.Name} is already a variable.";
                 foreach (var c in t.Columns)
                 {
+                    if (TableConfig.IsProperty(c))
+                    {
+                        if (!TableConfig.Properties.Contains(c.Trim())) return $"{t.Name}: {c} is not a property (Part Number, Description or Material).";
+                        continue;
+                    }
+                    // (another table's name: the row of it this one picks; an equation's: the value it sets it to)
+                    if (tables.Any(o => o != t && o.Name.Trim().Equals(c.Trim(), StringComparison.OrdinalIgnoreCase))
+                        || session.Doc.Equations.Any(e => e.Name.Trim().Equals(c.Trim(), StringComparison.OrdinalIgnoreCase))) continue;
                     if (!IsName(c)) return $"{t.Name}: \"{c}\" cannot name a variable.";
                     if (!names.Add(c)) return $"{t.Name}: {c} is already a variable (in Equations or another table).";
                 }
@@ -526,7 +548,7 @@ static class ParametersDialog
             var json = System.Text.Json.JsonSerializer.Serialize(tables, Serialization.Options);
             if (json == System.Text.Json.JsonSerializer.Serialize(session.Doc.Tables ?? new(), Serialization.Options)) return;
             var copy = tables.Select(Serialization.Clone).ToList();
-            session.Change(() => session.Doc.Tables = copy.Count == 0 ? null : copy);
+            session.Change(() => { session.Doc.Tables = copy.Count == 0 ? null : copy; TableConfig.ApplyMaterial(session.Doc); });
         }
 
         // the list: Equations, then the tables; the one picked shown beside it
@@ -610,6 +632,50 @@ static class ParametersDialog
                         Item("Delete Column", null, () => DeleteColumn(t, cc)),
                     },
                 };
+                var colName = t.Columns[c];
+                // a property: text (Part Number, Description), or a material picked from the library
+                if (TableConfig.IsProperty(colName))
+                {
+                    head.Text = TableConfig.Label(colName);
+                    ToolTip.SetTip(head, colName.Trim() == TableConfig.Material
+                        ? "The material of the part in each row (the Bill of Materials, its mass and look). Right-click to move or delete the column."
+                        : $"The part's {TableConfig.Label(colName).ToLowerInvariant()} in each row, as the Bill of Materials and drawings show it. Right-click to move or delete the column.");
+                    if (colName.Trim() == TableConfig.Material)
+                    {
+                        var materials = Materials();
+                        dg.Columns.Add(new DataGridTemplateColumn
+                        {
+                            Header = head, Width = new DataGridLength(170),
+                            CellTemplate = new FuncDataTemplate<TRow>((_, _) => new ComboBox
+                            {
+                                ItemsSource = materials.Select(m => m.item).ToList(), HorizontalAlignment = HorizontalAlignment.Stretch, MinHeight = 0, Padding = new Thickness(6, 0),
+                                ItemTemplate = new FuncDataTemplate<string>((k, _) => new TextBlock { Text = materials.FirstOrDefault(m => m.item == k).name ?? k }),
+                                [!SelectingItemsControl.SelectedItemProperty] = new Binding($"[{cc}]") { Mode = BindingMode.TwoWay },
+                            }),
+                        });
+                    }
+                    else dg.Columns.Add(new DataGridTextColumn { Header = head, Binding = new Binding($"[{cc}]") { Mode = BindingMode.TwoWay }, Width = new DataGridLength(130) });
+                    continue;
+                }
+                // another table's name: the row of it each row picks (a combination of configurations)
+                if (tables.FirstOrDefault(o => o != t && o.Name.Trim().Equals(colName.Trim(), StringComparison.OrdinalIgnoreCase)) is { } picks)
+                {
+                    ToolTip.SetTip(head, $"The row of {picks.Name} each row picks: a row of this table combines it with the rest. Right-click to rename, move or delete the column.");
+                    var keys = picks.Rows.Select(r => r.Key).ToList();
+                    dg.Columns.Add(new DataGridTemplateColumn
+                    {
+                        Header = head, Width = new DataGridLength(110),
+                        CellTemplate = new FuncDataTemplate<TRow>((_, _) => new ComboBox
+                        {
+                            ItemsSource = keys, HorizontalAlignment = HorizontalAlignment.Stretch, MinHeight = 0, Padding = new Thickness(6, 0),
+                            [!SelectingItemsControl.SelectedItemProperty] = new Binding($"[{cc}]") { Mode = BindingMode.TwoWay },
+                        }),
+                    });
+                    continue;
+                }
+                // an equation's name: the value each row sets it to
+                if (session.Doc.Equations.Any(e => e.Name.Trim().Equals(colName.Trim(), StringComparison.OrdinalIgnoreCase)))
+                    ToolTip.SetTip(head, $"The value of the equation {colName} in each row (in place of its own). Right-click to rename, move or delete the column.");
                 // a feature's on/off column (its Suppress When is "not" the column): a checkbox per row
                 if (Switched(t.Columns[c]) is { } sw)
                 {
@@ -713,6 +779,29 @@ static class ParametersDialog
                 ShowPicked(); Apply();
             };
             // a feature switched on and off by the table: a column of checkboxes, the feature's Suppress When reading it
+            ToolTip.SetTip(addCol, "A column: a variable of its own, an equation's name (the value each row sets it to), or another table's name (the row of it each row picks).");
+            // a property column: Part Number, Description, Material (those the table has not)
+            var addProperty = new Button { Content = "+ Property" };
+            ToolTip.SetTip(addProperty, "A column of the part's part number, description or material in each row: each row a named configuration, as the Bill of Materials lists it.");
+            addProperty.Click += (_, _) =>
+            {
+                var menu = new MenuFlyout { Placement = PlacementMode.BottomEdgeAlignedLeft };
+                foreach (var prop in TableConfig.Properties.Where(p => !t.Columns.Contains(p)))
+                {
+                    var pp = prop;
+                    var mi = new MenuItem { Header = TableConfig.Label(prop) };
+                    mi.Click += (_, _) =>
+                    {
+                        t.Columns.Add(pp);
+                        // (the material the part has now, to start; text empty)
+                        foreach (var r in t.Rows) r.Values.Add(pp == TableConfig.Material ? session.Doc.MaterialItem ?? "" : "");
+                        ShowPicked(); Apply();
+                    };
+                    menu.Items.Add(mi);
+                }
+                if (menu.Items.Count == 0) menu.Items.Add(new MenuItem { Header = "(it has them all)", IsEnabled = false });
+                menu.ShowAt(addProperty);
+            };
             var addFeature = new Button { Content = "+ Feature On/Off" };
             ToolTip.SetTip(addFeature, "A column of checkboxes turning a feature on or off in each row (it sets the feature's Suppress When).");
             addFeature.Click += (_, _) =>
@@ -728,7 +817,7 @@ static class ParametersDialog
                 if (menu.Items.Count == 0) menu.Items.Add(new MenuItem { Header = "(no features yet)", IsEnabled = false });
                 menu.ShowAt(addFeature);
             };
-            right.Children.Add(new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Children = { addRow, addCol, addFeature } });
+            right.Children.Add(new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Children = { addRow, addCol, addProperty, addFeature } });
             right.Children.Add(error);
         }
 

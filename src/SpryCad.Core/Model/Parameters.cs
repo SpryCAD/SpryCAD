@@ -151,6 +151,8 @@ public static class Configurations
             else if (d.Equations.FirstOrDefault(e => string.Equals(e.Name.Trim(), name, StringComparison.OrdinalIgnoreCase)) is { } eq)
                 eq.Expr = v;
         }
+        // (made of the material its rows in use say, when they say one)
+        TableConfig.ApplyMaterial(d);
         return d;
     }
 

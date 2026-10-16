@@ -742,19 +742,26 @@ public partial class MainWindow
                 grid.Children.Add(tb);
             }
             grid.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
-            string[] heads = { "Item", "Part", "Configuration", "Qty", "Material", $"Mass ({MassUnits.Label(units)})", "Total" };
-            for (int c = 0; c < heads.Length; c++) Cell(0, c, heads[c], head: true, right: c is 3 or 5 or 6);
+            // (part numbers and descriptions when a part has them: its design tables' rows)
+            var props = rows.Any(x => x.PartNumber != null || x.Description != null);
+            var o = props ? 2 : 0;
+            grid.ColumnDefinitions = new ColumnDefinitions(props ? "Auto,*,Auto,Auto,Auto,Auto,Auto,Auto,Auto" : "Auto,*,Auto,Auto,Auto,Auto,Auto");
+            var heads = new List<string> { "Item", "Part" };
+            if (props) heads.AddRange(new[] { "Part Number", "Description" });
+            heads.AddRange(new[] { "Configuration", "Qty", "Material", $"Mass ({MassUnits.Label(units)})", "Total" });
+            for (int c = 0; c < heads.Count; c++) Cell(0, c, heads[c], head: true, right: c - o is 3 or 5 or 6);
             for (int i = 0; i < rows.Count; i++)
             {
                 var r = rows[i];
                 grid.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
                 Cell(i + 1, 0, r.Item);
                 Cell(i + 1, 1, (r.IsAssembly ? "▸ " : "") + r.Name, indent: 14 * r.Level);
-                Cell(i + 1, 2, r.Configuration);
-                Cell(i + 1, 3, r.Quantity.ToString(CultureInfo.InvariantCulture), right: true);
-                Cell(i + 1, 4, r.Material ?? "");
-                Cell(i + 1, 5, r.Mass is { } g ? MassUnits.Number(g, units) : "", right: true);
-                Cell(i + 1, 6, r.Mass is { } t ? MassUnits.Number(t * r.Quantity, units) : "", right: true);
+                if (props) { Cell(i + 1, 2, r.PartNumber ?? ""); Cell(i + 1, 3, r.Description ?? ""); }
+                Cell(i + 1, o + 2, r.Configuration);
+                Cell(i + 1, o + 3, r.Quantity.ToString(CultureInfo.InvariantCulture), right: true);
+                Cell(i + 1, o + 4, r.Material ?? "");
+                Cell(i + 1, o + 5, r.Mass is { } g ? MassUnits.Number(g, units) : "", right: true);
+                Cell(i + 1, o + 6, r.Mass is { } t ? MassUnits.Number(t * r.Quantity, units) : "", right: true);
             }
         }
         var kindBox = new ComboBox { ItemsSource = new[] { "Indented", "Top-level only", "Parts only" }, SelectedIndex = 0, Width = 160 };

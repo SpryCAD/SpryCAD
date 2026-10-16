@@ -108,6 +108,38 @@ static class ConfigTests
             t.Eq(back.Find(cut.Id)!.SuppressWhen, "Nope > 1");
         });
 
+        t.Test("Design tables as configurations: a row picks another table's row and sets an equation, and gives the part number and description", () =>
+        {
+            var doc = new CadDocument();
+            doc.Equations.Add(new Equation { Name = "L", Expr = "10mm" });
+            doc.Tables = new()
+            {
+                new DesignTable
+                {
+                    Name = "Config", Columns = { "Size", "L", TableConfig.PartNumber, TableConfig.Description }, Selected = "M6x20",
+                    Rows =
+                    {
+                        new DesignRow { Key = "M5x12", Values = { "M5", "12mm", "SC-0512", "Cap screw M5x12" } },
+                        new DesignRow { Key = "M6x20", Values = { "M6", "20mm", "SC-0620", "Cap screw M6x20" } },
+                    },
+                },
+                new DesignTable { Name = "Size", Columns = { "D" }, Rows = { new DesignRow { Key = "M5", Values = { "5mm" } }, new DesignRow { Key = "M6", Values = { "6mm" } } } },
+            };
+            var (vals, errs) = Regenerator.EvaluateEquations(doc);
+            t.True(errs.Count == 0, string.Join("; ", errs.Values));
+            t.Eq(vals["D"].Value, 6.0); t.Eq(vals["L"].Value, 20.0); t.Eq(vals["Size"].Value, 2.0);
+            t.True(!vals.ContainsKey(TableConfig.PartNumber), "a property is not a variable");
+            var props = TableConfig.PropertiesOf(doc);
+            t.Eq(props[TableConfig.PartNumber], "SC-0620"); t.Eq(props[TableConfig.Description], "Cap screw M6x20");
+            doc.Tables[0].Selected = "M5x12";
+            (vals, _) = Regenerator.EvaluateEquations(doc);
+            t.Eq(vals["D"].Value, 5.0); t.Eq(vals["L"].Value, 12.0);
+            t.Eq(TableConfig.PropertiesOf(doc)[TableConfig.PartNumber], "SC-0512");
+            // the table picked from listed first: the same
+            doc.Tables.Reverse();
+            t.Eq(Regenerator.EvaluateEquations(doc).values["D"].Value, 5.0);
+        });
+
         t.Test("Design tables: the row in use sets its columns; the table's name is the row number", () =>
         {
             var (doc, cut, lp) = Plate("not Holes");
@@ -130,11 +162,11 @@ static class ConfigTests
             doc.Tables[0].Selected = "XL";
             t.Eq(Regenerator.EvaluateEquations(doc).values["W"].Value, 80.0);
 
-            // a variable set twice: the first (the table) wins, the second is an error
+            // an equation a table's column names: the table sets it, the row's value in place of its own (TableConfig)
             doc.Equations.Add(new Equation { Name = "W", Expr = "5" });
             (vals, errs) = Regenerator.EvaluateEquations(doc);
             t.Eq(vals["W"].Value, 80.0);
-            t.True(errs.ContainsKey("W"), "W set twice is an error");
+            t.True(!errs.ContainsKey("W"), "W set by the table, not an error");
 
             // saved and read again
             doc.Equations.RemoveAt(1);

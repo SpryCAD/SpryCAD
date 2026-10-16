@@ -19,7 +19,8 @@ public enum BomKind
 }
 
 /// <summary>One line of a bill of materials; <c>Mass</c> one of it in grams (a sub-assembly's: its parts'), when asked for.</summary>
-public sealed record BomRow(string Item, int Level, string Name, string Configuration, int Quantity, bool IsAssembly, string? File, string? Material, double? Mass = null);
+public sealed record BomRow(string Item, int Level, string Name, string Configuration, int Quantity, bool IsAssembly, string? File, string? Material, double? Mass = null,
+    string? PartNumber = null, string? Description = null);
 
 /// <summary>
 /// Bills of materials: the components counted (suppressed ones left out; hidden ones counted), a line for each part or
@@ -83,7 +84,10 @@ public static class Bom
             mass = c.IsAssembly
                 ? massOf.PlacedParts(hidden: true).Where(p => p.o.Path.StartsWith(o.Path + "/", StringComparison.Ordinal)).Sum(p => AssemblyMass.PartMass(p.pd))
                 : o.Display is { } pd ? AssemblyMass.PartMass(pd) : null;
-        return new BomRow(item, level, name, config, qty, c.IsAssembly, file, material.Length > 0 ? material : PartMaterialLabel(o), mass);
+        // its part number and description, as the design tables' rows in use give them (TableConfig)
+        var props = c.IsAssembly ? null : TableConfig.PropertiesOf(o.Display?.Part ?? o.Display?.Doc);
+        return new BomRow(item, level, name, config, qty, c.IsAssembly, file, material.Length > 0 ? material : PartMaterialLabel(o), mass,
+            props?.GetValueOrDefault(TableConfig.PartNumber), props?.GetValueOrDefault(TableConfig.Description));
     }
 
     /// <summary>A part with no material: said so (steel's density is assumed for its mass); a sub-assembly: none.</summary>
@@ -101,10 +105,14 @@ public static class Bom
         static string Q(string? s) => s == null ? "" : s.IndexOfAny(new[] { ',', '"', '\n' }) >= 0 ? "\"" + s.Replace("\"", "\"\"") + "\"" : s;
         var list = rows.ToList();
         bool mass = list.Any(r => r.Mass != null);
-        var sb = new StringBuilder("Item,Part,Configuration,Quantity,Material," + (mass ? $"Mass ({MassUnits.Label(units)}),Total mass ({MassUnits.Label(units)})," : "") + "File\n");
+        // (part numbers and descriptions when a part has them)
+        bool props = list.Any(r => r.PartNumber != null || r.Description != null);
+        var sb = new StringBuilder("Item,Part," + (props ? "Part Number,Description," : "") + "Configuration,Quantity,Material," + (mass ? $"Mass ({MassUnits.Label(units)}),Total mass ({MassUnits.Label(units)})," : "") + "File\n");
         foreach (var r in list)
         {
-            sb.Append(Q(r.Item)).Append(',').Append(Q(new string(' ', 2 * r.Level) + r.Name)).Append(',').Append(Q(r.Configuration)).Append(',')
+            sb.Append(Q(r.Item)).Append(',').Append(Q(new string(' ', 2 * r.Level) + r.Name)).Append(',');
+            if (props) sb.Append(Q(r.PartNumber)).Append(',').Append(Q(r.Description)).Append(',');
+            sb.Append(Q(r.Configuration)).Append(',')
               .Append(r.Quantity.ToString(CultureInfo.InvariantCulture)).Append(',').Append(Q(r.Material)).Append(',');
             if (mass) sb.Append(r.Mass is { } g ? MassUnits.Number(g, units) + "," + MassUnits.Number(g * r.Quantity, units) : ",").Append(',');
             sb.Append(Q(r.File)).Append('\n');
