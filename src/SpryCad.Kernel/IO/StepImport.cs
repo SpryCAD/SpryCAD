@@ -2,8 +2,8 @@ using SpryCad.Kernel.Native;
 
 namespace SpryCad.Kernel;
 
-/// <summary>A solid read from a STEP file.</summary>
-public sealed record StepSolid(string Name, NBody Body);
+/// <summary>A solid read from a STEP file, and its color in it (r, g, b, opacity 0-1; null: none given).</summary>
+public sealed record StepSolid(string Name, NBody Body, double[]? Color = null);
 
 /// <summary>A part of a STEP assembly: its name and its solids, in its own coordinates.</summary>
 public sealed record StepPart(string Name, List<StepSolid> Solids);
@@ -64,6 +64,7 @@ public static class StepImport
         var ctx = new Ctx(f, r.UnitMm * mmToUnits, angleScale, prefix, r.Warnings);
 
         var solids = f.OfType("MANIFOLD_SOLID_BREP").Concat(f.OfType("BREP_WITH_VOIDS")).Distinct().ToList();
+        var colors = StepColors.Of(f);
         if (solids.Count == 0)
         {
             var shells = f.OfType("CLOSED_SHELL").ToList();
@@ -86,7 +87,7 @@ public static class StepImport
                     var oc = f.Get(v); // ORIENTED_CLOSED_SHELL(name, *, shell, orientation)
                     parts.Add((f.Get(oc.Args[2]), !(oc.Args[3] is StepEnum { Value: "T" })));
                 }
-            ctx.AddSolid(r, name, parts);
+            ctx.AddSolid(r, name, parts, StepColors.OfSolid(f, s, colors));
         }
         if (r.Solids.Count == 0) throw new InvalidDataException("No solid of the STEP file could be imported: " + string.Join("; ", r.Warnings.Take(3)));
         return r;
@@ -117,6 +118,7 @@ public static class StepImport
         var res = new StepAssemblyResult();
         (res.UnitMm, var angleUnit) = Units(f);
         var ctx = new Ctx(f, res.UnitMm * mmToUnits, angleUnit, prefix, res.Warnings);
+        var colors = StepColors.Of(f);
         bool IsBrep(StepInstance i) => i.Is("MANIFOLD_SOLID_BREP") || i.Is("BREP_WITH_VOIDS");
         StepInstance? Inst(object? a) => a is StepRef r && f.Instances.TryGetValue(r.Id, out var i) ? i : null;
         List<object?>? RepArgs(StepInstance i) => i.Parts.FirstOrDefault(p => p.Type.EndsWith("REPRESENTATION", StringComparison.Ordinal) && p.Args.Count >= 2 && p.Args[1] is List<object?>).Args;
@@ -209,7 +211,7 @@ public static class StepImport
                     var parts = new List<(StepInstance shell, bool reversed)> { (f.Get(b.Args[1]), false) };
                     if (b.Is("BREP_WITH_VOIDS") && b.Args.Count > 2 && b.Args[2] is List<object?> voids)
                         foreach (var v in voids) { var oc = f.Get(v); parts.Add((f.Get(oc.Args[2]), !(oc.Args[3] is StepEnum { Value: "T" }))); }
-                    pc.AddSolid(r, b.Args.Count > 0 && b.Args[0] is string bn && bn.Trim().Length > 0 ? bn.Trim() : name, parts);
+                    pc.AddSolid(r, b.Args.Count > 0 && b.Args[0] is string bn && bn.Trim().Length > 0 ? bn.Trim() : name, parts, StepColors.OfSolid(f, b, colors));
                 }
                 return (r, null);
             }
@@ -392,7 +394,7 @@ public static class StepImport
             _f = f; _s = scale; _ang = angle; _prefix = prefix; _warn = warnings;
         }
 
-        public void AddSolid(StepImportResult r, string name, IEnumerable<(StepInstance shell, bool reversed)> shells)
+        public void AddSolid(StepImportResult r, string name, IEnumerable<(StepInstance shell, bool reversed)> shells, double[]? color = null)
         {
             var body = new NBody();
             int skipped = 0; var reasons = new SortedSet<string>();
@@ -446,7 +448,7 @@ public static class StepImport
             body.Link();
             var err = body.Validate();
             if (err != null) { _warn.Add($"{name}: not a closed solid ({err}); skipped."); return; }
-            r.Solids.Add(new StepSolid(name, body));
+            r.Solids.Add(new StepSolid(name, body, color));
         }
 
         Vec3 Point(object? a)

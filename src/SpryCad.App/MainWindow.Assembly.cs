@@ -126,7 +126,8 @@ public partial class MainWindow : IAssemblyHost
                     // sub-assemblies placed where they are in this one)
                     string NameOf(Occurrence o) { var l = o.Owner.ConfigLabel(o.Component); return o.Component.Name.Split('<')[0] + (l.Length > 0 ? $" ({l})" : ""); }
                     var parts = live.Select(k => (NameOf(comps.First(x => x.pd == k).o), (IReadOnlyList<(string, Solid)>)solids[k])).ToList();
-                    StepWriter.WriteAssembly(fs, baseName, parts, comps.Select(x => (live.IndexOf(x.pd), model.NameAt(x.o.Path).Replace('/', '-'), x.o.World)).ToList());
+                    StepWriter.WriteAssembly(fs, baseName, parts, comps.Select(x => (live.IndexOf(x.pd), model.NameAt(x.o.Path).Replace('/', '-'), x.o.World)).ToList(),
+                        partColors: live.Select(k => (double[]?)k.Appearance.ToRgba()).ToList());
                 }
                 else StlWriter.Write(fs, comps.SelectMany(x => solids[x.pd].Select(s => s.Solid.Transformed(x.o.World))));
             });

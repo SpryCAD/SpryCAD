@@ -510,14 +510,16 @@ public sealed partial class AssemblyModel
         Parallel.For(0, res.Parts.Count, i =>
         {
             byte[] bytes; string ext;
+            // its color in the file (its first colored solid's) as its appearance
+            var color = res.Parts[i].Solids.Select(sd => sd.Color).FirstOrDefault(c => c != null);
             try { bytes = NBrepFile.Write(res.Parts[i].Solids, "S."); ext = ".sbrep"; }
             catch (NotSupportedException)
             {
                 using var ms = new MemoryStream();
-                StepWriter.Write(ms, res.Parts[i].Solids.Select(sd => (sd.Name, Kernel.Native.NTess.ToSolid(sd.Body))), names[i]);
+                StepWriter.Write(ms, res.Parts[i].Solids.Select(sd => (sd.Name, Kernel.Native.NTess.ToSolid(sd.Body))), names[i], color: color);
                 bytes = ms.ToArray(); ext = ".step";
             }
-            var doc = new CadDocument();
+            var doc = new CadDocument { Appearance = color != null ? Appearance.FromRgba(color) : null };
             var file = "imports/" + SafeFileName(names[i]) + ext;
             doc.AddFile(file, bytes);
             doc.AddFeature(new ImportFeature { File = file, Sha256 = DocumentContainer.Hash(bytes) });

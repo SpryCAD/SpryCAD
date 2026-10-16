@@ -1,5 +1,6 @@
 using SpryCad.Core.Library;
 using SpryCad.Core.Model;
+using SpryCad.Kernel;
 
 namespace SpryCad.Tests;
 
@@ -276,6 +277,37 @@ static class MaterialTests
             t.Eq(old.Mesh.Indices.Length, e.Mesh.Indices.Length);
             // rewritten (faces renamed) keeps it
             t.Near(SpryCad.Core.Assembly.MeshCache.Read(SpryCad.Core.Assembly.MeshCache.Renamed(bytes, n => n)).Appearance.Opacity, 0.5, 1e-6);
+        });
+
+        t.Test("Appearance: STEP colors written (a part's, an assembly's parts', see-through) and read back as each solid's; a part from a STEP assembly in its color", () =>
+        {
+            var dir = AppContext.BaseDirectory;
+            while (dir != null && !Directory.Exists(Path.Combine(dir, "samples"))) dir = Path.GetDirectoryName(dir);
+            var doc = CadDocument.Load(Path.Combine(dir!, "samples", "bracket.sprt"));
+            var solid = new SpryCad.Core.Regen.Regenerator().Rebuild(doc).State.Bodies[0].Solid;
+            using (var ms = new MemoryStream())
+            {
+                StepWriter.Write(ms, new[] { ("Body", solid) }, "Bracket", color: new[] { 0.8, 0.5, 0.25, 0.4 });
+                var data = ms.ToArray();
+                t.True(System.Text.Encoding.ASCII.GetString(data).Contains("STYLED_ITEM('color'"), "styled");
+                var c = StepImport.Read(data, "S.").Solids.Single().Color!;
+                t.True(Math.Abs(c[0] - 0.8) < 1e-9 && Math.Abs(c[2] - 0.25) < 1e-9 && Math.Abs(c[3] - 0.4) < 1e-9, string.Join(",", c));
+                t.True(StepColors.Dominant(StepFile.Parse(data)) is { } d && Math.Abs(d[1] - 0.5) < 1e-9, "the file's color");
+            }
+            using (var ms = new MemoryStream())
+            {
+                var parts = new List<(string, IReadOnlyList<(string, SpryCad.Kernel.Solid)>)> { ("A", new[] { ("Body", solid) }), ("B", new[] { ("Body", solid) }) };
+                StepWriter.WriteAssembly(ms, "Asm", parts, new[] { (0, "A1", SpryCad.Kernel.Transform.Identity), (1, "B1", SpryCad.Kernel.Transform.Translation(new SpryCad.Kernel.Vec3(200, 0, 0))) },
+                    partColors: new double[]?[] { new[] { 1.0, 0, 0, 1 }, null });
+                var data = ms.ToArray();
+                var res = StepImport.ReadAssembly(data, "S.")!;
+                t.True(res.Parts.Single(p => p.Name.StartsWith("A")).Solids[0].Color is { } a && a[0] == 1 && a[1] == 0, "A red");
+                t.True(res.Parts.Single(p => p.Name.StartsWith("B")).Solids[0].Color == null, "B none");
+                var m = SpryCad.Core.Assembly.AssemblyModel.FromStep(data, "Asm")!;
+                var looks = m.PlacedParts().ToDictionary(p => p.o.Component.Name.Split('<')[0], p => p.pd.Appearance);
+                t.True(looks.Single(kv => kv.Key.StartsWith("A")).Value.Color.SequenceEqual(new[] { 1.0, 0, 0 }), "the part red");
+                t.Eq(looks.Single(kv => kv.Key.StartsWith("B")).Value, Appearance.Default);
+            }
         });
 
         t.Test("Appearance: a component's own in full and as a color for older readers; a color an older SpryCAD changed keeps the finish; serialized and read back", () =>

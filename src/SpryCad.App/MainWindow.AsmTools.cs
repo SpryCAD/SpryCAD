@@ -700,11 +700,17 @@ public partial class MainWindow
     {
         if (Asm is not { } a) return;
         var kind = BomKind.Indented;
-        var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto,Auto,Auto") };
+        var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto,Auto,Auto,Auto,Auto") };
         List<BomRow> rows = new();
+        // masses once the parts are measured (off the UI thread, the first time: their solids built); in the assembly's units
+        var measured = false;
+        var units = a.Model.Doc.Units;
+        var total = new TextBlock { VerticalAlignment = VerticalAlignment.Center, Foreground = Palette.TextMuted };
         void Fill()
         {
-            rows = Bom.Build(a.Model, kind);
+            rows = Bom.Build(a.Model, kind, mass: measured);
+            var totalMass = rows.Where(x => x.Level == 0 && x.Mass != null).Sum(x => x.Mass!.Value * x.Quantity);
+            total.Text = measured ? $"Total mass: {MassUnits.Text(totalMass, units)}" + (rows.Any(x => x.Material == Bom.NoMaterial) ? $" (parts with no material: steel's density)" : "") : "Measuring the parts…";
             grid.Children.Clear(); grid.RowDefinitions.Clear();
             void Cell(int r, int c, string text, bool head = false, double indent = 0, bool right = false)
             {
@@ -713,8 +719,8 @@ public partial class MainWindow
                 grid.Children.Add(tb);
             }
             grid.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
-            string[] heads = { "Item", "Part", "Configuration", "Qty", "Material" };
-            for (int c = 0; c < heads.Length; c++) Cell(0, c, heads[c], head: true, right: c == 3);
+            string[] heads = { "Item", "Part", "Configuration", "Qty", "Material", $"Mass ({MassUnits.Label(units)})", "Total" };
+            for (int c = 0; c < heads.Length; c++) Cell(0, c, heads[c], head: true, right: c is 3 or 5 or 6);
             for (int i = 0; i < rows.Count; i++)
             {
                 var r = rows[i];
@@ -724,6 +730,8 @@ public partial class MainWindow
                 Cell(i + 1, 2, r.Configuration);
                 Cell(i + 1, 3, r.Quantity.ToString(CultureInfo.InvariantCulture), right: true);
                 Cell(i + 1, 4, r.Material ?? "");
+                Cell(i + 1, 5, r.Mass is { } g ? MassUnits.Number(g, units) : "", right: true);
+                Cell(i + 1, 6, r.Mass is { } t ? MassUnits.Number(t * r.Quantity, units) : "", right: true);
             }
         }
         var kindBox = new ComboBox { ItemsSource = new[] { "Indented", "Top level only", "Parts only" }, SelectedIndex = 0, Width = 160 };
@@ -732,10 +740,13 @@ public partial class MainWindow
         var copy = new Button { Content = "Copy" };
         var close = new Button { Content = "Close", IsCancel = true };
         var bar = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Children = { new TextBlock { Text = "Show:", VerticalAlignment = VerticalAlignment.Center }, kindBox } };
-        var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 8, 0, 0), Children = { csv, copy, close } };
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, HorizontalAlignment = HorizontalAlignment.Right, Children = { csv, copy, close } };
+        var footer = new DockPanel { Margin = new Thickness(0, 8, 0, 0) };
+        DockPanel.SetDock(buttons, Dock.Right);
+        footer.Children.Add(buttons); footer.Children.Add(total);
         var dock = new DockPanel();
-        DockPanel.SetDock(bar, Dock.Top); DockPanel.SetDock(buttons, Dock.Bottom);
-        dock.Children.Add(bar); dock.Children.Add(buttons);
+        DockPanel.SetDock(bar, Dock.Top); DockPanel.SetDock(footer, Dock.Bottom);
+        dock.Children.Add(bar); dock.Children.Add(footer);
         dock.Children.Add(new ScrollViewer { Content = grid, Margin = new Thickness(0, 8, 0, 0) });
         var w = ToolWindow($"Bill of Materials: {a.Title.TrimEnd(' ', '*')}", dock, 640, 520);
         csv.Click += async (_, _) =>
@@ -745,12 +756,23 @@ public partial class MainWindow
                 Title = "Export Bill of Materials", DefaultExtension = "csv", SuggestedFileName = a.Title.TrimEnd(' ', '*') + " BOM.csv",
                 FileTypeChoices = new[] { new FilePickerFileType("CSV") { Patterns = new[] { "*.csv" } } },
             });
-            if (f?.TryGetLocalPath() is { } p) { await File.WriteAllTextAsync(p, Bom.ToCsv(rows)); Status("Saved " + p); }
+            if (f?.TryGetLocalPath() is { } p) { await File.WriteAllTextAsync(p, Bom.ToCsv(rows, units)); Status("Saved " + p); }
         };
-        copy.Click += (_, _) => _ = Clipboard?.SetTextAsync(Bom.ToCsv(rows).Replace(',', '\t'));
+        copy.Click += (_, _) => _ = Clipboard?.SetTextAsync(Bom.ToCsv(rows, units).Replace(',', '\t'));
+        var cts = new CancellationTokenSource();
         close.Click += (_, _) => w.Close();
+        w.Closed += (_, _) => cts.Cancel();
         Fill();
         w.Show(this);
+        // the parts measured off the UI thread (a list taken here), then the masses shown
+        var displays = a.Model.PlacedParts(hidden: true).Select(x => x.pd).Distinct().ToList();
+        _ = Task.Run(() => AssemblyMass.Prepare(displays, cts.Token), cts.Token).ContinueWith(t =>
+        {
+            if (t.IsCanceled || cts.IsCancellationRequested) return;
+            if (t.Exception != null) { App.Log(t.Exception, "BOM mass"); total.Text = "The parts could not be measured."; return; }
+            measured = true;
+            Fill();
+        }, TaskScheduler.FromCurrentSynchronizationContext());
     }
 
     void AssemblyMassCommand()
@@ -761,15 +783,8 @@ public partial class MainWindow
         void Fill()
         {
             var r = AssemblyMass.Of(a.Model);
-            var I = r.Inertia;
-            report = $"Mass properties of {a.Title.TrimEnd(' ', '*')} ({r.Parts} parts, each with its own material; suppressed ones left out)\n\n" +
-                     $"Mass = {r.Mass:0.###} g ({r.Mass / 1000:0.######} kg)\nVolume = {r.Volume:0.###} mm³\nSurface area = {r.Area:0.###} mm²\n\n" +
-                     $"Center of mass (mm): X = {r.Center.X:0.###}, Y = {r.Center.Y:0.###}, Z = {r.Center.Z:0.###}\n\n" +
-                     "Principal moments of inertia about the center of mass (g·mm²):\n" +
-                     string.Concat(Enumerable.Range(0, 3).Select(i => $"  P{i + 1} = {r.Principal[i]:0.###}  along ({r.Axes[i].X:0.####}, {r.Axes[i].Y:0.####}, {r.Axes[i].Z:0.####})\n")) +
-                     "\nMoments of inertia about the center of mass, assembly axes (g·mm²):\n" +
-                     $"  Lxx = {I[0, 0]:0.###}  Lxy = {-I[0, 1]:0.###}  Lxz = {-I[0, 2]:0.###}\n  Lyx = {-I[1, 0]:0.###}  Lyy = {I[1, 1]:0.###}  Lyz = {-I[1, 2]:0.###}\n  Lzx = {-I[2, 0]:0.###}  Lzy = {-I[2, 1]:0.###}  Lzz = {I[2, 2]:0.###}\n" +
-                     (r.Approximate.Count > 0 ? $"\nFrom their display meshes (shown from a copy, so not exact): {string.Join(", ", r.Approximate)}\n" : "");
+            // in the assembly's units (grams and millimetres, or pounds and inches)
+            report = r.Report(a.Title.TrimEnd(' ', '*'), a.Model.Doc.Units);
             text.Text = report;
             Viewport.CenterOfMass = r.Mass > 0 ? (r.Center, r.Axes, Math.Max(5, a.Model.WorldBounds(a.Model.Doc.Components.FirstOrDefault()?.Id ?? "").Diagonal * 0.05)) : null;
             Viewport.Redraw();

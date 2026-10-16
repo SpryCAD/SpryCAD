@@ -877,10 +877,19 @@ public partial class MainWindow
         var name = "imports/" + baseName;
         for (int k = 2; s.Doc.Files.TryGetValue(name, out var existing) && DocumentContainer.Hash(existing) != hash; k++)
             name = $"imports/{Path.GetFileNameWithoutExtension(baseName)} ({k}){Path.GetExtension(baseName)}";
+        // the file's color (most of its solids'), for a part with no appearance yet (read only when it has one)
+        double[]? color = null;
+        if (s.Doc.Appearance == null && System.Text.Encoding.Latin1.GetString(data) is var text
+            && (text.Contains("COLOUR_RGB", StringComparison.Ordinal) || text.Contains("PRE_DEFINED_COLOUR", StringComparison.Ordinal)))
+        {
+            try { color = StepColors.Dominant(StepFile.Parse(data)); }
+            catch (Exception ex) when (ex is InvalidDataException or FormatException) { color = null; }
+        }
         s.Change(() =>
         {
             s.Doc.AddFile(name, data);
             s.Doc.AddFeature(new ImportFeature { Name = Path.GetFileNameWithoutExtension(baseName), File = name, Sha256 = hash });
+            if (color != null) s.Doc.Appearance = Appearance.FromRgba(color);
         });
         t.FitAfterLoad = s.RequestedRevision; // the rebuild with the import in it
         return null;
@@ -1126,12 +1135,13 @@ public partial class MainWindow
             var hasCosmetic = r.State.Cosmetics.Count > 0;
             var snapshot = hasCosmetic ? Session.Doc.Clone() : null;
             var session = Session;
+            var look = session.Doc.EffectiveAppearance.ToRgba(); // (its color in the file, as other CAD shows it)
             // written off the UI thread: the exact B-rep / tessellation of big parts takes a moment
             await Task.Run(() =>
             {
                 if (snapshot != null) bodies = session.RebuildForExport(snapshot).State.Bodies.ToList();
                 using var fs = File.Create(path);
-                if (kind == "step") StepWriter.Write(fs, bodies.Select(b => (b.Id, b.Solid)), baseName);
+                if (kind == "step") StepWriter.Write(fs, bodies.Select(b => (b.Id, b.Solid)), baseName, color: look);
                 else StlWriter.Write(fs, bodies.Select(b => b.Solid));
             });
             Status($"Exported {path} ({sw.ElapsedMilliseconds} ms)");
