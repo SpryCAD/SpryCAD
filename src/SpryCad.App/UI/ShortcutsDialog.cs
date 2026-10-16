@@ -25,43 +25,43 @@ public static class ShortcutsDialog
 
     static (string title, Shortcut[] items)[] Sections() => new[]
     {
-        ("View with the mouse", new Shortcut[]
+        ("View with the Mouse", new Shortcut[]
         {
             new("Middle drag", "Rotate"),
-            new("Middle click", "Rotate about this spot from now on (in empty space: back to the default)"),
+            new("Middle click", "Set the rotation center at this point; in empty space, reset it"),
             new("Ctrl+Middle drag", "Pan"),
             new("Shift+Middle drag", "Zoom"),
             new("Alt+Middle drag", "Roll"),
             new("Wheel", "Zoom at the cursor"),
-            new("Right drag", "Mouse gestures: right Measure, up Normal To, left Zoom to Fit, down Sketch (in a sketch: Smart Dimension, Circle, Line, Rectangle)"),
+            new("Right drag", "Mouse gestures. Part: right Measure, up Normal To, left Zoom to Fit, down Sketch. Sketch: right Smart Dimension, up Circle, left Line, down Rectangle. Assembly: right Mate, down Insert Components."),
         }),
-        ("View with the keyboard", new Shortcut[]
+        ("View with the Keyboard", new Shortcut[]
         {
-            new("F", "Zoom to fit"),
-            new("Space", "View Selector: click a face, edge or corner of the cube"),
+            new("F", "Zoom to Fit"),
+            new("Space", "Open the View Selector"),
             new("Ctrl+1 … 6", "Front, Back, Left, Right, Top, Bottom"),
             new("Ctrl+7", "Isometric"),
             new("Ctrl+8", "Normal To"),
-            new("Arrows", "Rotate 15° (with Shift: 90°)"),
+            new("Arrows", "Rotate 15° (Shift: 90°)"),
             new("Ctrl+Arrows", "Pan"),
         }),
         ("Sketch", MainWindow.SketchToolKeys.OrderBy(k => k.Value)
             .Select(k => new Shortcut(k.Value, ToolNames.GetValueOrDefault(k.Key, k.Key.ToString())))
             .Concat(new Shortcut[]
             {
-                new("Esc", "Select, or end the tool in use"),
+                new("Esc", "End the active tool, or return to Select"),
                 new("Double-click", "Edit a dimension's value"),
                 new("Delete", "Delete the selected entities or relations"),
             }).ToArray()),
-        ("Files and tabs", new Shortcut[]
+        ("Files and Tabs", new Shortcut[]
         {
             new("Ctrl+N", "New part"),
             new("Ctrl+O", "Open"),
             new("Ctrl+S", "Save"),
             new("Ctrl+Shift+S", "Save As"),
             new("Ctrl+I", "Import STEP"),
-            new("Ctrl+W", "Close the part or assembly (its tab)"),
-            new("Ctrl+Tab", "Next tab (with Shift: the previous one)"),
+            new("Ctrl+W", "Close the active document"),
+            new("Ctrl+Tab", "Next tab (Shift: previous tab)"),
         }),
         ("Editing", new Shortcut[]
         {
@@ -70,7 +70,7 @@ public static class ShortcutsDialog
             new("Delete", "Delete the selection"),
             new("F2", "Rename the selected feature or mate"),
             new("Ctrl+B", "Rebuild"),
-            new("Ctrl+Q", "Force rebuild (every feature again)"),
+            new("Ctrl+Q", "Force rebuild of all features"),
         }),
         ("PropertyManager", new Shortcut[]
         {
@@ -82,7 +82,7 @@ public static class ShortcutsDialog
     public static async Task Show(Window owner)
     {
         var sections = Sections();
-        var search = new TextBox { Watermark = "Search shortcuts (a key or an action)", Margin = new Thickness(14, 12, 14, 8) };
+        var search = new TextBox { Watermark = "Search by key or action", Margin = new Thickness(14, 12, 14, 8) };
         var list = new StackPanel { Spacing = 2, Margin = new Thickness(14, 0, 14, 12) };
         var none = new TextBlock { Text = "No shortcut matches.", Foreground = Palette.TextMuted, Margin = new Thickness(0, 8, 0, 0) };
 
@@ -121,7 +121,7 @@ public static class ShortcutsDialog
 
         var w = new Window
         {
-            Title = "Keyboard & Mouse", Width = 640, Height = 600, MinWidth = 480, MinHeight = 360,
+            Title = "Keyboard Shortcuts", Width = 640, Height = 600, MinWidth = 480, MinHeight = 360,
             CanResize = true, CanMinimize = false, CanMaximize = false, ShowInTaskbar = false,
             WindowStartupLocation = WindowStartupLocation.CenterOwner, Content = root,
         };

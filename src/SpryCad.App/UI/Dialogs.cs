@@ -153,10 +153,10 @@ public static class Dialogs
         var info = new TextBlock
         {
             FontSize = TypeScale.Small, Foreground = Palette.TextMuted, TextWrapping = TextWrapping.Wrap,
-            Text = "Global variables usable in any dimension or feature value, e.g. W = 100mm, H = W/2, N = 6. A value with a unit (10mm, 2in, 30deg) is a length or an angle "
-                + "wherever it is used; one without is a plain number, which a length or angle field takes in the part's units. Trig functions use degrees. "
-                + "Conditions (Teeth < 30 and not Slots) give 1 or 0, for Suppress When. "
-                + "User-facing variables are what Configure shows (an assembly sets them per instance); the others are internal.",
+            Text = "Global variables for any dimension or feature value, e.g. W = 100mm, H = W/2, N = 6. Values with units (10mm, 2in, 30deg) are lengths or angles; "
+                + "unitless values are read in the part's units. Trig functions use degrees. "
+                + "Conditions (Teeth < 30 and not Slots) evaluate to 1 or 0. "
+                + "User variables appear in Configure.",
         };
         // variables the design tables set (read only here)
         var fromTables = (tables ?? new()).SelectMany(t => new[] { t.Name }.Concat(t.Columns)).Where(n => !string.IsNullOrWhiteSpace(n)).Select(n => n.Trim()).ToList();
@@ -201,10 +201,10 @@ public static class Dialogs
             header.Children.Add(Head("Name", 0));
             header.Children.Add(Head("Value / Equation", 1));
             header.Children.Add(Head("Evaluates to", 2));
-            header.Children.Add(Head("User", 3, "User-facing: shown in Configure, set per instance in assemblies"));
-            header.Children.Add(Head("Description", 4, "What Configure shows for it"));
-            header.Children.Add(Head("Min", 5, "Smallest value Configure accepts (blank: none); Min 0 and Max 1 make a checkbox"));
-            header.Children.Add(Head("Max", 6, "Largest value Configure accepts (blank: none)"));
+            header.Children.Add(Head("User", 3, "Shown in Configure; set per instance in assemblies."));
+            header.Children.Add(Head("Description", 4, "Label shown in Configure."));
+            header.Children.Add(Head("Min", 5, "Minimum value accepted in Configure. Min 0 and Max 1 show a checkbox."));
+            header.Children.Add(Head("Max", 6, "Maximum value accepted in Configure."));
             list.Children.Add(header);
             var (vals, errs) = Evaluate();
             foreach (var r in rows)
@@ -219,7 +219,7 @@ public static class Dialogs
                 var lo = new TextBox { Text = r.Min is { } a ? Expr.Format(a) : "", Margin = m, IsEnabled = r.Exposed };
                 var hi = new TextBox { Text = r.Max is { } b ? Expr.Format(b) : "", Margin = m, IsEnabled = r.Exposed };
                 var del = DeleteButton("Delete this variable");
-                ToolTip.SetTip(user, "User-facing: shown in Configure");
+                ToolTip.SetTip(user, "Shown in Configure.");
                 var rr = r;
                 valueCells.Add((rr, v));
                 Show(v, rr, vals, errs);
@@ -236,7 +236,7 @@ public static class Dialogs
             }
         }
         Refresh();
-        var add = new Button { Content = "+ Add variable" };
+        var add = new Button { Content = "+ Add Variable" };
         add.Click += (_, _) => { rows.Add(new Equation { Name = "Var" + (rows.Count + 1), Expr = "10" }); Refresh(); };
         var ok = new Button { Content = "OK", IsDefault = true };
         var cancel = new Button { Content = "Cancel", IsCancel = true };
@@ -270,9 +270,9 @@ public static class Dialogs
         void Update()
         {
             var text = tb.Text?.Trim() ?? "";
-            if (text.Length == 0) { now.Text = "No condition: the feature is built unless suppressed by hand."; now.Foreground = Palette.TextMuted; return; }
+            if (text.Length == 0) { now.Text = "No condition set. The feature is built unless manually suppressed."; now.Foreground = Palette.TextMuted; return; }
             if (!Expr.TryEvaluate(text, lookup, out var v, out var err)) { now.Text = err; now.Foreground = Palette.Danger; return; }
-            now.Text = Expr.Truthy(v.Value) ? "Holds now: the feature is suppressed (and the features using it)." : "Does not hold now: the feature is built.";
+            now.Text = Expr.Truthy(v.Value) ? "Currently true: the feature and its dependents are suppressed." : "Currently false: the feature is built.";
             now.Foreground = Palette.TextMuted;
         }
         tb.TextChanged += (_, _) => Update();
@@ -287,7 +287,7 @@ public static class Dialogs
         sp.Children.Add(new TextBlock
         {
             FontSize = TypeScale.Small, Foreground = Palette.TextMuted, TextWrapping = TextWrapping.Wrap,
-            Text = "Compare with < <= > >= == != and combine with and, or, not. "
+            Text = "Operators: < <= > >= == !=, combined with and, or, not. "
                 + (names.Count > 0 ? "Variables: " + string.Join(", ", names) + "." : "Define variables in Equations first."),
         });
         sp.Children.Add(Buttons(ok, cancel));
@@ -312,7 +312,7 @@ public static class Dialogs
     /// </summary>
     public static async Task DesignTables(MainWindow owner)
     {
-        if (owner.PartOnly("Design tables")) return;
+        if (owner.PartOnly("Design Table")) return;
         var session = owner.Session;
         var tables = (session.Doc.Tables ?? new()).Select(Serialization.Clone).ToList();
         int current = 0;
@@ -350,8 +350,8 @@ public static class Dialogs
                 body.Children.Add(new TextBlock
                 {
                     TextWrapping = TextWrapping.Wrap, Foreground = Palette.TextMuted,
-                    Text = "No design tables. A table gives rows of values for a set of variables, e.g. a screw's sizes M3, M4, M5 with D, Pitch and HeadD for each: "
-                        + "choosing a row sets them all. Add one with + Table, or paste a spreadsheet.",
+                    Text = "No design tables. Each row sets values for a set of variables, e.g. sizes M3, M4, M5 with D, Pitch and HeadD. "
+                        + "Click + Table to add one, or paste from a spreadsheet.",
                 });
                 return;
             }
@@ -360,8 +360,8 @@ public static class Dialogs
             var name = new TextBox { Text = t.Name };
             var user = new CheckBox { Content = "User-facing", IsChecked = t.Exposed };
             var desc = new TextBox { Text = t.Description ?? "", Watermark = "Description for Configure" };
-            ToolTip.SetTip(name, "The choice, and a variable holding the number of the row in use (1 = the first), for conditions");
-            ToolTip.SetTip(user, "Shown in Configure as a list of the rows (an assembly chooses one per instance)");
+            ToolTip.SetTip(name, "Table name; also a variable holding the active row number (1 = first) for conditions.");
+            ToolTip.SetTip(user, "Shows the rows as a list in Configure; set per instance in assemblies.");
             name.TextChanged += (_, _) => { t.Name = name.Text?.Trim() ?? ""; };
             name.LostFocus += (_, _) => Pick();
             user.IsCheckedChanged += (_, _) => t.Exposed = user.IsChecked == true;
@@ -382,7 +382,7 @@ public static class Dialogs
                 int cc = c;
                 var cell = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), Margin = new Thickness(0, 0, 4, 0) };
                 var cn = new TextBox { Text = t.Columns[c], FontWeight = FontWeight.SemiBold };
-                ToolTip.SetTip(cn, "The variable this column sets");
+                ToolTip.SetTip(cn, "Variable set by this column.");
                 cn.TextChanged += (_, _) => t.Columns[cc] = cn.Text?.Trim() ?? "";
                 var dc = DeleteButton("Delete this column");
                 dc.Click += (_, _) => { t.Columns.RemoveAt(cc); foreach (var r in t.Rows) if (cc < r.Values.Count) r.Values.RemoveAt(cc); Refresh(); };
@@ -390,8 +390,8 @@ public static class Dialogs
                 cell.Children.Add(cn); cell.Children.Add(dc);
                 Grid.SetColumn(cell, c + 1); head.Children.Add(cell);
             }
-            var inUse = new TextBlock { Text = "In use", FontWeight = FontWeight.SemiBold, VerticalAlignment = VerticalAlignment.Center };
-            ToolTip.SetTip(inUse, "The row the part uses when nothing else is chosen");
+            var inUse = new TextBlock { Text = "Active", FontWeight = FontWeight.SemiBold, VerticalAlignment = VerticalAlignment.Center };
+            ToolTip.SetTip(inUse, "Row the part uses unless another is selected.");
             Grid.SetColumn(inUse, t.Columns.Count + 1); head.Children.Add(inUse);
             grid.Children.Add(head);
             var selected = t.Current;
@@ -438,18 +438,18 @@ public static class Dialogs
                 Refresh();
             };
             var paste = new Button { Content = "Paste from Spreadsheet" };
-            ToolTip.SetTip(paste, "Replaces the table with the copied cells: a header row (the first cell anything, then the variables), then a row per configuration (its key, then the values)");
+            ToolTip.SetTip(paste, "Replaces the table with copied cells: a header row of variable names, then one row per configuration with its key and values.");
             paste.Click += async (_, _) =>
             {
                 var text = owner.Clipboard is { } clip ? await clip.GetTextAsync() : null;
-                if (DesignTable.Parse(text) is not { } pasted) { error.Text = "The clipboard has no table: copy a header row and rows of cells from a spreadsheet."; return; }
+                if (DesignTable.Parse(text) is not { } pasted) { error.Text = "No table found on the clipboard. Copy a header row and data rows from a spreadsheet."; return; }
                 t.Columns = pasted.Columns; t.Rows = pasted.Rows;
                 if (t.Row(t.Selected ?? "") == null) t.Selected = null;
                 error.Text = "";
                 Refresh();
             };
             var copy = new Button { Content = "Copy" };
-            ToolTip.SetTip(copy, "Copies the table as tab-separated cells, to edit in a spreadsheet");
+            ToolTip.SetTip(copy, "Copies the table as tab-separated cells for editing in a spreadsheet.");
             copy.Click += (_, _) =>
             {
                 var lines = new List<string> { string.Join("\t", new[] { t.Name }.Concat(t.Columns)) };
@@ -476,7 +476,7 @@ public static class Dialogs
                 if (t.Rows.Count == 0) return $"{t.Name} has no rows.";
                 var keys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 foreach (var r in t.Rows)
-                    if (r.Key.Length == 0 || !keys.Add(r.Key)) return $"{t.Name}: each row needs a key of its own ('{r.Key}').";
+                    if (r.Key.Length == 0 || !keys.Add(r.Key)) return $"{t.Name}: each row needs a unique key ('{r.Key}').";
             }
             return null;
         }
@@ -491,8 +491,8 @@ public static class Dialogs
         sp.Children.Add(new TextBlock
         {
             FontSize = TypeScale.Small, Foreground = Palette.TextMuted, TextWrapping = TextWrapping.Wrap,
-            Text = "Rows of values for a set of variables; the row in use sets them all. Values may be expressions of the part's other variables. "
-                + "The table's name holds the number of the row in use (1 = the first), for conditions such as Size >= 3.",
+            Text = "Each row sets values for a set of variables; values can be expressions. "
+                + "The table name holds the active row number (1 = first) for conditions such as Size >= 3.",
         });
         sp.Children.Add(head);
         sp.Children.Add(body);
@@ -604,15 +604,15 @@ public static class Dialogs
     /// <summary>Configure for the part open: its own values (the defaults assemblies start from) set.</summary>
     public static async Task ConfigurePart(MainWindow owner)
     {
-        if (owner.PartOnly("Configure", "an assembly's configurations are on its row at the top of the tree (right-click it), a component's on the Configure button with it selected")) return;
+        if (owner.PartOnly("Configure", "for an assembly, right-click its top row in the design tree; for a component, select it and click Configure")) return;
         var session = owner.Session;
         if (session.Doc.UserParameters().Count == 0)
         {
-            await Message(owner, "Configure", "This part has no user-facing parameters yet. Mark variables as User in Equations, or add a design table (Tools > Design Table).");
+            await Message(owner, "Configure", "This part has no user parameters. Mark variables as User in Equations, or add a design table (Tools > Design Table).");
             return;
         }
         var chosen = await Configure(owner, session.Doc, null, "Configure",
-            "The part's own values: what it is built with here, and what each new instance in an assembly starts from.");
+            "Default values for the part, also used by new instances in assemblies.");
         if (chosen is not { } c) return;
         var values = c.values;
         if (session.Doc.Normalize(values) != null) session.Change(() => session.Doc.Apply(values));
@@ -661,7 +661,7 @@ public static class Dialogs
             Foreground = Palette.TextSecondary, VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.Wrap,
         };
         var copy = new Button { Content = "Copy", Padding = new Thickness(8, 2), MinHeight = 0, VerticalAlignment = VerticalAlignment.Center };
-        ToolTip.SetTip(copy, "Copy the version and system details (for a bug report)");
+        ToolTip.SetTip(copy, "Copies version and system details for bug reports.");
         copy.Click += async (_, _) =>
         {
             var details = $"SpryCAD {info}\n{System.Runtime.InteropServices.RuntimeInformation.OSDescription} ({System.Runtime.InteropServices.RuntimeInformation.OSArchitecture})\n.NET {Environment.Version}";
@@ -690,7 +690,7 @@ public static class Dialogs
         sp.Children.Add(new StackPanel { Spacing = 3, Children =
         {
             Muted("Parts (.sprt) and assemblies (.sasm). Imports STEP; exports STEP AP214, STL and flat patterns as DXF."),
-            Muted("Its own plane-based B-rep kernel in C#. Built with Avalonia, Silk.NET (OpenGL) and .NET."),
+            Muted("Native B-rep modeling kernel written in C#. Built with Avalonia, Silk.NET (OpenGL) and .NET."),
         } });
         sp.Children.Add(links);
         sp.Children.Add(Buttons(ok));

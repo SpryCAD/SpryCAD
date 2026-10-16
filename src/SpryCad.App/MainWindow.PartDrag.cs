@@ -71,7 +71,7 @@ public partial class MainWindow
                     c.Placement = Placement.From(Transform.Translation(DropPoint(pt, anchor) - c.Placement.ToTransform().RigidInverse().Point(wb.Center)));
                 last = c.Id;
             }
-            catch (Exception ex) { App.Log(ex, "Insert " + p); await Dialogs.Message(this, "Insert Component", $"{Path.GetFileName(p)} could not be inserted: {ex.Message}"); }
+            catch (Exception ex) { App.Log(ex, "Insert " + p); await Dialogs.Message(this, "Insert Failed", $"Could not insert {Path.GetFileName(p)}: {ex.Message}"); }
         }
         if (last == null) { a.AbandonChange(); return; }
         a.Selected = last;
@@ -79,7 +79,7 @@ public partial class MainWindow
         Viewport.Focus();
         var unsaved = open.Where(t => t is { Session.Dirty: true }).Select(t => TitleOf(t!).TrimEnd(' ', '*')).ToList();
         Status($"Inserted {string.Join(", ", paths.Select(Path.GetFileNameWithoutExtension))}." +
-               (unsaved.Count > 0 ? $" {string.Join(", ", unsaved)} has unsaved changes: inserted as last saved." : " Drag it to move it; Shift+drag turns it."));
+               (unsaved.Count > 0 ? $" {string.Join(", ", unsaved)} has unsaved changes; the last saved version was inserted." : " Drag to move; Shift+drag to rotate."));
     }
 
     /// <summary>The middle of what the assembly holds (the origin when empty): dropped parts go at its depth.</summary>
@@ -125,8 +125,8 @@ public partial class MainWindow
             if (d.X * d.X + d.Y * d.Y < 16) return;
             var p = press; press = null;
             e.Pointer.Capture(null);
-            if (t.Session.FilePath == null) { Status($"Save {TitleOf(t).TrimEnd(' ', '*')} first: an assembly refers to parts by their files."); return; }
-            Status($"Drop {TitleOf(t).TrimEnd(' ', '*')} in the graphics area to insert it where it is dropped.");
+            if (t.Session.FilePath == null) { Status($"Save {TitleOf(t).TrimEnd(' ', '*')} before inserting it into an assembly."); return; }
+            Status($"Drop {TitleOf(t).TrimEnd(' ', '*')} in the graphics area to insert it.");
             var data = new DataTransfer();
             data.Add(DataTransferItem.Create(PartDragFormat, t.Session.FilePath));
             await DragDrop.DoDragDropAsync(p, data, DragDropEffects.Copy);

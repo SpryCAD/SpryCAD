@@ -28,14 +28,14 @@ public sealed partial class SketchEditor
             {
                 _filletFirstLine = piece.Id;
                 Selected.Clear(); Selected.Add(new SkRef(SkRefKind.Entity, piece.Id)); SelectionChanged?.Invoke();
-                Message?.Invoke("Sketch Fillet: now click the other line or arc of the corner.");
+                Message?.Invoke("Sketch Fillet: select the other line or arc of the corner.");
                 return;
             }
             corner = SharedPoint(Sk.Entity(_filletFirstLine)!, piece);
             _filletFirstLine = -1;
-            if (corner < 0) { Message?.Invoke("Sketch Fillet: those do not meet at a corner."); return; }
+            if (corner < 0) { Message?.Invoke("Sketch Fillet: the selected entities do not meet at a corner."); return; }
         }
-        else { Message?.Invoke("Sketch Fillet: click a corner where two lines or arcs meet, or the two of them."); return; }
+        else { Message?.Invoke("Sketch Fillet: select a corner where two lines or arcs meet, or both entities."); return; }
         FilletCorners(new[] { corner });
     }
 
@@ -77,7 +77,7 @@ public sealed partial class SketchEditor
         }
         Selected.Clear(); SelectionChanged?.Invoke();
         Resolve();
-        Message?.Invoke(error ?? $"Filleted {done} corner{(done == 1 ? "" : "s")} (R {Units.Length(FilletRadius)}). The original lines and arcs remain as construction geometry; delete the fillet to restore the corner.");
+        Message?.Invoke(error ?? $"Filleted {done} corner{(done == 1 ? "" : "s")} with R {Units.Length(FilletRadius)}. The original entities remain as construction geometry; delete the fillet to restore the corner.");
         _vp.Redraw();
     }
 
@@ -105,7 +105,7 @@ public sealed partial class SketchEditor
     public string? Offset(IReadOnlyCollection<long> ids, double distance, bool reverse)
     {
         ids = ids.Where(id => Sk.Entity(id) is SkLine or SkArc or SkCircle or SkSpline).ToList();
-        if (ids.Count == 0) return "Offset Entities: select a line, arc, circle or spline (the chain it is part of is offset).";
+        if (ids.Count == 0) return "Offset Entities: select a line, arc, circle or spline; its connected chain is offset.";
         Snapshot();
         OffsetDistance = distance;
         var (off, err) = SketchOps.Offset(Sk, SketchOps.Chain(Sk, ids), distance, reverse);
@@ -170,7 +170,7 @@ public sealed partial class SketchEditor
         var lines = ents.OfType<SkLine>().ToList();
         var axis = lines.LastOrDefault(l => l.Construction)
             ?? Selected.Where(r => r.Kind == SkRefKind.Entity).Select(r => Sk.Entity(r.Id)).OfType<SkLine>().LastOrDefault();
-        if (axis == null) return "Mirror: select the entities to mirror and a centerline (or line) to mirror about.";
+        if (axis == null) return "Mirror: select the entities to mirror and a centerline or line to mirror about.";
         return Mirror(ents.Where(e => e.Id != axis.Id).Select(e => e.Id).ToList(), axis.Id);
     }
 
@@ -180,9 +180,9 @@ public sealed partial class SketchEditor
     /// </summary>
     public string? Mirror(IReadOnlyCollection<long> ids, long axisLine)
     {
-        if (Sk.Entity(axisLine) is not SkLine) return "Mirror: pick a centerline (or line) to mirror about.";
+        if (Sk.Entity(axisLine) is not SkLine) return "Mirror: select a centerline or line to mirror about.";
         var toMirror = ids.Where(id => id != axisLine && Sk.Entity(id) is { IsReference: false }).ToList();
-        if (toMirror.Count == 0) return "Mirror: pick the entities to mirror as well as the line to mirror about.";
+        if (toMirror.Count == 0) return "Mirror: select the entities to mirror as well as the line to mirror about.";
         Snapshot();
         var made = SketchOps.Mirror(Sk, toMirror, axisLine);
         Selected.Clear();

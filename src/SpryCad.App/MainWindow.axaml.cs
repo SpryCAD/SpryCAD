@@ -42,7 +42,7 @@ public partial class MainWindow : Window
         Viewport.RotateAbout = UserSettings.RotateAbout;
         Viewport.Camera.Perspective = UserSettings.Perspective;
         Viewport.AntiAliasing = UserSettings.AntiAliasing;
-        Viewport.SoftwareRenderer += () => Status("The view is drawn without the graphics card (a software renderer), slow with large models: see Tools > Options > Graphics.");
+        Viewport.SoftwareRenderer += () => Status("Software rendering is active and large models may be slow. See Tools > Options > Graphics.");
         Viewport.Overlay = Overlay;
         Viewport.Selection = Selection;
         Viewport.ContextRequested += OnViewportContext;
@@ -159,7 +159,8 @@ public partial class MainWindow : Window
     /// </summary>
     void ShowTimeOnScreen()
     {
-        if (Session.Timing is not { Shown: 0 } timing) return;
+        // (not for an assembly: its tab's part is a blank stand-in, whose time says nothing about the assembly)
+        if (Asm != null || Session.Timing is not { Shown: 0 } timing) return;
         var session = Session;
         var text = StatusRebuild.Text;
         Viewport.AfterNextFrame(at =>
@@ -167,7 +168,7 @@ public partial class MainWindow : Window
             if (!ReferenceEquals(session.Timing, timing) || timing.Shown != 0) return;
             timing.Shown = at;
             if (!ReferenceEquals(session, Session) || StatusRebuild.Text != text) return; // another tab, or a newer status
-            StatusRebuild.Text = $"{text}  ·  on screen in {timing.TotalMs:0} ms";
+            StatusRebuild.Text = $"{text}  ·  displayed in {timing.TotalMs:0} ms";
             var tip = ToolTip.GetTip(StatusRebuild) as string;
             ToolTip.SetTip(StatusRebuild, tip == null ? timing.Breakdown : tip + Environment.NewLine + Environment.NewLine + timing.Breakdown);
         });
@@ -195,7 +196,7 @@ public partial class MainWindow : Window
     void SetupUnitsSwitch()
     {
         StatusUnits.Cursor = new Cursor(StandardCursorType.Hand);
-        ToolTip.SetTip(StatusUnits, "Units: click to change");
+        ToolTip.SetTip(StatusUnits, "Click to change the unit system");
         StatusUnits.PointerPressed += (_, e) =>
         {
             if (!e.GetCurrentPoint(StatusUnits).Properties.IsLeftButtonPressed) return;
@@ -217,9 +218,12 @@ public partial class MainWindow : Window
         if (Units == u) return;
         if (Asm is { } a) { a.BeginChange(); a.Model.Doc.Units = u; a.EndChange(); }
         else Session.Change(() => Session.Doc.Units = u);
+        // (new parts start in them too)
+        UserSettings.Units = u;
+        UserSettings.Save();
         StatusUnits.Text = Units.ToString();
         RefreshScene();
-        Status($"Units: {u}.");
+        Status($"Units set to {u}.");
     }
 
     void OnDocumentChanged()
@@ -231,6 +235,7 @@ public partial class MainWindow : Window
         Viewport.PartColor = new Rgba((float)Session.Doc.Color[0], (float)Session.Doc.Color[1], (float)Session.Doc.Color[2]);
         RebuildTree();
         RefreshRevisions();
+        RefreshBom();
     }
 
     // what the feature tree was last built from
@@ -290,6 +295,7 @@ public partial class MainWindow : Window
     public void RefreshScene()
     {
         UpdateColorByLabels();
+        UpdateHudStates();
         if (Asm != null) { RefreshAssemblyScene(); return; }
         UpdateHudStates();
         Viewport.Instances = Array.Empty<MeshInstance>();
@@ -411,7 +417,7 @@ public partial class MainWindow : Window
         var show = shown ?? !doc.SketchShown(id, consumed);
         if (show == doc.SketchShown(id, consumed)) return;
         Session.Change(() => doc.SetSketchShown(id, show, consumed));
-        Status($"{doc.Find(id)?.Name ?? id + " Plane"} {(show ? "shown" : "hidden")}");
+        Status($"{doc.Find(id)?.Name ?? id + " Plane"} {(show ? "shown" : "hidden")}.");
     }
 
     /// <summary>Exact geometry of a selected face/edge for the status bar (like SolidWorks).</summary>
@@ -647,7 +653,7 @@ public partial class MainWindow : Window
                     HidePalette();
                     if (Asm is { Selected: not null } or { SelectedMate: not null }) SelectMate(null);
                     if (_asmOriginSel != null) { _asmOriginSel = null; RefreshAssemblyScene(); }
-                    if (_normalToPick) { _normalToPick = false; RefreshAssemblyScene(); Status("Normal To cancelled."); }
+                    if (_normalToPick) { _normalToPick = false; RefreshAssemblyScene(); Status("Normal To canceled."); }
                     e.Handled = true;
                 }
                 break;
@@ -847,17 +853,17 @@ public partial class MainWindow : Window
         List<Recoverable> found;
         try { found = WorkingCopy.FindRecoverable(); }
         catch (Exception ex) { App.Log(ex, "Recovery"); return; }
-        if (found.Count == 0) { if (!atStart) Status("Nothing to recover: no part was left unsaved."); return; }
+        if (found.Count == 0) { if (!atStart) Status("No unsaved work to recover."); return; }
         var one = found.Count == 1;
         var list = string.Join("\n", found.Select(r => $"    {r.Name}   (autosaved {r.SavedUtc.ToLocalTime():g})"));
         var choice = await Dialogs.YesNoCancel(this, "Recover Unsaved Work",
             $"SpryCAD closed without saving {(one ? "this part" : "these parts")}:\n\n{list}\n\n" +
-            $"Restore {(one ? "it" : "them")} as last autosaved? (Cancel keeps {(one ? "it" : "them")} to decide later.)", "Restore", "Discard");
+            $"Restore {(one ? "it" : "them")} from the last autosave? Cancel keeps {(one ? "it" : "them")} for later.", "Restore", "Discard");
         if (choice == null) return;
-        if (choice == false) { foreach (var r in found) WorkingCopy.Discard(r); Status("Discarded the unsaved work."); return; }
+        if (choice == false) { foreach (var r in found) WorkingCopy.Discard(r); Status("Unsaved work discarded."); return; }
         int n = 0;
         foreach (var r in found) { if (!await RecoverInTab(r)) break; n++; }
-        if (n > 0) Status(n == 1 ? "Restored the unsaved part: save it to keep it." : $"Restored {n} unsaved parts: save them to keep them.");
+        if (n > 0) Status(n == 1 ? "Restored the unsaved part. Save it to keep the changes." : $"Restored {n} unsaved parts. Save them to keep the changes.");
     }
 
     async Task<bool> RecoverInTab(Recoverable r)
@@ -876,7 +882,7 @@ public partial class MainWindow : Window
         catch (Exception ex)
         {
             App.Log(ex, "Recover " + r.WorkingPath);
-            await Dialogs.Message(this, "Recover failed", ex.Message);
+            await Dialogs.Message(this, "Recover Failed", $"Could not recover {r.Name}: {ex.Message}");
             return false;
         }
     }
@@ -890,7 +896,7 @@ public partial class MainWindow : Window
         foreach (var t in _parts.Where(DirtyOf).ToList())
         {
             if (!await SwitchTo(t)) return;
-            var r = await Dialogs.YesNoCancel(this, "SpryCAD", $"Save changes to {TitleOf(t).TrimEnd(' ', '*')}?");
+            var r = await Dialogs.YesNoCancel(this, "Save Changes", $"Save changes to {TitleOf(t).TrimEnd(' ', '*')}?");
             if (r == null) return;
             if (r == true && !await Save()) return;
         }

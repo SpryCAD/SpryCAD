@@ -33,6 +33,15 @@ public partial class MainWindow
     {
         var m = new MenuItem { Header = header };
         if (gesture != null) m.InputGesture = Avalonia.Input.KeyGesture.Parse(gesture);
+        // Avalonia shows a number key by its name ("Ctrl+D1"): the menu's gesture text put as the key reads (Ctrl+1)
+        if (m.InputGesture is { } g && g.Key is >= Avalonia.Input.Key.D0 and <= Avalonia.Input.Key.D9)
+            m.TemplateApplied += (_, _) => Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+            {
+                var raw = Avalonia.Controls.Converters.PlatformKeyGestureConverter.ToPlatformString(g);
+                var digit = (char)('0' + (g.Key - Avalonia.Input.Key.D0));
+                foreach (var tb in Avalonia.VisualTree.VisualExtensions.GetVisualDescendants(m).OfType<TextBlock>())
+                    if (tb.Text == raw && raw.EndsWith("D" + digit)) tb.Text = raw[..^2] + digit;
+            });
         if (icon != null) m.Icon = Icons.Make(icon, 16);
         m.Click += (_, _) => click();
         return m;
@@ -117,19 +126,19 @@ public partial class MainWindow
         MainMenu.Items.Add(Sub("_File",
             Item("_New", () => _ = NewFile(), "Ctrl+N", "new"),
             Item("New _Assembly", NewAssembly, null, "new"),
-            Item("_Open...", () => _ = OpenFileDialog(), "Ctrl+O", "open"),
+            Item("_Open…", () => _ = OpenFileDialog(), "Ctrl+O", "open"),
             Item("_Save", () => _ = Save(), "Ctrl+S", "save"),
-            Item("Save _As...", () => _ = SaveAs(), "Ctrl+Shift+S"),
+            Item("Save _As…", () => _ = SaveAs(), "Ctrl+Shift+S"),
             Item("_Close", () => _ = CloseTab(_tab), "Ctrl+W"),
             RecentMenu(),
             "-",
-            PartMenu(Item("_Import STEP...", () => _ = ImportDialog(), "Ctrl+I", "import")),
-            Item("Export _STEP...", () => _ = Export("step"), null, "export-step"),
-            Item("Export S_TL...", () => _ = Export("stl"), null, "export-stl"),
-            PartMenu(Item("Export Flat Pattern _DXF...", () => _ = ExportDxf(), null, "export-dxf")),
+            PartMenu(Item("_Import STEP…", () => _ = ImportDialog(), "Ctrl+I", "import")),
+            Item("Export _STEP…", () => _ = Export("step"), null, "export-step"),
+            Item("Export S_TL…", () => _ = Export("stl"), null, "export-stl"),
+            PartMenu(Item("Export Flat Pattern _DXF…", () => _ = ExportDxf(), null, "export-dxf")),
             "-",
             Item("Re_visions", () => ShowTaskPane(_revisionsPane, focus: true), null, "revisions"),
-            Item("_History...", HistoryCommand),
+            Item("_History…", HistoryCommand),
             Item("Recover Autosave", () => OfferRecovery(atStart: false)),
             "-",
             Item("E_xit", Close)));
@@ -178,47 +187,47 @@ public partial class MainWindow
             Item("_Sketch", () => StartSketchCommand(), null, "sketch"),
             "-",
             Sub("_Boss/Base",
-                Item("_Extrude...", () => ExtrudeCommand(false), null, "extrude"),
-                Item("_Revolve...", () => RevolveCommand(false), null, "revolve"),
-                Item("S_wept...", () => SweepCommand(false), null, "sweep"),
-                Item("_Lofted...", () => LoftCommand(false), null, "loft"),
-                Item("_Helical...", () => HelicalCommand(false), null, "helical")),
+                Item("_Extrude…", () => ExtrudeCommand(false), null, "extrude"),
+                Item("_Revolve…", () => RevolveCommand(false), null, "revolve"),
+                Item("S_wept…", () => SweepCommand(false), null, "sweep"),
+                Item("_Lofted…", () => LoftCommand(false), null, "loft"),
+                Item("_Helical…", () => HelicalCommand(false), null, "helical")),
             Sub("_Cut",
-                Item("_Extrude...", () => ExtrudeCommand(true), null, "cut"),
-                Item("_Revolve...", () => RevolveCommand(true), null, "cutrevolve"),
-                Item("S_wept...", () => SweepCommand(true), null, "cutsweep"),
-                Item("_Lofted...", () => LoftCommand(true), null, "cutloft"),
-                Item("_Helical...", () => HelicalCommand(true), null, "cuthelical")),
+                Item("_Extrude…", () => ExtrudeCommand(true), null, "cut"),
+                Item("_Revolve…", () => RevolveCommand(true), null, "cutrevolve"),
+                Item("S_wept…", () => SweepCommand(true), null, "cutsweep"),
+                Item("_Lofted…", () => LoftCommand(true), null, "cutloft"),
+                Item("_Helical…", () => HelicalCommand(true), null, "cuthelical")),
             Sub("_Features",
-                Item("_Fillet...", () => BlendCommand(true), null, "fillet"),
-                Item("_Chamfer...", () => BlendCommand(false), null, "chamfer"),
-                Item("_Hole Wizard...", HoleCommand, null, "hole"),
-                Item("_Thread...", ThreadCommand, null, "thread"),
-                Item("_Shell...", ShellCommand, null, "shell"),
-                Item("_Draft...", DraftCommand, null, "draft"),
-                Item("C_ombine...", CombineCommand, null, "combine")),
+                Item("_Fillet…", () => BlendCommand(true), null, "fillet"),
+                Item("_Chamfer…", () => BlendCommand(false), null, "chamfer"),
+                Item("_Hole Wizard…", HoleCommand, null, "hole"),
+                Item("_Thread…", ThreadCommand, null, "thread"),
+                Item("_Shell…", ShellCommand, null, "shell"),
+                Item("_Draft…", DraftCommand, null, "draft"),
+                Item("C_ombine…", CombineCommand, null, "combine")),
             Sub("_Pattern/Mirror",
-                Item("_Linear Pattern...", LinearPatternCommand, null, "lpattern"),
-                Item("_Circular Pattern...", CircularPatternCommand, null, "cpattern"),
-                Item("_Mirror...", MirrorCommand, null, "mirror")),
+                Item("_Linear Pattern…", LinearPatternCommand, null, "lpattern"),
+                Item("_Circular Pattern…", CircularPatternCommand, null, "cpattern"),
+                Item("_Mirror…", MirrorCommand, null, "mirror")),
             Sub("_Reference Geometry",
-                Item("_Plane...", PlaneCommand, null, "plane"),
-                Item("_Axis...", AxisCommand, null, "axis")),
+                Item("_Plane…", PlaneCommand, null, "plane"),
+                Item("_Axis…", AxisCommand, null, "axis")),
             Sub("Sheet _Metal",
-                Item("_Flat Pattern...", FlatPatternCommand, null, "flatpattern"),
+                Item("_Flat Pattern…", FlatPatternCommand, null, "flatpattern"),
                 Item("Fla_tten", ToggleFlatten, null, "flatten"))));
         MainMenu.Items.Add(Sub("_Tools",
-            PartMenu(Item("_Equations...", () => _ = Dialogs.Equations(this), null, "equations")),
-            PartMenu(Item("_Design Table...", () => _ = Dialogs.DesignTables(this), null, "table")),
-            PartMenu(Item("_Configure...", () => _ = Dialogs.ConfigurePart(this), null, "configure")),
-            Item("Mea_sure...", MeasureCommand, null, "measure"),
-            Item("_Mass Properties...", MassPropertiesCommand, null, "mass"),
+            PartMenu(Item("_Equations…", () => _ = Dialogs.Equations(this), null, "equations")),
+            PartMenu(Item("_Design Table…", () => _ = Dialogs.DesignTables(this), null, "table")),
+            PartMenu(Item("_Configure…", () => _ = Dialogs.ConfigurePart(this), null, "configure")),
+            Item("Mea_sure…", MeasureCommand, null, "measure"),
+            Item("_Mass Properties…", MassPropertiesCommand, null, "mass"),
             "-",
-            Item("_Options...", () => _ = Dialogs.Options(this), null, "options")));
+            Item("_Options…", () => _ = Dialogs.Options(this), null, "options")));
         MainMenu.Items.Add(Sub("_Help",
             Item("_Keyboard Shortcuts", () => _ = Dialogs.Shortcuts(this), null, "help"),
-            Item("Check for _Updates...", () => _ = Updater.CheckNow(this)),
-            Item("_Change Log...", () => _ = Updater.ShowChangelog(this)),
+            Item("Check for _Updates…", () => _ = Updater.CheckNow(this)),
+            Item("_Change Log…", () => _ = Updater.ShowChangelog(this)),
             Item("_About SpryCAD", () => _ = Dialogs.About(this))));
     }
 
@@ -390,45 +399,45 @@ public partial class MainWindow
     /// <summary>One-line descriptions shown under the command name in toolbar tooltips.</summary>
     static readonly Dictionary<string, string> CommandHelp = new()
     {
-        ["Extruded Boss/Base"] = "Extends a sketch profile to add material.",
-        ["Extruded Cut"] = "Extends a sketch profile to remove material.",
+        ["Extruded Boss/Base"] = "Extrudes a sketch profile to add material.",
+        ["Extruded Cut"] = "Extrudes a sketch profile to remove material.",
         ["Revolved Boss/Base"] = "Revolves a sketch profile about a centerline to add material.",
         ["Revolved Cut"] = "Revolves a sketch profile about a centerline to remove material.",
         ["Swept Boss/Base"] = "Sweeps a closed profile along a path of lines and arcs to add material.",
         ["Swept Cut"] = "Sweeps a closed profile along a path of lines and arcs to remove material.",
-        ["Lofted Boss/Base"] = "Adds material between profiles in order (and through guide curves): a transition from one shape to the next.",
-        ["Lofted Cut"] = "Removes material between profiles in order (and through guide curves).",
-        ["Hole Wizard"] = "Simple, counterbored or countersunk holes placed on a face.",
-        ["Helical Boss/Base"] = "Sweeps a closed profile along a helix about a centerline of its sketch (springs, coils).",
-        ["Helical Cut"] = "Cuts a closed profile swept along a helix about a centerline of its sketch.",
-        ["Thread"] = "Models a metric thread on a shaft or in a hole, with a fit clearance for 3D printing.",
-        ["Fillet"] = "Rounds the selected edges (tangent edges are included).",
-        ["Chamfer"] = "Bevels the selected edges.",
+        ["Lofted Boss/Base"] = "Adds material by lofting between profiles, optionally along guide curves.",
+        ["Lofted Cut"] = "Removes material by lofting between profiles, optionally along guide curves.",
+        ["Hole Wizard"] = "Creates simple, counterbore or countersink holes on a planar face.",
+        ["Helical Boss/Base"] = "Sweeps a closed profile along a helix about a sketch centerline to add material.",
+        ["Helical Cut"] = "Sweeps a closed profile along a helix about a sketch centerline to remove material.",
+        ["Thread"] = "Adds a modeled or cosmetic metric thread to a cylindrical face.",
+        ["Fillet"] = "Rounds the selected edges or faces.",
+        ["Chamfer"] = "Bevels the selected edges or faces.",
         ["Shell"] = "Hollows the part, leaving the selected faces open.",
-        ["Draft"] = "Tapers faces by an angle about a neutral plane, so the part comes out of a mould (planar faces, and round faces along the pull direction).",
+        ["Draft"] = "Tapers faces by an angle from a neutral plane for mold release.",
         ["Linear Pattern"] = "Copies features along one or two directions.",
         ["Circular Pattern"] = "Copies features around an axis.",
         ["Mirror"] = "Mirrors features about a plane or planar face.",
         ["Reference Plane"] = "Creates a plane offset from a plane or planar face.",
         ["Combine"] = "Adds, subtracts or intersects bodies.",
-        ["Flat Pattern"] = "Unfolds the sheet metal part about a fixed face (bend allowance from the K-factor).",
-        ["Flatten"] = "Shows the part flat or folded.",
-        ["Export DXF"] = "Writes the flat pattern outline and bend lines as a DXF file.",
+        ["Flat Pattern"] = "Unfolds the sheet metal part from a fixed face, using the K-factor for bend allowance.",
+        ["Flatten"] = "Toggles the part between flattened and folded.",
+        ["Export DXF"] = "Exports the flat pattern outline and bend lines as a DXF file.",
         ["Sketch"] = "Starts a sketch on the selected plane or planar face.",
-        ["Smart Dimension"] = "Dimensions sketch entities and model edges/vertices.",
-        ["Line"] = "Sketches lines. Snapping adds relations, also to model edges, midpoints and centers.",
+        ["Smart Dimension"] = "Dimensions sketch entities and model edges or vertices.",
+        ["Line"] = "Sketches lines, adding relations when they snap to entities, model edges, midpoints and centers.",
         ["Convert Entities"] = "Projects the selected model edges into the sketch.",
         ["Trim Entities"] = "Trims sketch entities at their intersections.",
-        ["Sketch Fillet"] = "Rounds the corner where two lines meet. The lines stay as construction geometry (the virtual sharp); deleting the arc restores the corner.",
-        ["Offset Entities"] = "Offsets the selected sketch chain (lines, arcs, circles) by a distance. The copy follows the original; the distance is a dimension.",
-        ["Mirror Entities"] = "Mirrors the selected entities about the selected centerline. The copies stay mirrored.",
+        ["Sketch Fillet"] = "Rounds the corner where two lines meet, keeping the lines as construction geometry.",
+        ["Offset Entities"] = "Offsets the selected sketch chain by a dimensioned distance, linked to the original.",
+        ["Mirror Entities"] = "Mirrors the selected entities about a centerline, keeping the copies linked.",
         ["Construction Geometry"] = "Toggles the selected sketch entities to construction.",
-        ["Add Relations"] = "Relates points and entities you click (coincident, horizontal, tangent…), no Ctrl needed.",
-        ["Measure"] = "Distance, angle, radius, length and area of the faces, edges and vertices you click.",
-        ["Mass Properties"] = "Mass, volume, surface area, center of mass and moments of inertia, with the part's material.",
-        ["Equations"] = "Global variables that drive dimensions; conditions on them suppress features (right-click a feature: Suppress When).",
-        ["Design Table"] = "Rows of values for sets of variables (a screw's sizes): choosing a row sets them all.",
-        ["Configure"] = "Sets the part's user-facing parameters: its design tables' rows and the variables marked User.",
+        ["Add Relations"] = "Adds relations such as coincident, horizontal or tangent between the selected entities.",
+        ["Measure"] = "Measures distance, angle, radius, length and area of the selected faces, edges and vertices.",
+        ["Mass Properties"] = "Calculates mass, volume, surface area, center of mass and moments of inertia from the part's material.",
+        ["Equations"] = "Defines global variables that drive dimensions and conditions that suppress features.",
+        ["Design Table"] = "Defines rows of variable values; selecting a row applies them all.",
+        ["Configure"] = "Sets the part's design table rows and the variables marked User.",
     };
 
     void Sep() => CommandBar.Children.Add(new Border { Width = 1, Background = Palette.Border, Margin = new Thickness(4, 6) });
@@ -457,7 +466,7 @@ public partial class MainWindow
     void BuildPanelTabs()
     {
         AddPanelTab(TreeTab, "part", "FeatureManager Design Tree", TreePanel());
-        AddPanelTab(PropertyTab, "propsheet", "PropertyManager (the settings of the feature or sketch being edited)", PmHost,
+        AddPanelTab(PropertyTab, "propsheet", "PropertyManager", PmHost,
             available: () => _page != null);
         PanelTabs.SelectionChanged += (_, _) =>
         {
@@ -572,7 +581,6 @@ public partial class MainWindow
 
     /// <summary>View > Color by Feature: each face in its feature's color, with a swatch of it on the feature's tree row.</summary>
     bool _colorByFeature;
-    // the button and menu item (in an assembly they color by part: each part its own color, on all its instances)
     // the view bar's toggles, shown pressed while on
     Button? _planesButton, _sectionButton;
 
@@ -622,7 +630,7 @@ public partial class MainWindow
             {
                 _normalToPick = true;
                 RefreshAssemblyScene();
-                Status("Normal To: click a flat face of a component to look straight at it (Esc to cancel).");
+                Status("Normal To: select a planar face of a component (Esc to cancel).");
                 return;
             }
         }
@@ -638,7 +646,7 @@ public partial class MainWindow
     {
         if (Asm is not { } a) return;
         if (a.Model.RefTo(component, face) is not { } r || a.Model.World(r) is not { Kind: Core.Assembly.MateGeomKind.Plane } g)
-        { Status($"{a.Model.NameAt(component)}: that face is not flat (pick a flat face, or Esc)."); return; }
+        { Status($"The selected face of {a.Model.NameAt(component)} is not planar. Select a planar face (Esc to cancel)."); return; }
         _normalToPick = false;
         RefreshAssemblyScene();
         Viewport.NormalTo(Frame.FromPlane(Plane.FromPointNormal(g.P, g.D)));
@@ -697,7 +705,7 @@ public partial class MainWindow
         if (_page?.ActiveBox != null)
         {
             if (_page.HandlePick(item)) UpdateEmphasis();
-            else Status($"This page has no box for {what}.");
+            else Status($"No selection box on this page accepts {what}.");
         }
         else Selection.Set(item);
         Viewport.Redraw();
@@ -727,8 +735,15 @@ public partial class MainWindow
                 && asm.Model.FaceGeom(mh.id, mf) is { Kind: Core.Assembly.MateGeomKind.Axis })
             {
                 menu.Items.Add(Item("Select Axis", () => PickFace(mh.id, mf)));
-                menu.Items.Add(Item("Select Center", () => PickRef(asm.Model.RefTo(mh.id, mf, asm.Model.NearerEnd(mh.id, mf, mh.point)), "That face has no circle to take the center of.")));
+                menu.Items.Add(Item("Select Center", () => PickRef(asm.Model.RefTo(mh.id, mf, asm.Model.NearerEnd(mh.id, mf, mh.point)), "The selected face has no circular edge.")));
                 menu.Items.Add(new Separator());
+            }
+            // a component right-clicked in an assembly: selected, as a click selects it, and its menu as its row in the
+            // tree has it (the view's commands after)
+            else if (Asm is { } ca && _page == null && Viewport.PickInstance(p.X, p.Y) is { } ch)
+            {
+                SelectComponent(ch.id);
+                if (ca.Selected is { } sel && _asmTree.ComponentMenu(sel) is { } cm) menu = cm;
             }
             var hit = Viewport.Pick(p.X, p.Y, SelFilter.Any);
             if (hit != null && !Selection.Contains(hit)) Selection.Set(hit);
@@ -804,7 +819,7 @@ public partial class MainWindow
             }
             menu.Items.Add(new Separator());
             menu.Items.Add(Item(f.Suppressed ? "Unsuppress" : "Suppress", () => SetSuppressed(!f.Suppressed), null, f.Suppressed ? "part" : "suppress"));
-            menu.Items.Add(Item(string.IsNullOrWhiteSpace(f.SuppressWhen) ? "Suppress When..." : "Edit Suppress Condition...", () => _ = Dialogs.SuppressWhen(this, f), null, "equations"));
+            menu.Items.Add(Item(string.IsNullOrWhiteSpace(f.SuppressWhen) ? "Suppress When…" : "Edit Suppress Condition…", () => _ = Dialogs.SuppressWhen(this, f), null, "equations"));
             menu.Items.Add(Item("Rename", () => _ = RenameFeature(f), "F2", "rename"));
             menu.Items.Add(Item("Roll Back", () => RollbackTo(id, false), null, "rollback"));
             menu.Items.Add(Item("Delete", DeleteSelected, null, "delete"));
@@ -843,8 +858,8 @@ public partial class MainWindow
     /// </summary>
     void ImportFile(string path)
     {
-        if (ImportInto(_tab, path) is { } err) { _ = Dialogs.Message(this, "Import failed", err); return; }
-        Status("Imported " + Path.GetFileName(path));
+        if (ImportInto(_tab, path) is { } err) { _ = Dialogs.Message(this, "Import Failed", err); return; }
+        Status("Imported " + Path.GetFileName(path) + ".");
     }
 
     /// <summary>Imports a STEP file into a tab's part (shown or not); the problem when it cannot, else null.</summary>
@@ -882,7 +897,7 @@ public partial class MainWindow
     {
         if (!HasPendingEdit) return true;
         var what = _sketch != null ? _sketch.Feature.Name : _edit!.Feature.Name;
-        var r = await Dialogs.YesNoCancel(this, "SpryCAD", $"{what} is still being edited. Keep the changes?", "Keep", "Discard");
+        var r = await Dialogs.YesNoCancel(this, "Keep Changes", $"{what} is still being edited. Keep the changes?", "Keep", "Discard");
         if (r == null) return false;
         if (_sketch != null) ExitSketch(r == true);
         else if (r == true) CommitEdit(); else CancelEdit();
@@ -902,7 +917,7 @@ public partial class MainWindow
         if (!await ResolvePendingEdit()) return false;
         if (Asm != null) return await ConfirmDiscardAssembly();
         if (!Session.Dirty) return true;
-        var r = await Dialogs.YesNoCancel(this, "SpryCAD", $"Save changes to {Session.Title.TrimEnd(' ', '*')}?");
+        var r = await Dialogs.YesNoCancel(this, "Save Changes", $"Save changes to {Session.Title.TrimEnd(' ', '*')}?");
         if (r == null) return false;
         if (r == true) return await Save();
         return true;
@@ -951,7 +966,7 @@ public partial class MainWindow
         }
         if (first == null) return;
         if (await SwitchTo(first) && blank != null && blank != first && _tab != blank) RemoveTab(blank);
-        Status($"Opened {paths.Count} files: each part is read when shown; previews are made in the background.");
+        Status($"Opened {paths.Count} files. Each part loads when its tab is shown.");
         StartPreviews();
     }
 
@@ -983,7 +998,7 @@ public partial class MainWindow
             Session.New();
             // a file that cannot be read stays open, marked, saying why (as in a batch)
             if (ImportInto(_tab, path) is { } err) { _tab.LoadError = err; EndLoading(_tab); UpdateTabHeader(_tab); }
-            else Status("Imported " + Path.GetFileName(path));
+            else Status("Imported " + Path.GetFileName(path) + ".");
             Session.MarkClean();
             UpdateLoadBanner();
             return true;
@@ -1005,11 +1020,11 @@ public partial class MainWindow
             // someone else has it open: read-only (saving makes a copy elsewhere), unless the user says otherwise
             if (tab.Session.ForeignLock is { } l)
             {
-                tab.Session.ReadOnly = await Dialogs.YesNo(this, "Opened by Someone Else",
-                    $"{Path.GetFileName(path)} is open by {l.User} on {l.Machine} since {l.SinceUtc.ToLocalTime():g}.\n\n" +
-                    "Open it read-only (saving makes a copy elsewhere), or open it anyway (whoever saves last overwrites the other)?",
+                tab.Session.ReadOnly = await Dialogs.YesNo(this, "File in Use",
+                    $"{Path.GetFileName(path)} has been open by {l.User} on {l.Machine} since {l.SinceUtc.ToLocalTime():g}.\n\n" +
+                    "Open it read-only, or open it anyway? If opened anyway, the last save overwrites the other user's changes.",
                     "Read-Only", "Open Anyway");
-                if (tab.Session.ReadOnly) Status($"Opened {Path.GetFileName(path)} read-only: {l.User} has it open.");
+                if (tab.Session.ReadOnly) Status($"Opened {Path.GetFileName(path)} read-only. {l.User} has it open.");
             }
             return true;
         }
@@ -1043,20 +1058,20 @@ public partial class MainWindow
         if (_tab.EmbeddedName != null)
         {
             try { if (await SaveEmbedded(_tab) is { } done) return done; }
-            catch (Exception ex) { App.Log(ex, "Save embedded"); await Dialogs.Message(this, "Save failed", ex.Message); return false; }
+            catch (Exception ex) { App.Log(ex, "Save embedded"); await Dialogs.Message(this, "Save Failed", "Could not save: " + ex.Message); return false; }
         }
         if (Session.FilePath == null || Session.ReadOnly) return await SaveAs();
-        try { Session.Save(Session.FilePath); RecentFiles.Add(Session.FilePath); Status("Saved " + Session.FilePath); return true; }
+        try { Session.Save(Session.FilePath); RecentFiles.Add(Session.FilePath); Status("Saved " + Session.FilePath + "."); return true; }
         catch (SaveConflictException ex)
         {
             // someone else saved it since it was opened: keep both (a copy), or overwrite theirs
             var r = await Dialogs.YesNoCancel(this, "Save Conflict", ex.Message + "\n\nSave your version as a copy, or overwrite theirs?", "Save as Copy", "Overwrite");
             if (r == null) return false;
             if (r == true) return await SaveAs();
-            try { Session.Save(Session.FilePath, overwrite: true); RecentFiles.Add(Session.FilePath); Status("Saved " + Session.FilePath); return true; }
-            catch (Exception ex2) { App.Log(ex2, "Save failed"); await Dialogs.Message(this, "Save failed", ex2.Message); return false; }
+            try { Session.Save(Session.FilePath, overwrite: true); RecentFiles.Add(Session.FilePath); Status("Saved " + Session.FilePath + "."); return true; }
+            catch (Exception ex2) { App.Log(ex2, "Save failed"); await Dialogs.Message(this, "Save Failed", $"Could not save {Path.GetFileName(Session.FilePath)}: {ex2.Message}"); return false; }
         }
-        catch (Exception ex) { App.Log(ex, "Save failed"); await Dialogs.Message(this, "Save failed", ex.Message); return false; }
+        catch (Exception ex) { App.Log(ex, "Save failed"); await Dialogs.Message(this, "Save Failed", $"Could not save {Path.GetFileName(Session.FilePath)}: {ex.Message}"); return false; }
     }
 
     async Task<bool> SaveAs()
@@ -1074,12 +1089,12 @@ public partial class MainWindow
         if (path == null) return false;
         try
         {
-            Session.Save(path); RecentFiles.Add(path); Status("Saved " + path);
+            Session.Save(path); RecentFiles.Add(path); Status("Saved " + path + ".");
             // (an embedded part saved as a file of its own: no longer tied to the assembly)
             _tab.EmbeddedIn = null; _tab.EmbeddedName = null; _tab.EmbeddedPath = null; UpdateTabHeader(_tab);
             return true;
         }
-        catch (Exception ex) { App.Log(ex, "Save failed"); await Dialogs.Message(this, "Save failed", ex.Message); return false; }
+        catch (Exception ex) { App.Log(ex, "Save failed"); await Dialogs.Message(this, "Save Failed", $"Could not save {Path.GetFileName(path)}: {ex.Message}"); return false; }
     }
 
     async Task Export(string kind)
@@ -1104,7 +1119,7 @@ public partial class MainWindow
         {
             // (written in millimetres, as the model is)
             var bodies = r.State.Bodies.ToList();
-            Status($"Exporting {Path.GetFileName(path)}...");
+            Status($"Exporting {Path.GetFileName(path)}…");
             var sw = System.Diagnostics.Stopwatch.StartNew();
             // cosmetic threads are modeled for export: the part rebuilt so (a copy, off the UI thread)
             var hasCosmetic = r.State.Cosmetics.Count > 0;
@@ -1118,9 +1133,9 @@ public partial class MainWindow
                 if (kind == "step") StepWriter.Write(fs, bodies.Select(b => (b.Id, b.Solid)), baseName);
                 else StlWriter.Write(fs, bodies.Select(b => b.Solid));
             });
-            Status($"Exported {path} ({sw.ElapsedMilliseconds} ms)");
+            Status($"Exported {path} in {sw.ElapsedMilliseconds} ms.");
         }
-        catch (Exception ex) { App.Log(ex, "Export failed"); await Dialogs.Message(this, "Export failed", ex.Message); }
+        catch (Exception ex) { App.Log(ex, "Export failed"); await Dialogs.Message(this, "Export Failed", $"Could not export {Path.GetFileName(path)}: {ex.Message}"); }
     }
 
     /// <summary>Writes the flat pattern (of each body a Flat Pattern feature unfolded) as DXF, in millimetres.</summary>
@@ -1130,7 +1145,7 @@ public partial class MainWindow
         var flats = Session.Result?.State.Flats;
         if (flats == null || flats.Count == 0)
         {
-            await Dialogs.Message(this, "Export DXF", "There is no flat pattern: insert a Flat Pattern (Sheet Metal tab) first.");
+            await Dialogs.Message(this, "Export DXF", "The part has no flat pattern. Insert a Flat Pattern feature first.");
             return;
         }
         var baseName = Session.FilePath != null ? Path.GetFileNameWithoutExtension(Session.FilePath) : Session.UntitledName;
@@ -1154,9 +1169,9 @@ public partial class MainWindow
                 DxfWriter.Write(fs, flat);
                 written.Add(p);
             }
-            Status($"Exported {string.Join(", ", written)}");
+            Status($"Exported {string.Join(", ", written)}.");
         }
-        catch (Exception ex) { App.Log(ex, "Export failed"); await Dialogs.Message(this, "Export failed", ex.Message); }
+        catch (Exception ex) { App.Log(ex, "Export failed"); await Dialogs.Message(this, "Export Failed", $"Could not export {Path.GetFileName(path)}: {ex.Message}"); }
     }
 
     // ------------------------------------------------------------------------------------------
@@ -1200,15 +1215,15 @@ public partial class MainWindow
         var text = $"Delete {string.Join(", ", victims.Select(v => v.Name))}?";
         if (deps.Count > 0)
         {
-            text += $"\n\nThese features depend on it and will fail without it:\n  {string.Join(", ", deps.Select(d => d.Name))}";
-            var r = await Dialogs.YesNoCancel(this, "Confirm Delete", text, "Delete", "Delete with children");
+            text += $"\n\nThe following dependent features will fail:\n  {string.Join(", ", deps.Select(d => d.Name))}";
+            var r = await Dialogs.YesNoCancel(this, "Confirm Delete", text, "Delete", "Delete with Dependents");
             if (r == null) return;
             if (r == false) victims.AddRange(deps);
         }
         else if (!await Dialogs.YesNo(this, "Confirm Delete", text, "Delete", "Cancel")) return;
         Session.Change(() => { foreach (var v in victims) Session.Doc.Features.Remove(v); FixRollback(); });
         Selection.Clear();
-        Status($"Deleted {string.Join(", ", victims.Select(v => v.Name))} (Ctrl+Z to undo)");
+        Status($"Deleted {string.Join(", ", victims.Select(v => v.Name))}. (Ctrl+Z to undo)");
     }
 
     void FixRollback()
@@ -1267,7 +1282,7 @@ public partial class MainWindow
             for (int j = i + 1; j < moved.Count; j++)
                 if (CadDocument.Refers(json[moved[i].Id], moved[j].Id))
                 {
-                    Status($"Can't move {f.Name} there: {moved[i].Name} uses {moved[j].Name}, which would come after it.");
+                    Status($"Cannot move {f.Name} there. {moved[i].Name} references {moved[j].Name}, which would come after it.");
                     return;
                 }
         Session.Change(() =>
@@ -1276,7 +1291,7 @@ public partial class MainWindow
             d.Features.AddRange(moved);
             d.RollbackIndex = active >= moved.Count ? null : active;
         });
-        Status($"Moved {f.Name} (Ctrl+Z to undo)");
+        Status($"Moved {f.Name}. (Ctrl+Z to undo)");
     }
 
     async Task RenameFeature(Feature f)

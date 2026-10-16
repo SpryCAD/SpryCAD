@@ -15,7 +15,7 @@ namespace SpryCad.App;
 /// The task pane, as SolidWorks': a strip of tabs at the right edge of the window. A tab slides its pane out over the
 /// graphics area; clicking the model (or Esc, or the tab again) tucks it away. Pinned, the pane stays open beside
 /// the graphics area instead (its width set by the splitter). The header collapses it, pops it out into a window of
-/// its own, or pins it. Panes: Open Parts, Revisions (more can be added with <see cref="AddTaskPane"/>).
+/// its own, or pins it. Panes: Open Parts, Revisions, Bill of Materials (more can be added with <see cref="AddTaskPane"/>).
 /// </summary>
 public partial class MainWindow
 {
@@ -56,7 +56,7 @@ public partial class MainWindow
         }
         var collapse = HeaderButton("collapse", "Collapse (Esc)");
         collapse.Click += (_, _) => HideTaskPane();
-        _taskPopOut = HeaderButton("popout", "Pop out: in a window of its own");
+        _taskPopOut = HeaderButton("popout", "Open in a separate window");
         _taskPopOut.Click += (_, _) => { if (_taskCurrent?.PopOut is { } pop) { HideTaskPane(); pop(); } };
         _taskPin = HeaderButton("unpinned", "");
         _taskPin.Click += (_, _) =>
@@ -87,6 +87,7 @@ public partial class MainWindow
         _partsPane = AddTaskPane("OpenParts", "Open Parts", "parts", () => { var l = PartsListControl(); l.Padding = new Thickness(0); return l; },
             popOut: () => MovePartsList(docked: false));
         _revisionsPane = AddTaskPane("Revisions", "Revisions", "revisions", RevisionsControl);
+        _bomPane = AddTaskPane("Bom", "Bill of Materials", "bom", BomControl);
 
         TaskSplitter.DragCompleted += (_, _) => { UserSettings.TaskWidth = (int)MainGrid.ColumnDefinitions[4].ActualWidth; UserSettings.Save(); };
         // unpinned, the pane tucks away when the model (or anything else outside it) is clicked
@@ -174,7 +175,7 @@ public partial class MainWindow
             TaskOverlay.Children.Add(_taskPanel);
         }
         _taskPin.Content = UI.Icons.Make(pinned ? "pinned" : "unpinned", 14);
-        ToolTip.SetTip(_taskPin, pinned ? "Unpin: slide away when the model is clicked" : "Pin: keep the pane open beside the model");
+        ToolTip.SetTip(_taskPin, pinned ? "Auto-hide the pane" : "Pin the pane open");
         foreach (var p in _taskPanes)
         {
             var on = mode != TaskMode.Hidden && p == _taskCurrent;

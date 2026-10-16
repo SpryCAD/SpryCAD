@@ -91,7 +91,7 @@ public partial class MainWindow
         Fill();
 
         var materialRow = new DockPanel();
-        var options = new Button { Content = "Options...", MinWidth = 80, HorizontalContentAlignment = HorizontalAlignment.Center };
+        var options = new Button { Content = "Options…", MinWidth = 80, HorizontalContentAlignment = HorizontalAlignment.Center };
         options.Click += async (_, _) => { if (_massWindow != null && await MassOptions(_massWindow)) UpdateMassProperties(); };
         DockPanel.SetDock(options, Dock.Right);
         materialRow.Children.Add(options);
@@ -311,9 +311,9 @@ public partial class MainWindow
         Tensor(mp.AtOrigin, "I");
 
         Line();
-        if (bodies.Any(b => b.Solid.Topology.OpenHalfEdges != 0)) Line("⚠ A body is not closed (watertight): these results are not reliable.");
+        if (bodies.Any(b => b.Solid.Topology.OpenHalfEdges != 0)) Line("⚠ A body is not watertight. Results may be inaccurate.");
         Line("Products of inertia (Lxy etc.) are ∫xy dm.");
-        Line("Computed on the display mesh, which follows the exact surfaces.");
+        Line("Values for bodies without exact geometry are calculated from the display mesh and are approximate.");
         Show();
         if (_massWindow != null) _massWindow.Title = "Mass Properties - " + Session.Title.TrimEnd(' ', '*');
         // the center of mass symbol, and the principal axes a quarter of the part's size to either side

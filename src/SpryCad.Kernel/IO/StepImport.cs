@@ -11,12 +11,26 @@ public sealed record StepPart(string Name, List<StepSolid> Solids);
 /// <summary>A placed use of a part in a STEP assembly (sub-assemblies' placements composed).</summary>
 public sealed record StepOccurrence(int Part, string Name, Transform Placement);
 
+/// <summary>
+/// A use in a STEP assembly product, placed in it: a part (<see cref="Part"/>, an index into the parts) or a
+/// sub-assembly (<see cref="Product"/>, an index into the products); the other is -1.
+/// </summary>
+public sealed record StepUse(int Part, int Product, string Name, Transform Placement);
+
+/// <summary>A STEP product holding others (a sub-assembly, or the assembly itself): its uses, each placed in it.</summary>
+public sealed record StepProduct(string Name, List<StepUse> Uses);
+
 /// <summary>A STEP assembly: its parts and where each is used.</summary>
 public sealed class StepAssemblyResult
 {
     public string Name { get; set; } = "Assembly";
     public List<StepPart> Parts { get; } = new();
+    /// <summary>Every use of a part, placed in the assembly (sub-assemblies' placements composed).</summary>
     public List<StepOccurrence> Occurrences { get; } = new();
+    /// <summary>The products holding others, each once however often it is used (the structure <see cref="Occurrences"/> flattens).</summary>
+    public List<StepProduct> Products { get; } = new();
+    /// <summary>The top products (indices into <see cref="Products"/>): usually one, the assembly.</summary>
+    public List<int> Roots { get; } = new();
     public List<string> Warnings { get; } = new();
     public double UnitMm { get; set; } = 1;
 }
@@ -166,7 +180,7 @@ public static class StepImport
             var childReps = repsOf.GetValueOrDefault(child.Id) ?? new();
             bool childIsRep1 = rr[2] is StepRef c1 && childReps.Contains(c1.Id) || !(rr[3] is StepRef c2 && childReps.Contains(c2.Id));
             var t = childIsRep1 ? f2 * f1.RigidInverse() : f1 * f2.RigidInverse();
-            var name = nauo.Args[1] is string nn && nn.Length > 0 ? nn : NameOf(child.Id);
+            var name = nauo.Args[1] is string nn && nn.Trim().Length > 0 ? nn.Trim() : NameOf(child.Id);
             if (!children.TryGetValue(parent.Id, out var l)) children[parent.Id] = l = new();
             l.Add((child.Id, t, name));
             placed.Add(nauo.Id);
@@ -176,22 +190,38 @@ public static class StepImport
         {
             if (placed.Contains(nauo.Id) || Inst(nauo.Args[3]) is not { } parent || Inst(nauo.Args[4]) is not { } child) continue;
             if (!children.TryGetValue(parent.Id, out var l)) children[parent.Id] = l = new();
-            l.Add((child.Id, Transform.Identity, nauo.Args[1] is string nn && nn.Length > 0 ? nn : NameOf(child.Id)));
+            l.Add((child.Id, Transform.Identity, nauo.Args[1] is string nn && nn.Trim().Length > 0 ? nn.Trim() : NameOf(child.Id)));
         }
 
         // a product's own solids, and mapped items in its shapes (a representation used again, placed)
+        // (the parts' solids are built all at once: the assembly walked first only to say which, while this is set)
+        Dictionary<string, (string name, IEnumerable<StepInstance> breps)>? wanted = null;
+        var built = new Dictionary<string, (StepImportResult r, Exception? error)>();
+        // a part's solids, read with a context of its own (parts share no vertices, edges or surfaces)
+        (StepImportResult, Exception?) Solids(string name, IEnumerable<StepInstance> breps)
+        {
+            var r = new StepImportResult();
+            try
+            {
+                var pc = new Ctx(f, res.UnitMm * mmToUnits, angleUnit, prefix, r.Warnings);
+                foreach (var b in breps.OrderBy(x => x.Id))
+                {
+                    var parts = new List<(StepInstance shell, bool reversed)> { (f.Get(b.Args[1]), false) };
+                    if (b.Is("BREP_WITH_VOIDS") && b.Args.Count > 2 && b.Args[2] is List<object?> voids)
+                        foreach (var v in voids) { var oc = f.Get(v); parts.Add((f.Get(oc.Args[2]), !(oc.Args[3] is StepEnum { Value: "T" }))); }
+                    pc.AddSolid(r, b.Args.Count > 0 && b.Args[0] is string bn && bn.Trim().Length > 0 ? bn.Trim() : name, parts);
+                }
+                return (r, null);
+            }
+            catch (Exception ex) { return (r, ex); }
+        }
         var partIndex = new Dictionary<string, int>();
         int PartOf(string key, string name, IEnumerable<StepInstance> breps)
         {
+            if (wanted != null) { wanted.TryAdd(key, (name, breps)); return -1; }
             if (partIndex.TryGetValue(key, out var i)) return i;
-            var r = new StepImportResult();
-            foreach (var b in breps.OrderBy(x => x.Id))
-            {
-                var parts = new List<(StepInstance shell, bool reversed)> { (f.Get(b.Args[1]), false) };
-                if (b.Is("BREP_WITH_VOIDS") && b.Args.Count > 2 && b.Args[2] is List<object?> voids)
-                    foreach (var v in voids) { var oc = f.Get(v); parts.Add((f.Get(oc.Args[2]), !(oc.Args[3] is StepEnum { Value: "T" }))); }
-                ctx.AddSolid(r, b.Args.Count > 0 && b.Args[0] is string bn && bn.Length > 0 ? bn : name, parts);
-            }
+            var (r, error) = built.TryGetValue(key, out var made) ? made : Solids(name, breps);
+            if (error != null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(error);
             res.Warnings.AddRange(r.Warnings);
             if (r.Solids.Count == 0) return partIndex[key] = -1;
             res.Parts.Add(new StepPart(name, r.Solids));
@@ -200,13 +230,14 @@ public static class StepImport
         IEnumerable<StepInstance> Items(IEnumerable<int> reps) =>
             reps.Select(id => f.Instances.GetValueOrDefault(id)).OfType<StepInstance>().SelectMany(rep => RepArgs(rep) is { } ra ? ((List<object?>)ra[1]).Select(Inst).OfType<StepInstance>() : Enumerable.Empty<StepInstance>());
 
-        void Walk(IEnumerable<int> reps, string key, string name, Transform t, int depth)
+        void Walk(IEnumerable<int> reps, string key, string name, Transform t, int depth, List<StepOccurrence>? into = null)
         {
             if (depth > 64) { res.Warnings.Add("The assembly is nested too deeply (a loop?); its deeper levels were left out."); return; }
+            into ??= res.Occurrences;
             var repSet = reps.ToList();
             var items = Items(repSet).ToList();
             var breps = items.Where(IsBrep).ToList();
-            if (breps.Count > 0 && PartOf(key, name, breps) is var pi and >= 0) res.Occurrences.Add(new StepOccurrence(pi, name, t));
+            if (breps.Count > 0 && PartOf(key, name, breps) is var pi and >= 0) into.Add(new StepOccurrence(pi, name, t));
             // mapped items: another representation placed in this one
             foreach (var mi in items.Where(i => i.Is("MAPPED_ITEM")))
             {
@@ -214,7 +245,7 @@ public static class StepImport
                 var mt = Frame(mi.Args[2]) * Frame(map.Args[0]).RigidInverse();
                 // the product owning that representation names it, if any
                 var owner = repsOf.FirstOrDefault(kv => kv.Value.Contains(mrep.Id)).Key;
-                Walk(Closure(mrep.Id), "rep:" + mrep.Id, owner != 0 ? NameOf(owner) : (mi.Args[0] is string mn && mn.Length > 0 ? mn : name), t * mt, depth + 1);
+                Walk(Closure(mrep.Id), "rep:" + mrep.Id, owner != 0 ? NameOf(owner) : (mi.Args[0] is string mn && mn.Trim().Length > 0 ? mn.Trim() : name), t * mt, depth + 1, into);
             }
         }
         void WalkProduct(int pd, string name, Transform t, int depth)
@@ -228,8 +259,57 @@ public static class StepImport
         var childIds = new HashSet<int>(children.Values.SelectMany(l => l.Select(x => x.child)));
         var roots = children.Keys.Where(k => !childIds.Contains(k)).ToList();
         if (roots.Count == 0) roots = repsOf.Keys.Where(k => !childIds.Contains(k)).ToList();
+        // the parts wanted, their solids built at once; then the assembly walked again, each part as built
+        wanted = new();
+        var noted = res.Warnings.Count;
+        foreach (var root in roots.OrderBy(x => x)) WalkProduct(root, NameOf(root), Transform.Identity, 0);
+        res.Occurrences.Clear();
+        res.Warnings.RemoveRange(noted, res.Warnings.Count - noted);
+        var jobs = wanted.ToList();
+        wanted = null;
+        var solids = new (StepImportResult, Exception?)[jobs.Count];
+        Parallel.For(0, jobs.Count, k => solids[k] = Solids(jobs[k].Value.name, jobs[k].Value.breps));
+        for (int k = 0; k < jobs.Count; k++) built[jobs[k].Key] = solids[k];
         foreach (var root in roots.OrderBy(x => x)) WalkProduct(root, NameOf(root), Transform.Identity, 0);
         if (roots.Count == 1) res.Name = NameOf(roots[0]);
+
+        // the structure: each product holding others once, its own solids and its parts' uses placed in it, the
+        // products it holds as uses of them (a product holding itself, or nested past the limit: flattened there)
+        var productOf = new Dictionary<int, int>();
+        var making = new HashSet<int>();
+        void Flat(int pd, string name, Transform t, int depth, List<StepUse> uses)
+        {
+            var occ = new List<StepOccurrence>();
+            Walk(repsOf.GetValueOrDefault(pd) ?? new HashSet<int>(), "pd:" + pd, name, t, depth, occ);
+            uses.AddRange(occ.Select(o => new StepUse(o.Part, -1, o.Name, o.Placement)));
+            if (depth > 64 || !making.Add(pd)) return;
+            foreach (var (child, ct, cname) in children.GetValueOrDefault(pd) ?? new())
+                Flat(child, cname, t * ct, depth + 1, uses);
+            making.Remove(pd);
+        }
+        int Product(int pd, string name, int depth)
+        {
+            if (productOf.TryGetValue(pd, out var k)) return k;
+            var uses = new List<StepUse>();
+            making.Add(pd);
+            var occ = new List<StepOccurrence>();
+            Walk(repsOf.GetValueOrDefault(pd) ?? new HashSet<int>(), "pd:" + pd, name, Transform.Identity, depth, occ);
+            uses.AddRange(occ.Select(o => new StepUse(o.Part, -1, o.Name, o.Placement)));
+            foreach (var (child, ct, cname) in children.GetValueOrDefault(pd) ?? new())
+            {
+                if (children.ContainsKey(child) && !making.Contains(child) && depth < 64)
+                {
+                    var p = Product(child, NameOf(child), depth + 1);
+                    // (a sub-assembly holding no part that could be read: left out)
+                    if (res.Products[p].Uses.Count > 0) uses.Add(new StepUse(-1, p, cname, ct));
+                }
+                else Flat(child, cname, ct, depth + 1, uses);
+            }
+            making.Remove(pd);
+            res.Products.Add(new StepProduct(name, uses));
+            return productOf[pd] = res.Products.Count - 1;
+        }
+        foreach (var root in roots.OrderBy(x => x)) res.Roots.Add(Product(root, NameOf(root), 0));
         if (res.Occurrences.Count == 0) throw new InvalidDataException("No part of the STEP assembly could be imported: " + string.Join("; ", res.Warnings.Take(3)));
         return res;
     }
@@ -245,17 +325,17 @@ public static class StepImport
     static (double mm, double rad) Units(StepFile f)
     {
         var solids = new HashSet<int>(f.OfType("MANIFOLD_SOLID_BREP").Concat(f.OfType("BREP_WITH_VOIDS")).Select(s => s.Id));
-        var sorted = f.Instances.Values.OrderBy(i => i.Id).ToList();
-        // representations listing a solid among their items, then every unit context
-        var contexts = new List<StepInstance>();
-        foreach (var r in sorted)
+        // representations listing a solid among their items (in the file's order), then every unit context
+        var found = new List<(int id, StepInstance ctx)>();
+        foreach (var r in f.Instances.Values)
         {
             var args = r.Parts.FirstOrDefault(p => p.Type.EndsWith("SHAPE_REPRESENTATION", StringComparison.Ordinal)).Args;
             if (args == null || args.Count < 3 || args[1] is not List<object?> items) continue;
             if (items.Any(x => x is StepRef sr && solids.Contains(sr.Id)) && args[2] is StepRef cr && f.Instances.TryGetValue(cr.Id, out var ctx))
-                contexts.Add(ctx);
+                found.Add((r.Id, ctx));
         }
-        foreach (var c in sorted) if (c.Is("GLOBAL_UNIT_ASSIGNED_CONTEXT")) contexts.Add(c);
+        var contexts = found.OrderBy(x => x.id).Select(x => x.ctx).ToList();
+        contexts.AddRange(f.OfType("GLOBAL_UNIT_ASSIGNED_CONTEXT"));
         double Unit(string kind, bool length)
         {
             foreach (var ctx in contexts)
@@ -264,8 +344,7 @@ public static class StepImport
                 foreach (var u in units)
                     if (u is StepRef ur && f.Instances.TryGetValue(ur.Id, out var ui) && ui.Is(kind)) return UnitFactor(f, ui, length);
             }
-            foreach (var u in sorted)
-                if (u.Is(kind)) return UnitFactor(f, u, length);
+            foreach (var u in f.OfType(kind)) return UnitFactor(f, u, length);
             return 1;
         }
         return (Unit("LENGTH_UNIT", true), Unit("PLANE_ANGLE_UNIT", false));
@@ -358,7 +437,10 @@ public static class StepImport
             foreach (var f in body.Faces)
             {
                 if (f.Surface.PeriodicU || f.Surface.PeriodicV) continue; // (wrapping faces are oriented after splitting)
-                try { if (NDomain.Of(f).SignedArea() < 0) { f.Sense = !f.Sense; flipped++; } }
+                // (only the sign of its area is wanted: its edges sampled to a thousandth of its size, not finer)
+                var box = Box3.Empty;
+                foreach (var c in f.Coedges) { box.Add(c.Edge.V0.P); box.Add(c.Edge.Curve.Eval((c.Edge.T0 + c.Edge.T1) / 2)); }
+                try { if (NDomain.Of(f, Math.Max(1e-3, box.Diagonal * 1e-3)).SignedArea() < 0) { f.Sense = !f.Sense; flipped++; } }
                 catch (InvalidOperationException) { }
             }
             if (flipped > 0) _warn.Add($"{name}: {flipped} face(s) had their orientation flag reversed in the file; corrected from their edges.");

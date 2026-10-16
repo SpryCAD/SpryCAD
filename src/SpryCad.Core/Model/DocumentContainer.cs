@@ -68,11 +68,21 @@ public static class DocumentContainer
     }
 
     /// <summary>Saves the part (a revision of its history: <see cref="Storage.PartFile.Save"/>).</summary>
-    public static void Save(CadDocument doc, string path, string? author = null)
+    /// <remarks>Not <paramref name="durable"/>: a file read back at once and dropped (see <see cref="Storage.PartDatabase.Create"/>).</remarks>
+    public static void Save(CadDocument doc, string path, string? author = null, bool durable = true)
     {
         foreach (var name in doc.Files.Keys) CheckName(name);
-        Storage.PartFile.Save(doc, path, author);
+        Storage.PartFile.Save(doc, path, author, durable: durable);
         doc.Attachments = null; // (the old containers' index of embedded files: the database keeps its own)
+    }
+
+    /// <summary>The part as the bytes of a new file, made in memory (a part embedded in an assembly as it is first made).</summary>
+    public static byte[] ToNewBytes(CadDocument doc, string name)
+    {
+        foreach (var n in doc.Files.Keys) CheckName(n);
+        var bytes = Storage.PartFile.ToNewBytes(doc, name);
+        doc.Attachments = null; // (as Save)
+        return bytes;
     }
 
     static void Write(ZipArchive zip, string name, byte[] data, CompressionLevel level)

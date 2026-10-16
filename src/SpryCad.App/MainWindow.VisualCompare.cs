@@ -65,7 +65,7 @@ public partial class MainWindow
         int n(FaceChange k) => faces.Values.Count(v => v == k);
         counts.Text = $"{n(FaceChange.Added)} faces added, {n(FaceChange.Changed)} changed, {n(FaceChange.Removed)} removed, {n(FaceChange.Unchanged)} unchanged";
         info.Text = n(FaceChange.Added) + n(FaceChange.Changed) + n(FaceChange.Removed) == 0
-            ? "No face changed: the shape is the same." : "Click a face to see which feature made it and what changed in it.";
+            ? "No faces changed." : "Click a face to show the feature that created it and what changed.";
         vp.StandardView("Trimetric", fit: true, animate: false);
 
         // a face clicked: its feature, and what changed in it
@@ -81,7 +81,7 @@ public partial class MainWindow
             } : "";
             var fname = feature != null ? DisplayNames.Face(feature == newer.Find(id) ? newer : older, f) : f;
             info.Text = feature == null ? $"Face {fname}: {what}."
-                : $"Face {fname}, made by {feature.Name}: {what}." + (byName.TryGetValue(feature.Name, out var t) ? "  " + t : feature.Name != null && k != FaceChange.Unchanged ? $"  ({feature.Name} itself did not change: something it is built on did.)" : "");
+                : $"Face {fname}, created by {feature.Name}: {what}." + (byName.TryGetValue(feature.Name, out var t) ? "  " + t : feature.Name != null && k != FaceChange.Unchanged ? $"  {feature.Name} is unchanged; a feature it depends on changed." : "");
         });
     }
 

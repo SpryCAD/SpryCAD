@@ -19,9 +19,9 @@ public partial class MainWindow
 {
     void HistoryCommand()
     {
-        if (Asm != null) { Status("History is kept for parts (assemblies come later)."); return; }
+        if (Asm != null) { Status("History is available for parts only."); return; }
         var session = Session;
-        if (session.History() == null) { _ = Dialogs.Message(this, "History", "The part has no history yet: every save of it is kept, from its first."); return; }
+        if (session.History() == null) { _ = Dialogs.Message(this, "History", "No history yet. Each save of the part creates a revision."); return; }
         var name = session.Title.TrimEnd(' ', '*');
 
         var list = new ListBox { SelectionMode = SelectionMode.Single };
@@ -38,13 +38,13 @@ public partial class MainWindow
         HistoryEntry? Selected() => list.SelectedIndex >= 0 && list.SelectedIndex < entries.Count ? entries[list.SelectedIndex] : null;
 
         var open = new Button { Content = "Open Read-Only" };
-        var compare = new Button { Content = "Compare with Previous..." };
-        var compare3d = new Button { Content = "Compare with Current in 3D..." };
-        var revertTo = new Button { Content = "Revert to This..." };
-        var tag = new Button { Content = "Tag..." };
-        var rename = new Button { Content = "Rename Tag..." };
+        var compare = new Button { Content = "Compare with Previous…" };
+        var compare3d = new Button { Content = "Compare with Current in 3D…" };
+        var revertTo = new Button { Content = "Revert to This…" };
+        var tag = new Button { Content = "Tag…" };
+        var rename = new Button { Content = "Rename Tag…" };
         var untag = new Button { Content = "Remove Tag" };
-        var purge = new Button { Content = "Purge Older..." };
+        var purge = new Button { Content = "Purge Older…" };
         var compact = new Button { Content = "Compact" };
         var clear = new Button { Content = "Clear Cache" };
         var close = new Button { Content = "Close", IsCancel = true };
@@ -60,7 +60,7 @@ public partial class MainWindow
 
         var note = new TextBlock
         {
-            Text = "Every save of the part, newest first. Tags, purging and compacting are saved to the file with the part's next save.",
+            Text = "All saved revisions, newest first. Tag, purge and compact changes are written to the file on the next save.",
             TextWrapping = TextWrapping.Wrap, Foreground = Palette.TextSecondary, Margin = new Thickness(0, 0, 0, 8),
         };
         var side = new StackPanel { Spacing = 6, Margin = new Thickness(10, 0, 0, 0), Children = { open, compare, compare3d, revertTo, new Separator(), tag, rename, untag, new Separator(), purge } };
@@ -84,16 +84,16 @@ public partial class MainWindow
             }
         }
         async Task<string?> TagOf(HistoryEntry e, string verb) =>
-            e.Tags.Count == 1 ? e.Tags[0] : await Dialogs.Input(w, verb, $"Which tag ({string.Join(", ", e.Tags)}):", e.Tags[0]);
+            e.Tags.Count == 1 ? e.Tags[0] : await Dialogs.Input(w, verb, $"Tag name ({string.Join(", ", e.Tags)}):", e.Tags[0]);
 
         async Task OpenSelected() => await Do(async () => { if (Selected() is { } e) await OpenRevisionTab(session, e, name); });
         open.Click += (_, _) => _ = OpenSelected();
         tag.Click += (_, _) => _ = Do(async () =>
         {
             if (Selected() is not { } e) return;
-            if (await Dialogs.Input(w, "Tag Revision", "Tag (a name for this revision, e.g. Rev A, Sent to shop):", "") is not { } t || t.Trim().Length == 0) return;
+            if (await Dialogs.Input(w, "Tag Revision", "Tag name (e.g. Rev A):", "") is not { } t || t.Trim().Length == 0) return;
             var moved = entries.FirstOrDefault(x => x != e && x.Tags.Contains(t.Trim()));
-            if (moved != null && !await Dialogs.YesNo(w, "Tag Revision", $"\"{t.Trim()}\" tags the revision of {When(moved)}. Move it to this one?", "Move", "Cancel")) return;
+            if (moved != null && !await Dialogs.YesNo(w, "Tag Revision", $"Tag \"{t.Trim()}\" is on the revision from {When(moved)}. Move it to this revision?", "Move", "Cancel")) return;
             session.EditHistory(db => PartHistory.Tag(db, e.Revision.RevisionId, t));
             Fill(e.Revision.RevisionId);
         });
@@ -115,13 +115,13 @@ public partial class MainWindow
             if (Selected() is not { } e) return;
             var (gone, tags) = session.ReadHistory(db => PartHistory.PurgePlan(db, e.Revision.RevisionId));
             if (gone.Count == 0) return;
-            var lost = tags.Count == 0 ? "" : $"\n\nThese tags go with them: {string.Join(", ", tags)}.";
+            var lost = tags.Count == 0 ? "" : $"\n\nThese tags are also deleted: {string.Join(", ", tags)}.";
             if (!await Dialogs.YesNo(w, "Purge Older Revisions",
-                $"Forget the {gone.Count} revision{(gone.Count == 1 ? "" : "s")} before {When(e)}? This revision becomes the first; the older ones cannot be opened again once the part is saved.{lost}",
-                "Purge", "Cancel")) return;
+                $"Permanently delete {gone.Count} older revision{(gone.Count == 1 ? "" : "s")} before {When(e)}? They cannot be opened after the part is saved.{lost}",
+                "Delete Revisions", "Cancel")) return;
             session.EditHistory(db => PartHistory.Purge(db, e.Revision.RevisionId));
             Fill(e.Revision.RevisionId);
-            Status($"Purged {gone.Count} older revision{(gone.Count == 1 ? "" : "s")} of {name}: saved with the part.");
+            Status($"Deleted {gone.Count} older revision{(gone.Count == 1 ? "" : "s")} of {name}. Save the part to apply.");
         });
         compact.Click += (_, _) => _ = Do(() => { session.EditHistory(PartHistory.Compact); Fill(Selected()?.Revision.RevisionId); return Task.CompletedTask; });
         clear.Click += (_, _) => _ = Do(() => { session.EditHistory(PartHistory.ClearCache); Fill(Selected()?.Revision.RevisionId); return Task.CompletedTask; });
@@ -138,7 +138,7 @@ public partial class MainWindow
         {
             if (Selected() is not { } e) return;
             if (!await Dialogs.YesNo(w, "Revert to This Revision",
-                $"Make {name} as it was at {When(e)} again? Everything since is undone, as one change (Undo brings it back); saving records it as a new revision, so the history keeps what came between.",
+                $"Revert {name} to the revision from {When(e)}? Later changes are undone as one step; Undo restores them. Saving creates a new revision.",
                 "Revert", "Cancel")) return;
             RevertToRevision(session, e, name);
         });
@@ -158,7 +158,7 @@ public partial class MainWindow
         Session.OpenRevision(doc, $"{name} ({label})");
         _tab.FitAfterLoad = Session.RequestedRevision;
         UpdateTabHeader(_tab);
-        Status($"Opened {name} as it was at {label}, read-only: Save As keeps it as a part of its own.");
+        Status($"Opened {name} at {label} as read-only. Use Save As to keep it as a separate part.");
     }
 
     /// <summary>The part made as it was in a revision again: one change, which Undo takes back; saved as a new revision.</summary>
@@ -166,7 +166,7 @@ public partial class MainWindow
     {
         var doc = session.ReadHistory(db => PartRevert.RevertTo(db, e.Revision.RevisionId));
         session.Revert(doc, $"Reverted to {(e.Tags.Count > 0 ? e.Tags[0] : When(e))}", e.Revision.RevisionId);
-        Status($"{name} reverted to {(e.Tags.Count > 0 ? $"{e.Tags[0]} ({When(e)})" : When(e))}: save to keep it, Undo (Ctrl+Z) to go back.");
+        Status($"{name} reverted to {(e.Tags.Count > 0 ? $"{e.Tags[0]} ({When(e)})" : When(e))}. Save to keep the change (Ctrl+Z to undo).");
     }
 
     /// <summary>
@@ -186,15 +186,15 @@ public partial class MainWindow
         }).ToList();
         var listPanel = new StackPanel { Spacing = 2 };
         foreach (var b in boxes) listPanel.Children.Add(b);
-        if (changes.Count == 0) listPanel.Children.Add(new TextBlock { Text = "Nothing in the model changed in this revision.", Foreground = Palette.TextMuted });
+        if (changes.Count == 0) listPanel.Children.Add(new TextBlock { Text = "No model changes in this revision.", Foreground = Palette.TextMuted });
         var head = new TextBlock
         {
-            Text = e.Revision.ParentId == null ? $"The first save of {name} ({When(e)}, {e.Revision.Author}): what it had." :
-                $"What {e.Revision.Author} changed in {name} at {When(e)}, from the revision before. Tick what to revert: the rest of the part stays as it is now.",
+            Text = e.Revision.ParentId == null ? $"First save of {name} ({When(e)}, {e.Revision.Author})." :
+                $"Changes by {e.Revision.Author} to {name} at {When(e)}, compared with the previous revision. Select the changes to revert; the rest of the part is unchanged.",
             TextWrapping = TextWrapping.Wrap, Foreground = Palette.TextSecondary, Margin = new Thickness(0, 0, 0, 8),
         };
-        var revert = new Button { Content = "Revert Ticked Changes...", IsEnabled = changes.Count > 0 && e.Revision.ParentId != null };
-        var show3d = new Button { Content = "Show in 3D...", IsEnabled = changes.Count > 0 };
+        var revert = new Button { Content = "Revert Selected…", IsEnabled = changes.Count > 0 && e.Revision.ParentId != null };
+        var show3d = new Button { Content = "Show in 3D…", IsEnabled = changes.Count > 0 };
         var close = new Button { Content = "Close", IsCancel = true };
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 10, 0, 0), Children = { show3d, revert, close } };
         var dock = new DockPanel();
@@ -208,7 +208,7 @@ public partial class MainWindow
             {
                 var newer = session.LoadRevision(e.Revision.RevisionId);
                 var older = e.Revision.ParentId is { } p ? session.LoadRevision(p) : new CadDocument();
-                VisualCompare(older, e.Revision.ParentId != null ? "the revision before" : "nothing", newer, When(e), changes, w);
+                VisualCompare(older, e.Revision.ParentId != null ? "previous revision" : "nothing", newer, When(e), changes, w);
             }
             catch (Exception ex) when (ex is InvalidOperationException or IOException or InvalidDataException) { await Dialogs.Message(w, "Compare", ex.Message); }
         };
@@ -224,16 +224,16 @@ public partial class MainWindow
                 {
                     // what uses what the revert removes: reverted with it, left to fail to rebuild, or not done
                     var r = await Dialogs.YesNoCancel(w, "Revert",
-                        $"{string.Join(", ", plan.Dependents)} use{(plan.Dependents.Count == 1 ? "s" : "")} what the revert removes. Revert {(plan.Dependents.Count == 1 ? "it" : "them")} too, or revert anyway (they will show rebuild errors)?",
+                        $"{string.Join(", ", plan.Dependents)} depend{(plan.Dependents.Count == 1 ? "s" : "")} on items this revert removes. Revert {(plan.Dependents.Count == 1 ? "it" : "them")} as well, or revert anyway and leave rebuild errors?",
                         "Revert with Dependents", "Revert Anyway");
                     if (r == null) return;
                     if (r == true) plan = session.ReadHistory(db => PartRevert.PlanSelective(db, session.Doc, e.Revision.RevisionId, only, withDependents: true));
                 }
                 if (plan.ChangedSince.Count > 0 && !await Dialogs.YesNo(w, "Revert",
-                    $"{string.Join(", ", plan.ChangedSince)} {(plan.ChangedSince.Count == 1 ? "was" : "were")} changed again after this revision: reverting discards those later changes too. (Untick {(plan.ChangedSince.Count == 1 ? "it" : "them")} to keep them.)",
+                    $"{string.Join(", ", plan.ChangedSince)} {(plan.ChangedSince.Count == 1 ? "was" : "were")} modified after this revision. Reverting also discards those later changes. Deselect {(plan.ChangedSince.Count == 1 ? "it" : "them")} to keep them.",
                     "Revert", "Cancel")) return;
                 session.Revert(plan.Result, plan.Message);
-                Status($"{plan.Message}: save to keep it (Undo brings the part back).");
+                Status($"{plan.Message}. Save to keep the change (Ctrl+Z to undo).");
                 w.Close();
             }
             catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or IOException or InvalidDataException)
@@ -284,7 +284,7 @@ public partial class MainWindow
     static string UsageText(FileUsage u)
     {
         static string Size(long b) => b < 1024 ? $"{b} B" : b < 1 << 20 ? $"{b / 1024.0:0.#} KB" : $"{b / 1048576.0:0.#} MB";
-        return $"{Size(u.FileBytes)} in all ({u.Revisions} revision{(u.Revisions == 1 ? "" : "s")}): model {Size(u.ModelBytes)}, embedded files {Size(u.EmbeddedFileBytes)}, " +
+        return $"{Size(u.FileBytes)} total ({u.Revisions} revision{(u.Revisions == 1 ? "" : "s")}): model {Size(u.ModelBytes)}, embedded files {Size(u.EmbeddedFileBytes)}, " +
                $"display {Size(u.DisplayBytes)}, older revisions {Size(u.HistoryBytes)}, preview {Size(u.ThumbnailBytes)}";
     }
 }

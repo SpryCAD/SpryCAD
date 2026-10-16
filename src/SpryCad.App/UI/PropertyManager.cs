@@ -231,7 +231,7 @@ public sealed class PmPage
                 if (r.Length == 1 && int.TryParse(r[0], out var n) && n >= min) res.Add(n);
                 else if (r.Length == 2 && int.TryParse(r[0], out var a) && int.TryParse(r[1], out var b) && a >= min && b >= a && b - a < 10000)
                     for (int k = a; k <= b; k++) res.Add(k);
-                else { err = $"\"{part}\" is not an instance number ({min} or more) or a range such as {min}-{min + 2}"; break; }
+                else { err = $"\"{part}\" is not a valid instance. Enter a number of {min} or more, or a range such as {min}-{min + 2}."; break; }
             }
             if (err != null) { _invalid[tb] = label; tb.BorderBrush = Palette.Danger; ToolTip.SetTip(tb, err); return; }
             _invalid.Remove(tb); tb.BorderBrush = null; ToolTip.SetTip(tb, tip);

@@ -341,8 +341,11 @@ public static class NTess
         double Ang(double r) => 2 * Math.Acos(Math.Max(-1, 1 - Math.Min(1, tol / Math.Max(r, 1e-9))));
         switch (s.Kind)
         {
-            case SurfaceKind.Cylinder: { var hu = Ang(s.R) * s.R; return (hu, Math.Max(hu * 8, 1e-6)); }
-            case SurfaceKind.Cone: { var r = Math.Max(s.R, 1e-3); var hu = Ang(r) * r; return (hu, Math.Max(hu * 4, 1e-6)); }
+            // straight along the axis: a line from end to end lies on the surface, so no rows of points along it (only
+            // round it, which the boundary and the refinement against the surface give); a long, thin round (a bend of
+            // sheet metal two metres long) is a few hundred triangles, not tens of thousands
+            case SurfaceKind.Cylinder: { var hu = Ang(s.R) * s.R; return (hu, double.PositiveInfinity); }
+            case SurfaceKind.Cone: { var r = Math.Max(s.R, 1e-3); var hu = Ang(r) * r; return (hu, double.PositiveInfinity); } // (straight along its sides too)
             case SurfaceKind.Sphere: { var h = Ang(s.R) * s.R; return (h, h); }
             case SurfaceKind.Torus: { var hu = Ang(s.R + s.R2) * (s.R + s.R2); var hv = Ang(s.R2) * s.R2; return (hu, hv); }
             case SurfaceKind.Offset:
@@ -385,6 +388,18 @@ public static class NTess
         return (1, 1);
     }
 
+    /// <summary>
+    /// A B-spline's distance per unit of the face's parameters: a closed direction runs 0 to 2π on the face (not the
+    /// B-spline's own knots, often 0 to 1: measured by those, the grid round it was six times too fine).
+    /// </summary>
+    static (double su, double sv) FaceScale(NurbsSurface nb)
+    {
+        var (su, sv) = nb.MetricScale();
+        if (nb.ClosedU) su *= (nb.U1 - nb.U0) / (2 * Math.PI);
+        if (nb.ClosedV) sv *= (nb.V1 - nb.V0) / (2 * Math.PI);
+        return (su, sv);
+    }
+
     static (double su, double sv) MetricScale(NSurface s) => s.Kind switch
     {
         SurfaceKind.Cylinder => (s.R, 1),
@@ -393,7 +408,7 @@ public static class NTess
         SurfaceKind.Torus => (s.R + s.R2, s.R2),
         SurfaceKind.Pipe => (s.R, 1),
         SurfaceKind.Screw => (Math.Max(s.Screw!.MaxRadius, 1e-3), 1),
-        SurfaceKind.BSpline => s.Nurbs!.MetricScale(),
+        SurfaceKind.BSpline => FaceScale(s.Nurbs!),
         SurfaceKind.Offset => MetricScale(s.Base!),
         _ => (1, 1),
     };
