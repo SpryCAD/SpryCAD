@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using SpryCad.Core.Model;
 using SpryCad.Kernel;
 
 namespace SpryCad.Core.Assembly;
@@ -11,10 +12,27 @@ public sealed class ComponentOverride
 {
     public bool? Hidden { get; set; }
     public bool? Suppressed { get; set; }
-    /// <summary>RGB 0-1.</summary>
+    /// <summary>RGB 0-1: the appearance's color, all an older SpryCAD reads (set with <see cref="SetLook"/>).</summary>
     public double[]? Color { get; set; }
+    /// <summary>The appearance in full (color, finish, opacity), beside <see cref="Color"/>; read through <see cref="Look"/>.</summary>
+    public Appearance? Appearance { get; set; }
+    [JsonIgnore] public Appearance? Look => AppearanceOverride.Look(Color, Appearance);
+    public void SetLook(Appearance? a) { Appearance = a; Color = a?.Color; }
 
     [JsonIgnore] public bool IsEmpty => Hidden == null && Suppressed == null && Color == null;
+}
+
+/// <summary>An appearance override kept as an older SpryCAD reads it (a color) and in full (an appearance).</summary>
+public static class AppearanceOverride
+{
+    /// <summary>
+    /// The override: none without a color; the full appearance with that color (its finish kept if an older
+    /// SpryCAD recolored it); a plain color's when there is no full one.
+    /// </summary>
+    public static Appearance? Look(double[]? color, Appearance? full) =>
+        color is not { Length: 3 } c ? null
+        : full == null ? new Appearance(c)
+        : full.Color.SequenceEqual(c) ? full : full with { Color = c, Name = null };
 }
 
 /// <summary>

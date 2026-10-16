@@ -20,7 +20,7 @@ public partial class MainWindow
     async Task MakeExternalCommand(string path)
     {
         if (Asm is not { } a || path.Contains('/') || a.Model.Doc.Find(path) is not { } c || c.Part.Embedded is not { } name) return;
-        if (_parts.Any(t => t.EmbeddedIn == a && t.EmbeddedName == name)) { await Dialogs.Message(this, "Make External", $"{c.Name} is open in a tab of its own: save or close it first."); return; }
+        if (_parts.Any(t => t.EmbeddedIn == a && t.EmbeddedName == name)) { await Dialogs.Message(this, "Make External", $"{c.Name} is open in another tab. Save or close it first."); return; }
         var ext = c.IsAssembly ? AssemblyDocument.FileExtension : CadDocument.FileExtension;
         var f = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
         {
@@ -35,7 +35,7 @@ public partial class MainWindow
         {
             await Task.Run(() => PartsIndexStore.Use(_ => { a.Model.MakeExternal(c, target); return true; }));
             a.EndChange();
-            Status($"{c.Name.Split('<')[0]} is now {Path.GetFileName(target)}, with its history: saving the assembly records it.");
+            Status($"{c.Name.Split('<')[0]} saved externally as {Path.GetFileName(target)}. Save the assembly to keep the change.");
         }
         catch (Exception ex) { App.Log(ex, "Make external"); a.AbandonChange(); await Dialogs.Message(this, "Make External", ex.Message); }
     }
@@ -45,7 +45,7 @@ public partial class MainWindow
         if (Asm is not { } a || path.Contains('/') || a.Model.Doc.Find(path) is not { } c || c.Part.Embedded != null) return;
         var what = c.Name.Split('<')[0];
         if (!await Dialogs.YesNo(this, "Make Virtual",
-            $"Embed {what} in the assembly, with its history? Its file stays where it is (other assemblies may use it); changes made to the file afterwards no longer reach this assembly, and the file says so when opened.",
+            $"Embed {what} in the assembly with its history? The original file is kept, but later changes to it will not update this assembly.",
             "Make Virtual", "Cancel")) return;
         a.BeginChange();
         MadeVirtual done;
@@ -56,17 +56,17 @@ public partial class MainWindow
         }
         catch (Exception ex) { App.Log(ex, "Make virtual"); a.AbandonChange(); await Dialogs.Message(this, "Make Virtual", ex.Message); return; }
         var file = Path.GetFileName(done.OriginalPath);
-        Status($"{what} is embedded now" + (done.Marked ? $"; {file} is marked as made virtual here." : $"; {file} could not be marked (read-only, in use, or saved by an older SpryCAD)."));
+        Status($"{what} made virtual." + (done.Marked ? $" {file} is marked as virtualized." : $" Could not mark {file}; it may be read-only, in use or from an older version."));
         // the original moved to the Recycle Bin: only when nothing else uses it, and once the assembly holding it is saved
         if (done.UsedBy.Count > 0)
         {
-            await Dialogs.Message(this, "Make Virtual", $"{file} is kept: other assemblies use it ({string.Join(", ", done.UsedBy.Select(Path.GetFileName))}).");
+            await Dialogs.Message(this, "Make Virtual", $"{file} is kept because other assemblies use it: {string.Join(", ", done.UsedBy.Select(Path.GetFileName))}.");
             return;
         }
         if (a.FilePath == null) return;
-        if (!await Dialogs.YesNo(this, "Make Virtual", $"No other assembly in this folder uses {file}. Save the assembly and move {file} to the {TrashName}?", "Save and Move", "Keep the File")) return;
+        if (!await Dialogs.YesNo(this, "Make Virtual", $"No other assembly in this folder uses {file}. Save the assembly and move {file} to the {TrashName}?", "Save and Move", "Keep File")) return;
         if (!await Save()) return;
-        Status(Trash(done.OriginalPath) ? $"Moved {file} to the {TrashName}." : $"{file} could not be moved to the {TrashName}: it is kept.");
+        Status(Trash(done.OriginalPath) ? $"Moved {file} to the {TrashName}." : $"Could not move {file} to the {TrashName}. The file is kept.");
     }
 
     static string TrashName => OperatingSystem.IsWindows() ? "Recycle Bin" : "Trash";
@@ -107,7 +107,7 @@ public partial class MainWindow
             bool take;
             if (o.Kind == Divergence.FileAhead)
                 take = await Dialogs.YesNo(this, "Changes to a Virtual Part's File",
-                    $"{o.PartName} was made virtual in this assembly, and its file ({Path.GetFileName(o.File)}) was changed since. Pull those changes in?", "Pull In", "Keep as It Is");
+                    $"{o.PartName} is virtual in this assembly, and its original file {Path.GetFileName(o.File)} has changed. Update the virtual part from the file?", "Update", "Keep Current");
             else
             {
                 string differences;
@@ -116,16 +116,16 @@ public partial class MainWindow
                     var mine = DocumentContainer.Load(a.Model.Doc.Files[o.Embedded], o.Embedded);
                     var theirs = CadDocument.Load(o.File);
                     var list = PartDescribe.Changes(mine, theirs);
-                    differences = list.Count == 0 ? "" : "\n\nThe file differs from the virtual part in: " + string.Join("; ", list.Take(8).Select(c => c.Text)) + (list.Count > 8 ? $"; and {list.Count - 8} more" : "");
+                    differences = list.Count == 0 ? "" : "\n\nDifferences: " + string.Join("; ", list.Take(8).Select(c => c.Text)) + (list.Count > 8 ? $"; and {list.Count - 8} more" : "");
                 }
                 catch (Exception ex) when (ex is IOException or InvalidDataException) { differences = ""; }
                 take = await Dialogs.YesNo(this, "A Virtual Part and Its File Both Changed",
-                    $"{o.PartName} was changed in this assembly and in its file ({Path.GetFileName(o.File)}) since it was made virtual. Keep the assembly's, or take the file's (the assembly's changes are lost)?{differences}",
-                    "Take the File's", "Keep the Assembly's");
+                    $"{o.PartName} has changed both in this assembly and in its original file {Path.GetFileName(o.File)}. Use the file's version? Changes made in the assembly will be lost.{differences}",
+                    "Use File Version", "Keep Assembly Version");
             }
             if (!take) continue;
             a.BeginChange();
-            try { await Task.Run(() => a.Model.TakeOriginal(o)); a.EndChange(); Status($"{o.PartName} taken from its file: saving the assembly records it."); }
+            try { await Task.Run(() => a.Model.TakeOriginal(o)); a.EndChange(); Status($"{o.PartName} updated from its file. Save the assembly to keep the change."); }
             catch (Exception ex) { App.Log(ex, "Pull changes in"); a.AbandonChange(); await Dialogs.Message(this, "Pull Changes In", ex.Message); }
         }
     }
@@ -139,13 +139,13 @@ public partial class MainWindow
         List<HistoryEntry> history;
         try { history = await Task.Run(() => a.Model.HistoryOf(c)); }
         catch (Exception ex) when (ex is IOException or InvalidDataException or Microsoft.Data.Sqlite.SqliteException) { await Dialogs.Message(this, "Pin to Revision", ex.Message); return; }
-        if (history.Count == 0) { await Dialogs.Message(this, "Pin to Revision", $"{c.Name.Split('<')[0]} has no saved history to pin to (not found, or saved by an older SpryCAD)."); return; }
+        if (history.Count == 0) { await Dialogs.Message(this, "Pin to Revision", $"{c.Name.Split('<')[0]} has no revision history. The part file was not found or is from an older version."); return; }
         var list = new ListBox { ItemsSource = history.Select((e, i) => Row(e, i == 0)).ToList(), SelectedIndex = 0 };
         var pin = new Button { Content = "Pin", IsDefault = true };
         var cancel = new Button { Content = "Cancel", IsCancel = true };
         var head = new TextBlock
         {
-            Text = $"Show {c.Name} as its part was at a revision, whatever the part becomes. (A tagged revision can follow its tag.)",
+            Text = $"Shows {c.Name} at the selected revision regardless of later changes to the part. A tagged revision can follow its tag.",
             TextWrapping = Avalonia.Media.TextWrapping.Wrap, Margin = new Avalonia.Thickness(0, 0, 0, 8),
         };
         var buttons = new StackPanel { Orientation = Avalonia.Layout.Orientation.Horizontal, Spacing = 6, HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right, Margin = new Avalonia.Thickness(0, 8, 0, 0), Children = { pin, cancel } };
@@ -161,7 +161,7 @@ public partial class MainWindow
         if (chosen is not { } e) return;
         string? tag = null;
         if (e.Tags.Count > 0 && await Dialogs.YesNo(this, "Pin to Revision",
-            $"The revision is tagged {e.Tags[0]}. Follow the tag (if it is moved to another revision, {c.Name} shows that one), or keep this revision whatever the tag does?",
+            $"The revision is tagged {e.Tags[0]}. Follow the tag if it moves to another revision, or keep this revision?",
             "Follow the Tag", "This Revision")) tag = e.Tags[0];
         a.BeginChange();
         try
@@ -169,7 +169,7 @@ public partial class MainWindow
             await Task.Run(() => a.Model.Pin(c, e.Revision.RevisionId, tag));
             if (a.Model.HasMates) a.Model.SolveMates();
             a.EndChange();
-            Status($"{c.Name} is pinned to {(tag ?? When(e))}: it keeps showing that revision as its part changes.");
+            Status($"{c.Name} pinned to {(tag ?? When(e))}.");
         }
         catch (Exception ex) { App.Log(ex, "Pin component"); a.AbandonChange(); await Dialogs.Message(this, "Pin to Revision", ex.Message); }
     }
@@ -183,7 +183,7 @@ public partial class MainWindow
             a.Model.Pin(c, null);
             if (a.Model.HasMates) a.Model.SolveMates();
             a.EndChange();
-            Status($"{c.Name} follows its part's latest revision again.");
+            Status($"{c.Name} unpinned. It now uses the latest revision.");
         }
         catch (Exception ex) { App.Log(ex, "Unpin component"); a.AbandonChange(); Status(ex.Message); }
     }
@@ -208,17 +208,17 @@ public partial class MainWindow
             var openAsm = new Button { Content = "Open Assembly" };
             var anyway = new Button { Content = "Edit Anyway" };
             var keep = new Button { Content = "Keep as Separate Part" };
-            ToolTip.SetTip(keep, "This part goes its own way: the mark is removed (saved with the part).");
+            ToolTip.SetTip(keep, "Detaches this part from the assembly and removes the virtual-part mark when saved.");
             openAsm.Click += (_, _) =>
             {
                 if (Session.Superseded?.AssemblyFile(Session.FilePath!) is { } f && File.Exists(f)) _ = OpenFileAsync(f);
-                else Status("The assembly is no longer where it was.");
+                else Status("The assembly file was not found.");
             };
             anyway.Click += (_, _) =>
             {
                 Session.ReadOnly = false; Session.Superseded = null;
                 UpdateSupersededBanner();
-                Status("Editing anyway: changes saved here do not reach the assembly the part was made virtual in.");
+                Status("Editing enabled. Changes saved here will not update the assembly.");
             };
             keep.Click += (_, _) =>
             {
@@ -227,7 +227,7 @@ public partial class MainWindow
                     Session.EditHistory(Supersede.Clear);
                     Session.ReadOnly = false; Session.Superseded = null;
                     UpdateSupersededBanner();
-                    Status("Kept as a part of its own: saving it removes the mark.");
+                    Status("Part detached. Save it to remove the virtual-part mark.");
                 }
                 catch (Exception ex) when (ex is InvalidOperationException or IOException) { Status(ex.Message); }
             };
@@ -237,7 +237,7 @@ public partial class MainWindow
         }
         var asmName = mark.AssemblyPath != null ? Path.GetFileNameWithoutExtension(mark.AssemblyPath) : "an assembly";
         _supersededTitle!.Text = $"{Path.GetFileNameWithoutExtension(path)} was made virtual in {asmName}";
-        _supersededText!.Text = $"On {mark.Utc.ToLocalTime():g} by {mark.User}. Changes made here will not appear in that assembly. Opened read-only.";
+        _supersededText!.Text = $"Read-only. Made virtual on {mark.Utc.ToLocalTime():g} by {mark.User}; edits to this file do not update that assembly.";
         _supersededBanner.IsVisible = true;
     }
 }

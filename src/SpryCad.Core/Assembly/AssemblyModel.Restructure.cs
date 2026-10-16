@@ -211,7 +211,7 @@ public sealed partial class AssemblyModel
             {
                 if (ov.Hidden is { } h) nc.Hidden = h;
                 if (ov.Suppressed is { } su) nc.Suppressed = su;
-                if (ov.Color != null) nc.Color = ov.Color;
+                if (ov.Look != null) nc.SetLook(ov.Look);
             }
             foreach (var (k, v) in s.Overrides ?? new()) if (k.StartsWith(cc.Id + "/", StringComparison.Ordinal)) (nc.Overrides ??= new())[Strip(k, cc.Id)] = v;
             if (s.Flexible)
@@ -357,7 +357,7 @@ public sealed partial class AssemblyModel
         {
             if (ov.Hidden is { } h) nc.Hidden = h;
             if (ov.Suppressed is { } su) nc.Suppressed = su;
-            if (ov.Color != null) nc.Color = ov.Color;
+            if (ov.Look != null) nc.SetLook(ov.Look);
         }
         var keys = (s.Overrides?.Keys ?? Enumerable.Empty<string>()).Concat(s.Poses?.Keys ?? Enumerable.Empty<string>()).Concat(s.Turns?.Keys ?? Enumerable.Empty<string>()).Distinct().ToList();
         foreach (var k in keys)

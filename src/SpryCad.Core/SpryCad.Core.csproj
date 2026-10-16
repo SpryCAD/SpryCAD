@@ -20,6 +20,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\SpryCad.Kernel\SpryCad.Kernel.csproj" />
+    <!-- shop profile tables in libraries (Library/LibraryFile.cs) -->
+    <ProjectReference Include="..\SpryCad.SheetMetal.Core\SpryCad.SheetMetal.Core.csproj" />
   </ItemGroup>
 
 </Project>

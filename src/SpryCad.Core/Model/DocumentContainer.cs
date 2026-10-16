@@ -76,6 +76,15 @@ public static class DocumentContainer
         doc.Attachments = null; // (the old containers' index of embedded files: the database keeps its own)
     }
 
+    /// <summary>The part as the bytes of a new file, made in memory (a part embedded in an assembly as it is first made).</summary>
+    public static byte[] ToNewBytes(CadDocument doc, string name)
+    {
+        foreach (var n in doc.Files.Keys) CheckName(n);
+        var bytes = Storage.PartFile.ToNewBytes(doc, name);
+        doc.Attachments = null; // (as Save)
+        return bytes;
+    }
+
     static void Write(ZipArchive zip, string name, byte[] data, CompressionLevel level)
     {
         var e = zip.CreateEntry(name, level);

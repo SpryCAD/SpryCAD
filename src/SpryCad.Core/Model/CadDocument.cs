@@ -45,15 +45,57 @@ public sealed class CadDocument
     /// <summary>Number of active features (rollback bar position); null = all.</summary>
     public int? RollbackIndex { get; set; }
     public Dictionary<string, int> NameCounters { get; set; } = new();
-    /// <summary>Part appearance (RGB 0-1).</summary>
-    public double[] Color { get; set; } = { 0.74, 0.76, 0.80 };
-    /// <summary>Material name, for mass properties (null: none set; steel's density is assumed).</summary>
-    public string? Material { get; set; }
-    /// <summary>Density in kg/m³ (null: steel, 7850).</summary>
-    public double? Density { get; set; }
+    /// <summary>
+    /// The part's material: a library item ("Materials-aluminum/Aluminum 6061") whose row the part keeps a copy of in
+    /// <see cref="Library"/>, or a material of the part's own (<see cref="Library.PartMaterial.CustomTable"/>). Null: none set,
+    /// steel's density assumed.
+    /// </summary>
+    public string? MaterialItem { get; set; }
+    /// <summary>The part's own appearance, set apart from its material's (null: the material's, or the default grey).</summary>
+    public Appearance? Appearance { get; set; }
     public const double DefaultDensity = 7850;
-    /// <summary>How bends unfold in this part (null: K-factor 0.5); a Flat Pattern may override it.</summary>
-    public SheetMetalSettings? SheetMetal { get; set; }
+
+    /// <summary>The part's material read (null: none set).</summary>
+    [JsonIgnore] public Library.MaterialInfo? MaterialInfo =>
+        MaterialItem != null && Core.Library.LibraryLink.Resolve(this, MaterialItem) is { } s ? Core.Library.Materials.Of(s) : null;
+    /// <summary>The material's name (null: none set).</summary>
+    [JsonIgnore] public string? MaterialName => MaterialInfo?.Name;
+    /// <summary>The density mass properties use, kg/m³: the material's, else steel's.</summary>
+    [JsonIgnore] public double EffectiveDensity => MaterialInfo?.Density ?? DefaultDensity;
+    /// <summary>How the part looks: its own appearance, else its material's, else the default grey.</summary>
+    [JsonIgnore] public Appearance EffectiveAppearance => Appearance ?? MaterialInfo?.Appearance ?? Model.Appearance.Default;
+    /// <summary>
+    /// The part's color as shown (RGB 0-1, <see cref="EffectiveAppearance"/>). Setting it gives the part an appearance of
+    /// its own in that color, the finish (metallic, roughness, opacity) kept.
+    /// </summary>
+    [JsonIgnore]
+    public double[] Color
+    {
+        get => EffectiveAppearance.Color;
+        set => Appearance = EffectiveAppearance with { Color = value, Name = null };
+    }
+
+    /// <summary>
+    /// What parts saved before material libraries had (a color always, a material name and a density when set): read
+    /// from older files only, then turned into <see cref="MaterialItem"/> and <see cref="Appearance"/>
+    /// (<see cref="Library.PartMaterial.Upgrade"/>) and cleared, so never written.
+    /// </summary>
+    [JsonPropertyName("color")] public double[]? LegacyColor { get; set; }
+    [JsonPropertyName("material")] public string? LegacyMaterial { get; set; }
+    [JsonPropertyName("density")] public double? LegacyDensity { get; set; }
+    /// <summary>
+    /// The library rows the features use (thread sizes, clearance holes), by item ("ISO261-coarse/M8"), copied in so the
+    /// part rebuilds the same with or without the library (<see cref="Library.LibraryLink"/>); null when none.
+    /// </summary>
+    public SortedDictionary<string, Library.LibrarySnapshot>? Library { get; set; }
+    /// <summary>The part's sheet metal bodies (sheet metal spec section 4); null when none.</summary>
+    public List<SheetMetal.SheetMetalBody>? SheetBodies { get; set; }
+    /// <summary>Profile values overridden on single bends, corners and hems; null when none.</summary>
+    public List<SheetMetal.SheetMetalOverride>? SheetOverrides { get; set; }
+    /// <summary>The shop profile rows the sheet metal bodies can use, copied in (null: none, or no sheet metal).</summary>
+    public SheetMetal.ProfileSnapshot? SheetProfile { get; set; }
+
+    public SheetMetal.SheetMetalBody? SheetBody(string id) => SheetBodies?.FirstOrDefault(b => b.Id == id);
     /// <summary>
     /// Sketches, reference planes and axes shown (true) or hidden (false) by the user, by feature id; one not listed is shown while no
     /// feature uses it. Display only: kept out of the features, so showing or hiding one rebuilds nothing.
@@ -210,6 +252,8 @@ public sealed class CadDocument
         if (d.Format == "FeatherCAD") d.Format = "SpryCAD";
         if (d.Format != "SpryCAD") throw new InvalidDataException("Not a SpryCAD document");
         if (d.FormatVersion <= LegacyIds.LastVersion) LegacyIds.Upgrade(d, json);
+        // (a part from before material libraries: its color, material and density as they are now kept)
+        Core.Library.PartMaterial.Upgrade(d);
         return d;
     }
 
@@ -269,6 +313,8 @@ public static class Serialization
                         if (ti.Properties[i].Set == null && ti.Properties[i].Name is "kind" or "consumes" or "pointIds" or "isDimension")
                             ti.Properties.RemoveAt(i);
                 },
+                // features of other projects (sheet metal) by their registered names
+                FeatureRegistry.AddDerivedTypes,
             },
         },
     };

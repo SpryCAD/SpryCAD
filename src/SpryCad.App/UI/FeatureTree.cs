@@ -102,6 +102,17 @@ public sealed class FeatureTree : UserControl
         _pressId = null; _moving = false; _dropLine.IsVisible = false;
         AddRow("__part", title, "part", 0, null, isHeader: true, hasChildren: Flyout);
         if (Flyout && !FlyoutOpen) { CommitRows(hovered); Select(_selectedId); return; }
+        // the part's material (as SolidWorks): its name and look, or not specified; a library's newer row marked
+        if (!Flyout)
+        {
+            var look = doc.EffectiveAppearance.Color;
+            FeatureStatus? note = null;
+            if (doc.MaterialItem is { } item && Core.Library.LibraryLink.Updates(doc).Any(u => u.Item == item))
+                note = new FeatureStatus { Warnings = { "The library has changed this material: Tools > Library Updates." } };
+            AddRow(MaterialRow, doc.MaterialName ?? "Material <not specified>", "material", 1, note,
+                swatchColor: doc.MaterialItem != null ? Color.FromRgb(Byte(look[0]), Byte(look[1]), Byte(look[2])) : null);
+            static byte Byte(double v) => (byte)Math.Round(Math.Clamp(v, 0, 1) * 255);
+        }
         // the origin: a folder of the three planes, the three axes and the origin point
         AddRow("Origin", "Origin", "folder", 1, null, hasChildren: true);
         if (_expanded.Contains("Origin"))
@@ -132,10 +143,10 @@ public sealed class FeatureTree : UserControl
         {
             var st = result?.Status.GetValueOrDefault(f.Id);
             var cond = string.IsNullOrWhiteSpace(f.SuppressWhen) ? null : $"Suppressed when {f.SuppressWhen}";
-            if (f.Suppressed) return cond == null ? null : cond + " (suppressed by hand now)";
-            if (st is { Suppressed: true, SuppressedBy: "condition" }) return cond + ": it holds, so suppressed.";
-            if (st is { Suppressed: true, SuppressedBy: { } by }) return $"Suppressed with {by}, which it uses." + (cond != null ? $"\n{cond}." : "");
-            return cond == null ? null : cond + ": it does not hold now.";
+            if (f.Suppressed) return cond == null ? null : cond + ". Currently suppressed manually.";
+            if (st is { Suppressed: true, SuppressedBy: "condition" }) return cond + ". Condition is true; feature suppressed.";
+            if (st is { Suppressed: true, SuppressedBy: { } by }) return $"Suppressed because it references {by}, which is suppressed." + (cond != null ? $"\n{cond}." : "");
+            return cond == null ? null : cond + ". Condition is currently false.";
         }
 
         var active = doc.ActiveCount;
@@ -216,7 +227,10 @@ public sealed class FeatureTree : UserControl
         PlaneFeature => "plane",
         AxisFeature => "axis",
         CombineFeature => "combine",
-        FlatPatternFeature => "flatpattern",
+        SpryCad.SheetMetal.Features.BaseFlangeFeature => "baseflange",
+        SpryCad.SheetMetal.Features.EdgeFlangeFeature => "edgeflange",
+        SpryCad.SheetMetal.Features.HemFeature => "hem",
+        SpryCad.SheetMetal.Features.SheetCutFeature => "sheetcut",
         _ => "part",
     };
 
@@ -234,7 +248,7 @@ public sealed class FeatureTree : UserControl
             Child = new Border { Height = 3, CornerRadius = new CornerRadius(1.5), Background = Palette.Accent, VerticalAlignment = VerticalAlignment.Center },
             Cursor = RollbackCursor, Tag = "__rollback",
         };
-        ToolTip.SetTip(bar, "Rollback bar: drag up or down to roll the model back.");
+        ToolTip.SetTip(bar, "Rollback Bar\nDrag up or down to roll the model back.");
         bar.ZIndex = 1;
         var shift = new TranslateTransform();
         bar.RenderTransform = shift;
@@ -338,7 +352,7 @@ public sealed class FeatureTree : UserControl
             VerticalAlignment = VerticalAlignment.Center, Cursor = new Cursor(StandardCursorType.Hand), Margin = new Thickness(2, 0, 0, 0),
             Opacity = shown ? 1 : 0.7,
         };
-        ToolTip.SetTip(b, shown ? "Hide the sketch" : "Show the sketch (e.g. to use it again in another feature)");
+        ToolTip.SetTip(b, shown ? "Hide in the graphics area" : "Show in the graphics area");
         b.PointerEntered += (_, _) => b.Background = Palette.SelectedBg;
         b.PointerExited += (_, _) => b.Background = Brushes.Transparent;
         b.PointerPressed += (_, e) =>
@@ -350,11 +364,15 @@ public sealed class FeatureTree : UserControl
         return b;
     }
 
+    /// <summary>The part's material row's id (under the part's row: right-click for its menu, double-click to edit it).</summary>
+    public const string MaterialRow = "__material";
+
     Border AddRow(string id, string text, string icon, int indent, FeatureStatus? status, bool isHeader = false, bool suppressed = false, bool hasChildren = false,
-        bool? sketchShown = null, string? condition = null)
+        bool? sketchShown = null, string? condition = null, Color? swatchColor = null)
     {
         // everything the row shows: the same as last time (and not already in this rebuild), the row as it was
-        var swatchKey = Swatches != null && Swatches.TryGetValue(id, out var sw) ? sw.ToString() : "";
+        Color? swatchOf = Swatches != null && Swatches.TryGetValue(id, out var sw) ? sw : swatchColor;
+        var swatchKey = swatchOf?.ToString() ?? "";
         var sig = string.Join("|", text, icon, indent, isHeader, suppressed, hasChildren, hasChildren && _expanded.Contains(id), sketchShown, condition,
             swatchKey, Flyout, status?.Ok, status?.Error, status == null ? null : string.Join("\n", status.Warnings),
             status is { Milliseconds: > 200 } ? status.Milliseconds.ToString("0") : "");
@@ -373,7 +391,7 @@ public sealed class FeatureTree : UserControl
             ? TreeRow.Expander(_expanded.Contains(id), () => ToggleExpanded(id))
             : TreeRow.Spacer());
         sp.Children.Add(Icons.Make(icon, 16));
-        if (Swatches != null && Swatches.TryGetValue(id, out var swatch))
+        if (swatchOf is { } swatch)
             sp.Children.Add(new Border
             {
                 Width = 10, Height = 10, CornerRadius = new CornerRadius(2), Background = new SolidColorBrush(swatch),

@@ -102,24 +102,24 @@ static class Updater
         {
             await Dialogs.Message(w, "Check for Updates", BaseUrl == null
                 ? "Local build: update checks are off."
-                : "Not installed by the setup, so it cannot update itself. Install with the setup to get updates.");
+                : "This copy was not installed with Setup and cannot update itself. Reinstall with Setup to get updates.");
             return;
         }
         if (_pending != null) { await Dialogs.Message(w, "Check for Updates", "Update downloaded. It installs on exit."); return; }
         // already downloading (Update clicked, its window hidden): its progress again, not a second download
         if (Downloading is { } dl) { await ShowProgress(w, dl); return; }
-        w.Status("Checking for updates...");
+        w.Status("Checking for updates…");
         Release? r;
         try { r = await Fetch(); }
         catch (Exception ex)
         {
             w.Status("");
             App.Log(ex, "Checking for updates");
-            await Dialogs.Message(w, "Update check failed", FailureReason(ex));
+            await Dialogs.Message(w, "Update Check Failed", FailureReason(ex));
             return;
         }
         w.Status("");
-        if (r == null) await Dialogs.Message(w, "Update check failed", "The update information failed its signature check. Try again later.");
+        if (r == null) await Dialogs.Message(w, "Update Check Failed", "The update information failed its signature check. Try again later.");
         else if (!IsNewer(r.Version, CurrentVersion)) await Dialogs.Message(w, "Check for Updates", $"SpryCAD {CurrentVersion} is up to date ({Channel} channel).");
         else await Offer(w, r);
     }
@@ -128,13 +128,13 @@ static class Updater
     static async Task Offer(MainWindow w, Release r)
     {
         var mb = r.Size / (1024.0 * 1024.0);
-        var title = $"Update available: {r.Version}";
+        var title = $"Update Available: {r.Version}";
         var text = $"Installed: {CurrentVersion}.";
         var note = $"{mb:0} MB. Installs on exit.";
         var buttons = new[] { "Update", "Later", "Skip This Version" };
         var choice = Card.ShowAsync(w, CardKind.Question, title, new[] { Card.Text(text), Card.Text(note, dim: true) }, buttons, 0, 1) is { } shown
             ? await shown
-            : await Dialogs.YesNo(w, "Update available", $"{title}. {text} {note}", "Update", "Later") ? 0 : 1;
+            : await Dialogs.YesNo(w, "Update Available", $"{title}. {text} {note}", "Update", "Later") ? 0 : 1;
         if (choice == 2) { UserSettings.SkippedUpdate = r.Version; UserSettings.Save(); return; }
         if (choice != 0) return;
 
@@ -150,11 +150,11 @@ static class Updater
         {
             w.Status("");
             App.Log(ex, "Downloading an update");
-            await Dialogs.Message(w, "Update failed", FailureReason(ex));
+            await Dialogs.Message(w, "Update Failed", FailureReason(ex));
             return;
         }
         w.Status("");
-        var now = Card.ShowAsync(w, CardKind.Info, $"{r.Version} ready to install",
+        var now = Card.ShowAsync(w, CardKind.Info, $"{r.Version} Ready to Install",
             new[] { Card.Text("Closes SpryCAD, installs and reopens. Prompts to save files with changes.") },
             new[] { "Install Now", "On Exit" }, 0, 1) is { } ready ? await ready == 0 : false;
         if (!now) { w.Status($"{r.Version} installs on exit."); return; }
@@ -357,11 +357,11 @@ static class Updater
         catch (Exception ex)
         {
             App.Log(ex, "Loading the change log");
-            await Dialogs.Message(owner, "Change log failed", FailureReason(ex));
+            await Dialogs.Message(owner, "Change Log Failed", FailureReason(ex));
             return;
         }
         var list = new StackPanel { Spacing = 2 };
-        list.Children.Add(new TextBlock { Text = $"You have v{CurrentVersion}.", Foreground = Palette.TextSecondary, Margin = new Thickness(0, 0, 0, 4) });
+        list.Children.Add(new TextBlock { Text = $"Installed: v{CurrentVersion}.", Foreground = Palette.TextSecondary, Margin = new Thickness(0, 0, 0, 4) });
         // builds whose changes were all internal list nothing, and are left out
         var listed = log.Where(e => e.Changes.Length > 0).ToList();
         if (listed.Count == 0)

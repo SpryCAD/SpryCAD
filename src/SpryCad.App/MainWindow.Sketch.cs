@@ -46,7 +46,7 @@ public partial class MainWindow
         _pendingAfterSketch = pendingAfter;
         var page = new PmPage("Edit Sketch", "sketch");
         var s = page.Section("Message");
-        page.Info(s, "Select a plane on which to create a sketch: one of the three default planes (in the graphics area or the design tree), a reference plane, or a planar face.");
+        page.Info(s, "Select a default plane, reference plane or planar face on which to create the sketch.");
         var box = page.Selection(s, "Plane", SelFilter.Plane | SelFilter.PlanarFace, "Plane or planar face", 1);
         box.Changed += () =>
         {
@@ -60,7 +60,7 @@ public partial class MainWindow
         {
             box.Items.Add(offered);
             box.Refresh();
-            page.Info(s, $"{offered.Name} is not used yet: OK (Enter) sketches on it.");
+            page.Info(s, $"{offered.Name} is not used yet. Click OK (Enter) to sketch on it.");
             page.OnOk = () => { if (TryPlaneOf(box.Items.FirstOrDefault(), out var p3, out var f3)) { ShowPage(null); StartSketch(p3!, f3); } else page.OnCancel!(); };
         }
         ShowPage(page);
@@ -111,7 +111,13 @@ public partial class MainWindow
     {
         Selection.Clear();
         _sketchIsNew = isNew;
-        _sketch = new SketchEditor(Viewport, sf, frame, Session.Lookup) { PointsOnly = pointsOnly, Units = Session.Doc.Units };
+        var u = Session.Doc.Units;
+        _sketch = new SketchEditor(Viewport, sf, frame, Session.Lookup)
+        {
+            PointsOnly = pointsOnly, Units = u,
+            // (round in the part's units)
+            FilletRadius = FeatureDefaults.Mm(u, 5, 0.125), OffsetDistance = FeatureDefaults.Mm(u, 5, 0.125),
+        };
         _sketch.Overlay = Overlay;
         _sketch.Changed += OnSketchChanged;
         _sketch.SelectionChanged += BuildSketchPage;
@@ -121,7 +127,7 @@ public partial class MainWindow
         Viewport.Mode = _sketch;
         Viewport.Hover = null;
         ShowTab("Sketch");
-        ShowConfirmCorner(() => ExitSketch(true), DiscardSketch, "Exit Sketch", "Discard changes", okIcon: "exitsketch");
+        ShowConfirmCorner(() => ExitSketch(true), DiscardSketch, "Exit Sketch", "Discard Changes", okIcon: "exitsketch");
         BuildSketchPage();
         // a new sketch turns to its plane; an existing one also zooms to fit its geometry and its dimensions
         Viewport.NormalTo(frame, isNew ? null : SketchFit(sf.Sketch, frame));
@@ -234,8 +240,8 @@ public partial class MainWindow
             }
             else switch (pending)
             {
-                case "extrude": OpenExtrudePage(new ExtrudeFeature { SketchId = sf.Id }, true); break;
-                case "cut": OpenExtrudePage(new ExtrudeFeature { SketchId = sf.Id, IsCut = true, End = EndCondition.ThroughAll, Reverse = true }, true); break;
+                case "extrude": OpenExtrudePage(new ExtrudeFeature { SketchId = sf.Id }.Sized(Units), true); break;
+                case "cut": OpenExtrudePage(new ExtrudeFeature { SketchId = sf.Id, IsCut = true, End = EndCondition.ThroughAll, Reverse = true }.Sized(Units), true); break;
                 case "revolve": OpenRevolvePage(new RevolveFeature { SketchId = sf.Id }, true); break;
                 case "cutrevolve": OpenRevolvePage(new RevolveFeature { SketchId = sf.Id, IsCut = true }, true); break;
             }
@@ -267,9 +273,9 @@ public partial class MainWindow
             var s = page.Section("Status");
             _sketchStatusText = new TextBlock { FontWeight = FontWeight.SemiBold };
             s.Children.Add(_sketchStatusText);
-            page.Info(s, "Blue = under defined, black = fully defined, red = over defined.");
+            page.Info(s, "Blue: Under Defined. Black: Fully Defined. Red: Over Defined.");
             if (ed.PointsOnly)
-                page.Info(s, "Click on the face to place hole centers. Add dimensions (Smart Dimension) to locate them, then click OK.");
+                page.Info(s, "Click on the face to place hole centers. Locate them with Smart Dimension, then click OK.");
             // settings of the tool in use (a finished polygon is plain lines: its sides are set while drawing it)
             if (ed.Tool == SketchTool.Fillet)
             {
@@ -280,7 +286,7 @@ public partial class MainWindow
                     // that rebuilds the panel from here would loop
                     if (UnitFormat.TryLength(v, Session.Lookup, out var r, out _) && r > 0) ed.FilletRadius = r;
                 }, "sketchfillet");
-                page.Info(fs, "Click corners where two lines meet (or the two lines). The lines stay as construction geometry, so dimensions to the sharp corner remain; delete the fillet's arc to restore the corner.");
+                page.Info(fs, "Select corners where two lines meet, or both lines. The lines remain as construction geometry to keep dimensions to the sharp corner; delete the arc to restore it.");
             }
             if (ed.Tool == SketchTool.Polygon)
             {
@@ -291,9 +297,9 @@ public partial class MainWindow
             var t = page.Section("Tools");
             page.Info(t, "L Line · R Rectangle · C Circle · A Arc · P Point · D Smart Dimension · T Trim · Esc Select. Drag points to move geometry. Double-click a dimension to change its value.");
             page.ButtonRow(t, "Auto Arrange Dimensions", () => AutoArrange(ed), "dimension");
-            page.Info(t, "Dimension labels you place or drag stay where you put them; the others arrange themselves. Auto Arrange puts the placed ones back in the arrangement (select some dimensions first to arrange only those).");
+            page.Info(t, "Dimensions you place or drag stay where you put them; others are arranged automatically. Auto Arrange rearranges all dimensions, or only the selected ones.");
             var m = page.Section("Model Edges");
-            page.Info(m, "Convert Entities projects model edges and faces into the sketch: exact lines, arcs and circles.");
+            page.Info(m, "Convert Entities projects model edges and faces into the sketch as exact lines, arcs and circles.");
             page.ButtonRow(m, "Convert Entities", ConvertEntities, "convert");
         }
         else
@@ -334,7 +340,7 @@ public partial class MainWindow
                 if (linked.Count > 0)
                 {
                     var row = new DockPanel();
-                    var del = Dialogs.DeleteButton("Delete On Edge: the geometry stays where it is, no longer following the model");
+                    var del = Dialogs.DeleteButton("Delete the On Edge relation. The geometry stays in place but no longer follows the model.");
                     del.Click += (_, _) => { ed.UnlinkSelection(); BuildSketchPage(); };
                     DockPanel.SetDock(del, Dock.Right);
                     row.Children.Add(del);
@@ -385,8 +391,8 @@ public partial class MainWindow
                 var fixRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4 };
                 var fixB = new Button { Content = "⚓ Fix" }; fixB.Click += (_, _) => { ed.FixSelection(true); BuildSketchPage(); };
                 var flB = new Button { Content = "Float" }; flB.Click += (_, _) => { ed.FixSelection(false); BuildSketchPage(); };
-                ToolTip.SetTip(fixB, "Anchor the selected points (and the end points of selected geometry) where they are");
-                ToolTip.SetTip(flB, "Release anchored points so the sketch can move them again");
+                ToolTip.SetTip(fixB, "Fixes the selected points and the endpoints of selected geometry in place.");
+                ToolTip.SetTip(flB, "Releases fixed points so the solver can move them again.");
                 fixRow.Children.Add(fixB); fixRow.Children.Add(flB);
                 opt.Children.Add(fixRow);
             }
@@ -412,9 +418,9 @@ public partial class MainWindow
                     void Apply() { if (ed.SetDimensionValue(dim, vb.Text)) { ed.UpdateOverlay(Viewport); OnSketchChanged(); } }
                     vb.KeyDown += (_, e) => { if (e.Key == Avalonia.Input.Key.Enter) { Apply(); e.Handled = true; } };
                     vb.LostFocus += (_, _) => Apply();
-                    page.ButtonRow(par, "Edit value…", () => ed.OpenModifyBox(dim));
+                    page.ButtonRow(par, "Edit Value…", () => ed.OpenModifyBox(dim));
                     page.Check(par, "Driven (reference)", () => dim.Driven, v => { dim.Driven = v; ed.Resolve(); Viewport.Redraw(); });
-                    if (dim.Type == CType.Offset) page.ButtonRow(par, "Reverse direction", () => { ed.ReverseOffset(dim); BuildSketchPage(); }, "offset");
+                    if (dim.Type == CType.Offset) page.ButtonRow(par, "Reverse Direction", () => { ed.ReverseOffset(dim); BuildSketchPage(); }, "offset");
                 }
             }
             page.ButtonRow(opt, "Delete", () => { ed.DeleteSelection(); BuildSketchPage(); });
@@ -452,15 +458,15 @@ public partial class MainWindow
 
     void ConvertEntities()
     {
-        if (_sketch == null) { Status("Convert Entities works inside a sketch."); return; }
+        if (_sketch == null) { Status("Convert Entities requires an active sketch."); return; }
         if (Converting) { _convertPage!.Activate(_convertBox); return; }
         _sketch.SetTool(SketchTool.Select);
         var page = new PmPage("Convert Entities", "convert");
         var s = page.Section("Entities to Convert");
         var box = page.Selection(s, "Entities", SelFilter.Edge | SelFilter.Face,
-            "Click model edges (lines, arcs, curves) and faces (all their edges). Click one again to remove it.");
+            "Select model edges, or faces to convert all their edges. Select an item again to remove it.");
         page.Check(s, "Select chain", () => _convertChain, v => { _convertChain = v; UpdateConvertCount(); });
-        page.Info(s, "Select chain: each edge picked brings the edges tangent to it, end to end (a filleted outline in one click).");
+        page.Info(s, "Select chain adds every edge tangent to each selected edge, end to end.");
         _convertCount = new TextBlock { FontSize = UI.TypeScale.Small, Foreground = Palette.TextMuted, Margin = new Thickness(0, 4, 0, 0) };
         s.Children.Add(_convertCount);
         // model edges and faces selected already are what is converted
@@ -471,7 +477,7 @@ public partial class MainWindow
         page.OnCancel = EndConvert;
         _convertPage = page; _convertBox = box;
         ShowPage(page);
-        ShowConfirmCorner(ConvertOk, EndConvert, "OK: convert (Enter)", "Cancel (Esc)");
+        ShowConfirmCorner(ConvertOk, EndConvert, "OK (Enter)", "Cancel (Esc)");
         UpdateConvertCount();
         UpdateEmphasis();
     }
@@ -480,7 +486,7 @@ public partial class MainWindow
     {
         if (!Converting || _convertBox is not { } box) return;
         var (exact, mesh, count) = ConvertTargets(box.Items, _convertChain);
-        if (count == 0) { Status("Pick model edges or faces to convert."); return; }
+        if (count == 0) { Status("Select model edges or faces to convert."); return; }
         _sketch!.ConvertEdges(exact, mesh);
         EndConvert();
     }
@@ -491,7 +497,7 @@ public partial class MainWindow
         if (!Converting) return;
         _convertPage = null; _convertBox = null; _convertCount = null;
         Viewport.Emphasis = Array.Empty<SelItem>();
-        ShowConfirmCorner(() => ExitSketch(true), DiscardSketch, "Exit Sketch", "Discard changes", okIcon: "exitsketch");
+        ShowConfirmCorner(() => ExitSketch(true), DiscardSketch, "Exit Sketch", "Discard Changes", okIcon: "exitsketch");
         BuildSketchPage();
         Viewport.Redraw();
     }
@@ -510,7 +516,7 @@ public partial class MainWindow
     {
         if (_convertCount == null || _convertBox == null) return;
         var (_, _, n) = ConvertTargets(_convertBox.Items, _convertChain);
-        _convertCount.Text = n == 0 ? "Nothing picked yet." : $"{n} edge{(n == 1 ? "" : "s")} to convert.";
+        _convertCount.Text = n == 0 ? "No edges selected." : $"{n} edge{(n == 1 ? "" : "s")} to convert.";
     }
 
     /// <summary>

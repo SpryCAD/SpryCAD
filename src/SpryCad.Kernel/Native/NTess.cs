@@ -388,6 +388,18 @@ public static class NTess
         return (1, 1);
     }
 
+    /// <summary>
+    /// A B-spline's distance per unit of the face's parameters: a closed direction runs 0 to 2π on the face (not the
+    /// B-spline's own knots, often 0 to 1: measured by those, the grid round it was six times too fine).
+    /// </summary>
+    static (double su, double sv) FaceScale(NurbsSurface nb)
+    {
+        var (su, sv) = nb.MetricScale();
+        if (nb.ClosedU) su *= (nb.U1 - nb.U0) / (2 * Math.PI);
+        if (nb.ClosedV) sv *= (nb.V1 - nb.V0) / (2 * Math.PI);
+        return (su, sv);
+    }
+
     static (double su, double sv) MetricScale(NSurface s) => s.Kind switch
     {
         SurfaceKind.Cylinder => (s.R, 1),
@@ -396,7 +408,7 @@ public static class NTess
         SurfaceKind.Torus => (s.R + s.R2, s.R2),
         SurfaceKind.Pipe => (s.R, 1),
         SurfaceKind.Screw => (Math.Max(s.Screw!.MaxRadius, 1e-3), 1),
-        SurfaceKind.BSpline => s.Nurbs!.MetricScale(),
+        SurfaceKind.BSpline => FaceScale(s.Nurbs!),
         SurfaceKind.Offset => MetricScale(s.Base!),
         _ => (1, 1),
     };

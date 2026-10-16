@@ -44,11 +44,34 @@ public static class PartDescribe
             case ObjectKind.Material:
                 {
                     var items = new List<string>();
-                    Fields(Data(old), Data(@new), "", items, skip: Array.Empty<string>());
+                    JsonElement a = Data(old), b = Data(@new);
+                    // (since material libraries: by the material's name, its color only as the part's own appearance)
+                    bool libraries = new[] { a, b }.Any(x => x.TryGetProperty("materialItem", out _) || x.TryGetProperty("appearance", out _));
+                    Fields(a, b, "", items, skip: libraries ? new[] { "materialItem", "color" } : Array.Empty<string>());
                     return "Material: " + (items.Count == 0 ? "changed" : Join(items));
                 }
-            case ObjectKind.Settings: return "Part settings changed (units, sheet metal or embedded files)";
+            case ObjectKind.Settings: return "Part settings changed (units or embedded files)";
             case ObjectKind.File: return $"Embedded file {name} replaced";
+            case ObjectKind.LibrarySnapshot:
+                {
+                    var items = new List<string>();
+                    Fields(Data(old), Data(@new), "", items, skip: new[] { "table", "row", "columns" });
+                    return $"{name} updated: " + (items.Count == 0 ? "changed" : Join(items));
+                }
+            case ObjectKind.SheetMetalBody:
+            case ObjectKind.SheetMetalOverride:
+                {
+                    var items = new List<string>();
+                    Fields(Data(old), Data(@new), "", items, skip: new[] { "id", "target" });
+                    return $"{name}: " + (items.Count == 0 ? "changed" : Join(items));
+                }
+            case ObjectKind.SheetProfile:
+                {
+                    var a = PartObjects.Open<SheetMetal.ProfileSnapshot>(old, ObjectKind.SheetProfile);
+                    var b = PartObjects.Open<SheetMetal.ProfileSnapshot>(@new, ObjectKind.SheetProfile);
+                    var d = a.Differences(b);
+                    return "Shop profile rows updated" + (d.Count == 0 ? "" : ": " + Join(d));
+                }
             default: return $"{name} changed";
         }
     }
@@ -104,6 +127,7 @@ public static class PartDescribe
                 ObjectKind.File => files.TryGetValue(c.ObjectId, out var n) ? n : "an embedded file",
                 ObjectKind.FeatureOrder => "Feature order",
                 ObjectKind.Variables => "Equations",
+                ObjectKind.LibrarySnapshot => "Library data " + PartObjects.SnapshotName(newB ?? oldB!),
                 _ => c.ObjectId.Kind.ToString(),
             };
             list.Add(new DescribedChange(c, name, Describe(c.ObjectId.Kind, oldB, newB, name)));

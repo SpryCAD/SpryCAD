@@ -34,7 +34,7 @@ public partial class MainWindow
     bool RepeatLastCommand()
     {
         if (_lastCommand is not { } c || _page != null || _edit != null) return false;
-        Status($"Repeat: {c.name}");
+        Status($"Repeating {c.name}.");
         c.run();
         return true;
     }
@@ -50,6 +50,7 @@ public partial class MainWindow
             C("insertcomp", "Insert Components", InsertComponentCommand);
             C("mates", "Mate", MateCommand);
             C("motor", "Motor", MotorCommand);
+            C("thread", "Insert Fastener", InsertFastenerCommand);
             C("lpattern", "Linear Component Pattern", () => PatternPage(Core.Assembly.PatternKind.Linear));
             C("cpattern", "Circular Component Pattern", () => PatternPage(Core.Assembly.PatternKind.Circular));
             C("mirror", "Mirror Components", () => PatternPage(Core.Assembly.PatternKind.Mirror));
@@ -113,14 +114,20 @@ public partial class MainWindow
             C("plane", "Reference Plane", PlaneCommand);
             C("axis", "Reference Axis", AxisCommand);
             C("combine", "Combine", CombineCommand);
-            C("flatpattern", "Flat Pattern", FlatPatternCommand);
-            C("flatten", "Flatten", ToggleFlatten);
+            C("baseflange", "Base Flange", BaseFlangeCommand);
+            C("edgeflange", "Edge Flange", EdgeFlangeCommand);
+            C("hem", "Hem", HemCommand);
+            C("sheetcut", "Sheet Cut", SheetCutCommand);
+            C("corners", "Corners", CornersCommand);
+            C("flatten", "Flatten", ToggleFlattenCommand);
+            C("export-dxf", "Export Flat Pattern", () => _ = ExportFlatCommand());
             C("measure", "Measure", MeasureCommand);
             C("mass", "Mass Properties", MassPropertiesCommand);
+            C("material", "Edit Material", EditMaterialCommand);
+            C("appearance", "Appearance", () => _ = PartAppearanceCommand());
             C("equations", "Equations", () => _ = Dialogs.Equations(this));
             C("table", "Design Table", () => _ = Dialogs.DesignTables(this));
             C("configure", "Configure", () => _ = Dialogs.ConfigurePart(this));
-            C("export-dxf", "Export Flat Pattern DXF", () => _ = ExportDxf());
             C("import", "Import STEP", () => _ = ImportDialog());
         }
         // the view, in any mode

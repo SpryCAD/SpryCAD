@@ -25,16 +25,16 @@ public partial class MainWindow
 
     void MirrorEntities()
     {
-        if (_sketch is not { } ed) { Status("Mirror Entities works in a sketch: edit or start a sketch first."); return; }
+        if (_sketch is not { } ed) { Status("Mirror Entities requires an active sketch. Edit or create a sketch first."); return; }
         if (InEntityPage) EndEntityPage();
         var page = new PmPage("Mirror Entities", "sketchmirror");
         var what = page.Section("Entities to Mirror");
         var ents = page.Selection(what, "Entities", SelFilter.SketchSegment,
-            "Click the sketch entities to mirror. Click one again (or Delete in the box) to take it out.",
+            "Select the sketch entities to mirror. Select one again, or press Delete in the box, to remove it.",
             accept: i => ed.Sk.Entity(i.SketchItem) is { IsReference: false });
         var about = page.Section("Mirror About");
         var axis = page.Selection(about, "Line", SelFilter.SketchSegment,
-            "A centerline or line. The copies stay symmetric about it.", max: 1,
+            "Centerline or line to mirror about. The copies stay symmetric about it.", max: 1,
             accept: i => ed.Sk.Entity(i.SketchItem) is SkLine);
         // what was selected: a centerline (else the last line) to mirror about, the rest to mirror
         var picked = ed.SelectedEntities.Where(e => !e.IsReference).ToList();
@@ -45,20 +45,20 @@ public partial class MainWindow
         axis.Changed += () => { if (axis.Items.Count > 0) page.Activate(ents); };
         OpenEntityPage(page, () =>
         {
-            if (axis.Items.Count == 0) return "Pick the line to mirror about.";
+            if (axis.Items.Count == 0) return "Select the line to mirror about.";
             return ed.Mirror(ents.Items.Select(i => i.SketchItem).ToList(), axis.Items[0].SketchItem);
         }, axis.Items.Count == 0 && ents.Items.Count > 0 ? axis : ents,
-           "Mirrored. The copies stay symmetric about the line.");
+           "Entities mirrored. The copies stay symmetric about the line.");
     }
 
     void OffsetEntities()
     {
-        if (_sketch is not { } ed) { Status("Offset Entities works in a sketch: edit or start a sketch first."); return; }
+        if (_sketch is not { } ed) { Status("Offset Entities requires an active sketch. Edit or create a sketch first."); return; }
         if (InEntityPage) EndEntityPage();
         var page = new PmPage("Offset Entities", "offset");
         var what = page.Section("Entities to Offset");
         var ents = page.Selection(what, "Entities", SelFilter.SketchSegment,
-            "Click lines, arcs or circles: each brings the chain it is part of. Click one again (or Delete in the box) to take it out.",
+            "Select lines, arcs or circles; each adds its connected chain. Select one again, or press Delete in the box, to remove it.",
             accept: i => ed.Sk.Entity(i.SketchItem) is SkLine or SkArc or SkCircle or SkSpline);
         var prm = page.Section("Parameters");
         var distance = ed.OffsetDistance;
@@ -68,10 +68,10 @@ public partial class MainWindow
             if (UnitFormat.TryLength(v, Session.Lookup, out var d, out _) && d > 0) distance = d;
         }, "offset");
         page.Check(prm, "Reverse direction", () => reverse, v => reverse = v);
-        page.Info(prm, "The copies keep the distance as the originals change (its dimension can be edited later).");
+        page.Info(prm, "The offset follows changes to the original entities. Its distance dimension can be edited later.");
         foreach (var e in ed.SelectedEntities.Where(e => e is SkLine or SkArc or SkCircle or SkSpline)) ents.Add(EntityItem(e.Id));
         OpenEntityPage(page, () => ed.Offset(ents.Items.Select(i => i.SketchItem).ToList(), distance, reverse), ents,
-            "Offset made. To change the distance later, double-click its dimension.");
+            "Offset created. Double-click its dimension to change the distance.");
     }
 
     /// <summary>
@@ -81,12 +81,12 @@ public partial class MainWindow
     /// </summary>
     void AddRelationCommand()
     {
-        if (_sketch is not { } ed) { Status("Add Relations works in a sketch: edit or start a sketch first."); return; }
+        if (_sketch is not { } ed) { Status("Add Relations requires an active sketch. Edit or create a sketch first."); return; }
         if (InEntityPage) EndEntityPage();
         var page = new PmPage("Add Relations", "relations");
         var sel = page.Section("Selected Entities");
         var box = page.Selection(sel, "Entities", SelFilter.SketchSegment | SelFilter.Vertex,
-            "Click the points, lines, arcs and circles to relate. Click one again (or Delete in the box) to take it out.");
+            "Select the points, lines, arcs and circles to relate. Select one again, or press Delete in the box, to remove it.");
         var add = page.Section("Add Relations");
         var buttons = new WrapPanel();
         add.Children.Add(buttons);
@@ -99,8 +99,8 @@ public partial class MainWindow
         {
             buttons.Children.Clear();
             var rels = ed.ApplicableRelations();
-            if (box.Items.Count == 0) buttons.Children.Add(Muted("Pick entities: the relations that fit them show here."));
-            else if (rels.Count == 0) buttons.Children.Add(Muted("No relation fits these together."));
+            if (box.Items.Count == 0) buttons.Children.Add(Muted("Select entities to see the relations that apply to them."));
+            else if (rels.Count == 0) buttons.Children.Add(Muted("No relations apply to the selected entities."));
             foreach (var rel in rels)
             {
                 var b = new Button { Margin = new Thickness(2), Padding = new Thickness(6, 2), Content = $"{SketchEditor.Glyph(rel)}  {SketchEditor.RelationName(rel)}" };
@@ -183,7 +183,7 @@ public partial class MainWindow
         if (_entityPage == null) return;
         _entityPage = null;
         if (_sketch is { } ed && !keepSelection) { ed.Selected.Clear(); Viewport.Redraw(); }
-        ShowConfirmCorner(() => ExitSketch(true), DiscardSketch, "Exit Sketch", "Discard changes", okIcon: "exitsketch");
+        ShowConfirmCorner(() => ExitSketch(true), DiscardSketch, "Exit Sketch", "Discard Changes", okIcon: "exitsketch");
         BuildSketchPage();
     }
 

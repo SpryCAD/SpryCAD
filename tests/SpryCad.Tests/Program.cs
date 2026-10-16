@@ -254,6 +254,11 @@ static class Program
             RollingBallTool.Tests(t);
             ContainerTests.Run(t);
             StorageTests.Run(t);
+            LibraryTests.Run(t);
+            FastenerTests.Run(t);
+            MaterialTests.Run(t);
+            MaterialTests.RunPart(t);
+            MaterialTests.RunAppearance(t);
             AssemblyStorageTests.Run(t);
             TransferTests.Run(t);
             TransferTests.RunPins(t);

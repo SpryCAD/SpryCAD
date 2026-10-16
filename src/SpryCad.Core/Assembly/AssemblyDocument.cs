@@ -198,8 +198,13 @@ public sealed class Component
     public bool Hidden { get; set; }
     /// <summary>Shown from the display cache only (no rebuild of the part): fast to open, nothing to select but the mesh.</summary>
     public bool Lightweight { get; set; }
-    /// <summary>Appearance override (RGB 0-1); null: the part's own color.</summary>
+    /// <summary>Appearance override's color (RGB 0-1), all an older SpryCAD reads; null: the part's own appearance. Set with <see cref="SetLook"/>.</summary>
     public double[]? Color { get; set; }
+    /// <summary>The appearance override in full (color, finish, opacity), beside <see cref="Color"/>; read through <see cref="Look"/>.</summary>
+    public Appearance? Appearance { get; set; }
+    /// <summary>The component's own appearance (null: the part's): <see cref="Appearance"/>, its color as <see cref="Color"/> says (an older SpryCAD may have changed it).</summary>
+    [System.Text.Json.Serialization.JsonIgnore] public Appearance? Look => AppearanceOverride.Look(Color, Appearance);
+    public void SetLook(Appearance? a) { Appearance = a; Color = a?.Color; }
     /// <summary>
     /// The part's configuration for this instance: values of its user-facing parameters (a design table's row, a
     /// variable's value) by name, only those that differ from the part's own (<see cref="Configurations"/>). Null: the

@@ -100,13 +100,16 @@ static class StorageTests
         doc.AddFile("imports/block.step", step);
         doc.AddFeature(new ImportFeature { File = "imports/block.step", Sha256 = DocumentContainer.Hash(step) });
         doc.Color = new[] { 0.1, 0.2, 0.3 };
-        doc.Material = "Aluminium 6061";
-        doc.Density = 2.7;
-        doc.SheetMetal = new SheetMetalSettings { KFactor = "0.44" };
+        SpryCad.Core.Library.PartMaterial.SetCustom(doc, "Aluminium 6061", 2710);
         doc.Units = UnitSystem.MMGS;
         doc.SketchVisibility = new() { [hole.Id] = false };
         doc.RollbackIndex = doc.Features.Count - 1;
         doc.DerivedFrom = CadDocument.NewGuid();
+        doc.Library = new(StringComparer.Ordinal) { ["ISO273/M8"] = SpryCad.Core.Library.LibrarySet.BuiltIn.Snapshot("ISO273/M8")! };
+        // sheet metal: a body (no features: its objects alone), a bend override, the profile rows it can use
+        doc.SheetBodies = new() { new SpryCad.SheetMetal.SheetMetalBody { Id = "Sheet1", Name = "Sheet1", Material = "Steel CRS", Gauge = "16 ga", Overrides = new(StringComparer.Ordinal) { ["sm.allowance/k"] = "0.4" } } };
+        doc.SheetOverrides = new() { new SpryCad.SheetMetal.SheetMetalOverride { Target = "EdgeFlange1.0.B", Values = { ["sm.tooling/inside radius"] = "2" } } };
+        doc.SheetProfile = SpryCad.SheetMetal.ProfileSnapshot.Of(SpryCad.SheetMetal.StarterProfile.Profile, new[] { ("Steel CRS", "16 ga") });
         return doc;
     }
 

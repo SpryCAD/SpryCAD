@@ -27,6 +27,8 @@ public partial class MainWindow
         /// </summary>
         public AssemblySession? EmbeddedIn;
         public string? EmbeddedName;
+        /// <summary>The sub-assembly holding it when it is embedded deeper down (its path in the assembly; null: in the assembly itself).</summary>
+        public string? EmbeddedOwner;
         /// <summary>The embedding assembly's file (found again by it once its tab is closed; null: never saved).</summary>
         public string? EmbeddedPath;
         public Border Header = null!;
@@ -144,7 +146,7 @@ public partial class MainWindow
     void InitPartsList()
     {
         PartsButton.Click += (_, _) => ShowPartsList();
-        ToolTip.SetTip(PartsButton, "All open parts (Ctrl+E), in the task pane at the right: arrow keys switch between them");
+        ToolTip.SetTip(PartsButton, "Open Parts (Ctrl+E)\nLists the open parts in the task pane. Use the arrow keys to switch between them.");
         DocTabs.HiddenCountChanged += () => Avalonia.Threading.Dispatcher.UIThread.Post(UpdatePartsButton);
         UpdatePartsButton();
         // + after the last tab: a new part or assembly (as a browser's new tab)
@@ -154,7 +156,7 @@ public partial class MainWindow
             Background = Brushes.Transparent, BorderThickness = new Thickness(0), CornerRadius = new CornerRadius(4),
             VerticalAlignment = VerticalAlignment.Center, Focusable = false,
         };
-        ToolTip.SetTip(add, "New part or assembly");
+        ToolTip.SetTip(add, "New Part or Assembly");
         var newPart = new MenuItem { Header = "New _Part", InputGesture = new KeyGesture(Key.N, KeyModifiers.Control) };
         newPart.Click += (_, _) => _ = NewFile();
         var newAsm = new MenuItem { Header = "New _Assembly" };
@@ -261,7 +263,7 @@ public partial class MainWindow
         {
             if (target() is not { } t || PathOf(t) is not { } p || Clipboard is not { } clip) return;
             await clip.SetTextAsync(p);
-            Status("Copied " + p);
+            Status("Copied " + p + " to the clipboard.");
         };
         // the list's order (its arrow keys follow it; the tabs keep theirs)
         var sorts = new (PartsOrder order, string label)[] { (PartsOrder.Tabs, "_Tab Order"), (PartsOrder.Name, "_Name"), (PartsOrder.RecentlyOpened, "_Recently Opened") }
@@ -342,7 +344,7 @@ public partial class MainWindow
             Background = Brushes.Transparent, BorderThickness = new Thickness(0),
             HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(8, 6, 6, 4),
         };
-        ToolTip.SetTip(dock, "Back to the task pane at the right of the main window");
+        ToolTip.SetTip(dock, "Dock in the task pane");
         var body = new ContentControl { Content = list };
         var content = new DockPanel { Children = { dock, body } };
         // a little room around the parts in the floating window, inside the scrolling area: the scroll bar stays at
@@ -487,11 +489,11 @@ public partial class MainWindow
                 // could not be opened: the name in red, the problem instead of the path (in full on the tooltip)
                 var error = t.Error;
                 SetErrorColor(row.Title, error != null);
-                row.Path.Text = error ?? t.Asm?.FilePath ?? t.Session.FilePath ?? t.Source ?? "Not saved yet";
+                row.Path.Text = error ?? t.Asm?.FilePath ?? t.Session.FilePath ?? t.Source ?? "Not saved";
                 row.Path.Foreground = error != null ? ErrorBrush : Palette.TextMuted;
                 row.Path.TextTrimming = error != null ? TextTrimming.CharacterEllipsis : TextTrimming.PathSegmentEllipsis;
                 row.Warning.IsVisible = error != null && t.Thumb == null;
-                ToolTip.SetTip(row.Item, error != null ? $"Could not be opened: {error}\n{t.Source ?? t.Session.FilePath}" : null);
+                ToolTip.SetTip(row.Item, error != null ? $"Could not open: {error}\n{t.Source ?? t.Session.FilePath}" : null);
                 Avalonia.Controls.Primitives.TextSearch.SetText(row.Item, TitleOf(t));
             }
             if (_partRows.TryGetValue(_tab, out var active) && !ReferenceEquals(list.SelectedItem, active.Item))
@@ -631,7 +633,7 @@ public partial class MainWindow
             _bannerError = UI.Card.Text("");
             _bannerPath = UI.Card.Text("", dim: true);
             var retry = new Button { Content = "Retry" };
-            ToolTip.SetTip(retry, "Read the file again (e.g. after fixing or replacing it)");
+            ToolTip.SetTip(retry, "Reloads the file from disk");
             retry.Click += (_, _) => RetryLoad(_tab);
             var close = new Button { Content = "Close" };
             ToolTip.SetTip(close, "Close this part (Ctrl+W)");
@@ -681,7 +683,7 @@ public partial class MainWindow
         t.Label.FontWeight = t == _tab ? FontWeight.SemiBold : FontWeight.Normal;
         SetErrorColor(t.Label, t.Error != null);
         t.Header.Background = t == _tab ? TabActiveBrush : TabInactiveBrush;
-        ToolTip.SetTip(t.Header, t.Error is { } e ? $"Could not be opened: {e}" : t.Asm?.FilePath ?? t.Session.FilePath ?? t.Source ?? "Not saved yet");
+        ToolTip.SetTip(t.Header, t.Error is { } e ? $"Could not open: {e}" : t.Asm?.FilePath ?? t.Session.FilePath ?? t.Source ?? "Not saved");
         RefreshPartsList();
     }
 

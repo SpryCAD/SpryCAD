@@ -3,8 +3,10 @@ using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.Platform.Storage;
 using SpryCad.App.Session;
 using SpryCad.Core;
+using SpryCad.Core.Library;
 using SpryCad.Core.Model;
 using SpryCad.Kernel;
 
@@ -31,14 +33,13 @@ public static class OptionsDialog
 
     // Updates: Windows only (Linux updates with its packages)
     static readonly Page[] SystemPages = OperatingSystem.IsWindows()
-        ? new Page[] { new("View", "views", ViewPage), new("Graphics", "display", GraphicsPage), new("Files", "folder", FilesPage), new("Updates", "rebuild", UpdatesPage) }
-        : new Page[] { new("View", "views", ViewPage), new("Graphics", "display", GraphicsPage), new("Files", "folder", FilesPage) };
+        ? new Page[] { new("View", "views", ViewPage), new("Graphics", "display", GraphicsPage), new("Files", "folder", FilesPage), new("Libraries", "table", LibrariesPage), new("Updates", "rebuild", UpdatesPage) }
+        : new Page[] { new("View", "views", ViewPage), new("Graphics", "display", GraphicsPage), new("Files", "folder", FilesPage), new("Libraries", "table", LibrariesPage) };
 
     static readonly Page[] DocumentPages =
     {
         new("Units", "measure", UnitsPage),
         new("Appearance", "display", AppearancePage),
-        new("Sheet Metal", "flatpattern", SheetMetalPage),
     };
 
     // the tab and page shown last, shown again next time (this run only)
@@ -53,7 +54,7 @@ public static class OptionsDialog
             ("System Options", SystemPages, null),
             (asm ? "Document Properties" : $"Document Properties ({owner.Session.Title.TrimEnd(' ', '*')})",
              asm ? Array.Empty<Page>() : DocumentPages,
-             asm ? "Document properties are a part's (its units, color, sheet metal): an assembly has none yet." : null),
+             asm ? "Document properties are available for parts only." : null),
         };
         var built = new Dictionary<Page, (Control view, Commit commit)>();
 
@@ -182,11 +183,15 @@ public static class OptionsDialog
         f.Section("Rotation");
         var pivots = new[] { RotateCenter.Selection, RotateCenter.ModelCenter, RotateCenter.UnderCursor };
         var pivot = f.Row("Rotate about", Combo(new[] { "The selection (default)", "The model center", "The point under the cursor" }, Array.IndexOf(pivots, vp.RotateAbout)),
-            "Middle-click a vertex, edge or face to rotate about that spot instead, until you middle-click empty space.");
+            "Middle-click a vertex, edge or face to rotate about it; middle-click empty space to reset.");
         f.Section("Projection");
-        var persp = f.Check("Perspective view", vp.Camera.Perspective, "Otherwise orthographic (parallel lines stay parallel), as drawings are.");
+        var persp = f.Check("Perspective view", vp.Camera.Perspective, "Clear for orthographic projection.");
+        f.Section("Command bar");
+        var bar = f.Row("Buttons", Combo(new[] { "Large (default)", "Compact" }, (int)UserSettings.CommandBar),
+            "Large: the icon above the name. Compact: a small icon beside it. Right-click the command bar to switch.");
         return new Commit(() => null, () => () =>
         {
+            if (bar.SelectedIndex >= 0) c.Owner.SetCommandBarLayout((CommandBarLayout)bar.SelectedIndex);
             // the user's, not the document's: remembered, no undo step, the part not marked modified
             vp.ReverseWheel = UserSettings.ReverseWheel = wheel.IsChecked == true;
             vp.Camera.Perspective = UserSettings.Perspective = persp.IsChecked == true;
@@ -200,24 +205,24 @@ public static class OptionsDialog
         f.Section("Graphics card");
         // the driver's renderer (vendor / renderer / version as logged)
         var renderer = App.GlInfo?.Split(" / ") is { Length: >= 2 } parts ? parts[1] : App.GlInfo;
-        f.Row("Drawing with", new SelectableTextBlock { Text = renderer ?? "(not started yet)", TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center });
+        f.Row("Renderer", new SelectableTextBlock { Text = renderer ?? "(not initialized)", TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center });
         if (Viewport.ViewportControl.IsSoftwareRenderer(renderer))
-            f.Hint("A software renderer: no graphics card draws the view, so large models are slow to turn. On a laptop with two "
-                + "graphics chips, choose High performance below. If that does not help, the graphics driver may be missing or "
-                + "disabled (Device Manager > Display adapters).", 150, Palette.Danger);
+            f.Hint("Software renderer in use: no graphics card is drawing the view, so large models are slow. "
+                + "On laptops with two graphics chips, select High performance below; otherwise check the graphics driver "
+                + "(Device Manager > Display adapters).", 150, Palette.Danger);
         ComboBox? gpu = null, api = null;
         if (OperatingSystem.IsWindows())
         {
             gpu = f.Row("Graphics processor", Combo(new[] { "Let Windows decide", "Power saving", "High performance" }, (int)GpuPreference.Get()),
-                "Windows' own setting for SpryCAD (as in Settings > System > Display > Graphics): on a laptop with two graphics "
-                + "chips, which one draws the view. Takes effect when SpryCAD starts again.");
-            api = f.Row("Draw through", Combo(new[] { "Direct3D (default)", "OpenGL (the card's own driver)" }, UserSettings.PreferOpenGL ? 1 : 0),
-                "Try OpenGL if the view draws wrongly or slowly; where it cannot start, Direct3D is used. Takes effect when SpryCAD starts again.");
+                "Windows graphics preference for SpryCAD (Settings > System > Display > Graphics). "
+                + "Takes effect after restarting SpryCAD.");
+            api = f.Row("Graphics API", Combo(new[] { "Direct3D (default)", "OpenGL (native driver)" }, UserSettings.PreferOpenGL ? 1 : 0),
+                "Try OpenGL if the view displays incorrectly or slowly; Direct3D is used if OpenGL fails. Takes effect after restarting SpryCAD.");
         }
         f.Section("Quality");
         var levels = new[] { 0, 2, 4 };
         var aa = f.Row("Anti-aliasing", Combo(new[] { "Off", "2x", "4x (default)" }, Math.Max(0, Array.IndexOf(levels, UserSettings.AntiAliasing))),
-            "Smooths the edges of faces and lines. Off draws fastest, which helps most without a graphics card.");
+            "Smooths edges of faces and lines. Off is fastest, especially with software rendering.");
         return new Commit(() => null, () => () =>
         {
             if (aa.SelectedIndex >= 0) vp.AntiAliasing = UserSettings.AntiAliasing = levels[aa.SelectedIndex];
@@ -235,23 +240,23 @@ public static class OptionsDialog
     {
         f.Section("Saving parts");
         var author = new TextBox { Text = UserSettings.AuthorName, MinWidth = 200 };
-        f.Row("Your name", author, "Every save of a part is kept in its history, under this name.");
+        f.Row("Author name", author, "Recorded as the author of each saved revision.");
         var modes = new[] { KeepDisplay.Always, KeepDisplay.SlowParts, KeepDisplay.Never };
-        var keep = Combo(new[] { "Of every part", "Of slow parts", "Never" }, Array.IndexOf(modes, UserSettings.KeepDisplay));
+        var keep = Combo(new[] { "For all parts", "For slow parts", "Never" }, Array.IndexOf(modes, UserSettings.KeepDisplay));
         keep.MinWidth = 150;
         var secs = new TextBox { Text = Expr.Format(UserSettings.KeepDisplaySeconds), Width = 60 };
-        var slower = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Children = { new TextBlock { Text = "slower than", VerticalAlignment = VerticalAlignment.Center }, secs, new TextBlock { Text = "s", VerticalAlignment = VerticalAlignment.Center } } };
+        var slower = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Children = { new TextBlock { Text = "over", VerticalAlignment = VerticalAlignment.Center }, secs, new TextBlock { Text = "s", VerticalAlignment = VerticalAlignment.Center } } };
         void Sync() => slower.IsEnabled = keep.SelectedIndex == 1;
         keep.SelectionChanged += (_, _) => Sync();
         Sync();
-        f.Row("Keep the display", new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, Children = { keep, slower } },
-            "The part keeps its display as last built, so it shows at once when opened while it rebuilds (larger files).");
+        f.Row("Save display data", new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, Children = { keep, slower } },
+            "Shows the part immediately on open while it rebuilds. Increases file size.");
         f.Section("Saving assemblies");
-        var meshes = f.Check("Keep the parts' meshes", UserSettings.AssemblyMeshes,
-            "The assembly opens without rebuilding its parts, and shows parts that have gone missing (larger files). Otherwise its parts are rebuilt when it opens; lightweight parts always keep theirs.");
+        var meshes = f.Check("Save part meshes", UserSettings.AssemblyMeshes,
+            "Opens the assembly without rebuilding its parts and shows missing parts. Increases file size; lightweight parts always save their meshes.");
         double seconds = UserSettings.KeepDisplaySeconds;
         return new Commit(
-            () => keep.SelectedIndex != 1 || (Expr.TryEval(secs.Text, null, out seconds, out _) && seconds >= 0) ? null : "Keep the display: a number of seconds, 0 or more.",
+            () => keep.SelectedIndex != 1 || (Expr.TryEval(secs.Text, null, out seconds, out _) && seconds >= 0) ? null : "Save display data: enter 0 or more seconds.",
             () => () =>
             {
                 if (!string.IsNullOrWhiteSpace(author.Text)) UserSettings.AuthorName = author.Text.Trim();
@@ -261,14 +266,81 @@ public static class OptionsDialog
             });
     }
 
+    static Commit LibrariesPage(Form f, Context c)
+    {
+        var (path, source) = Libraries.Location;
+        var byAdmin = source is LibraryConfigSource.Environment or LibraryConfigSource.MachinePolicy;
+        f.Section("Library set");
+        var box = new TextBox { Text = UserSettings.LibrariesPath ?? "", MinWidth = 300, IsEnabled = !byAdmin, Watermark = "None: SpryCAD's built-in standards" };
+        var browse = new Button { Content = "Browse...", IsEnabled = !byAdmin };
+        f.Row("Location", new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Children = { box, browse } },
+            "The folder on a shared drive (or its libraries.json) listing the libraries everyone uses: thread sizes, clearance holes, a company's preferred sizes. "
+            + "They are copied to this computer and read from there, so SpryCAD works offline with the copies last read.");
+        if (byAdmin)
+            f.Hint($"Set by your administrator ({(source == LibraryConfigSource.Environment ? $"the {LibrarySync.EnvironmentVariable} environment variable" : LibrarySync.MachinePolicyFile)}): {path}", 150, Palette.Warning);
+        async Task<string?> PickFolder(string title)
+        {
+            var picked = await c.Owner.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = title });
+            return picked.FirstOrDefault()?.TryGetLocalPath();
+        }
+        browse.Click += async (_, _) => { if (await PickFolder("Library set folder") is { } p) box.Text = p; };
+
+        f.Section("In use");
+        foreach (var lib in LibraryLink.Current.Libraries)
+            f.Row(lib.Name, new SelectableTextBlock
+            {
+                Text = $"{lib.Layer}, {lib.Tables.Count} tables{(lib.Restrictions.Count > 0 ? $", {lib.Restrictions.Count} restrictions" : "")}{(lib.Path != null ? " · " + lib.Path : " · built in")}",
+                TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center,
+            });
+        if (LibraryLink.Current.Libraries.Any(l => l.Tables.Any(t => !t.Verified)))
+            f.Hint("Some tables are not yet verified against their published standards: check values before relying on them.", 0, Palette.Warning);
+        foreach (var p in Libraries.Problems) f.Hint(p, 0, Palette.Danger);
+        var reload = new Button { Content = "Reload Now" };
+        reload.Click += (_, _) => { Libraries.Reload(); c.Owner.Status("Reading the standards libraries again (Options shows them next time it opens)."); };
+        f.Row("", reload, "SpryCAD reads them again every few minutes; parts keep the values they were made with until you accept an update (Tools > Library Updates).");
+
+        f.Section("Set up a shared library set");
+        var create = new Button { Content = "Create in a Folder..." };
+        f.Row("Administrators", create,
+            "Writes standards.sprlib (SpryCAD's standards, to correct or extend) and libraries.json listing it into a folder, e.g. on a file server. "
+            + $"Give everyone read access and only the libraries' owners write access, then point each computer at it: the {LibrarySync.EnvironmentVariable} environment variable, "
+            + $"the first line of {LibrarySync.MachinePolicyFile}, or this page.");
+        create.Click += async (_, _) =>
+        {
+            if (await PickFolder("Folder for the shared library set") is not { } folder) return;
+            var json = Path.Combine(folder, LibraryConfig.FileName);
+            if (File.Exists(json)) { await Dialogs.Message(c.Owner, "Libraries", $"{json} already exists: it was left as it is."); return; }
+            try
+            {
+                var lib = Path.Combine(folder, "standards" + LibraryFile.Extension);
+                if (!File.Exists(lib)) LibraryFile.WriteBuiltIn(lib, UserSettings.AuthorName);
+                File.WriteAllText(json, System.Text.Json.JsonSerializer.Serialize(new LibraryConfig { Libraries = { Path.GetFileName(lib) } }, Serialization.Options));
+                if (!byAdmin) box.Text = folder;
+                await Dialogs.Message(c.Owner, "Libraries", $"Created {json} and {Path.GetFileName(lib)}.");
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                await Dialogs.Message(c.Owner, "Libraries", "The library set could not be created: " + ex.Message);
+            }
+        };
+
+        return new Commit(() => null, () =>
+        {
+            var v = box.Text?.Trim();
+            if (string.IsNullOrEmpty(v)) v = null;
+            if (v == UserSettings.LibrariesPath) return null;
+            return () => { UserSettings.LibrariesPath = v; Libraries.Reload(); };
+        });
+    }
+
     static Commit UpdatesPage(Form f, Context c)
     {
         var can = Updater.CanUpdate;
         f.Section("Version");
         f.Row("Installed", new SelectableTextBlock { Text = Updater.CurrentVersion, VerticalAlignment = VerticalAlignment.Center });
-        var channel = f.Row("Channel", Combo(new[] { "Stable: releases", "Dev: every change, as it is made" },
+        var channel = f.Row("Channel", Combo(new[] { "Stable (releases)", "Dev (latest builds)" },
                 Math.Max(0, Array.IndexOf(Updater.Channels, Updater.Channel ?? "stable"))),
-            "Dev builds have the newest features and fixes first, and are tested less. Switching to Stable moves you to the next release newer than your version; nothing is downgraded.");
+            "Dev builds get new features and fixes first but are less tested. Switching to Stable updates at the next newer release; nothing is downgraded.");
         channel.IsEnabled = can;
         string Picked() => Updater.Channels[Math.Max(0, channel.SelectedIndex)];
 
@@ -279,14 +351,14 @@ public static class OptionsDialog
         var restart = new Button { Content = "Install Now", IsVisible = false };
         ToolTip.SetTip(restart, "Closes SpryCAD, installs the update and reopens. Prompts to save files with changes.");
         f.Row("Latest", new WrapPanel { Orientation = Orientation.Horizontal, ItemSpacing = 8, LineSpacing = 6, Children = { latest, checkNow, update, restart } });
-        var changes = f.Row("Changes", new Button { Content = "Change Log...", HorizontalAlignment = HorizontalAlignment.Left },
-            "What each build of the picked channel changed, newest first.");
+        var changes = f.Row("Changes", new Button { Content = "Change Log…", HorizontalAlignment = HorizontalAlignment.Left },
+            "Changes in each build of the selected channel, newest first.");
         changes.Click += (_, _) => _ = Updater.ShowChangelog(TopLevel.GetTopLevel(changes) as Window ?? c.Owner, Picked());
 
         f.Section("Automatic checks");
         var check = f.Check("Check for updates when SpryCAD starts", UserSettings.CheckForUpdates,
-            can ? "A newer version is offered, never installed without asking."
-                : "This copy cannot update itself (a local build, or not installed by the setup).");
+            can ? "Updates are offered, never installed without confirmation."
+                : "This copy cannot update itself (local build, or not installed with Setup).");
 
         Updater.Release? found = null;
         int checks = 0;
@@ -294,7 +366,7 @@ public static class OptionsDialog
         {
             var mine = ++checks; // a newer check (the channel changed again) wins
             checkNow.IsEnabled = false; update.IsVisible = false; found = null;
-            latest.Text = "Checking...";
+            latest.Text = "Checking…";
             string text;
             try
             {
@@ -308,7 +380,7 @@ public static class OptionsDialog
                     update.Content = $"Update to {r.Version}";
                     update.IsVisible = true;
                 }
-                else text = $"{r.Version}: you are up to date";
+                else text = $"{r.Version} (up to date)";
             }
             catch (Exception ex)
             {
@@ -321,7 +393,7 @@ public static class OptionsDialog
         }
         void Ready(string version)
         {
-            latest.Text = $"{version} is downloaded: it installs when SpryCAD closes.";
+            latest.Text = $"{version} downloaded. It installs when SpryCAD closes.";
             checkNow.IsEnabled = channel.IsEnabled = update.IsVisible = false;
             restart.IsVisible = true;
         }
@@ -375,12 +447,13 @@ public static class OptionsDialog
         var doc = c.Part.Doc;
         f.Section("Unit system");
         var units = f.Row("Units", Combo(new[] { "MMGS (millimeter, gram, second)", "IPS (inch, pound, second)" }, doc.Units == UnitSystem.IPS ? 1 : 0),
-            "What values are shown in, and what a value typed without a unit is in. Changing it changes nothing in the model: "
-            + "values keep the units they were typed in (10mm stays 10mm in an IPS part), and any unit can be typed in either.");
+            "Units for displayed values and for values typed without a unit. Changing it does not modify the model; "
+            + "typed units are kept (10mm stays 10mm in an IPS part).");
         return new Commit(() => null, () =>
         {
             var u = units.SelectedIndex == 1 ? UnitSystem.IPS : UnitSystem.MMGS;
-            return u == doc.Units ? null : () => doc.Units = u;
+            // (new parts start in them too)
+            return u == doc.Units ? null : () => { doc.Units = u; UserSettings.Units = u; };
         });
     }
 
@@ -400,34 +473,12 @@ public static class OptionsDialog
             : Brushes.Transparent;
         text.TextChanged += (_, _) => Preview();
         Preview();
-        f.Row("Color", new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Children = { text, swatch } }, "Red, green, blue: 0 to 255 each.");
+        f.Row("Color", new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Children = { text, swatch } }, "Red, green, blue: 0 to 255 each. Its finish, opacity and the presets: Tools > Appearance.");
         // shown rounded to whole numbers: untouched, the stored color is kept as it is (not marked changed)
         var shown = text.Text;
         return new Commit(
             () => Parse() == null ? "Color: three numbers from 0 to 255, separated by commas." : null,
             () => text.Text != shown && Parse() is { } rgb && !rgb.SequenceEqual(doc.Color) ? () => doc.Color = rgb : null);
-    }
-
-    static Commit SheetMetalPage(Form f, Context c)
-    {
-        var s = c.Part;
-        var sheet = s.Doc.SheetMetal ?? new SheetMetalSettings();
-        f.Section("Bend allowance");
-        var method = f.Row("Method", Combo(new[] { "K-factor", "DIN 6935" }, sheet.Method == BendAllowanceMethod.Din6935 ? 1 : 0));
-        var k = f.Row("K-factor", new TextBox { Text = sheet.KFactor, Width = 120, HorizontalAlignment = HorizontalAlignment.Left },
-            "0 to 1, or an expression of the part's variables. For this part's flat patterns (a Flat Pattern can override it).");
-        void Sync() => k.IsEnabled = method.SelectedIndex == 0;
-        method.SelectionChanged += (_, _) => Sync();
-        Sync();
-        return new Commit(
-            () => method.SelectedIndex != 0 || (Expr.TryEvaluate((k.Text ?? "").Trim(), s.Lookup, out var v, out _) && v.IsNumber && v.Value >= 0 && v.Value <= 1) ? null
-                : "K-factor: a number from 0 to 1, or an expression of the part's variables.",
-            () =>
-            {
-                var m = method.SelectedIndex == 1 ? BendAllowanceMethod.Din6935 : BendAllowanceMethod.KFactor;
-                var kText = m == BendAllowanceMethod.KFactor ? (k.Text ?? "").Trim() : sheet.KFactor;
-                return m == sheet.Method && kText == sheet.KFactor ? null : () => s.Doc.SheetMetal = new SheetMetalSettings { Method = m, KFactor = kText };
-            });
     }
 
     static ComboBox Combo(string[] items, int selected) => new() { ItemsSource = items, SelectedIndex = selected, MinWidth = 260, HorizontalAlignment = HorizontalAlignment.Left };

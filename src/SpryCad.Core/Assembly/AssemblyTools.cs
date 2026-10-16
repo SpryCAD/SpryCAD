@@ -18,8 +18,8 @@ public enum BomKind
     PartsOnly,
 }
 
-/// <summary>One line of a bill of materials.</summary>
-public sealed record BomRow(string Item, int Level, string Name, string Configuration, int Quantity, bool IsAssembly, string? File, string? Material);
+/// <summary>One line of a bill of materials; <c>Mass</c> one of it in grams (a sub-assembly's: its parts'), when asked for.</summary>
+public sealed record BomRow(string Item, int Level, string Name, string Configuration, int Quantity, bool IsAssembly, string? File, string? Material, double? Mass = null);
 
 /// <summary>
 /// Bills of materials: the components counted (suppressed ones left out; hidden ones counted), a line for each part or
@@ -27,65 +27,109 @@ public sealed record BomRow(string Item, int Level, string Name, string Configur
 /// </summary>
 public static class Bom
 {
-    public static List<BomRow> Build(AssemblyModel m, BomKind kind)
+    /// <param name="mass">Each line's mass too (<see cref="BomRow.Mass"/>): its parts measured (once each, cached).</param>
+    public static List<BomRow> Build(AssemblyModel m, BomKind kind, bool mass = false)
     {
         var rows = new List<BomRow>();
+        if (mass) AssemblyMass.Prepare(m);
         if (kind == BomKind.PartsOnly)
         {
             int item = 0;
             foreach (var g in m.Occurrences().Where(o => !o.Component.IsAssembly).GroupBy(o => AssemblyModel.DisplayKey(o.Component)))
             {
                 var o = g.First();
-                rows.Add(Row((++item).ToString(CultureInfo.InvariantCulture), 0, o, g.Count()));
+                rows.Add(Row((++item).ToString(CultureInfo.InvariantCulture), 0, o, g.Count(), mass ? m : null));
             }
             return rows;
         }
-        Level(m, m.Occurrences().Where(o => o.Rel == null).ToList(), "", 0, kind == BomKind.Indented, rows);
+        Level(m, m.Occurrences().Where(o => o.Rel == null).ToList(), "", 0, kind == BomKind.Indented, rows, mass ? m : null);
         return rows;
     }
 
-    static void Level(AssemblyModel m, List<Occurrence> here, string prefix, int level, bool deep, List<BomRow> rows)
+    static void Level(AssemblyModel m, List<Occurrence> here, string prefix, int level, bool deep, List<BomRow> rows, AssemblyModel? massOf)
     {
         int item = 0;
         foreach (var g in here.GroupBy(o => o.Component.IsAssembly ? AssemblyModel.SubKey(o.Component) : AssemblyModel.DisplayKey(o.Component)))
         {
             var o = g.First();
             var no = prefix + (++item).ToString(CultureInfo.InvariantCulture);
-            rows.Add(Row(no, level, o, g.Count()));
+            rows.Add(Row(no, level, o, g.Count(), massOf));
             if (!deep || !o.Component.IsAssembly) continue;
             // its components as the first of them shows them, counted per sub-assembly
             var children = m.Occurrences().Where(x => x.Path.StartsWith(o.Path + "/", StringComparison.Ordinal) && x.Path.IndexOf('/', o.Path.Length + 1) < 0).ToList();
-            Level(m, children, no + ".", level + 1, true, rows);
+            Level(m, children, no + ".", level + 1, true, rows, massOf);
         }
     }
 
-    static BomRow Row(string item, int level, Occurrence o, int qty)
+    static BomRow Row(string item, int level, Occurrence o, int qty, AssemblyModel? massOf)
     {
         var c = o.Component;
         var r = c.Part;
         var file = r.Embedded == null ? o.Owner.Resolution.Parts.GetValueOrDefault(ComponentResolver.Key(r))?.Path ?? r.AbsolutePath ?? r.Path : null;
         var name = System.IO.Path.GetFileNameWithoutExtension(r.Path ?? r.AbsolutePath ?? r.Embedded ?? c.Name);
         if (string.IsNullOrEmpty(name)) name = c.Name.Split('<')[0];
+        // a fastener by its standard and designation, with its length ("ISO 4762 M8x30"), not by its file
+        if (Library.Fasteners.Of(o.Display?.Part ?? o.Display?.Doc) is { } fastener) name = fastener.Designation;
         string config, material = "";
         if (c.IsAssembly) config = c.Configuration ?? "";
         else
         {
             config = c.Parameters != null ? o.Owner.ConfigLabel(c) : "";
-            material = o.Display?.Part?.Material ?? o.Display?.Doc?.Material ?? "";
+            material = o.Display?.Part?.MaterialName ?? o.Display?.Doc?.MaterialName ?? "";
         }
-        return new BomRow(item, level, name, config, qty, c.IsAssembly, file, material.Length > 0 ? material : null);
+        // one of it: a part's mass, a sub-assembly's its parts' (as this assembly shows them: suppressed ones left out)
+        double? mass = null;
+        if (massOf != null)
+            mass = c.IsAssembly
+                ? massOf.PlacedParts(hidden: true).Where(p => p.o.Path.StartsWith(o.Path + "/", StringComparison.Ordinal)).Sum(p => AssemblyMass.PartMass(p.pd))
+                : o.Display is { } pd ? AssemblyMass.PartMass(pd) : null;
+        return new BomRow(item, level, name, config, qty, c.IsAssembly, file, material.Length > 0 ? material : PartMaterialLabel(o), mass);
     }
 
-    /// <summary>The rows as CSV (Item, Part, Configuration, Quantity, Material, File), quoted where needed.</summary>
-    public static string ToCsv(IEnumerable<BomRow> rows)
+    /// <summary>A part with no material: said so (steel's density is assumed for its mass); a sub-assembly: none.</summary>
+    static string? PartMaterialLabel(Occurrence o) => o.Component.IsAssembly || o.Display == null ? null : NoMaterial;
+
+    /// <summary>How a part with no material is listed.</summary>
+    public const string NoMaterial = "<not specified>";
+
+    /// <summary>
+    /// The rows as CSV (Item, Part, Configuration, Quantity, Material, then Mass in <paramref name="units"/>' mass unit
+    /// when the rows have it, File), quoted where needed.
+    /// </summary>
+    public static string ToCsv(IEnumerable<BomRow> rows, UnitSystem units = UnitSystem.MMGS)
     {
         static string Q(string? s) => s == null ? "" : s.IndexOfAny(new[] { ',', '"', '\n' }) >= 0 ? "\"" + s.Replace("\"", "\"\"") + "\"" : s;
-        var sb = new StringBuilder("Item,Part,Configuration,Quantity,Material,File\n");
-        foreach (var r in rows)
+        var list = rows.ToList();
+        bool mass = list.Any(r => r.Mass != null);
+        var sb = new StringBuilder("Item,Part,Configuration,Quantity,Material," + (mass ? $"Mass ({MassUnits.Label(units)}),Total mass ({MassUnits.Label(units)})," : "") + "File\n");
+        foreach (var r in list)
+        {
             sb.Append(Q(r.Item)).Append(',').Append(Q(new string(' ', 2 * r.Level) + r.Name)).Append(',').Append(Q(r.Configuration)).Append(',')
-              .Append(r.Quantity.ToString(CultureInfo.InvariantCulture)).Append(',').Append(Q(r.Material)).Append(',').Append(Q(r.File)).Append('\n');
+              .Append(r.Quantity.ToString(CultureInfo.InvariantCulture)).Append(',').Append(Q(r.Material)).Append(',');
+            if (mass) sb.Append(r.Mass is { } g ? MassUnits.Number(g, units) + "," + MassUnits.Number(g * r.Quantity, units) : ",").Append(',');
+            sb.Append(Q(r.File)).Append('\n');
+        }
         return sb.ToString();
     }
+}
+
+/// <summary>
+/// Masses as an assembly shows them: grams in MMGS, pounds in IPS (the model's are grams and millimetres whatever the
+/// units), with the lengths, volumes, areas and moments of inertia that go with them.
+/// </summary>
+public static class MassUnits
+{
+    public const double GramsPerPound = 453.59237, MmPerInch = 25.4;
+
+    public static string Label(UnitSystem u) => u == UnitSystem.IPS ? "lb" : "g";
+    public static double Mass(double grams, UnitSystem u) => u == UnitSystem.IPS ? grams / GramsPerPound : grams;
+    public static double Length(double mm, UnitSystem u) => u == UnitSystem.IPS ? mm / MmPerInch : mm;
+    /// <summary>A mass as a number in the units (4 significant figures past the point for pounds, 3 decimals for grams).</summary>
+    public static string Number(double grams, UnitSystem u) =>
+        Mass(grams, u).ToString(u == UnitSystem.IPS ? "0.####" : "0.###", CultureInfo.InvariantCulture);
+    /// <summary>A mass with its unit ("125.4 g", "0.2765 lb"; kilograms once a thousand grams).</summary>
+    public static string Text(double grams, UnitSystem u) =>
+        u == UnitSystem.MMGS && grams >= 1000 ? (grams / 1000).ToString("0.###", CultureInfo.InvariantCulture) + " kg" : Number(grams, u) + " " + Label(u);
 }
 
 /// <summary>The solids of a part display, built once (from its document) and kept as long as the display is.</summary>
@@ -140,6 +184,28 @@ public sealed class AssemblyMassResult
     public int Parts;
     /// <summary>Parts measured from their display mesh only (shown from a copy: not exact), by name.</summary>
     public List<string> Approximate = new();
+    /// <summary>Parts with no material (steel's density assumed), by name, each once.</summary>
+    public List<string> NoMaterial = new();
+
+    /// <summary>The report, in the assembly's units: grams and millimetres (MMGS) or pounds and inches (IPS).</summary>
+    public string Report(string title, UnitSystem units)
+    {
+        bool ips = units == UnitSystem.IPS;
+        string L = ips ? "in" : "mm", M = MassUnits.Label(units);
+        double l = MassUnits.Length(1, units), mf = MassUnits.Mass(1, units);
+        string N(double v) => v.ToString(ips ? "0.######" : "0.###", CultureInfo.InvariantCulture);
+        string A(double v) => v.ToString("0.####", CultureInfo.InvariantCulture);
+        var I = Inertia; var k = mf * l * l; // g·mm² to the units'
+        return $"Mass properties of {title} ({Parts} parts, each with its own material; suppressed ones left out)\n\n" +
+               $"Mass = {MassUnits.Text(Mass, units)}\nVolume = {N(Volume * l * l * l)} {L}³\nSurface area = {N(Area * l * l)} {L}²\n\n" +
+               $"Center of mass ({L}): X = {N(Center.X * l)}, Y = {N(Center.Y * l)}, Z = {N(Center.Z * l)}\n\n" +
+               $"Principal moments of inertia about the center of mass ({M}·{L}²):\n" +
+               string.Concat(Enumerable.Range(0, 3).Select(i => $"  P{i + 1} = {N(Principal[i] * k)}  along ({A(Axes[i].X)}, {A(Axes[i].Y)}, {A(Axes[i].Z)})\n")) +
+               $"\nMoments of inertia about the center of mass, assembly axes ({M}·{L}²):\n" +
+               $"  Lxx = {N(I[0, 0] * k)}  Lxy = {N(-I[0, 1] * k)}  Lxz = {N(-I[0, 2] * k)}\n  Lyx = {N(-I[1, 0] * k)}  Lyy = {N(I[1, 1] * k)}  Lyz = {N(-I[1, 2] * k)}\n  Lzx = {N(-I[2, 0] * k)}  Lzy = {N(-I[2, 1] * k)}  Lzz = {N(I[2, 2] * k)}\n" +
+               (NoMaterial.Count > 0 ? $"\nNo material set (steel's density assumed): {string.Join(", ", NoMaterial)}\n" : "") +
+               (Approximate.Count > 0 ? $"\nFrom their display meshes (shown from a copy, so not exact): {string.Join(", ", Approximate)}\n" : "");
+    }
 }
 
 public static class AssemblyMass
@@ -164,6 +230,19 @@ public static class AssemblyMass
         return mp;
     }
 
+    /// <summary>Every part shown measured (once each, in parallel; kept while its display is).</summary>
+    public static void Prepare(AssemblyModel m) => Prepare(m.PlacedParts(hidden: true).Select(x => x.pd).Distinct().ToList());
+
+    /// <summary>These parts measured (once each, in parallel): a list taken from the assembly first, so it can be done off its thread.</summary>
+    public static void Prepare(IReadOnlyList<PartDisplay> displays, CancellationToken ct = default) =>
+        PartWork.Each(displays, pd => pd.Doc ?? (object)pd, pd => Of(pd, out _), ct);
+
+    /// <summary>The part's density (kg/m³): its material's, else steel's.</summary>
+    static double Density(PartDisplay pd) => (pd.Part ?? pd.Doc)?.EffectiveDensity ?? CadDocument.DefaultDensity;
+
+    /// <summary>One part's mass in grams, with its material's density.</summary>
+    public static double PartMass(PartDisplay pd) => Math.Max(0, Of(pd, out _).Volume) * Density(pd) * 1e-6;
+
     /// <summary>The mass properties of every part shown (suppressed ones left out, hidden ones counted), where it is.</summary>
     public static AssemblyMassResult Of(AssemblyModel m)
     {
@@ -171,13 +250,15 @@ public static class AssemblyMass
         var items = new List<(double mass, Vec3 c, double[,] i)>();
         // each part's measured once, in parallel
         var placed = m.PlacedParts(hidden: true).ToList();
-        PartWork.Each(placed.Select(x => x.pd).Distinct().ToList(), pd => pd.Doc ?? (object)pd, pd => Of(pd, out _));
+        Prepare(m);
         foreach (var (o, pd) in placed)
         {
             var mp = Of(pd, out var exact);
             if (mp.Volume <= 0) continue;
             if (!exact) r.Approximate.Add(m.NameAt(o.Path));
-            var rho = (pd.Part?.Density ?? pd.Doc?.Density ?? CadDocument.DefaultDensity) * 1e-6; // kg/m³ to g/mm³
+            // a part with no material: steel's density, said so (once per part)
+            if ((pd.Part ?? pd.Doc) is { MaterialItem: null } && o.Component.Name.Split('<')[0] is var part && !r.NoMaterial.Contains(part)) r.NoMaterial.Add(part);
+            var rho = Density(pd) * 1e-6; // kg/m³ to g/mm³
             var t = o.World;
             var mass = mp.Volume * rho;
             // the tensor turned into the assembly's axes: R I Rᵀ

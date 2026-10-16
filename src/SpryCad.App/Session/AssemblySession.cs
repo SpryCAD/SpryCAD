@@ -50,6 +50,30 @@ public sealed class AssemblySession
         return new AssemblySession(model, model.Resolution.Changed);
     }
 
+    /// <summary>
+    /// Opens an assembly embedded in another from its bytes, in memory: no file of its own (saved back into that
+    /// assembly, <see cref="SaveToBytes"/>), named <paramref name="name"/>'s file name. Call off the UI thread.
+    /// </summary>
+    public static AssemblySession FromEmbedded(byte[] bytes, string name)
+    {
+        var doc = AssemblyContainer.Load(bytes, name);
+        var model = PartsIndexStore.Use(ix => AssemblyModel.Open(doc, null, ix, defer: true));
+        if (model.HasMates) model.SolveMates();
+        return new AssemblySession(model, model.Resolution.Changed) { UntitledName = Path.GetFileNameWithoutExtension(name) };
+    }
+
+    /// <summary>
+    /// Its bytes, to embed in the assembly it belongs to (its history going on from <paramref name="previous"/>, the
+    /// bytes it had there): saved, as far as this tab goes.
+    /// </summary>
+    public byte[] SaveToBytes(byte[]? previous)
+    {
+        var bytes = Model.ToBytes(previous);
+        Dirty = false;
+        Changed?.Invoke();
+        return bytes;
+    }
+
     /// <summary>Displays are being built in the background (<see cref="BuildPending"/>).</summary>
     public bool Building { get; private set; }
 
@@ -69,9 +93,18 @@ public sealed class AssemblySession
             for (var jobs = Model.PendingJobs(); jobs.Count > 0; jobs = Model.PendingJobs())
             {
                 var built = new System.Collections.Concurrent.ConcurrentQueue<(AssemblyModel.PendingJob job, PartDisplay? display, string? problem)>();
+                // a part used in several sub-assemblies (one document: a STEP assembly's): built once, shown in each
+                // (a document's jobs run one after another, so no two build it at once)
+                var made = new System.Collections.Concurrent.ConcurrentDictionary<(object doc, string config, PartSource source, SpryCad.Core.Regen.ThreadDisplay threads), PartDisplay>();
                 var run = Task.Run(() => PartWork.Each(jobs, j => j.Placeholder.Part!, job =>
                 {
-                    try { built.Enqueue((job, job.Build(), null)); }
+                    try
+                    {
+                        var p = job.Placeholder;
+                        var k = ((object)p.Part!, p.Config, p.Source, job.Threads);
+                        if (!made.TryGetValue(k, out var d)) made[k] = d = job.Build();
+                        built.Enqueue((job, d, null));
+                    }
                     catch (Exception ex) { App.Log(ex, "Build component part " + job.Name); built.Enqueue((job, null, ex.Message)); }
                 }));
                 // each shown as it comes (here, on the UI thread): what is drawn, a few times a second at most (the

@@ -33,7 +33,9 @@ public sealed class AssemblyTree : DockPanel
     public event Action<string?>? Hovered;
     readonly Dictionary<string, Border> _rowById = new();
     string? _selected;        // a component's path, "mate:" + a mate's id, or "pattern:" + a pattern's
-    bool _matesOpen = true, _patternsOpen = true, _originOpen;
+    bool _patternsOpen = true, _originOpen;
+    // (null: as it starts, open unless there are many mates: a STEP assembly's hundreds of locks)
+    bool? _matesOpenSet;
     /// <summary>The sub-assemblies shown open (by path).</summary>
     readonly HashSet<string> _open = new();
     string? _doubleClicked;
@@ -74,6 +76,9 @@ public sealed class AssemblyTree : DockPanel
         Children.Add(notes);
         Children.Add(new ScrollViewer { Content = _rows, HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled });
     }
+
+    /// <summary>A component's menu, as its row has it (right-clicked in the graphics area); null when it is not shown.</summary>
+    public ContextMenu? ComponentMenu(string path) => _shown?.Model is { } m && m.Find(path) is { } o ? MenuFor(m, o) : null;
 
     /// <summary>The mate selected in the tree (its id), if a mate's row is.</summary>
     public string? SelectedMate => _selected is { } s && s.StartsWith("mate:") ? s["mate:".Length..] : null;
@@ -124,8 +129,8 @@ public sealed class AssemblyTree : DockPanel
             if (!FlyoutOpen) return;
         }
         else
-        AddRow("__asm", 0, "assembly", s.Title.TrimEnd(' ', '*'), note: configs.Count > 1 ? m.Doc.ActiveConfigurationName : null, header: true, menu: AssemblyMenu(m),
-            tip: configs.Count > 1 ? $"Configuration: {m.Doc.ActiveConfigurationName} (right-click to change)" : "Right-click for configurations, the bill of materials and more");
+        AddRow("__asm", 0, "assembly", s.Title.TrimEnd(' ', '*'), note: configs.Count > 1 ? m.Doc.ActiveConfigurationName : null, header: true, menu: () => AssemblyMenu(m),
+            tip: configs.Count > 1 ? $"Configuration: {m.Doc.ActiveConfigurationName}. Right-click to change." : "Right-click for configurations, bill of materials and other commands.");
         // the origin, as the part's tree has it: a folder of the three planes (each with an eye), the axes and the point
         AddRow("__origin", 1, "folder", "Origin", folder: true, expander: (_originOpen, () => { _originOpen = !_originOpen; Show(s); }));
         if (_originOpen)
@@ -142,9 +147,10 @@ public sealed class AssemblyTree : DockPanel
         {
             var broken = m.BrokenMates().ToDictionary(x => x.mate, x => x.why);
             var anyOff = broken.Count > 0 || m.Doc.Mates.Any(x => !x.Suppressed && (m.LastSolve?.Errors.GetValueOrDefault(x.Id) ?? 0) > 1e-6);
-            AddRow("__mates", 1, "mates", "Mates", folder: true, bad: anyOff && !_matesOpen, expander: (_matesOpen, () => { _matesOpen = !_matesOpen; Show(s); }),
-                tip: anyOff && !_matesOpen ? "A mate is not satisfied (open the folder)" : null);
-            if (_matesOpen)
+            var matesOpen = _matesOpenSet ?? m.Doc.Mates.Count <= 50;
+            AddRow("__mates", 1, "mates", "Mates", note: matesOpen ? null : m.Doc.Mates.Count.ToString(), folder: true, bad: anyOff && !matesOpen, expander: (matesOpen, () => { _matesOpenSet = !matesOpen; Show(s); }),
+                tip: anyOff && !matesOpen ? "One or more mates are not satisfied." : null);
+            if (matesOpen)
             {
                 string NameOf(MateRef r) => r.Component == null ? r.Face + " Plane" : m.NameAt(r.Component) + (m.Find(r.Component)?.Component.IsAssembly == true ? $" {r.Face} Plane" : "");
                 foreach (var mate in m.Doc.Mates)
@@ -152,10 +158,10 @@ public sealed class AssemblyTree : DockPanel
                     var err = m.LastSolve?.Errors.GetValueOrDefault(mate.Id) ?? 0;
                     var why = broken.GetValueOrDefault(mate);
                     var off = why != null || !mate.Suppressed && err > 1e-6;
-                    AddRow("mate:" + mate.Id, 2, IconFor(mate.Type), mate.Name + ValueOf(mate, m.Doc.Units), note: why != null ? $"reference missing: {why}" : $"{NameOf(mate.A)}, {NameOf(mate.B)}",
-                        bad: off, dim: mate.Suppressed, menu: MenuFor(mate, why != null),
-                        tip: why != null ? $"A reference is missing ({why}): right-click, Repair, to pick it again.\n{NameOf(mate.A)}, {NameOf(mate.B)}"
-                            : off ? $"Not satisfied: off by {err:0.######} (it conflicts with other mates, or cannot be reached)"
+                    AddRow("mate:" + mate.Id, 2, IconFor(mate.Type), mate.Name + ValueOf(mate, m.Doc.Units), note: why != null ? $"missing reference: {why}" : $"{NameOf(mate.A)}, {NameOf(mate.B)}",
+                        bad: off, dim: mate.Suppressed, menu: () => MenuFor(mate, why != null),
+                        tip: why != null ? $"Missing reference: {why}. Right-click and select Repair.\n{NameOf(mate.A)}, {NameOf(mate.B)}"
+                            : off ? $"Not satisfied, error {err:0.######}. The mate conflicts with other mates or cannot be reached."
                             : $"{mate.Type}{(mate.Suppressed ? ", suppressed" : "")}, {(mate.Aligned ? "aligned" : "anti-aligned")}. Double-click to edit, F2 to rename.");
                 }
             }
@@ -175,7 +181,7 @@ public sealed class AssemblyTree : DockPanel
                         _ => "mirrored",
                     };
                     AddRow("pattern:" + p.Id, 2, p.Kind switch { PatternKind.Linear => "lpattern", PatternKind.Circular => "cpattern", _ => "mirror" }, p.Name,
-                        note: $"{seeds}: {what}", menu: MenuFor(p), tip: "Double-click to edit");
+                        note: $"{seeds}: {what}", menu: () => MenuFor(p), tip: "Double-click to edit");
                 }
         }
         // the selection survives the rows being made again (unless what it was is gone)
@@ -206,11 +212,11 @@ public sealed class AssemblyTree : DockPanel
             tags.Add(c.Flexible ? "flexible" : "rigid");
             if (c.Configuration != null) tags.Add(c.Configuration);
             if (c.Part.Embedded != null) tags.Add("embedded");
-            if (sub?.Source == SubSource.Cache) tags.Add("missing: the assembly's copy");
-            else if (sub?.Model == null) tags.Add(sub?.Problem == "not found" || sub == null ? "missing" : "could not be shown");
-            tip = (c.Part.Embedded != null ? $"Embedded in the assembly ({c.Part.Embedded})" : res?.Path ?? $"Not found (last at {c.Part.AbsolutePath ?? c.Part.Path})")
-                + (sub?.Problem is { } why ? $"\nNot shown as its file is: {why}" : "")
-                + (c.Flexible ? "\nFlexible: its own mates are solved in this assembly, so its parts move here." : "\nRigid: moves as one body, its parts where its own file has them.");
+            if (sub?.Source == SubSource.Cache) tags.Add("missing, cached copy");
+            else if (sub?.Model == null) tags.Add(sub?.Problem == "not found" || sub == null ? "missing" : "load failed");
+            tip = (c.Part.Embedded != null ? $"Embedded in the assembly ({c.Part.Embedded})" : res?.Path ?? $"Not found. Last location: {c.Part.AbsolutePath ?? c.Part.Path}")
+                + (sub?.Problem is { } why ? $"\nCould not load file: {why}" : "")
+                + (c.Flexible ? "\nFlexible: its mates are solved in this assembly." : "\nRigid: moves as one body.");
             // one of its mates (solved here) not satisfied
             bad = sub?.Model == null || sub.Source == SubSource.Cache || c.Flexible && m.LastSolve?.Errors.Any(e => e.Key.StartsWith(path + "/", StringComparison.Ordinal) && e.Value > 1e-6) == true;
         }
@@ -220,11 +226,11 @@ public sealed class AssemblyTree : DockPanel
             if (c.Part.Embedded != null) tags.Add("embedded");
             if (c.Part.PinTag != null) tags.Add("pinned to " + c.Part.PinTag);
             else if (c.Part.Pin != null) tags.Add("pinned");
-            if (pd?.Source == PartSource.Cache) tags.Add(pd.Problem != null ? "missing: the assembly's copy" : "lightweight");
+            if (pd?.Source == PartSource.Cache) tags.Add(pd.Problem != null ? "missing, cached copy" : "lightweight");
             if (pd?.Source == PartSource.None) tags.Add("missing");
             // being built after the assembly opened (shown meanwhile as it last was, if the assembly has a copy)
             if (pd?.Building == true) tags.Add(pd.Mesh.Indices.Length > 0 ? "updating" : "loading");
-            tip = c.Part.Embedded != null ? $"Embedded in the assembly ({c.Part.Embedded})" : res?.Path ?? $"Not found (last at {c.Part.AbsolutePath ?? c.Part.Path})";
+            tip = c.Part.Embedded != null ? $"Embedded in the assembly ({c.Part.Embedded})" : res?.Path ?? $"Not found. Last location: {c.Part.AbsolutePath ?? c.Part.Path}";
             // a configured part: its configuration after the name ("Screw<2> (M4, Length 12)")
             config = c.Parameters != null ? owner.ConfigLabel(c) : "";
             if (config.Length > 0) tip += "\nConfigured: " + config;
@@ -232,11 +238,11 @@ public sealed class AssemblyTree : DockPanel
         }
         if (o.Suppressed) tags.Add("suppressed");
         else if (o.Hidden) tags.Add("hidden");
-        if (o.Rel != null && o.Top.Overrides?.ContainsKey(o.Rel) == true) { tags.Add("changed here"); tip += "\nShown otherwise here than in its sub-assembly (hidden, suppressed or colored for this instance)."; }
-        if (o.Rel == null && c.Pattern != null && m.Doc.Patterns?.FirstOrDefault(p => p.Id == c.Pattern) is { } pat) { tags.Add("copy: " + pat.Name); tip += $"\nA copy made by {pat.Name}: placed by it."; }
+        if (o.Rel != null && o.Top.Overrides?.ContainsKey(o.Rel) == true) { tags.Add("overridden"); tip += "\nVisibility, suppression or color overridden for this instance."; }
+        if (o.Rel == null && c.Pattern != null && m.Doc.Patterns?.FirstOrDefault(p => p.Id == c.Pattern) is { } pat) { tags.Add("instance of " + pat.Name); tip += $"\nPattern instance of {pat.Name}."; }
         var open = sub?.Model != null && _open.Contains(path);
         AddRow(path, indent, c.IsAssembly ? "assembly" : "part", $"{(c.Fixed ? "(f)" : "(-)")} {c.Name}" + (config.Length > 0 ? $" ({config})" : ""),
-            note: tags.Count > 0 ? string.Join(", ", tags) : null, bad: bad, dim: o.Suppressed || o.Hidden, tip: tip, menu: MenuFor(m, o),
+            note: tags.Count > 0 ? string.Join(", ", tags) : null, bad: bad, dim: o.Suppressed || o.Hidden, tip: tip, menu: () => MenuFor(m, o),
             expander: sub?.Model != null ? (open, () => { if (!_open.Remove(path)) _open.Add(path); if (_shown != null) Show(_shown); }) : null);
         if (open)
             foreach (var cc in sub!.Model!.Doc.Components)
@@ -245,7 +251,7 @@ public sealed class AssemblyTree : DockPanel
 
     /// <summary>A row as the part's tree draws them: an arrow (folders, sub-assemblies), the icon, the name, a note in grey.</summary>
     void AddRow(string key, int indent, string icon, string text, string? note = null, bool header = false, bool folder = false,
-        bool bad = false, bool dim = false, string? tip = null, ContextMenu? menu = null, (bool open, Action toggle)? expander = null, bool? eye = null)
+        bool bad = false, bool dim = false, string? tip = null, Func<ContextMenu>? menu = null, (bool open, Action toggle)? expander = null, bool? eye = null)
     {
         // as the part's tree (UI/TreeRow.cs): as wide as the tree, the grey note trimmed first when the row is too
         // long, then the name; the whole of it on the row's tip
@@ -265,7 +271,16 @@ public sealed class AssemblyTree : DockPanel
         }
         sp.Shrink.Add(tb);
         if (eye is { } shown && !Flyout) sp.Children.Add(EyeButton(key, shown));
-        var row = new Border { Classes = { "treerow" }, Child = sp, Tag = key, ContextMenu = Flyout ? null : menu };
+        var row = new Border { Classes = { "treerow" }, Child = sp, Tag = key };
+        // its menu made when first wanted (hundreds of rows, a dozen items each: most of making the tree)
+        if (!Flyout && menu != null)
+            row.AddHandler(ContextRequestedEvent, (_, e) =>
+            {
+                if (row.ContextMenu != null) return;
+                row.ContextMenu = menu();
+                row.ContextMenu.Open(row);
+                e.Handled = true;
+            }, Avalonia.Interactivity.RoutingStrategies.Tunnel);
         row.PointerEntered += (_, _) => Hovered?.Invoke(key);
         row.PointerExited += (_, _) => Hovered?.Invoke(null);
         if (tip != null || note != null) ToolTip.SetTip(row, (note != null ? $"{text}  {note}" : text) + (tip != null ? "\n" + tip : ""));
@@ -314,7 +329,7 @@ public sealed class AssemblyTree : DockPanel
             VerticalAlignment = VerticalAlignment.Center, Cursor = new Cursor(StandardCursorType.Hand), Margin = new Thickness(2, 0, 0, 0),
             Opacity = shown ? 1 : 0.6,
         };
-        ToolTip.SetTip(b, shown ? "Hide the plane" : "Show the plane");
+        ToolTip.SetTip(b, shown ? "Hide plane" : "Show plane");
         b.PointerEntered += (_, _) => b.Background = Palette.SelectedBg;
         b.PointerExited += (_, _) => b.Background = Brushes.Transparent;
         b.PointerPressed += (_, e) =>
@@ -351,10 +366,10 @@ public sealed class AssemblyTree : DockPanel
     {
         MenuItem I(string header, string cmd, string icon, string? gesture = null) => Item(header, icon, () => MateCommand?.Invoke(mate.Id, cmd), gesture: gesture);
         var menu = new ContextMenu();
-        if (broken) { menu.Items.Add(I("Re_pair (pick the missing reference again)...", "repair", "warning")); menu.Items.Add(new Separator()); }
+        if (broken) { menu.Items.Add(I("Re_pair…", "repair", "warning")); menu.Items.Add(new Separator()); }
         foreach (var i in new object[]
                  {
-                     I("_Edit Mate...", "edit", IconFor(mate.Type)), I("_Rename...", "rename", "rename", "F2"), new Separator(),
+                     I("_Edit Mate…", "edit", IconFor(mate.Type)), I("_Rename…", "rename", "rename", "F2"), new Separator(),
                      I("_Flip Alignment", "flip", "align-opposite"), I(mate.Suppressed ? "_Unsuppress" : "_Suppress", "suppress", mate.Suppressed ? "mates" : "suppress"), new Separator(),
                      I("_Delete", "delete", "delete"),
                  })
@@ -366,10 +381,10 @@ public sealed class AssemblyTree : DockPanel
     {
         Items =
         {
-            Item("_Edit Pattern...", p.Kind switch { PatternKind.Linear => "lpattern", PatternKind.Circular => "cpattern", _ => "mirror" }, () => PatternCommand?.Invoke(p.Id, "edit")),
+            Item("_Edit Pattern…", p.Kind switch { PatternKind.Linear => "lpattern", PatternKind.Circular => "cpattern", _ => "mirror" }, () => PatternCommand?.Invoke(p.Id, "edit")),
             new Separator(),
-            Item("_Delete (and its copies)", "delete", () => PatternCommand?.Invoke(p.Id, "delete")),
-            Item("Delete, _keeping the copies", "delete", () => PatternCommand?.Invoke(p.Id, "keep")),
+            Item("_Delete with Instances", "delete", () => PatternCommand?.Invoke(p.Id, "delete")),
+            Item("Delete and _Keep Instances", "delete", () => PatternCommand?.Invoke(p.Id, "keep")),
         },
     };
 
@@ -385,8 +400,8 @@ public sealed class AssemblyTree : DockPanel
             configs.Items.Add(mi);
         }
         configs.Items.Add(new Separator());
-        configs.Items.Add(A("_Add Configuration...", "config-add", "configure"));
-        configs.Items.Add(A("_Rename Active...", "config-rename", "rename"));
+        configs.Items.Add(A("_Add Configuration…", "config-add", "configure"));
+        configs.Items.Add(A("_Rename Active…", "config-rename", "rename"));
         var del = new MenuItem { Header = "_Delete", Icon = Icons.Make("delete", 16), IsEnabled = m.Doc.ConfigurationNames.Count > 1 };
         foreach (var name in m.Doc.ConfigurationNames.Where(n => n != m.Doc.ActiveConfigurationName))
             del.Items.Add(A(name, "config-delete:" + name, "delete"));
@@ -397,8 +412,8 @@ public sealed class AssemblyTree : DockPanel
             {
                 configs, new Separator(),
                 A("_Bill of Materials", "bom", "bom"), A("_Mass Properties", "mass", "mass"), A("_Interference Detection", "interference", "interference"),
-                A("_Exploded View...", "explode", "explode"), new Separator(),
-                A("_Show All Components", "showall", "show"), A("_Pack and Go...", "packgo", "packgo"),
+                A("_Exploded View…", "explode", "explode"), new Separator(),
+                A("_Show All Components", "showall", "show"), A("_Pack and Go…", "packgo", "packgo"),
             },
         };
     }
@@ -416,13 +431,19 @@ public sealed class AssemblyTree : DockPanel
         void Add(params object[] items) { foreach (var i in items) menu.Items.Add(i); }
         var embedded = c.Part.Embedded != null;
         Add(I(c.IsAssembly ? (embedded ? "_Edit Sub-assembly" : "_Open Sub-assembly") : embedded ? "_Edit Part" : "_Open Part", "open", "open"));
+        // a sub-assembly's component: the sub-assembly holding it, opened
+        if (o.Rel != null)
+        {
+            var holder = path[..path.LastIndexOf('/')];
+            Add(Item(m.Find(holder)?.Component.Part.Embedded != null ? "Edit Sub-_assembly" : "Open Sub-_assembly", "open", () => Command?.Invoke(holder, "open")));
+        }
         // (named in this assembly: its own components only)
-        if (o.Rel == null) Add(I("_Rename... (F2)", "rename", "rename"));
+        if (o.Rel == null) Add(I("_Rename… (F2)", "rename", "rename"));
         Add(new Separator());
         // how it shows (any component)
         Add(o.Hidden ? I("_Show", "show", "show") : I("_Hide", "hide", "hide"),
             o.Suppressed ? I("_Unsuppress", "unsuppress", "suppress") : I("_Suppress", "suppress", "suppress"),
-            I("_Isolate", "isolate", "isolate"), I("_Appearance...", "appearance", "appearance"));
+            I("_Isolate", "isolate", "isolate"), I("_Appearance…", "appearance", "appearance"));
         if (o.Rel != null)
         {
             // a sub-assembly's component: what this instance shows; moved out (one level down only)
@@ -437,7 +458,7 @@ public sealed class AssemblyTree : DockPanel
             if (configs.Count > 1)
             {
                 var cm = new MenuItem { Header = "Con_figuration", Icon = Icons.Make("configure", 16) };
-                var saved = new MenuItem { Header = "As saved", ToggleType = MenuItemToggleType.Radio, IsChecked = c.Configuration == null };
+                var saved = new MenuItem { Header = "As Saved", ToggleType = MenuItemToggleType.Radio, IsChecked = c.Configuration == null };
                 saved.Click += (_, _) => Command?.Invoke(path, "subconfig:");
                 cm.Items.Add(saved);
                 foreach (var name in configs)
@@ -452,16 +473,16 @@ public sealed class AssemblyTree : DockPanel
         }
         else
         {
-            var configure = I("_Configure...", "configure", "configure");
+            var configure = I("_Configure…", "configure", "configure");
             // Configure only for a part with something to configure (a design table, user-facing variables); asked when
             // the menu opens, not as the tree is made, since finding the part may read its file
             menu.Opening += (_, _) => configure.IsEnabled = _shown?.Model.PartDocument(c)?.UserParameters().Count > 0;
             Add(I(c.Lightweight ? "Set to _Resolved" : "Set to _Lightweight", "lightweight", c.Lightweight ? "part" : "lightweight"), configure);
-            Add(I("_Pin to Revision...", "pin", "history"), I("Follow _Latest", "unpin", "history", c.Part.Pin != null || c.Part.PinTag != null));
+            Add(I("_Pin to Revision…", "pin", "history"), I("Follow _Latest", "unpin", "history", c.Part.Pin != null || c.Part.PinTag != null));
         }
-        Add(new Separator(), I("Re_place Component...", "replace", "replace"),
-            embedded ? I("Make E_xternal...", "makeexternal", "save") : I("Make _Virtual...", "makevirtual", "import"),
-            I("_Form New Sub-assembly...", "form", "formsub", c.Pattern == null));
+        Add(new Separator(), I("Re_place Component…", "replace", "replace"),
+            embedded ? I("Make E_xternal…", "makeexternal", "save") : I("Make _Virtual…", "makevirtual", "import"),
+            I("_Form New Sub-assembly…", "form", "formsub", c.Pattern == null));
         var subs = m.Doc.Components.Where(x => x != c && x.IsAssembly && m.SubOf(x) is { Model: not null, Source: not SubSource.Cache }).ToList();
         if (subs.Count > 0 && c.Pattern == null)
         {

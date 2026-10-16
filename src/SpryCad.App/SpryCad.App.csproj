@@ -17,7 +17,10 @@
     <Product>SpryCAD</Product>
     <RootNamespace>SpryCad.App</RootNamespace>
     <TieredPGO>true</TieredPGO>
-    <ServerGarbageCollector>false</ServerGarbageCollector>
+    <!-- a GC heap per core (sized to the load: .NET's dynamic adaptation), collected by all of them at once: parts built
+         in parallel no longer wait on one thread's collections (a large STEP assembly's parts built in 1.1 s, were 1.55; ~20 MB
+         more at rest) -->
+    <ServerGarbageCollection>true</ServerGarbageCollection>
     <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
     <!-- QuickJit stays on (the default): with ReadyToRun, turning it off made startup ~280 ms slower and the first
          rebuild no faster, as everything not precompiled had to be fully optimized before it first ran -->
@@ -25,6 +28,7 @@
 
   <ItemGroup>
     <PackageReference Include="Avalonia" Version="11.3.22" />
+    <PackageReference Include="Avalonia.Controls.DataGrid" Version="11.3.13" />
     <PackageReference Include="Avalonia.Desktop" Version="11.3.22" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.22" />
     <PackageReference Include="Avalonia.Fonts.Inter" Version="11.3.22" />
@@ -41,6 +45,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\SpryCad.Core\SpryCad.Core.csproj" />
+    <ProjectReference Include="..\SpryCad.SheetMetal.Features\SpryCad.SheetMetal.Features.csproj" />
+    <ProjectReference Include="..\SpryCad.SheetMetal.Export\SpryCad.SheetMetal.Export.csproj" />
   </ItemGroup>
 
   <!--

@@ -38,7 +38,10 @@ public sealed partial class AssemblyModel
     public void SetSuppressed(string path, bool suppressed) => Override(path, c => c.Suppressed = suppressed, (ov, _) => ov.Suppressed = suppressed);
 
     /// <summary>The component at a path in a color of its own (RGB 0-1), or (null) as its part (or sub-assembly) has it.</summary>
-    public void SetColor(string path, double[]? color) => Override(path, c => c.Color = color, (ov, _) => ov.Color = color);
+    public void SetColor(string path, double[]? color) => SetAppearance(path, color == null ? null : new Appearance(color));
+
+    /// <summary>The component at a path with an appearance of its own (color, finish, opacity), or (null) as its part (or sub-assembly) has it.</summary>
+    public void SetAppearance(string path, Appearance? a) => Override(path, c => c.SetLook(a), (ov, _) => ov.SetLook(a));
 
     /// <summary>The paths whose overrides are set for a sub-assembly instance (shown in its tree).</summary>
     public IEnumerable<string> OverriddenPaths(Component top) => top.Overrides?.Keys.Select(k => top.Id + "/" + k) ?? Enumerable.Empty<string>();
@@ -169,6 +172,59 @@ public sealed partial class AssemblyModel
     /// tab of its own): its components show it as it now is (built now, or with <paramref name="defer"/> later).
     /// Mates are not solved here.
     /// </summary>
+    /// <summary>
+    /// Whether a part or sub-assembly embedded below this assembly can be saved back into it: every sub-assembly on the
+    /// way to it (<paramref name="path"/>, the one holding it, as <see cref="Find"/> takes it) embedded, not linked to a
+    /// file of its own.
+    /// </summary>
+    public bool EmbeddedAllTheWay(string path)
+    {
+        for (int i = path.IndexOf('/'); ; i = path.IndexOf('/', i + 1))
+        {
+            if (Find(i < 0 ? path : path[..i]) is not { Component: { IsAssembly: true, Part.Embedded: not null } }) return false;
+            if (i < 0) return true;
+        }
+    }
+
+    /// <summary>The bytes of a file embedded in the sub-assembly at <paramref name="path"/> (below this assembly), as saved there.</summary>
+    public byte[]? NestedEmbedded(string path, string name) =>
+        Find(path) is { } o && o.Owner.SubOf(o.Component)?.Model is { } sm && sm.Doc.Files.TryGetValue(name, out var b) ? b : null;
+
+    /// <summary>
+    /// A part or sub-assembly embedded in a sub-assembly below this one (at <paramref name="path"/>, every one on the
+    /// way embedded: <see cref="EmbeddedAllTheWay"/>) saved again with new contents: its file in that sub-assembly,
+    /// that sub-assembly's file in the one holding it, and so up to this one, each copy's history going on (from the
+    /// files as saved, not the sub-assemblies shown: one may be shown in several places); then shown again here.
+    /// </summary>
+    public void UpdateNestedEmbedded(string path, string name, byte[] bytes, bool defer = false)
+    {
+        var chain = path.Split('/');
+        var top = Doc.Find(chain[0]) ?? throw new ArgumentException("No such component.", nameof(path));
+        var topFile = top.Part.Embedded ?? throw new InvalidOperationException($"{top.Name} is not embedded.");
+        UpdateEmbedded(topFile, Replaced(Doc.Files[topFile], topFile, chain, 1, name, bytes), defer);
+    }
+
+    // a sub-assembly's file with a file embedded in it (or below it, through chain[i..]) replaced
+    static byte[] Replaced(byte[] subBytes, string subName, string[] chain, int i, string name, byte[] bytes)
+    {
+        var sd = AssemblyContainer.Load(subBytes, subName);
+        string file;
+        if (i == chain.Length) file = name;
+        else
+        {
+            var c = sd.Find(chain[i]) ?? throw new InvalidOperationException("The sub-assembly no longer holds it.");
+            file = c.Part.Embedded ?? throw new InvalidOperationException($"{c.Name} is not embedded.");
+            bytes = Replaced(sd.Files[file], file, chain, i + 1, name, bytes);
+        }
+        if (!sd.Files.ContainsKey(file)) throw new InvalidOperationException("The sub-assembly no longer holds it.");
+        sd.Files[file] = bytes;
+        // the components using it: its new revision (as UpdateEmbedded notes it)
+        var revision = file.EndsWith(AssemblyDocument.FileExtension, StringComparison.OrdinalIgnoreCase)
+            ? AssemblyContainer.Load(bytes, file).Revision : DocumentContainer.Load(bytes, file).Revision;
+        foreach (var c in sd.Components.Where(c => c.Part.Embedded == file)) c.Part.Revision = revision;
+        return AssemblyContainer.ToBytes(sd, subBytes);
+    }
+
     public void UpdateEmbedded(string name, byte[] bytes, bool defer = false)
     {
         if (!Doc.Files.ContainsKey(name)) throw new ArgumentException("No such embedded file.", nameof(name));

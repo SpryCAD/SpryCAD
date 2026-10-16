@@ -18,6 +18,8 @@
         <ColorPaletteResources x:Key="Light" Accent="#FF2F7BD6" />
       </FluentTheme.Palettes>
     </FluentTheme>
+    <!-- the DataGrid's own theme (the library editor's tables) -->
+    <StyleInclude Source="avares://Avalonia.Controls.DataGrid/Themes/Fluent.xaml" />
     <StyleInclude Source="avares://SpryCAD/UI/Styles.axaml" />
   </Application.Styles>
 </Application>

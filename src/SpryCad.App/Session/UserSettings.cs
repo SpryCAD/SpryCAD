@@ -31,13 +31,26 @@ public enum KeepDisplay
     Always,
 }
 
+/// <summary>How the CommandManager's buttons are laid out.</summary>
+public enum CommandBarLayout
+{
+    /// <summary>The icon above the name, the drop-down grid's size.</summary>
+    Large,
+    /// <summary>A small icon with the name beside it, one short row.</summary>
+    Compact,
+}
+
 /// <summary>Per-user view preferences (not part of the document), stored as key=value lines in app data.</summary>
 public static class UserSettings
 {
     static string StorePath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "SpryCAD", "settings.txt");
 
     public static bool ReverseWheel { get; set; }
+    /// <summary>The CommandManager's buttons: large (the default) or compact.</summary>
+    public static CommandBarLayout CommandBar { get; set; } = CommandBarLayout.Large;
     public static bool Perspective { get; set; }
+    /// <summary>The units new parts and assemblies start in: the ones chosen last (the status bar, Options).</summary>
+    public static Core.Model.UnitSystem Units { get; set; } = Core.Model.UnitSystem.MMGS;
     /// <summary>
     /// The name saved revisions are made by (their history shows it): the user's sign-in name until set. Also the name
     /// files saved without one are given (assemblies, embedded documents: <see cref="Core.Storage.PartFile.DefaultAuthor"/>).
@@ -71,6 +84,8 @@ public static class UserSettings
     public static PartsOrder PartsSort { get; set; } = PartsOrder.Tabs;
     /// <summary>Look for a newer version at start (Windows, installed copies only: see Updater). On by default.</summary>
     public static bool CheckForUpdates { get; set; } = true;
+    /// <summary>The standards library set (libraries.json, or its folder) chosen here; an admin's setting takes precedence (<see cref="Libraries"/>).</summary>
+    public static string? LibrariesPath { get; set; }
     /// <summary>The version the user chose to skip: not offered again at start (Help > Check for Updates still does).</summary>
     public static string? SkippedUpdate { get; set; }
     /// <summary>The update channel picked in Options ("stable" or "dev"); null: the one the installed build came from.</summary>
@@ -101,7 +116,9 @@ public static class UserSettings
                 if (i < 0) continue;
                 var (k, v) = (line[..i].Trim(), line[(i + 1)..].Trim());
                 if (k == nameof(ReverseWheel)) ReverseWheel = v == "1";
+                else if (k == nameof(CommandBar) && Enum.TryParse<CommandBarLayout>(v, out var cb)) CommandBar = cb;
                 else if (k == nameof(Perspective)) Perspective = v == "1";
+                else if (k == nameof(Units) && Enum.TryParse<Core.Model.UnitSystem>(v, out var us)) Units = us;
                 else if (k == nameof(AuthorName) && v.Length > 0) AuthorName = v;
                 else if (k == nameof(KeepDisplay) && Enum.TryParse<KeepDisplay>(v, out var kd)) KeepDisplay = kd;
                 else if (k == nameof(KeepDisplaySeconds) && double.TryParse(v, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var ks) && ks >= 0) KeepDisplaySeconds = ks;
@@ -115,6 +132,7 @@ public static class UserSettings
                 else if (k == nameof(PartsSort) && Enum.TryParse<PartsOrder>(v, out var po)) PartsSort = po;
                 else if (k == nameof(CheckForUpdates)) CheckForUpdates = v == "1";
                 else if (k == nameof(SkippedUpdate)) SkippedUpdate = v.Length > 0 ? v : null;
+                else if (k == nameof(LibrariesPath)) LibrariesPath = v.Length > 0 ? v : null;
                 else if (k == nameof(UpdateChannel)) UpdateChannel = v.Length > 0 ? v : null;
                 else if (k == nameof(PreferOpenGL)) PreferOpenGL = v == "1";
                 else if (k == nameof(AntiAliasing) && int.TryParse(v, out var aa) && aa is 0 or 2 or 4) AntiAliasing = aa;
@@ -134,7 +152,9 @@ public static class UserSettings
             {
                 $"{nameof(Version)}={Version}",
                 $"{nameof(ReverseWheel)}={(ReverseWheel ? 1 : 0)}",
+                $"{nameof(CommandBar)}={CommandBar}",
                 $"{nameof(Perspective)}={(Perspective ? 1 : 0)}",
+                $"{nameof(Units)}={Units}",
                 $"{nameof(AuthorName)}={AuthorName}",
                 $"{nameof(KeepDisplay)}={KeepDisplay}",
                 $"{nameof(KeepDisplaySeconds)}={KeepDisplaySeconds.ToString(System.Globalization.CultureInfo.InvariantCulture)}",
@@ -149,6 +169,7 @@ public static class UserSettings
             lines.Add($"{nameof(CheckForUpdates)}={(CheckForUpdates ? 1 : 0)}");
             if (SkippedUpdate != null) lines.Add($"{nameof(SkippedUpdate)}={SkippedUpdate}");
             if (UpdateChannel != null) lines.Add($"{nameof(UpdateChannel)}={UpdateChannel}");
+            if (LibrariesPath != null) lines.Add($"{nameof(LibrariesPath)}={LibrariesPath}");
             lines.Add($"{nameof(PreferOpenGL)}={(PreferOpenGL ? 1 : 0)}");
             lines.Add($"{nameof(AntiAliasing)}={AntiAliasing}");
             File.WriteAllLines(StorePath, lines);

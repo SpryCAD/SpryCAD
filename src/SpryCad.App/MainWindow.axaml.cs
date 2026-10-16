@@ -42,7 +42,7 @@ public partial class MainWindow : Window
         Viewport.RotateAbout = UserSettings.RotateAbout;
         Viewport.Camera.Perspective = UserSettings.Perspective;
         Viewport.AntiAliasing = UserSettings.AntiAliasing;
-        Viewport.SoftwareRenderer += () => Status("The view is drawn without the graphics card (a software renderer), slow with large models: see Tools > Options > Graphics.");
+        Viewport.SoftwareRenderer += () => Status("Software rendering is active and large models may be slow. See Tools > Options > Graphics.");
         Viewport.Overlay = Overlay;
         Viewport.Selection = Selection;
         Viewport.ContextRequested += OnViewportContext;
@@ -60,10 +60,11 @@ public partial class MainWindow : Window
         _tab = AddTab(Session);
         UpdateTabHeader(_tab);
         Selection.Changed += OnSelectionChanged;
+        Viewport.PointerMoved += (_, e) => FadePalette(e.GetPosition(Viewport));
         SetupUnitsSwitch();
 
         Tree.SelectedChanged += OnTreeSelected;
-        Tree.EditRequested += id => EditFeature(id);
+        Tree.EditRequested += id => { if (id == FeatureTree.MaterialRow) EditMaterialCommand(); else EditFeature(id); };
         Tree.ContextRequested += OnTreeContext;
         Tree.SketchVisibilityToggled += id => SetSketchShown(id, null);
         Tree.HoverChanged += OnTreeHover;
@@ -77,6 +78,7 @@ public partial class MainWindow : Window
         _autosave = new DispatcherTimer { Interval = TimeSpan.FromSeconds(60) };
         _autosave.Tick += (_, _) => AutoSave();
         _autosave.Start();
+        InitLibraries();
 
         BuildMenu();
         BuildQuickAccess();
@@ -145,6 +147,7 @@ public partial class MainWindow : Window
         {
             var st = pr.Status.GetValueOrDefault(_edit.Feature.Id);
             _page.Message = st?.Error ?? (st is { Warnings.Count: > 0 } ? string.Join("\n", st.Warnings) : _edit.Hint);
+            _page.ShowFailure(st?.Error); // (the value typed last, red)
         }
         UpdateProblemEdges();
         if (_firstRebuild) { _firstRebuild = false; }
@@ -167,7 +170,7 @@ public partial class MainWindow : Window
             if (!ReferenceEquals(session.Timing, timing) || timing.Shown != 0) return;
             timing.Shown = at;
             if (!ReferenceEquals(session, Session) || StatusRebuild.Text != text) return; // another tab, or a newer status
-            StatusRebuild.Text = $"{text}  ·  on screen in {timing.TotalMs:0} ms";
+            StatusRebuild.Text = $"{text}  ·  displayed in {timing.TotalMs:0} ms";
             var tip = ToolTip.GetTip(StatusRebuild) as string;
             ToolTip.SetTip(StatusRebuild, tip == null ? timing.Breakdown : tip + Environment.NewLine + Environment.NewLine + timing.Breakdown);
         });
@@ -195,7 +198,7 @@ public partial class MainWindow : Window
     void SetupUnitsSwitch()
     {
         StatusUnits.Cursor = new Cursor(StandardCursorType.Hand);
-        ToolTip.SetTip(StatusUnits, "Units: click to change");
+        ToolTip.SetTip(StatusUnits, "Click to change the unit system");
         StatusUnits.PointerPressed += (_, e) =>
         {
             if (!e.GetCurrentPoint(StatusUnits).Properties.IsLeftButtonPressed) return;
@@ -217,9 +220,12 @@ public partial class MainWindow : Window
         if (Units == u) return;
         if (Asm is { } a) { a.BeginChange(); a.Model.Doc.Units = u; a.EndChange(); }
         else Session.Change(() => Session.Doc.Units = u);
+        // (new parts start in them too)
+        UserSettings.Units = u;
+        UserSettings.Save();
         StatusUnits.Text = Units.ToString();
         RefreshScene();
-        Status($"Units: {u}.");
+        Status($"Units set to {u}.");
     }
 
     void OnDocumentChanged()
@@ -228,9 +234,13 @@ public partial class MainWindow : Window
         StatusUnits.Text = Units.ToString();
         PmPage.CurrentUnits = () => Units;
         UpdateUndoButtons();
-        Viewport.PartColor = new Rgba((float)Session.Doc.Color[0], (float)Session.Doc.Color[1], (float)Session.Doc.Color[2]);
+        // the part's appearance: its own, else its material's (its color, opacity and finish)
+        var look = Session.Doc.EffectiveAppearance;
+        Viewport.PartColor = new Rgba((float)look.Color[0], (float)look.Color[1], (float)look.Color[2], (float)look.Opacity);
+        Viewport.PartFinish = new Finish((float)look.Metallic, (float)look.Roughness);
         RebuildTree();
         RefreshRevisions();
+        RefreshBom();
     }
 
     // what the feature tree was last built from
@@ -265,31 +275,10 @@ public partial class MainWindow : Window
     }
 
     /// <summary>Pushes the current rebuild result (or rolled back / preview state) into the viewport.</summary>
-    /// <summary>
-    /// Bend and bend tangent lines of the bodies shown flat (a body is its flat pattern's own solid: no feature after
-    /// the Flat Pattern changed it), on the unfolded face; the viewport puts them on the face toward the viewer.
-    /// </summary>
-    static List<ViewportControl.BendLine> BendLinesOf(ModelState state)
-    {
-        var lines = new List<ViewportControl.BendLine>();
-        foreach (var body in state.Bodies)
-        {
-            if (!state.Flats.TryGetValue(body.Id, out var flat) || !ReferenceEquals(body.Solid.Native, flat.Body)) continue;
-            var fr = flat.Frame;
-            Vec3 P(Vec2 p) => fr.ToWorld(p.X, p.Y, 0);
-            foreach (var bend in flat.Bends)
-            {
-                ViewportControl.BendLine L(Vec2 a, Vec2 b, ViewportControl.BendLineKind kind) => new(P(a), P(b), kind, fr.Normal, flat.Thickness, bend.Allowance);
-                lines.Add(L(bend.A, bend.B, bend.Up ? ViewportControl.BendLineKind.BendUp : ViewportControl.BendLineKind.BendDown));
-                foreach (var (a, b) in bend.Tangents) lines.Add(L(a, b, ViewportControl.BendLineKind.Tangent));
-            }
-        }
-        return lines;
-    }
-
     public void RefreshScene()
     {
         UpdateColorByLabels();
+        UpdateHudStates();
         if (Asm != null) { RefreshAssemblyScene(); return; }
         UpdateHudStates();
         Viewport.Instances = Array.Empty<MeshInstance>();
@@ -320,13 +309,14 @@ public partial class MainWindow : Window
             ? FeatureColors.Of(doc).ToDictionary(kv => kv.Key, kv => new Rgba((float)kv.Value[0], (float)kv.Value[1], (float)kv.Value[2]))
             : null;
         Viewport.PreviewBodies = preview;
-        Viewport.BendLines = BendLinesOf(state);
+        Viewport.BendLines = Array.Empty<ViewportControl.BendLine>();
         Viewport.CosmeticThreads = state.Cosmetics.Values.ToList();
         // a slow part just opened: the display saved with it, until the rebuild is done (nothing to pick meanwhile)
         if (result == null && Session.SavedDisplay is { } saved)
         {
-            var col = doc.Color;
-            Viewport.Instances = new[] { new MeshInstance("__saved", saved.Mesh, System.Numerics.Matrix4x4.Identity, new Rgba((float)col[0], (float)col[1], (float)col[2])) };
+            var look = doc.EffectiveAppearance;
+            Viewport.Instances = new[] { new MeshInstance("__saved", saved.Mesh, System.Numerics.Matrix4x4.Identity,
+                new Rgba((float)look.Color[0], (float)look.Color[1], (float)look.Color[2], (float)look.Opacity), Finish: new Finish((float)look.Metallic, (float)look.Roughness), SeeThrough: look.Opacity < 1) };
             Viewport.CosmeticThreads = saved.Threads;
             if (_tab.FitAfterLoad != null) { _tab.FitAfterLoad = null; Viewport.StandardView("Trimetric", fit: true, animate: false); }
         }
@@ -411,7 +401,7 @@ public partial class MainWindow : Window
         var show = shown ?? !doc.SketchShown(id, consumed);
         if (show == doc.SketchShown(id, consumed)) return;
         Session.Change(() => doc.SetSketchShown(id, show, consumed));
-        Status($"{doc.Find(id)?.Name ?? id + " Plane"} {(show ? "shown" : "hidden")}");
+        Status($"{doc.Find(id)?.Name ?? id + " Plane"} {(show ? "shown" : "hidden")}.");
     }
 
     /// <summary>Exact geometry of a selected face/edge for the status bar (like SolidWorks).</summary>
@@ -450,6 +440,7 @@ public partial class MainWindow : Window
 
     void OnSelectionChanged()
     {
+        UpdatePalette();
         UpdateBreadcrumbs();
         var s = Selection.First;
         if (_sketch == null)
@@ -482,6 +473,13 @@ public partial class MainWindow : Window
         if (_page?.ActiveBox != null && (_page.ActiveBox.Filter & SelFilter.Plane) != 0 && id is "Front" or "Top" or "Right")
         {
             _page.HandlePick(new SelItem { Kind = SelKind.Plane, Name = id, Frame = Resolver.StdPlane(id) });
+            return;
+        }
+        // a reference plane into a box that takes planes (as clicked in the graphics area)
+        if (_page?.ActiveBox != null && (_page.ActiveBox.Filter & SelFilter.Plane) != 0 && Session.Doc.Find(id) is PlaneFeature rp)
+        {
+            _page.HandlePick(new SelItem { Kind = SelKind.Plane, Name = rp.Name, FeatureId = rp.Id, Frame = Session.Result?.State.Planes.GetValueOrDefault(rp.Id) });
+            RefreshScene();
             return;
         }
         // an origin axis into a box that takes axes or lines
@@ -643,9 +641,10 @@ public partial class MainWindow : Window
                 if (_sketch == null)
                 {
                     Selection.Clear();
+                    HidePalette();
                     if (Asm is { Selected: not null } or { SelectedMate: not null }) SelectMate(null);
                     if (_asmOriginSel != null) { _asmOriginSel = null; RefreshAssemblyScene(); }
-                    if (_normalToPick) { _normalToPick = false; RefreshAssemblyScene(); Status("Normal To cancelled."); }
+                    if (_normalToPick) { _normalToPick = false; RefreshAssemblyScene(); Status("Normal To canceled."); }
                     e.Handled = true;
                 }
                 break;
@@ -737,6 +736,7 @@ public partial class MainWindow : Window
 
     void ShowPage(PmPage? page)
     {
+        if (page != null) HidePalette(); // (a command started: the palette has done its part)
         if (page != null) HideBreadcrumbs(); // (a command started)
         // the Measure tool's drawing belongs to its page
         if (_measurePage != null && page != _measurePage) EndMeasure();
@@ -844,17 +844,17 @@ public partial class MainWindow : Window
         List<Recoverable> found;
         try { found = WorkingCopy.FindRecoverable(); }
         catch (Exception ex) { App.Log(ex, "Recovery"); return; }
-        if (found.Count == 0) { if (!atStart) Status("Nothing to recover: no part was left unsaved."); return; }
+        if (found.Count == 0) { if (!atStart) Status("No unsaved work to recover."); return; }
         var one = found.Count == 1;
         var list = string.Join("\n", found.Select(r => $"    {r.Name}   (autosaved {r.SavedUtc.ToLocalTime():g})"));
         var choice = await Dialogs.YesNoCancel(this, "Recover Unsaved Work",
             $"SpryCAD closed without saving {(one ? "this part" : "these parts")}:\n\n{list}\n\n" +
-            $"Restore {(one ? "it" : "them")} as last autosaved? (Cancel keeps {(one ? "it" : "them")} to decide later.)", "Restore", "Discard");
+            $"Restore {(one ? "it" : "them")} from the last autosave? Cancel keeps {(one ? "it" : "them")} for later.", "Restore", "Discard");
         if (choice == null) return;
-        if (choice == false) { foreach (var r in found) WorkingCopy.Discard(r); Status("Discarded the unsaved work."); return; }
+        if (choice == false) { foreach (var r in found) WorkingCopy.Discard(r); Status("Unsaved work discarded."); return; }
         int n = 0;
         foreach (var r in found) { if (!await RecoverInTab(r)) break; n++; }
-        if (n > 0) Status(n == 1 ? "Restored the unsaved part: save it to keep it." : $"Restored {n} unsaved parts: save them to keep them.");
+        if (n > 0) Status(n == 1 ? "Restored the unsaved part. Save it to keep the changes." : $"Restored {n} unsaved parts. Save them to keep the changes.");
     }
 
     async Task<bool> RecoverInTab(Recoverable r)
@@ -873,7 +873,7 @@ public partial class MainWindow : Window
         catch (Exception ex)
         {
             App.Log(ex, "Recover " + r.WorkingPath);
-            await Dialogs.Message(this, "Recover failed", ex.Message);
+            await Dialogs.Message(this, "Recover Failed", $"Could not recover {r.Name}: {ex.Message}");
             return false;
         }
     }
@@ -887,7 +887,7 @@ public partial class MainWindow : Window
         foreach (var t in _parts.Where(DirtyOf).ToList())
         {
             if (!await SwitchTo(t)) return;
-            var r = await Dialogs.YesNoCancel(this, "SpryCAD", $"Save changes to {TitleOf(t).TrimEnd(' ', '*')}?");
+            var r = await Dialogs.YesNoCancel(this, "Save Changes", $"Save changes to {TitleOf(t).TrimEnd(' ', '*')}?");
             if (r == null) return;
             if (r == true && !await Save()) return;
         }

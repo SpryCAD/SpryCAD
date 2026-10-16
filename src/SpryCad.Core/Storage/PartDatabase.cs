@@ -58,8 +58,67 @@ public sealed class PartDatabase : IDisposable
         // (the page size must be set before the first table)
         Exec(db, $"PRAGMA page_size = 4096; PRAGMA application_id = {ApplicationId}; PRAGMA user_version = {SchemaVersion};");
         if (!durable) Exec(db, "PRAGMA journal_mode = MEMORY; PRAGMA synchronous = OFF;");
-        Exec(db, Schema);
+        // (in one transaction: each table its own was a write to the file apiece)
+        Exec(db, "BEGIN;" + Schema + ";COMMIT;");
         return new PartDatabase(db);
+    }
+
+    /// <summary>
+    /// A new, empty database in memory, its file's bytes taken with <see cref="ToBytes"/>: a file only made to be
+    /// embedded in another (no file written, opened and read back: each was tens of milliseconds, most of making one).
+    /// </summary>
+    public static PartDatabase CreateInMemory()
+    {
+        var db = Connect(":memory:", SqliteOpenMode.ReadWriteCreate);
+        Exec(db, $"PRAGMA page_size = 4096; PRAGMA application_id = {ApplicationId}; PRAGMA user_version = {SchemaVersion};");
+        Exec(db, "BEGIN;" + Schema + ";COMMIT;");
+        return new PartDatabase(db);
+    }
+
+    /// <summary>A database given as its file's bytes, in memory (to read).</summary>
+    public static PartDatabase FromBytes(byte[] bytes)
+    {
+        if (!Is(bytes)) throw new InvalidDataException("Not a SpryCAD file.");
+        var db = Connect(":memory:", SqliteOpenMode.ReadWriteCreate);
+        try { Deserialize(db, "main", bytes); }
+        catch { db.Dispose(); throw; }
+        return new PartDatabase(db);
+    }
+
+    /// <summary>The database as the bytes of its file (one in memory: <see cref="CreateInMemory"/>).</summary>
+    public byte[] ToBytes()
+    {
+        var p = SQLitePCL.raw.sqlite3_serialize(_db.Handle, "main", out long size, 0);
+        if (p == IntPtr.Zero) throw new InvalidOperationException("The database could not be written out.");
+        try
+        {
+            var bytes = new byte[size];
+            System.Runtime.InteropServices.Marshal.Copy(p, bytes, 0, checked((int)size));
+            return bytes;
+        }
+        finally { SQLitePCL.raw.sqlite3_free(p); }
+    }
+
+    /// <summary>Attaches a database given as its file's bytes (to read), in memory, as <paramref name="schema"/> (DETACH it after).</summary>
+    public void AttachBytes(string schema, byte[] bytes)
+    {
+        if (!Is(bytes)) throw new InvalidDataException("Not a SpryCAD file.");
+        Exec(_db, $"ATTACH DATABASE ':memory:' AS {schema};");
+        try { Deserialize(_db, schema, bytes); }
+        catch { Exec(_db, $"DETACH DATABASE {schema};"); throw; }
+    }
+
+    // (a copy SQLite owns and frees when done with it: not marked read only, as a transaction locks every attached
+    // database for writing; nothing writes to it)
+    static void Deserialize(SqliteConnection db, string schema, byte[] bytes)
+    {
+        const int FreeOnClose = 1;
+        var mem = SQLitePCL.raw.sqlite3_malloc64(bytes.Length);
+        if (mem == IntPtr.Zero) throw new OutOfMemoryException();
+        System.Runtime.InteropServices.Marshal.Copy(bytes, 0, mem, bytes.Length);
+        // (on failure SQLite frees the copy itself)
+        var rc = SQLitePCL.raw.sqlite3_deserialize(db.Handle, schema, mem, bytes.Length, bytes.Length, FreeOnClose);
+        if (rc != 0) throw new InvalidDataException($"The file could not be read (SQLite error {rc}).");
     }
 
     public static PartDatabase Open(string path, bool readOnly = true)

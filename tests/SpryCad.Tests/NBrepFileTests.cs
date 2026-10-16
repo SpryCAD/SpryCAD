@@ -1,4 +1,5 @@
 using SpryCad.Core.Assembly;
+using SpryCad.Core.Model;
 using SpryCad.Core.Regen;
 using SpryCad.Kernel;
 using SpryCad.Kernel.Native;
@@ -28,8 +29,86 @@ static class NBrepFileTests
         return h;
     }
 
+    // a STEP file's instances as text, in their order (ids, types, arguments)
+    static string Dump(StepFile f)
+    {
+        var sb = new System.Text.StringBuilder();
+        void Arg(object? a)
+        {
+            switch (a)
+            {
+                case List<object?> l: sb.Append('('); foreach (var x in l) { Arg(x); sb.Append(','); } sb.Append(')'); break;
+                case double d: sb.Append(BitConverter.DoubleToInt64Bits(d)); break;
+                case StepTyped ty: sb.Append(ty.Type).Append('('); Arg(ty.Value); sb.Append(')'); break;
+                case null: sb.Append('$'); break;
+                default: sb.Append(a); break;
+            }
+        }
+        foreach (var (type, args) in f.Header) { sb.Append(type); Arg(args); sb.Append('\n'); }
+        foreach (var i in f.Instances.Values) { sb.Append(i.Id).Append('='); foreach (var (type, args) in i.Parts) { sb.Append(type); Arg(args); } sb.Append('\n'); }
+        return sb.ToString();
+    }
+
     public static void Run(TestRunner t)
     {
+        t.Test("Part and assembly files made in memory read back as those saved to disk (every demo; an assembly's embedded parts)", () =>
+        {
+            var demos = Path.Combine(Root(), "samples", "demos");
+            var tmp = Path.Combine(Path.GetTempPath(), "sprycad-mem-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(tmp);
+            static bool Same(Dictionary<SpryCad.Core.Storage.ObjectId, byte[]> a, Dictionary<SpryCad.Core.Storage.ObjectId, byte[]> b) =>
+                a.Count == b.Count && a.All(kv => b.TryGetValue(kv.Key, out var o) && o.AsSpan().SequenceEqual(kv.Value));
+            try
+            {
+                foreach (var file in Directory.GetFiles(demos, "*.sprt"))
+                {
+                    var onDisk = Path.Combine(tmp, "a.sprt");
+                    DocumentContainer.Save(CadDocument.Load(file), onDisk);
+                    var a = CadDocument.Load(onDisk);
+                    var b = DocumentContainer.Load(DocumentContainer.ToNewBytes(CadDocument.Load(file), "b"), "b.sprt");
+                    t.True(Same(SpryCad.Core.Storage.PartObjects.From(a), SpryCad.Core.Storage.PartObjects.From(b)), Path.GetFileName(file) + " made in memory differs");
+                }
+                foreach (var file in Directory.GetFiles(demos, "*.sasm"))
+                {
+                    var onDisk = Path.Combine(tmp, "a.sasm");
+                    AssemblyContainer.Save(AssemblyContainer.Load(file), onDisk);
+                    var a = AssemblyContainer.Load(onDisk);
+                    var b = AssemblyContainer.Load(AssemblyContainer.ToBytes(AssemblyContainer.Load(file)), "b.sasm");
+                    // (each save its own revision: the rest the same)
+                    a.Revision = b.Revision = null;
+                    t.True(a.ToJson() == b.ToJson(), Path.GetFileName(file) + " made in memory: its document differs");
+                    t.True(a.Files.Keys.OrderBy(k => k).SequenceEqual(b.Files.Keys.OrderBy(k => k)), Path.GetFileName(file) + " made in memory: its files differ");
+                    foreach (var name in a.Files.Keys.Where(k => k.EndsWith(CadDocument.FileExtension)))
+                        t.True(Same(SpryCad.Core.Storage.PartObjects.From(DocumentContainer.Load(a.Files[name], name)), SpryCad.Core.Storage.PartObjects.From(DocumentContainer.Load(b.Files[name], name))),
+                            $"{Path.GetFileName(file)} made in memory: {name} differs");
+                }
+            }
+            finally { try { Directory.Delete(tmp, true); } catch { } }
+        });
+
+
+        t.Test("STEP files parsed in pieces at once read as parsed in order (every STEP model and demo export)", () =>
+        {
+            var root = Root();
+            var files = Directory.GetFiles(Path.Combine(root, "tests", "SpryCad.Tests", "models", "step"), "*.step")
+                .Concat(Directory.GetFiles(Path.Combine(root, "samples", "demos"), "*.step")).ToList();
+            var was = StepFile.ParallelMin;
+            try
+            {
+                foreach (var file in files)
+                {
+                    var data = File.ReadAllBytes(file);
+                    StepFile.ParallelMin = int.MaxValue;
+                    var inOrder = Dump(StepFile.Parse(data));
+                    StepFile.ParallelMin = 0;
+                    t.True(Dump(StepFile.Parse(data)) == inOrder, Path.GetFileName(file) + " parsed in pieces differs");
+                }
+            }
+            finally { StepFile.ParallelMin = was; }
+            t.True(files.Count > 5, "the STEP files found");
+        });
+
+
         t.Test("Solid files: every STEP model and demo export written and read back the same (names, geometry, display)", () =>
         {
             var root = Root();

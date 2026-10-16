@@ -14,7 +14,9 @@ public enum PartSource { File, Embedded, Cache, None }
 public sealed class PartDisplay
 {
     public required DisplayMesh Mesh { get; init; }
-    public required double[] Color { get; init; }
+    /// <summary>How it looks: its part's appearance (own, else its material's), or a cache's.</summary>
+    public required Appearance Appearance { get; init; }
+    public double[] Color => Appearance.Color;
     public required PartSource Source { get; init; }
     /// <summary>Its cosmetic threads, in the part's coordinates.</summary>
     public IReadOnlyList<CosmeticThread> Threads { get; init; } = Array.Empty<CosmeticThread>();
@@ -176,7 +178,7 @@ public sealed partial class AssemblyModel
                     try
                     {
                         var e = MeshCache.Read(current);
-                        Parts[g.Key] = new PartDisplay { Mesh = e.Mesh, Threads = e.Threads, Color = doc.Color, Source = src, Revision = doc.Revision, Doc = built, Part = doc, Config = config, Cached = true };
+                        Parts[g.Key] = new PartDisplay { Mesh = e.Mesh, Threads = e.Threads, Appearance = doc.EffectiveAppearance, Source = src, Revision = doc.Revision, Doc = built, Part = doc, Config = config, Cached = true };
                         continue;
                     }
                     catch { } // (a damaged cache: rebuilt)
@@ -187,7 +189,7 @@ public sealed partial class AssemblyModel
                     var old = CachedOf(first) is { } oc ? MeshCache.Read(oc) : null;
                     Parts[g.Key] = new PartDisplay
                     {
-                        Mesh = old?.Mesh ?? new DisplayMesh(), Threads = old?.Threads ?? Array.Empty<CosmeticThread>(), Color = doc.Color, Source = src,
+                        Mesh = old?.Mesh ?? new DisplayMesh(), Threads = old?.Threads ?? Array.Empty<CosmeticThread>(), Appearance = doc.EffectiveAppearance, Source = src,
                         Revision = r.Revision, Doc = built, Part = doc, Config = config, Building = true,
                     };
                     Pending.Add(g.Key);
@@ -204,10 +206,10 @@ public sealed partial class AssemblyModel
             if (CachedOf(first) is { } cache)
             {
                 var e = MeshCache.Read(cache);
-                Parts[g.Key] = new PartDisplay { Mesh = e.Mesh, Threads = e.Threads, Color = e.Color, Source = PartSource.Cache, Revision = r.Revision, Part = doc, Config = config, Problem = why };
+                Parts[g.Key] = new PartDisplay { Mesh = e.Mesh, Threads = e.Threads, Appearance = e.Appearance, Source = PartSource.Cache, Revision = r.Revision, Part = doc, Config = config, Problem = why };
                 continue;
             }
-            Parts[g.Key] = new PartDisplay { Mesh = new DisplayMesh(), Color = new[] { 0.74, 0.76, 0.80 }, Source = PartSource.None, Part = doc, Config = config, Problem = why ?? "not found" };
+            Parts[g.Key] = new PartDisplay { Mesh = new DisplayMesh(), Appearance = Model.Appearance.Default, Source = PartSource.None, Part = doc, Config = config, Problem = why ?? "not found" };
         }
     }
 
@@ -215,7 +217,7 @@ public sealed partial class AssemblyModel
     static PartDisplay BuildDisplay(CadDocument part, CadDocument built, PartSource src, string config, ThreadDisplay mode)
     {
         var (mesh, threads) = Build(built, mode);
-        return new PartDisplay { Mesh = mesh, Threads = threads, Color = part.Color, Source = src, Revision = part.Revision, Doc = built, Part = part, Config = config };
+        return new PartDisplay { Mesh = mesh, Threads = threads, Appearance = part.EffectiveAppearance, Source = src, Revision = part.Revision, Doc = built, Part = part, Config = config };
     }
 
     /// <summary>Displays waiting to be built (<see cref="LoadPart"/> with defer), by <see cref="DisplayKey"/>.</summary>
@@ -274,7 +276,7 @@ public sealed partial class AssemblyModel
         var p = job.Placeholder;
         Parts[job.Key] = built ?? new PartDisplay
         {
-            Mesh = p.Mesh, Threads = p.Threads, Color = p.Color, Source = p.Mesh.Indices.Length > 0 ? PartSource.Cache : PartSource.None,
+            Mesh = p.Mesh, Threads = p.Threads, Appearance = p.Appearance, Source = p.Mesh.Indices.Length > 0 ? PartSource.Cache : PartSource.None,
             Revision = p.Revision, Part = p.Part, Config = p.Config, Problem = problem ?? "could not be built",
         };
         return true;
@@ -411,7 +413,7 @@ public sealed partial class AssemblyModel
         if (!Parts.ContainsKey(key))
         {
             var (mesh, threads) = Build(doc, Threads);
-            Parts[key] = new PartDisplay { Mesh = mesh, Threads = threads, Color = doc.Color, Source = embed ? PartSource.Embedded : PartSource.File, Revision = doc.Revision, Doc = doc, Part = doc };
+            Parts[key] = new PartDisplay { Mesh = mesh, Threads = threads, Appearance = doc.EffectiveAppearance, Source = embed ? PartSource.Embedded : PartSource.File, Revision = doc.Revision, Doc = doc, Part = doc };
         }
         return c;
     }
@@ -446,12 +448,12 @@ public sealed partial class AssemblyModel
             if (made is { mesh: null })
             {
                 // its display left to build (PendingJobs): shown empty until then
-                Parts[key] = new PartDisplay { Mesh = new DisplayMesh(), Threads = Array.Empty<CosmeticThread>(), Color = doc.Color, Source = PartSource.Embedded, Revision = doc.Revision, Doc = doc, Part = doc, Building = true };
+                Parts[key] = new PartDisplay { Mesh = new DisplayMesh(), Threads = Array.Empty<CosmeticThread>(), Appearance = doc.EffectiveAppearance, Source = PartSource.Embedded, Revision = doc.Revision, Doc = doc, Part = doc, Building = true };
                 Pending.Add(key);
                 return c;
             }
             var (mesh, threads) = made is { mesh: { } mm } m ? (mm, m.threads!) : Build(doc, Threads);
-            Parts[key] = new PartDisplay { Mesh = mesh, Threads = threads, Color = doc.Color, Source = PartSource.Embedded, Revision = doc.Revision, Doc = doc, Part = doc };
+            Parts[key] = new PartDisplay { Mesh = mesh, Threads = threads, Appearance = doc.EffectiveAppearance, Source = PartSource.Embedded, Revision = doc.Revision, Doc = doc, Part = doc };
         }
         return c;
     }
@@ -459,10 +461,8 @@ public sealed partial class AssemblyModel
     /// <summary>A part saved as a part file is (its identity and revision given), as the bytes an assembly embeds.</summary>
     static byte[] SaveEmbedded(CadDocument doc)
     {
-        var tmp = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "fc-embed-" + Guid.NewGuid().ToString("N") + CadDocument.FileExtension);
-        // (a file read back at once: not synced to disk)
-        try { DocumentContainer.Save(doc, tmp, durable: false); return File.ReadAllBytes(tmp); }
-        finally { try { File.Delete(tmp); } catch { } }
+        // (made in memory: no file written and read back)
+        return DocumentContainer.ToNewBytes(doc, "Part");
     }
 
     static string SafeFileName(string name)
@@ -474,9 +474,9 @@ public sealed partial class AssemblyModel
 
     /// <summary>
     /// An assembly from a STEP assembly file: each of its parts a part document embedded in the assembly (an Import
-    /// of that part's solids, in its own coordinates), each use of a part a component where the file places it. The
-    /// first component is fixed and every other one locked to it, so the assembly stays as it was designed until a
-    /// lock is deleted (then mate it as wanted). Null when the file is not an assembly (or holds one part, once).
+    /// of that part's solids, in its own coordinates), each use of a part a component where the file places it, its
+    /// sub-assemblies embedded sub-assemblies. Every component is fixed there, so the assembly stays as it was
+    /// designed until one is floated (then mate it as wanted). Null when the file is not an assembly (or holds one part, once).
     /// With <paramref name="defer"/> the parts' displays are left to build (<see cref="PendingJobs"/>): the assembly
     /// shows at once and its parts appear as each is built.
     /// </summary>
@@ -508,14 +508,16 @@ public sealed partial class AssemblyModel
         Parallel.For(0, res.Parts.Count, i =>
         {
             byte[] bytes; string ext;
+            // its color in the file (its first colored solid's) as its appearance
+            var color = res.Parts[i].Solids.Select(sd => sd.Color).FirstOrDefault(c => c != null);
             try { bytes = NBrepFile.Write(res.Parts[i].Solids, "S."); ext = ".sbrep"; }
             catch (NotSupportedException)
             {
                 using var ms = new MemoryStream();
-                StepWriter.Write(ms, res.Parts[i].Solids.Select(sd => (sd.Name, Kernel.Native.NTess.ToSolid(sd.Body))), names[i]);
+                StepWriter.Write(ms, res.Parts[i].Solids.Select(sd => (sd.Name, Kernel.Native.NTess.ToSolid(sd.Body))), names[i], color: color);
                 bytes = ms.ToArray(); ext = ".step";
             }
-            var doc = new CadDocument();
+            var doc = new CadDocument { Appearance = color != null ? Appearance.FromRgba(color) : null };
             var file = "imports/" + SafeFileName(names[i]) + ext;
             doc.AddFile(file, bytes);
             doc.AddFeature(new ImportFeature { File = file, Sha256 = DocumentContainer.Hash(bytes) });
@@ -527,19 +529,71 @@ public sealed partial class AssemblyModel
             made[i] = (saved, mesh, threads);
         });
         var pIns = Kernel.Prof.Time("stepasm.insert");
-        Component? first = null;
-        foreach (var o in res.Occurrences)
+        // its sub-assemblies as the file has them (one top product holding others): each an embedded sub-assembly,
+        // rigid, made once however often it is used, its components fixed where the file puts them; else every use
+        // of a part a component of the assembly itself
+        var subs = new Dictionary<int, (AssemblyModel model, int height)>();
+        var placed = new List<(AssemblyModel owner, string file, int product)>(); // where each sub-assembly's file goes
+        (AssemblyModel model, int height) Sub(int p)
         {
-            var c = m.InsertEmbedded(docs[o.Part], names[o.Part], o.Placement, made[o.Part]);
-            if (first == null) { first = c; continue; }
-            // held where the file put it: locked to the first component
-            // (a lock holds the components themselves: no face is needed; each holds them where they are, so they are
-            // solved once after, not after each)
-            m.AddMate(MateType.Lock, new MateRef { Component = c.Id, D = Vec3.UnitZ }, new MateRef { Component = first.Id, D = Vec3.UnitZ }, settle: false);
+            if (subs.TryGetValue(p, out var had)) return had;
+            var sm = New();
+            sm.Doc.Id = CadDocument.NewGuid();
+            int height = 0;
+            foreach (var u in res.Products[p].Uses)
+            {
+                if (u.Part >= 0) { sm.InsertEmbedded(docs[u.Part], names[u.Part], u.Placement, made[u.Part]).Fixed = true; continue; }
+                var (child, h) = Sub(u.Product);
+                height = Math.Max(height, h + 1);
+                sm.InsertEmbeddedSub(child, u.Product, res.Products[u.Product].Name, u.Placement, placed).Fixed = true;
+            }
+            return subs[p] = (sm, height);
         }
+        var top = res.Roots.Count == 1 && res.Products[res.Roots[0]].Uses.Any(u => u.Product >= 0)
+            ? res.Products[res.Roots[0]].Uses
+            : res.Occurrences.Select(o => new StepUse(o.Part, -1, o.Name, o.Placement)).ToList();
+        // each fixed where the file puts it (float one to move it, then mate it as wanted)
+        foreach (var u in top)
+            (u.Part >= 0 ? m.InsertEmbedded(docs[u.Part], names[u.Part], u.Placement, made[u.Part]) : m.InsertEmbeddedSub(Sub(u.Product).model, u.Product, res.Products[u.Product].Name, u.Placement, placed)).Fixed = true;
+        // the sub-assemblies' files: each holds those of the sub-assemblies it uses, so the innermost first; those as
+        // deep as each other at once (a file read back at once: not synced to disk)
+        using (Kernel.Prof.Time("stepasm.subfiles"))
+            foreach (var level in subs.GroupBy(kv => kv.Value.height).OrderBy(g => g.Key))
+            {
+                var files = new System.Collections.Concurrent.ConcurrentDictionary<int, byte[]>();
+                Parallel.ForEach(level, kv => files[kv.Key] = AssemblyContainer.ToBytes(kv.Value.model.Doc, durable: false));
+                foreach (var (owner, file, product) in placed.Where(x => files.ContainsKey(x.product)))
+                {
+                    owner.Doc.Files[file] = files[product];
+                    var revision = subs[product].model.Doc.Revision;
+                    foreach (var c in owner.Doc.Components.Where(c => c.Part.Embedded == file)) c.Part.Revision = revision;
+                }
+            }
         if (m.HasMates) m.SolveMates();
         pIns.Dispose();
         return m;
+    }
+
+    /// <summary>
+    /// Adds a component of a sub-assembly made here (<see cref="FromStep"/>), shown by that model: its file embedded
+    /// once (further components of it share the copy), written later (where noted in <paramref name="placed"/>). Rigid.
+    /// </summary>
+    Component InsertEmbeddedSub(AssemblyModel sub, int product, string name, Transform placement, List<(AssemblyModel owner, string file, int product)> placed)
+    {
+        var sd = sub.Doc;
+        PartRef r;
+        if (Doc.Components.Select(c => c.Part).FirstOrDefault(p => p.Assembly && p.Embedded != null && p.PartId == sd.Id) is { } same) r = same.Clone();
+        else
+        {
+            r = new PartRef { PartId = sd.Id, Assembly = true, Embedded = UniqueName("subs/" + SafeFileName(name) + AssemblyDocument.FileExtension) };
+            Doc.Files[r.Embedded] = Array.Empty<byte>();
+            placed.Add((this, r.Embedded, product));
+        }
+        var key = ComponentResolver.Key(r);
+        if (!Resolution.Parts.ContainsKey(key)) Resolution.Parts[key] = new PartResolution(PartStatus.Embedded, null, false, null);
+        var c = Doc.AddComponent(r, placement, name);
+        if (!Subs.ContainsKey(SubKey(c))) Subs[SubKey(c)] = new SubAssembly { Model = sub, Source = SubSource.Embedded };
+        return c;
     }
 
     string UniqueName(string name)
@@ -913,7 +967,7 @@ public sealed partial class AssemblyModel
                 // (a configuration's: named by a hash of it)
                 var config = pd.Config.Length > 0 ? "-" + DocumentContainer.Hash(System.Text.Encoding.UTF8.GetBytes(pd.Config))[..12] : "";
                 var name = $"cache/{id}-{pd.Revision ?? "none"}{config}.mesh";
-                Doc.Files[name] = MeshCache.Write(pd.Mesh, pd.Doc.Color, pd.Threads);
+                Doc.Files[name] = MeshCache.Write(pd.Mesh, pd.Doc.EffectiveAppearance, pd.Threads);
                 Doc.Caches[ck] = name;
             }
             foreach (var c in ComponentsShowing(key)) c.Part.Revision = pd.Revision;
@@ -1006,6 +1060,19 @@ public sealed partial class AssemblyModel
     }
 
     /// <summary>Saves the assembly (caches refreshed; references made relative to the new place; its preview made).</summary>
+    /// <summary>
+    /// The assembly as the bytes of its file, to embed in another (an embedded sub-assembly edited in memory): its
+    /// display caches and preview made, as a save makes them; its history going on from <paramref name="previous"/>,
+    /// the bytes it had there.
+    /// </summary>
+    public byte[] ToBytes(byte[]? previous)
+    {
+        Doc.RecordActiveConfiguration();
+        RefreshCaches();
+        try { Doc.Thumbnail = RenderThumbnail() ?? Doc.Thumbnail; } catch { }
+        return AssemblyContainer.ToBytes(Doc, previous);
+    }
+
     public void Save(string path)
     {
         path = System.IO.Path.GetFullPath(path);

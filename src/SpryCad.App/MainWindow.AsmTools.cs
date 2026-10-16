@@ -70,7 +70,7 @@ public partial class MainWindow
             case "hide" or "show": ShowComponent(path, cmd == "show"); break;
             case "suppress" or "unsuppress": SuppressComponent(path, cmd == "suppress"); break;
             case "isolate": Isolate(path); break;
-            case "appearance": _ = Appearance(path); break;
+            case "appearance": _ = ComponentAppearance(path); break;
             case "replace": _ = ReplaceComponent(path); break;
             case "form": FormSubAssemblyPage(path); break;
             case "dissolve": _ = DissolveSub(path); break;
@@ -109,7 +109,7 @@ public partial class MainWindow
         a.BeginChange();
         a.Model.SetHidden(path, !show);
         a.EndChange();
-        Status($"{a.Model.NameAt(path)} {(show ? "shown" : "hidden")}{(path.Contains('/') ? " (in this assembly only)" : "")}.");
+        Status($"{a.Model.NameAt(path)} {(show ? "shown" : "hidden")}{(path.Contains('/') ? " in this assembly only" : "")}.");
     }
 
     /// <summary>Hide / Show on the Assembly tab: the selected component.</summary>
@@ -126,7 +126,7 @@ public partial class MainWindow
         a.Model.SetSuppressed(path, suppress);
         if (a.Model.HasMates) a.Model.SolveMates();
         a.EndChange();
-        Status($"{a.Model.NameAt(path)} {(suppress ? "suppressed (not shown, solved or counted)" : "unsuppressed")}{(path.Contains('/') ? " in this assembly only" : "")}.");
+        Status($"{a.Model.NameAt(path)} {(suppress ? "suppressed" : "unsuppressed")}{(path.Contains('/') ? " in this assembly only" : "")}.");
     }
 
     void ShowAll()
@@ -144,58 +144,31 @@ public partial class MainWindow
     {
         if (Asm is not { } a) return;
         path ??= a.Selected;
-        if (_isolate != null && (path == null || _isolate.Contains(path))) { _isolate = null; Status("Everything shown again."); RefreshAssemblyScene(); return; }
+        if (_isolate != null && (path == null || _isolate.Contains(path))) { _isolate = null; Status("Isolate off."); RefreshAssemblyScene(); return; }
         if (path == null) { Status("Select a component to isolate."); return; }
         _isolate = new HashSet<string> { path };
         RefreshAssemblyScene();
-        Status($"{a.Model.NameAt(path)} isolated: Isolate again shows everything.");
+        Status($"{a.Model.NameAt(path)} isolated. Click Isolate again to show all components.");
     }
 
-    static readonly (string name, double[]? rgb)[] Swatches =
-    {
-        ("As its part", null), ("Steel", new[] { 0.74, 0.76, 0.80 }), ("Dark grey", new[] { 0.35, 0.36, 0.38 }), ("White", new[] { 0.95, 0.95, 0.95 }),
-        ("Red", new[] { 0.85, 0.20, 0.18 }), ("Orange", new[] { 0.95, 0.55, 0.15 }), ("Yellow", new[] { 0.95, 0.82, 0.20 }), ("Green", new[] { 0.25, 0.65, 0.30 }),
-        ("Blue", new[] { 0.20, 0.45, 0.85 }), ("Purple", new[] { 0.55, 0.35, 0.75 }), ("Brass", new[] { 0.80, 0.65, 0.30 }), ("Copper", new[] { 0.78, 0.45, 0.30 }),
-    };
-
-    /// <summary>A component's appearance: a color of its own (for a sub-assembly's component, in this instance), or its part's.</summary>
-    async Task Appearance(string path)
+    /// <summary>
+    /// A component's appearance: one of its own in this assembly (color, finish, opacity; for a sub-assembly's
+    /// component, in this instance only), or its part's; given <paramref name="all"/>, every one of them (a part's
+    /// instances, from the Bill of Materials pane).
+    /// </summary>
+    async Task ComponentAppearance(string path, IReadOnlyList<string>? all = null)
     {
         if (Asm is not { } a || a.Model.Find(path) is not { } o) return;
-        double[]? chosen = null; bool picked = false;
-        var grid = new WrapPanel { Orientation = Orientation.Horizontal, MaxWidth = 330 };
-        var w = Dialogs.MakeWindow($"Appearance: {o.Component.Name}", new StackPanel
-        {
-            Spacing = 8,
-            Children =
-            {
-                new TextBlock { Text = path.Contains('/') ? "Its color in this assembly (its sub-assembly is not changed):" : "Its color in this assembly (its part is not changed):", TextWrapping = TextWrapping.Wrap },
-                grid,
-            },
-        }, 360);
-        foreach (var (name, rgb) in Swatches)
-        {
-            var c = rgb ?? o.Display?.Color ?? new[] { 0.74, 0.76, 0.80 };
-            var b = new Button
-            {
-                Width = 76, Height = 52, Margin = new Thickness(3), Padding = new Thickness(2),
-                Content = new StackPanel
-                {
-                    Spacing = 2,
-                    Children =
-                    {
-                        new Border { Height = 22, CornerRadius = new CornerRadius(3), Background = new SolidColorBrush(Color.FromRgb((byte)(c[0] * 255), (byte)(c[1] * 255), (byte)(c[2] * 255))), BorderBrush = Palette.TextMuted, BorderThickness = new Thickness(rgb == null ? 1 : 0) },
-                        new TextBlock { Text = name, FontSize = TypeScale.Small, HorizontalAlignment = HorizontalAlignment.Center },
-                    },
-                },
-            };
-            b.Click += (_, _) => { chosen = rgb; picked = true; w.Close(); };
-            grid.Children.Add(b);
-        }
-        await w.ShowDialog(this);
-        if (!picked) return;
+        // its own: on it, or (a sub-assembly's component) this instance's override
+        var own = o.Rel == null ? o.Component.Look : o.Top.Overrides?.GetValueOrDefault(o.Rel)?.Look;
+        var part = o.Display?.Appearance ?? Core.Model.Appearance.Default;
+        var many = all is { Count: > 1 };
+        var choice = await AppearanceDialog.Show(this, many ? $"Appearance: {o.Component.Name.Split('<')[0]} (all {all!.Count})" : $"Appearance: {o.Component.Name}",
+            path.Contains('/') ? "How it looks in this assembly (its sub-assembly is not changed):" : "How it looks in this assembly (its part is not changed):",
+            own, part, "Part's Appearance");
+        if (choice == null || (!many && choice.Look == own)) return;
         a.BeginChange();
-        a.Model.SetColor(path, chosen);
+        foreach (var p in all ?? new[] { path }) a.Model.SetAppearance(p, choice.Look);
         a.EndChange();
     }
 
@@ -206,7 +179,7 @@ public partial class MainWindow
         a.Model.SetSubConfiguration(c, name, defer: true);
         if (a.Model.HasMates) a.Model.SolveMates();
         a.EndChange();
-        Status($"{c.Name}: {name ?? "as saved"}.");
+        Status($"{c.Name} set to {(name != null ? $"configuration {name}" : "its saved configuration")}.");
         _ = BuildPendingOf(a);
     }
 
@@ -220,19 +193,19 @@ public partial class MainWindow
         if (!a.Model.ActivateConfiguration(name, defer: true)) { a.AbandonChange(); return; }
         if (a.Model.HasMates) a.Model.SolveMates();
         a.EndChange();
-        Status($"Configuration: {name}.");
+        Status($"Configuration '{name}' activated.");
         _ = BuildPendingOf(a);
     }
 
     async Task AddConfiguration()
     {
         if (Asm is not { } a) return;
-        var name = await Dialogs.Input(this, "Add Configuration", "Name (made as the assembly is now, then made active):", "Config" + (a.Model.Doc.ConfigurationNames.Count + 1));
+        var name = await Dialogs.Input(this, "Add Configuration", "Name:", "Config" + (a.Model.Doc.ConfigurationNames.Count + 1));
         if (string.IsNullOrWhiteSpace(name)) return;
         a.BeginChange();
-        if (!a.Model.Doc.AddConfiguration(name)) { a.AbandonChange(); Status($"There is a configuration named {name.Trim()} already."); return; }
+        if (!a.Model.Doc.AddConfiguration(name)) { a.AbandonChange(); Status($"A configuration named '{name.Trim()}' already exists."); return; }
         a.EndChange();
-        Status($"Configuration {name.Trim()} added and active: suppress, hide or configure components for it; the other configurations keep theirs.");
+        Status($"Configuration '{name.Trim()}' added and activated.");
     }
 
     async Task RenameConfiguration()
@@ -242,14 +215,14 @@ public partial class MainWindow
         var name = await Dialogs.Input(this, "Rename Configuration", "New name:", from);
         if (string.IsNullOrWhiteSpace(name) || name.Trim() == from) return;
         a.BeginChange();
-        if (!a.Model.Doc.RenameConfiguration(from, name)) { a.AbandonChange(); Status($"There is a configuration named {name.Trim()} already."); return; }
+        if (!a.Model.Doc.RenameConfiguration(from, name)) { a.AbandonChange(); Status($"A configuration named '{name.Trim()}' already exists."); return; }
         a.EndChange();
     }
 
     async Task DeleteConfiguration(string name)
     {
         if (Asm is not { } a) return;
-        if (!await Dialogs.YesNo(this, "Delete Configuration", $"Delete the configuration {name}?", "Delete")) return;
+        if (!await Dialogs.YesNo(this, "Delete Configuration", $"Delete configuration '{name}'?", "Delete")) return;
         a.BeginChange();
         if (!a.Model.Doc.DeleteConfiguration(name)) { a.AbandonChange(); return; }
         a.EndChange();
@@ -271,7 +244,7 @@ public partial class MainWindow
         if ((path ?? a.Selected) is { } sel && a.Model.Doc.Find(sel.Split('/')[0]) is { } sc && own.Contains(sc)) pick.Add(sc);
         var page = new PmPage("Form New Sub-assembly", "formsub");
         var s = page.Section("Components");
-        page.Info(s, "Check the components to put in the new sub-assembly. They keep their places; the mates among them go with them.");
+        page.Info(s, "Select the components for the new sub-assembly. They keep their positions, and the mates between them move with them.");
         var list = new StackPanel { Spacing = 2 };
         foreach (var c in own)
         {
@@ -282,25 +255,25 @@ public partial class MainWindow
         s.Children.Add(new ScrollViewer { Content = list, MaxHeight = 260 });
         var o = page.Section("Options");
         bool embed = false, flexible = true;
-        page.Check(o, "Embed it in this assembly (no file of its own)", () => embed, v => embed = v);
+        page.Check(o, "Embed in this assembly", () => embed, v => embed = v);
         page.Combo(o, "Solve as", new List<(bool, string)> { (true, "Flexible"), (false, "Rigid") }, () => flexible, v => flexible = v);
-        page.Info(o, "Flexible keeps the components moving as they do now.");
+        page.Info(o, "Flexible keeps the components free to move as they do now.");
         void Close() { ShowPage(null); HideConfirmCorner(); }
         async void Ok()
         {
-            if (pick.Count == 0) { Status("Check the components to put in it."); return; }
+            if (pick.Count == 0) { Status("Select the components for the sub-assembly."); return; }
             string? file = null;
             if (!embed)
             {
                 var f = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
                 {
-                    Title = "Save the New Sub-assembly", DefaultExtension = "sasm", SuggestedFileName = "SubAssembly" + AssemblyDocument.FileExtension,
+                    Title = "Save New Sub-assembly", DefaultExtension = "sasm", SuggestedFileName = "SubAssembly" + AssemblyDocument.FileExtension,
                     FileTypeChoices = new[] { AssemblyType },
                     SuggestedStartLocation = a.FilePath != null ? await StorageProvider.TryGetFolderFromPathAsync(Path.GetDirectoryName(a.FilePath)!) : null,
                 });
                 file = f?.TryGetLocalPath();
                 if (file == null) return;
-                if (a.FilePath != null && PartIndex.SamePath(file, a.FilePath)) { Status("Pick another file than this assembly's."); return; }
+                if (a.FilePath != null && PartIndex.SamePath(file, a.FilePath)) { Status("Choose a different file name; this one is the open assembly."); return; }
             }
             Close();
             a.BeginChange();
@@ -311,14 +284,14 @@ public partial class MainWindow
                 if (a.Model.HasMates) a.Model.SolveMates();
                 a.Selected = sub.Id;
                 a.EndChange();
-                Status($"{sub.Name}: a new {(flexible ? "flexible" : "rigid")} sub-assembly of {pick.Count} component{(pick.Count == 1 ? "" : "s")}{(embed ? ", embedded" : ", saved as " + file)}.");
+                Status($"Sub-assembly {sub.Name} created with {pick.Count} component{(pick.Count == 1 ? "" : "s")}.");
             }
             catch (Exception ex) { App.Log(ex, "Form sub-assembly"); a.AbandonChange(); await Dialogs.Message(this, "Form New Sub-assembly", ex.Message); }
         }
         page.OnOk = Ok;
         page.OnCancel = Close;
         ShowPage(page);
-        ShowConfirmCorner(Ok, Close, "OK: make the sub-assembly (Enter)", "Cancel (Esc)");
+        ShowConfirmCorner(Ok, Close, "OK (Enter)", "Cancel (Esc)");
     }
 
     async Task DissolveSub(string path)
@@ -331,7 +304,7 @@ public partial class MainWindow
             if (a.Model.HasMates) a.Model.SolveMates();
             a.Selected = null;
             a.EndChange();
-            Status($"{s.Name} dissolved into {made.Count} component{(made.Count == 1 ? "" : "s")}{(s.Flexible ? "" : " (locked together as it was rigid; its own mates came along suppressed)")}.");
+            Status($"{s.Name} dissolved into {made.Count} component{(made.Count == 1 ? "" : "s")}.{(s.Flexible ? "" : " The components are locked together; the sub-assembly's mates are suppressed.")}");
         }
         catch (Exception ex) { App.Log(ex, "Dissolve"); a.AbandonChange(); await Dialogs.Message(this, "Dissolve Sub-assembly", ex.Message); }
     }
@@ -339,7 +312,7 @@ public partial class MainWindow
     /// <summary>A change that saves a sub-assembly's file: asked first (it cannot be undone here); the undo history cleared after.</summary>
     async Task<bool> ConfirmSubChange(AssemblySession a, Component s, string what)
     {
-        var shared = s.Part.Embedded == null ? $" {s.Name}'s file is saved: every assembly using it gets the change." : "";
+        var shared = s.Part.Embedded == null ? $" {s.Name} is saved, which affects every assembly that uses it." : "";
         return await Dialogs.YesNo(this, what, $"{what}?{shared} This cannot be undone.", what.Split(' ')[0]);
     }
 
@@ -370,7 +343,7 @@ public partial class MainWindow
             a.Selected = c.Id;
             a.ClearUndo();
             a.EndChange();
-            Status($"{c.Name} moved out of {s.Name} into this assembly.");
+            Status($"{c.Name} moved out of {s.Name}.");
         }
         catch (Exception ex) { App.Log(ex, "Move out of sub-assembly"); await Dialogs.Message(this, "Move Out of Sub-assembly", ex.Message); }
     }
@@ -379,7 +352,7 @@ public partial class MainWindow
     {
         if (Asm is not { } a) return;
         path ??= a.Selected;
-        if (path == null || path.Contains('/') || a.Model.Doc.Find(path) is not { } c) { Status("Select one of the assembly's own components to replace."); return; }
+        if (path == null || path.Contains('/') || a.Model.Doc.Find(path) is not { } c) { Status("Select a top-level component to replace."); return; }
         var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
         {
             Title = $"Replace {c.Name} with",
@@ -387,7 +360,7 @@ public partial class MainWindow
         });
         if (files.FirstOrDefault()?.TryGetLocalPath() is not { } file) return;
         var instances = a.Model.ComponentsOf(ComponentResolver.Key(c.Part)).Count();
-        var all = instances > 1 && await Dialogs.YesNo(this, "Replace Component", $"Replace all {instances} instances of {c.Name.Split('<')[0]}, or just {c.Name}?", "All instances", "Just this one");
+        var all = instances > 1 && await Dialogs.YesNo(this, "Replace Component", $"Replace all {instances} instances of {c.Name.Split('<')[0]}, or just {c.Name}?", "All Instances", "This Instance");
         a.BeginChange();
         try
         {
@@ -396,7 +369,7 @@ public partial class MainWindow
             a.EndChange();
             var broken = a.Model.BrokenMates().Count;
             Status($"Replaced {done.Count} component{(done.Count == 1 ? "" : "s")} with {Path.GetFileNameWithoutExtension(file)}" +
-                   (broken > 0 ? $": {broken} mate{(broken == 1 ? "" : "s")} lost a face (red under Mates: right-click, Repair)." : "."));
+                   (broken > 0 ? $". {broken} mate{(broken == 1 ? " has" : "s have")} errors; right-click under Mates and select Repair." : "."));
         }
         catch (Exception ex) { App.Log(ex, "Replace component"); a.AbandonChange(); await Dialogs.Message(this, "Replace Component", ex.Message); }
     }
@@ -417,21 +390,32 @@ public partial class MainWindow
     {
         var name = o.Component.Part.Embedded!;
         // already open: shown
-        if (_parts.FirstOrDefault(t => t.EmbeddedIn == a && t.EmbeddedName == name) is { } open) { await SwitchTo(open); return; }
-        if (!o.Owner.Doc.Files.TryGetValue(name, out var bytes)) { Status("Its embedded copy is missing."); return; }
-        if (o.Owner != a.Model) { Status($"{o.Component.Name} is embedded in a sub-assembly: edit the sub-assembly to change it."); return; }
+        // (embedded deeper down: the sub-assembly holding it, every one on the way embedded, saved back up through them)
+        var owner = o.Owner != a.Model ? o.Path[..o.Path.LastIndexOf('/')] : null;
+        if (_parts.FirstOrDefault(t => t.EmbeddedIn == a && t.EmbeddedName == name && t.EmbeddedOwner == owner) is { } open) { await SwitchTo(open); return; }
+        if (!o.Owner.Doc.Files.TryGetValue(name, out var bytes)) { Status("The embedded file is missing."); return; }
+        if (owner != null && !a.Model.EmbeddedAllTheWay(owner)) { Status($"{o.Component.Name} is in a sub-assembly saved as a file of its own. Open that sub-assembly to change it."); return; }
+        void Embedded(PartTab t) { t.EmbeddedIn = a; t.EmbeddedName = name; t.EmbeddedOwner = owner; t.EmbeddedPath = a.FilePath; UpdateTabHeader(t); }
+        if (o.Component.IsAssembly)
+        {
+            // a sub-assembly: opened from the assembly's copy, in memory (no file of its own: saved back into it)
+            AssemblySession s;
+            try { s = await Task.Run(() => AssemblySession.FromEmbedded(bytes, name)); }
+            catch (Exception ex) { App.Log(ex, "Edit embedded sub-assembly"); await Dialogs.Message(this, "Edit Sub-assembly", $"{Path.GetFileNameWithoutExtension(name)} could not be opened: {ex.Message}"); return; }
+            if (await ShowAssembly(s, null, Embedded) != null)
+                Status($"Editing embedded {Path.GetFileNameWithoutExtension(name)}. Save writes it back into {a.Title.TrimEnd(' ', '*')}.");
+            return;
+        }
         var dir = Path.Combine(EmbeddedEditDir, Guid.NewGuid().ToString("N")[..12]);
         Directory.CreateDirectory(dir);
         var file = Path.Combine(dir, Path.GetFileName(name));
         await File.WriteAllBytesAsync(file, bytes);
         var parent = _tab;
-        if (o.Component.IsAssembly) await OpenAssembly(file);
-        else await OpenFileAsync(file);
+        await OpenFileAsync(file);
         var t = _parts.FirstOrDefault(x => (x.Asm?.FilePath ?? x.Session.FilePath) is { } p && PartIndex.SamePath(p, file));
         if (t == null) return;
-        t.EmbeddedIn = a; t.EmbeddedName = name; t.EmbeddedPath = a.FilePath;
-        UpdateTabHeader(t);
-        Status($"Editing {Path.GetFileNameWithoutExtension(name)}, embedded in {a.Title.TrimEnd(' ', '*')}: Save puts it back into the assembly and saves the assembly.");
+        Embedded(t);
+        Status($"Editing embedded {Path.GetFileNameWithoutExtension(name)}. Save writes it back into {a.Title.TrimEnd(' ', '*')}.");
     }
 
     /// <summary>The assembly a tab's embedded document belongs to, if its tab is open (the one it was opened from, or a tab of its file).</summary>
@@ -459,19 +443,29 @@ public partial class MainWindow
             try { a = await Task.Run(() => PartsIndexStore.Use(_ => AssemblySession.Open(asmFile))); background = true; }
             catch (Exception ex) { App.Log(ex, "Open assembly to save embedded"); a = null; }
         }
-        if (a == null || !a.Model.Doc.Files.ContainsKey(name))
+        // (its copy there now: in the assembly, or in the sub-assembly holding it)
+        byte[]? Held(AssemblySession x) => t.EmbeddedOwner is { } ow ? x.Model.EmbeddedAllTheWay(ow) ? x.Model.NestedEmbedded(ow, name) : null : x.Model.Doc.Files.GetValueOrDefault(name);
+        if (a == null || Held(a) == null)
         {
             var why = a == null
                 ? t.EmbeddedPath == null ? "its assembly was closed without being saved" : $"its assembly ({t.EmbeddedPath}) cannot be opened"
                 : "its assembly no longer holds it";
-            if (!await Dialogs.YesNo(this, "Save", $"This {what} cannot be saved into its assembly: {why}. Save it as a file of its own?", "Save As…")) return false;
+            if (!await Dialogs.YesNo(this, "Save", $"Could not save this {what} into its assembly: {why}. Save it as a separate file?", "Save As…")) return false;
             return t.Asm != null ? await SaveAssembly(true) : await SaveAs();
         }
-        // the edit written out, then into the assembly
-        var copy = t.Asm?.FilePath ?? t.Session.FilePath!;
-        if (t.Asm != null) t.Asm.Save(copy); else t.Session.Save(copy);
+        // the edit into the assembly: a sub-assembly edited in memory as its bytes (its history going on from the
+        // assembly's copy); else written out to its copy and read back
+        byte[] bytes;
+        if (t.Asm is { FilePath: null } sub) bytes = sub.SaveToBytes(Held(a));
+        else
+        {
+            var copy = t.Asm?.FilePath ?? t.Session.FilePath!;
+            if (t.Asm != null) t.Asm.Save(copy); else t.Session.Save(copy);
+            bytes = await File.ReadAllBytesAsync(copy);
+        }
         a.BeginChange();
-        a.Model.UpdateEmbedded(name, await File.ReadAllBytesAsync(copy), defer: true);
+        if (t.EmbeddedOwner is { } holder) a.Model.UpdateNestedEmbedded(holder, name, bytes, defer: true);
+        else a.Model.UpdateEmbedded(name, bytes, defer: true);
         if (a.Model.HasMates) a.Model.SolveMates();
         a.EndChange();
         // the assembly saved with it
@@ -484,7 +478,7 @@ public partial class MainWindow
                 SuggestedFileName = a.UntitledName + AssemblyDocument.FileExtension, FileTypeChoices = new[] { AssemblyType },
             });
             path = f?.TryGetLocalPath();
-            if (path == null) { Status($"Put into {a.Title.TrimEnd(' ', '*')}, which is not saved yet: save it to keep the {what}."); return true; }
+            if (path == null) { Status($"Saved into unsaved assembly {a.Title.TrimEnd(' ', '*')}. Save the assembly to keep the {what}."); return true; }
         }
         a.Save(path);
         RecentFiles.Add(path);
@@ -492,7 +486,7 @@ public partial class MainWindow
         t.EmbeddedPath = path;
         UpdateTabHeader(t);
         if (!background) _ = BuildPendingOf(a);
-        Status($"Saved into {Path.GetFileName(path)}" + (background ? "." : " (the assembly saved with it)."));
+        Status($"Saved into {Path.GetFileName(path)}.");
         return true;
     }
 
@@ -513,11 +507,11 @@ public partial class MainWindow
     void PatternPage(PatternKind kind, ComponentPattern? editing = null)
     {
         if (Asm is not { } a) return;
-        if (_mating != null || _motor != null || _patterning != null) { Status("Finish the open page first (OK or Cancel)."); return; }
+        if (_mating != null || _motor != null || _patterning != null) { Status("Close the open PropertyManager first."); return; }
         if (editing != null) kind = editing.Kind;
         var p = editing != null
             ? new ComponentPattern { Kind = kind, Seeds = new(editing.Seeds), Reference = editing.Reference.Clone(), Count = editing.Count, Spacing = editing.Spacing, Reverse = editing.Reverse, Symmetry = editing.Symmetry }
-            : new ComponentPattern { Kind = kind, Reference = a.Model.RefTo(null, kind == PatternKind.Circular ? "Top" : "Right")!, Count = kind == PatternKind.Circular ? 4 : 3, Spacing = kind == PatternKind.Circular ? 90 : 50 };
+            : new ComponentPattern { Kind = kind, Reference = a.Model.RefTo(null, kind == PatternKind.Circular ? "Top" : "Right")!, Count = kind == PatternKind.Circular ? 4 : 3, Spacing = kind == PatternKind.Circular ? 90 : FeatureDefaults.Mm(Units, 50, 2) };
         if (editing == null && a.Selected is { } sel && a.Model.Doc.Find(sel.Split('/')[0]) is { Pattern: null } sc) p.Seeds.Add(sc.Id);
         var st = new Patterning { Pattern = p, Editing = editing };
         _patterning = st;
@@ -530,16 +524,16 @@ public partial class MainWindow
         foreach (var pl in AssemblyModel.OriginPlanes)
         {
             var b = new Button { Content = pl, Padding = new Thickness(6, 2), MinHeight = 0 };
-            ToolTip.SetTip(b, kind == PatternKind.Mirror ? $"Mirror across the assembly's {pl} plane" : $"Along the assembly's {pl} plane's normal");
+            ToolTip.SetTip(b, kind == PatternKind.Mirror ? $"Mirror across the assembly's {pl} Plane" : $"Along the normal of the assembly's {pl} Plane");
             b.Click += (_, _) => { p.Reference = a.Model.RefTo(null, pl)!; st.Update?.Invoke(); };
             planes.Children.Add(b);
         }
         dirSec.Children.Add(planes);
         page.Info(dirSec, kind switch
         {
-            PatternKind.Linear => "Click a planar face (its normal) or a round face (its axis), or pick an origin plane's normal.",
-            PatternKind.Circular => "Click a round face (its axis), or pick an origin plane (its normal through the origin).",
-            _ => "Click a planar face, or pick an origin plane.",
+            PatternKind.Linear => "Select a planar face, a cylindrical face or an origin plane for the direction.",
+            PatternKind.Circular => "Select a cylindrical face or an origin plane for the axis.",
+            _ => "Select a planar face or an origin plane.",
         });
         if (kind != PatternKind.Mirror) page.Check(dirSec, "Reverse direction", () => p.Reverse, v => p.Reverse = v);
         var opts = page.Section(kind == PatternKind.Mirror ? "Copies" : "Spacing and Instances");
@@ -553,9 +547,9 @@ public partial class MainWindow
         }
         else
         {
-            page.Combo(opts, "Part symmetric about", new List<(int, string)> { (-1, "Worked out from its shape"), (0, "Its YZ plane"), (1, "Its ZX plane"), (2, "Its XY plane") },
+            page.Combo(opts, "Part symmetric about", new List<(int, string)> { (-1, "Automatic"), (0, "Its YZ plane"), (1, "Its ZX plane"), (2, "Its XY plane") },
                 () => p.Symmetry, v => p.Symmetry = v);
-            page.Info(opts, "A mirrored copy is the same part turned over: right for parts symmetric about one of their planes (no opposite-hand part is made).");
+            page.Info(opts, "Mirrored instances reuse the same part, flipped. Use for parts symmetric about one of their planes.");
         }
         var seeds = page.Section("Components to Pattern");
         var list = new StackPanel { Spacing = 2 };
@@ -569,7 +563,7 @@ public partial class MainWindow
         st.Update = () =>
         {
             var r = p.Reference;
-            refLbl.Text = r.Component == null ? $"{r.Face} Plane{(kind == PatternKind.Mirror ? "" : " (its normal)")}" : $"{a.Model.NameAt(r.Component)}: {(r.Kind == MateGeomKind.Axis ? "axis of" : "")} {a.Model.FaceName(r)}";
+            refLbl.Text = r.Component == null ? $"{r.Face} Plane{(kind == PatternKind.Mirror ? "" : " normal")}" : $"{a.Model.NameAt(r.Component)}: {(r.Kind == MateGeomKind.Axis ? "axis of" : "")} {a.Model.FaceName(r)}";
             RefreshAssemblyScene();
         };
         void Close()
@@ -580,9 +574,9 @@ public partial class MainWindow
         }
         void Ok()
         {
-            if (p.Seeds.Count == 0) { Status("Check the components to pattern."); return; }
-            if (kind == PatternKind.Mirror && p.Reference.Kind != MateGeomKind.Plane) { Status("Mirror across a plane: a planar face or an origin plane."); return; }
-            if (kind == PatternKind.Circular && p.Reference.Kind == MateGeomKind.Point) { Status("Pick an axis: a round face, or an origin plane."); return; }
+            if (p.Seeds.Count == 0) { Status("Select the components to pattern."); return; }
+            if (kind == PatternKind.Mirror && p.Reference.Kind != MateGeomKind.Plane) { Status("Select a planar face or an origin plane to mirror across."); return; }
+            if (kind == PatternKind.Circular && p.Reference.Kind == MateGeomKind.Point) { Status("Select a cylindrical face or an origin plane for the axis."); return; }
             Close();
             a.BeginChange();
             try
@@ -595,7 +589,7 @@ public partial class MainWindow
                 else editing = a.Model.AddPattern(kind, p.Seeds.Select(a.Model.Doc.Find).OfType<Component>(), p.Reference, p.Count, p.Spacing, p.Reverse, p.Symmetry);
                 if (a.Model.HasMates) a.Model.SolveMates();
                 a.EndChange();
-                Status($"{editing.Name}: {editing.Instances.Count} cop{(editing.Instances.Count == 1 ? "y" : "ies")}, placed by the pattern as their seeds move.");
+                Status($"{editing.Name} updated with {editing.Instances.Count} instance{(editing.Instances.Count == 1 ? "" : "s")}.");
             }
             catch (Exception ex) { App.Log(ex, "Pattern"); a.AbandonChange(); _ = Dialogs.Message(this, title, ex.Message); }
         }
@@ -610,7 +604,7 @@ public partial class MainWindow
     void PatternPick(string component, string face)
     {
         if (_patterning is not { } st || Asm is not { } a) return;
-        if (a.Model.RefTo(component, face) is not { } r || r.Kind == MateGeomKind.Point) { Status("Pick a planar or round face."); return; }
+        if (a.Model.RefTo(component, face) is not { } r || r.Kind == MateGeomKind.Point) { Status("Select a planar or cylindrical face."); return; }
         st.Pattern.Reference = r;
         st.Update?.Invoke();
     }
@@ -625,7 +619,7 @@ public partial class MainWindow
                 a.BeginChange();
                 a.Model.RemovePattern(p, keepCopies: cmd == "keep");
                 a.EndChange();
-                Status(cmd == "keep" ? $"{p.Name} deleted: its copies kept as components of their own (fixed)." : $"{p.Name} deleted with its copies.");
+                Status(cmd == "keep" ? $"{p.Name} deleted. Instances kept as fixed components." : $"{p.Name} deleted with its copies.");
                 break;
         }
     }
@@ -640,7 +634,7 @@ public partial class MainWindow
     void ExplodeCommand()
     {
         if (Asm is not { } a) return;
-        if (_mating != null || _motor != null || _patterning != null) { Status("Finish the open page first (OK or Cancel)."); return; }
+        if (_mating != null || _motor != null || _patterning != null) { Status("Close the open PropertyManager first."); return; }
         a.BeginChange();
         // (Cancel puts the views back as they were)
         var before = System.Text.Json.JsonSerializer.Serialize(a.Model.Doc.Explodes, Core.Model.Serialization.Compact);
@@ -670,16 +664,16 @@ public partial class MainWindow
                 });
                 DockPanel.SetDock(del, Dock.Right);
             }
-            if (v.Steps.Count == 0) stepList.Children.Add(new TextBlock { Text = "(no steps)", Foreground = Palette.TextMuted });
+            if (v.Steps.Count == 0) stepList.Children.Add(new TextBlock { Text = "No steps", Foreground = Palette.TextMuted });
         }
-        page.ButtonRow(steps, "Auto Explode (from where they are)", () => { v.Steps = a.Model.AutoExplode(v.Name).Steps; Fill(); RefreshAssemblyScene(); }, "explode");
-        var add = page.Section("Add a Step");
-        var dir = "Z"; double dist = 50;
+        page.ButtonRow(steps, "Auto Explode", () => { v.Steps = a.Model.AutoExplode(v.Name).Steps; Fill(); RefreshAssemblyScene(); }, "explode");
+        var add = page.Section("Add Step");
+        var dir = "Z"; double dist = FeatureDefaults.Mm(Units, 50, 2);
         page.Combo(add, "Direction", new List<(string, string)> { ("X", "+X"), ("-X", "-X"), ("Y", "+Y"), ("-Y", "-Y"), ("Z", "+Z"), ("-Z", "-Z") }, () => dir, x => dir = x);
         page.Number(add, "Distance", () => Units.Entry(dist), x => { if (UnitFormat.TryLength(x, null, out var d, out _)) dist = d; });
         page.ButtonRow(add, "Add Step for the Selected Component", () =>
         {
-            if (a.Selected is not { } sel) { Status("Select a component (click it, or its row in the tree) first."); return; }
+            if (a.Selected is not { } sel) { Status("Select a component first."); return; }
             var d = dir.TrimStart('-') switch { "X" => Vec3.UnitX, "Y" => Vec3.UnitY, _ => Vec3.UnitZ } * (dir.StartsWith('-') ? -1 : 1);
             v.Steps.Add(new ExplodeStep { Components = new() { sel }, Direction = d, Distance = dist });
             Fill(); RefreshAssemblyScene();
@@ -691,7 +685,7 @@ public partial class MainWindow
         play.Children.Add(slider);
         page.Check(play, "Show exploded after closing", () => _exploded, x => { _exploded = x; RefreshAssemblyScene(); });
         void Close() { ShowPage(null); HideConfirmCorner(); RefreshAssemblyScene(); }
-        page.OnOk = () => { Close(); _explodeT = 1; a.EndChange(); Status(_exploded ? "Exploded (Exploded View again, or the tree's menu, to collapse; components cannot be dragged while exploded)." : "Collapsed."); RefreshAssemblyScene(); };
+        page.OnOk = () => { Close(); _explodeT = 1; a.EndChange(); Status(_exploded ? "Exploded view on. Components cannot be dragged while exploded." : "Exploded view off."); RefreshAssemblyScene(); };
         page.OnCancel = () =>
         {
             a.Model.Doc.Explodes = System.Text.Json.JsonSerializer.Deserialize<List<ExplodeView>>(before, Core.Model.Serialization.Compact);
@@ -712,7 +706,7 @@ public partial class MainWindow
         if (a.Model.Doc.Explodes is not [_, ..]) { ExplodeCommand(); return; }
         _exploded = !_exploded; _explodeT = 1;
         RefreshAssemblyScene();
-        Status(_exploded ? "Exploded (components cannot be dragged while exploded)." : "Collapsed.");
+        Status(_exploded ? "Exploded view on. Components cannot be dragged while exploded." : "Exploded view off.");
     }
 
     // ------------------------------------------------------------------------------------------
@@ -729,11 +723,17 @@ public partial class MainWindow
     {
         if (Asm is not { } a) return;
         var kind = BomKind.Indented;
-        var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto,Auto,Auto") };
+        var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto,Auto,Auto,Auto,Auto") };
         List<BomRow> rows = new();
+        // masses once the parts are measured (off the UI thread, the first time: their solids built); in the assembly's units
+        var measured = false;
+        var units = a.Model.Doc.Units;
+        var total = new TextBlock { VerticalAlignment = VerticalAlignment.Center, Foreground = Palette.TextMuted };
         void Fill()
         {
-            rows = Bom.Build(a.Model, kind);
+            rows = Bom.Build(a.Model, kind, mass: measured);
+            var totalMass = rows.Where(x => x.Level == 0 && x.Mass != null).Sum(x => x.Mass!.Value * x.Quantity);
+            total.Text = measured ? $"Total mass: {MassUnits.Text(totalMass, units)}" + (rows.Any(x => x.Material == Bom.NoMaterial) ? $" (parts with no material: steel's density)" : "") : "Measuring the parts…";
             grid.Children.Clear(); grid.RowDefinitions.Clear();
             void Cell(int r, int c, string text, bool head = false, double indent = 0, bool right = false)
             {
@@ -742,8 +742,8 @@ public partial class MainWindow
                 grid.Children.Add(tb);
             }
             grid.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
-            string[] heads = { "Item", "Part", "Configuration", "Qty", "Material" };
-            for (int c = 0; c < heads.Length; c++) Cell(0, c, heads[c], head: true, right: c == 3);
+            string[] heads = { "Item", "Part", "Configuration", "Qty", "Material", $"Mass ({MassUnits.Label(units)})", "Total" };
+            for (int c = 0; c < heads.Length; c++) Cell(0, c, heads[c], head: true, right: c is 3 or 5 or 6);
             for (int i = 0; i < rows.Count; i++)
             {
                 var r = rows[i];
@@ -753,18 +753,23 @@ public partial class MainWindow
                 Cell(i + 1, 2, r.Configuration);
                 Cell(i + 1, 3, r.Quantity.ToString(CultureInfo.InvariantCulture), right: true);
                 Cell(i + 1, 4, r.Material ?? "");
+                Cell(i + 1, 5, r.Mass is { } g ? MassUnits.Number(g, units) : "", right: true);
+                Cell(i + 1, 6, r.Mass is { } t ? MassUnits.Number(t * r.Quantity, units) : "", right: true);
             }
         }
-        var kindBox = new ComboBox { ItemsSource = new[] { "Indented", "Top level only", "Parts only" }, SelectedIndex = 0, Width = 160 };
+        var kindBox = new ComboBox { ItemsSource = new[] { "Indented", "Top-level only", "Parts only" }, SelectedIndex = 0, Width = 160 };
         kindBox.SelectionChanged += (_, _) => { kind = kindBox.SelectedIndex switch { 1 => BomKind.TopLevel, 2 => BomKind.PartsOnly, _ => BomKind.Indented }; Fill(); };
-        var csv = new Button { Content = "Export CSV..." };
+        var csv = new Button { Content = "Export CSV…" };
         var copy = new Button { Content = "Copy" };
         var close = new Button { Content = "Close", IsCancel = true };
         var bar = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Children = { new TextBlock { Text = "Show:", VerticalAlignment = VerticalAlignment.Center }, kindBox } };
-        var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 8, 0, 0), Children = { csv, copy, close } };
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, HorizontalAlignment = HorizontalAlignment.Right, Children = { csv, copy, close } };
+        var footer = new DockPanel { Margin = new Thickness(0, 8, 0, 0) };
+        DockPanel.SetDock(buttons, Dock.Right);
+        footer.Children.Add(buttons); footer.Children.Add(total);
         var dock = new DockPanel();
-        DockPanel.SetDock(bar, Dock.Top); DockPanel.SetDock(buttons, Dock.Bottom);
-        dock.Children.Add(bar); dock.Children.Add(buttons);
+        DockPanel.SetDock(bar, Dock.Top); DockPanel.SetDock(footer, Dock.Bottom);
+        dock.Children.Add(bar); dock.Children.Add(footer);
         dock.Children.Add(new ScrollViewer { Content = grid, Margin = new Thickness(0, 8, 0, 0) });
         var w = ToolWindow($"Bill of Materials: {a.Title.TrimEnd(' ', '*')}", dock, 640, 520);
         csv.Click += async (_, _) =>
@@ -774,12 +779,23 @@ public partial class MainWindow
                 Title = "Export Bill of Materials", DefaultExtension = "csv", SuggestedFileName = a.Title.TrimEnd(' ', '*') + " BOM.csv",
                 FileTypeChoices = new[] { new FilePickerFileType("CSV") { Patterns = new[] { "*.csv" } } },
             });
-            if (f?.TryGetLocalPath() is { } p) { await File.WriteAllTextAsync(p, Bom.ToCsv(rows)); Status("Saved " + p); }
+            if (f?.TryGetLocalPath() is { } p) { await File.WriteAllTextAsync(p, Bom.ToCsv(rows, units)); Status("Saved " + p + "."); }
         };
-        copy.Click += (_, _) => _ = Clipboard?.SetTextAsync(Bom.ToCsv(rows).Replace(',', '\t'));
+        copy.Click += (_, _) => _ = Clipboard?.SetTextAsync(Bom.ToCsv(rows, units).Replace(',', '\t'));
+        var cts = new CancellationTokenSource();
         close.Click += (_, _) => w.Close();
+        w.Closed += (_, _) => cts.Cancel();
         Fill();
         w.Show(this);
+        // the parts measured off the UI thread (a list taken here), then the masses shown
+        var displays = a.Model.PlacedParts(hidden: true).Select(x => x.pd).Distinct().ToList();
+        _ = Task.Run(() => AssemblyMass.Prepare(displays, cts.Token), cts.Token).ContinueWith(t =>
+        {
+            if (t.IsCanceled || cts.IsCancellationRequested) return;
+            if (t.Exception != null) { App.Log(t.Exception, "BOM mass"); total.Text = "The parts could not be measured."; return; }
+            measured = true;
+            Fill();
+        }, TaskScheduler.FromCurrentSynchronizationContext());
     }
 
     void AssemblyMassCommand()
@@ -790,15 +806,8 @@ public partial class MainWindow
         void Fill()
         {
             var r = AssemblyMass.Of(a.Model);
-            var I = r.Inertia;
-            report = $"Mass properties of {a.Title.TrimEnd(' ', '*')} ({r.Parts} parts, each with its own material; suppressed ones left out)\n\n" +
-                     $"Mass = {r.Mass:0.###} g ({r.Mass / 1000:0.######} kg)\nVolume = {r.Volume:0.###} mm³\nSurface area = {r.Area:0.###} mm²\n\n" +
-                     $"Center of mass (mm): X = {r.Center.X:0.###}, Y = {r.Center.Y:0.###}, Z = {r.Center.Z:0.###}\n\n" +
-                     "Principal moments of inertia about the center of mass (g·mm²):\n" +
-                     string.Concat(Enumerable.Range(0, 3).Select(i => $"  P{i + 1} = {r.Principal[i]:0.###}  along ({r.Axes[i].X:0.####}, {r.Axes[i].Y:0.####}, {r.Axes[i].Z:0.####})\n")) +
-                     "\nMoments of inertia about the center of mass, assembly axes (g·mm²):\n" +
-                     $"  Lxx = {I[0, 0]:0.###}  Lxy = {-I[0, 1]:0.###}  Lxz = {-I[0, 2]:0.###}\n  Lyx = {-I[1, 0]:0.###}  Lyy = {I[1, 1]:0.###}  Lyz = {-I[1, 2]:0.###}\n  Lzx = {-I[2, 0]:0.###}  Lzy = {-I[2, 1]:0.###}  Lzz = {I[2, 2]:0.###}\n" +
-                     (r.Approximate.Count > 0 ? $"\nFrom their display meshes (shown from a copy, so not exact): {string.Join(", ", r.Approximate)}\n" : "");
+            // in the assembly's units (grams and millimetres, or pounds and inches)
+            report = r.Report(a.Title.TrimEnd(' ', '*'), a.Model.Doc.Units);
             text.Text = report;
             Viewport.CenterOfMass = r.Mass > 0 ? (r.Center, r.Axes, Math.Max(5, a.Model.WorldBounds(a.Model.Doc.Components.FirstOrDefault()?.Id ?? "").Diagonal * 0.05)) : null;
             Viewport.Redraw();
@@ -817,7 +826,7 @@ public partial class MainWindow
         close.Click += (_, _) => w.Close();
         w.Closed += (_, _) => { Viewport.CenterOfMass = null; Viewport.Redraw(); };
         try { Fill(); }
-        catch (Exception ex) { App.Log(ex, "Assembly mass"); text.Text = "Could not be worked out: " + ex.Message; }
+        catch (Exception ex) { App.Log(ex, "Assembly mass"); text.Text = "Calculation failed: " + ex.Message; }
         w.Show(this);
     }
 
@@ -828,7 +837,7 @@ public partial class MainWindow
         var list = new ListBox { MinHeight = 120 };
         var info = new TextBlock { TextWrapping = TextWrapping.Wrap, Foreground = Palette.TextMuted };
         var calc = new Button { Content = "Calculate", IsDefault = true };
-        var withinBox = new CheckBox { Content = "Check parts of a sub-assembly against each other", IsChecked = true };
+        var withinBox = new CheckBox { Content = "Check interference within sub-assemblies", IsChecked = true };
         withinBox.IsCheckedChanged += (_, _) => within = withinBox.IsChecked == true;
         var close = new Button { Content = "Close", IsCancel = true };
         CancellationTokenSource? cts = null;
@@ -839,7 +848,7 @@ public partial class MainWindow
             var c = found[list.SelectedIndex];
             _clashes = new HashSet<string> { c.A, c.B };
             RefreshAssemblyScene();
-            Status($"{a.Model.NameAt(c.A)} and {a.Model.NameAt(c.B)} overlap by {c.Volume:0.###} mm³ (shown red).");
+            Status($"{a.Model.NameAt(c.A)} and {a.Model.NameAt(c.B)} overlap by {c.Volume:0.###} mm³.");
         };
         calc.Click += async (_, _) =>
         {
@@ -855,14 +864,14 @@ public partial class MainWindow
                 found = await Task.Run(() => Interference.Find(items, notes, within,
                     (k, n) => Avalonia.Threading.Dispatcher.UIThread.Post(() => info.Text = $"Checking {k} of {n} pairs whose boxes overlap…"), token));
                 list.ItemsSource = found.Select(c => $"{a.Model.NameAt(c.A)}  ↔  {a.Model.NameAt(c.B)}:  {c.Volume:0.###} mm³").ToList();
-                info.Text = (found.Count == 0 ? $"No interference among {items.Count} parts." : $"{found.Count} interference{(found.Count == 1 ? "" : "s")}: pick one to see it.") +
+                info.Text = (found.Count == 0 ? $"No interference among {items.Count} parts." : $"{found.Count} interference{(found.Count == 1 ? "" : "s")} found. Select one to show it.") +
                             (notes.Count > 0 ? "\n" + string.Join("\n", notes.Take(6)) + (notes.Count > 6 ? $"\n… and {notes.Count - 6} more" : "") : "");
             }
             catch (OperationCanceledException) { }
-            catch (Exception ex) { App.Log(ex, "Interference"); info.Text = "Could not be checked: " + ex.Message; }
+            catch (Exception ex) { App.Log(ex, "Interference"); info.Text = "Interference check failed: " + ex.Message; }
             finally { calc.IsEnabled = true; }
         };
-        var top = new StackPanel { Spacing = 6, Children = { new TextBlock { Text = "Finds parts that share volume (touching is not interference).", TextWrapping = TextWrapping.Wrap }, withinBox, calc } };
+        var top = new StackPanel { Spacing = 6, Children = { new TextBlock { Text = "Finds parts whose volumes overlap. Touching faces are not reported.", TextWrapping = TextWrapping.Wrap }, withinBox, calc } };
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 8, 0, 0), Children = { close } };
         var dock = new DockPanel();
         DockPanel.SetDock(top, Dock.Top); DockPanel.SetDock(buttons, Dock.Bottom); DockPanel.SetDock(info, Dock.Bottom);
@@ -882,7 +891,7 @@ public partial class MainWindow
         if (Asm is not { } a) return;
         if (a.FilePath == null || a.Dirty)
         {
-            if (!await Dialogs.YesNo(this, "Pack and Go", "The assembly is copied as saved: save it first?", "Save")) return;
+            if (!await Dialogs.YesNo(this, "Pack and Go", "Pack and Go copies the saved files. Save the assembly first?", "Save")) return;
             if (!await SaveAssembly(false)) return;
         }
         string dest = Path.Combine(Path.GetDirectoryName(a.FilePath!)!, Path.GetFileNameWithoutExtension(a.FilePath!) + " Pack");
@@ -892,8 +901,8 @@ public partial class MainWindow
         var browse = new Button { Content = "Browse…" };
         var prefixBox = new TextBox { Watermark = "Prefix" };
         var suffixBox = new TextBox { Watermark = "Suffix" };
-        var flattenBox = new CheckBox { Content = "All files in one folder (else the folders as they are)" };
-        var zipBox = new CheckBox { Content = "Also make a .zip of it" };
+        var flattenBox = new CheckBox { Content = "Flatten folder structure" };
+        var zipBox = new CheckBox { Content = "Create a .zip file" };
         var files = new TextBlock { FontSize = TypeScale.Small, Foreground = Palette.TextMuted, TextWrapping = TextWrapping.Wrap };
         void Preview()
         {
@@ -917,7 +926,7 @@ public partial class MainWindow
                     Spacing = 6, [DockPanel.DockProperty] = Dock.Top,
                     Children =
                     {
-                        new TextBlock { Text = "Copies the assembly and every file it uses (parts and sub-assemblies) to a folder; the copies refer to each other.", TextWrapping = TextWrapping.Wrap },
+                        new TextBlock { Text = "Copies the assembly and all referenced parts and sub-assemblies to a folder, with references updated.", TextWrapping = TextWrapping.Wrap },
                         new DockPanel { Children = { browse, destBox } },
                         new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Children = { new TextBlock { Text = "Rename:", VerticalAlignment = VerticalAlignment.Center }, prefixBox, new TextBlock { Text = "name", VerticalAlignment = VerticalAlignment.Center }, suffixBox } },
                         flattenBox, zipBox,
@@ -930,7 +939,7 @@ public partial class MainWindow
         DockPanel.SetDock(browse, Dock.Right);
         browse.Click += async (_, _) =>
         {
-            var folders = await w.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = "Pack and Go to" });
+            var folders = await w.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = "Pack and Go Destination" });
             if (folders.FirstOrDefault()?.TryGetLocalPath() is { } f) destBox.Text = f;
         };
         cancel.Click += (_, _) => w.Close();
@@ -938,14 +947,14 @@ public partial class MainWindow
         {
             dest = destBox.Text ?? dest; prefix = prefixBox.Text ?? ""; suffix = suffixBox.Text ?? ""; flatten = flattenBox.IsChecked == true; zip = zipBox.IsChecked == true;
             if (Directory.Exists(dest) && Directory.EnumerateFileSystemEntries(dest).Any() &&
-                !await Dialogs.YesNo(w, "Pack and Go", $"{dest} is not empty: files of the same names are overwritten.", "Go on")) return;
+                !await Dialogs.YesNo(w, "Pack and Go", $"{dest} is not empty. Overwrite files with the same names?", "Overwrite")) return;
             ok.IsEnabled = false;
             try
             {
                 var plan = PackAndGo.Plan(a.Model, dest, prefix, suffix, flatten);
                 await Task.Run(() => { PackAndGo.Run(plan); if (zip) PackAndGo.Zip(dest, dest.TrimEnd('\\', '/') + ".zip"); });
                 w.Close();
-                Status($"Packed {plan.Count} files into {dest}{(zip ? " (and its .zip)" : "")}.");
+                Status($"Packed {plan.Count} file{(plan.Count == 1 ? "" : "s")} into {dest}{(zip ? " and created a .zip file" : "")}.");
             }
             catch (Exception ex) { App.Log(ex, "Pack and Go"); await Dialogs.Message(w, "Pack and Go", ex.Message); ok.IsEnabled = true; }
         };

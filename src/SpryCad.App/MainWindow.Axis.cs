@@ -46,14 +46,14 @@ public partial class MainWindow
         // (a round face or circular edge picked as its axis)
         var box = page.Selection(sec, "References",
             SelFilter.Plane | SelFilter.PlanarFace | SelFilter.Sketch | SelFilter.Edge | SelFilter.Axis | SelFilter.SketchSegment | SelFilter.Vertex | SelFilter.Center,
-            "A line, edge or round face; or two planes; or two points; or a point and a plane.", 2,
+            "Line, edge or cylindrical face; two planes; two points; or a point and a plane.", 2,
             s => AxisRefOf(s) != null);
         foreach (var r in f.Refs) if (AxisRefItem(r, st) is { } it) box.Items.Add(it);
         sec.Children.Add(type);
         void Sync()
         {
             var t = AxisSolver.TypeOf(f.Refs);
-            (type.Text, type.Foreground) = t != null ? ("✔ " + t, Palette.Success) : (f.Refs.Count == 0 ? "" : "Not an axis yet", Palette.TextSecondary);
+            (type.Text, type.Foreground) = t != null ? ("✔ " + t, Palette.Success) : (f.Refs.Count == 0 ? "" : "Incomplete references", Palette.TextSecondary);
             type.IsVisible = f.Refs.Count > 0;
         }
         box.Changed += () =>
