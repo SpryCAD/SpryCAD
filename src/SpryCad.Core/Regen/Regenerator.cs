@@ -1465,8 +1465,13 @@ public sealed class Regenerator
         void DoHole(HoleFeature h)
         {
             var sk = GetSketch(h.SketchId);
+            // the holes at the sketch's points; a sketch without points (one made for a cut, its circles) at its circles'
+            // centers, so a sketch can be used again for holes
             var pts = sk.Sketch.Entities.OfType<SkPointEntity>().Where(p => !p.Construction).Select(p => sk.Sketch.P(p.P)).ToList();
-            if (pts.Count == 0) throw new FeatureException("Place at least one hole position point.");
+            if (pts.Count == 0)
+                foreach (var c in sk.Sketch.Entities.OfType<SkCircle>().Where(c => !c.Construction))
+                    if (sk.Sketch.P(c.Center) is var ctr && !pts.Any(q => Vec2.Distance(q, ctr) < 1e-9)) pts.Add(ctr);
+            if (pts.Count == 0) throw new FeatureException("Place at least one hole position point (or circle: a hole at its center).");
             var d = PosLen(h.Diameter, "Diameter"); var r = d / 2;
             double depth = h.ThroughAll ? BigDepth(sk.Frame) : PosLen(h.Depth, "Depth");
             // the tool starts on the sketch plane, as an extruded cut does: a start just above it (it was 1e-3) lay within the

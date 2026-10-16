@@ -762,6 +762,11 @@ public partial class MainWindow
         if (_sketch != null) ExitSketch(true);
         var hole = new HoleFeature().Sized(Units);
         var sel = Selection.First;
+        // a sketch picked (or, nothing picked, the last one not used yet): the holes at its points, or its circles'
+        // centers (a sketch made for a cut used again for holes)
+        void UseSketch(string id) { hole.SketchId = id; ViewSketchIso(id); OpenHolePage(hole, isNew: true); }
+        if (sel is { Kind: SelKind.Sketch, FeatureId: { } picked }) { UseSketch(picked); return; }
+        if (sel == null && SketchFromSelection() is { } unused) { UseSketch(unused); return; }
         if (sel != null && TryPlaneOf(sel, out var pr, out var frame))
         {
             _pendingHole = hole;
@@ -771,11 +776,12 @@ public partial class MainWindow
         }
         var page = new PmPage("Hole Position", "hole");
         var s = page.Section("Positions");
-        page.Info(s, "Select the planar face or plane on which to place the holes.");
-        var box = page.Selection(s, "Face", SelFilter.PlanarFace | SelFilter.Plane, "Face or plane", 1);
+        page.Info(s, "Select the planar face or plane on which to place the holes, or a sketch: the holes at its points, or its circles' centers.");
+        var box = page.Selection(s, "Face", SelFilter.PlanarFace | SelFilter.Plane | SelFilter.Sketch, "Face, plane or sketch", 1);
         box.Changed += () =>
         {
             var it = box.Items.FirstOrDefault();
+            if (it is { Kind: SelKind.Sketch, FeatureId: { } sid }) { ShowPage(null); UseSketch(sid); return; }
             if (TryPlaneOf(it, out var p2, out var f2))
             {
                 ShowPage(null);
