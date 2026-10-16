@@ -161,15 +161,22 @@ public sealed class PmPage
             ShouldUseOverlayLayer = true, IsHitTestVisible = false, Child = _msgBorder,
         };
         header.Children.Add(msgPopup);
+        // opened and closed a moment later, never during a layout or while the page is being taken off the window (a
+        // popup changed then left the panel unpainted when OK closed the page); while it shows, looked at a few times a
+        // second for the page hidden with its panel (another tab picked)
+        var watch = new Avalonia.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
         void SyncMessage()
         {
-            var open = _msgBorder.IsVisible && _root.GetVisualRoot() != null && _root.IsEffectivelyVisible;
+            var attached = _root.GetVisualRoot() != null;
+            var open = _msgBorder.IsVisible && attached && _root.IsEffectivelyVisible;
             if (msgPopup.IsOpen != open) msgPopup.IsOpen = open;
+            watch.IsEnabled = _msgBorder.IsVisible && attached;
         }
-        _msgBorder.PropertyChanged += (_, e) => { if (e.Property == Visual.IsVisibleProperty) SyncMessage(); };
-        _root.AttachedToVisualTree += (_, _) => SyncMessage();
-        _root.DetachedFromVisualTree += (_, _) => msgPopup.IsOpen = false;
-        _root.LayoutUpdated += (_, _) => SyncMessage(); // (the page hidden or shown again with the panel)
+        void Later() => Avalonia.Threading.Dispatcher.UIThread.Post(SyncMessage, Avalonia.Threading.DispatcherPriority.Background);
+        watch.Tick += (_, _) => SyncMessage();
+        _msgBorder.PropertyChanged += (_, e) => { if (e.Property == Visual.IsVisibleProperty) Later(); };
+        _root.AttachedToVisualTree += (_, _) => Later();
+        _root.DetachedFromVisualTree += (_, _) => { watch.Stop(); Later(); };
         _root.Children.Add(new ScrollViewer { Content = _body, HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled });
     }
 
