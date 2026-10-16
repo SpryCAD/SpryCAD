@@ -1,0 +1,586 @@
+using System.Collections.ObjectModel;
+using System.ComponentModel;
+using Avalonia;
+using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
+using Avalonia.Controls.Templates;
+using Avalonia.Data;
+using Avalonia.Input;
+using Avalonia.Interactivity;
+using Avalonia.Layout;
+using Avalonia.Media;
+using Avalonia.Styling;
+using SpryCad.Core;
+using SpryCad.Core.Model;
+using SpryCad.Core.Regen;
+
+namespace SpryCad.App.UI;
+
+/// <summary>
+/// The part's parameters in one window, as Inventor's: a list on the left, Equations always first, then the design
+/// tables (added and removed under the list), and beside it the one picked. Equations: global variables (name, value or
+/// equation, what it works out to, and for user variables shown in Configure a description and limits; those the design
+/// tables set listed too, greyed, "from table Size"). A design table: its name, its columns the variables it sets, a row
+/// per configuration, the row in use. Every grid copies to and pastes from a spreadsheet (Ctrl+C, Ctrl+V: tab-separated,
+/// a heading row). Each change goes into the part as it is made, one undo step each.
+/// </summary>
+static class ParametersDialog
+{
+    /// <summary>Opens on the equations, or (<paramref name="tables"/>) on the first design table.</summary>
+    public static async Task Show(MainWindow owner, bool tables = false)
+    {
+        if (owner.PartOnly("Parameters")) return;
+        var equations = Equations(owner);
+        var body = Body(owner, equations, tables);
+        var close = new Button { Content = "Close", IsCancel = true };
+        var w = Dialogs.MakeWindow("Parameters", Dialogs.WithButtons(body, null, close), 1000);
+        close.Click += (_, _) => w.Close();
+        await w.ShowDialog(owner);
+    }
+
+    // ---- shared ----------------------------------------------------------------------------------------------------
+
+    static DataGrid NewGrid() => new()
+    {
+        AutoGenerateColumns = false, CanUserSortColumns = true, CanUserReorderColumns = false, CanUserResizeColumns = true,
+        SelectionMode = DataGridSelectionMode.Extended, GridLinesVisibility = DataGridGridLinesVisibility.All, HeadersVisibility = DataGridHeadersVisibility.All,
+        BorderBrush = Palette.Border, BorderThickness = new Thickness(1), Height = 340,
+        Styles =
+        {
+            // (a cell's text centred up and down while it is edited, where it was shown)
+            new Style(x => x.OfType<DataGridCell>().Descendant().OfType<TextBox>())
+            {
+                Setters = { new Setter(TextBox.VerticalContentAlignmentProperty, VerticalAlignment.Center), new Setter(Layoutable.MinHeightProperty, 0.0) },
+            },
+        },
+    };
+
+    static Control Header(string text, string tip) { var t = new TextBlock { Text = text, FontWeight = FontWeight.SemiBold }; ToolTip.SetTip(t, tip); return t; }
+
+    static TextBlock Note(string text) => new() { FontSize = TypeScale.Small, Foreground = Palette.TextMuted, TextWrapping = TextWrapping.Wrap, Text = text };
+
+    static MenuItem Item(string text, string? gesture, Action a)
+    {
+        var m = new MenuItem { Header = text };
+        if (gesture != null) m.InputGesture = KeyGesture.Parse(gesture);
+        m.Click += (_, _) => a();
+        return m;
+    }
+
+    /// <summary>Ctrl+C, Ctrl+V and Delete on a grid (not while a cell is edited), and its menu with them.</summary>
+    static void Keys(DataGrid dg, Func<Task> copy, Func<Task> paste, Action delete)
+    {
+        var editing = false;
+        dg.BeginningEdit += (_, e) => { if (!e.Cancel) editing = true; };
+        dg.CellEditEnded += (_, _) => editing = false;
+        dg.AddHandler(InputElement.KeyDownEvent, async (_, e) =>
+        {
+            if (editing) return;
+            if (e.Key == Key.Delete && e.KeyModifiers == KeyModifiers.None) { e.Handled = true; delete(); }
+            else if (e.Key == Key.C && e.KeyModifiers == KeyModifiers.Control) { e.Handled = true; await copy(); }
+            else if (e.Key == Key.V && e.KeyModifiers == KeyModifiers.Control) { e.Handled = true; await paste(); }
+        }, RoutingStrategies.Tunnel);
+        dg.ContextMenu = new ContextMenu
+        {
+            Items = { Item("Copy", "Ctrl+C", () => _ = copy()), Item("Paste", "Ctrl+V", () => _ = paste()), new Separator(), Item("Delete Rows", "Delete", delete) },
+        };
+    }
+
+    static string Cell(string s) => s.Replace('\t', ' ').Replace('\r', ' ').Replace('\n', ' ');
+
+    static bool IsName(string? s) => !string.IsNullOrEmpty(s) && (char.IsLetter(s[0]) || s[0] == '_') && s.All(c => char.IsLetterOrDigit(c) || c == '_') && EquationEntry.NameProblem(s) == null;
+
+    // ---- the equations -------------------------------------------------------------------------------------------
+
+    /// <summary>A row of the equations: an equation being edited (or, greyed, a variable a design table sets), and what it works out to.</summary>
+    sealed class EqRow : INotifyPropertyChanged
+    {
+        public event PropertyChangedEventHandler? PropertyChanged;
+        readonly Action _changed;
+        /// <summary>The design table setting it (read only here), or null: an equation of the part's.</summary>
+        public readonly string? FromTable;
+        public EqRow(Equation e, Action changed, string? fromTable = null)
+        {
+            _changed = changed; FromTable = fromTable;
+            _name = e.Name; _expr = fromTable != null ? $"from table {fromTable}" : e.Expr; _exposed = e.Exposed; _description = e.Description ?? "";
+            _min = e.Min is { } a ? Expr.Format(a) : ""; _max = e.Max is { } b ? Expr.Format(b) : "";
+        }
+        string _name, _expr, _description, _min, _max;
+        bool _exposed;
+        void Set<T>(ref T field, T value, string name)
+        {
+            if (FromTable != null || Equals(field, value)) return;
+            field = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+            _changed();
+        }
+        public string Name { get => _name; set => Set(ref _name, value?.Trim() ?? "", nameof(Name)); }
+        public string Equation { get => _expr; set => Set(ref _expr, string.IsNullOrWhiteSpace(value) ? "0" : value.Trim(), nameof(Equation)); }
+        public bool User { get => _exposed; set => Set(ref _exposed, value, nameof(User)); }
+        public string Description { get => _description; set => Set(ref _description, value ?? "", nameof(Description)); }
+        public string Min { get => _min; set => Set(ref _min, value?.Trim() ?? "", nameof(Min)); }
+        public string Max { get => _max; set => Set(ref _max, value?.Trim() ?? "", nameof(Max)); }
+
+        // what it works out to, or why it does not (red); a brush left empty would draw nothing
+        public string Value { get; private set; } = "";
+        public IBrush ValueBrush { get; private set; } = Palette.Text;
+        public string? Problem { get; private set; }
+        public void Show(string value, string? problem)
+        {
+            (Value, Problem, ValueBrush) = (problem ?? value, problem, problem != null ? Palette.Danger : FromTable != null ? Palette.TextMuted : Palette.Text);
+            foreach (var p in new[] { nameof(Value), nameof(ValueBrush), nameof(Problem) }) PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(p));
+        }
+
+        static double? Number(string text) => Expr.TryEval(text, null, out var v, out _) ? v : null;
+        public Equation ToEquation() => new()
+        {
+            Name = Name, Expr = Equation, Exposed = User,
+            // (a description and limits only for a user variable: Configure is all they are for)
+            Description = User && Description.Trim().Length > 0 ? Description.Trim() : null,
+            Min = User ? Number(Min) : null, Max = User ? Number(Max) : null,
+        };
+    }
+
+    static (Control view, Action refresh) Equations(MainWindow owner)
+    {
+        var session = owner.Session;
+        var units = session.Doc.Units;
+        var items = new ObservableCollection<EqRow>();
+        bool loading = true;
+        IEnumerable<EqRow> Own() => items.Where(r => r.FromTable == null);
+
+        static string KeyOf(IEnumerable<Equation> eqs) => string.Join("\n", eqs.Select(e => $"{e.Name}\t{e.Expr}\t{e.Exposed}\t{e.Description}\t{e.Min}\t{e.Max}"));
+        // into the part as made, when it differs from what the part has (one undo step)
+        void Apply()
+        {
+            if (loading) return;
+            var result = Own().Where(r => r.Name.Trim().Length > 0).Select(r => r.ToEquation()).ToList();
+            if (KeyOf(result) != KeyOf(session.Doc.Equations)) session.Change(() => session.Doc.Equations = result);
+        }
+        void Recompute()
+        {
+            var tables = session.Doc.Tables;
+            var eqs = Own().Select(r => new Equation { Name = r.Name, Expr = r.Equation }).ToList();
+            var (vals, errs) = Regenerator.EvaluateEquations(new CadDocument { Equations = eqs, Tables = tables, Units = units });
+            var fromTables = items.Where(r => r.FromTable != null).Select(r => r.Name.Trim()).ToList();
+            foreach (var r in items)
+            {
+                var name = r.Name.Trim();
+                string? problem = null;
+                if (r.FromTable == null)
+                    // (one set twice has a value, from where it was set first: the second is the error)
+                    problem = name.Length == 0 ? "Give it a name"
+                        : EquationEntry.NameProblem(name)
+                        ?? (Own().Count(x => x.Name.Trim().Equals(name, StringComparison.OrdinalIgnoreCase)) > 1 || fromTables.Contains(name, StringComparer.OrdinalIgnoreCase)
+                            ? $"{name} is set twice (an equation and a design table, or two equations)" : errs.GetValueOrDefault(r.Name));
+                r.Show(vals.TryGetValue(name, out var v) ? units.Show(v) : "", problem);
+            }
+            Apply();
+        }
+        EqRow Make(Equation e) => new(e, Recompute);
+
+        var dg = NewGrid();
+        dg.ItemsSource = items;
+        void Text(string header, string tip, string property, DataGridLength width) =>
+            dg.Columns.Add(new DataGridTextColumn { Header = Header(header, tip), Binding = new Binding(property) { Mode = BindingMode.TwoWay }, Width = width });
+        Text("Name", "The variable's name, used in any value (W, Teeth).", nameof(EqRow.Name), new DataGridLength(120));
+        Text("Value / Equation", "A value (10mm, 2in, 30deg, 6) or an equation of other variables (W/2, sqrt(A^2 + B^2), if(N < 30, 5mm, 8mm)). A value without a unit is read in the part's units.",
+            nameof(EqRow.Equation), new DataGridLength(1, DataGridLengthUnitType.Star));
+        dg.Columns.Add(new DataGridTemplateColumn
+        {
+            Header = Header("Evaluates To", "What it works out to, in the part's units; why not, in red."), Width = new DataGridLength(130), IsReadOnly = true,
+            CellTemplate = new FuncDataTemplate<EqRow>((_, _) => new TextBlock
+            {
+                VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0), TextTrimming = TextTrimming.CharacterEllipsis,
+                [!TextBlock.TextProperty] = new Binding(nameof(EqRow.Value)),
+                [!TextBlock.ForegroundProperty] = new Binding(nameof(EqRow.ValueBrush)),
+                [!ToolTip.TipProperty] = new Binding(nameof(EqRow.Problem)),
+            }),
+        });
+        dg.Columns.Add(new DataGridTemplateColumn
+        {
+            Header = Header("User", "Shown in Configure, where an assembly sets it for each instance."), Width = new DataGridLength(1, DataGridLengthUnitType.SizeToHeader),
+            CellTemplate = new FuncDataTemplate<EqRow>((r, _) => new CheckBox
+            {
+                HorizontalAlignment = HorizontalAlignment.Center, MinHeight = 0, Padding = new Thickness(0), IsEnabled = r?.FromTable == null,
+                [!ToggleButton.IsCheckedProperty] = new Binding(nameof(EqRow.User)) { Mode = BindingMode.TwoWay },
+            }),
+        });
+        Text("Description", "A user variable's label in Configure.", nameof(EqRow.Description), new DataGridLength(150));
+        Text("Min", "The smallest value Configure accepts. Min 0 and Max 1 make a checkbox.", nameof(EqRow.Min), new DataGridLength(60));
+        Text("Max", "The largest value Configure accepts.", nameof(EqRow.Max), new DataGridLength(60));
+        // a design table's variables: greyed, not edited here
+        dg.BeginningEdit += (_, e) => { if (e.Row.DataContext is EqRow { FromTable: not null }) e.Cancel = true; };
+        dg.LoadingRow += (_, e) =>
+        {
+            var table = e.Row.DataContext is EqRow r && r.FromTable != null;
+            if (table) { e.Row.Foreground = Palette.TextMuted; e.Row.FontStyle = FontStyle.Italic; }
+            else { e.Row.ClearValue(TemplatedControl.ForegroundProperty); e.Row.ClearValue(TemplatedControl.FontStyleProperty); }
+        };
+
+        List<EqRow> Selected() => dg.SelectedItems.OfType<EqRow>().Where(r => r.FromTable == null).OrderBy(items.IndexOf).ToList();
+        void Delete() { foreach (var r in Selected()) items.Remove(r); Recompute(); }
+        async Task Copy()
+        {
+            var sel = Selected();
+            if (sel.Count == 0) sel = Own().ToList();
+            if (sel.Count == 0 || TopLevel.GetTopLevel(dg)?.Clipboard is not { } clip) return;
+            var lines = new List<string> { "Name\tValue / Equation\tEvaluates To\tUser\tDescription\tMin\tMax" };
+            lines.AddRange(sel.Select(r => string.Join("\t", Cell(r.Name), Cell(r.Equation), Cell(r.Value), r.User ? "TRUE" : "FALSE", Cell(r.Description), r.Min, r.Max)));
+            await clip.SetTextAsync(string.Join("\r\n", lines));
+            owner.Status($"Copied {sel.Count} variable{(sel.Count == 1 ? "" : "s")}.");
+        }
+        async Task Paste()
+        {
+            if (TopLevel.GetTopLevel(dg)?.Clipboard is not { } clip || await clip.GetTextAsync() is not { Length: > 0 } text) return;
+            int n = 0;
+            loading = true; // (one undo step for the whole paste)
+            foreach (var line in text.Replace("\r", "").Split('\n'))
+            {
+                var c = line.Split('\t');
+                var name = c[0].Trim();
+                if (name.Length == 0 || name.Equals("Name", StringComparison.OrdinalIgnoreCase)) continue; // (a blank line, the heading)
+                var expr = c.Length > 1 && c[1].Trim().Length > 0 ? c[1].Trim() : "0";
+                var row = Own().FirstOrDefault(r => r.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+                if (row == null) items.Insert(Own().Count(), row = Make(new Equation { Name = name, Expr = expr }));
+                else row.Equation = expr;
+                // (as copied here: Evaluates To third, then User, Description, Min, Max)
+                if (c.Length > 3) row.User = c[3].Trim() is var u && (u.Equals("TRUE", StringComparison.OrdinalIgnoreCase) || u == "1" || u.Equals("yes", StringComparison.OrdinalIgnoreCase) || u.Equals("x", StringComparison.OrdinalIgnoreCase));
+                if (c.Length > 4) row.Description = c[4].Trim();
+                if (c.Length > 5) row.Min = c[5].Trim();
+                if (c.Length > 6) row.Max = c[6].Trim();
+                n++;
+            }
+            loading = false;
+            Recompute();
+            owner.Status($"Pasted {n} variable{(n == 1 ? "" : "s")}.");
+        }
+        Keys(dg, Copy, Paste, Delete);
+
+        // the part's equations, then the variables its design tables set
+        void Refresh()
+        {
+            loading = true;
+            items.Clear();
+            foreach (var e in session.Doc.Equations) items.Add(Make(e));
+            foreach (var t in session.Doc.Tables ?? new())
+                foreach (var name in new[] { t.Name }.Concat(t.Columns).Where(n => !string.IsNullOrWhiteSpace(n)))
+                    items.Add(new EqRow(new Equation { Name = name.Trim() }, Recompute, t.Name));
+            Recompute();
+            loading = false;
+        }
+        Refresh();
+
+        var add = new Button { Content = "+ Variable" };
+        add.Click += (_, _) =>
+        {
+            int k = Own().Count() + 1;
+            while (items.Any(r => r.Name.Equals("Var" + k, StringComparison.OrdinalIgnoreCase))) k++;
+            var r = Make(new Equation { Name = "Var" + k, Expr = units == UnitSystem.IPS ? "1in" : "10mm" });
+            items.Insert(Own().Count(), r);
+            Recompute();
+            dg.SelectedItem = r;
+            dg.ScrollIntoView(r, dg.Columns[0]);
+        };
+        var view = new StackPanel
+        {
+            Spacing = 8,
+            Children =
+            {
+                Note("Variables for any dimension or feature value; typing L = 10 in a value field adds one here. Those a design table sets are listed greyed. "
+                    + "Changes apply as made (Ctrl+Z in the window undoes them). Ctrl+C copies rows for a spreadsheet, Ctrl+V pastes them back (name, then value)."),
+                dg, add,
+            },
+        };
+        return (view, Refresh);
+    }
+
+    // ---- the design tables ---------------------------------------------------------------------------------------
+
+    /// <summary>A row of a design table: its key, a value per column, whether it is the row in use.</summary>
+    sealed class TRow : INotifyPropertyChanged
+    {
+        public event PropertyChangedEventHandler? PropertyChanged;
+        public readonly DesignRow Row;
+        readonly DesignTable _t;
+        readonly Action _changed;
+        public TRow(DesignRow row, DesignTable t, Action changed) { Row = row; _t = t; _changed = changed; }
+        void Notify(string p) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(p));
+        public string Key
+        {
+            get => Row.Key;
+            set
+            {
+                var was = Row.Key; var now = value?.Trim() ?? "";
+                if (now == was) return;
+                Row.Key = now;
+                if (_t.Selected == was) _t.Selected = now;
+                Notify(nameof(Key)); _changed();
+            }
+        }
+        public string this[int c]
+        {
+            get => c < Row.Values.Count ? Row.Values[c] : "0";
+            set
+            {
+                while (Row.Values.Count <= c) Row.Values.Add("0");
+                var now = string.IsNullOrWhiteSpace(value) ? "0" : value.Trim();
+                if (Row.Values[c] == now) return;
+                Row.Values[c] = now;
+                Notify("Item[]"); _changed();
+            }
+        }
+        public bool Active
+        {
+            get => ReferenceEquals(_t.Current, Row);
+            set { if (value && !Active) { _t.Selected = Row.Key; _changed(); } }
+        }
+        public void ActiveChanged() => Notify(nameof(Active));
+    }
+
+    /// <summary>The list (Equations, then the design tables) and, beside it, the one picked.</summary>
+    static Control Body(MainWindow owner, (Control view, Action refresh) equations, bool startOnTables)
+    {
+        var session = owner.Session;
+        var tables = new List<DesignTable>();
+        int current = 0;
+        bool onEquations = !(startOnTables && (session.Doc.Tables?.Count ?? 0) > 0);
+        var list = new ListBox { Classes = { "selbox" } };
+        var right = new StackPanel { Spacing = 6 };
+        var error = new TextBlock { Foreground = Palette.Danger, FontSize = TypeScale.Small, TextWrapping = TextWrapping.Wrap };
+        bool listing = false;
+        var addTable = new Button { Content = "+", MinWidth = 32 };
+        ToolTip.SetTip(addTable, "Add a design table");
+        var delTable = new Button { Content = "−", MinWidth = 32 };
+        ToolTip.SetTip(delTable, "Delete the design table picked (Equations stays)");
+
+        // what stops the tables going in the part (named as variables, unique, with rows), or null
+        string? Problem()
+        {
+            var names = new HashSet<string>(session.Doc.Equations.Select(e => e.Name.Trim()), StringComparer.OrdinalIgnoreCase);
+            foreach (var t in tables)
+            {
+                if (!IsName(t.Name)) return $"\"{t.Name}\" cannot name a table (letters, digits and _, starting with a letter; not a function, constant or unit).";
+                if (!names.Add(t.Name)) return $"{t.Name} is already a variable.";
+                foreach (var c in t.Columns)
+                {
+                    if (!IsName(c)) return $"{t.Name}: \"{c}\" cannot name a variable.";
+                    if (!names.Add(c)) return $"{t.Name}: {c} is already a variable (in Equations or another table).";
+                }
+                if (t.Rows.Count == 0) return $"{t.Name} has no rows.";
+                var keys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var r in t.Rows)
+                    if (r.Key.Length == 0 || !keys.Add(r.Key)) return $"{t.Name}: each row needs a key of its own (\"{r.Key}\").";
+            }
+            return null;
+        }
+        // into the part as made, when right (else why not, under the table) and different (one undo step)
+        void Apply()
+        {
+            foreach (var t in tables) { t.Name = t.Name.Trim(); t.Description = string.IsNullOrWhiteSpace(t.Description) ? null : t.Description.Trim(); }
+            if (Problem() is { } p) { error.Text = p + " Not applied until corrected."; return; }
+            error.Text = "";
+            var json = System.Text.Json.JsonSerializer.Serialize(tables, Serialization.Options);
+            if (json == System.Text.Json.JsonSerializer.Serialize(session.Doc.Tables ?? new(), Serialization.Options)) return;
+            var copy = tables.Select(Serialization.Clone).ToList();
+            session.Change(() => session.Doc.Tables = copy.Count == 0 ? null : copy);
+        }
+
+        // the list: Equations, then the tables; the one picked shown beside it
+        void Relist()
+        {
+            listing = true;
+            if (tables.Count == 0) onEquations = true;
+            current = Math.Clamp(current, 0, Math.Max(0, tables.Count - 1));
+            list.ItemsSource = new[] { "Equations" }.Concat(tables.Select(t => string.IsNullOrWhiteSpace(t.Name) ? "(unnamed)" : t.Name)).ToList();
+            list.SelectedIndex = onEquations ? 0 : current + 1;
+            listing = false;
+            ShowPicked();
+        }
+        list.SelectionChanged += (_, _) =>
+        {
+            if (listing || list.SelectedIndex < 0) return;
+            onEquations = list.SelectedIndex == 0;
+            if (!onEquations) current = list.SelectedIndex - 1;
+            ShowPicked();
+        };
+
+        void ShowPicked()
+        {
+            right.Children.Clear();
+            delTable.IsEnabled = !onEquations;
+            if (onEquations)
+            {
+                // (shown again from the part: the tables may have changed the variables they set)
+                equations.refresh();
+                right.Children.Add(equations.view);
+                return;
+            }
+            var t = tables[current];
+            right.Children.Add(Note("Each row sets values for a set of variables (values or expressions); the table's name holds the row in use (1 = first), for conditions such as "
+                + "Size >= 3 (Suppress When). Changes apply as made. Ctrl+C copies the table for a spreadsheet; Ctrl+V pastes one back (a heading row of variable names, then a row per configuration)."));
+
+            // its name, user-facing and description
+            var name = new TextBox { Text = t.Name, Width = 140 };
+            ToolTip.SetTip(name, "The table's name: the choice in Configure, and a variable holding the row in use (1 = first).");
+            void Rename() { if (name.Text?.Trim() is { } n && n != t.Name) { t.Name = n; Relist(); Apply(); } }
+            name.LostFocus += (_, _) => Rename();
+            name.KeyDown += (_, e) => { if (e.Key == Key.Enter) { Rename(); e.Handled = true; } };
+            var user = new CheckBox { Content = "User-facing", IsChecked = t.Exposed };
+            ToolTip.SetTip(user, "Shows the rows as a list in Configure; set per instance in assemblies.");
+            user.IsCheckedChanged += (_, _) => { t.Exposed = user.IsChecked == true; Apply(); };
+            var desc = new TextBox { Text = t.Description ?? "", Watermark = "Description for Configure", MinWidth = 220 };
+            desc.LostFocus += (_, _) => { if ((desc.Text ?? "") != (t.Description ?? "")) { t.Description = desc.Text; Apply(); } };
+            right.Children.Add(new StackPanel
+            {
+                Orientation = Orientation.Horizontal, Spacing = 8,
+                Children = { new TextBlock { Text = "Name", VerticalAlignment = VerticalAlignment.Center }, name, user, desc },
+            });
+
+            // its grid: the key, a column per variable, the row in use
+            var rows = new ObservableCollection<TRow>();
+            void Changed() { foreach (var r in rows) r.ActiveChanged(); Apply(); }
+            foreach (var r in t.Rows) rows.Add(new TRow(r, t, Changed));
+            var dg = NewGrid();
+            dg.ItemsSource = rows;
+            dg.Columns.Add(new DataGridTextColumn
+            {
+                Header = Header("Row", "The row's key: what Configure lists (M3, M4, Small)."), Binding = new Binding(nameof(TRow.Key)) { Mode = BindingMode.TwoWay }, Width = new DataGridLength(110),
+            });
+            for (int c = 0; c < t.Columns.Count; c++)
+            {
+                int cc = c;
+                var head = new TextBlock { Text = t.Columns[c], FontWeight = FontWeight.SemiBold, Background = Brushes.Transparent };
+                ToolTip.SetTip(head, $"The variable {t.Columns[c]}: each row's value (a value or an expression). Right-click to rename or delete the column.");
+                head.ContextMenu = new ContextMenu
+                {
+                    Items =
+                    {
+                        Item("Rename Column...", null, async () =>
+                        {
+                            if (TopLevel.GetTopLevel(dg) is not Window w || await Dialogs.Input(w, "Rename Column", "Variable", t.Columns[cc]) is not { } n || n.Trim().Length == 0) return;
+                            t.Columns[cc] = n.Trim(); ShowPicked(); Apply();
+                        }),
+                        Item("Delete Column", null, () =>
+                        {
+                            t.Columns.RemoveAt(cc);
+                            foreach (var r in t.Rows) if (cc < r.Values.Count) r.Values.RemoveAt(cc);
+                            ShowPicked(); Apply();
+                        }),
+                    },
+                };
+                dg.Columns.Add(new DataGridTextColumn { Header = head, Binding = new Binding($"[{cc}]") { Mode = BindingMode.TwoWay }, Width = new DataGridLength(90) });
+            }
+            var group = "dt" + Guid.NewGuid().ToString("N");
+            dg.Columns.Add(new DataGridTemplateColumn
+            {
+                Header = Header("Active", "The row the part uses unless an assembly picks another."), Width = new DataGridLength(1, DataGridLengthUnitType.SizeToHeader),
+                CellTemplate = new FuncDataTemplate<TRow>((_, _) => new RadioButton
+                {
+                    GroupName = group, HorizontalAlignment = HorizontalAlignment.Center, MinHeight = 0, Padding = new Thickness(0),
+                    [!ToggleButton.IsCheckedProperty] = new Binding(nameof(TRow.Active)) { Mode = BindingMode.TwoWay },
+                }),
+            });
+
+            List<TRow> Selected() => dg.SelectedItems.OfType<TRow>().OrderBy(rows.IndexOf).ToList();
+            void Delete() { foreach (var r in Selected()) { t.Rows.Remove(r.Row); rows.Remove(r); } Changed(); }
+            async Task Copy()
+            {
+                var sel = Selected();
+                if (sel.Count == 0) sel = rows.ToList();
+                if (TopLevel.GetTopLevel(dg)?.Clipboard is not { } clip) return;
+                var lines = new List<string> { string.Join("\t", new[] { Cell(t.Name) }.Concat(t.Columns.Select(Cell))) };
+                lines.AddRange(sel.Select(r => string.Join("\t", new[] { Cell(r.Key) }.Concat(t.Columns.Select((_, c) => Cell(r.Row.ValueAt(c)))))));
+                await clip.SetTextAsync(string.Join("\r\n", lines));
+                owner.Status($"Copied {t.Name}: {sel.Count} row{(sel.Count == 1 ? "" : "s")}.");
+            }
+            async Task Paste()
+            {
+                if (TopLevel.GetTopLevel(dg)?.Clipboard is not { } clip || DesignTable.Parse(await clip.GetTextAsync()) is not { } pasted)
+                { error.Text = "No table on the clipboard: copy a heading row of variable names and a row per configuration (its key, then its values)."; return; }
+                // the same columns: rows changed by key and added; other columns: the table becomes the cells pasted
+                if (pasted.Columns.Count == t.Columns.Count && pasted.Columns.Zip(t.Columns).All(p => p.First.Equals(p.Second, StringComparison.OrdinalIgnoreCase)))
+                    foreach (var pr in pasted.Rows)
+                    {
+                        if (t.Row(pr.Key) is { } have) have.Values = pr.Values;
+                        else t.Rows.Add(pr);
+                    }
+                else
+                {
+                    t.Columns = pasted.Columns; t.Rows = pasted.Rows;
+                    if (t.Row(t.Selected ?? "") == null) t.Selected = null;
+                }
+                ShowPicked(); Apply();
+                owner.Status($"Pasted {pasted.Rows.Count} row{(pasted.Rows.Count == 1 ? "" : "s")} into {t.Name}.");
+            }
+            Keys(dg, Copy, Paste, Delete);
+            right.Children.Add(dg);
+
+            var addRow = new Button { Content = "+ Row" };
+            addRow.Click += (_, _) =>
+            {
+                int k = t.Rows.Count + 1;
+                while (t.Row("Row" + k) != null) k++;
+                var r = new DesignRow { Key = "Row" + k, Values = t.Rows.LastOrDefault()?.Values.ToList() ?? t.Columns.Select(_ => "0").ToList() };
+                t.Rows.Add(r);
+                var tr = new TRow(r, t, Changed);
+                rows.Add(tr);
+                Changed();
+                dg.SelectedItem = tr;
+                dg.ScrollIntoView(tr, dg.Columns[0]);
+            };
+            var addCol = new Button { Content = "+ Column" };
+            addCol.Click += async (_, _) =>
+            {
+                int n = t.Columns.Count + 1;
+                while (t.Columns.Contains("Var" + n, StringComparer.OrdinalIgnoreCase)) n++;
+                if (TopLevel.GetTopLevel(dg) is not Window w || await Dialogs.Input(w, "Add Column", "Variable", "Var" + n) is not { } v || v.Trim().Length == 0) return;
+                t.Columns.Add(v.Trim());
+                foreach (var r in t.Rows) r.Values.Add("0");
+                ShowPicked(); Apply();
+            };
+            right.Children.Add(new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Children = { addRow, addCol } });
+            right.Children.Add(error);
+        }
+
+        addTable.Click += (_, _) =>
+        {
+            int n = tables.Count + 1;
+            var known = new HashSet<string>(session.Doc.Equations.Select(e => e.Name.Trim()).Concat(tables.SelectMany(t => new[] { t.Name }.Concat(t.Columns))), StringComparer.OrdinalIgnoreCase);
+            var tname = known.Contains("Size") ? "Table" + n : "Size";
+            while (known.Contains(tname)) tname = "Table" + ++n;
+            var col = "D"; int k = 1;
+            while (known.Contains(col)) col = "D" + ++k;
+            var inch = session.Doc.Units == UnitSystem.IPS;
+            tables.Add(new DesignTable
+            {
+                Name = tname, Columns = { col },
+                Rows = { new DesignRow { Key = "A", Values = { inch ? "0.5in" : "10mm" } }, new DesignRow { Key = "B", Values = { inch ? "1in" : "20mm" } } },
+            });
+            current = tables.Count - 1;
+            onEquations = false;
+            Relist(); Apply();
+        };
+        delTable.Click += (_, _) =>
+        {
+            if (onEquations || tables.Count == 0) return;
+            tables.RemoveAt(current);
+            current = Math.Max(0, current - 1);
+            Relist(); Apply();
+        };
+
+        tables = (session.Doc.Tables ?? new()).Select(Serialization.Clone).ToList();
+        Relist();
+
+        var left = new DockPanel { Width = 170 };
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, Margin = new Thickness(0, 4, 0, 0), Children = { addTable, delTable } };
+        DockPanel.SetDock(buttons, Dock.Bottom);
+        left.Children.Add(buttons);
+        list.MaxHeight = double.PositiveInfinity;
+        left.Children.Add(list);
+        var body = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,12,*") };
+        Grid.SetColumn(right, 2);
+        body.Children.Add(left); body.Children.Add(right);
+        return body;
+    }
+}

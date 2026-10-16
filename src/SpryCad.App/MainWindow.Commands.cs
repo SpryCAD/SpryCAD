@@ -222,8 +222,8 @@ public partial class MainWindow
                 Item("Fla_tten", ToggleFlattenCommand, null, "flatten"),
                 Item("E_xport Flat Pattern…", () => _ = ExportFlatCommand(), null, "export-dxf"))));
         MainMenu.Items.Add(Sub("_Tools",
-            PartMenu(Item("_Equations…", () => _ = Dialogs.Equations(this), null, "equations")),
-            PartMenu(Item("_Design Table…", () => _ = Dialogs.DesignTables(this), null, "table")),
+            // (equations and design tables in one window)
+            PartMenu(Item("_Parameters…", () => _ = Dialogs.Equations(this), null, "equations")),
             PartMenu(Item("_Configure…", () => _ = Dialogs.ConfigurePart(this), null, "configure")),
             Item("Mea_sure…", MeasureCommand, null, "measure"),
             Item("_Mass Properties…", MassPropertiesCommand, null, "mass"),
@@ -381,7 +381,7 @@ public partial class MainWindow
                 if (Asm == null)
                 {
                     Cmd("material", "Edit\nMaterial", EditMaterialCommand);
-                    Cmd("equations", "Equations", () => _ = Dialogs.Equations(this));
+                    Cmd("equations", "Parameters", () => _ = Dialogs.Equations(this));
                     Cmd("table", "Design\nTable", () => _ = Dialogs.DesignTables(this));
                     Cmd("configure", "Configure", () => _ = Dialogs.ConfigurePart(this));
                 }
