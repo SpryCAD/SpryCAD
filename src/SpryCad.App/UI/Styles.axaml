@@ -58,10 +58,24 @@
     <Setter Property="TextAlignment" Value="Center" />
     <Setter Property="HorizontalAlignment" Value="Center" />
   </Style>
-  <!-- a row too wide for the window: narrower, the names kept -->
-  <Style Selector="Button.cmd.big.narrow">
-    <Setter Property="Width" Value="76" />
-    <Setter Property="Padding" Value="2,5,2,3" />
+  <!-- the overflow button at the row's end, and its list of the commands that do not fit -->
+  <Style Selector="Button.cmd.overflow">
+    <Setter Property="Width" Value="32" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+  </Style>
+  <Style Selector="Button.cmd.menurow">
+    <Setter Property="HorizontalAlignment" Value="Stretch" />
+    <Setter Property="HorizontalContentAlignment" Value="Left" />
+    <Setter Property="MinWidth" Value="200" />
+    <Setter Property="Margin" Value="0" />
+    <Setter Property="Padding" Value="6,3" />
+  </Style>
+  <Style Selector="Border.menusep">
+    <Setter Property="Height" Value="1" />
+    <Setter Property="Margin" Value="4,3" />
+    <Setter Property="Background" Value="{DynamicResource Spry.Border}" />
   </Style>
   <Style Selector="Button.cmd.big.iconsonly">
     <Setter Property="Width" Value="48" />

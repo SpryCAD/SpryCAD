@@ -34,6 +34,8 @@ public partial class MainWindow
     readonly List<DropGroup> _dropGroups = new();
     // the names on the row's buttons (hidden when the row does not fit)
     readonly List<TextBlock> _cmdLabels = new();
+    // the commands each of the row's buttons stands for (a family's all): the overflow lists those that do not fit
+    readonly Dictionary<Control, Command[]> _barCommands = new();
 
     string TipOf(Command c)
     {
@@ -136,7 +138,7 @@ public partial class MainWindow
                 var c = family[i];
                 var item = new Button { Classes = { "cmd", "big" }, Content = new StackPanel { Spacing = 4, Children = { Icons.Make(c.Icon, 32), new TextBlock { Text = BarLabel(c.Name, large: true) } } } };
                 item.Classes.Set("active", i == Current());
-                ToolTip.SetTip(item, TipOf(c));
+                TipBeside(item, panel, TipOf(c));
                 item.Click += (_, _) => Pick(idx);
                 grid.Children.Add(item);
             }
@@ -176,7 +178,24 @@ public partial class MainWindow
 
         // the family's sketch tools light the button (in use, it shows that kind: UpdateDropGroups)
         foreach (var c in family) if (c.Tool is { } t) _toolButtons[t] = main;
-        CommandBar.Children.Add(new Panel { Children = { box, popup } });
+        var host = new Panel { Children = { box, popup } };
+        _barCommands[host] = family;
+        CommandBar.Children.Add(host);
+    }
+
+    /// <summary>
+    /// A drop-down's button's tooltip beside the drop-down (to its right, level with the button), never under the
+    /// pointer: moving onto a tooltip took the pointer off the drop-down, which closed it.
+    /// </summary>
+    static void TipBeside(Control item, Control panel, string tip)
+    {
+        ToolTip.SetTip(item, tip);
+        ToolTip.SetPlacement(item, PlacementMode.Right);
+        item.PointerEntered += (_, _) =>
+        {
+            var right = item.TranslatePoint(new Point(item.Bounds.Width, 0), panel);
+            ToolTip.SetHorizontalOffset(item, (right is { } r ? panel.Bounds.Width - r.X : 0) + 6);
+        };
     }
 
     /// <summary>A drop-down chevron in the text's colour, <paramref name="w"/> wide.</summary>
@@ -203,8 +222,8 @@ public partial class MainWindow
     }
 
     /// <summary>
-    /// A row too wide for the window: large buttons made narrower, their names kept (every tab alike, names under the
-    /// icons), and past that it scrolls; compact ones show their icons only (the names in the tooltips).
+    /// A row too wide for the window: compact buttons show their icons only (the names in the tooltips); what still
+    /// does not fit (large buttons keep their names) goes behind the overflow button at the row's end.
     /// </summary>
     bool _fitHooked;
 
@@ -218,18 +237,105 @@ public partial class MainWindow
         _fitPending = true;
         CommandBar.Height = LargeBar ? double.NaN : 34;
         foreach (var l in _cmdLabels) l.IsVisible = true;
-        foreach (var b in CommandBar.GetLogicalDescendants().OfType<Button>()) { b.Classes.Set("iconsonly", false); b.Classes.Set("narrow", false); }
+        foreach (var b in CommandBar.GetLogicalDescendants().OfType<Button>()) b.Classes.Set("iconsonly", false);
+        // the overflow button last on the row (the row is made anew for each tab)
+        var more = OverflowHost();
+        CommandBar.Children.Remove(more);
+        CommandBar.Children.Add(more);
+        var items = CommandBar.Children.Where(c => c != more).ToList();
+        foreach (var c in items) c.IsVisible = true;
+        more.IsVisible = false;
         Avalonia.Threading.Dispatcher.UIThread.Post(() =>
         {
             _fitPending = false;
             if (CommandBar.Parent is not Control host) return;
-            CommandBar.Measure(Size.Infinity);
-            if (CommandBar.DesiredSize.Width <= host.Bounds.Width - 8) return;
-            var buttons = CommandBar.GetLogicalDescendants().OfType<Button>().ToList();
-            if (LargeBar) { foreach (var b in buttons) b.Classes.Set("narrow", true); return; }
-            foreach (var l in _cmdLabels) l.IsVisible = false;
-            foreach (var b in buttons) b.Classes.Set("iconsonly", true);
+            var room = host.Bounds.Width - 8;
+            double Wide() { CommandBar.Measure(Size.Infinity); return items.Sum(c => c.DesiredSize.Width); }
+            if (Wide() > room && !LargeBar)
+            {
+                foreach (var l in _cmdLabels) l.IsVisible = false;
+                foreach (var b in CommandBar.GetLogicalDescendants().OfType<Button>()) b.Classes.Set("iconsonly", true);
+            }
+            var hidden = new List<Control>();
+            if (Wide() > room)
+            {
+                // from the end, until the rest and the overflow button fit (a separator never left last)
+                double x = 0, limit = room - 36;
+                foreach (var c in items) { x += c.DesiredSize.Width; if (x > limit) hidden.Add(c); }
+                while (items.LastOrDefault(c => !hidden.Contains(c)) is { } last && last.Classes.Contains("barsep")) hidden.Insert(0, last);
+                foreach (var c in hidden) c.IsVisible = false;
+            }
+            _overflowItems = hidden;
+            more.IsVisible = hidden.Count > 0;
         }, Avalonia.Threading.DispatcherPriority.Loaded);
+    }
+
+    // the overflow: its button (with its list's popup), and the row's items behind it
+    Panel? _overflowHost;
+    List<Control> _overflowItems = new();
+
+    /// <summary>
+    /// The overflow button at the row's end: hovered (or clicked), a list of the commands that do not fit drops below
+    /// it, each its icon and name; one clicked runs (a family's also goes on its button).
+    /// </summary>
+    Panel OverflowHost()
+    {
+        if (_overflowHost != null) return _overflowHost;
+        var button = new Button { Classes = { "cmd", "overflow" }, Content = new TextBlock { Text = "»", FontSize = 18 } };
+        ToolTip.SetTip(button, "More commands");
+        var list = new StackPanel { Spacing = 0 };
+        var panel = new Border { Classes = { "cmdgrid" }, Child = list };
+        var popup = new Popup { PlacementTarget = button, Placement = PlacementMode.BottomEdgeAlignedRight, VerticalOffset = 2, Child = panel };
+        void Run(Command c)
+        {
+            popup.IsOpen = false;
+            // a family's: it goes on its button too, as picked from its grid
+            foreach (var g in _dropGroups)
+                if (Array.IndexOf(g.Commands, c) is var i and >= 0) { _dropChoice[g.Key] = i; g.Show(i); }
+            NoteCommand(c.Name, c.Icon, c.Run);
+            c.Run();
+            UpdateToolButtons();
+        }
+        void Open()
+        {
+            if (popup.IsOpen) return;
+            list.Children.Clear();
+            foreach (var item in _overflowItems)
+            {
+                if (item.Classes.Contains("barsep")) { if (list.Children.Count > 0) list.Children.Add(new Border { Classes = { "menusep" } }); continue; }
+                if (!_barCommands.TryGetValue(item, out var cmds)) continue;
+                foreach (var c in cmds)
+                {
+                    var row = new Button
+                    {
+                        Classes = { "cmd", "menurow" },
+                        Content = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Children = { Icons.Make(c.Icon, 20), new TextBlock { Text = c.Name.Replace('\n', ' ') } } },
+                    };
+                    TipBeside(row, panel, TipOf(c));
+                    row.Click += (_, _) => Run(c);
+                    list.Children.Add(row);
+                }
+            }
+            popup.IsOpen = list.Children.Count > 0;
+        }
+        button.Click += (_, _) => Open();
+        // as a family's grid: hovering a moment opens it, leaving both closes it, a click elsewhere too
+        var opening = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(350) };
+        var closing = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(300) };
+        opening.Tick += (_, _) => { opening.Stop(); if (button.IsPointerOver) Open(); };
+        closing.Tick += (_, _) => { closing.Stop(); if (!button.IsPointerOver && !panel.IsPointerOver) popup.IsOpen = false; };
+        button.PointerEntered += (_, _) => { closing.Stop(); if (!popup.IsOpen) opening.Start(); };
+        button.PointerExited += (_, _) => { opening.Stop(); closing.Start(); };
+        panel.PointerEntered += (_, _) => closing.Stop();
+        panel.PointerExited += (_, _) => closing.Start();
+        button.AttachedToVisualTree += (_, _) =>
+        {
+            if (TopLevel.GetTopLevel(button) is not Window w || button.Tag != null) return;
+            button.Tag = w;
+            w.AddHandler(PointerPressedEvent, (_, _) => { if (popup.IsOpen && !button.IsPointerOver && !panel.IsPointerOver) popup.IsOpen = false; },
+                Avalonia.Interactivity.RoutingStrategies.Tunnel, handledEventsToo: true);
+        };
+        return _overflowHost = new Panel { Children = { button, popup } };
     }
 
     bool _fitPending;

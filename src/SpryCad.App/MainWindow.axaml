@@ -24,9 +24,11 @@
       <DockPanel>
         <!-- the command sets, below their commands (the one shown marked by a line along its top) -->
         <StackPanel x:Name="CommandTabs" DockPanel.Dock="Bottom" Orientation="Horizontal" Background="{DynamicResource Spry.Strip}" />
-        <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
+        <!-- the commands: never scrolled (what does not fit goes behind the overflow button at the row's end), clipped
+             while a resize has not been fitted yet -->
+        <Panel ClipToBounds="True">
           <StackPanel x:Name="CommandBar" Orientation="Horizontal" Margin="4,3" />
-        </ScrollViewer>
+        </Panel>
       </DockPanel>
     </Border>
 

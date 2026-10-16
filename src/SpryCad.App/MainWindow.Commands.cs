@@ -309,6 +309,7 @@ public partial class MainWindow
         _toolButtons.Clear();
         _cmdLabels.Clear();
         _dropGroups.Clear();
+        _barCommands.Clear();
         Command T(string icon, string label, SketchTool tool) => new(icon, label, () => SetSketchTool(tool), tool);
         switch (name)
         {
@@ -347,13 +348,12 @@ public partial class MainWindow
                 Cmd("dimension", "Smart Dimension", () => SetSketchTool(SketchTool.SmartDimension), SketchTool.SmartDimension);
                 Sep();
                 // the kinds of a shape on one button, named by the kind shown
-                Family(null, T("line", "Line", SketchTool.Line), T("centerline", "Centerline", SketchTool.Centerline));
+                Family(null, T("line", "Line", SketchTool.Line), T("centerline", "Centerline", SketchTool.Centerline), T("spline", "Spline", SketchTool.Spline));
                 Family(null, T("rect", "Corner Rectangle", SketchTool.Rectangle), T("centerrect", "Center Rectangle", SketchTool.CenterRectangle));
                 Cmd("circle", "Circle", () => SetSketchTool(SketchTool.Circle), SketchTool.Circle);
                 Family(null, T("centerarc", "Centerpoint Arc", SketchTool.CenterArc), T("arc3", "3 Point Arc", SketchTool.ThreePointArc),
                     T("tangentarc", "Tangent Arc", SketchTool.TangentArc));
                 Family(null, T("slot", "Straight Slot", SketchTool.Slot), T("polygon", "Polygon", SketchTool.Polygon));
-                Cmd("spline", "Spline", () => SetSketchTool(SketchTool.Spline), SketchTool.Spline);
                 Cmd("point", "Point", () => SetSketchTool(SketchTool.Point), SketchTool.Point);
                 Sep();
                 Cmd("trim", "Trim Entities", () => SetSketchTool(SketchTool.Trim), SketchTool.Trim);
@@ -403,6 +403,7 @@ public partial class MainWindow
         ToolTip.SetTip(b, CommandHelp.TryGetValue(name, out var help) ? $"{name}{key}\n{help}" : name + key);
         b.Click += (_, _) => { NoteCommand(name, icon, click); click(); };
         if (tool != null) _toolButtons[tool.Value] = b;
+        _barCommands[b] = new[] { new Command(icon, name, click, tool) };
         CommandBar.Children.Add(b);
     }
 
@@ -461,7 +462,7 @@ public partial class MainWindow
         ["Configure"] = "Sets the part's design table rows and the variables marked User.",
     };
 
-    void Sep() => CommandBar.Children.Add(new Border { Width = 1, Background = Palette.Border, Margin = new Thickness(4, 6) });
+    void Sep() => CommandBar.Children.Add(new Border { Width = 1, Background = Palette.Border, Margin = new Thickness(4, 6), Classes = { "barsep" } });
 
     void UpdateToolButtons()
     {
