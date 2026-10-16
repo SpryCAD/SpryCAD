@@ -1245,12 +1245,13 @@ public partial class MainWindow
         if (f == null && Selection.First is { Kind: SelKind.Plane, FeatureId: { } pid }) f = Session.Doc.Find(pid);
         if (f == null) return;
         var victims = new List<Feature> { f };
-        // also delete the absorbed sketch of the feature (like SolidWorks "Delete absorbed features")
-        foreach (var c in f.Consumes)
-            if (Session.Doc.Find(c) is SketchFeature sk && Session.Doc.ConsumersOf(sk.Id).All(x => x.Id == f.Id)) victims.Add(sk);
+        // its sketch kept (as SolidWorks, absorbed features not deleted unless asked): often used again for another
+        // feature, a hole wizard in place of a cut; deleted on its own when not wanted
+        var kept = f.Consumes.Select(c => Session.Doc.Find(c)).OfType<SketchFeature>().Select(s => s.Name).ToList();
         // confirm, listing what goes and what depends on it (as SolidWorks' Confirm Delete)
         var deps = Session.Doc.DependentsOf(victims.Select(v => v.Id));
-        var text = $"Delete {string.Join(", ", victims.Select(v => v.Name))}?";
+        var text = $"Delete {string.Join(", ", victims.Select(v => v.Name))}?"
+            + (kept.Count > 0 ? $" {string.Join(", ", kept)} {(kept.Count == 1 ? "is" : "are")} kept, for another feature." : "");
         if (deps.Count > 0)
         {
             text += $"\n\nThe following dependent features will fail:\n  {string.Join(", ", deps.Select(d => d.Name))}";
