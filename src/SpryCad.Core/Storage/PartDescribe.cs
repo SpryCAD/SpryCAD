@@ -50,13 +50,27 @@ public static class PartDescribe
                     Fields(a, b, "", items, skip: libraries ? new[] { "materialItem", "color" } : Array.Empty<string>());
                     return "Material: " + (items.Count == 0 ? "changed" : Join(items));
                 }
-            case ObjectKind.Settings: return "Part settings changed (units, sheet metal or embedded files)";
+            case ObjectKind.Settings: return "Part settings changed (units or embedded files)";
             case ObjectKind.File: return $"Embedded file {name} replaced";
             case ObjectKind.LibrarySnapshot:
                 {
                     var items = new List<string>();
                     Fields(Data(old), Data(@new), "", items, skip: new[] { "table", "row", "columns" });
                     return $"{name} updated: " + (items.Count == 0 ? "changed" : Join(items));
+                }
+            case ObjectKind.SheetMetalBody:
+            case ObjectKind.SheetMetalOverride:
+                {
+                    var items = new List<string>();
+                    Fields(Data(old), Data(@new), "", items, skip: new[] { "id", "target" });
+                    return $"{name}: " + (items.Count == 0 ? "changed" : Join(items));
+                }
+            case ObjectKind.SheetProfile:
+                {
+                    var a = PartObjects.Open<SheetMetal.ProfileSnapshot>(old, ObjectKind.SheetProfile);
+                    var b = PartObjects.Open<SheetMetal.ProfileSnapshot>(@new, ObjectKind.SheetProfile);
+                    var d = a.Differences(b);
+                    return "Shop profile rows updated" + (d.Count == 0 ? "" : ": " + Join(d));
                 }
             default: return $"{name} changed";
         }

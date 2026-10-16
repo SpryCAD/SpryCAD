@@ -313,7 +313,8 @@ static class AssemblyStorageTests
             var embedded = new Dictionary<string, (string id, string revision)> { ["parts/Embedded.sprt"] = (part.Id!, part.Revision!) };
             var before = AssemblyObjects.From(asm, embedded);
             var kinds = before.Keys.Select(k => k.Kind).ToHashSet();
-            foreach (var k in Enum.GetValues<ObjectKind>().Where(k => (int)k >= 20)) t.True(kinds.Contains(k), $"no {k} object tested");
+            // (40 and up: a library's, LibraryTests')
+            foreach (var k in Enum.GetValues<ObjectKind>().Where(k => (int)k is >= 20 and < 40)) t.True(kinds.Contains(k), $"no {k} object tested");
             t.True(kinds.All(k => (int)k >= 20), "an assembly has only assembly objects");
             var path = Path.Combine(dir, "a.sasm");
             asm.Save(path);

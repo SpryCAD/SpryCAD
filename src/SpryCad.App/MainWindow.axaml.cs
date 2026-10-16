@@ -275,28 +275,6 @@ public partial class MainWindow : Window
     }
 
     /// <summary>Pushes the current rebuild result (or rolled back / preview state) into the viewport.</summary>
-    /// <summary>
-    /// Bend and bend tangent lines of the bodies shown flat (a body is its flat pattern's own solid: no feature after
-    /// the Flat Pattern changed it), on the unfolded face; the viewport puts them on the face toward the viewer.
-    /// </summary>
-    static List<ViewportControl.BendLine> BendLinesOf(ModelState state)
-    {
-        var lines = new List<ViewportControl.BendLine>();
-        foreach (var body in state.Bodies)
-        {
-            if (!state.Flats.TryGetValue(body.Id, out var flat) || !ReferenceEquals(body.Solid.Native, flat.Body)) continue;
-            var fr = flat.Frame;
-            Vec3 P(Vec2 p) => fr.ToWorld(p.X, p.Y, 0);
-            foreach (var bend in flat.Bends)
-            {
-                ViewportControl.BendLine L(Vec2 a, Vec2 b, ViewportControl.BendLineKind kind) => new(P(a), P(b), kind, fr.Normal, flat.Thickness, bend.Allowance);
-                lines.Add(L(bend.A, bend.B, bend.Up ? ViewportControl.BendLineKind.BendUp : ViewportControl.BendLineKind.BendDown));
-                foreach (var (a, b) in bend.Tangents) lines.Add(L(a, b, ViewportControl.BendLineKind.Tangent));
-            }
-        }
-        return lines;
-    }
-
     public void RefreshScene()
     {
         UpdateColorByLabels();
@@ -331,7 +309,7 @@ public partial class MainWindow : Window
             ? FeatureColors.Of(doc).ToDictionary(kv => kv.Key, kv => new Rgba((float)kv.Value[0], (float)kv.Value[1], (float)kv.Value[2]))
             : null;
         Viewport.PreviewBodies = preview;
-        Viewport.BendLines = BendLinesOf(state);
+        Viewport.BendLines = Array.Empty<ViewportControl.BendLine>();
         Viewport.CosmeticThreads = state.Cosmetics.Values.ToList();
         // a slow part just opened: the display saved with it, until the rebuild is done (nothing to pick meanwhile)
         if (result == null && Session.SavedDisplay is { } saved)

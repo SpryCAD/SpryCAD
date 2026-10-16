@@ -27,7 +27,19 @@ public sealed class LibrarySet
             foreach (var t in lib.Tables) Add(lib, t);
             _restrictions.AddRange(lib.Restrictions);
         }
+        ProfileLibrary = Libraries.LastOrDefault(l => l.ProfileTables is { Count: > 0 });
+        Profile = ProfileLibrary == null ? SheetMetal.StarterProfile.Profile : new SheetMetal.ShopProfile(ProfileLibrary.Name, ProfileLibrary.ProfileTables!);
     }
+
+    /// <summary>
+    /// The shop profile every sheet metal part uses (sheet metal spec section 3): that of the last library in the set
+    /// that has one, whole (its tables are never mixed with another profile's, so nothing it lacks is found elsewhere);
+    /// SpryCAD's starter profile when no library has one.
+    /// </summary>
+    public SheetMetal.ShopProfile Profile { get; }
+
+    /// <summary>The library the profile is from (null: the starter profile).</summary>
+    public LoadedLibrary? ProfileLibrary { get; }
 
     void Add(LoadedLibrary lib, LibraryTable t)
     {

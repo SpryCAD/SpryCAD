@@ -112,6 +112,8 @@ public static class LibraryEditor
         public Guid? ReadRevision;
         public List<TableEdit> Tables = new();
         public Dictionary<string, RestrictionEdit> Restrictions = new(StringComparer.Ordinal);
+        /// <summary>The library's shop profile tables (sheet metal): kept as read, published again unchanged.</summary>
+        public List<SpryCad.SheetMetal.ShopProfileTable> ProfileTables = new();
         public bool Dirty;
         /// <summary>SpryCAD's built-in standards (no file): published to a folder the user chooses.</summary>
         public bool BuiltIn => Path.Length == 0;
@@ -366,6 +368,7 @@ public static class LibraryEditor
     {
         var s = new State { Path = path, Id = lib.LibraryId, Name = lib.Name, Layer = lib.Layer, ReadRevision = lib.RevisionId };
         s.Tables.AddRange(lib.Tables.Select(t => Edit(t, true)));
+        s.ProfileTables.AddRange(lib.ProfileTables ?? Array.Empty<SpryCad.SheetMetal.ShopProfileTable>());
         // a table restricted more than once: one restriction doing the same (rows allowed by all, denied by any)
         foreach (var g in lib.Restrictions.GroupBy(r => r.Table))
         {
@@ -1083,6 +1086,71 @@ public static class LibraryEditor
             if (menu.Items.Count == 0) menu.Items.Add(new MenuItem { Header = "Every table in use is listed", IsEnabled = false });
         };
 
+        // ---- the shop profile (sheet metal): its tables from CSV, one per kind; the profile in use is the last library's that has one
+        var profile = new Button { Content = "Shop Profile" };
+        ToolTip.SetTip(profile, "Sheet metal: import the shop's tables (gauges, tooling, allowances, rules) from CSV. A library with a shop profile is the one every sheet metal part uses.");
+        var profileMenu = new MenuFlyout();
+        profile.Flyout = profileMenu;
+        profileMenu.Opening += (_, _) =>
+        {
+            profileMenu.Items.Clear();
+            foreach (var tpl in SpryCad.SheetMetal.ProfileTables.All)
+            {
+                var have = s.ProfileTables.FirstOrDefault(x => x.Key == tpl.Key);
+                var item = new MenuItem { Header = $"{tpl.Title}{(have != null ? $"  ({have.Rows.Count} rows)" : "")}" };
+                foreach (var (units, words) in new[] { ((string?)null, "Import CSV (mm)..."), (SpryCad.SheetMetal.ShopProfileTable.Inch, "Import CSV (inches)...") })
+                {
+                    var imp = new MenuItem { Header = words };
+                    var key = tpl.Key;
+                    imp.Click += async (_, _) => await ImportProfileTable(key, units);
+                    item.Items.Add(imp);
+                }
+                if (have != null)
+                {
+                    var exp = new MenuItem { Header = "Export CSV..." };
+                    exp.Click += async (_, _) =>
+                    {
+                        var f = await w.StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions { Title = $"Export {have.Title}", SuggestedFileName = have.Key + ".csv", DefaultExtension = "csv", FileTypeChoices = new[] { CsvType } });
+                        if (f?.TryGetLocalPath() is { } p) await File.WriteAllTextAsync(p, SpryCad.SheetMetal.ProfileCsv.Write(have));
+                    };
+                    var del = new MenuItem { Header = "Remove" };
+                    del.Click += (_, _) => { s.ProfileTables.Remove(have); Changed(); };
+                    item.Items.Add(exp);
+                    item.Items.Add(del);
+                }
+                profileMenu.Items.Add(item);
+            }
+            var starter = new MenuItem { Header = "Start from SpryCAD's starter profile (example values)" };
+            starter.Click += (_, _) =>
+            {
+                foreach (var tb in SpryCad.SheetMetal.StarterProfile.Tables)
+                    if (!s.ProfileTables.Any(x => x.Key == tb.Key)) s.ProfileTables.Add(tb.Clone());
+                Changed();
+                owner.Status("The starter profile's tables added where the library had none (not yet published).");
+            };
+            profileMenu.Items.Add(new Separator());
+            profileMenu.Items.Add(starter);
+        };
+
+        async Task ImportProfileTable(string key, string? units)
+        {
+            var files = await w.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions { Title = $"Import {key}", AllowMultiple = false, FileTypeFilter = new[] { CsvType } });
+            if (files.FirstOrDefault()?.TryGetLocalPath() is not { } p) return;
+            try
+            {
+                var table = SpryCad.SheetMetal.ProfileCsv.Read(key, await File.ReadAllTextAsync(p), units);
+                var old = s.ProfileTables.FindIndex(x => x.Key == key);
+                // a bend table keeps whether it interpolates (not in the CSV)
+                if (old >= 0) { table.Interpolate = s.ProfileTables[old].Interpolate; s.ProfileTables[old] = table; } else s.ProfileTables.Add(table);
+                Changed();
+                owner.Status($"Imported {table.Rows.Count} rows into the shop profile's {table.Title} (not yet published).");
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or FormatException)
+            {
+                error.Text = $"{System.IO.Path.GetFileName(p)} could not be imported: {ex.Message}";
+            }
+        }
+
         // ---- the bottom: history, publish, close
         var history = new Button { Content = "History..." };
         var publish = new Button { Content = "Publish...", IsDefault = true };
@@ -1122,7 +1190,7 @@ public static class LibraryEditor
             try
             {
                 var st = s;
-                rev = await Task.Run(() => LibraryFile.Publish(st.Path, st.Id, st.Name, st.Layer, tables, restrictions, UserSettings.AuthorName, message.Trim(), st.ReadRevision));
+                rev = await Task.Run(() => LibraryFile.Publish(st.Path, st.Id, st.Name, st.Layer, tables, restrictions, UserSettings.AuthorName, message.Trim(), st.ReadRevision, st.ProfileTables));
                 if (folder != null)
                 {
                     var config = System.IO.Path.Combine(folder, LibraryConfig.FileName);
@@ -1224,8 +1292,8 @@ public static class LibraryEditor
         top.Children.Add(pathText);
         var topBar = new Border { Child = top, Background = Palette.Strip, BorderBrush = Palette.Border, BorderThickness = new Thickness(0, 0, 0, 1) };
 
-        var leftButtons = new StackPanel { Spacing = 6, Margin = new Thickness(8), Children = { addTable, restrict } };
-        foreach (var b in new[] { addTable, restrict }) b.HorizontalAlignment = HorizontalAlignment.Stretch;
+        var leftButtons = new StackPanel { Spacing = 6, Margin = new Thickness(8), Children = { addTable, restrict, profile } };
+        foreach (var b in new[] { addTable, restrict, profile }) b.HorizontalAlignment = HorizontalAlignment.Stretch;
         var leftDock = new DockPanel();
         DockPanel.SetDock(leftButtons, Dock.Bottom);
         leftDock.Children.Add(leftButtons);

@@ -74,10 +74,10 @@ public sealed class ModelState
     public Dictionary<string, (Vec3 A, Vec3 B)> Axes { get; init; } = new();
     public Dictionary<string, ToolInfo> Tools { get; init; } = new();
     public Dictionary<string, SketchResult> Sketches { get; init; } = new();
-    /// <summary>Flat patterns by body id (made by a Flat Pattern feature, whether the part shows flat or folded).</summary>
-    public Dictionary<string, FlatPattern> Flats { get; init; } = new();
     /// <summary>Cosmetic threads by feature id.</summary>
     public Dictionary<string, CosmeticThread> Cosmetics { get; init; } = new();
+    /// <summary>Sheet metal bodies by body id: their bend graphs and rules (sheet metal spec section 4).</summary>
+    public Dictionary<string, SpryCad.SheetMetal.SheetState> Sheets { get; init; } = new();
 
     public static ModelState Initial() => new();
 
@@ -88,9 +88,23 @@ public sealed class ModelState
         Axes = Axes,
         Tools = Tools,
         Sketches = Sketches,
-        Flats = Flats,
         Cosmetics = Cosmetics,
+        Sheets = Sheets,
     };
+
+    /// <summary>This with a sheet metal body's state and solid set (the earlier states keep theirs).</summary>
+    public ModelState WithSheet(SpryCad.SheetMetal.SheetState sheet, Solid solid)
+    {
+        var bodies = new List<Body>(Bodies);
+        var i = bodies.FindIndex(b => b.Id == sheet.BodyId);
+        var body = new Body { Id = sheet.BodyId, Solid = solid };
+        if (i >= 0) bodies[i] = body; else bodies.Add(body);
+        return new()
+        {
+            Bodies = bodies, Planes = Planes, Axes = Axes, Tools = Tools, Sketches = Sketches, Cosmetics = Cosmetics,
+            Sheets = new Dictionary<string, SpryCad.SheetMetal.SheetState>(Sheets) { [sheet.BodyId] = sheet },
+        };
+    }
 
     public ModelState Copy() => new()
     {
@@ -99,8 +113,8 @@ public sealed class ModelState
         Axes = new Dictionary<string, (Vec3 A, Vec3 B)>(Axes),
         Tools = new Dictionary<string, ToolInfo>(Tools),
         Sketches = new Dictionary<string, SketchResult>(Sketches),
-        Flats = new Dictionary<string, FlatPattern>(Flats),
         Cosmetics = new Dictionary<string, CosmeticThread>(Cosmetics),
+        Sheets = new Dictionary<string, SpryCad.SheetMetal.SheetState>(Sheets),
     };
 
     public Box3 Bounds

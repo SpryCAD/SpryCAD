@@ -22,6 +22,8 @@ public partial class MainWindow
         public Action? BeforeCommit;
         /// <summary>Extra cleanup when the edit is cancelled (e.g. remove the Hole Wizard position sketch).</summary>
         public Action? OnCancelled;
+        /// <summary>Other changes the feature makes to the part (a base flange's sheet metal body): in the preview and the commit.</summary>
+        public Action<CadDocument>? ApplyToDoc;
     }
 
     EditContext? _edit;
@@ -83,6 +85,7 @@ public partial class MainWindow
             var i = doc.IndexOf(clone.Id);
             if (i >= 0) doc.Features[i] = clone;
         }
+        _edit.ApplyToDoc?.Invoke(doc);
         // a preview that rebuilds slow features says so up front (from how long they took last time)
         if (_page != null && !_edit.IsNew)
         {
@@ -123,6 +126,7 @@ public partial class MainWindow
                 var i = Session.Doc.IndexOf(f.Id);
                 if (i >= 0) Session.Doc.Features[i] = f;
             }
+            e.ApplyToDoc?.Invoke(Session.Doc);
         });
         Session.EndPreview();
         ShowPage(null);
@@ -190,7 +194,10 @@ public partial class MainWindow
             case PlaneFeature p: OpenPlanePage((PlaneFeature)p.Clone(), false); break;
             case AxisFeature ax: OpenAxisPage((AxisFeature)ax.Clone(), false); break;
             case CombineFeature c: OpenCombinePage((CombineFeature)c.Clone(), false); break;
-            case FlatPatternFeature fp: OpenFlatPatternPage((FlatPatternFeature)fp.Clone(), false); break;
+            case SheetMetal.Features.BaseFlangeFeature bf: OpenBaseFlangePage((SheetMetal.Features.BaseFlangeFeature)bf.Clone(), false); break;
+            case SheetMetal.Features.EdgeFlangeFeature ef: OpenEdgeFlangePage((SheetMetal.Features.EdgeFlangeFeature)ef.Clone(), false); break;
+            case SheetMetal.Features.HemFeature hm: OpenHemPage((SheetMetal.Features.HemFeature)hm.Clone(), false); break;
+            case SheetMetal.Features.SheetCutFeature sc: OpenSheetCutPage((SheetMetal.Features.SheetCutFeature)sc.Clone(), false); break;
         }
     }
 
@@ -861,51 +868,6 @@ public partial class MainWindow
         neutral.Changed += () => { if (page.ActiveBox == neutral && neutral.Items.Count == 1) page.Activate(faces); };
         page.Activate(isNew && f.Faces.Count == 0 ? neutral : faces);
         BeginEdit(f, isNew, page, overlay: true, hint: f.Faces.Count == 0 ? "Select the neutral plane or face, then the faces to draft." : null);
-    }
-
-    // ------------------------------------------------------------------------------------------
-    // Sheet metal
-
-    /// <summary>Edits the part's Flat Pattern feature, or inserts one (at the end, unfolded about the selected planar face).</summary>
-    void FlatPatternCommand()
-    {
-        if (Session.Doc.Features.OfType<FlatPatternFeature>().FirstOrDefault() is { } existing) { EditFeature(existing.Id); return; }
-        var face = Selection.Items.FirstOrDefault(s => s.Kind == SelKind.Face && s.Planar)?.ToFaceRef();
-        OpenFlatPatternPage(new FlatPatternFeature { FixedFace = face }, true);
-    }
-
-    void OpenFlatPatternPage(FlatPatternFeature f, bool isNew)
-    {
-        var page = new PmPage("Flat-Pattern", "flatpattern");
-        var p = page.Section("Parameters");
-        var box = page.Selection(p, "Fixed face", SelFilter.Face, "Face that stays in place; if empty, the largest planar face", max: 1, accept: s => s.Planar);
-        if (f.FixedFace != null) box.Items.Add(FaceItem(f.FixedFace));
-        box.Changed += () => { f.FixedFace = box.Items.FirstOrDefault()?.ToFaceRef(); };
-        var part = Session.Doc.SheetMetal ?? new SheetMetalSettings();
-        var partText = part.Method == BendAllowanceMethod.Din6935 ? "DIN 6935" : $"K-factor {part.KFactor}";
-        var ba = page.Section("Bend Allowance");
-        page.Combo<BendAllowanceMethod?>(ba, "Method", new (BendAllowanceMethod?, string)[]
-        {
-            (null, $"Part setting ({partText})"), (BendAllowanceMethod.KFactor, "K-factor"), (BendAllowanceMethod.Din6935, "DIN 6935"),
-        }, () => f.Method, v => f.Method = v);
-        var k = page.Number(ba, "K-factor", () => f.KFactor ?? "", v => f.KFactor = string.IsNullOrWhiteSpace(v) ? null : v, unit: "", optional: true);
-        k.Watermark = part.KFactor;
-        page.Info(ba, "K-factor: flat bend length = angle × (inner radius + K × thickness); DIN 6935 derives K from r/s and adds no allowance below 15°. Set the part default in Tools > Options.");
-        page.Check(p, "Flatten", () => f.Flatten, v => f.Flatten = v);
-        page.Info(p, "Any part of uniform thickness with round bends can be flattened, including shelled parts and imported sheet metal.");
-        BeginEdit(f, isNew, page, overlay: false);
-    }
-
-    /// <summary>Shows the part flat or folded (the Flat Pattern feature's Flatten option, undoable).</summary>
-    void ToggleFlatten()
-    {
-        if (Session.Doc.Features.OfType<FlatPatternFeature>().FirstOrDefault() is not { } fp)
-        {
-            Status("Insert a Flat Pattern first.");
-            return;
-        }
-        Session.Change(() => fp.Flatten = !fp.Flatten);
-        Status(fp.Flatten ? "Flattened." : "Folded.");
     }
 
     // ------------------------------------------------------------------------------------------

@@ -136,7 +136,6 @@ public partial class MainWindow
             PartMenu(Item("_Import STEP…", () => _ = ImportDialog(), "Ctrl+I", "import")),
             Item("Export _STEP…", () => _ = Export("step"), null, "export-step"),
             Item("Export S_TL…", () => _ = Export("stl"), null, "export-stl"),
-            PartMenu(Item("Export Flat Pattern _DXF…", () => _ = ExportDxf(), null, "export-dxf")),
             "-",
             Item("Re_visions", () => ShowTaskPane(_revisionsPane, focus: true), null, "revisions"),
             Item("_History…", HistoryCommand),
@@ -215,8 +214,13 @@ public partial class MainWindow
                 Item("_Plane…", PlaneCommand, null, "plane"),
                 Item("_Axis…", AxisCommand, null, "axis")),
             Sub("Sheet _Metal",
-                Item("_Flat Pattern…", FlatPatternCommand, null, "flatpattern"),
-                Item("Fla_tten", ToggleFlatten, null, "flatten"))));
+                Item("_Base Flange…", BaseFlangeCommand, null, "baseflange"),
+                Item("_Edge Flange…", EdgeFlangeCommand, null, "edgeflange"),
+                Item("_Hem…", HemCommand, null, "hem"),
+                Item("Sheet C_ut…", SheetCutCommand, null, "sheetcut"),
+                Item("_Corners…", CornersCommand, null, "corners"),
+                Item("Fla_tten", ToggleFlattenCommand, null, "flatten"),
+                Item("E_xport Flat Pattern…", () => _ = ExportFlatCommand(), null, "export-dxf"))));
         MainMenu.Items.Add(Sub("_Tools",
             PartMenu(Item("_Equations…", () => _ = Dialogs.Equations(this), null, "equations")),
             PartMenu(Item("_Design Table…", () => _ = Dialogs.DesignTables(this), null, "table")),
@@ -361,10 +365,14 @@ public partial class MainWindow
                 Cmd("normalto", "Normal To", NormalTo);
                 break;
             case "Sheet Metal":
-                Cmd("flatpattern", "Flat\nPattern", FlatPatternCommand);
-                Cmd("flatten", "Flatten", ToggleFlatten);
+                Cmd("baseflange", "Base\nFlange", BaseFlangeCommand);
+                Cmd("edgeflange", "Edge\nFlange", EdgeFlangeCommand);
+                Cmd("hem", "Hem", HemCommand);
+                Cmd("sheetcut", "Sheet\nCut", SheetCutCommand);
+                Cmd("corners", "Corners", CornersCommand);
+                Cmd("flatten", "Flatten", ToggleFlattenCommand);
                 Sep();
-                Cmd("export-dxf", "Export\nDXF", () => _ = ExportDxf());
+                Cmd("export-dxf", "Export\nFlat", () => _ = ExportFlatCommand());
                 break;
             case "Evaluate":
                 // (in an assembly only what works on one: measuring, its mass properties and its export)
@@ -428,9 +436,13 @@ public partial class MainWindow
         ["Mirror"] = "Mirrors features about a plane or planar face.",
         ["Reference Plane"] = "Creates a plane offset from a plane or planar face.",
         ["Combine"] = "Adds, subtracts or intersects bodies.",
-        ["Flat Pattern"] = "Unfolds the sheet metal part from a fixed face, using the K-factor for bend allowance.",
-        ["Flatten"] = "Toggles the part between flattened and folded.",
-        ["Export DXF"] = "Exports the flat pattern outline and bend lines as a DXF file.",
+        ["Base Flange"] = "Creates a sheet metal part from a closed sketch (a plate) or open lines (a bent profile), using the shop profile's material and gauge.",
+        ["Edge Flange"] = "Adds flanges to sheet edges, measured to the outside or inside mold line or the tangent, with a bend angle and direction.",
+        ["Hem"] = "Folds sheet edges back on themselves (closed, open or teardrop), checked against the shop's hem rules.",
+        ["Sheet Cut"] = "Cuts closed sketch profiles normal to the sheet, through every parallel panel they lie on.",
+        ["Corners"] = "Lists where flanges meet, how each corner is made and its gap check; each corner's treatment and gap can be overridden.",
+        ["Flatten"] = "Toggles the sheet metal between flattened and folded.",
+        ["Export Flat"] = "Exports the flat pattern as DXF or SVG on the shop profile's layers, with bend notes and a bend table.",
         ["Sketch"] = "Starts a sketch on the selected plane or planar face.",
         ["Smart Dimension"] = "Dimensions sketch entities and model edges or vertices.",
         ["Line"] = "Sketches lines, adding relations when they snap to entities, model edges, midpoints and centers.",
@@ -1051,6 +1063,7 @@ public partial class MainWindow
             if (!IsAutosave(path) && !IsEmbeddedCopy(path)) RecentFiles.Add(path);
             Status("Opened " + path);
             NoteLibraryUpdates();
+            TakeProfileUpdates();
             tab.FitAfterLoad = tab.Session.RequestedRevision;
             UpdateSupersededBanner();
             // someone else has it open: read-only (saving makes a copy elsewhere), unless the user says otherwise
@@ -1171,42 +1184,6 @@ public partial class MainWindow
                 else StlWriter.Write(fs, bodies.Select(b => b.Solid));
             });
             Status($"Exported {path} in {sw.ElapsedMilliseconds} ms.");
-        }
-        catch (Exception ex) { App.Log(ex, "Export failed"); await Dialogs.Message(this, "Export Failed", $"Could not export {Path.GetFileName(path)}: {ex.Message}"); }
-    }
-
-    /// <summary>Writes the flat pattern (of each body a Flat Pattern feature unfolded) as DXF, in millimetres.</summary>
-    async Task ExportDxf()
-    {
-        if (PartOnly("Flat pattern export")) return;
-        var flats = Session.Result?.State.Flats;
-        if (flats == null || flats.Count == 0)
-        {
-            await Dialogs.Message(this, "Export DXF", "The part has no flat pattern. Insert a Flat Pattern feature first.");
-            return;
-        }
-        var baseName = Session.FilePath != null ? Path.GetFileNameWithoutExtension(Session.FilePath) : Session.UntitledName;
-        var f = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
-        {
-            Title = "Export Flat Pattern DXF",
-            DefaultExtension = "dxf",
-            SuggestedFileName = baseName + ".dxf",
-            FileTypeChoices = new[] { new FilePickerFileType("DXF") { Patterns = new[] { "*.dxf" } } },
-        });
-        var path = f?.TryGetLocalPath();
-        if (path == null) return;
-        try
-        {
-            var written = new List<string>();
-            foreach (var (bodyId, flat) in flats)
-            {
-                // one file per body: the chosen name for a single body, the body id added for several
-                var p = flats.Count == 1 ? path : Path.Combine(Path.GetDirectoryName(path)!, $"{Path.GetFileNameWithoutExtension(path)}-{bodyId}.dxf");
-                using var fs = File.Create(p);
-                DxfWriter.Write(fs, flat);
-                written.Add(p);
-            }
-            Status($"Exported {string.Join(", ", written)}.");
         }
         catch (Exception ex) { App.Log(ex, "Export failed"); await Dialogs.Message(this, "Export Failed", $"Could not export {Path.GetFileName(path)}: {ex.Message}"); }
     }
