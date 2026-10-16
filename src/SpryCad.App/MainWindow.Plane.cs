@@ -227,9 +227,9 @@ public partial class MainWindow
             relLists[i] = new StackPanel { Spacing = 1 };
             sec.Children.Add(relLists[i]);
             distBoxes[i] = page.Number(sec, "Distance", () => slots[i]?.Value ?? DefaultOffset, v => { if (slots[i] is { } s) s.Value = v; }, "dimension");
-            distRows[i] = (Control)distBoxes[i].Parent!.Parent!;
+            distRows[i] = PmPage.RowOf(distBoxes[i]);
             angleBoxes[i] = page.Number(sec, "Angle", () => slots[i]?.Value ?? "45", v => { if (slots[i] is { } s) s.Value = v; }, "mate-angle", "°");
-            angleRows[i] = (Control)angleBoxes[i].Parent!.Parent!;
+            angleRows[i] = PmPage.RowOf(angleBoxes[i]);
             flips[i] = page.Check(sec, "Flip", () => slots[i]?.Flip ?? false, v => { if (slots[i] is { } s) s.Flip = v; });
         }
 
