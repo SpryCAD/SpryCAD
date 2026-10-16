@@ -103,20 +103,23 @@ public partial class MainWindow
         box.Changed += () => f.Edges = box.Items.Select(SheetEdge).OfType<string>().Distinct().ToList();
         var l = page.Section("Flange");
         page.Number(l, "Length", () => f.Length, v => f.Length = v);
-        page.Combo(l, "Measured to", new[]
+        page.IconChoice(l, new List<(FlangeReference, string, string)>
         {
-            (FlangeReference.OutsideMoldLine, "Outside mold line (virtual sharp)"),
-            (FlangeReference.InsideMoldLine, "Inside mold line"),
-            (FlangeReference.Tangent, "Tangent line"),
-        }, () => f.Reference, v => f.Reference = v);
+            (FlangeReference.OutsideMoldLine, "flange-oml", "Outside mold line: the length to the virtual sharp, outside"),
+            (FlangeReference.InsideMoldLine, "flange-iml", "Inside mold line: the length to the virtual sharp, inside"),
+            (FlangeReference.Tangent, "flange-tangent", "Tangent line: the length from where the bend ends"),
+        }, () => f.Reference, v => f.Reference = v, "Measured to");
         page.Number(l, "Angle", () => f.Angle, v => f.Angle = v, unit: "°");
-        page.Combo(l, "Direction", new[] { (BendDirection.Up, "Up"), (BendDirection.Down, "Down") }, () => f.Direction, v => f.Direction = v);
-        page.Combo(l, "Position", new[]
+        page.IconChoice(l, new List<(BendDirection, string, string)>
         {
-            (FlangePosition.MaterialInside, "Material inside"),
-            (FlangePosition.MaterialOutside, "Material outside"),
-            (FlangePosition.BendOutside, "Bend outside"),
-        }, () => f.Position, v => f.Position = v);
+            (BendDirection.Up, "flange-up", "Up: bent to the top side"), (BendDirection.Down, "flange-down", "Down: bent to the bottom side"),
+        }, () => f.Direction, v => f.Direction = v, "Direction");
+        page.IconChoice(l, new List<(FlangePosition, string, string)>
+        {
+            (FlangePosition.MaterialInside, "flange-matin", "Material inside: the flange inside the original edge"),
+            (FlangePosition.MaterialOutside, "flange-matout", "Material outside: the flange outside the original edge"),
+            (FlangePosition.BendOutside, "flange-bendout", "Bend outside: the whole bend past the original edge"),
+        }, () => f.Position, v => f.Position = v, "Position");
         page.Info(l, "Angle is the bend angle (90° for a square flange). Inside radius and allowance come from the shop profile.");
         BeginEdit(f, isNew, page, overlay: true, hint: f.Edges.Count == 0 ? "Select the sheet edges (thin side faces) to flange." : null);
     }
@@ -140,15 +143,19 @@ public partial class MainWindow
         foreach (var e in f.Edges) box.Items.Add(new SelItem { Kind = SelKind.Face, Name = e, BodyId = f.Body });
         box.Changed += () => f.Edges = box.Items.Select(SheetEdge).OfType<string>().Distinct().ToList();
         var h = page.Section("Hem");
-        page.Combo(h, "Type", new[]
+        page.IconChoice(h, new List<(HemType, string, string)>
         {
-            (HemType.Closed, "Closed"), (HemType.Open, "Open"), (HemType.Teardrop, "Teardrop"),
-        }, () => f.Type, v => f.Type = v);
+            (HemType.Closed, "hem-closed", "Closed: folded flat onto the sheet"), (HemType.Open, "hem-open", "Open: folded back with a gap"),
+            (HemType.Teardrop, "hem-teardrop", "Teardrop: folded round into a loop"),
+        }, () => f.Type, v => f.Type = v, "Type");
         page.Number(h, "Length", () => f.Length, v => f.Length = v);
         page.Number(h, "Gap (open)", () => f.Gap ?? "", v => f.Gap = string.IsNullOrWhiteSpace(v) ? null : v, optional: true);
         page.Number(h, "Radius (teardrop)", () => f.Radius ?? "", v => f.Radius = string.IsNullOrWhiteSpace(v) ? null : v, optional: true);
         page.Number(h, "Angle (teardrop)", () => f.Angle, v => f.Angle = v, unit: "°");
-        page.Combo(h, "Folds over", new[] { (BendDirection.Up, "Top side"), (BendDirection.Down, "Bottom side") }, () => f.Direction, v => f.Direction = v);
+        page.IconChoice(h, new List<(BendDirection, string, string)>
+        {
+            (BendDirection.Up, "hem-top", "Top side: folded over the top"), (BendDirection.Down, "hem-bottom", "Bottom side: folded under"),
+        }, () => f.Direction, v => f.Direction = v, "Folds over");
         page.Check(h, "Hem's outside at the edge (material inside)", () => f.MaterialInside, v => f.MaterialInside = v);
         page.Info(h, "Length is measured from the outside of the fold. Lengths and gaps are checked against the shop profile; a blank gap uses the profile default.");
         BeginEdit(f, isNew, page, overlay: true, hint: f.Edges.Count == 0 ? "Select the sheet edges (thin side faces) to hem." : null);

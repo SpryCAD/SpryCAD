@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Through All - Both: through the whole part, both ways -->
+  <g stroke-linejoin="miter" stroke-linecap="square" fill="none">
+    <path d="M3.5 4.5H28.5V9.5H3.5Z" fill="#D5DBE3" stroke="#24364F"/>
+    <path d="M3.5 22.5H28.5V27.5H3.5Z" fill="#D5DBE3" stroke="#24364F"/>
+    <path d="M12.5 2.5H19.5V29.5H12.5Z" fill="#9CC2EE" stroke="#2F7BD6"/>
+    <path d="M6 16H26" stroke="#24364F" stroke-width="1.6"/>
+  </g>
+</svg>

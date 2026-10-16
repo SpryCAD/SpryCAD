@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Tangent run-out: the groove leaves along the helix -->
+  <g stroke-linejoin="miter" stroke-linecap="square" fill="none">
+    <path d="M4.5 3.5H27.5V9.5H4.5Z" fill="#D5DBE3" stroke="#24364F"/>
+    <path d="M11.5 9.5H20.5V28.5H11.5Z" fill="#D5DBE3" stroke="#24364F"/>
+    <path d="M10.5 28.5L21.5 26L10.5 23.5L21.5 21L12.5 18.5L19.5 16L15.5 13.5" stroke="#2F7BD6" stroke-width="1.6"/>
+  </g>
+</svg>

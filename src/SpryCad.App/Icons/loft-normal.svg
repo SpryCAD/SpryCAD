@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Normal to profile: the loft leaves square to it -->
+  <g stroke-linejoin="miter" stroke-linecap="square" fill="none">
+    <path d="M6 6.5H26" stroke="#24364F" stroke-width="1.8"/>
+    <path d="M10 25.5H22" stroke="#24364F" stroke-width="1.8"/>
+    <path d="M6 6.5C6 16 10 16 10 25.5H22C22 16 26 16 26 6.5Z" fill="#9CC2EE" stroke="#2F7BD6"/>
+    <path d="M16 6.5V1.5" stroke="#2F7BD6" stroke-width="1"/>
+    <path d="M14 4.0L16 1.5L18 4.0" stroke="#2F7BD6"/>
+    <path d="M16 25.5V30.5" stroke="#2F7BD6" stroke-width="1"/>
+    <path d="M14 28.0L16 30.5L18 28.0" stroke="#2F7BD6"/>
+  </g>
+</svg>

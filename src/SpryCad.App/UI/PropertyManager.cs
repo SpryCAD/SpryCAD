@@ -442,7 +442,7 @@ public sealed class PmPage
     /// A choice as a row of icon buttons, each showing its option (the Hole Wizard's hole types): the one chosen pressed;
     /// its name and what it is in its tooltip.
     /// </summary>
-    public void IconChoice<T>(StackPanel s, IReadOnlyList<(T value, string icon, string tip)> options, Func<T> get, Action<T> set)
+    public void IconChoice<T>(StackPanel s, IReadOnlyList<(T value, string icon, string tip)> options, Func<T> get, Action<T> set, string? label = null)
     {
         var row = new WrapPanel { Orientation = Orientation.Horizontal };
         var buttons = new List<(Avalonia.Controls.Primitives.ToggleButton b, T v)>();
@@ -457,7 +457,8 @@ public sealed class PmPage
             row.Children.Add(b);
         }
         Mark();
-        s.Children.Add(row);
+        // (labeled as a field is, when the section holds more than this choice)
+        s.Children.Add(label != null ? Row(label, row) : row);
     }
 
     public Button ButtonRow(StackPanel s, string text, Action click, string? icon = null)

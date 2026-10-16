@@ -337,10 +337,12 @@ public partial class MainWindow
         if (!string.IsNullOrEmpty(f.SketchId)) skBox.Items.Add(new SelItem { Kind = SelKind.Sketch, FeatureId = f.SketchId });
         skBox.Changed += () => f.SketchId = skBox.Items.FirstOrDefault()?.FeatureId ?? "";
         var d1 = page.Section("Direction 1");
-        page.Combo(d1, "End", new List<(EndCondition, string)>
+        page.IconChoice(d1, new List<(EndCondition, string, string)>
         {
-            (EndCondition.Blind, "Blind"), (EndCondition.ThroughAll, "Through All"), (EndCondition.ThroughAllBoth, "Through All - Both"), (EndCondition.MidPlane, "Mid Plane"),
-            (EndCondition.UpToSurface, "Up To Surface"), (EndCondition.UpToBody, "Up To Body"),
+            (EndCondition.Blind, "end-blind", "Blind: to a depth"), (EndCondition.ThroughAll, "end-throughall", "Through All: through the whole part"),
+            (EndCondition.ThroughAllBoth, "end-throughallboth", "Through All - Both: through the whole part, both ways"),
+            (EndCondition.MidPlane, "end-midplane", "Mid Plane: half the depth each side of the sketch"),
+            (EndCondition.UpToSurface, "end-uptosurface", "Up To Surface: up to a face or plane"), (EndCondition.UpToBody, "end-uptobody", "Up To Body: up to another body"),
         }, () => f.End, v => f.End = v);
         page.Check(d1, "Reverse direction", () => f.Reverse, v => f.Reverse = v);
         // Up To Surface / Up To Body: where it ends (a plane, a planar or cylindrical face; for a body, any face of it)
@@ -504,10 +506,13 @@ public partial class MainWindow
         clBox.Refresh();
         clBox.Changed += () => f.CenterlineSketchId = clBox.Items.FirstOrDefault()?.FeatureId;
         var opts = page.Section("Start/End Constraints");
-        var tangency = new List<(LoftTangency, string)> { (LoftTangency.None, "None"), (LoftTangency.Normal, "Normal to profile") };
-        page.Combo(opts, "Start", tangency, () => f.StartTangency, v => f.StartTangency = v);
+        var tangency = new List<(LoftTangency, string, string)>
+        {
+            (LoftTangency.None, "loft-free", "None: the loft leaves the profile as it falls"), (LoftTangency.Normal, "loft-normal", "Normal to profile: the loft leaves square to it"),
+        };
+        page.IconChoice(opts, tangency, () => f.StartTangency, v => f.StartTangency = v, "Start");
         page.Number(opts, "Start tangent length", () => f.StartLength, v => f.StartLength = v, unit: "×");
-        page.Combo(opts, "End", tangency, () => f.EndTangency, v => f.EndTangency = v);
+        page.IconChoice(opts, tangency, () => f.EndTangency, v => f.EndTangency = v, "End");
         page.Number(opts, "End tangent length", () => f.EndLength, v => f.EndLength = v, unit: "×");
         var osec = page.Section("Options");
         page.Check(osec, "Close loft", () => f.Closed, v => f.Closed = v);
@@ -623,10 +628,11 @@ public partial class MainWindow
             f.Standard = i < 0 || v[..i] == coarse ? null : v[..i];
         }, "thread");
         page.Number(spec, "Pitch (custom)", () => f.Pitch, v => f.Pitch = v, "dimension");
-        page.Combo(spec, "End", new List<(ThreadEnd, string)>
+        page.IconChoice(spec, new List<(ThreadEnd, string, string)>
         {
-            (ThreadEnd.Blind, "Blind"), (ThreadEnd.UpToNext, "Up To Next"), (ThreadEnd.ThroughAll, "Through All"),
-        }, () => f.End, v => f.End = v);
+            (ThreadEnd.Blind, "thread-blind", "Blind: a given length"), (ThreadEnd.UpToNext, "thread-uptonext", "Up To Next: up to the head or a shoulder"),
+            (ThreadEnd.ThroughAll, "thread-throughall", "Through All: the whole length (nuts, through holes)"),
+        }, () => f.End, v => f.End = v, "End");
         page.Number(spec, "Length (blind)", () => f.Length, v => f.Length = v, "dimension", optional: true);
         page.Info(spec, "Use Up To Next on bolts to stop short of the head or a shoulder, and Through All for nuts and through holes.");
         var opt = page.Section("Options");
@@ -635,10 +641,11 @@ public partial class MainWindow
         page.Check(opt, "Lead-in chamfer", () => f.Chamfer, v => f.Chamfer = v);
         page.Check(opt, "Cosmetic thread", () => f.Cosmetic, v => f.Cosmetic = v);
         page.Info(opt, "A cosmetic thread is shown as a helix on the face and is always modeled on export. View > Threads overrides the display of all threads.");
-        page.Combo(opt, "Thread end", new List<(ThreadRunout, string)>
+        page.IconChoice(opt, new List<(ThreadRunout, string, string)>
         {
-            (ThreadRunout.None, "Plain"), (ThreadRunout.Relief, "Relief groove"), (ThreadRunout.Tangent, "Tangent run-out (shafts)"),
-        }, () => f.Runout, v => f.Runout = v);
+            (ThreadRunout.None, "runout-plain", "Plain: the thread stops square"), (ThreadRunout.Relief, "runout-relief", "Relief groove: an undercut at the end for the tool"),
+            (ThreadRunout.Tangent, "runout-tangent", "Tangent run-out (shafts): the groove leaves along the helix"),
+        }, () => f.Runout, v => f.Runout = v, "Thread end");
         page.Info(opt, "Relief groove: an undercut at the thread end for tool clearance at a shoulder. Tangent run-out: the thread groove exits the shaft along the helix tangent.");
         page.Check(opt, "Left hand", () => f.LeftHand, v => f.LeftHand = v);
         page.Check(opt, "Start at the other end", () => f.Reverse, v => f.Reverse = v);
@@ -696,10 +703,11 @@ public partial class MainWindow
             var fbox = page.Selection(sc, "Between features", SelFilter.Feature, "Select features in the design tree or graphics area");
             foreach (var id in fs.Features) fbox.Items.Add(new SelItem { Kind = SelKind.Feature, FeatureId = id });
             fbox.Changed += () => { fs.Features.Clear(); fs.Features.AddRange(fbox.Items.Select(i => i.FeatureId!).Distinct()); };
-            page.Combo(sc, "Edges", new List<(BlendScopeKind, string)>
+            page.IconChoice(sc, new List<(BlendScopeKind, string, string)>
             {
-                (BlendScopeKind.Concave, "Concave"), (BlendScopeKind.Convex, "Convex"), (BlendScopeKind.All, "Concave and convex"),
-            }, () => fs.ScopeKind, v => fs.ScopeKind = v);
+                (BlendScopeKind.Concave, "edges-concave", "Concave: inside corners"), (BlendScopeKind.Convex, "edges-convex", "Convex: outside corners"),
+                (BlendScopeKind.All, "edges-all", "Concave and convex: every corner"),
+            }, () => fs.ScopeKind, v => fs.ScopeKind = v, "Edges");
             page.Info(sc, "Whole body fillets every edge of the selected type; Between features fillets the edges where the features meet the body or each other, including pattern and mirror copies. Edges that cannot be filleted are skipped with a warning.");
         }
         var p = page.Section(fillet ? "Fillet Parameters" : "Chamfer Parameters");
@@ -716,10 +724,11 @@ public partial class MainWindow
                 RowOf(angle!).IsVisible = ch.Type == ChamferType.AngleDistance;
                 flip!.IsVisible = ch.Type != ChamferType.Distance;
             }
-            page.Combo(p, "Type", new List<(ChamferType, string)>
+            page.IconChoice(p, new List<(ChamferType, string, string)>
             {
-                (ChamferType.Distance, "Distance"), (ChamferType.AngleDistance, "Angle-Distance"), (ChamferType.DistanceDistance, "Distance-Distance"),
-            }, () => ch.Type, v => { ch.Type = v; ShowFields(); });
+                (ChamferType.Distance, "chamfer-d", "Distance: the same distance on both faces"), (ChamferType.AngleDistance, "chamfer-ad", "Angle-Distance: a distance and an angle"),
+                (ChamferType.DistanceDistance, "chamfer-dd", "Distance-Distance: a distance on each face"),
+            }, () => ch.Type, v => { ch.Type = v; ShowFields(); }, "Type");
             page.Number(p, "Distance", () => ch.Distance, v => ch.Distance = v, "chamfer");
             d2 = page.Number(p, "Distance 2", () => ch.Distance2, v => ch.Distance2 = v, "chamfer");
             angle = page.Number(p, "Angle", () => ch.Angle, v => ch.Angle = v, "dimension", "°");
@@ -1213,7 +1222,11 @@ public partial class MainWindow
     {
         var page = new PmPage("Combine", "combine");
         var t = page.Section("Operation Type");
-        page.Combo(t, "Operation", new List<(CombineOp, string)> { (CombineOp.Add, "Add"), (CombineOp.Subtract, "Subtract"), (CombineOp.Common, "Common") }, () => f.Op, v => f.Op = v);
+        page.IconChoice(t, new List<(CombineOp, string, string)>
+        {
+            (CombineOp.Add, "combine-add", "Add: the bodies joined"), (CombineOp.Subtract, "combine-subtract", "Subtract: the other bodies taken from the main one"),
+            (CombineOp.Common, "combine-common", "Common: only where the bodies overlap"),
+        }, () => f.Op, v => f.Op = v, "Operation");
         var m = page.Section("Bodies");
         var main = page.Selection(m, "Main body", SelFilter.Body, "Main body; select one of its faces", 1);
         if (!string.IsNullOrEmpty(f.MainBody)) main.Items.Add(new SelItem { Kind = SelKind.Body, BodyId = f.MainBody });

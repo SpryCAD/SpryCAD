@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Inside mold line: the length to the virtual sharp, inside -->
+  <g stroke-linejoin="miter" stroke-linecap="square" fill="none">
+    <path d="M3.5 24.5H17.5V27.5H3.5Z" fill="#D5DBE3" stroke="#24364F"/>
+    <path d="M17.5 24.5Q20.5 24.5 20.5 21.5V5.5H23.5V21.5Q23.5 27.5 17.5 27.5Z" fill="#9CC2EE" stroke="#2F7BD6"/>
+    <path d="M20.5 24.5H27" stroke="#24364F" stroke-width="0.8" stroke-dasharray="1.5 1"/>
+    <path d="M27.5 5.5V24.5" stroke="#2F7BD6" stroke-width="1"/>
+  </g>
+</svg>

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- None: the loft leaves the profile as it falls -->
+  <g stroke-linejoin="miter" stroke-linecap="square" fill="none">
+    <path d="M6 6.5H26" stroke="#24364F" stroke-width="1.8"/>
+    <path d="M10 25.5H22" stroke="#24364F" stroke-width="1.8"/>
+    <path d="M6 6.5L10 25.5H22L26 6.5Z" fill="#9CC2EE" stroke="#2F7BD6"/>
+  </g>
+</svg>

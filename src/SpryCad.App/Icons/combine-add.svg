@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Add: the bodies joined -->
+  <g stroke-linejoin="miter" stroke-linecap="square" fill="none">
+    <path d="M16 9.3A8.5 8.5 0 1 0 16 22.7A8.5 8.5 0 1 0 16 9.3Z" fill="#9CC2EE" stroke="#2F7BD6"/>
+  </g>
+</svg>
