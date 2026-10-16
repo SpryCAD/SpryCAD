@@ -887,12 +887,17 @@ public static class DirectBlend
     /// <summary>Whether the edge passes through the inside of face t (on the same surface), sampled every step.</summary>
     static bool Crosses(NEdge e, NFace t, double step, double tol)
     {
-        if (!e.Bounds().Overlaps(t.Bounds(), tol)) return false;
+        var tb = t.Bounds();
+        if (!e.Bounds().Overlaps(tb, tol)) return false;
         var dom = NDomain.Cached(t, 1e-3);
         int n = (int)Math.Clamp(Math.Ceiling(e.Length / Math.Max(step, 1e-9)), 8, 4096);
+        // (a sample well clear of the face's box (by the blend's size) is not inside it: not projected. A long edge
+        // passing a small blend, a rim by a spoke's fillet, is a thousand samples, nearly all of them far)
+        var reach = 4 * step + tol;
         for (int i = 0; i <= n; i++)
         {
             var p = e.At((double)i / n);
+            if (!tb.Contains(p, reach)) continue;
             if (dom.Classify(t.Surface.Project(p), tol) > 0) return true;
         }
         return false;
