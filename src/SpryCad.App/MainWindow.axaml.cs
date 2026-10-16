@@ -492,6 +492,13 @@ public partial class MainWindow : Window
             _page.HandlePick(new SelItem { Kind = SelKind.Plane, Name = id, Frame = Resolver.StdPlane(id) });
             return;
         }
+        // a reference plane into a box that takes planes (as clicked in the graphics area)
+        if (_page?.ActiveBox != null && (_page.ActiveBox.Filter & SelFilter.Plane) != 0 && Session.Doc.Find(id) is PlaneFeature rp)
+        {
+            _page.HandlePick(new SelItem { Kind = SelKind.Plane, Name = rp.Name, FeatureId = rp.Id, Frame = Session.Result?.State.Planes.GetValueOrDefault(rp.Id) });
+            RefreshScene();
+            return;
+        }
         // an origin axis into a box that takes axes or lines
         if (_page?.ActiveBox != null && WorldAxisItem(id) is { } wax && PmPage.Matches(_page.ActiveBox.Filter, wax))
         {
