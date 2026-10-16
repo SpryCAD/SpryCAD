@@ -303,6 +303,12 @@ public partial class MainWindow : Window
             if (Session.PreviewActive && Session.PreviewResult is { } pr && pr.Status.GetValueOrDefault(_edit.Feature.Id) is { Ok: true })
                 preview = pr.State.Bodies;
         }
+        else if (_edit != null && baseResult != null && !(Session.PreviewActive && Session.PreviewResult != null))
+        {
+            // a feature being edited, its first preview not here yet: the model up to it (the preview is rolled back to it too)
+            var idx = _edit.IsNew ? doc.ActiveCount : doc.IndexOf(_edit.Feature.Id) + 1;
+            state = StateBefore(baseResult, idx);
+        }
 
         Viewport.Bodies = state.Bodies;
         Viewport.ColorByFeature = _colorByFeature

@@ -82,15 +82,16 @@ public partial class MainWindow
         }
         else
         {
+            // rolled back to the feature, as it is edited: the features after it are neither built nor shown
             var i = doc.IndexOf(clone.Id);
-            if (i >= 0) doc.Features[i] = clone;
+            if (i >= 0) { doc.Features[i] = clone; doc.RollbackIndex = Math.Min(doc.ActiveCount, i + 1); }
         }
         _edit.ApplyToDoc?.Invoke(doc);
         // a preview that rebuilds slow features says so up front (from how long they took last time)
         if (_page != null && !_edit.IsNew)
         {
             var (secs, slowest, slowSecs) = Session.Estimate(doc, doc.IndexOf(clone.Id));
-            var note = secs >= 2 ? $"⏱ Each preview rebuilds all subsequent features, about {secs:0} s{(slowest != null && slowSecs >= 1 ? $"; slowest: {slowest}, {slowSecs:0.0} s" : "")}." : null;
+            var note = secs >= 2 ? $"⏱ Each preview takes about {secs:0} s." : null;
             if (note != null && (_page.Message == null || _page.Message == _edit.Hint || _page.Message.StartsWith("⏱"))) _page.Message = note;
         }
         Session.RequestPreview(doc);

@@ -1235,7 +1235,14 @@ public partial class MainWindow
             if (r == false) victims.AddRange(deps);
         }
         else if (!await Dialogs.YesNo(this, "Confirm Delete", text, "Delete", "Cancel")) return;
-        Session.Change(() => { foreach (var v in victims) Session.Doc.Features.Remove(v); FixRollback(); });
+        Session.Change(() =>
+        {
+            // the rollback bar stays under the same feature: one place up for each feature deleted above it (it is an index)
+            var d = Session.Doc;
+            if (d.RollbackIndex is int rb) d.RollbackIndex = rb - victims.Count(v => d.IndexOf(v.Id) is var i && i >= 0 && i < rb);
+            foreach (var v in victims) d.Features.Remove(v);
+            FixRollback();
+        });
         Selection.Clear();
         Status($"Deleted {string.Join(", ", victims.Select(v => v.Name))}. (Ctrl+Z to undo)");
     }
