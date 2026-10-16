@@ -33,7 +33,8 @@ public partial class MainWindow
         void Sep() => row.Children.Add(new TextBlock { Text = "›", Foreground = Palette.TextMuted, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(2, 0) });
         void Crumb(string icon, string text, Action? click)
         {
-            var content = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, Children = { Icons.Make(icon, 16), new TextBlock { Text = text, VerticalAlignment = VerticalAlignment.Center, FontSize = TypeScale.Small } } };
+            // (a long part or feature name cut short, so the trail stays on the view; a crumb's button tip names it whole)
+            var content = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, Children = { Icons.Make(icon, 16), Labels.Trimmed(text, TypeScale.Small, 180, tip: click == null) } };
             if (click == null) { row.Children.Add(new Border { Child = content, Padding = new Thickness(4, 2) }); return; }
             var b = new Button { Classes = { "tb" }, Content = content, Padding = new Thickness(4, 2) };
             ToolTip.SetTip(b, $"Select {text}");

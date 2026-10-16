@@ -95,13 +95,21 @@ public sealed class PmPage
     public Action? OnCancel { get; set; }
 
     readonly Dictionary<TextBox, string> _invalid = new();
-    /// <summary>Label of the first field holding an invalid value (OK must not commit the last valid one silently).</summary>
-    public string? FirstInvalidField => _invalid.Count == 0 ? null : _invalid.Values.First();
+    /// <summary>
+    /// Label of the first field holding an invalid value (OK must not commit the last valid one silently). A field the
+    /// page hides (an Angle row while the relation is a distance) does not count: it is not what OK commits.
+    /// </summary>
+    public string? FirstInvalidField => _invalid.Where(kv => Shown(kv.Key)).Select(kv => kv.Value).FirstOrDefault();
     public List<PmSelectionBox> Boxes { get; } = new();
     public PmSelectionBox? ActiveBox { get; private set; }
     public event Action? ActiveBoxChanged;
     public Func<string, Quantity?> Lookup { get; set; } = _ => null;
-    public string? Message { get => _msg.Text; set { _msg.Text = value; _msgBorder.IsVisible = !string.IsNullOrEmpty(value); } }
+    public string? Message
+    {
+        get => _msg.Text;
+        set { _msg.Text = value; _msgBorder.IsVisible = !string.IsNullOrEmpty(value); MessageChanged?.Invoke(); }
+    }
+    public event Action? MessageChanged;
 
     readonly DockPanel _root = new();
     readonly StackPanel _body = new() { Spacing = 0 };
@@ -112,9 +120,15 @@ public sealed class PmPage
     {
         Title = title; Icon = icon;
         var header = new DockPanel { Margin = new Thickness(6, 6, 6, 2) };
-        var titleRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
-        titleRow.Children.Add(Icons.Make(icon, 22));
-        titleRow.Children.Add(new TextBlock { Text = title, FontSize = TypeScale.Title, FontWeight = FontWeight.SemiBold, VerticalAlignment = VerticalAlignment.Center, Foreground = Palette.Heading });
+        // (a long title cut short in a narrow panel, not clipped)
+        var titleRow = new DockPanel();
+        var titleIcon = Icons.Make(icon, 22);
+        titleIcon.Margin = new Thickness(0, 0, 6, 0);
+        DockPanel.SetDock(titleIcon, Dock.Left);
+        titleRow.Children.Add(titleIcon);
+        var titleText = Labels.Trimmed(title, TypeScale.Title);
+        titleText.FontWeight = FontWeight.SemiBold; titleText.Foreground = Palette.Heading;
+        titleRow.Children.Add(titleText);
         DockPanel.SetDock(titleRow, Dock.Top);
         header.Children.Add(titleRow);
         if (showOkCancel)
@@ -160,6 +174,17 @@ public sealed class PmPage
     }
 
     public void RaiseChanged() => Changed?.Invoke();
+
+    /// <summary>
+    /// Whether the page shows <paramref name="c"/>: nothing between it and the page is hidden (whether the page itself
+    /// is on screen does not matter).
+    /// </summary>
+    bool Shown(Control c)
+    {
+        for (Control? x = c; x != null && x != _root; x = x.Parent as Control)
+            if (!x.IsVisible) return false;
+        return true;
+    }
 
     /// <summary>
     /// A field's row in its section (the field with its label, or the field alone): what to hide to hide the field.
@@ -253,6 +278,10 @@ public sealed class PmPage
         }
         void Validate()
         {
+            // a hidden field neither writes nor is wrong: two fields can share a value (a plane reference's Distance
+            // and Angle), and the hidden one would write it back as its own kind ("Wall" as "(Wall)deg") when the page
+            // opens, since TextChanged fires late for each field's first text
+            if (!Shown(tb)) { MarkInvalid(false); tb.Classes.Set("invalid", false); return; }
             var t = tb.Text ?? "";
             if (optional && string.IsNullOrWhiteSpace(t))
             {

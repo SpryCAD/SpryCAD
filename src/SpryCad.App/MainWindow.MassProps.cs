@@ -51,7 +51,8 @@ public partial class MainWindow
         // material and density
         var materials = OfferedMaterials();
         var names = new List<string>();
-        var combo = new ComboBox { Width = 220, MaxDropDownHeight = 420 };
+        // (as wide as a long material name needs, within reason)
+        var combo = new ComboBox { MinWidth = 220, MaxWidth = 320, MaxDropDownHeight = 420 };
         var dens = new TextBox { Width = 100 };
         var unit = new TextBlock { VerticalAlignment = VerticalAlignment.Center, Foreground = LabelBrush };
         var filling = false;
@@ -133,19 +134,16 @@ public partial class MainWindow
         var copy = new Button { Content = "Copy to Clipboard" };
         copy.Click += (_, _) => { if (_massText.Length > 0) _ = Clipboard?.SetTextAsync(_massText); };
         var close = new Button { Content = "Close", IsCancel = true };
-        var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, HorizontalAlignment = HorizontalAlignment.Right };
-        foreach (var b in new[] { copy, close }) { b.MinWidth = 80; b.HorizontalContentAlignment = HorizontalAlignment.Center; buttons.Children.Add(b); }
 
         var content = new StackPanel { Spacing = 10 };
         content.Children.Add(materialRow);
         content.Children.Add(reportBox);
-        content.Children.Add(buttons);
         var w = new Window
         {
             Title = "Mass Properties - " + Session.Title.TrimEnd(' ', '*'),
             Width = 720, SizeToContent = SizeToContent.Height, CanResize = false, CanMinimize = false, CanMaximize = false,
             WindowStartupLocation = WindowStartupLocation.CenterOwner, ShowInTaskbar = false,
-            Content = new Border { Padding = new Thickness(12), Child = content },
+            Content = new Border { Padding = Spacing.Dialog, Child = Dialogs.WithButtons(content, null, copy, close) },
         };
         Dialogs.Compact(w);
         close.Click += (_, _) => w.Close();
@@ -185,20 +183,12 @@ public partial class MainWindow
         var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         row.Children.Add(new TextBlock { Text = "Decimal places", VerticalAlignment = VerticalAlignment.Center });
         row.Children.Add(decimals);
-        var ok = new Button { Content = "OK", IsDefault = true, MinWidth = 80, HorizontalContentAlignment = HorizontalAlignment.Center };
-        var cancel = new Button { Content = "Cancel", IsCancel = true, MinWidth = 80, HorizontalContentAlignment = HorizontalAlignment.Center };
-        var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 8, 0, 0) };
-        buttons.Children.Add(ok); buttons.Children.Add(cancel);
+        var ok = new Button { Content = "OK", IsDefault = true };
+        var cancel = new Button { Content = "Cancel", IsCancel = true };
         var sp = new StackPanel { Spacing = 10 };
         sp.Children.Add(new TextBlock { Text = "Report", FontWeight = FontWeight.SemiBold });
-        sp.Children.Add(row); sp.Children.Add(sci); sp.Children.Add(buttons);
-        var w = new Window
-        {
-            Title = "Mass Properties Options", Width = 300, SizeToContent = SizeToContent.Height, CanResize = false, CanMinimize = false, CanMaximize = false,
-            WindowStartupLocation = WindowStartupLocation.CenterOwner, ShowInTaskbar = false,
-            Content = new Border { Padding = new Thickness(14), Child = sp },
-        };
-        Dialogs.Compact(w);
+        sp.Children.Add(row); sp.Children.Add(sci);
+        var w = Dialogs.MakeWindow("Mass Properties Options", Dialogs.WithButtons(sp, null, ok, cancel), 300);
         var changed = false;
         ok.Click += (_, _) =>
         {

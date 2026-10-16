@@ -48,8 +48,9 @@ public partial class MainWindow
         {
             var b = new Button
             {
-                Content = UI.Icons.Make(icon, 14), Padding = new Thickness(4, 2), MinHeight = 0,
-                Background = Brushes.Transparent, BorderThickness = new Thickness(0), VerticalAlignment = VerticalAlignment.Center,
+                Content = UI.Icons.Make(icon, 14), Padding = new Thickness(4, 2), MinHeight = 22, MinWidth = 22, Classes = { "tb" },
+                HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
             };
             ToolTip.SetTip(b, tip);
             return b;
@@ -109,8 +110,7 @@ public partial class MainWindow
         var p = new TaskPane(id, title, icon, content, popOut);
         p.Tab = new Button
         {
-            Content = UI.Icons.Make(icon, 18), Padding = new Thickness(3), MinHeight = 0, MinWidth = 0,
-            Background = Brushes.Transparent, BorderThickness = new Thickness(1), BorderBrush = Brushes.Transparent, CornerRadius = new CornerRadius(3),
+            Content = UI.Icons.Make(icon, 18), Padding = new Thickness(3), MinHeight = 0, MinWidth = 0, Classes = { "tb" },
         };
         ToolTip.SetTip(p.Tab, title);
         p.Tab.Click += (_, _) =>

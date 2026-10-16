@@ -286,10 +286,9 @@ static class Updater
         var text = new TextBlock { Text = $"SpryCAD {r.Version}", TextWrapping = TextWrapping.Wrap };
         var bar = new ProgressBar { Minimum = 0, Maximum = 1, Height = 8, Margin = new Thickness(0, 10, 0, 0) };
         var note = new TextBlock { Text = "Installs on exit. Hide to keep downloading in the background.", Foreground = Palette.TextMuted, FontSize = TypeScale.Small, Margin = new Thickness(0, 8, 0, 0), TextWrapping = TextWrapping.Wrap };
-        var hide = new Button { Content = "Hide", IsDefault = true, IsCancel = true, MinWidth = 80, HorizontalContentAlignment = HorizontalAlignment.Center,
-            HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 12, 0, 0) };
-        var root = new StackPanel { Children = { text, bar, note, hide } };
-        var w = Dialogs.MakeWindow("Downloading Update", root, 420);
+        var hide = new Button { Content = "Hide", IsDefault = true, IsCancel = true };
+        var root = new StackPanel { Children = { text, bar, note } };
+        var w = Dialogs.MakeWindow("Downloading Update", Dialogs.WithButtons(root, null, hide), 420);
         void Show(double f) { bar.Value = f; text.Text = $"SpryCAD {r.Version}: {f:P0}"; }
         Show(_downloaded);
         DownloadProgress += Show;
@@ -387,11 +386,11 @@ static class Updater
                 list.Children.Add(row);
             }
         }
-        var close = new Button { Content = "Close", IsDefault = true, IsCancel = true, MinWidth = 80, HorizontalContentAlignment = HorizontalAlignment.Center,
-            HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 12, 0, 0) };
+        var close = new Button { Content = "Close", IsDefault = true, IsCancel = true };
         var root = new DockPanel();
-        DockPanel.SetDock(close, Dock.Bottom);
-        root.Children.Add(close);
+        var buttons = Dialogs.ButtonRow(close);
+        DockPanel.SetDock(buttons, Dock.Bottom);
+        root.Children.Add(buttons);
         root.Children.Add(new ScrollViewer { Content = list, MaxHeight = 480, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled });
         var w = Dialogs.MakeWindow($"Change Log ({(channel == "dev" ? "dev builds" : "releases")})", root, 640);
         close.Click += (_, _) => w.Close();

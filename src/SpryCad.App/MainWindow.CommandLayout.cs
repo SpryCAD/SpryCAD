@@ -53,10 +53,26 @@ public partial class MainWindow
         ShowTab(_activeTab);
     }
 
+    /// <summary>
+    /// A name as a large button shows it (the bar's when large, a family grid's always, <paramref name="large"/>): two
+    /// words or more over two lines, broken where the lines come out most even ("Extruded Cut" as "Extruded / Cut", as
+    /// "Linear / Pattern" is), one word on one. Every label is two lines high (Styles.axaml), so no tab's row is
+    /// shorter than another's.
+    /// </summary>
+    static string BarLabel(string name, bool large = false)
+    {
+        if (!(large || LargeBar)) return name;
+        var words = name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (words.Length < 2) return name;
+        var best = Enumerable.Range(1, words.Length - 1)
+            .MinBy(k => Math.Max(string.Join(' ', words[..k]).Length, string.Join(' ', words[k..]).Length));
+        return string.Join(' ', words[..best]) + "\n" + string.Join(' ', words[best..]);
+    }
+
     /// <summary>A button's content: its icon and its name, below it (large) or beside it (compact).</summary>
     StackPanel RowContent(string icon, string text)
     {
-        var label = new TextBlock { Text = text };
+        var label = new TextBlock { Text = BarLabel(text) };
         _cmdLabels.Add(label);
         return LargeBar
             ? new StackPanel { Spacing = 4, Children = { Icons.Make(icon, 32), label } }
@@ -93,7 +109,7 @@ public partial class MainWindow
         {
             // (no tooltip of its own: it would cover the grid, whose buttons have theirs)
             iconHost.Content = Icons.Make(family[i].Icon, LargeBar ? 32 : 22);
-            text.Text = family[i].Name;
+            text.Text = BarLabel(family[i].Name);
         }
 
         // the grid: the family's name over its commands, each its icon above its name, the one on the button marked
@@ -120,7 +136,7 @@ public partial class MainWindow
             {
                 var idx = i;
                 var c = family[i];
-                var item = new Button { Classes = { "cmd", "big" }, Content = new StackPanel { Spacing = 4, Children = { Icons.Make(c.Icon, 32), new TextBlock { Text = c.Name } } } };
+                var item = new Button { Classes = { "cmd", "big" }, Content = new StackPanel { Spacing = 4, Children = { Icons.Make(c.Icon, 32), new TextBlock { Text = BarLabel(c.Name, large: true) } } } };
                 item.Classes.Set("active", i == Current());
                 ToolTip.SetTip(item, TipOf(c));
                 item.Click += (_, _) => Pick(idx);

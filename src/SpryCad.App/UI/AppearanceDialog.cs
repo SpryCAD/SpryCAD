@@ -107,23 +107,17 @@ public static class AppearanceDialog
         top.Children.Add(new StackPanel { Spacing = 4, Children = { preview, presetName } });
         top.Children.Add(controls);
 
-        var useOther = new Button { Content = "Use " + otherwiseName, MinWidth = 80 };
-        var ok = new Button { Content = "OK", IsDefault = true, MinWidth = 80, HorizontalContentAlignment = HorizontalAlignment.Center };
-        var cancel = new Button { Content = "Cancel", IsCancel = true, MinWidth = 80, HorizontalContentAlignment = HorizontalAlignment.Center };
+        var useOther = new Button { Content = "Use " + otherwiseName, MinWidth = 80, HorizontalAlignment = HorizontalAlignment.Left };
+        var ok = new Button { Content = "OK", IsDefault = true };
+        var cancel = new Button { Content = "Cancel", IsCancel = true };
         ToolTip.SetTip(useOther, $"No appearance of its own: {otherwiseName} shows");
-        var buttons = new DockPanel { Margin = new Thickness(0, 6, 0, 0) };
-        var right = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Children = { ok, cancel } };
-        DockPanel.SetDock(right, Dock.Right);
-        buttons.Children.Add(right);
-        buttons.Children.Add(new StackPanel { Orientation = Orientation.Horizontal, Children = { useOther } });
 
         var content = new StackPanel { Spacing = 10 };
         content.Children.Add(new TextBlock { Text = intro, TextWrapping = TextWrapping.Wrap });
         content.Children.Add(top);
         content.Children.Add(new TextBlock { Text = "Presets", FontWeight = FontWeight.SemiBold });
         content.Children.Add(presets);
-        content.Children.Add(buttons);
-        var w = Dialogs.MakeWindow(title, content, 470);
+        var w = Dialogs.MakeWindow(title, Dialogs.WithButtons(content, useOther, ok, cancel), 470);
         ok.Click += (_, _) =>
         {
             if (ParseHex(hex.Text) == null) { hex.Focus(); return; }

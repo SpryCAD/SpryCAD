@@ -496,10 +496,12 @@ public static class LibraryEditor
             {
                 var t = s.Table(k);
                 var sp = new StackPanel { Margin = new Thickness(2, 1) };
-                sp.Children.Add(new TextBlock { Text = k, FontWeight = FontWeight.SemiBold });
+                var keyText = Labels.Trimmed(k); keyText.FontWeight = FontWeight.SemiBold;
+                sp.Children.Add(keyText);
                 var sub = t != null ? $"{(t.Title.Length > 0 ? t.Title + " · " : "")}{t.Rows.Count} rows" : "Restrictions only";
                 if (s.Restrictions.TryGetValue(k, out var r) && r.Any && t != null) sub += " · restricted";
-                sp.Children.Add(new TextBlock { Text = sub, FontSize = TypeScale.Small, Foreground = Palette.TextMuted });
+                var subText = Labels.Trimmed(sub, TypeScale.Small); subText.Foreground = Palette.TextMuted;
+                sp.Children.Add(subText);
                 list.Items.Add(new ListBoxItem { Content = sp, Tag = k, Padding = new Thickness(8, 4) });
             }
             selected = select ?? selected;
@@ -1155,7 +1157,6 @@ public static class LibraryEditor
         var history = new Button { Content = "History..." };
         var publish = new Button { Content = "Publish...", IsDefault = true };
         var close = new Button { Content = "Close", IsCancel = true };
-        foreach (var b in new[] { history, publish, close }) { b.MinWidth = 80; b.HorizontalContentAlignment = HorizontalAlignment.Center; }
 
         void Reload(State fresh)
         {
@@ -1306,12 +1307,8 @@ public static class LibraryEditor
         Grid.SetColumn(right, 1);
         middle.Children.Add(left); middle.Children.Add(right);
 
-        var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Children = { history, publish, close } };
-        var status = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Children = { error, info } };
-        var bottom = new DockPanel { Margin = new Thickness(14, 10) };
-        DockPanel.SetDock(buttons, Dock.Right);
-        bottom.Children.Add(buttons); bottom.Children.Add(status);
-        var bottomBar = new Border { Child = bottom, BorderBrush = Palette.Border, BorderThickness = new Thickness(0, 1, 0, 0) };
+        var status = new StackPanel { Children = { error, info } };
+        var bottomBar = Dialogs.FooterBar(status, history, publish, close);
 
         var root = new DockPanel();
         DockPanel.SetDock(topBar, Dock.Top); DockPanel.SetDock(bottomBar, Dock.Bottom);
@@ -1365,12 +1362,11 @@ public static class LibraryEditor
             C((r.Message.Length > 0 ? r.Message : "(no message)") + (current ? "  · the revision being edited" : ""), 2);
             grid.Children.Add(g);
         }
-        var ok = new Button { Content = "Close", IsDefault = true, IsCancel = true, MinWidth = 80, HorizontalContentAlignment = HorizontalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 12, 0, 0) };
+        var ok = new Button { Content = "Close", IsDefault = true, IsCancel = true };
         var sp = new StackPanel { Spacing = 6 };
         sp.Children.Add(Muted($"Each publish of {name} is a revision, newest first."));
         sp.Children.Add(new ScrollViewer { Content = grid, MaxHeight = 420 });
-        sp.Children.Add(ok);
-        var w = Dialogs.MakeWindow($"History of {name}", sp, 640);
+        var w = Dialogs.MakeWindow($"History of {name}", Dialogs.WithButtons(sp, null, ok), 640);
         ok.Click += (_, _) => w.Close();
         await w.ShowDialog(owner);
     }

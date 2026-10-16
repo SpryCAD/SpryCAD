@@ -42,14 +42,9 @@ public static class Card
         foreach (var c in body) stack.Children.Add(c);
         if (buttons is { Count: > 0 })
         {
-            var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 8, 0, 0) };
-            foreach (var b in buttons)
-            {
-                b.MinWidth = 80; b.HorizontalContentAlignment = HorizontalAlignment.Center;
-                b.Classes.Add("card"); // a clear ring when it has the keyboard (Styles.axaml)
-                row.Children.Add(b);
-            }
-            stack.Children.Add(row);
+            // (a dialog's button row, as every dialog's; a clear ring when it has the keyboard, Styles.axaml)
+            foreach (var b in buttons) b.Classes.Add("card");
+            stack.Children.Add(Dialogs.ButtonRow(buttons.ToArray()));
         }
         return new Border
         {

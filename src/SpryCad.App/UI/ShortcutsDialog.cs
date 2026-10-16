@@ -108,12 +108,8 @@ public static class ShortcutsDialog
         search.TextChanged += (_, _) => Fill();
         Fill();
 
-        var close = new Button { Content = "Close", IsDefault = true, IsCancel = true, MinWidth = 80, HorizontalContentAlignment = HorizontalAlignment.Center };
-        var bottom = new Border
-        {
-            Child = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(14, 10), Children = { close } },
-            BorderBrush = Palette.Border, BorderThickness = new Thickness(0, 1, 0, 0),
-        };
+        var close = new Button { Content = "Close", IsDefault = true, IsCancel = true };
+        var bottom = Dialogs.FooterBar(null, close);
         var root = new DockPanel();
         DockPanel.SetDock(search, Dock.Top); DockPanel.SetDock(bottom, Dock.Bottom);
         root.Children.Add(search); root.Children.Add(bottom);

@@ -326,22 +326,48 @@ public partial class MainWindow
         mech.Children.Add(TypeList(MechanicalMates));
         page.Info(mech, "Gear: two cylindrical faces rotate together at a ratio, by default their radii. Screw: rotation of one translates the other along the axis by the lead per turn.");
 
-        // a number field: a label and a box (Enter or leaving it applies); its Tag shows the value again. A length or an
-        // angle (kind) is shown with its unit, and one typed without gets the assembly's (lengths are millimetres)
-        StackPanel Field(string label, Func<double?> get, Action<double?> set, Func<ValueKind>? kind = null, bool optional = false, bool signed = false)
+        // a number field, laid out and marked as a PmPage field is (the label column, the box across the rest, red with
+        // the reason in its tooltip when the value is wrong, Up / Down stepping), but applied on Enter or on leaving it:
+        // each change solves the assembly anew. Its Tag shows the value again (not while it is being typed in). A length
+        // or an angle (kind) is shown with its unit, and one typed without gets the assembly's (lengths are millimeters)
+        var fieldLabels = new Dictionary<Grid, TextBlock>();
+        Grid Field(string label, Func<double?> get, Action<double?> set, Func<ValueKind>? kind = null, bool optional = false, bool signed = false)
         {
-            var tb = new TextBox { Width = 90 };
-            var lbl = new TextBlock { Text = label, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0), MinWidth = 96 };
-            var row = new StackPanel { Orientation = Orientation.Horizontal, Children = { lbl, tb }, Margin = new Thickness(0, 2) };
+            var tb = new TextBox { MinWidth = 90, HorizontalAlignment = HorizontalAlignment.Stretch };
+            var lbl = new TextBlock { Text = label, VerticalAlignment = VerticalAlignment.Center, TextWrapping = Avalonia.Media.TextWrapping.Wrap, FontSize = UI.TypeScale.Body };
+            var lblHost = new Border { Child = lbl, MinWidth = 82, MaxWidth = 130, Margin = new Thickness(0, 0, 6, 0), VerticalAlignment = VerticalAlignment.Center };
+            var row = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*"), Margin = new Thickness(0, 1), Children = { lblHost, tb } };
+            Grid.SetColumn(tb, 1);
+            fieldLabels[row] = lbl;
             ValueKind K() => kind?.Invoke() ?? ValueKind.Number;
-            row.Tag = (Action)(() => tb.Text = get() is { } v ? Units.Entry(v, K()) : "");
+            void Mark(string? err)
+            {
+                tb.Classes.Set("invalid", err != null);
+                ToolTip.SetTip(tb, err);
+            }
+            void Show() { tb.Text = get() is { } v ? Units.Entry(v, K()) : ""; Mark(null); }
+            row.Tag = (Action)(() => { if (!tb.IsFocused) Show(); });
             void Read()
             {
-                if (string.IsNullOrWhiteSpace(tb.Text) && optional) { if (get() != null) { set(null); st.Update?.Invoke(); } return; }
-                if (Units.TryEnter(tb.Text, K(), null, out string _, out var q, out string? _) && (signed || q.Value >= 0) && q.Value != get()) { set(q.Value); st.Update?.Invoke(); }
+                if (string.IsNullOrWhiteSpace(tb.Text) && optional) { Mark(null); if (get() != null) { set(null); st.Update?.Invoke(); } return; }
+                if (!Units.TryEnter(tb.Text, K(), null, out string _, out var q, out string? err)) { Mark(err); return; }
+                if (!signed && q.Value < 0) { Mark("Expected a value of 0 or more"); return; }
+                Mark(null);
+                if (q.Value != get()) { set(q.Value); st.Update?.Invoke(); Show(); }
             }
             tb.LostFocus += (_, _) => Read();
-            tb.KeyDown += (_, e) => { if (e.Key == Avalonia.Input.Key.Enter) { Read(); e.Handled = true; } };
+            tb.KeyDown += (_, e) =>
+            {
+                if (e.Key == Avalonia.Input.Key.Enter) { Read(); e.Handled = true; return; }
+                // Up / Down: a step of 1 (Shift 10, Ctrl 0.1), as a PmPage field; applied at once
+                if (e.Key is not (Avalonia.Input.Key.Up or Avalonia.Input.Key.Down) || !Units.TryEnter(tb.Text, K(), null, out string _, out var cur, out string? _)) return;
+                var step = e.KeyModifiers.HasFlag(Avalonia.Input.KeyModifiers.Shift) ? 10 : e.KeyModifiers.HasFlag(Avalonia.Input.KeyModifiers.Control) ? 0.1 : 1;
+                if (e.Key == Avalonia.Input.Key.Down) step = -step;
+                var shown = K() == ValueKind.Length ? cur.Value / Units.MmPer() : cur.Value;
+                tb.Text = Units.Entry(K() == ValueKind.Length ? (shown + step) * Units.MmPer() : shown + step, K());
+                Read();
+                e.Handled = true;
+            };
             return row;
         }
         CheckBox Check(string label, Func<bool> get, Action<bool> set)
@@ -373,7 +399,7 @@ public partial class MainWindow
         var align = new StackPanel
         {
             Orientation = Orientation.Horizontal, Spacing = 4, Margin = new Thickness(0, 6, 0, 0),
-            Children = { new TextBlock { Text = "Mate alignment:", VerticalAlignment = VerticalAlignment.Center, MinWidth = 96, Margin = new Thickness(0, 0, 6, 0) }, alignSame, alignOpp },
+            Children = { new TextBlock { Text = "Mate alignment:", VerticalAlignment = VerticalAlignment.Center, MinWidth = 82, Margin = new Thickness(0, 0, 6, 0) }, alignSame, alignOpp },
         };
         foreach (var c in new Control[] { offsetRow, angleRow, limits, minRow, maxRow, ratioA, ratioB, lead, reverse, align }) opts.Children.Add(c);
         var result = new TextBlock { TextWrapping = Avalonia.Media.TextWrapping.Wrap, Margin = new Thickness(0, 6, 0, 0), FontSize = UI.TypeScale.Small };
@@ -420,8 +446,8 @@ public partial class MainWindow
             angleRow.IsVisible = ang && !st.Limits;
             limits.IsVisible = coin || ang;
             minRow.IsVisible = maxRow.IsVisible = (coin || ang) && st.Limits;
-            ((TextBlock)minRow.Children[0]).Text = $"Minimum ({(ang ? "deg" : Units.Symbol())})";
-            ((TextBlock)maxRow.Children[0]).Text = $"Maximum ({(ang ? "deg" : Units.Symbol())})";
+            fieldLabels[minRow].Text = $"Minimum ({(ang ? "deg" : Units.Symbol())})";
+            fieldLabels[maxRow].Text = $"Maximum ({(ang ? "deg" : Units.Symbol())})";
             ratioA.IsVisible = ratioB.IsVisible = type == MateType.Gear;
             lead.IsVisible = type == MateType.Screw;
             reverse.IsVisible = type is MateType.Gear or MateType.Screw;

@@ -111,9 +111,9 @@ public partial class MainWindow
         t.Label = new TextBlock { VerticalAlignment = VerticalAlignment.Center, FontSize = UI.TypeScale.Body, Margin = new Thickness(0, 0, 6, 0) };
         var close = new Button
         {
-            Content = UI.Icons.Make("cancel", 10), Padding = new Thickness(3), MinHeight = 18, MinWidth = 18,
+            Content = UI.Icons.Make("cancel", 10), Padding = new Thickness(3), MinHeight = 22, MinWidth = 22, Margin = new Thickness(0),
             HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center,
-            Background = Brushes.Transparent, BorderThickness = new Thickness(0), VerticalAlignment = VerticalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center, Classes = { "tb" },
         };
         ToolTip.SetTip(close, "Close (Ctrl+W)");
         close.Click += (_, _) => _ = CloseTab(t);
@@ -152,9 +152,8 @@ public partial class MainWindow
         // + after the last tab: a new part or assembly (as a browser's new tab)
         var add = new Button
         {
-            Content = "+", FontSize = 15, Padding = new Thickness(7, 0, 7, 1), MinHeight = 0, MinWidth = 0, Margin = new Thickness(2, 0, 0, 1),
-            Background = Brushes.Transparent, BorderThickness = new Thickness(0), CornerRadius = new CornerRadius(4),
-            VerticalAlignment = VerticalAlignment.Center, Focusable = false,
+            Content = "+", FontSize = UI.TypeScale.Title, Padding = new Thickness(7, 0, 7, 1), MinHeight = 22, MinWidth = 22, Margin = new Thickness(2, 0, 0, 1),
+            VerticalAlignment = VerticalAlignment.Center, Focusable = false, Classes = { "tb" },
         };
         ToolTip.SetTip(add, "New Part or Assembly");
         var newPart = new MenuItem { Header = "New _Part", InputGesture = new KeyGesture(Key.N, KeyModifiers.Control) };
@@ -340,8 +339,7 @@ public partial class MainWindow
         }
         var dock = new Button
         {
-            Content = UI.Icons.Make("dockright", 14), Padding = new Thickness(4, 2), MinHeight = 0,
-            Background = Brushes.Transparent, BorderThickness = new Thickness(0),
+            Content = UI.Icons.Make("dockright", 14), Padding = new Thickness(4, 2), MinHeight = 22, Classes = { "tb" },
             HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(8, 6, 6, 4),
         };
         ToolTip.SetTip(dock, "Dock in the task pane");
@@ -459,7 +457,7 @@ public partial class MainWindow
                     {
                         Content = UI.Icons.Make("cancel", 12), Padding = new Thickness(5), MinHeight = 24, MinWidth = 24, Margin = new Thickness(6, 0, 0, 0),
                         HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center,
-                        Background = Brushes.Transparent, BorderThickness = new Thickness(0), VerticalAlignment = VerticalAlignment.Center,
+                        VerticalAlignment = VerticalAlignment.Center, Classes = { "tb" },
                         Opacity = 0, Focusable = false,
                     };
                     ToolTip.SetTip(close, "Close (Delete, Ctrl+W)");

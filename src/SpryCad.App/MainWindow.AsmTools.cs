@@ -714,7 +714,7 @@ public partial class MainWindow
 
     Window ToolWindow(string title, Control content, double width = 560, double height = 480)
     {
-        var w = new Window { Title = title, Width = width, Height = height, Content = new Border { Padding = new Thickness(12), Child = content }, ShowInTaskbar = false, WindowStartupLocation = WindowStartupLocation.CenterOwner };
+        var w = new Window { Title = title, Width = width, Height = height, Content = new Border { Padding = Spacing.Dialog, Child = content }, ShowInTaskbar = false, WindowStartupLocation = WindowStartupLocation.CenterOwner };
         Dialogs.Compact(w);
         return w;
     }
@@ -763,10 +763,7 @@ public partial class MainWindow
         var copy = new Button { Content = "Copy" };
         var close = new Button { Content = "Close", IsCancel = true };
         var bar = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Children = { new TextBlock { Text = "Show:", VerticalAlignment = VerticalAlignment.Center }, kindBox } };
-        var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, HorizontalAlignment = HorizontalAlignment.Right, Children = { csv, copy, close } };
-        var footer = new DockPanel { Margin = new Thickness(0, 8, 0, 0) };
-        DockPanel.SetDock(buttons, Dock.Right);
-        footer.Children.Add(buttons); footer.Children.Add(total);
+        var footer = Dialogs.ButtonRow(total, csv, copy, close);
         var dock = new DockPanel();
         DockPanel.SetDock(bar, Dock.Top); DockPanel.SetDock(footer, Dock.Bottom);
         dock.Children.Add(bar); dock.Children.Add(footer);

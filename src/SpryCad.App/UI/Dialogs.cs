@@ -22,7 +22,7 @@ public static class Dialogs
             CanMinimize = false,
             CanMaximize = false,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            Content = new Border { Padding = new Thickness(14), Child = content },
+            Content = new Border { Padding = Spacing.Dialog, Child = content },
             ShowInTaskbar = false,
         };
         Compact(w);
@@ -62,11 +62,47 @@ public static class Dialogs
         return b;
     }
 
-    static StackPanel Buttons(params Button[] b)
+    /// <summary>A dialog's buttons, one size (at least 80 wide, the text centered), in a row at the right.</summary>
+    static StackPanel ButtonStrip(Button[] b)
     {
-        var sp = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 12, 0, 0) };
+        var sp = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Spacing.M, HorizontalAlignment = HorizontalAlignment.Right };
         foreach (var x in b) { x.MinWidth = 80; x.HorizontalContentAlignment = HorizontalAlignment.Center; sp.Children.Add(x); }
         return sp;
+    }
+
+    /// <summary>
+    /// A dialog's button row, under its body: the buttons at the right, <paramref name="left"/> (a status, a total, an
+    /// option) at the left when there is one. Every dialog's the same: the gap above it, the buttons' size and spacing.
+    /// </summary>
+    internal static Control ButtonRow(Control? left, params Button[] b)
+    {
+        var strip = ButtonStrip(b);
+        if (left == null) { strip.Margin = new Thickness(0, Spacing.L, 0, 0); return strip; }
+        var row = new DockPanel { Margin = new Thickness(0, Spacing.L, 0, 0) };
+        DockPanel.SetDock(strip, Dock.Right);
+        left.VerticalAlignment = VerticalAlignment.Center;
+        row.Children.Add(strip); row.Children.Add(left);
+        return row;
+    }
+
+    internal static Control ButtonRow(params Button[] b) => ButtonRow(null, b);
+
+    /// <summary>A dialog's body with its button row under it (the row's gap its own, not the body's spacing).</summary>
+    internal static Control WithButtons(Control body, Control? left, params Button[] b) =>
+        new StackPanel { Children = { body, ButtonRow(left, b) } };
+
+    /// <summary>
+    /// A large dialog's footer (Options, the library editor): a rule across the window and the buttons under it, at the
+    /// right, <paramref name="left"/> at the left. For a window whose content runs to its edges (no dialog padding).
+    /// </summary>
+    internal static Border FooterBar(Control? left, params Button[] b)
+    {
+        var strip = ButtonStrip(b);
+        var row = new DockPanel { Margin = Spacing.FooterBar };
+        DockPanel.SetDock(strip, Dock.Right);
+        row.Children.Add(strip);
+        if (left != null) { left.VerticalAlignment = VerticalAlignment.Center; row.Children.Add(left); }
+        return new Border { Child = row, BorderBrush = Palette.Border, BorderThickness = new Thickness(0, 1, 0, 0) };
     }
 
     /// <summary>A message (a problem when the title says something failed): a card in the window, else a dialog window.</summary>
@@ -77,8 +113,7 @@ public static class Dialogs
         var ok = new Button { Content = "OK", IsDefault = true };
         var sp = new StackPanel();
         sp.Children.Add(new TextBlock { Text = text, TextWrapping = TextWrapping.Wrap });
-        sp.Children.Add(Buttons(ok));
-        var w = MakeWindow(title, sp);
+        var w = MakeWindow(title, WithButtons(sp, null, ok));
         ok.Click += (_, _) => w.Close();
         await w.ShowDialog(owner);
     }
@@ -94,8 +129,7 @@ public static class Dialogs
         var cancel = new Button { Content = "Cancel", IsCancel = true };
         var sp = new StackPanel();
         sp.Children.Add(new TextBlock { Text = text, TextWrapping = TextWrapping.Wrap });
-        sp.Children.Add(Buttons(yes, no, cancel));
-        var w = MakeWindow(title, sp);
+        var w = MakeWindow(title, WithButtons(sp, null, yes, no, cancel));
         yes.Click += (_, _) => { result = true; w.Close(); };
         no.Click += (_, _) => { result = false; w.Close(); };
         cancel.Click += (_, _) => { result = null; w.Close(); };
@@ -113,8 +147,7 @@ public static class Dialogs
         var no = new Button { Content = noText, IsCancel = true };
         var sp = new StackPanel();
         sp.Children.Add(new TextBlock { Text = text, TextWrapping = TextWrapping.Wrap });
-        sp.Children.Add(Buttons(yes, no));
-        var w = MakeWindow(title, sp);
+        var w = MakeWindow(title, WithButtons(sp, null, yes, no));
         yes.Click += (_, _) => { result = true; w.Close(); };
         no.Click += (_, _) => w.Close();
         await w.ShowDialog(owner);
@@ -132,8 +165,7 @@ public static class Dialogs
         var sp = new StackPanel { Spacing = 6 };
         sp.Children.Add(new TextBlock { Text = label });
         sp.Children.Add(tb);
-        sp.Children.Add(Buttons(ok, cancel));
-        var w = MakeWindow(title, sp, 360);
+        var w = MakeWindow(title, WithButtons(sp, null, ok, cancel), 360);
         ok.Click += (_, _) => { result = tb.Text; w.Close(); };
         cancel.Click += (_, _) => w.Close();
         w.Opened += (_, _) => { tb.Focus(); tb.SelectAll(); };
@@ -245,8 +277,7 @@ public static class Dialogs
         sp.Children.Add(tableInfo);
         sp.Children.Add(new ScrollViewer { Content = list, MaxHeight = 420 });
         sp.Children.Add(add);
-        sp.Children.Add(Buttons(ok, cancel));
-        var w = MakeWindow("Equations, Global Variables", sp, 900);
+        var w = MakeWindow("Equations, Global Variables", WithButtons(sp, null, ok, cancel), 900);
         ok.Click += (_, _) =>
         {
             w.Close();
@@ -290,8 +321,7 @@ public static class Dialogs
             Text = "Operators: < <= > >= == !=, combined with and, or, not. "
                 + (names.Count > 0 ? "Variables: " + string.Join(", ", names) + "." : "Define variables in Equations first."),
         });
-        sp.Children.Add(Buttons(ok, cancel));
-        var w = MakeWindow("Suppress When", sp, 420);
+        var w = MakeWindow("Suppress When", WithButtons(sp, null, ok, cancel), 420);
         ok.Click += (_, _) =>
         {
             var text = tb.Text?.Trim() ?? "";
@@ -497,8 +527,7 @@ public static class Dialogs
         sp.Children.Add(head);
         sp.Children.Add(body);
         sp.Children.Add(error);
-        sp.Children.Add(Buttons(ok, cancel));
-        var w = MakeWindow("Design Tables", sp, 760);
+        var w = MakeWindow("Design Tables", WithButtons(sp, null, ok, cancel), 760);
         ok.Click += (_, _) =>
         {
             foreach (var t in tables) { t.Name = t.Name.Trim(); t.Description = string.IsNullOrWhiteSpace(t.Description) ? null : t.Description; }
@@ -587,8 +616,7 @@ public static class Dialogs
         sp.Children.Add(grid);
         sp.Children.Add(summary);
         sp.Children.Add(all);
-        sp.Children.Add(Buttons(ok, cancel));
-        var w = MakeWindow(title, sp, 400);
+        var w = MakeWindow(title, WithButtons(sp, null, ok, cancel), 400);
         ok.Click += (_, _) =>
         {
             foreach (var p in ps)
@@ -693,8 +721,7 @@ public static class Dialogs
             Muted("Native B-rep modeling kernel written in C#. Built with Avalonia, Silk.NET (OpenGL) and .NET."),
         } });
         sp.Children.Add(links);
-        sp.Children.Add(Buttons(ok));
-        var w = MakeWindow("About SpryCAD", sp, 460);
+        var w = MakeWindow("About SpryCAD", WithButtons(sp, null, ok), 460);
         ok.Click += (_, _) => w.Close();
         await w.ShowDialog(owner);
     }

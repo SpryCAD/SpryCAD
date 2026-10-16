@@ -201,6 +201,19 @@ public partial class MainWindow
         var angleBoxes = new TextBox[3];
         var flips = new CheckBox[3];
         Action sync = () => { };
+        PlaneSolver.Definition? defined = null;
+        void showStatus()
+        {
+            // (with nothing picked the page's message says what to pick; not "Fully Defined" under one saying it fails)
+            statusBox.IsVisible = defined != null && !(defined == PlaneSolver.Definition.Full && !string.IsNullOrEmpty(page.Message));
+            (status.Text, status.Foreground) = defined switch
+            {
+                null => ("", Palette.TextMuted),
+                PlaneSolver.Definition.Full => ("✔ Fully Defined", Palette.Success),
+                PlaneSolver.Definition.Under => ("Under Defined", Palette.TextSecondary),
+                _ => ("Over Defined", Palette.Danger),
+            };
+        }
 
         for (int k = 0; k < 3; k++)
         {
@@ -228,9 +241,10 @@ public partial class MainWindow
 
             relLists[i] = new StackPanel { Spacing = 1 };
             sec.Children.Add(relLists[i]);
-            distBoxes[i] = page.Number(sec, "Distance", () => slots[i]?.Value ?? DefaultOffset, v => { if (slots[i] is { } s) s.Value = v; }, "dimension");
+            // (the two share the reference's value: each writes it only for its own relation)
+            distBoxes[i] = page.Number(sec, "Distance", () => slots[i]?.Value ?? DefaultOffset, v => { if (slots[i] is { Relation: PlaneRelation.Offset } s) s.Value = v; }, "dimension");
             distRows[i] = PmPage.RowOf(distBoxes[i]);
-            angleBoxes[i] = page.Number(sec, "Angle", () => slots[i]?.Value ?? "45", v => { if (slots[i] is { } s) s.Value = v; }, "mate-angle", "°");
+            angleBoxes[i] = page.Number(sec, "Angle", () => slots[i]?.Value ?? "45", v => { if (slots[i] is { Relation: PlaneRelation.Angle } s) s.Value = v; }, "mate-angle", "°");
             angleRows[i] = PmPage.RowOf(angleBoxes[i]);
             flips[i] = page.Check(sec, "Flip", () => slots[i]?.Flip ?? false, v => { if (slots[i] is { } s) s.Flip = v; });
         }
@@ -278,16 +292,10 @@ public partial class MainWindow
                 flips[i].Content = rl == PlaneRelation.Tangent ? "Other side" : rl == PlaneRelation.Angle ? "Flip angle" : "Flip offset";
                 flips[i].IsChecked = r?.Flip ?? false;
             }
-            // (with nothing picked the page's message says what to pick)
-            statusBox.IsVisible = refs.Count > 0;
-            (status.Text, status.Foreground) = refs.Count == 0 ? ("", Palette.TextMuted)
-                : PlaneSolver.Defined(refs) switch
-                {
-                    PlaneSolver.Definition.Full => ("✔ Fully Defined", Palette.Success),
-                    PlaneSolver.Definition.Under => ("Under Defined", Palette.TextSecondary),
-                    _ => ("Over Defined", Palette.Danger),
-                };
+            defined = refs.Count == 0 ? null : PlaneSolver.Defined(refs);
+            showStatus();
         };
+        page.MessageChanged += showStatus;
         sync();
         // the first empty box takes the next pick
         if (slots.Select((s, j) => (s, j)).FirstOrDefault(x => x.s == null) is { s: null } empty) page.Activate(boxes[empty.j]);

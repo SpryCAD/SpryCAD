@@ -72,13 +72,9 @@ public static class OptionsDialog
         middle.Children.Add(left); middle.Children.Add(right);
 
         var error = new TextBlock { Foreground = Palette.Danger, TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 12, 0) };
-        var ok = new Button { Content = "OK", IsDefault = true, MinWidth = 80, HorizontalContentAlignment = HorizontalAlignment.Center };
-        var cancel = new Button { Content = "Cancel", IsCancel = true, MinWidth = 80, HorizontalContentAlignment = HorizontalAlignment.Center };
-        var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Children = { ok, cancel } };
-        var bottom = new DockPanel { Margin = new Thickness(14, 10) };
-        DockPanel.SetDock(buttons, Dock.Right);
-        bottom.Children.Add(buttons); bottom.Children.Add(error);
-        var bottomBar = new Border { Child = bottom, BorderBrush = Palette.Border, BorderThickness = new Thickness(0, 1, 0, 0) };
+        var ok = new Button { Content = "OK", IsDefault = true };
+        var cancel = new Button { Content = "Cancel", IsCancel = true };
+        var bottomBar = Dialogs.FooterBar(error, ok, cancel);
 
         // the tabs, as the CommandManager's (UI/Styles.axaml ToggleButton.tab)
         var tabButtons = tabs.Select(t => new ToggleButton { Content = t.title, Classes = { "tab" } }).ToArray();

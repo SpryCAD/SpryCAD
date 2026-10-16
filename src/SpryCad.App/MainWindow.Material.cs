@@ -243,12 +243,7 @@ public partial class MainWindow
         var body = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 16 };
         body.Children.Add(left);
         body.Children.Add(new ScrollViewer { Content = details, MaxHeight = 470 });
-        var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, HorizontalAlignment = HorizontalAlignment.Right };
-        foreach (var b in new[] { custom, inLibrary, apply, close }) { b.MinWidth = 80; b.HorizontalContentAlignment = HorizontalAlignment.Center; buttons.Children.Add(b); }
-        var bottom = new DockPanel { Margin = new Thickness(0, 10, 0, 0) };
-        DockPanel.SetDock(buttons, Dock.Right);
-        bottom.Children.Add(buttons);
-        bottom.Children.Add(useMaterialLook);
+        var bottom = Dialogs.ButtonRow(useMaterialLook, custom, inLibrary, apply, close);
         var content = new DockPanel();
         DockPanel.SetDock(bottom, Dock.Bottom);
         content.Children.Add(bottom);
@@ -259,7 +254,7 @@ public partial class MainWindow
             Title = "Material - " + Session.Title.TrimEnd(' ', '*'),
             SizeToContent = SizeToContent.WidthAndHeight, CanResize = false, CanMinimize = false, CanMaximize = false,
             WindowStartupLocation = WindowStartupLocation.CenterOwner, ShowInTaskbar = false,
-            Content = new Border { Padding = new Thickness(12), Child = content },
+            Content = new Border { Padding = Spacing.Dialog, Child = content },
         };
         Dialogs.Compact(win);
         close.Click += (_, _) => win.Close();

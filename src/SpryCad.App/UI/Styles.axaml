@@ -50,8 +50,11 @@
     <Setter Property="HorizontalContentAlignment" Value="Center" />
     <Setter Property="VerticalContentAlignment" Value="Top" />
   </Style>
+  <!-- names broken in code (MainWindow.BarLabel), every one two lines high: a tab of one-line names is no shorter -->
   <Style Selector="Button.cmd.big TextBlock">
     <Setter Property="TextWrapping" Value="Wrap" />
+    <Setter Property="LineHeight" Value="15" />
+    <Setter Property="MinHeight" Value="30" />
     <Setter Property="TextAlignment" Value="Center" />
     <Setter Property="HorizontalAlignment" Value="Center" />
   </Style>
