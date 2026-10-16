@@ -86,7 +86,9 @@ public static class Configurations
             if (t.Exposed && !string.IsNullOrWhiteSpace(t.Name) && t.Rows.Count > 0)
                 list.Add(new UserParameter(t.Name.Trim(), t.Description, t.Current!.Key, t.Rows.Select(r => r.Key).ToList(), null, null));
         foreach (var e in doc.Equations)
-            if (e.Exposed && !string.IsNullOrWhiteSpace(e.Name))
+            if (e.Exposed && !string.IsNullOrWhiteSpace(e.Name)
+                // (one a user-facing table of its standard values sets: the table's choice in its place)
+                && !list.Any(p => p.IsChoice && p.Name.Equals(e.Name.Trim(), StringComparison.OrdinalIgnoreCase)))
                 list.Add(new UserParameter(e.Name.Trim(), e.Description, e.Expr, null, e.Min, e.Max));
         return list;
     }

@@ -319,7 +319,9 @@ public sealed class Regenerator
             if (string.IsNullOrWhiteSpace(t.Name)) continue;
             var row = config.Rows.TryGetValue(t.Name.Trim(), out var key) ? t.Row(key) ?? t.Current : t.Current;
             if (row == null) continue;
-            all.Add(new Equation { Name = t.Name.Trim(), Expr = (t.Rows.IndexOf(row) + 1).ToString(System.Globalization.CultureInfo.InvariantCulture) });
+            // (a table named after an equation lists its standard values: the equation is the table, not the row number)
+            if (!TableConfig.SetsEquation(doc, t.Name))
+                all.Add(new Equation { Name = t.Name.Trim(), Expr = (t.Rows.IndexOf(row) + 1).ToString(System.Globalization.CultureInfo.InvariantCulture) });
             for (int c = 0; c < t.Columns.Count; c++)
             {
                 var col = t.Columns[c];

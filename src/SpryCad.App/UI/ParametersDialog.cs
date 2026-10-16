@@ -143,25 +143,19 @@ static class ParametersDialog
         }
         string _name, _expr, _description, _min, _max;
         bool _exposed;
+        /// <summary>A cell being edited: its value goes in when the edit ends (not at each key typed), the grid then says so.</summary>
+        public Func<bool>? Editing;
         void Set<T>(ref T field, T value, string name)
         {
             if (FromTable != null || Equals(field, value)) return;
             field = value;
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
-            _changed();
+            if (Editing?.Invoke() != true) _changed();
         }
-        /// <summary>Renames the variable everywhere it is used (old name, new name); false: renamed here only.</summary>
-        public Func<string, string, bool>? Renaming;
-        public string Name
-        {
-            get => _name;
-            set
-            {
-                var now = value?.Trim() ?? "";
-                if (FromTable == null && Renaming != null && _name.Length > 0 && now.Length > 0 && now != _name && Renaming(_name, now)) return;
-                Set(ref _name, now, nameof(Name));
-            }
-        }
+        /// <summary>The name the part knows it by (a rename done when the cell's edit ends: everywhere it is used).</summary>
+        public string Committed = "";
+        public string Name { get => _name; set => Set(ref _name, value?.Trim() ?? "", nameof(Name)); }
+        public void Unrename() { _name = Committed; PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Name))); }
         public string Equation { get => _expr; set => Set(ref _expr, string.IsNullOrWhiteSpace(value) ? "0" : value.Trim(), nameof(Equation)); }
         public bool User { get => _exposed; set => Set(ref _exposed, value, nameof(User)); }
         public string Description { get => _description; set => Set(ref _description, value ?? "", nameof(Description)); }
@@ -252,17 +246,21 @@ static class ParametersDialog
             var uses = VariableUses.Map(session.Doc);
             foreach (var r in items) r.Uses(uses.GetValueOrDefault(r.Name.Trim()));
         }
-        // a variable renamed: everywhere it is used too, the table then shown again from the part
-        bool Rename(string from, string to)
+        // a variable renamed (its cell's edit ended): everywhere it is used too, the table then shown again from the part;
+        // a name it cannot have: the old one back, why said
+        void Rename(EqRow r)
         {
-            if (!IsName(to) || items.Any(r => r.Name.Trim().Equals(to, StringComparison.OrdinalIgnoreCase))) return false;
+            var (from, to) = (r.Committed, r.Name.Trim());
+            string? problem = !IsName(to) ? $"\"{to}\" cannot name a variable (letters, digits and _, starting with a letter; not a function, constant or unit)."
+                : items.Any(x => x != r && x.Name.Trim().Equals(to, StringComparison.OrdinalIgnoreCase)) ? $"{to} is already a variable." : null;
+            if (problem != null) { r.Unrename(); owner.Status(problem); return; }
             int n = 0;
             session.Change(() => n = VariableUses.Rename(session.Doc, from, to));
             owner.Status(n == 0 ? $"Renamed {from} to {to}." : $"Renamed {from} to {to}, and in the {n} value{(n == 1 ? "" : "s")} using it.");
             Avalonia.Threading.Dispatcher.UIThread.Post(Refresh);
-            return true;
         }
-        EqRow Make(Equation e) => new(e, Recompute) { Renaming = Rename };
+        bool editingCell = false;
+        EqRow Make(Equation e) => new(e, Recompute) { Editing = () => editingCell, Committed = e.Name.Trim() };
 
         var dg = NewGrid();
         dg.ItemsSource = items;
@@ -328,8 +326,16 @@ static class ParametersDialog
         Text("Description", "A user variable's label in Configure.", nameof(EqRow.Description), new DataGridLength(150));
         Text("Min", "The smallest value Configure accepts. Min 0 and Max 1 make a checkbox.", nameof(EqRow.Min), new DataGridLength(60));
         Text("Max", "The largest value Configure accepts.", nameof(EqRow.Max), new DataGridLength(60));
-        // a design table's variables: greyed, not edited here
-        dg.BeginningEdit += (_, e) => { if (e.Row.DataContext is EqRow { FromTable: not null }) e.Cancel = true; };
+        // a design table's variables: greyed, not edited here; a cell's value in when its edit ends (a rename then too)
+        dg.BeginningEdit += (_, e) => { if (e.Row.DataContext is EqRow { FromTable: not null }) e.Cancel = true; else editingCell = true; };
+        dg.CellEditEnded += (_, e) =>
+        {
+            editingCell = false;
+            if (e.Row.DataContext is not EqRow r || r.FromTable != null) return;
+            if (e.EditAction == DataGridEditAction.Commit && r.Committed.Length > 0 && r.Name.Trim() != r.Committed) { Rename(r); return; }
+            if (r.Committed.Length == 0) r.Committed = r.Name.Trim();
+            Recompute();
+        };
         dg.LoadingRow += (_, e) =>
         {
             var table = e.Row.DataContext is EqRow r && r.FromTable != null;
@@ -401,8 +407,11 @@ static class ParametersDialog
             items.Clear();
             foreach (var e in session.Doc.Equations) items.Add(Make(e));
             foreach (var t in session.Doc.Tables ?? new())
-                foreach (var name in new[] { t.Name }.Concat(t.Columns).Where(n => !string.IsNullOrWhiteSpace(n)))
-                    items.Add(new EqRow(new Equation { Name = name.Trim() }, Recompute, t.Name));
+                foreach (var name in new[] { t.Name }.Concat(t.Columns).Where(n => !string.IsNullOrWhiteSpace(n) && !TableConfig.IsProperty(n)))
+                    // (an equation's own row stands for it: a table of its standard values, or a column setting it)
+                    if (!session.Doc.Equations.Any(e => e.Name.Trim().Equals(name.Trim(), StringComparison.OrdinalIgnoreCase))
+                        && session.Doc.Tables!.All(o => o == t || !o.Name.Trim().Equals(name.Trim(), StringComparison.OrdinalIgnoreCase)))
+                        items.Add(new EqRow(new Equation { Name = name.Trim() }, Recompute, t.Name));
             Recompute();
             loading = false;
         }
@@ -460,6 +469,9 @@ static class ParametersDialog
         readonly DesignTable _t;
         readonly Action _changed;
         public TRow(DesignRow row, DesignTable t, Action changed) { Row = row; _t = t; _changed = changed; }
+        /// <summary>A cell being edited: its value goes in when the edit ends (the grid then says so), not at each key.</summary>
+        public Func<bool>? Editing;
+        void Changed() { if (Editing?.Invoke() != true) _changed(); }
         void Notify(string p) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(p));
         public string Key
         {
@@ -470,7 +482,7 @@ static class ParametersDialog
                 if (now == was) return;
                 Row.Key = now;
                 if (_t.Selected == was) _t.Selected = now;
-                Notify(nameof(Key)); _changed();
+                Notify(nameof(Key)); Changed();
             }
         }
         public string this[int c]
@@ -483,7 +495,7 @@ static class ParametersDialog
                 if (now.Length == 0 && !(c < _t.Columns.Count && TableConfig.IsProperty(_t.Columns[c]))) now = "0";
                 if (Row.Values[c] == now) return;
                 Row.Values[c] = now;
-                Notify("Item[]"); _changed();
+                Notify("Item[]"); Changed();
             }
         }
         public bool Active
@@ -518,7 +530,10 @@ static class ParametersDialog
             foreach (var t in tables)
             {
                 if (!IsName(t.Name)) return $"\"{t.Name}\" cannot name a table (letters, digits and _, starting with a letter; not a function, constant or unit).";
-                if (!names.Add(t.Name)) return $"{t.Name} is already a variable.";
+                // (named after an equation: that equation's standard values, each row's key one)
+                var values = session.Doc.Equations.Any(e => e.Name.Trim().Equals(t.Name.Trim(), StringComparison.OrdinalIgnoreCase));
+                if (!values && !names.Add(t.Name)) return $"{t.Name} is already a variable.";
+                if (values && tables.Count(o => o.Name.Trim().Equals(t.Name.Trim(), StringComparison.OrdinalIgnoreCase)) > 1) return $"{t.Name} has two tables.";
                 foreach (var c in t.Columns)
                 {
                     if (TableConfig.IsProperty(c))
@@ -582,7 +597,9 @@ static class ParametersDialog
                 return;
             }
             var t = tables[current];
-            right.Children.Add(Note("Each row sets values for a set of variables (values or expressions); the table's name holds the row in use (1 = first), for conditions such as "
+            right.Children.Add(Note((session.Doc.Equations.Any(e => e.Name.Trim().Equals(t.Name.Trim(), StringComparison.OrdinalIgnoreCase))
+                ? $"Named after the equation {t.Name.Trim()}: its standard values, each row's key one (12, 16, 20). The row picked sets {t.Name.Trim()}; user-facing, Configure offers them. "
+                : "") + "Each row sets values for a set of variables (values or expressions); the table's name holds the row in use (1 = first), for conditions such as "
                 + "Size >= 3 (Suppress When). Changes apply as made. Ctrl+C copies the table for a spreadsheet; Ctrl+V pastes one back (a heading row of variable names, then a row per configuration)."));
 
             // its name, user-facing and description
@@ -605,7 +622,9 @@ static class ParametersDialog
             // its grid: the key, a column per variable, the row in use
             var rows = new ObservableCollection<TRow>();
             void Changed() { foreach (var r in rows) r.ActiveChanged(); Apply(); }
-            foreach (var r in t.Rows) rows.Add(new TRow(r, t, Changed));
+            bool editingCell = false;
+            TRow NewRow(DesignRow r) => new(r, t, Changed) { Editing = () => editingCell };
+            foreach (var r in t.Rows) rows.Add(NewRow(r));
             var dg = NewGrid();
             dg.ItemsSource = rows;
             dg.Columns.Add(new DataGridTextColumn
@@ -747,6 +766,8 @@ static class ParametersDialog
                 dg.SelectedItem = r;
             }
             Keys(dg, Copy, Paste, Delete, Move);
+            dg.BeginningEdit += (_, e) => { if (!e.Cancel) editingCell = true; };
+            dg.CellEditEnded += (_, e) => { editingCell = false; if (e.EditAction == DataGridEditAction.Commit) Changed(); };
             var host = new Panel { Children = { dg } };
             dg.PreparingCellForEdit += (_, e) =>
             {
@@ -762,7 +783,7 @@ static class ParametersDialog
                 while (t.Row("Row" + k) != null) k++;
                 var r = new DesignRow { Key = "Row" + k, Values = t.Rows.LastOrDefault()?.Values.ToList() ?? t.Columns.Select(_ => "0").ToList() };
                 t.Rows.Add(r);
-                var tr = new TRow(r, t, Changed);
+                var tr = NewRow(r);
                 rows.Add(tr);
                 Changed();
                 dg.SelectedItem = tr;

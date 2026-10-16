@@ -8,6 +8,8 @@ namespace SpryCad.Core.Model;
 /// <item>another table's name: the row of that table it picks ("M6"), so a row combines others ("M6x20, threaded");</item>
 /// <item>an equation's name: the value it sets that equation to in that row.</item>
 /// </list>
+/// A table named after an equation lists that equation's standard values (Inventor's multi-value parameter): each row's
+/// key is a value of it ("12", "16", "20" for L), the row picked setting it.
 /// The first table to pick a row or set a value wins: a table of configurations is put before those it picks from.
 /// </summary>
 public static class TableConfig
@@ -56,6 +58,8 @@ public static class TableConfig
         {
             if (RowOf(t, picked) is not { } row) continue;
             rows[t.Name.Trim()] = row.Key;
+            // (named after an equation: its standard values, the row's key the value)
+            if (equations.Contains(t.Name.Trim())) sets.TryAdd(t.Name.Trim(), row.Key);
             for (int c = 0; c < t.Columns.Count; c++)
             {
                 var col = t.Columns[c].Trim();

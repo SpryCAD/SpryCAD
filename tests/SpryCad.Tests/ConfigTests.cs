@@ -108,6 +108,27 @@ static class ConfigTests
             t.Eq(back.Find(cut.Id)!.SuppressWhen, "Nope > 1");
         });
 
+        t.Test("Design tables: one named after an equation lists its standard values (each row's key one), user-facing as a choice in its place", () =>
+        {
+            var doc = new CadDocument();
+            doc.Equations.Add(new Equation { Name = "L", Expr = "10mm", Exposed = true });
+            doc.Tables = new()
+            {
+                new DesignTable
+                {
+                    Name = "L", Selected = "20mm",
+                    Rows = { new DesignRow { Key = "12mm" }, new DesignRow { Key = "16mm" }, new DesignRow { Key = "20mm" } },
+                },
+            };
+            var (vals, errs) = Regenerator.EvaluateEquations(doc);
+            t.True(errs.Count == 0, string.Join("; ", errs.Values));
+            t.Eq(vals["L"].Value, 20.0);
+            var ps = doc.UserParameters();
+            t.True(ps.Count == 1 && ps[0].IsChoice && ps[0].Choices!.Count == 3, "L offered as its standard values, once");
+            var configured = doc.Configured(new Dictionary<string, string> { ["L"] = "12mm" });
+            t.Eq(Regenerator.EvaluateEquations(configured).values["L"].Value, 12.0);
+        });
+
         t.Test("Design tables as configurations: a row picks another table's row and sets an equation, and gives the part number and description", () =>
         {
             var doc = new CadDocument();
