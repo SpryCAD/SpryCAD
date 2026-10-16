@@ -570,15 +570,16 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         if (Section is not { } s || Style == DisplayStyle.Shaded) { _outlines.Clear(); return; }
         var world = new Vector4((float)s.Normal.X, (float)s.Normal.Y, (float)s.Normal.Z, (float)-s.D);
         var live = new HashSet<(DisplayMesh, Matrix4x4)>();
-        void One(DisplayMesh m, Matrix4x4 model)
+        // (in the color its edges are: mid grey around a dark part's cut, as on its edges)
+        void One(DisplayMesh m, Matrix4x4 model, Rgba color)
         {
             var key = (m, model);
             live.Add(key);
             if (!_outlines.TryGetValue(key, out var o) || o.plane != world) _outlines[key] = o = (world, Outline(m, model, world));
-            for (int k = 0; k + 1 < o.segs.Count; k += 2) g.Line(o.segs[k], o.segs[k + 1], EdgeColor);
+            for (int k = 0; k + 1 < o.segs.Count; k += 2) g.Line(o.segs[k], o.segs[k + 1], color);
         }
-        foreach (var b in Bodies) One(b.Mesh, Matrix4x4.Identity);
-        foreach (var i in Instances) if (i.Color.A > 0) One(i.Mesh, i.Model);
+        foreach (var b in Bodies) One(b.Mesh, Matrix4x4.Identity, ColorByFeature == null ? EdgeOver(PartColor) : EdgeColor);
+        foreach (var i in Instances) if (i.Color.A > 0) One(i.Mesh, i.Model, EdgeOver(i.Color));
         foreach (var k in _outlines.Keys.Where(k => !live.Contains(k)).ToList()) _outlines.Remove(k);
     }
 
