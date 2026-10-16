@@ -1215,13 +1215,13 @@ public static class LibraryEditor
             catch (UnauthorizedAccessException)
             {
                 Unwritten();
-                await Dialogs.Message(w, "Publish failed", $"No write access to {s.Path}. Only library owners can publish.");
+                await Dialogs.Message(w, "Publish Failed", $"No write access to {s.Path}. Only library owners can publish.");
                 return false;
             }
             catch (Exception ex) when (ex is IOException or InvalidDataException or ArgumentException or Microsoft.Data.Sqlite.SqliteException)
             {
                 Unwritten();
-                await Dialogs.Message(w, "Publish failed", $"Could not publish {file}: {ex.Message}");
+                await Dialogs.Message(w, "Publish Failed", $"Could not publish {file}: {ex.Message}");
                 return false;
             }
             // the built-in standards not written after all: still the built-in ones, unsaved
@@ -1257,7 +1257,7 @@ public static class LibraryEditor
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
             {
-                await Dialogs.Message(w, "Publish failed", $"Could not update {config}: {ex.Message}");
+                await Dialogs.Message(w, "Publish Failed", $"Could not update {config}: {ex.Message}");
             }
         }
 
