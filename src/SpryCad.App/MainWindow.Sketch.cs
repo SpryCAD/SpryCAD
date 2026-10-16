@@ -229,7 +229,8 @@ public partial class MainWindow
             Status($"{Session.Doc.Find(id)?.Name} saved.");
         }
         else if (save && _sketchIsNew) { Status("Empty sketch discarded."); pending = null; hole = null; }
-        ShowTab(_activeTab);
+        // a sketch a feature asked for (an extrude, a revolve, a hole): back on the Features tab, with that feature
+        ShowTab(save && (pending != null || hole != null) ? "Features" : _activeTab);
         if (save && Session.Doc.Find(id) is SketchFeature sf)
         {
             Selection.Set(new SelItem { Kind = SelKind.Sketch, FeatureId = sf.Id, Frame = ed.Frame });
