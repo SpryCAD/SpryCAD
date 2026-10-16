@@ -343,7 +343,10 @@ public sealed partial class SketchEditor : IViewportMode
                 break;
             case CType.Perpendicular: New(type, lines[0].Id, lines[1].Id); break;
             case CType.Coincident:
-                Sk.MergePoints(pts[1], pts[0]);
+                // with the origin or a fixed point (a model reference): a relation, which can be deleted to free it;
+                // two points of the sketch are merged
+                if (pts.Any(id => id == Sketch.OriginId || Sk.Point(id)?.Fixed == true)) New(type, pts[0], pts[1]);
+                else Sk.MergePoints(pts[1], pts[0]);
                 break;
             case CType.PointOnLine: New(type, pts[0], lines[0].Id); break;
             case CType.Midpoint: New(type, pts[0], lines[0].Id); break;
@@ -717,7 +720,9 @@ public sealed partial class SketchEditor : IViewportMode
         SkPoint? bestP = null; double bestD = tol;
         foreach (var p in Sk.Points)
         {
-            var d = Vec2.Distance(p.P, m);
+            // (a point drawn on the origin or on a fixed point sits where that one is: the drawn one is taken, so a
+            // chain closes on its own start, not on a second point coincident with it)
+            var d = Vec2.Distance(p.P, m) + (p.Id == Sketch.OriginId || p.Fixed ? Px * 0.5 : 0);
             if (d < bestD) { bestD = d; bestP = p; }
         }
         if (bestP != null) return Aligned(new Snap(bestP.Id == Sketch.OriginId ? SnapKind.Origin : SnapKind.Point, bestP.P, bestP.Id));
@@ -868,12 +873,15 @@ public sealed partial class SketchEditor : IViewportMode
         switch (s.Kind)
         {
             case SnapKind.Point:
-            case SnapKind.Origin:
                 return s.Id;
+            case SnapKind.Origin:
+                // a point of its own, Coincident with the origin (a relation shown, which can be deleted to free it),
+                // not the origin itself
+                return Coincident(Sketch.OriginId, s.P);
         }
         if (s.Kind == SnapKind.ModelVertex && s.Model is { } vh &&
             SketchReferences.Create(Sk, Frame, vh.Edge, vh.Body.Id, true, vh.Point) is SkPointEntity rp)
-            return rp.P; // shares the fixed reference point: coincident with the model vertex
+            return Coincident(rp.P, s.P); // Coincident with the model vertex's (fixed) reference point, not that point itself
         if (s.Model is { } mh && s.Kind is SnapKind.ModelEdge or SnapKind.ModelMidpoint or SnapKind.ModelCenter)
         {
             // associative relation to the model: the edge becomes reference geometry, the point is tied to it
@@ -892,6 +900,14 @@ public sealed partial class SketchEditor : IViewportMode
             case SnapKind.OnLine: Sk.AddConstraint(CType.PointOnLine, p.Id, s.Id); break;
             case SnapKind.OnCircle: Sk.AddConstraint(CType.PointOnCircle, p.Id, s.Id); break;
         }
+        return p.Id;
+    }
+
+    /// <summary>A new point at <paramref name="at"/>, Coincident with point <paramref name="with"/>; its id.</summary>
+    long Coincident(long with, Vec2 at)
+    {
+        var p = Sk.AddPoint(at);
+        Sk.AddConstraint(CType.Coincident, p.Id, with);
         return p.Id;
     }
 
@@ -1060,7 +1076,8 @@ public sealed partial class SketchEditor : IViewportMode
         e = c + (e - c).Normalized * r;
         long ci = ResolvePoint(_clickSnaps[0]);
         long si = ResolvePoint(_clickSnaps[1]);
-        long ei = _clickSnaps[2].Kind is SnapKind.Point or SnapKind.Origin ? _clickSnaps[2].Id : Sk.AddPoint(e).Id;
+        long ei = _clickSnaps[2].Kind == SnapKind.Point ? _clickSnaps[2].Id
+            : _clickSnaps[2].Kind == SnapKind.Origin ? Coincident(Sketch.OriginId, e) : Sk.AddPoint(e).Id;
         if (_arcSweep >= 0) Sk.Add(new SkArc { Center = ci, Start = si, End = ei });
         else Sk.Add(new SkArc { Center = ci, Start = ei, End = si });
     }
