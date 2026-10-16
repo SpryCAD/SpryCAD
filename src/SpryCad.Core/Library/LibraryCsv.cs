@@ -6,7 +6,7 @@ namespace SpryCad.Core.Library;
 /// <summary>
 /// A library table's rows as CSV, to edit in a spreadsheet: a header row (the first cell names the row column, then
 /// the table's columns, then its text as <c>text:name</c>), then a row per designation: its key, its values (numbers,
-/// invariant culture, round-trippable) and its text (empty: none). Quoted as RFC 4180; tab-separated text (pasted from
+/// invariant culture, round-trippable; empty: not known, NaN, which only a material table may hold) and its text (empty: none). Quoted as RFC 4180; tab-separated text (pasted from
 /// a spreadsheet) reads too.
 /// </summary>
 public static class LibraryCsv
@@ -21,7 +21,7 @@ public static class LibraryCsv
         Line(sb, new[] { "row" }.Concat(t.Columns).Concat(texts.Select(n => TextPrefix + n)));
         foreach (var r in t.Rows)
             Line(sb, new[] { r.Key }
-                .Concat(r.Values.Select(v => v.ToString("R", CultureInfo.InvariantCulture)))
+                .Concat(r.Values.Select(v => double.IsFinite(v) ? v.ToString("R", CultureInfo.InvariantCulture) : ""))
                 .Concat(texts.Select(n => r.Text != null && r.Text.TryGetValue(n, out var s) ? s : "")));
         return sb.ToString();
     }
@@ -74,6 +74,7 @@ public static class LibraryCsv
             foreach (var i in numbers)
             {
                 var s = Cell(i);
+                if (s.Length == 0) { row.Values.Add(double.NaN); continue; }
                 if (!double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out var v) || !double.IsFinite(v))
                     throw new FormatException($"Line {line}: {key}'s {header[i]} is not a number (\"{s}\").");
                 row.Values.Add(v);

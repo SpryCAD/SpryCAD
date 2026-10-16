@@ -39,6 +39,8 @@ public static class LibraryEditor
         (TableKinds.Clearance, "Clearance holes", new[] { "close", "normal", "loose" }),
         (TableKinds.Counterbore, "Counterbores", new[] { "diameter", "depth" }),
         (TableKinds.Countersink, "Countersinks", new[] { "diameter", "angle" }),
+        (TableKinds.Material, "Materials", Materials.Columns.ToArray()),
+        (TableKinds.Appearance, "Appearances", Materials.AppearanceColumns.ToArray()),
     };
 
     // ------------------------------------------------------------------------------------------
@@ -74,7 +76,8 @@ public static class LibraryEditor
         public string? Units;
         public bool Verified;
 
-        public double Scale(string column) => new LibraryTable { Units = Units }.Scale(column);
+        public double Scale(string column) => new LibraryTable { Units = Units, Kind = Kind }.Scale(column);
+        public bool Material => Kind == TableKinds.Material;
 
         /// <summary>Shows the values in other units: each the same length.</summary>
         public void Convert(string? units)
@@ -142,7 +145,11 @@ public static class LibraryEditor
                     for (int c = 0; c < cols.Count; c++)
                     {
                         if (r.Mm(c, t.Scale(cols[c])) is not { } v)
+                        {
+                            // (a material's value left blank: not known)
+                            if (MayBeBlank(t, c) && (c >= r.Values.Count || r.Values[c].Trim().Length == 0)) { row.Values.Add(double.NaN); continue; }
                             return (tables, new(), $"{key}: {rk}'s {cols[c]} is not a number (\"{(c < r.Values.Count ? r.Values[c].Trim() : "")}\").");
+                        }
                         row.Values.Add(v);
                     }
                     foreach (var n in t.TextColumns)
@@ -225,7 +232,7 @@ public static class LibraryEditor
                 var t = _table()!;
                 if (c < t.Columns.Count)
                 {
-                    if (!TryNumber(value, out _))
+                    if (!TryNumber(value, out _) && !(value.Length == 0 && MayBeBlank(t, c)))
                     {
                         _problem($"{Row.Key}'s {t.Columns[c]}: \"{value}\" is not a number, so it was left as it was.");
                         Dispatcher.UIThread.Post(Notify); // the cell shows the value kept
@@ -233,7 +240,17 @@ public static class LibraryEditor
                     }
                     Row.Set(c, value);
                 }
-                else if (c - t.Columns.Count < t.TextColumns.Count) Row.Text[t.TextColumns[c - t.Columns.Count]] = value;
+                else if (c - t.Columns.Count < t.TextColumns.Count)
+                {
+                    // a material's type: one the app knows (else it reads as Other)
+                    if (t.Material && t.TextColumns[c - t.Columns.Count] == Materials.TypeKey && value.Length > 0 && !Enum.TryParse<MaterialType>(value, out _))
+                    {
+                        _problem($"{Row.Key}'s type: \"{value}\" is not one of {string.Join(", ", Enum.GetNames<MaterialType>())}, so it was left as it was.");
+                        Dispatcher.UIThread.Post(Notify);
+                        return;
+                    }
+                    Row.Text[t.TextColumns[c - t.Columns.Count]] = value;
+                }
                 else return;
                 _changed(); Notify();
             }
@@ -259,9 +276,13 @@ public static class LibraryEditor
             _changed(); Notify();
         }
 
+        /// <summary>The row's color (an appearance's or a material's r, g, b columns) as a swatch; null when it has none.</summary>
+        public Func<GridRow, IBrush?>? SwatchOf;
+        public IBrush? Swatch => SwatchOf?.Invoke(this);
+
         public void Notify()
         {
-            foreach (var p in new[] { nameof(Key), "Item[]", nameof(Enabled), nameof(Foreground), nameof(Style) })
+            foreach (var p in new[] { nameof(Key), "Item[]", nameof(Enabled), nameof(Foreground), nameof(Style), nameof(Swatch) })
                 PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(p));
         }
     }
@@ -306,9 +327,15 @@ public static class LibraryEditor
     static bool TryNumber(string s, out double v) =>
         double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out v) && double.IsFinite(v);
 
-    /// <summary>A value in millimetres as shown in units of <paramref name="scale"/> mm: millimetres (and degrees) to 4 decimals, inches to 5.</summary>
+    /// <summary>
+    /// A value in millimetres as shown in units of <paramref name="scale"/> mm: millimetres (and degrees) to 4 decimals,
+    /// inches to 5 (a material's in its units alike); a value not known (a material's) blank.
+    /// </summary>
     static string Shown(double mm, double scale) =>
-        Math.Round(mm / scale, scale == 1 ? 4 : 5).ToString("R", CultureInfo.InvariantCulture);
+        double.IsFinite(mm) ? Math.Round(mm / scale, scale == 1 ? 4 : 5).ToString("R", CultureInfo.InvariantCulture) : "";
+
+    /// <summary>Whether a material table's column may be left blank: not known (any but its density).</summary>
+    static bool MayBeBlank(TableEdit t, int c) => t.Material && c < t.Columns.Count && t.Columns[c] != "density";
 
     static TableEdit Edit(LibraryTable t, bool published) => new()
     {
@@ -376,15 +403,15 @@ public static class LibraryEditor
     // ------------------------------------------------------------------------------------------
     // the commands
 
-    /// <summary>Tools > Libraries > Edit Library: picks a library file and edits it.</summary>
-    public static async Task Open(MainWindow owner)
+    /// <summary>Tools > Libraries > Edit Library: picks a library file and edits it (at <paramref name="table"/>, when it has it).</summary>
+    public static async Task Open(MainWindow owner, string? table = null)
     {
         // no library set yet: SpryCAD's own standards, published as the start of one
         if (Libraries.Location.path == null)
         {
-            var b = FromLibrary(BuiltInStandards.AsLibrary(), "");
+            var b = FromLibrary(BuiltInStandards.AsLibrary() with { Tables = LibraryFile.BuiltInTables.ToList() }, "");
             b.ReadRevision = null;
-            await Show(owner, b);
+            await Show(owner, b, table);
             return;
         }
         var files = await owner.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
@@ -399,7 +426,7 @@ public static class LibraryEditor
             await Dialogs.Message(owner, "Edit Library failed", $"{System.IO.Path.GetFileName(path)} could not be read: {ex.Message}");
             return;
         }
-        await Show(owner, s);
+        await Show(owner, s, table);
     }
 
     /// <summary>Tools > Libraries > New Company Library: a new, empty company library at a path chosen (written when first published).</summary>
@@ -424,7 +451,7 @@ public static class LibraryEditor
     // ------------------------------------------------------------------------------------------
     // the window
 
-    static async Task Show(MainWindow owner, State s)
+    static async Task Show(MainWindow owner, State s, string? select = null)
     {
         string? selected = null;
         var nameBox = new TextBox { MinWidth = 220 };
@@ -448,7 +475,7 @@ public static class LibraryEditor
         {
             nameBox.Text = s.Name;
             pathText.Text = s.BuiltIn
-                ? "SpryCAD's built-in standards: no library set is in use (Options > Libraries). Publish saves your copy, with your changes, as standards.sprlib in a folder you choose, "
+                ? "SpryCAD's built-in standards and materials: no library set is in use (Options > Libraries). Publish saves your copy, with your changes, as standards.sprlib in a folder you choose, "
                     + "with a libraries.json listing it: a library set to share."
                 : $"{s.Layer} library · {s.Path}";
             info.Text = s.BuiltIn ? "Built in: published to a folder." : s.ReadRevision == null ? "New: written when first published." : $"Editing revision {s.ReadRevision.Value.ToString()[..8]}.";
@@ -541,7 +568,8 @@ public static class LibraryEditor
             var cols = t?.Columns.ToList() ?? inh?.table.Columns.ToList() ?? new List<string>();
             var texts = t?.TextColumns.ToList() ?? (inh != null ? LibraryCsv.TextColumns(inh.Value.table.Rows) : new List<string>());
             var units = t != null ? t.Units : inh?.table.Units;
-            double Scale(string col) => new LibraryTable { Units = units }.Scale(col);
+            var unitsTable = new LibraryTable { Units = units, Kind = t?.Kind ?? inh?.table.Kind ?? "" };
+            double Scale(string col) => unitsTable.Scale(col);
 
             // this library's own table, made (from the other libraries') when a row is first added or overridden
             TableEdit Own()
@@ -561,8 +589,16 @@ public static class LibraryEditor
             // the rows: the other libraries' in their order (this library's override in place of one), then this library's new ones,
             // then any the restriction names that no table has
             void RowChanged() { Changed(); Relist(key, body: false); }
+            // a color (r, g, b columns, 0-1) shown as a swatch beside the designation
+            int ri = cols.IndexOf("r"), gi = cols.IndexOf("g"), bi = cols.IndexOf("b");
+            bool colored = ri >= 0 && gi >= 0 && bi >= 0;
+            IBrush? SwatchOf(GridRow g)
+            {
+                byte C(int c) => TryNumber(g[c], out var v) ? (byte)Math.Round(Math.Clamp(v, 0, 1) * 255) : (byte)0;
+                return TryNumber(g[ri], out _) && TryNumber(g[gi], out _) && TryNumber(g[bi], out _) ? new SolidColorBrush(Color.FromRgb(C(ri), C(gi), C(bi))) : null;
+            }
             GridRow Make(RowEdit? own, string? from, string inheritedKey, string[] cells) =>
-                new(own, from, inheritedKey, cells, () => t, () => s.Restriction(key), RowChanged, p => error.Text = p);
+                new(own, from, inheritedKey, cells, () => t, () => s.Restriction(key), RowChanged, p => error.Text = p) { SwatchOf = colored ? SwatchOf : null };
             var items = new ObservableCollection<GridRow>();
             var inhRows = new Dictionary<string, (LibraryRow row, string from)>(StringComparer.Ordinal);
             var used = new HashSet<RowEdit>();
@@ -667,6 +703,37 @@ public static class LibraryEditor
                 CustomSortComparer = new Comparer((a, b) => Natural(a.Key, b.Key)),
             });
             fields.Add(0);
+            if (colored)
+            {
+                // clicked: a color typed as #RRGGBB, into the r, g and b columns
+                dg.Columns.Add(new DataGridTemplateColumn
+                {
+                    Header = Header("Color", "The row's r, g and b columns. Click a swatch to set them from a color (#RRGGBB).", false, null, null), Width = ToHeader,
+                    CellTemplate = new FuncDataTemplate<GridRow>((_, _) =>
+                    {
+                        var sw = new Border
+                        {
+                            Width = 28, Height = 14, CornerRadius = new CornerRadius(2), BorderBrush = Palette.TextMuted, BorderThickness = new Thickness(0.5),
+                            HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, Cursor = new Cursor(StandardCursorType.Hand),
+                            [!Border.BackgroundProperty] = new Binding(nameof(GridRow.Swatch)),
+                        };
+                        sw.PointerPressed += async (_, e) =>
+                        {
+                            if (sw.DataContext is not GridRow g || !e.GetCurrentPoint(sw).Properties.IsLeftButtonPressed) return;
+                            e.Handled = true;
+                            string Hex(int c) => TryNumber(g[c], out var v) ? ((int)Math.Round(Math.Clamp(v, 0, 1) * 255)).ToString("X2") : "00";
+                            var typed = (await Dialogs.Input(w, "Color", $"{g.Key}'s color, as #RRGGBB:", $"#{Hex(ri)}{Hex(gi)}{Hex(bi)}"))?.Trim().TrimStart('#');
+                            if (typed == null) return;
+                            if (typed.Length != 6 || !int.TryParse(typed, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var rgb)) { error.Text = $"\"{typed}\" is not a color (#RRGGBB)."; return; }
+                            Override(g);
+                            string Part(int shift) => Math.Round(((rgb >> shift) & 0xFF) / 255.0, 4).ToString("R", CultureInfo.InvariantCulture);
+                            g[ri] = Part(16); g[gi] = Part(8); g[bi] = Part(0);
+                        };
+                        return sw;
+                    }),
+                });
+                fields.Add(-1);
+            }
             async Task<string?> ColumnName(string title, string label, string value)
             {
                 var n = (await Dialogs.Input(w, title, label, value))?.Trim();
@@ -677,10 +744,10 @@ public static class LibraryEditor
             for (int c = 0; c < cols.Count; c++)
             {
                 int cc = c;
-                var unit = Scale(cols[c]) != 1 ? "in" : cols[c].Contains("angle", StringComparison.OrdinalIgnoreCase) ? "°" : "mm";
+                var unit = unitsTable.UnitLabel(cols[c]);
                 dg.Columns.Add(new DataGridTextColumn
                 {
-                    Header = Header($"{cols[c]} ({unit})", "A column of numbers: the commands read values by its name (major, pitch; close, normal, loose).", false,
+                    Header = Header(unit.Length > 0 ? $"{cols[c]} ({unit})" : cols[c], "A column of numbers: the commands read values by its name (major, pitch; close, normal, loose).", false,
                         t == null ? null : async () =>
                         {
                             if (await ColumnName("Rename Column", "The column's new name (the commands read values by it):", cols[cc]) is not { } n) return;
@@ -875,14 +942,22 @@ public static class LibraryEditor
                 t.Kind = Kinds[kind.SelectedIndex].kind;
                 // a table with no columns yet takes the ones its kind is read by
                 if (t.Columns.Count == 0) { t.Columns = Kinds[kind.SelectedIndex].columns.ToList(); foreach (var r in t.Rows) { r.Values = t.Columns.Select(_ => "0").ToList(); r.Exact.Clear(); r.Pad(t.Columns.Count); } }
+                // (a material says what it is: its type)
+                if (t.Material && !t.TextColumns.Contains(Materials.TypeKey)) t.TextColumns.Insert(0, Materials.TypeKey);
                 Changed(); Body();
             };
             var verified = new CheckBox { Content = "Verified against the published standard", IsChecked = t.Verified };
             verified.IsCheckedChanged += (_, _) => { t.Verified = verified.IsChecked == true; Changed(); };
             Cell(Label("Key"), 0, 0); Cell(key, 0, 1); Cell(Label("Title"), 0, 3); Cell(title, 0, 4);
             Cell(Label("For"), 2, 0); Cell(kind, 2, 1); Cell(Label("Standard"), 2, 3); Cell(standard, 2, 4);
-            var units = new ComboBox { ItemsSource = new[] { "Millimetres (mm)", "Inches (in)" }, SelectedIndex = t.Units == LibraryTable.Inch ? 1 : 0, HorizontalAlignment = HorizontalAlignment.Stretch };
-            ToolTip.SetTip(units, "The units the table's lengths are shown and typed in (and CSV files use): inches for an inch standard. They are stored in millimetres either way");
+            var units = new ComboBox
+            {
+                ItemsSource = t.Material ? new[] { "Metric (g/cm³, GPa, MPa)", "Inch-pound (lb/in³, Msi, ksi)" } : new[] { "Millimetres (mm)", "Inches (in)" },
+                SelectedIndex = t.Units == LibraryTable.Inch ? 1 : 0, HorizontalAlignment = HorizontalAlignment.Stretch,
+            };
+            ToolTip.SetTip(units, t.Material
+                ? "The units the table's properties are shown and typed in (and CSV files use). They are stored in SI units either way"
+                : "The units the table's lengths are shown and typed in (and CSV files use): inches for an inch standard. They are stored in millimetres either way");
             units.SelectionChanged += (_, _) =>
             {
                 var u = units.SelectedIndex == 1 ? LibraryTable.Inch : null;
@@ -892,7 +967,11 @@ public static class LibraryEditor
             };
             Cell(Label("Units"), 4, 0); Cell(units, 4, 1); Cell(verified, 4, 3); Grid.SetColumnSpan(verified, 2);
             Top(props);
-            Top(Muted($"Lengths in {(t.Units == LibraryTable.Inch ? "inches" : "millimetres")}, angles (columns named angle) in degrees. A table keyed as one in an earlier library adds rows to it and overrides rows of the same designation, "
+            Top(Muted((t.Material
+                    ? $"Properties in {(t.Units == LibraryTable.Inch ? "inch-pound" : "metric")} units, as each column's heading says; leave a cell blank when the value is not known (all but density). "
+                        + $"The type text is one of {string.Join(", ", Enum.GetNames<MaterialType>())}; r, g, b, metallic, roughness and opacity (0 to 1) are how it looks. "
+                    : $"Lengths in {(t.Units == LibraryTable.Inch ? "inches" : "millimetres")}, angles (columns named angle) in degrees. ")
+                + "A table keyed as one in an earlier library adds rows to it and overrides rows of the same designation, "
                 + "as long as its columns are the same (otherwise it replaces the table). Text columns carry part numbers, suppliers and the like."));
         }
 
@@ -932,7 +1011,7 @@ public static class LibraryEditor
                     if (t.Published && !cols.SequenceEqual(t.Columns)
                         && !await Dialogs.YesNo(w, "Import CSV", $"The file's columns ({string.Join(", ", cols)}) are not the table's ({string.Join(", ", t.Columns)}). Parts read values by column name. Import anyway?", "Import", "Cancel"))
                         return;
-                    var imported = Edit(InUnits(new LibraryTable { Units = t.Units, Columns = cols, Rows = rows }, toShown: false), false);
+                    var imported = Edit(InUnits(new LibraryTable { Units = t.Units, Kind = t.Kind, Columns = cols, Rows = rows }, toShown: false), false);
                     t.Columns = imported.Columns; t.TextColumns = imported.TextColumns; t.Rows = imported.Rows;
                     Changed(); Relist();
                     owner.Status($"Imported {rows.Count} rows into {t.Key} (not yet published).");
@@ -1191,7 +1270,7 @@ public static class LibraryEditor
         };
         close.Click += (_, _) => w.Close();
 
-        Header(); Relist();
+        Header(); Relist(select != null && s.Table(select) != null ? select : null);
         s.Dirty = s.ReadRevision == null && !s.BuiltIn; // (filling the boxes is not a change)
         await w.ShowDialog(owner);
     }

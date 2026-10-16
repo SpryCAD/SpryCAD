@@ -274,6 +274,17 @@ static class AssemblyToolTests
             t.True(mp.Parts == 5 && Math.Abs(mp.Volume - vol) < 1e-3 * vol && Math.Abs(mp.Mass - vol * 7.85e-3) < 1e-3 * mp.Mass, $"volume {mp.Volume:0.##} (want {vol:0.##}), mass {mp.Mass:0.###} g");
             // symmetric about x = 0 (the base at the origin, one pin and sleeve pair each side)
             t.True(Math.Abs(mp.Center.X) < 1e-6 && mp.Principal[0] > 0 && mp.Approximate.Count == 0, $"centered ({mp.Center})");
+            // the BOM's masses: each line one of it, the top level's adding up to the assembly's; parts with no material said so
+            var withMass = Bom.Build(m, BomKind.Indented, mass: true);
+            var sum = withMass.Where(r => r.Level == 0).Sum(r => r.Mass!.Value * r.Quantity);
+            t.True(Math.Abs(sum - mp.Mass) < 1e-6 * mp.Mass, $"BOM total {sum:0.###} g, assembly {mp.Mass:0.###} g");
+            t.True(withMass.Where(r => !r.IsAssembly).All(r => r.Material == Bom.NoMaterial && r.Mass > 0), string.Join("; ", withMass));
+            var csvIps = Bom.ToCsv(withMass, UnitSystem.IPS);
+            t.Eq(csvIps.Split('\n')[0], "Item,Part,Configuration,Quantity,Material,Mass (lb),Total mass (lb),File");
+            // the report in the assembly's units
+            var ips = mp.Report("T", UnitSystem.IPS);
+            t.True(ips.Contains(" lb\n") && ips.Contains("Center of mass (in)") && ips.Contains("lb·in²") && ips.Contains("No material set"), ips);
+            t.True(mp.Report("T", UnitSystem.MMGS).Contains("Center of mass (mm)"), "metric");
 
             // each pin and its sleeve share their volume (the sleeve sits on the pin)
             var notes = new List<string>();

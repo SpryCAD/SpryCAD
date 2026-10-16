@@ -118,8 +118,15 @@ public static class LibraryFile
         foreach (var t in tables)
         {
             if (string.IsNullOrWhiteSpace(t.Key) || t.Key.Contains('/')) throw new ArgumentException($"A table key cannot be empty or hold '/': \"{t.Key}\".");
+            if (t.Key == PartMaterial.CustomTable) throw new ArgumentException($"\"{t.Key}\" is kept for parts' own materials: a table cannot be keyed so.");
             foreach (var r in t.Rows)
+            {
                 if (r.Values.Count != t.Columns.Count) throw new ArgumentException($"{t.Key}/{r.Key} has {r.Values.Count} values for {t.Columns.Count} columns.");
+                // (only a material's values may be missing, not known; never a size's, nor a material's density)
+                for (int c = 0; c < r.Values.Count; c++)
+                    if (!double.IsFinite(r.Values[c]) && (t.Kind != TableKinds.Material || t.Columns[c] == "density"))
+                        throw new ArgumentException($"{t.Key}/{r.Key} has no {t.Columns[c]}.");
+            }
             if (!d.TryAdd(PartObjects.IdOf(ObjectKind.LibraryTable, t.Key), PartObjects.Envelope(ObjectKind.LibraryTable, PartObjects.Json(t))))
                 throw new ArgumentException($"Two tables are keyed \"{t.Key}\".");
         }
@@ -135,7 +142,10 @@ public static class LibraryFile
         return new Guid(root.ToBytes().AsSpan(0, 16));
     }
 
-    /// <summary>The built-in standards written as a library file (the start of a shared standards library).</summary>
+    /// <summary>The built-in standards and materials written as a library file (the start of a shared standards library, to correct and add to).</summary>
     public static Guid WriteBuiltIn(string path, string author) =>
-        Publish(path, BuiltInStandards.LibraryId, BuiltInStandards.Name, LibraryLayer.Standards, BuiltInStandards.Tables, null, author, "SpryCAD built-in standards");
+        Publish(path, BuiltInStandards.LibraryId, BuiltInStandards.Name, LibraryLayer.Standards, BuiltInTables, null, author, "SpryCAD built-in standards and materials");
+
+    /// <summary>The built-in standards' and materials' tables, as a standards library file starts with them.</summary>
+    public static IEnumerable<LibraryTable> BuiltInTables => BuiltInStandards.Tables.Concat(BuiltInMaterials.Tables);
 }

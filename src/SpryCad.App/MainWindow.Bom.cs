@@ -141,7 +141,7 @@ public partial class MainWindow
             var anyShown = all.Any(o => !o.Suppressed && !o.Hidden);
             menu.Items.Add(Item((anyShown ? "Hide All Instances" : "Show All Instances") + n, () => BomSet(live, anyShown ? "hidden" : "shown", (m, p) => m.SetHidden(p, anyShown)), null, anyShown ? "hide" : "show"));
             menu.Items.Add(Item("Isolate All Instances" + n, () => BomIsolate(live, name), null, "isolate"));
-            menu.Items.Add(Item("Appearance of All Instances" + n + "…", () => _ = Appearance(first, live), null, "appearance"));
+            menu.Items.Add(Item("Appearance of All Instances" + n + "…", () => _ = ComponentAppearance(first, live), null, "appearance"));
             menu.Items.Add(new Separator());
             menu.Items.Add(Item("Suppress All Instances" + n, () => BomSet(live, "suppressed", (m, p) => m.SetSuppressed(p, true), solve: true), null, "suppress"));
         }

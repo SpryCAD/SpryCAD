@@ -19,7 +19,8 @@ public sealed class LibraryTable
     public bool Verified { get; set; }
     /// <summary>
     /// The units the table's lengths are shown and typed in: <see cref="Inch"/> for an inch standard, else millimetres
-    /// (null). Values are stored in millimetres either way; angle columns (named "angle") are degrees in both.
+    /// (null). Values are stored in millimetres either way; angle columns (named "angle") are degrees in both. A
+    /// material table's values are SI, shown metric (null) or inch-pound (<see cref="Inch"/>).
     /// </summary>
     public string? Units { get; set; }
     public List<string> Columns { get; set; } = new();
@@ -27,8 +28,18 @@ public sealed class LibraryTable
 
     public const string Inch = "in";
 
-    /// <summary>Millimetres per unit the column is shown in: 25.4 for a length column of an inch table, else 1.</summary>
-    public double Scale(string column) => Units == Inch && !column.Contains("angle", StringComparison.OrdinalIgnoreCase) ? 25.4 : 1;
+    /// <summary>
+    /// Millimetres per unit the column is shown in: 25.4 for a length column of an inch table, else 1. A material
+    /// table's: the SI amount per unit shown, metric or (<see cref="Inch"/>) inch-pound (<see cref="Materials.Unit"/>).
+    /// </summary>
+    public double Scale(string column) =>
+        Kind == TableKinds.Material ? Materials.Unit(column, Units == Inch ? Model.UnitSystem.IPS : Model.UnitSystem.MMGS).scale
+        : Units == Inch && !column.Contains("angle", StringComparison.OrdinalIgnoreCase) ? 25.4 : 1;
+
+    /// <summary>The unit a column is shown in ("mm", "in", "°"; a material's "g/cm³", "ksi", ...; "" for a plain number).</summary>
+    public string UnitLabel(string column) =>
+        Kind == TableKinds.Material ? Materials.Unit(column, Units == Inch ? Model.UnitSystem.IPS : Model.UnitSystem.MMGS).label
+        : Scale(column) != 1 ? "in" : column.Contains("angle", StringComparison.OrdinalIgnoreCase) ? "°" : "mm";
 
     public LibraryRow? Row(string key) => Rows.FirstOrDefault(r => r.Key == key);
 
@@ -64,6 +75,14 @@ public static class TableKinds
     public const string Nut = "nut";
     /// <summary>Washers, a row per size: <see cref="Fasteners.WasherColumns"/> (mm).</summary>
     public const string Washer = "washer";
+    /// <summary>
+    /// Materials, a row per material ("Aluminum 6061"): <see cref="Materials.Columns"/> in SI units, not millimetres
+    /// (<see cref="Materials.Unit"/>), a value not known NaN; text "type" (<see cref="MaterialType"/>) and optionally
+    /// "category", "spec", "description", "hardnessScale", part numbers.
+    /// </summary>
+    public const string Material = "material";
+    /// <summary>Appearances, a row per finish ("Brushed aluminum"): <see cref="Materials.AppearanceColumns"/> (0-1).</summary>
+    public const string Appearance = "appearance";
 }
 
 /// <summary>

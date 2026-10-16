@@ -9,6 +9,7 @@ using SpryCad.App.Sketcher;
 using SpryCad.App.UI;
 using SpryCad.App.Viewport;
 using SpryCad.Core.Model;
+using SpryCad.Core.Library;
 using SpryCad.Core.Storage;
 using SpryCad.Core.Regen;
 using SpryCad.Kernel;
@@ -222,6 +223,8 @@ public partial class MainWindow
             PartMenu(Item("_Configure…", () => _ = Dialogs.ConfigurePart(this), null, "configure")),
             Item("Mea_sure…", MeasureCommand, null, "measure"),
             Item("_Mass Properties…", MassPropertiesCommand, null, "mass"),
+            PartMenu(Item("Edit Ma_terial…", EditMaterialCommand, null, "material")),
+            PartMenu(Item("_Appearance…", () => _ = PartAppearanceCommand(), null, "appearance")),
             PartMenu(Item("_Library Updates…", () => _ = LibraryUpdatesCommand(), null, "table")),
             Sub("Li_braries",
                 Item("_Edit Library…", () => _ = LibraryEditor.Open(this), null, "table"),
@@ -369,6 +372,7 @@ public partial class MainWindow
                 Cmd("mass", "Mass\nProperties", MassPropertiesCommand);
                 if (Asm == null)
                 {
+                    Cmd("material", "Edit\nMaterial", EditMaterialCommand);
                     Cmd("equations", "Equations", () => _ = Dialogs.Equations(this));
                     Cmd("table", "Design\nTable", () => _ = Dialogs.DesignTables(this));
                     Cmd("configure", "Configure", () => _ = Dialogs.ConfigurePart(this));
@@ -439,6 +443,7 @@ public partial class MainWindow
         ["Add Relations"] = "Adds relations such as coincident, horizontal or tangent between the selected entities.",
         ["Measure"] = "Measures distance, angle, radius, length and area of the selected faces, edges and vertices.",
         ["Mass Properties"] = "Calculates mass, volume, surface area, center of mass and moments of inertia from the part's material.",
+        ["Edit Material"] = "Assigns a material from the libraries: its density for mass properties, its properties and its appearance.",
         ["Equations"] = "Defines global variables that drive dimensions and conditions that suppress features.",
         ["Design Table"] = "Defines rows of variable values; selecting a row applies them all.",
         ["Configure"] = "Sets the part's design table rows and the variables marked User.",
@@ -804,6 +809,23 @@ public partial class MainWindow
     {
         var menu = new ContextMenu();
         var f = Session.Doc.Find(id);
+        // the part's material: edit, remove, a recent one, and the library's change when there is one
+        if (id is FeatureTree.MaterialRow or "__part")
+        {
+            menu.Items.Add(Item("Edit Material...", EditMaterialCommand, null, "material"));
+            menu.Items.Add(Item("Appearance...", () => _ = PartAppearanceCommand(), null, "appearance"));
+            foreach (var item in _recentMaterials.Where(i => i != Session.Doc.MaterialItem && LibraryLink.Current.Snapshot(i) != null).Take(5))
+            {
+                var it = item;
+                menu.Items.Add(Item(LibrarySnapshot.Split(it).row, () => SetPartMaterial(it), null, "material"));
+            }
+            if (Session.Doc.MaterialItem is { } mi)
+            {
+                if (LibraryLink.Updates(Session.Doc).Any(u => u.Item == mi)) menu.Items.Add(Item("Update from Library...", () => _ = LibraryUpdatesCommand(), null, "table"));
+                menu.Items.Add(Item("Remove Material", () => SetPartMaterial(null), null, "delete"));
+            }
+            if (id == "__part" && Session.Doc.RollbackIndex != null) menu.Items.Add(new Separator());
+        }
         if (id is "Front" or "Top" or "Right")
         {
             menu.Items.Add(Item("Sketch", () => StartSketchCommand(), null, "sketch"));
@@ -881,10 +903,19 @@ public partial class MainWindow
         var name = "imports/" + baseName;
         for (int k = 2; s.Doc.Files.TryGetValue(name, out var existing) && DocumentContainer.Hash(existing) != hash; k++)
             name = $"imports/{Path.GetFileNameWithoutExtension(baseName)} ({k}){Path.GetExtension(baseName)}";
+        // the file's color (most of its solids'), for a part with no appearance yet (read only when it has one)
+        double[]? color = null;
+        if (s.Doc.Appearance == null && System.Text.Encoding.Latin1.GetString(data) is var text
+            && (text.Contains("COLOUR_RGB", StringComparison.Ordinal) || text.Contains("PRE_DEFINED_COLOUR", StringComparison.Ordinal)))
+        {
+            try { color = StepColors.Dominant(StepFile.Parse(data)); }
+            catch (Exception ex) when (ex is InvalidDataException or FormatException) { color = null; }
+        }
         s.Change(() =>
         {
             s.Doc.AddFile(name, data);
             s.Doc.AddFeature(new ImportFeature { Name = Path.GetFileNameWithoutExtension(baseName), File = name, Sha256 = hash });
+            if (color != null) s.Doc.Appearance = Appearance.FromRgba(color);
         });
         t.FitAfterLoad = s.RequestedRevision; // the rebuild with the import in it
         return null;
@@ -1130,12 +1161,13 @@ public partial class MainWindow
             var hasCosmetic = r.State.Cosmetics.Count > 0;
             var snapshot = hasCosmetic ? Session.Doc.Clone() : null;
             var session = Session;
+            var look = session.Doc.EffectiveAppearance.ToRgba(); // (its color in the file, as other CAD shows it)
             // written off the UI thread: the exact B-rep / tessellation of big parts takes a moment
             await Task.Run(() =>
             {
                 if (snapshot != null) bodies = session.RebuildForExport(snapshot).State.Bodies.ToList();
                 using var fs = File.Create(path);
-                if (kind == "step") StepWriter.Write(fs, bodies.Select(b => (b.Id, b.Solid)), baseName);
+                if (kind == "step") StepWriter.Write(fs, bodies.Select(b => (b.Id, b.Solid)), baseName, color: look);
                 else StlWriter.Write(fs, bodies.Select(b => b.Solid));
             });
             Status($"Exported {path} in {sw.ElapsedMilliseconds} ms.");

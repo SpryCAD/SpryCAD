@@ -1,4 +1,5 @@
 using System.Text;
+using SpryCad.Core.Model;
 using SpryCad.Core.Regen;
 using SpryCad.Kernel;
 
@@ -6,7 +7,7 @@ namespace SpryCad.Core.Assembly;
 
 /// <summary>
 /// A part's display as an assembly keeps it: the display mesh (triangles, normals, face ranges by name, edge lines),
-/// its bounds and volume, and the part's color. What a component shows when its part is not loaded (lightweight),
+/// its bounds and volume, and the part's appearance. What a component shows when its part is not loaded (lightweight),
 /// cannot be found (missing) or is not shared (an assembly packed for viewing). Binary, little-endian:
 /// <code>
 ///   "FCMESH4"  geometry version (int)  color r g b (float)  bounds min max (6 double)  volume (double)
@@ -17,6 +18,8 @@ namespace SpryCad.Core.Assembly;
 ///          plane point and normal, radius, second parameter)
 ///   edge line vertices (count); x, y, z (planar ushort runs)  edges (count; index, start, count)
 ///   cosmetic threads (count; origin, axis, reference direction, radius, lead, length, external)
+///   "FNSH" (int)  metallic, roughness, opacity (float): after all an older SpryCAD reads, so the same version 4 cache
+///   to it; a cache without them is plastic
 /// </code>
 /// Positions and edge lines are kept as their place in the quantization box, 65535 steps per axis
 /// (<see cref="PointQuantizer"/>), normals in two numbers (<see cref="OctNormal"/>): for display (and picking on a
@@ -35,16 +38,22 @@ public static class MeshCache
     // version 3 the geometry version and the cosmetic threads; version 4 quantized points and normals, face hashes
     const string Magic = "FCMESH4", Magic3 = "FCMESH3", Magic2 = "FCMESH2", Magic1 = "FCMESH1";
 
-    /// <summary>A cache read: its mesh, color, cosmetic threads and the geometry version that made it (0: unknown, older).</summary>
-    public sealed record Entry(DisplayMesh Mesh, double[] Color, IReadOnlyList<CosmeticThread> Threads, int Version)
+    /// <summary>A cache read: its mesh, appearance (a color only, in older caches), cosmetic threads and the geometry version that made it (0: unknown, older).</summary>
+    public sealed record Entry(DisplayMesh Mesh, Appearance Appearance, IReadOnlyList<CosmeticThread> Threads, int Version)
     {
         /// <summary>Made by this code: what rebuilding the part would give.</summary>
         public bool Current => Version == GeometryVersion.Current;
+        public double[] Color => Appearance.Color;
     }
 
+    /// <summary>A cache in a plain color (plastic: as caches were before appearances).</summary>
+    public static byte[] Write(DisplayMesh m, double[] color, IReadOnlyList<CosmeticThread>? threads = null, int? version = null) =>
+        Write(m, new Appearance(color), threads, version);
+
     /// <param name="version">The geometry version to record (null: this code's): a cache rewritten as it was keeps its own.</param>
-    public static byte[] Write(DisplayMesh m, double[] color, IReadOnlyList<CosmeticThread>? threads = null, int? version = null)
+    public static byte[] Write(DisplayMesh m, Appearance look, IReadOnlyList<CosmeticThread>? threads = null, int? version = null)
     {
+        var color = look.Color;
         using var ms = new MemoryStream();
         using var w = new BinaryWriter(ms, Encoding.UTF8);
         w.Write(Encoding.ASCII.GetBytes(Magic));
@@ -88,13 +97,20 @@ public static class MeshCache
             foreach (var v in new[] { t.Origin, t.Axis, t.RefDir }) { w.Write(v.X); w.Write(v.Y); w.Write(v.Z); }
             w.Write(t.Radius); w.Write(t.Lead); w.Write(t.Length); w.Write(t.External);
         }
+        // the finish, after all an older SpryCAD reads (it stops before: the same version 4 cache to it)
+        w.Write(FinishTag);
+        w.Write((float)look.Metallic); w.Write((float)look.Roughness); w.Write((float)look.Opacity);
         w.Flush();
         return ms.ToArray();
     }
 
-    /// <summary>A rebuilt part's display as a cache: its bodies as one mesh, its cosmetic threads.</summary>
-    public static byte[] Of(RegenResult r, double[] color) =>
-        Write(AssemblyModel.Merge(r.State.Bodies.Select(b => b.Mesh)), color, r.State.Cosmetics.Values.ToList());
+    const int FinishTag = 0x48534E46; // "FNSH"
+
+    /// <summary>A rebuilt part's display as a cache: its bodies as one mesh, its cosmetic threads, its appearance.</summary>
+    public static byte[] Of(RegenResult r, Appearance look) =>
+        Write(AssemblyModel.Merge(r.State.Bodies.Select(b => b.Mesh)), look, r.State.Cosmetics.Values.ToList());
+
+    public static byte[] Of(RegenResult r, double[] color) => Of(r, new Appearance(color));
 
     /// <summary>How long building the whole part took (each feature's last build, cached ones included), in seconds.</summary>
     public static double BuildSeconds(RegenResult r) => r.Status.Values.Sum(s => s.Milliseconds) / 1000;
@@ -167,7 +183,11 @@ public static class MeshCache
                 threads.Add(new CosmeticThread(o, ax, rd, r.ReadDouble(), r.ReadDouble(), r.ReadDouble(), r.ReadBoolean()));
             }
         }
-        return new Entry(m, color, threads, version);
+        // its finish, when written with one (a cache from before appearances: plastic)
+        var look = new Appearance(color);
+        if (v4 && r.BaseStream.Length - r.BaseStream.Position >= 16 && r.ReadInt32() == FinishTag)
+            look = look with { Metallic = r.ReadSingle(), Roughness = r.ReadSingle(), Opacity = r.ReadSingle() };
+        return new Entry(m, look, threads, version);
     }
 
     /// <summary>A cache with its faces renamed (a part re-id'd: <see cref="Model.LegacyIds"/>), made by the same geometry version.</summary>
@@ -175,7 +195,7 @@ public static class MeshCache
     {
         var e = Read(data);
         for (int i = 0; i < e.Mesh.Faces.Count; i++) e.Mesh.Faces[i] = e.Mesh.Faces[i] with { Name = rename(e.Mesh.Faces[i].Name) };
-        return Write(e.Mesh, e.Color, e.Threads, e.Version);
+        return Write(e.Mesh, e.Appearance, e.Threads, e.Version);
     }
 
     /// <summary>Points as three planar runs (x, y, z), quantized in the box.</summary>

@@ -70,7 +70,7 @@ public partial class MainWindow
             case "hide" or "show": ShowComponent(path, cmd == "show"); break;
             case "suppress" or "unsuppress": SuppressComponent(path, cmd == "suppress"); break;
             case "isolate": Isolate(path); break;
-            case "appearance": _ = Appearance(path); break;
+            case "appearance": _ = ComponentAppearance(path); break;
             case "replace": _ = ReplaceComponent(path); break;
             case "form": FormSubAssemblyPage(path); break;
             case "dissolve": _ = DissolveSub(path); break;
@@ -151,54 +151,24 @@ public partial class MainWindow
         Status($"{a.Model.NameAt(path)} isolated. Click Isolate again to show all components.");
     }
 
-    static readonly (string name, double[]? rgb)[] Swatches =
-    {
-        ("Part color", null), ("Steel", new[] { 0.74, 0.76, 0.80 }), ("Dark gray", new[] { 0.35, 0.36, 0.38 }), ("White", new[] { 0.95, 0.95, 0.95 }),
-        ("Red", new[] { 0.85, 0.20, 0.18 }), ("Orange", new[] { 0.95, 0.55, 0.15 }), ("Yellow", new[] { 0.95, 0.82, 0.20 }), ("Green", new[] { 0.25, 0.65, 0.30 }),
-        ("Blue", new[] { 0.20, 0.45, 0.85 }), ("Purple", new[] { 0.55, 0.35, 0.75 }), ("Brass", new[] { 0.80, 0.65, 0.30 }), ("Copper", new[] { 0.78, 0.45, 0.30 }),
-    };
-
     /// <summary>
-    /// A component's appearance: a color of its own (for a sub-assembly's component, in this instance), or its part's;
-    /// given <paramref name="all"/>, every one of them (a part's instances, from the Bill of Materials pane).
+    /// A component's appearance: one of its own in this assembly (color, finish, opacity; for a sub-assembly's
+    /// component, in this instance only), or its part's; given <paramref name="all"/>, every one of them (a part's
+    /// instances, from the Bill of Materials pane).
     /// </summary>
-    async Task Appearance(string path, IReadOnlyList<string>? all = null)
+    async Task ComponentAppearance(string path, IReadOnlyList<string>? all = null)
     {
         if (Asm is not { } a || a.Model.Find(path) is not { } o) return;
-        double[]? chosen = null; bool picked = false;
-        var grid = new WrapPanel { Orientation = Orientation.Horizontal, MaxWidth = 330 };
-        var w = Dialogs.MakeWindow(all is { Count: > 1 } ? $"Appearance: {o.Component.Name.Split('<')[0]} (all {all.Count})" : $"Appearance: {o.Component.Name}", new StackPanel
-        {
-            Spacing = 8,
-            Children =
-            {
-                new TextBlock { Text = path.Contains('/') ? "Color in this assembly only. The sub-assembly is not changed." : "Color in this assembly only. The part is not changed.", TextWrapping = TextWrapping.Wrap },
-                grid,
-            },
-        }, 360);
-        foreach (var (name, rgb) in Swatches)
-        {
-            var c = rgb ?? o.Display?.Color ?? new[] { 0.74, 0.76, 0.80 };
-            var b = new Button
-            {
-                Width = 76, Height = 52, Margin = new Thickness(3), Padding = new Thickness(2),
-                Content = new StackPanel
-                {
-                    Spacing = 2,
-                    Children =
-                    {
-                        new Border { Height = 22, CornerRadius = new CornerRadius(3), Background = new SolidColorBrush(Color.FromRgb((byte)(c[0] * 255), (byte)(c[1] * 255), (byte)(c[2] * 255))), BorderBrush = Palette.TextMuted, BorderThickness = new Thickness(rgb == null ? 1 : 0) },
-                        new TextBlock { Text = name, FontSize = TypeScale.Small, HorizontalAlignment = HorizontalAlignment.Center },
-                    },
-                },
-            };
-            b.Click += (_, _) => { chosen = rgb; picked = true; w.Close(); };
-            grid.Children.Add(b);
-        }
-        await w.ShowDialog(this);
-        if (!picked) return;
+        // its own: on it, or (a sub-assembly's component) this instance's override
+        var own = o.Rel == null ? o.Component.Look : o.Top.Overrides?.GetValueOrDefault(o.Rel)?.Look;
+        var part = o.Display?.Appearance ?? Core.Model.Appearance.Default;
+        var many = all is { Count: > 1 };
+        var choice = await AppearanceDialog.Show(this, many ? $"Appearance: {o.Component.Name.Split('<')[0]} (all {all!.Count})" : $"Appearance: {o.Component.Name}",
+            path.Contains('/') ? "How it looks in this assembly (its sub-assembly is not changed):" : "How it looks in this assembly (its part is not changed):",
+            own, part, "Part's Appearance");
+        if (choice == null || (!many && choice.Look == own)) return;
         a.BeginChange();
-        foreach (var p in all ?? new[] { path }) a.Model.SetColor(p, chosen);
+        foreach (var p in all ?? new[] { path }) a.Model.SetAppearance(p, choice.Look);
         a.EndChange();
     }
 
@@ -753,11 +723,17 @@ public partial class MainWindow
     {
         if (Asm is not { } a) return;
         var kind = BomKind.Indented;
-        var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto,Auto,Auto") };
+        var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto,Auto,Auto,Auto,Auto") };
         List<BomRow> rows = new();
+        // masses once the parts are measured (off the UI thread, the first time: their solids built); in the assembly's units
+        var measured = false;
+        var units = a.Model.Doc.Units;
+        var total = new TextBlock { VerticalAlignment = VerticalAlignment.Center, Foreground = Palette.TextMuted };
         void Fill()
         {
-            rows = Bom.Build(a.Model, kind);
+            rows = Bom.Build(a.Model, kind, mass: measured);
+            var totalMass = rows.Where(x => x.Level == 0 && x.Mass != null).Sum(x => x.Mass!.Value * x.Quantity);
+            total.Text = measured ? $"Total mass: {MassUnits.Text(totalMass, units)}" + (rows.Any(x => x.Material == Bom.NoMaterial) ? $" (parts with no material: steel's density)" : "") : "Measuring the parts…";
             grid.Children.Clear(); grid.RowDefinitions.Clear();
             void Cell(int r, int c, string text, bool head = false, double indent = 0, bool right = false)
             {
@@ -766,8 +742,8 @@ public partial class MainWindow
                 grid.Children.Add(tb);
             }
             grid.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
-            string[] heads = { "Item", "Part", "Configuration", "Qty", "Material" };
-            for (int c = 0; c < heads.Length; c++) Cell(0, c, heads[c], head: true, right: c == 3);
+            string[] heads = { "Item", "Part", "Configuration", "Qty", "Material", $"Mass ({MassUnits.Label(units)})", "Total" };
+            for (int c = 0; c < heads.Length; c++) Cell(0, c, heads[c], head: true, right: c is 3 or 5 or 6);
             for (int i = 0; i < rows.Count; i++)
             {
                 var r = rows[i];
@@ -777,6 +753,8 @@ public partial class MainWindow
                 Cell(i + 1, 2, r.Configuration);
                 Cell(i + 1, 3, r.Quantity.ToString(CultureInfo.InvariantCulture), right: true);
                 Cell(i + 1, 4, r.Material ?? "");
+                Cell(i + 1, 5, r.Mass is { } g ? MassUnits.Number(g, units) : "", right: true);
+                Cell(i + 1, 6, r.Mass is { } t ? MassUnits.Number(t * r.Quantity, units) : "", right: true);
             }
         }
         var kindBox = new ComboBox { ItemsSource = new[] { "Indented", "Top-level only", "Parts only" }, SelectedIndex = 0, Width = 160 };
@@ -785,10 +763,13 @@ public partial class MainWindow
         var copy = new Button { Content = "Copy" };
         var close = new Button { Content = "Close", IsCancel = true };
         var bar = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Children = { new TextBlock { Text = "Show:", VerticalAlignment = VerticalAlignment.Center }, kindBox } };
-        var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 8, 0, 0), Children = { csv, copy, close } };
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, HorizontalAlignment = HorizontalAlignment.Right, Children = { csv, copy, close } };
+        var footer = new DockPanel { Margin = new Thickness(0, 8, 0, 0) };
+        DockPanel.SetDock(buttons, Dock.Right);
+        footer.Children.Add(buttons); footer.Children.Add(total);
         var dock = new DockPanel();
-        DockPanel.SetDock(bar, Dock.Top); DockPanel.SetDock(buttons, Dock.Bottom);
-        dock.Children.Add(bar); dock.Children.Add(buttons);
+        DockPanel.SetDock(bar, Dock.Top); DockPanel.SetDock(footer, Dock.Bottom);
+        dock.Children.Add(bar); dock.Children.Add(footer);
         dock.Children.Add(new ScrollViewer { Content = grid, Margin = new Thickness(0, 8, 0, 0) });
         var w = ToolWindow($"Bill of Materials: {a.Title.TrimEnd(' ', '*')}", dock, 640, 520);
         csv.Click += async (_, _) =>
@@ -798,12 +779,23 @@ public partial class MainWindow
                 Title = "Export Bill of Materials", DefaultExtension = "csv", SuggestedFileName = a.Title.TrimEnd(' ', '*') + " BOM.csv",
                 FileTypeChoices = new[] { new FilePickerFileType("CSV") { Patterns = new[] { "*.csv" } } },
             });
-            if (f?.TryGetLocalPath() is { } p) { await File.WriteAllTextAsync(p, Bom.ToCsv(rows)); Status("Saved " + p + "."); }
+            if (f?.TryGetLocalPath() is { } p) { await File.WriteAllTextAsync(p, Bom.ToCsv(rows, units)); Status("Saved " + p + "."); }
         };
-        copy.Click += (_, _) => _ = Clipboard?.SetTextAsync(Bom.ToCsv(rows).Replace(',', '\t'));
+        copy.Click += (_, _) => _ = Clipboard?.SetTextAsync(Bom.ToCsv(rows, units).Replace(',', '\t'));
+        var cts = new CancellationTokenSource();
         close.Click += (_, _) => w.Close();
+        w.Closed += (_, _) => cts.Cancel();
         Fill();
         w.Show(this);
+        // the parts measured off the UI thread (a list taken here), then the masses shown
+        var displays = a.Model.PlacedParts(hidden: true).Select(x => x.pd).Distinct().ToList();
+        _ = Task.Run(() => AssemblyMass.Prepare(displays, cts.Token), cts.Token).ContinueWith(t =>
+        {
+            if (t.IsCanceled || cts.IsCancellationRequested) return;
+            if (t.Exception != null) { App.Log(t.Exception, "BOM mass"); total.Text = "The parts could not be measured."; return; }
+            measured = true;
+            Fill();
+        }, TaskScheduler.FromCurrentSynchronizationContext());
     }
 
     void AssemblyMassCommand()
@@ -814,15 +806,8 @@ public partial class MainWindow
         void Fill()
         {
             var r = AssemblyMass.Of(a.Model);
-            var I = r.Inertia;
-            report = $"Mass properties of {a.Title.TrimEnd(' ', '*')} ({r.Parts} part{(r.Parts == 1 ? "" : "s")}, suppressed components excluded)\n\n" +
-                     $"Mass = {r.Mass:0.###} g ({r.Mass / 1000:0.######} kg)\nVolume = {r.Volume:0.###} mm³\nSurface area = {r.Area:0.###} mm²\n\n" +
-                     $"Center of mass (mm): X = {r.Center.X:0.###}, Y = {r.Center.Y:0.###}, Z = {r.Center.Z:0.###}\n\n" +
-                     "Principal moments of inertia about the center of mass (g·mm²):\n" +
-                     string.Concat(Enumerable.Range(0, 3).Select(i => $"  P{i + 1} = {r.Principal[i]:0.###}  along ({r.Axes[i].X:0.####}, {r.Axes[i].Y:0.####}, {r.Axes[i].Z:0.####})\n")) +
-                     "\nMoments of inertia about the center of mass, assembly axes (g·mm²):\n" +
-                     $"  Lxx = {I[0, 0]:0.###}  Lxy = {-I[0, 1]:0.###}  Lxz = {-I[0, 2]:0.###}\n  Lyx = {-I[1, 0]:0.###}  Lyy = {I[1, 1]:0.###}  Lyz = {-I[1, 2]:0.###}\n  Lzx = {-I[2, 0]:0.###}  Lzy = {-I[2, 1]:0.###}  Lzz = {I[2, 2]:0.###}\n" +
-                     (r.Approximate.Count > 0 ? $"\nApproximate, calculated from display meshes: {string.Join(", ", r.Approximate)}\n" : "");
+            // in the assembly's units (grams and millimetres, or pounds and inches)
+            report = r.Report(a.Title.TrimEnd(' ', '*'), a.Model.Doc.Units);
             text.Text = report;
             Viewport.CenterOfMass = r.Mass > 0 ? (r.Center, r.Axes, Math.Max(5, a.Model.WorldBounds(a.Model.Doc.Components.FirstOrDefault()?.Id ?? "").Diagonal * 0.05)) : null;
             Viewport.Redraw();

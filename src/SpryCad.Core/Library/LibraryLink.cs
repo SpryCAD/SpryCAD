@@ -12,7 +12,7 @@ public sealed record LibraryUpdate(string Item, LibrarySnapshot Old, LibrarySnap
         foreach (var c in Old.Columns.Union(New.Columns))
         {
             var a = Old.Value(c); var b = New.Value(c);
-            if (a != b) items.Add($"{c} {(a is { } x ? Expr.Format(x) : "—")} → {(b is { } y ? Expr.Format(y) : "—")}");
+            if (!a.Equals(b)) items.Add($"{c} {(a is { } x ? Expr.Format(x) : "—")} → {(b is { } y ? Expr.Format(y) : "—")}");
         }
         if (!(Old.Text ?? new()).SequenceEqual(New.Text ?? new())) items.Add("text changed");
         return $"{New.Row} ({New.Table}): {string.Join(", ", items)}";
@@ -41,6 +41,7 @@ public static class LibraryLink
     {
         set ??= Current;
         var used = doc.Features.SelectMany(f => f.LibraryItems()).ToHashSet(StringComparer.Ordinal);
+        if (doc.MaterialItem != null) used.Add(doc.MaterialItem);
         bool changed = false;
         foreach (var item in used)
             if (doc.Library?.ContainsKey(item) != true && set.Snapshot(item) is { } s)

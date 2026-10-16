@@ -44,7 +44,10 @@ public static class PartDescribe
             case ObjectKind.Material:
                 {
                     var items = new List<string>();
-                    Fields(Data(old), Data(@new), "", items, skip: Array.Empty<string>());
+                    JsonElement a = Data(old), b = Data(@new);
+                    // (since material libraries: by the material's name, its color only as the part's own appearance)
+                    bool libraries = new[] { a, b }.Any(x => x.TryGetProperty("materialItem", out _) || x.TryGetProperty("appearance", out _));
+                    Fields(a, b, "", items, skip: libraries ? new[] { "materialItem", "color" } : Array.Empty<string>());
                     return "Material: " + (items.Count == 0 ? "changed" : Join(items));
                 }
             case ObjectKind.Settings: return "Part settings changed (units, sheet metal or embedded files)";

@@ -38,7 +38,10 @@ public sealed partial class AssemblyModel
     public void SetSuppressed(string path, bool suppressed) => Override(path, c => c.Suppressed = suppressed, (ov, _) => ov.Suppressed = suppressed);
 
     /// <summary>The component at a path in a color of its own (RGB 0-1), or (null) as its part (or sub-assembly) has it.</summary>
-    public void SetColor(string path, double[]? color) => Override(path, c => c.Color = color, (ov, _) => ov.Color = color);
+    public void SetColor(string path, double[]? color) => SetAppearance(path, color == null ? null : new Appearance(color));
+
+    /// <summary>The component at a path with an appearance of its own (color, finish, opacity), or (null) as its part (or sub-assembly) has it.</summary>
+    public void SetAppearance(string path, Appearance? a) => Override(path, c => c.SetLook(a), (ov, _) => ov.SetLook(a));
 
     /// <summary>The paths whose overrides are set for a sub-assembly instance (shown in its tree).</summary>
     public IEnumerable<string> OverriddenPaths(Component top) => top.Overrides?.Keys.Select(k => top.Id + "/" + k) ?? Enumerable.Empty<string>();

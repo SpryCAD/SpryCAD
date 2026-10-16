@@ -474,7 +474,7 @@ public static class OptionsDialog
             : Brushes.Transparent;
         text.TextChanged += (_, _) => Preview();
         Preview();
-        f.Row("Color", new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Children = { text, swatch } }, "Red, green, blue: 0 to 255 each.");
+        f.Row("Color", new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Children = { text, swatch } }, "Red, green, blue: 0 to 255 each. Its finish, opacity and the presets: Tools > Appearance.");
         // shown rounded to whole numbers: untouched, the stored color is kept as it is (not marked changed)
         var shown = text.Text;
         return new Commit(

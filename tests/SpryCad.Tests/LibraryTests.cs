@@ -54,7 +54,7 @@ static class LibraryTests
             t.Eq(lib.LibraryId, BuiltInStandards.LibraryId);
             t.Eq(lib.RevisionId, rev);
             t.Eq(lib.Layer, LibraryLayer.Standards);
-            t.Eq(J(lib.Tables), J(BuiltInStandards.Tables.OrderBy(x => x.Key, StringComparer.Ordinal).ToList()));
+            t.Eq(J(lib.Tables), J(LibraryFile.BuiltInTables.OrderBy(x => x.Key, StringComparer.Ordinal).ToList()));
             t.True(LibraryFile.IsLibrary(path) && PartDatabase.IsFile(path), "a SpryCAD database, its root a library");
         });
 
@@ -127,8 +127,8 @@ static class LibraryTests
                 var r4 = LibrarySync.Load(config);
                 t.Near(r4.Set.Table("ISO273")!.Row("M8")!.Values[1], 9.4, 1e-12);
                 t.True(r4.Problems.Count > 0, "says it is using the copies");
-                // no set configured: the built-in standards and part families
-                t.Eq(LibrarySync.Load(null).Set.Libraries.Count, 2);
+                // no set configured: the built-in standards, materials and part families
+                t.Eq(LibrarySync.Load(null).Set.Libraries.Count, 3);
             }
             finally { LibrarySync.CacheFolder = cacheBefore; }
         });

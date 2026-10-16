@@ -100,8 +100,7 @@ static class StorageTests
         doc.AddFile("imports/block.step", step);
         doc.AddFeature(new ImportFeature { File = "imports/block.step", Sha256 = DocumentContainer.Hash(step) });
         doc.Color = new[] { 0.1, 0.2, 0.3 };
-        doc.Material = "Aluminium 6061";
-        doc.Density = 2.7;
+        SpryCad.Core.Library.PartMaterial.SetCustom(doc, "Aluminium 6061", 2710);
         doc.SheetMetal = new SheetMetalSettings { KFactor = "0.44" };
         doc.Units = UnitSystem.MMGS;
         doc.SketchVisibility = new() { [hole.Id] = false };

@@ -64,7 +64,7 @@ public partial class MainWindow : Window
         SetupUnitsSwitch();
 
         Tree.SelectedChanged += OnTreeSelected;
-        Tree.EditRequested += id => EditFeature(id);
+        Tree.EditRequested += id => { if (id == FeatureTree.MaterialRow) EditMaterialCommand(); else EditFeature(id); };
         Tree.ContextRequested += OnTreeContext;
         Tree.SketchVisibilityToggled += id => SetSketchShown(id, null);
         Tree.HoverChanged += OnTreeHover;
@@ -234,7 +234,10 @@ public partial class MainWindow : Window
         StatusUnits.Text = Units.ToString();
         PmPage.CurrentUnits = () => Units;
         UpdateUndoButtons();
-        Viewport.PartColor = new Rgba((float)Session.Doc.Color[0], (float)Session.Doc.Color[1], (float)Session.Doc.Color[2]);
+        // the part's appearance: its own, else its material's (its color, opacity and finish)
+        var look = Session.Doc.EffectiveAppearance;
+        Viewport.PartColor = new Rgba((float)look.Color[0], (float)look.Color[1], (float)look.Color[2], (float)look.Opacity);
+        Viewport.PartFinish = new Finish((float)look.Metallic, (float)look.Roughness);
         RebuildTree();
         RefreshRevisions();
         RefreshBom();
@@ -333,8 +336,9 @@ public partial class MainWindow : Window
         // a slow part just opened: the display saved with it, until the rebuild is done (nothing to pick meanwhile)
         if (result == null && Session.SavedDisplay is { } saved)
         {
-            var col = doc.Color;
-            Viewport.Instances = new[] { new MeshInstance("__saved", saved.Mesh, System.Numerics.Matrix4x4.Identity, new Rgba((float)col[0], (float)col[1], (float)col[2])) };
+            var look = doc.EffectiveAppearance;
+            Viewport.Instances = new[] { new MeshInstance("__saved", saved.Mesh, System.Numerics.Matrix4x4.Identity,
+                new Rgba((float)look.Color[0], (float)look.Color[1], (float)look.Color[2], (float)look.Opacity), Finish: new Finish((float)look.Metallic, (float)look.Roughness), SeeThrough: look.Opacity < 1) };
             Viewport.CosmeticThreads = saved.Threads;
             if (_tab.FitAfterLoad != null) { _tab.FitAfterLoad = null; Viewport.StandardView("Trimetric", fit: true, animate: false); }
         }
@@ -491,6 +495,13 @@ public partial class MainWindow : Window
         if (_page?.ActiveBox != null && (_page.ActiveBox.Filter & SelFilter.Plane) != 0 && id is "Front" or "Top" or "Right")
         {
             _page.HandlePick(new SelItem { Kind = SelKind.Plane, Name = id, Frame = Resolver.StdPlane(id) });
+            return;
+        }
+        // a reference plane into a box that takes planes (as clicked in the graphics area)
+        if (_page?.ActiveBox != null && (_page.ActiveBox.Filter & SelFilter.Plane) != 0 && Session.Doc.Find(id) is PlaneFeature rp)
+        {
+            _page.HandlePick(new SelItem { Kind = SelKind.Plane, Name = rp.Name, FeatureId = rp.Id, Frame = Session.Result?.State.Planes.GetValueOrDefault(rp.Id) });
+            RefreshScene();
             return;
         }
         // an origin axis into a box that takes axes or lines

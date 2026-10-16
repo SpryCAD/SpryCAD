@@ -73,17 +73,37 @@ public static class StepWriter
     /// <summary>Why the last exact export fell back to facets (diagnostics).</summary>
     public static Exception? LastError;
 
-    public static void Write(Stream stream, IEnumerable<(string name, Solid solid)> bodies, string productName, double scale = 1.0, bool exact = true)
+    /// <param name="color">The solids' color (r, g, b and optionally opacity, 0-1), as other CAD shows them; null: none.</param>
+    public static void Write(Stream stream, IEnumerable<(string name, Solid solid)> bodies, string productName, double scale = 1.0, bool exact = true, double[]? color = null)
     {
         var c = new Ctx();
         var (appCtx, prodCtx, pdc, geomCtx) = Contexts(c);
         var safe = Esc(productName);
         var (_, pds, _) = Product(c, productName, prodCtx, pdc);
         var items = new List<int> { Origin(c) };
-        items.AddRange(Bodies(c, bodies, scale, exact));
+        var solids = Bodies(c, bodies, scale, exact);
+        items.AddRange(solids);
         var rep = c.Add($"ADVANCED_BREP_SHAPE_REPRESENTATION('{safe}',({string.Join(",", items.Select(i => "#" + i))}),#{geomCtx})");
         c.Add($"SHAPE_DEFINITION_REPRESENTATION(#{pds},#{rep})");
+        if (color != null) Style(c, solids, color, geomCtx);
         Finish(stream, c, safe);
+    }
+
+    /// <summary>
+    /// The solids in a color (AP214 presentation: a STYLED_ITEM each, its surfaces filled with a COLOUR_RGB, see-through
+    /// by SURFACE_STYLE_TRANSPARENT when its opacity is below 1), listed in a presentation representation.
+    /// </summary>
+    static void Style(Ctx c, IReadOnlyList<int> solids, double[] color, int geomCtx)
+    {
+        if (solids.Count == 0 || color.Length < 3) return;
+        var col = c.Add($"COLOUR_RGB('',{R(color[0])},{R(color[1])},{R(color[2])})");
+        var fill = c.Add($"FILL_AREA_STYLE('',(#{c.Add($"FILL_AREA_STYLE_COLOUR('',#{col})")}))");
+        var sides = new List<int> { c.Add($"SURFACE_STYLE_FILL_AREA(#{fill})") };
+        if (color.Length > 3 && color[3] < 1) sides.Add(c.Add($"SURFACE_STYLE_TRANSPARENT({R(Math.Clamp(1 - color[3], 0, 1))})"));
+        var side = c.Add($"SURFACE_SIDE_STYLE('',({string.Join(",", sides.Select(s => "#" + s))}))");
+        var psa = c.Add($"PRESENTATION_STYLE_ASSIGNMENT((#{c.Add($"SURFACE_STYLE_USAGE(.BOTH.,#{side})")}))");
+        var styled = solids.Select(s => c.Add($"STYLED_ITEM('color',(#{psa}),#{s})")).ToList();
+        c.Add($"MECHANICAL_DESIGN_GEOMETRIC_PRESENTATION_REPRESENTATION('',({string.Join(",", styled.Select(s => "#" + s))}),#{geomCtx})");
     }
 
     /// <summary>
@@ -93,7 +113,7 @@ public static class StepWriter
     /// ITEM_DEFINED_TRANSFORMATION from the part's origin to the component's frame). Rigid placements only.
     /// </summary>
     public static void WriteAssembly(Stream stream, string assemblyName, IReadOnlyList<(string name, IReadOnlyList<(string name, Solid solid)> bodies)> parts,
-        IReadOnlyList<(int part, string name, Transform placement)> components, double scale = 1.0, bool exact = true)
+        IReadOnlyList<(int part, string name, Transform placement)> components, double scale = 1.0, bool exact = true, IReadOnlyList<double[]?>? partColors = null)
     {
         var c = new Ctx();
         var (appCtx, prodCtx, pdc, geomCtx) = Contexts(c);
@@ -107,9 +127,11 @@ public static class StepWriter
             partPd[i] = pd;
             partOrigin[i] = Origin(c);
             var items = new List<int> { partOrigin[i] };
-            items.AddRange(Bodies(c, bodies, scale, exact));
+            var solids = Bodies(c, bodies, scale, exact);
+            items.AddRange(solids);
             partRep[i] = c.Add($"ADVANCED_BREP_SHAPE_REPRESENTATION('{Esc(pname)}',({string.Join(",", items.Select(x => "#" + x))}),#{geomCtx})");
             c.Add($"SHAPE_DEFINITION_REPRESENTATION(#{pds},#{partRep[i]})");
+            if (partColors != null && i < partColors.Count && partColors[i] is { } pc) Style(c, solids, pc, geomCtx);
         }
         // the assembly's shape: its origin and each component's frame
         var frames = new List<int>();

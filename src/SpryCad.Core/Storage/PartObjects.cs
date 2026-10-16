@@ -79,7 +79,12 @@ public static class PartObjects
             objects.Add(FeatureId(f.Id), Envelope(ObjectKind.Feature, CadDocument.JsonOf(f)));
         objects.Add(Single(ObjectKind.FeatureOrder), Envelope(ObjectKind.FeatureOrder, Json(doc.Features.Select(f => f.Id).ToList())));
         objects.Add(Single(ObjectKind.Variables), Envelope(ObjectKind.Variables, Json(new VariablesData { Equations = doc.Equations, Tables = doc.Tables })));
-        objects.Add(Single(ObjectKind.Material), Envelope(ObjectKind.Material, Json(new MaterialData { Color = doc.Color, Material = doc.Material, Density = doc.Density })));
+        // (the color, material name and density as an older SpryCAD reads them, besides what they come from)
+        objects.Add(Single(ObjectKind.Material), Envelope(ObjectKind.Material, Json(new MaterialData
+        {
+            MaterialItem = doc.MaterialItem, Appearance = doc.Appearance,
+            Color = doc.Color, Material = doc.MaterialName, Density = doc.MaterialItem != null ? doc.EffectiveDensity : null,
+        })));
         var files = doc.Files.Keys.Order(StringComparer.Ordinal).ToList();
         objects.Add(Single(ObjectKind.Settings), Envelope(ObjectKind.Settings, Json(new SettingsData
         {
@@ -107,7 +112,9 @@ public static class PartObjects
         var v = Data<VariablesData>(ObjectKind.Variables);
         doc.Equations = v.Equations ?? new(); doc.Tables = v.Tables;
         var m = Data<MaterialData>(ObjectKind.Material);
-        doc.Color = m.Color ?? doc.Color; doc.Material = m.Material; doc.Density = m.Density;
+        doc.MaterialItem = m.MaterialItem; doc.Appearance = m.Appearance;
+        // (from before material libraries: turned into a material and an appearance once the library rows are read, below)
+        if (m.MaterialItem == null && m.Appearance == null) { doc.LegacyColor = m.Color; doc.LegacyMaterial = m.Material; doc.LegacyDensity = m.Density; }
         var s = Data<SettingsData>(ObjectKind.Settings);
         doc.Units = s.Units; doc.SheetMetal = s.SheetMetal;
         // (in the settings in files saved before they had an object of their own)
@@ -121,6 +128,7 @@ public static class PartObjects
                 var snap = Open<Library.LibrarySnapshot>(b, ObjectKind.LibrarySnapshot);
                 (doc.Library ??= new(StringComparer.Ordinal))[snap.Item] = snap;
             }
+        Library.PartMaterial.Upgrade(doc);
         return doc;
     }
 
@@ -203,6 +211,10 @@ public static class PartObjects
 
     sealed class MaterialData
     {
+        /// <summary>The part's material item and its own appearance (null: none): what the part is made from.</summary>
+        public string? MaterialItem { get; set; }
+        public Appearance? Appearance { get; set; }
+        /// <summary>The color shown, the material's name and density (null: none set): all an older SpryCAD reads.</summary>
         public double[]? Color { get; set; }
         public string? Material { get; set; }
         public double? Density { get; set; }
