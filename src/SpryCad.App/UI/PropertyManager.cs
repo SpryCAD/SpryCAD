@@ -17,7 +17,8 @@ public sealed class PmSelectionBox
     public List<SelItem> Items { get; } = new();
     public int Max { get; init; } = int.MaxValue;
     public Func<SelItem, bool>? Accept { get; init; }
-    public ListBox List { get; } = new() { Classes = { "selbox" } };
+    /// <summary>The list: several of its items can be selected (Ctrl/Shift-click, Shift+arrows, Ctrl+A) to remove at once.</summary>
+    public ListBox List { get; } = new() { Classes = { "selbox" }, SelectionMode = SelectionMode.Multiple };
     public event Action? Changed;
     public Func<SelItem, string>? LabelOf { get; set; }
 
@@ -44,6 +45,17 @@ public sealed class PmSelectionBox
     }
 
     public void Clear() { Items.Clear(); Refresh(); Changed?.Invoke(); }
+
+    /// <summary>Removes the items selected in the list; the one after them is selected next (Delete again removes it).</summary>
+    public void RemoveSelected()
+    {
+        var picked = List.Selection.SelectedIndexes.Where(i => i >= 0 && i < Items.Count).Distinct().OrderByDescending(i => i).ToList();
+        if (picked.Count == 0) return;
+        foreach (var i in picked) Items.RemoveAt(i);
+        Refresh();
+        if (Items.Count > 0) List.SelectedIndex = Math.Min(picked[^1], Items.Count - 1);
+        Changed?.Invoke();
+    }
 
     public void Refresh()
     {
@@ -168,9 +180,17 @@ public sealed class PmPage
     static Grid Row(string label, Control field, string? icon = null)
     {
         var g = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*"), Margin = new Thickness(0, 1) };
-        var l = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, MinWidth = 82, VerticalAlignment = VerticalAlignment.Center };
-        if (icon != null) l.Children.Add(Icons.Make(icon, 16));
-        l.Children.Add(new TextBlock { Text = label, VerticalAlignment = VerticalAlignment.Center, FontSize = TypeScale.Body });
+        // the label at most 130 wide, wrapping: a long one never pushes the field off the page
+        var l = new DockPanel { MinWidth = 82, MaxWidth = 130, Margin = new Thickness(0, 0, 6, 0), VerticalAlignment = VerticalAlignment.Center };
+        if (icon != null)
+        {
+            var ic = Icons.Make(icon, 16);
+            ic.Margin = new Thickness(0, 0, 4, 0);
+            ic.VerticalAlignment = VerticalAlignment.Center;
+            DockPanel.SetDock(ic, Dock.Left);
+            l.Children.Add(ic);
+        }
+        l.Children.Add(new TextBlock { Text = label, VerticalAlignment = VerticalAlignment.Center, FontSize = TypeScale.Body, TextWrapping = TextWrapping.Wrap });
         g.Children.Add(l);
         Grid.SetColumn(field, 1);
         g.Children.Add(field);
@@ -316,20 +336,58 @@ public sealed class PmPage
         box.List.PointerPressed += (_, _) => Activate(box);
         box.List.KeyDown += (_, e) =>
         {
-            if (e.Key is Key.Delete or Key.Back) { box.Remove(box.List.SelectedIndex); e.Handled = true; }
+            if (e.Key is Key.Delete or Key.Back) { box.RemoveSelected(); e.Handled = true; }
         };
         var menu = new ContextMenu();
         var clear = new MenuItem { Header = "Clear Selections" };
         clear.Click += (_, _) => box.Clear();
         var del = new MenuItem { Header = "Delete" };
-        del.Click += (_, _) => box.Remove(box.List.SelectedIndex);
+        del.Click += (_, _) => box.RemoveSelected();
         menu.Items.Add(del); menu.Items.Add(clear);
         box.List.ContextMenu = menu;
         box.Changed += () => Changed?.Invoke();
+        // a fixed height (5 rows; as many as it holds when fewer), scrolling past it: adding or removing items never
+        // moves what is below. The grip under it resizes it (kept for boxes of that name while the app runs).
+        var rows = Math.Min(max, 5);
+        box.List.MinHeight = BoxRow + 4;
+        box.List.MaxHeight = double.PositiveInfinity;
+        box.List.Height = _boxHeights.TryGetValue(label, out var kept) ? kept : rows * BoxRow + 4;
+        ScrollViewer.SetVerticalScrollBarVisibility(box.List, Avalonia.Controls.Primitives.ScrollBarVisibility.Auto);
         s.Children.Add(box.List);
+        if (max > 1) s.Children.Add(Grip(box.List, label));
         Boxes.Add(box);
         if (ActiveBox == null) Activate(box);
         return box;
+    }
+
+    // a selection box's row height, and the heights boxes were dragged to (by their label)
+    const double BoxRow = 21;
+    static readonly Dictionary<string, double> _boxHeights = new();
+
+    /// <summary>The grip under a selection box: dragged up or down, the box's height (a row at least).</summary>
+    static Control Grip(ListBox list, string label)
+    {
+        var grip = new Border
+        {
+            Height = 8, Background = Brushes.Transparent, Cursor = new Cursor(StandardCursorType.SizeNorthSouth),
+            Child = new Border { Width = 28, Height = 2, CornerRadius = new CornerRadius(1), Background = Palette.FieldBorder, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center },
+        };
+        ToolTip.SetTip(grip, "Drag to resize the list");
+        double startY = 0, startH = 0;
+        bool dragging = false;
+        grip.PointerPressed += (_, e) =>
+        {
+            if (!e.GetCurrentPoint(grip).Properties.IsLeftButtonPressed) return;
+            dragging = true; startY = e.GetPosition(null).Y; startH = list.Bounds.Height;
+            e.Pointer.Capture(grip); e.Handled = true;
+        };
+        grip.PointerMoved += (_, e) =>
+        {
+            if (!dragging) return;
+            list.Height = _boxHeights[label] = Math.Clamp(startH + e.GetPosition(null).Y - startY, BoxRow + 4, 600);
+        };
+        grip.PointerReleased += (_, e) => { dragging = false; e.Pointer.Capture(null); };
+        return grip;
     }
 
     public void Activate(PmSelectionBox? box)

@@ -594,10 +594,11 @@ public partial class MainWindow : Window
                 case Key.D6: Viewport.StandardView("Bottom"); break;
                 case Key.D7: Viewport.StandardView("Isometric"); break;
                 case Key.D8: NormalTo(); break;
-                case Key.Left: if (!inText) { Viewport.Camera.Pan(40, 0); Viewport.Redraw(); } else handled = false; break;
-                case Key.Right: if (!inText) { Viewport.Camera.Pan(-40, 0); Viewport.Redraw(); } else handled = false; break;
-                case Key.Up: if (!inText) { Viewport.Camera.Pan(0, 40); Viewport.Redraw(); } else handled = false; break;
-                case Key.Down: if (!inText) { Viewport.Camera.Pan(0, -40); Viewport.Redraw(); } else handled = false; break;
+                // (Ctrl+arrows in a list or a field are the control's: moving in a selection box's list)
+                case Key.Left: if (!inControl) { Viewport.Camera.Pan(40, 0); Viewport.Redraw(); } else handled = false; break;
+                case Key.Right: if (!inControl) { Viewport.Camera.Pan(-40, 0); Viewport.Redraw(); } else handled = false; break;
+                case Key.Up: if (!inControl) { Viewport.Camera.Pan(0, 40); Viewport.Redraw(); } else handled = false; break;
+                case Key.Down: if (!inControl) { Viewport.Camera.Pan(0, -40); Viewport.Redraw(); } else handled = false; break;
                 default: handled = false; break;
             }
             e.Handled = handled;

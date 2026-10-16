@@ -692,7 +692,8 @@ public partial class MainWindow
             page.Check(p, "Overflow: trim at neighboring faces", () => ((FilletFeature)f).Overflow, v => ((FilletFeature)f).Overflow = v);
             // (where it wraps round another fillet into an edge not picked: faded out to nothing at that fillet's
             // tangent point, over this length back from it; empty: the whole wrap, 0: a square end)
-            var fade = page.Number(p, "Fade length (empty: whole wrap, 0: none)", () => ((FilletFeature)f).FadeLength, v => ((FilletFeature)f).FadeLength = v, "fillet", optional: true);
+            var fade = page.Number(p, "Fade length", () => ((FilletFeature)f).FadeLength, v => ((FilletFeature)f).FadeLength = v, "fillet", optional: true);
+            fade.Watermark = "Whole wrap";
             ToolTip.SetTip(fade, "Where the fillet wraps round another fillet into an edge not picked, it fades out to nothing at that fillet's tangent point, over this length back from it. Empty: the whole wrap. 0: a square end.");
             // (where convex and concave edges meet at a corner: which is filleted first, the other rolling round it)
             var ff = (FilletFeature)f;
