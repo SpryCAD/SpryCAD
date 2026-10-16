@@ -334,7 +334,7 @@ public partial class MainWindow : Window
         {
             var look = doc.EffectiveAppearance;
             Viewport.Instances = new[] { new MeshInstance("__saved", saved.Mesh, System.Numerics.Matrix4x4.Identity,
-                new Rgba((float)look.Color[0], (float)look.Color[1], (float)look.Color[2], (float)look.Opacity), Finish: new Finish((float)look.Metallic, (float)look.Roughness)) };
+                new Rgba((float)look.Color[0], (float)look.Color[1], (float)look.Color[2], (float)look.Opacity), Finish: new Finish((float)look.Metallic, (float)look.Roughness), SeeThrough: look.Opacity < 1) };
             Viewport.CosmeticThreads = saved.Threads;
             if (_tab.FitAfterLoad != null) { _tab.FitAfterLoad = null; Viewport.StandardView("Trimetric", fit: true, animate: false); }
         }

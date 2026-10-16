@@ -53,8 +53,11 @@ public sealed record SketchDisplay(string FeatureId, SketchResult Result);
 /// A mesh drawn where a rigid placement puts it, in a color (an assembly's component: one GPU mesh for all the
 /// components of a part). <c>Model</c> is the placement as a row-vector matrix (rotation, then translation).
 /// <c>Faces</c>: faces drawn over it in other colors (hover, selection), by name. <c>Finish</c>: how it takes the light (null: plastic).
+/// <c>SeeThrough</c>: its color's alpha is its appearance's (glass, clear plastic), so it is drawn as such: its far side seen through
+/// it, its edges solid (else an alpha below 1 fades it, as a ghost).
 /// </summary>
-public readonly record struct MeshInstance(string Id, DisplayMesh Mesh, Matrix4x4 Model, Rgba Color, IReadOnlyList<(string face, Rgba color)>? Faces = null, Finish? Finish = null);
+public readonly record struct MeshInstance(string Id, DisplayMesh Mesh, Matrix4x4 Model, Rgba Color, IReadOnlyList<(string face, Rgba color)>? Faces = null, Finish? Finish = null,
+    bool SeeThrough = false);
 
 public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICustomHitTest
 {
@@ -92,6 +95,8 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
     public bool Ghosted { get => _ghosted; set { if (_ghosted != value) { _ghosted = value; Redraw(); } } }
     bool _ghosted;
     const float GhostAlpha = 0.3f;
+    /// <summary>How solid a see-through part's (or component's) hovered and selected faces are drawn: plain over the glass.</summary>
+    const float SeeThroughPickAlpha = 0.8f;
     /// <summary>What the view rotates about unless a rotation center was set by middle-clicking the model.</summary>
     public RotateCenter RotateAbout = RotateCenter.Selection;
 
@@ -224,10 +229,29 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
 
         // solids
         _r.SetupDepth(true, true);
-        // faded (the View Selector), or a see-through part (its appearance's opacity): drawn the same way
-        var ghostAlpha = Ghosted ? GhostAlpha : PartColor.A;
-        var ghost = (Ghosted || PartColor.A < 1 && ColorByFeature == null) && Style is DisplayStyle.ShadedWithEdges or DisplayStyle.Shaded;
-        if (ghost)
+        // faded (the View Selector): only the nearest surface, blended. A see-through part (its appearance: glass, clear
+        // plastic): seen through to its far side (no depth written: its back faces, then its front ones, blended), its
+        // edges then solid over it and its picked faces strong, so what it is and what is selected stay plain
+        var ghostAlpha = GhostAlpha;
+        var ghost = Ghosted && Style is DisplayStyle.ShadedWithEdges or DisplayStyle.Shaded;
+        var seeThrough = !ghost && PartColor.A < 1 && ColorByFeature == null && Style is DisplayStyle.ShadedWithEdges or DisplayStyle.Shaded;
+        if (seeThrough)
+        {
+            _r.Blend(true);
+            _r.SetupDepth(true, false);
+            foreach (var front in new[] { true, false })
+            {
+                _r.Cull(front);
+                foreach (var b in Bodies) DrawBody(_gpu[b.Mesh], PartColor.A, vp, view);
+            }
+            _r.Cull(null);
+            foreach (var b in Bodies)
+                foreach (var (fr, color) in hl.Faces(b.Id, b.Mesh))
+                    _r.DrawMesh(_gpu[b.Mesh], color.WithAlpha(Math.Max(PartColor.A, SeeThroughPickAlpha)), vp, view, Camera.Perspective, fr.IndexStart, fr.IndexCount);
+            _r.Blend(false);
+            _r.SetupDepth(true, true);
+        }
+        else if (ghost)
         {
             // faded: depth first so only the nearest surface shows, then its colour blended over the background
             _r.PolygonOffset(true, 1, 1);
@@ -271,7 +295,8 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         foreach (var b in Bodies)
         {
             var g = _gpu[b.Mesh];
-            if (Style != DisplayStyle.Shaded) _r.DrawEdges(g, ghost ? EdgeColor.WithAlpha(ghostAlpha) : EdgeColor, vp);
+            // (a see-through part's edges whatever the style: without them glass is hard to make out)
+            if (Style != DisplayStyle.Shaded || seeThrough) _r.DrawEdges(g, ghost ? EdgeColor.WithAlpha(ghostAlpha) : EdgeColor, vp);
             foreach (var (er, color) in hl.Edges(b.Id, b.Mesh))
             {
                 _r.SetupDepth(false, false);
@@ -430,36 +455,65 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         {
             _r.PolygonOffset(true, 1, 1);
             if (Style == DisplayStyle.HiddenLinesVisible) _r.Gl.ColorMask(false, false, false, false);
+            // (a see-through instance, glass or clear plastic, is drawn last, below)
+            bool Glass(MeshInstance i) => i.SeeThrough && i.Color.A < 1 && Style != DisplayStyle.HiddenLinesVisible;
+            void PickedFaces(MeshInstance i, float? alpha)
+            {
+                if (i.Faces == null || Style == DisplayStyle.HiddenLinesVisible) return;
+                foreach (var (name, color) in i.Faces)
+                    foreach (var fr in i.Mesh.Faces)
+                        if (fr.Name == name) _r.DrawMesh(_gpu[i.Mesh], alpha is { } a ? color.WithAlpha(a) : color, i.Model * vp, i.Model * view, Camera.Perspective, fr.IndexStart, fr.IndexCount);
+            }
             foreach (var i in Instances)
             {
+                if (Glass(i)) continue;
                 _r.Model = i.Model;
-                // (an instance see-through by its color: its own faces solid now, the rest blended over after)
+                // (an instance faded by its color: its own faces solid now, the rest blended over after)
                 if (i.Color.A >= 1) _r.DrawMesh(_gpu[i.Mesh], i.Color, i.Model * vp, i.Model * view, Camera.Perspective, finish: i.Finish);
-                if (i.Faces != null && Style != DisplayStyle.HiddenLinesVisible)
-                    foreach (var (name, color) in i.Faces)
-                        foreach (var fr in i.Mesh.Faces)
-                            if (fr.Name == name) _r.DrawMesh(_gpu[i.Mesh], color, i.Model * vp, i.Model * view, Camera.Perspective, fr.IndexStart, fr.IndexCount);
+                PickedFaces(i, null);
             }
             if (Style == DisplayStyle.HiddenLinesVisible) _r.Gl.ColorMask(true, true, true, true);
-            if (Style != DisplayStyle.HiddenLinesVisible && Instances.Any(i => i.Color.A is > 0 and < 1))
+            if (Style != DisplayStyle.HiddenLinesVisible && Instances.Any(i => !Glass(i) && i.Color.A is > 0 and < 1))
             {
                 _r.Blend(true);
                 foreach (var i in Instances)
                 {
                     _r.Model = i.Model;
-                    if (i.Color.A is > 0 and < 1) _r.DrawMesh(_gpu[i.Mesh], i.Color, i.Model * vp, i.Model * view, Camera.Perspective, finish: i.Finish);
+                    if (!Glass(i) && i.Color.A is > 0 and < 1) _r.DrawMesh(_gpu[i.Mesh], i.Color, i.Model * vp, i.Model * view, Camera.Perspective, finish: i.Finish);
                 }
                 _r.Blend(false);
             }
+            // see-through ones: their far sides seen through them (no depth written: back faces, then front ones), their
+            // picked faces strong over them
+            if (Instances.Any(Glass))
+            {
+                _r.Blend(true);
+                _r.SetupDepth(true, false);
+                foreach (var front in new[] { true, false })
+                {
+                    _r.Cull(front);
+                    foreach (var i in Instances.Where(Glass))
+                    {
+                        _r.Model = i.Model;
+                        _r.DrawMesh(_gpu[i.Mesh], i.Color, i.Model * vp, i.Model * view, Camera.Perspective, finish: i.Finish);
+                    }
+                }
+                _r.Cull(null);
+                foreach (var i in Instances.Where(Glass)) { _r.Model = i.Model; PickedFaces(i, Math.Max(i.Color.A, SeeThroughPickAlpha)); }
+                _r.Blend(false);
+                _r.SetupDepth(true, true);
+            }
             _r.PolygonOffset(false);
         }
-        if (Style != DisplayStyle.Shaded)
-            foreach (var i in Instances)
-            {
-                _r.Model = i.Model;
-                if (i.Color.A >= 1) _r.DrawEdges(_gpu[i.Mesh], EdgeColor, i.Model * vp);
-                else if (i.Color.A > 0) { _r.Blend(true); _r.DrawEdges(_gpu[i.Mesh], EdgeColor.WithAlpha(i.Color.A), i.Model * vp); _r.Blend(false); }
-            }
+        // edges: a see-through instance's solid, whatever the style (glass is hard to make out without them); a faded one's faded
+        foreach (var i in Instances)
+        {
+            _r.Model = i.Model;
+            if (i.SeeThrough && i.Color.A > 0) _r.DrawEdges(_gpu[i.Mesh], EdgeColor, i.Model * vp);
+            else if (Style == DisplayStyle.Shaded) continue;
+            else if (i.Color.A >= 1) _r.DrawEdges(_gpu[i.Mesh], EdgeColor, i.Model * vp);
+            else if (i.Color.A > 0) { _r.Blend(true); _r.DrawEdges(_gpu[i.Mesh], EdgeColor.WithAlpha(i.Color.A), i.Model * vp); _r.Blend(false); }
+        }
         _r.Model = Matrix4x4.Identity;
     }
 

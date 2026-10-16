@@ -452,6 +452,14 @@ public sealed unsafe class GlRenderer : IDisposable
         else _gl.Disable(EnableCap.PolygonOffsetFill);
     }
 
+    /// <summary>Leaves out the back faces (<paramref name="front"/> false), the front ones (true), or none (null).</summary>
+    public void Cull(bool? front)
+    {
+        if (front is not { } f) { _gl.Disable(EnableCap.CullFace); return; }
+        _gl.Enable(EnableCap.CullFace);
+        _gl.CullFace(f ? GLEnum.Front : GLEnum.Back);
+    }
+
     public void Blend(bool on)
     {
         if (on) { _gl.Enable(EnableCap.Blend); _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha); }
