@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Generates SpryCAD's built-in library from data/library/*.xlsx at build time (docs/library-v2.md), and prints a
+       workbook as text for git's diff driver. Run by SpryCad.Core's build; see Program.cs. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\SpryCad.Library\SpryCad.Library.csproj" />
+  </ItemGroup>
+
+</Project>

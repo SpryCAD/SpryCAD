@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json;
+using SpryCad.Core.Library;
 using SpryCad.Core.Model;
 using SpryCad.Core.Sketching;
 using SpryCad.Kernel;
@@ -830,7 +831,10 @@ public sealed class Regenerator
             else
             {
                 // (a standard size from the part's library snapshot: the same with or without the library installed)
-                var std = t.Size == "Auto" ? Threads.Fit(2 * surfaceR, external)
+                // (Auto: the size of its table fitting the face, a shaft's major diameter or a hole's tap drill)
+                var std = t.Size == "Auto"
+                    ? Library.ThreadSizes.Fit(doc, Library.ThreadSizes.TableOf(t), 2 * surfaceR, external, t.Class) is { } a ? (name: a.name, d: a.major, p: a.pitch)
+                        : throw new FeatureException($"{Library.ThreadSizes.TableOf(t)} has no sizes to fit the face to.")
                     : Library.ThreadSizes.Resolve(doc, t) is { } r ? (name: t.Size, d: r.major, p: r.pitch)
                     : throw new FeatureException($"Unknown thread size '{t.Size}'.");
                 pitch = std.p;
@@ -911,6 +915,21 @@ public sealed class Regenerator
                 _ => upTo,
             };
             if (threadLen <= 0) throw new FeatureException("The face is too short for this thread.");
+            // its callout: its size and class (Auto: the size it took), its length where it is blind
+            {
+                var table = Library.ThreadSizes.TableOf(t);
+                string? item = t.Size switch
+                {
+                    "Custom" => null,
+                    "Auto" => Library.ThreadSizes.Fit(doc, table, 2 * surfaceR, external, t.Class) is { } af ? Library.ThreadSizes.ItemOf(table, af.name, af.cls) : null,
+                    _ => Library.ThreadSizes.Items(t).FirstOrDefault(),
+                };
+                var row = item == null ? null : LibraryLink.Resolve(doc, item);
+                var note = new FeatureNote(Callouts.Thread(doc.Units, row, major, pitch, external, t.End == ThreadEnd.Blind && !string.IsNullOrWhiteSpace(t.Length) ? threadLen : null),
+                    item, external, face.Tag.Name);
+                State.Notes[f.Id] = note;
+                status.Callout = note.Callout;
+            }
             var run = threadLen + pitch;
             double yStart = pitch, yFar = pitch + faceLen;
             bool cosmetic = ThreadMode switch { ThreadDisplay.Modeled => false, ThreadDisplay.Cosmetic => true, _ => t.Cosmetic };
@@ -1464,11 +1483,20 @@ public sealed class Regenerator
 
         void DoHole(HoleFeature h)
         {
+            // (sized from the library: its row's values, read from the part's snapshot, but those typed over)
+            h = HoleSizes.Effective(h, item => LibraryLink.Resolve(doc, item));
             var sk = GetSketch(h.SketchId);
             var pts = HoleProfile.Positions(sk.Sketch);
             if (pts.Count == 0) throw new FeatureException("Place at least one hole position point (or circle: a hole at its center).");
             var d = PosLen(h.Diameter, "Diameter"); var r = d / 2;
             var endKind = h.EndKind;
+            // a tapped hole: drilled with its thread's tap drill (the diameter, unless typed over), threaded to its thread
+            // depth, the thread shown cosmetic (a helix on the wall)
+            var thread = h.Type == HoleType.Tapped && h.LibraryType == null
+                ? HoleSizes.Thread(h, item => LibraryLink.Resolve(doc, item)) ?? throw new FeatureException(string.IsNullOrEmpty(h.ThreadSize) ? "Select the tapped hole's thread size." : $"Unknown thread size '{h.ThreadSize}'.")
+                : ((double major, double pitch, double tap)?)null;
+            if (thread is { } th0 && d >= th0.major) throw new FeatureException("The hole is not smaller than the thread's major diameter.");
+            double? threadDepth = thread != null && !string.IsNullOrWhiteSpace(h.ThreadDepth) ? PosLen(h.ThreadDepth, "Thread depth") : null;
             // the tool starts on the sketch plane, as an extruded cut does: a start just above it (it was 1e-3) lay within the
             // boolean's tolerance of the face, so where the hole met other faces near it some points welded to the tool's edge and
             // some did not (a hole breaking out through a fillet: its wall left uncut, the result invalid)
@@ -1579,8 +1607,12 @@ public sealed class Regenerator
                 upTo = Plane.FromPointNormal(uf.Origin, uf.Normal);
             }
             var customRegions = new Dictionary<double, List<ProfileRegion>>();
-            var rays = (h.Profile == null && (h.ClearAbove || far != null)) || endKind == HoleEnd.UpToNext;
+            // a tapped hole's thread cut (not cosmetic): a groove at each hole, cut after the holes
+            bool cutThread = thread != null && ThreadMode switch { ThreadDisplay.Modeled => true, ThreadDisplay.Cosmetic => false, _ => !h.ThreadCosmetic };
+            var grooves = new List<Solid>();
+            var rays = (h.Profile == null && (h.ClearAbove || far != null)) || endKind == HoleEnd.UpToNext || (thread != null && endKind == HoleEnd.ThroughAll);
             var casters = rays ? State.Bodies.Where(b => b.Solid.Native != null).Select(b => Kernel.NativeBlend.RayCaster(b.Solid.Native!)).ToList() : null;
+            double? firstDepth = null;
             foreach (var p in pts)
             {
                 var origin = sk.Frame.ToWorld(p);
@@ -1610,6 +1642,7 @@ public sealed class Regenerator
                         depth = PosLen(h.Depth, "Depth");
                         break;
                 }
+                firstDepth ??= depth;
                 List<ProfileRegion> regions;
                 if (h.Profile != null)
                 {
@@ -1623,6 +1656,15 @@ public sealed class Regenerator
                     var up = casters != null && h.ClearAbove ? ClearHeight(casters, origin, -drill, x, y, Math.Max(r, ProfileTop())) : 0;
                     regions = new List<ProfileRegion> { new(Profile(Math.Max(up, lift), depth, exit, out _)) };
                 }
+                if (thread is { } th)
+                {
+                    // threaded as deep as asked, no deeper than the hole goes (through the part, for Through All)
+                    var holeLen = endKind == HoleEnd.ThroughAll ? LastExit(casters!, origin, drill) ?? depth : depth;
+                    var len = Math.Min(threadDepth ?? holeLen, holeLen);
+                    if (threadDepth > holeLen + 1e-9 && !status.Warnings.Contains(ThreadTooDeep)) status.Warnings.Add(ThreadTooDeep);
+                    if (cutThread) grooves.Add(TapGroove(origin, x, drill, th.major / 2, th.pitch, len, holeLen, endKind == HoleEnd.ThroughAll && threadDepth == null, k));
+                    else State.Cosmetics[$"{f.Id}.T{k}"] = new CosmeticThread(origin, drill, x, r, th.pitch, len, External: false);
+                }
                 var tool = Builders.Revolve(regions, frame, Vec2.Zero, new Vec2(0, 1), 2 * Math.PI, $"{f.Id}.{k++}",
                     SurfaceDef.SegmentsFor(r));
                 if (tool.Native == null && tool.Volume() < 0) tool = tool.Flipped(); // native revolves are oriented by construction
@@ -1630,11 +1672,41 @@ public sealed class Regenerator
             }
             // (the hole's top radius: the counterbore's, countersink's, near side countersink's, or its own)
             double ProfileTop() { Profile(lift, 1, null, out var t); return t; }
+            // a tapped hole's thread groove (as the Thread feature cuts a hole's, ISO 60° basic profile): swept from a
+            // pitch outside the face along the drill to its length; through the part, out past it; else stopping short
+            // of where it ends (the hole's bottom, or the thread depth) by half the groove's width
+            Solid TapGroove(Vec3 at, Vec3 xd, Vec3 along, double majorR, double p, double len, double holeLen, bool through, int n)
+            {
+                if (majorR <= r) throw new FeatureException("The hole is not smaller than the thread's major diameter.");
+                var gorigin = at - along * p;
+                var gframe = new Frame(gorigin, xd, along, Vec3.Cross(xd, along));
+                var (groove, _) = Threads.Groove(external: false, r, majorR, p, 0);
+                var halfWidth = groove.Max(q => Math.Abs(q.Y));
+                var threadLen = through ? holeLen + p : Math.Min(len, holeLen - halfWidth - 0.05 * p);
+                if (threadLen <= 0) throw new FeatureException("The hole is too shallow for its thread.");
+                var run = threadLen + p;
+                try
+                {
+                    var nb = Kernel.Native.NHelical.Sweep(new[] { new ProfileRegion(ProfileLoop.Polygon(groove, "G")) }, gframe, gorigin, along, p, run / p * 2 * Math.PI, $"{f.Id}.T{n}");
+                    if (nb.Validate() is { } bad) throw new FeatureException("The thread is not a valid solid: " + bad);
+                    return Kernel.Native.NTess.ToSolid(nb);
+                }
+                catch (ArgumentException ex) { throw new FeatureException(char.ToUpper(ex.Message[0]) + ex.Message[1..] + "."); }
+            }
             Solid all;
             using (Prof.Time("hole.toolunion")) all = Csg.UnionAll(tools);
             ApplyTool(all, cut: true, merge: true);
             State.Tools[f.Id] = new ToolInfo(all, true, true);
+            foreach (var g in grooves) ApplyTool(g, cut: true, merge: true);
+            // its callout, as it was made (its library values in place)
+            var threadItem = HoleSizes.ThreadItemOf(h);
+            var holeNote = new FeatureNote(Callouts.Hole(doc.Units, h, pts.Count, d, firstDepth, v => PosLen(v, "Length"), v => PosAng(v, "Angle"),
+                threadItem == null ? null : LibraryLink.Resolve(doc, threadItem), threadDepth), threadItem);
+            State.Notes[f.Id] = holeNote;
+            status.Callout = holeNote.Callout;
         }
+
+        const string ThreadTooDeep = "The thread is deeper than the hole: threaded as deep as the hole goes.";
 
         /// <summary>
         /// Up To Next: how deep a hole of radius <paramref name="rad"/> goes to come out of the first material it meets

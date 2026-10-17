@@ -607,26 +607,57 @@ public partial class MainWindow
         if (!string.IsNullOrEmpty(f.Face.Name)) box.Items.Add(FaceItem(f.Face));
         box.Changed += () => f.Face = box.Items.FirstOrDefault()?.ToFaceRef() ?? new FaceRef();
         var spec = page.Section("Specification");
-        // the sizes the libraries offer (a company's preferred ones), as "table|size"; ISO metric coarse is a thread's
-        // table when it names none (threads made before libraries)
+        // the sizes the libraries offer (a company's preferred ones), as "table|size", each table's Auto first (the
+        // size fitting the face); ISO metric coarse is a thread's table when it names none (threads made before libraries)
         const string coarse = "ISO261-coarse";
-        var sizes = new List<(string, string)> { ("Auto", "Auto (ISO metric, fits the face)") };
-        foreach (var tbl in Core.Library.LibraryLink.Current.Offered(Core.Library.TableKinds.Thread))
-        {
-            var pitch = tbl.Column("pitch");
-            if (pitch < 0) continue;
-            sizes.AddRange(tbl.Rows.Select(r => (tbl.Key + "|" + r.Key, r.Key.StartsWith('M') && !r.Key.Contains('x') ? $"{r.Key} × {Core.Expr.Format(r.Values[pitch])}" : r.Key)));
-        }
+        var tables = Core.Library.LibraryLink.Current.Offered(Core.Library.TableKinds.Thread).Where(x => x.Column("pitch") >= 0).ToList();
+        var sizes = tables.Select(x => (x.Key + "|Auto", $"Auto: {x.Title}, the size fitting the face")).ToList();
+        // (a size once: its classes are its rows, picked below)
+        foreach (var tbl in tables)
+            foreach (var r in tbl.Rows.GroupBy(r => r.Keys[0]).Select(g => g.First()))
+                sizes.Add((tbl.Key + "|" + r.Keys[0], r.Keys[0].StartsWith('M') && !r.Keys[0].Contains('x') ? $"{r.Keys[0]} × {Core.Expr.Format(Math.Round(tbl.Base(r, "pitch") ?? 0, 4))}" : r.Keys[0]));
         sizes.Add(("Custom", "Custom pitch"));
-        string SizeValue() => f.Size is "Auto" or "Custom" ? f.Size : Core.Library.ThreadSizes.TableOf(f) + "|" + f.Size;
+        string SizeValue() => f.Size == "Custom" ? f.Size : Core.Library.ThreadSizes.TableOf(f) + "|" + f.Size;
         // a size the libraries no longer offer stays this thread's
         if (!sizes.Any(s => s.Item1 == SizeValue())) sizes.Insert(1, (SizeValue(), $"{f.Size} (not offered by the libraries)"));
+        Action listClasses = () => { };
         page.Combo(spec, "Size", sizes, SizeValue, v =>
         {
             var i = v.IndexOf('|');
             f.Size = i < 0 ? v : v[(i + 1)..];
             f.Standard = i < 0 || v[..i] == coarse ? null : v[..i];
+            listClasses();
         }, "thread");
+        // its class: the size's rows (2A / 2B, 3A / 3B); for Auto, the classes the table has
+        var classBox = new ComboBox { HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Stretch, FontSize = TypeScale.Body };
+        var classRow = PmPage.RowOf(page.Field(spec, "Class", classBox));
+        ToolTip.SetTip(classBox, "The thread's class: external / internal.");
+        List<Core.Library.ThreadSizes.ThreadClass> classes = new();
+        bool listingClasses = false;
+        listClasses = () =>
+        {
+            listingClasses = true;
+            var set = Core.Library.LibraryLink.Current;
+            var table = Core.Library.ThreadSizes.TableOf(f);
+            classes = f.Size == "Custom" ? new()
+                : f.Size == "Auto" ? set.Table(table)?.Rows.Where(r => r.Keys.Count == 2).GroupBy(r => r.Keys[1])
+                    .Select(g => new Core.Library.ThreadSizes.ThreadClass(g.Key, g.First().Text?.GetValueOrDefault("internal.class") ?? "")).ToList() ?? new()
+                : Core.Library.ThreadSizes.Classes(set, table, f.Size);
+            // (the thread's class kept where the size has it, else the first)
+            if (classes.Count > 0 && classes.All(c => c.External != f.Class)) f.Class = f.Size == "Auto" ? null : classes[0].External;
+            classBox.ItemsSource = classes.Select(c => c.Pair).ToList();
+            classBox.SelectedIndex = f.Class == null ? 0 : classes.FindIndex(c => c.External == f.Class);
+            classBox.IsEnabled = classes.Count > 1;
+            classRow.IsVisible = classes.Count > 0;
+            listingClasses = false;
+        };
+        classBox.SelectionChanged += (_, _) =>
+        {
+            if (listingClasses || classBox.SelectedIndex < 0 || classBox.SelectedIndex >= classes.Count) return;
+            f.Class = classes[classBox.SelectedIndex].External;
+            page.RaiseChanged();
+        };
+        listClasses();
         page.Number(spec, "Pitch (custom)", () => f.Pitch, v => f.Pitch = v, "dimension");
         page.IconChoice(spec, new List<(ThreadEnd, string, string)>
         {
@@ -823,87 +854,238 @@ public partial class MainWindow
     {
         var page = new PmPage("Hole Specification", "hole");
         var t = page.Section("Hole Type");
-        Action syncSections = () => { };
-        TextBox? dia = null, cbd = null, cbdp = null, csd = null, csa = null;
-        // sizes from the libraries (section 34): the diameters set from the standard, size and fit picked
-        Core.Library.LibrarySnapshot? Resolve(string item) => Core.Library.LibraryLink.Resolve(Session.Doc, item);
-        void Fill()
+        // the page made again (a library type picked or dropped: other sections), the hole as set
+        void Reopen()
         {
-            if (f.Standard == null) return;
-            Core.Library.HoleSizes.Apply(f, Resolve);
-            // a size the counterbore or countersink table lacks keeps the values it had: said, so they are typed
-            if (Core.Library.HoleSizes.Missing(f, Resolve) is { } missing) Status(missing);
-            dia!.Text = f.Diameter; cbd!.Text = f.CbDiameter; cbdp!.Text = f.CbDepth; csd!.Text = f.CsDiameter; csa!.Text = f.CsAngle;
+            if (_edit != null) _edit.OnCancelled = null;
+            CancelEdit();
+            OpenHolePage(f, isNew, madeSketch);
+        }
+        // a hole type from the library (its profile and a table of sizes, as Inventor's spreadsheets), else the built-in
+        // types below; one with no profile is not offered
+        var libTypes = Core.Library.LibraryLink.Current.Offered(Core.Library.TableKinds.HoleType).Where(x => x.Profile != null).ToList();
+        bool lib = f.LibraryType != null;
+        if (libTypes.Count > 0 || lib)
+        {
+            var choices = new List<(string, string)> { ("", "None (built-in types)") };
+            choices.AddRange(libTypes.Select(x => (x.Key, x.Title.Length > 0 && x.Title != x.Key ? $"{x.Title} ({x.Key})" : x.Key)));
+            if (lib && libTypes.All(x => x.Key != f.LibraryType)) choices.Add((f.LibraryType!, $"{f.LibraryType} (not offered by the libraries)"));
+            page.Combo(t, "Library type", choices, () => f.LibraryType ?? "", v =>
+            {
+                if (v == "") { f.LibraryType = null; f.TypeValues = null; f.Profile = null; f.Size = null; }
+                else if (libTypes.FirstOrDefault(x => x.Key == v) is { } lt)
+                {
+                    f.LibraryType = v; f.Profile = HoleProfile.FromJson(lt.Profile); f.Standard = null; f.Fastener = null; f.Fit = null; f.Overrides = null;
+                    f.Size = lt.Rows.FirstOrDefault()?.Key;
+                }
+                Reopen();
+            });
+        }
+        if (lib)
+        {
+            // its sizes (the table's rows); the size picked sets the profile's values
+            var rows = libTypes.FirstOrDefault(x => x.Key == f.LibraryType)?.Rows.Select(r => r.Key).ToList() ?? new List<string>();
+            if (f.Size != null && !rows.Contains(f.Size)) rows.Add(f.Size);
+            page.Combo(t, "Size", rows.Select(r => (r, r)).ToList(), () => f.Size ?? "", v => f.Size = v);
+        }
+        int builtInFrom = t.Children.Count;
+        Action syncSections = () => { };
+        // sized from a fastener holes table (docs/library-v2.md): its standard, the fastener the hole is for, its size and
+        // fit; the fields show the row's values, and a value typed over one is kept as typed (a library update leaves it)
+        Core.Library.LibrarySnapshot? Resolve(string item) => Core.Library.LibraryLink.Resolve(Session.Doc, item);
+        var holeTables = Core.Library.LibraryLink.Current.Offered(Core.Library.TableKinds.FastenerHoles).ToList();
+        Core.Library.LibraryTable? Table() => f.Standard == null ? null : holeTables.FirstOrDefault(x => x.Key == f.Standard);
+        IEnumerable<Core.Library.LibraryRow> Suiting(Core.Library.LibraryTable tb) =>
+            tb.Rows.Where(r => r.Keys.Count == 2 && Core.Library.HoleSizes.Suits(f.Type, tb, r));
+        // a new hole of the size its default diameter is (an M6 hole shows M6, not Custom)
+        if (isNew && f.Standard == null && !lib && UnitFormat.TryLength(f.Diameter, Session.Lookup, out var d0, out _))
+            foreach (var tb in holeTables)
+                if (Suiting(tb).FirstOrDefault(r => tb.Base(r, "normal") is { } n && Math.Abs(n - d0) < 1e-9) is { } guess)
+                { f.Standard = tb.Key; f.Fastener = guess.Keys[0]; f.Size = guess.Keys[1]; break; }
+        // the value a field shows: typed over the row's, the row's, else the hole's own
+        string Shown(string field) => f.Overrides?.GetValueOrDefault(field) ?? Core.Library.HoleSizes.LibraryValue(f, field, Resolve) ?? Core.Library.HoleSizes.Get(f, field);
+        bool SameValue(string field, string a, string b)
+        {
+            if (a == b) return true;
+            if (field == "CsAngle")
+            {
+                static double? A(string v) => double.TryParse(v.Replace("deg", "").Replace("°", "").Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var x) ? x : null;
+                return A(a) is { } x && A(b) is { } y && Math.Abs(x - y) < 1e-9;
+            }
+            return UnitFormat.TryLength(a, Session.Lookup, out var p, out _) && UnitFormat.TryLength(b, Session.Lookup, out var q, out _) && Math.Abs(p - q) < 1e-6;
+        }
+        Action syncOverridden = () => { };
+        // a field typed: kept as the hole's value, and over the row's when it differs from it
+        void Typed(string field, string v)
+        {
+            Core.Library.HoleSizes.Set(f, field, v);
+            if (Core.Library.HoleSizes.ItemOf(f) == null && Core.Library.HoleSizes.ThreadItemOf(f) == null) return;
+            if (Core.Library.HoleSizes.LibraryValue(f, field, Resolve) is { } libv && SameValue(field, v, libv))
+            { if (f.Overrides?.Remove(field) == true && f.Overrides.Count == 0) f.Overrides = null; }
+            else (f.Overrides ??= new())[field] = v;
+            syncOverridden();
+        }
+        TextBox? dia = null, cbd = null, cbdp = null, csd = null, csa = null;
+        // the row changed (standard, fastener, size, fit): the values typed over the last one dropped, the fields its
+        void Refill(params string[] dropped)
+        {
+            foreach (var field in dropped.Length == 0 ? Core.Library.HoleSizes.Fields : dropped) f.Overrides?.Remove(field);
+            if (f.Overrides?.Count == 0) f.Overrides = null;
+            foreach (var field in Core.Library.HoleSizes.Fields) Core.Library.HoleSizes.Set(f, field, Shown(field));
+            if (dia != null) { dia.Text = f.Diameter; cbd!.Text = f.CbDiameter; cbdp!.Text = f.CbDepth; csd!.Text = f.CsDiameter; csa!.Text = f.CsAngle; }
+            syncOverridden();
+        }
+        var fastenerBox = new ComboBox { HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Stretch, FontSize = TypeScale.Body };
+        var sizeBox = new ComboBox { HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Stretch, FontSize = TypeScale.Body };
+        Control? fastenerRow = null, sizeRow = null, fitRow = null, standardRow = null;
+        Action listThreads = () => { }, listThreadClasses = () => { };
+        // (a tapped hole's thread size: the one of its table whose tap drill is nearest the hole as it is)
+        void FitThread()
+        {
+            var fit = UnitFormat.TryLength(f.Diameter, Session.Lookup, out var dd, out _)
+                ? Core.Library.ThreadSizes.Fit(Session.Doc, Core.Library.HoleSizes.ThreadTableOf(f), dd, external: false, f.ThreadClass) : null;
+            f.ThreadSize = fit?.name; f.ThreadClass = fit?.cls;
+        }
+        // the fasteners the standard has holes for that suit the hole type, then their sizes (the hole's kept when listed)
+        bool listing = false;
+        void List()
+        {
+            listing = true;
+            var tb = Table();
+            var fasteners = tb == null ? new List<string>() : Suiting(tb).Select(r => r.Keys[0]).Distinct().ToList();
+            if (f.Standard != null && tb == null && f.Fastener != null) fasteners.Add(f.Fastener);
+            if (tb != null && (f.Fastener == null || !fasteners.Contains(f.Fastener))) f.Fastener = fasteners.FirstOrDefault();
+            fastenerBox.ItemsSource = fasteners;
+            fastenerBox.SelectedItem = f.Fastener;
+            var sizes = tb == null ? new List<string>() : Suiting(tb).Where(r => r.Keys[0] == f.Fastener).Select(r => r.Keys[1]).ToList();
+            if (f.Standard != null && tb == null && f.Size != null) sizes.Add(f.Size);
+            if (tb != null && (f.Size == null || !sizes.Contains(f.Size))) f.Size = sizes.FirstOrDefault();
+            sizeBox.ItemsSource = sizes;
+            sizeBox.SelectedItem = f.Size;
+            listing = false;
+            // (a tapped hole: its thread's rows instead)
+            foreach (var row in new[] { fastenerRow, sizeRow, fitRow }) if (row != null) row.IsVisible = f.Standard != null && f.Type != HoleType.Tapped;
+            if (standardRow != null) standardRow.IsVisible = f.Type != HoleType.Tapped;
+            if (tb != null && f.Fastener == null && f.Type != HoleType.Tapped) Status($"{tb.Title} has no holes for a {f.Type.ToString().ToLowerInvariant()}.");
         }
         // the hole type as a row of pictures of it in section (as SolidWorks): simple, counterbore, countersink
-        Action refreshType = () => { };
         page.IconChoice(t, new List<(HoleType, string, string)>
         {
             (HoleType.Simple, "hole-simple", "Simple: drilled straight, through or to a depth"),
             (HoleType.Counterbore, "hole-cbore", "Counterbore: a socket head screw's head sunk below the face"),
             (HoleType.Countersink, "hole-csink", "Countersink: a flat head screw's head flush with the face"),
-        }, () => f.Type, v => { f.Type = v; syncSections(); refreshType(); Fill(); });
-        // the standard (the clearance holes' table), then the screw type it sizes the hole for, then the size and fit
-        var clearance = Core.Library.LibraryLink.Current.Offered(Core.Library.TableKinds.Clearance).ToList();
-        // a hole made before libraries, with an ISO 273 normal diameter, shows its size (editing an M6 hole shows M6, not Custom)
-        if (f.Standard == null && UnitFormat.TryLength(f.Diameter, Session.Lookup, out var d0, out _)
-            && Core.Library.LibraryLink.Current.Table("ISO273") is { } iso && iso.Rows.FirstOrDefault(r => Math.Abs(r.Values[iso.Column("normal")] - d0) < 1e-9) is { } guess)
-        { f.Standard = "ISO273"; f.Size = guess.Key; }
-        var standards = new List<(string, string)> { ("custom", "Custom (diameters typed)") };
-        standards.AddRange(clearance.Select(c => (c.Key, $"{c.Title} ({c.Standard})")));
-        if (f.Standard != null && clearance.All(c => c.Key != f.Standard)) standards.Add((f.Standard, $"{f.Standard} (not offered by the libraries)"));
-        var typeBox = new ComboBox { HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Stretch, FontSize = TypeScale.Body };
-        var sizeBox = new ComboBox { HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Stretch, FontSize = TypeScale.Body };
-        Control? sizeRow = null, fitRow = null;
-        // the screw type the standard and the hole type size it for (the counterbore's or countersink's table)
-        refreshType = () =>
+            (HoleType.Tapped, "hole-tapped", "Tapped: drilled with the thread's tap drill and threaded"),
+        }, () => f.Type, v =>
         {
-            string? key = f.Standard == null ? null : f.Type switch
-            {
-                HoleType.Counterbore => Core.Library.HoleSizes.Companions(f.Standard).cbore,
-                HoleType.Countersink => Core.Library.HoleSizes.Companions(f.Standard).csink,
-                _ => null,
-            };
-            var tbl = key == null ? null : Core.Library.LibraryLink.Current.Table(key);
-            static string Screw(string title) =>
-                title.IndexOf(" for ", StringComparison.Ordinal) is var i and >= 0 ? char.ToUpper(title[i + 5]) + title[(i + 6)..].Split(" (")[0].Replace("screws", "screw") : title;
-            typeBox.ItemsSource = new[]
-            {
-                f.Standard == null ? "Custom" : f.Type == HoleType.Simple ? "Clearance hole"
-                    : tbl != null ? $"{Screw(tbl.Title)} ({tbl.Standard})" : $"{key} (not offered by the libraries)",
-            };
-            typeBox.SelectedIndex = 0;
-            typeBox.IsEnabled = f.Standard != null;
-        };
-        // the sizes of the standard picked (its size kept when it has it, else the first)
-        bool listing = false;
-        void ListSizes()
-        {
-            listing = true;
-            var tbl = f.Standard == null ? null : clearance.FirstOrDefault(c => c.Key == f.Standard);
-            var keys = tbl?.Rows.Select(r => r.Key).ToList() ?? new List<string>();
-            if (f.Size != null && !keys.Contains(f.Size) && tbl == null && f.Standard != null) keys.Add(f.Size);
-            if (f.Standard != null && (f.Size == null || !keys.Contains(f.Size))) f.Size = keys.FirstOrDefault();
-            sizeBox.ItemsSource = keys;
-            sizeBox.SelectedItem = f.Size;
-            listing = false;
-            if (sizeRow != null) sizeRow.IsVisible = f.Standard != null;
-            if (fitRow != null) fitRow.IsVisible = f.Standard != null;
-        }
-        var standardBox = page.Combo(t, "Standard", standards, () => f.Standard ?? "custom", v =>
-        {
-            if (v == "custom") { f.Standard = null; f.Size = null; f.Fit = null; }
-            else f.Standard = v;
-            ListSizes(); refreshType(); Fill();
+            var row = Core.Library.HoleSizes.ItemOf(f);
+            f.Type = v;
+            if (v == HoleType.Tapped && f.ThreadSize == null) FitThread();
+            syncSections(); List(); listThreads();
+            if (Core.Library.HoleSizes.ItemOf(f) != row) Refill(); else Refill("CbDiameter", "CbDepth", "CsDiameter", "CsAngle");
         });
-        page.Field(t, "Type", typeBox);
+        var standards = new List<(string, string)> { ("custom", "Custom (diameters typed)") };
+        standards.AddRange(holeTables.Select(c => (c.Key, c.Standard.Length > 0 ? $"{c.Title} ({c.Standard})" : c.Title)));
+        if (f.Standard != null && holeTables.All(c => c.Key != f.Standard)) standards.Add((f.Standard, $"{f.Standard} (not offered by the libraries)"));
+        standardRow = PmPage.RowOf(page.Combo(t, "Standard", standards, () => f.Standard ?? "custom", v =>
+        {
+            if (v == "custom") { f.Standard = null; f.Fastener = null; f.Size = null; f.Fit = null; f.Overrides = null; }
+            else f.Standard = v;
+            List(); Refill();
+        }));
+        fastenerRow = PmPage.RowOf(page.Field(t, "Fastener", fastenerBox));
+        fastenerBox.SelectionChanged += (_, _) =>
+        {
+            if (listing || fastenerBox.SelectedItem is not string fa || fa == f.Fastener) return;
+            f.Fastener = fa; List(); Refill(); page.RaiseChanged();
+        };
+        // (a library type: its own profile and sizes in place of the built-in types' rows)
+        if (lib) foreach (var c in t.Children.Skip(builtInFrom)) c.IsVisible = false;
+        // a tapped hole's thread: its table and size (the size's tap drill the hole's diameter), how deep it is threaded
+        var threadSec = page.Section("Thread");
+        var threadTables = Core.Library.LibraryLink.Current.Offered(Core.Library.TableKinds.Thread).Where(x => x.Column("pitch") >= 0).ToList();
+        var threadChoices = threadTables.Select(x => (x.Key, x.Standard.Length > 0 ? $"{x.Title} ({x.Standard})" : x.Title)).ToList();
+        if (threadChoices.All(c => c.Key != Core.Library.HoleSizes.ThreadTableOf(f)))
+            threadChoices.Add((Core.Library.HoleSizes.ThreadTableOf(f), $"{Core.Library.HoleSizes.ThreadTableOf(f)} (not offered by the libraries)"));
+        var threadSizeBox = new ComboBox { HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Stretch, FontSize = TypeScale.Body };
+        bool listingThreads = false;
+        listThreads = () =>
+        {
+            listingThreads = true;
+            var tb = threadTables.FirstOrDefault(x => x.Key == Core.Library.HoleSizes.ThreadTableOf(f));
+            var sizes = tb?.Rows.Select(r => r.Keys[0]).Distinct().ToList() ?? new List<string>();
+            if (f.ThreadSize != null && !sizes.Contains(f.ThreadSize)) sizes.Add(f.ThreadSize);
+            threadSizeBox.ItemsSource = sizes;
+            threadSizeBox.SelectedItem = f.ThreadSize;
+            listingThreads = false;
+            listThreadClasses();
+        };
+        page.Combo(threadSec, "Standard", threadChoices, () => Core.Library.HoleSizes.ThreadTableOf(f), v =>
+        {
+            f.ThreadStandard = v == "ISO261-coarse" ? null : v;
+            FitThread();
+            listThreads(); Refill("Diameter");
+        });
+        page.Field(threadSec, "Size", threadSizeBox);
+        // its class: the size's rows, by their internal class (2B, 3B); picking one sizes the hole from its row
+        var threadClassBox = new ComboBox { HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Stretch, FontSize = TypeScale.Body };
+        var threadClassRow = PmPage.RowOf(page.Field(threadSec, "Class", threadClassBox));
+        ToolTip.SetTip(threadClassBox, "The tapped thread's class (internal).");
+        List<Core.Library.ThreadSizes.ThreadClass> threadClasses = new();
+        bool listingClasses = false;
+        void ListThreadClasses()
+        {
+            listingClasses = true;
+            threadClasses = f.ThreadSize == null ? new() : Core.Library.ThreadSizes.Classes(Core.Library.LibraryLink.Current, Core.Library.HoleSizes.ThreadTableOf(f), f.ThreadSize);
+            if (threadClasses.Count > 0 && threadClasses.All(c => c.External != f.ThreadClass)) f.ThreadClass = threadClasses[0].External;
+            threadClassBox.ItemsSource = threadClasses.Select(c => c.Internal.Length > 0 ? c.Internal : c.External).ToList();
+            threadClassBox.SelectedIndex = threadClasses.FindIndex(c => c.External == f.ThreadClass);
+            threadClassBox.IsEnabled = threadClasses.Count > 1;
+            threadClassRow.IsVisible = threadClasses.Count > 0;
+            listingClasses = false;
+        }
+        threadClassBox.SelectionChanged += (_, _) =>
+        {
+            if (listingClasses || threadClassBox.SelectedIndex < 0 || threadClassBox.SelectedIndex >= threadClasses.Count) return;
+            f.ThreadClass = threadClasses[threadClassBox.SelectedIndex].External;
+            Refill("Diameter"); page.RaiseChanged();
+        };
+        threadSizeBox.SelectionChanged += (_, _) =>
+        {
+            if (listingThreads || threadSizeBox.SelectedItem is not string sz || sz == f.ThreadSize) return;
+            f.ThreadSize = sz; ListThreadClasses(); Refill("Diameter"); page.RaiseChanged();
+        };
+        listThreadClasses = ListThreadClasses;
+        page.Number(threadSec, "Thread depth", () => f.ThreadDepth, v => f.ThreadDepth = v, "dimension", optional: true);
+        page.Info(threadSec, "Blank: threaded as deep as the hole goes.");
+        page.Check(threadSec, "Cosmetic thread", () => f.ThreadCosmetic, v => f.ThreadCosmetic = v);
+        page.Info(threadSec, "A cosmetic thread is shown as a helix on the wall; clear it to cut the thread. View > Threads overrides the display of all threads.");
+        listThreads();
         var std = page.Section("Hole Specifications");
         sizeRow = PmPage.RowOf(page.Field(std, "Size", sizeBox));
-        sizeBox.SelectionChanged += (_, _) => { if (!listing && sizeBox.SelectedItem is string sz) { f.Size = sz; Fill(); page.RaiseChanged(); } };
+        sizeBox.SelectionChanged += (_, _) =>
+        {
+            if (listing || sizeBox.SelectedItem is not string sz || sz == f.Size) return;
+            f.Size = sz; Refill(); page.RaiseChanged();
+        };
         fitRow = PmPage.RowOf(page.Combo(std, "Fit", new List<(string, string)> { ("close", "Close"), ("normal", "Normal"), ("loose", "Loose") },
-            () => f.Fit ?? "normal", v => { f.Fit = v == "normal" ? null : v; Fill(); }));
-        ListSizes(); refreshType();
-        dia = page.Number(std, "Diameter", () => f.Diameter, v => f.Diameter = v, "hole");
+            () => f.Fit ?? "normal", v => { f.Fit = v == "normal" ? null : v; Refill("Diameter"); }));
+        List();
+        dia = page.Number(std, "Diameter", () => Shown("Diameter"), v => Typed("Diameter", v), "hole");
+        // the values typed over the row's said, and put back with a click
+        var overriddenInfo = new TextBlock { TextWrapping = Avalonia.Media.TextWrapping.Wrap, Foreground = Palette.TextMuted, FontSize = TypeScale.Small };
+        std.Children.Add(overriddenInfo);
+        var useLibrary = page.ButtonRow(std, "Use Library Values", () => Refill(), "table");
+        syncOverridden = () =>
+        {
+            var typed = f.Overrides?.Keys.ToList() ?? new List<string>();
+            static string Name(string field) => field switch
+            {
+                "Diameter" => "diameter", "CbDiameter" => "counterbore diameter", "CbDepth" => "counterbore depth",
+                "CsDiameter" => "countersink diameter", _ => "countersink angle",
+            };
+            overriddenInfo.Text = typed.Count == 0 ? "" : "Typed over the library: " + string.Join(", ", typed.Select(Name)) + ".";
+            overriddenInfo.IsVisible = useLibrary.IsVisible = typed.Count > 0;
+        };
         // how deep: a row of pictures (as SolidWorks), the depth for Blind, the plane or face for Up To Surface
         var end = page.Section("End Condition");
         Action syncEnd = () => { };
@@ -963,10 +1145,27 @@ public partial class MainWindow
         // the profile: the type's, or the hole's own (as SolidWorks lets the hole's sketch be edited); with its own, the
         // options and the clearance are what it draws
         var profSec = page.Section("Profile");
-        page.Info(profSec, f.Profile == null ? "The hole type's standard profile."
+        page.Info(profSec, lib ? $"The profile of {f.LibraryType} from the library; its dimensions use its columns. Edit Profile changes this hole's copy only."
+            : f.Profile == null ? "The hole type's standard profile."
             : "A custom profile. Its dimensions can use " + string.Join(", ", HoleProfile.Names.Select(n => n.name)) + ", and the part's equations.");
         page.ButtonRow(profSec, "Edit Profile…", () => EditHoleProfile(f, isNew, madeSketch), "sketch");
-        if (f.Profile != null)
+        // a custom profile made a library hole type: its names its table's columns, this hole's values the first size;
+        // the Library Editor opened with it to add sizes (or export it to Excel) and publish
+        if (f.Profile != null && !lib)
+            page.ButtonRow(profSec, "Save Profile to Library…", async () =>
+            {
+                var key = (await Dialogs.Input(this, "Save Profile to Library", "Hole type key (e.g. ACME-cbore):", ""))?.Trim();
+                if (string.IsNullOrEmpty(key)) return;
+                if (key.Contains('/')) { Status("A hole type's key cannot hold '/'."); return; }
+                var size = (await Dialogs.Input(this, "Save Profile to Library", "This hole's size (its first row, e.g. M8):", f.Size ?? "Default"))?.Trim();
+                if (string.IsNullOrEmpty(size)) return;
+                double Shown(string e) => UnitFormat.TryLength(e, Session.Lookup, out var v, out _) ? v : 0;
+                var lookup = HoleProfile.Lookup(f, Session.Lookup, Units.MmPer(), Shown(f.Depth));
+                var (table, problem) = HoleProfile.ToLibraryType(f.Profile!, key, size, lookup);
+                if (table == null) { Status(problem!); return; }
+                await LibraryEditor.Open(this, add: table);
+            }, "table");
+        if (f.Profile != null && !lib)
             page.ButtonRow(profSec, "Use Standard Profile", () =>
             {
                 f.Profile = null;
@@ -986,16 +1185,19 @@ public partial class MainWindow
         };
         syncEnd();
         var cb = page.Section("Counterbore");
-        cbd = page.Number(cb, "C'bore dia.", () => f.CbDiameter, v => f.CbDiameter = v);
-        cbdp = page.Number(cb, "C'bore depth", () => f.CbDepth, v => f.CbDepth = v);
+        cbd = page.Number(cb, "C'bore dia.", () => Shown("CbDiameter"), v => Typed("CbDiameter", v));
+        cbdp = page.Number(cb, "C'bore depth", () => Shown("CbDepth"), v => Typed("CbDepth", v));
         var cs = page.Section("Countersink");
-        csd = page.Number(cs, "C'sink dia.", () => f.CsDiameter, v => f.CsDiameter = v);
-        csa = page.Number(cs, "C'sink angle", () => f.CsAngle, v => f.CsAngle = v, null, "°");
+        csd = page.Number(cs, "C'sink dia.", () => Shown("CsDiameter"), v => Typed("CsDiameter", v));
+        csa = page.Number(cs, "C'sink angle", () => Shown("CsAngle"), v => Typed("CsAngle", v), null, "°");
+        syncOverridden();
         // only the section of the chosen hole type is shown
         syncSections = () =>
         {
-            if (cb.Parent is Control cbs) cbs.IsVisible = f.Type == HoleType.Counterbore;
-            if (cs.Parent is Control css) css.IsVisible = f.Type == HoleType.Countersink;
+            if (cb.Parent is Control cbs) cbs.IsVisible = !lib && f.Type == HoleType.Counterbore;
+            if (cs.Parent is Control css) css.IsVisible = !lib && f.Type == HoleType.Countersink;
+            if (std.Parent is Control stds) stds.IsVisible = !lib;
+            if (threadSec.Parent is Control ths) ths.IsVisible = !lib && f.Type == HoleType.Tapped;
             syncOptions();
         };
         syncSections();
@@ -1015,23 +1217,6 @@ public partial class MainWindow
             EditFeature(f.SketchId);
         }, "sketch");
         BeginEdit(f, isNew, page, overlay: false);
-        // diameters typed over the standard's: a custom hole (a library update must not size it again)
-        if (_edit != null) _edit.BeforeCommit = () =>
-        {
-            if (f.Standard == null) return;
-            var sized = (HoleFeature)f.Clone();
-            Core.Library.HoleSizes.Apply(sized, Resolve);
-            // (by value: a field keeps "11mm" as it shows it, "11" in a millimeter part; compared as text, every library
-            // hole turned custom at its first preview, and a counterbore picked after kept the diameter it had)
-            bool Same(string a, string b) => a == b || (UnitFormat.TryLength(a, Session.Lookup, out var x, out _)
-                && UnitFormat.TryLength(b, Session.Lookup, out var y, out _) && Math.Abs(x - y) < 1e-9);
-            bool same = Same(sized.Diameter, f.Diameter) && (f.Type != HoleType.Counterbore || (Same(sized.CbDiameter, f.CbDiameter) && Same(sized.CbDepth, f.CbDepth)))
-                && (f.Type != HoleType.Countersink || (Same(sized.CsDiameter, f.CsDiameter) && Same(sized.CsAngle, f.CsAngle)));
-            if (same) return;
-            // a diameter typed over the standard's: the page says Custom too
-            f.Standard = null; f.Size = null; f.Fit = null;
-            Avalonia.Threading.Dispatcher.UIThread.Post(() => { standardBox.SelectedIndex = 0; ListSizes(); refreshType(); });
-        };
         if (isNew && madeSketch && _edit != null)
         {
             // the position sketch was committed just before this page opened: cancelling removes it

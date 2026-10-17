@@ -257,6 +257,7 @@ static class Program
             StorageTests.Run(t);
             LibraryTests.Run(t);
             FastenerTests.Run(t);
+            ThreadLibraryTests.Run(t);
             MaterialTests.Run(t);
             MaterialTests.RunPart(t);
             MaterialTests.RunAppearance(t);

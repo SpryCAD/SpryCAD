@@ -231,7 +231,7 @@ static class FeatureTests
             var tables = StarterProfile.Tables.Select(x => x.Clone()).ToList();
             var tooling = tables.Single(x => x.Key == ProfileTables.Tooling);
             tooling.Rows.Add(new ProfileRow(new[] { Steel, "*", "Standard" }, "1", "t", "88", "8*t", "88", "1", "2*t", "4*t", ""));
-            var lib = new LoadedLibrary(Guid.NewGuid(), "Acme", LibraryLayer.Company, Guid.NewGuid(), null, Array.Empty<LibraryTable>(), Array.Empty<LibraryRestriction>(), tables);
+            var lib = new LoadedLibrary(Guid.NewGuid(), "Acme", LibraryDomain.Standards, Guid.NewGuid(), null, Array.Empty<LibraryTable>(), tables);
             var set = new LibrarySet(new[] { lib });
             var u = SheetProfiles.Update(doc, set);
             t.True(u != null, "an update");

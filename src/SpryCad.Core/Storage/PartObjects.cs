@@ -26,7 +26,7 @@ public enum ObjectKind : byte
     /// changes them and the history does not list that as a change of its own.
     /// </summary>
     NameCounters = 7,
-    /// <summary>One per library item the part uses ("ISO261-coarse/M8"): the rows it rebuilds from (section 34).</summary>
+    /// <summary>One per library item the part uses ("ISO261-coarse:M8"): the rows it rebuilds from (section 34).</summary>
     LibrarySnapshot = 8,
     /// <summary>One per sheet metal body, by its id: material, gauge, fixed panel, overrides (sheet metal spec section 4).</summary>
     SheetMetalBody = 9,
@@ -150,6 +150,7 @@ public static class PartObjects
         doc.SheetBodies?.Sort((x, y) => string.CompareOrdinal(x.Id, y.Id));
         doc.SheetOverrides?.Sort((x, y) => string.CompareOrdinal(x.Target, y.Target));
         if (objects.TryGetValue(Single(ObjectKind.SheetProfile), out var sp)) doc.SheetProfile = Open<SheetMetal.ProfileSnapshot>(sp, ObjectKind.SheetProfile);
+        Library.LibraryLink.Upgrade(doc);
         Library.PartMaterial.Upgrade(doc);
         return doc;
     }
@@ -187,7 +188,7 @@ public static class PartObjects
     internal static string SnapshotName(byte[] envelope)
     {
         var s = Open<Library.LibrarySnapshot>(envelope, ObjectKind.LibrarySnapshot);
-        return $"{s.Row} ({s.Table})";
+        return s.Name;
     }
 
     /// <summary>The embedded files' names a settings object lists.</summary>

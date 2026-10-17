@@ -285,7 +285,7 @@ public static class OptionsDialog
         foreach (var lib in LibraryLink.Current.Libraries)
             f.Row(lib.Name, new SelectableTextBlock
             {
-                Text = $"{lib.Layer}, {lib.Tables.Count} tables{(lib.Restrictions.Count > 0 ? $", {lib.Restrictions.Count} restrictions" : "")}{(lib.Path != null ? " · " + lib.Path : " · built in")}",
+                Text = $"{(lib.Domain == LibraryDomain.Materials ? "Materials" : "Standards")}, {lib.Tables.Count} tables{(lib.Path != null ? " · " + lib.Path : " · SpryCAD's defaults")}",
                 TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center,
             });
         if (LibraryLink.Current.Libraries.Any(l => l.Tables.Any(t => !t.Verified)))
@@ -298,7 +298,7 @@ public static class OptionsDialog
         f.Section("Set up a shared library set");
         var create = new Button { Content = "Create in a Folder…" };
         f.Row("Administrators", create,
-            "Writes standards.sprlib (SpryCAD standards to edit) and libraries.json to a folder, e.g. on a file server. "
+            "Writes standards.sprlib and materials.sprlib (your company's own libraries, copies of SpryCAD's defaults to change) and libraries.json to a folder, e.g. on a file server. "
             + $"Grant users read access and owners write access, then set each computer to it with the {LibrarySync.EnvironmentVariable} environment variable, "
             + $"the first line of {LibrarySync.MachinePolicyFile}, or this page.");
         create.Click += async (_, _) =>
@@ -308,11 +308,18 @@ public static class OptionsDialog
             if (File.Exists(json)) { await Dialogs.Message(c.Owner, "Libraries", $"{json} already exists: it was left as it is."); return; }
             try
             {
-                var lib = Path.Combine(folder, "standards" + LibraryFile.Extension);
-                if (!File.Exists(lib)) LibraryFile.WriteBuiltIn(lib, UserSettings.AuthorName);
-                File.WriteAllText(json, System.Text.Json.JsonSerializer.Serialize(new LibraryConfig { Libraries = { Path.GetFileName(lib) } }, Serialization.Options));
+                var files = new List<string>();
+                foreach (var (domain, name) in new[] { (LibraryDomain.Standards, "Company standards"), (LibraryDomain.Materials, "Company materials") })
+                {
+                    var lib = Path.Combine(folder, LibraryDomains.Name(domain) + LibraryFile.Extension);
+                    if (!File.Exists(lib)) LibraryFile.WriteDefaults(lib, domain, name, UserSettings.AuthorName);
+                    files.Add(Path.GetFileName(lib));
+                }
+                var config = new LibraryConfig();
+                config.Libraries.AddRange(files);
+                File.WriteAllText(json, System.Text.Json.JsonSerializer.Serialize(config, Serialization.Options));
                 if (!byAdmin) box.Text = folder;
-                await Dialogs.Message(c.Owner, "Libraries", $"Created {json} and {Path.GetFileName(lib)}.");
+                await Dialogs.Message(c.Owner, "Libraries", $"Created {json}, {string.Join(" and ", files)}.");
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {

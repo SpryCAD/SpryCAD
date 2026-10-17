@@ -231,7 +231,8 @@ public partial class MainWindow
             PartMenu(Item("_Appearance…", () => _ = PartAppearanceCommand(), null, "appearance")),
             PartMenu(Item("_Library Updates…", () => _ = LibraryUpdatesCommand(), null, "table")),
             Sub("Li_braries",
-                Item("_Edit Library…", () => _ = LibraryEditor.Open(this), null, "table"),
+                Item("_Edit Standards Library…", () => _ = LibraryEditor.Open(this), null, "table"),
+                Item("Edit _Materials Library…", () => _ = LibraryEditor.Open(this, domain: LibraryDomain.Materials), null, "material"),
                 Item("_New Company Library…", () => _ = LibraryEditor.New(this))),
             "-",
             Item("_Options…", () => _ = Dialogs.Options(this), null, "options")));
@@ -886,11 +887,9 @@ public partial class MainWindow
             }
             if (id == "__part" && Session.Doc.RollbackIndex != null) menu.Items.Add(new Separator());
         }
-        if (id is "Front" or "Top" or "Right")
-        {
-            menu.Items.Add(Item("Sketch", () => StartSketchCommand(), null, "sketch"));
-            menu.Items.Add(Item("Normal To", NormalTo, null, "normalto"));
-        }
+        if (id is "Front" or "Top" or "Right") menu.Items.Add(Item("Sketch", () => StartSketchCommand(), null, "sketch"));
+        // an origin plane, a plane or a sketch: looked at straight on (again, from its other side)
+        if (TreeFrame(id) is { } nf) menu.Items.Add(Item("Normal To", () => Viewport.NormalTo(nf, flip: true), null, "normalto"));
         if (f != null)
         {
             menu.Items.Add(Item(f is SketchFeature ? "Edit Sketch" : "Edit Feature", () => EditFeature(id), null, FeatureTree.IconFor(f)));

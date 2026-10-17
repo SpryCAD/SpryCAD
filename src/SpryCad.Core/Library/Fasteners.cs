@@ -19,7 +19,7 @@ public enum FastenerKind { Screw, Nut, Washer }
 /// </summary>
 public static class Fasteners
 {
-    /// <summary>The row text naming the screw size a row is for ("M8", "1/4"), as clearance hole tables name their rows.</summary>
+    /// <summary>The row text naming the screw size a row is for ("M8", "1/4"), as fastener holes tables name their sizes.</summary>
     public const string SizeKey = "size";
 
     /// <summary>
@@ -68,15 +68,8 @@ public static class Fasteners
     public static string? SizeOf(LibrarySnapshot s) => s.Text?.GetValueOrDefault(SizeKey);
 
     // ------------------------------------------------------------------------------------------
-    // which tables go with a clearance hole table
+    // rows by screw size
 
-    /// <summary>The screw, nut and washer tables for screws in a clearance hole table's holes (null: none).</summary>
-    public static (string screws, string? nuts, string? washers)? TablesFor(string clearanceTable) => clearanceTable switch
-    {
-        "ISO273" => ("ISO4762", "ISO4032", "ISO7089"),
-        "ASME-B18.2.8" => ("ASME-B18.3-SHCS", null, null),
-        _ => null,
-    };
 
     /// <summary>
     /// The rows of a table of a size that the libraries offer (company restrictions applied), shortest first: what the
@@ -98,7 +91,7 @@ public static class Fasteners
     public static string Designation(LibrarySnapshot s, LibrarySet? set = null)
     {
         var standard = (set ?? LibraryLink.Current).Table(s.Table)?.Standard
-            ?? FastenerFamilies.Tables.FirstOrDefault(t => t.Key == s.Table)?.Standard ?? s.Table;
+            ?? BuiltInStandards.Tables.FirstOrDefault(t => t.Key == s.Table)?.Standard ?? s.Table;
         return standard + " " + s.Row;
     }
 
@@ -124,7 +117,7 @@ public static class Fasteners
         sb.Append(Definitions[kind]).Append('\n');
         for (int i = 0; i < s.Columns.Count; i++)
             sb.Append(s.Columns[i]).Append('=').Append(s.Values[i].ToString("R", CultureInfo.InvariantCulture)).Append(';');
-        sb.Append("\ngeometry ").Append(GeometryVersion.Current);
+        sb.Append("\nunits ").Append(s.Units).Append("\ngeometry ").Append(GeometryVersion.Current);
         return Storage.Hash.Of(Encoding.UTF8.GetBytes(sb.ToString())).ToString();
     }
 
@@ -132,7 +125,7 @@ public static class Fasteners
     public static Solid Body(LibrarySnapshot s) => Bodies.GetOrAdd(BodyKey(s), _ => new Lazy<Solid>(() =>
     {
         Interlocked.Increment(ref _built);
-        double V(string c) => s.Value(c) is { } v && v > 0 ? v : throw new Regen.FeatureException($"{s.Row} ({s.Table}) has no {c}.");
+        double V(string c) => s.Base(c) is { } v && v > 0 ? v : throw new Regen.FeatureException($"{s.Row} ({s.Table}) has no {c}.");
         return KindOf(s) switch
         {
             FastenerKind.Screw => Screw(V("d"), V("l"), V("dk"), V("k"), V("s"), V("t")),
@@ -210,12 +203,12 @@ public static class Fasteners
         return doc;
     }
 
-    /// <summary>The row text naming the material item a fastener is made of ("Materials-stainless/Stainless steel, A2-70").</summary>
+    /// <summary>The row text naming the material item a fastener is made of ("Stainless:Stainless steel, A2-70").</summary>
     public const string MaterialKey = "material";
 
     /// <summary>A fastener's material when its row names none: property class 8.8 steel; a washer, plain carbon steel.</summary>
     public static string DefaultMaterial(FastenerKind kind) =>
-        kind == FastenerKind.Washer ? "Materials-steel/Steel (plain carbon)" : "Materials-steel/Steel, property class 8.8";
+        kind == FastenerKind.Washer ? "Steel:Steel (plain carbon)" : "Steel:Steel, property class 8.8";
 
     /// <summary>A fastener part's identity: from its row's item and data (not where it came from).</summary>
     public static Guid PartId(LibrarySnapshot s)

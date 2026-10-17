@@ -46,7 +46,7 @@ public sealed class CadDocument
     public int? RollbackIndex { get; set; }
     public Dictionary<string, int> NameCounters { get; set; } = new();
     /// <summary>
-    /// The part's material: a library item ("Materials-aluminum/Aluminum 6061") whose row the part keeps a copy of in
+    /// The part's material: a library item ("Aluminum:Aluminum 6061") whose row the part keeps a copy of in
     /// <see cref="Library"/>, or a material of the part's own (<see cref="Library.PartMaterial.CustomTable"/>). Null: none set,
     /// steel's density assumed.
     /// </summary>
@@ -84,7 +84,7 @@ public sealed class CadDocument
     [JsonPropertyName("material")] public string? LegacyMaterial { get; set; }
     [JsonPropertyName("density")] public double? LegacyDensity { get; set; }
     /// <summary>
-    /// The library rows the features use (thread sizes, clearance holes), by item ("ISO261-coarse/M8"), copied in so the
+    /// The library rows the features use (thread sizes, clearance holes), by item ("ISO261-coarse:M8"), copied in so the
     /// part rebuilds the same with or without the library (<see cref="Library.LibraryLink"/>); null when none.
     /// </summary>
     public SortedDictionary<string, Library.LibrarySnapshot>? Library { get; set; }
@@ -253,6 +253,7 @@ public sealed class CadDocument
         if (d.Format != "SpryCAD") throw new InvalidDataException("Not a SpryCAD document");
         if (d.FormatVersion <= LegacyIds.LastVersion) LegacyIds.Upgrade(d, json);
         // (a part from before material libraries: its color, material and density as they are now kept)
+        Core.Library.LibraryLink.Upgrade(d);
         Core.Library.PartMaterial.Upgrade(d);
         return d;
     }

@@ -121,6 +121,9 @@ public static class LibrarySync
             }
         }
         WriteIndex(index);
+        // (one library of each domain is used: a second is said, not mixed in)
+        foreach (var g in libs.GroupBy(l => l.Domain).Where(g => g.Count() > 1))
+            problems.Add($"{string.Join(", ", g.Skip(1).Select(l => Path.GetFileName(l.Path ?? l.Name)))} not used: {Path.GetFileName(g.First().Path ?? g.First().Name)} is the {LibraryDomains.Name(g.Key)} library in use.");
         return new Result(new LibrarySet(libs), problems);
     }
 

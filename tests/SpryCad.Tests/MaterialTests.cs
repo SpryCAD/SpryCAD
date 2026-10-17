@@ -13,7 +13,7 @@ static class MaterialTests
     {
         t.Test("Materials: built-in tables well formed (the fixed columns, a density each, looks 0-1, unique names); the old twelve keep their names and densities", () =>
         {
-            var keys = BuiltInStandards.Tables.Concat(BuiltInMaterials.Tables).Concat(FastenerFamilies.Tables).Select(x => x.Key).ToList();
+            var keys = BuiltInStandards.Tables.Concat(BuiltInMaterials.Tables).Select(x => x.Key).ToList();
             t.True(keys.Distinct().Count() == keys.Count, "table keys unique across the built-in libraries");
             var names = new HashSet<string>();
             foreach (var tb in BuiltInMaterials.Tables)
@@ -57,59 +57,54 @@ static class MaterialTests
             var dir = Path.Combine(Path.GetTempPath(), "fc-material-tests", Guid.NewGuid().ToString("N")[..8]);
             Directory.CreateDirectory(dir);
             var path = Path.Combine(dir, "materials.sprlib");
-            LibraryFile.Publish(path, BuiltInMaterials.LibraryId, BuiltInMaterials.Name, LibraryLayer.Standards, BuiltInMaterials.Tables, null, "test");
+            LibraryFile.Publish(path, BuiltInMaterials.LibraryId, BuiltInMaterials.Name, LibraryDomain.Materials, BuiltInMaterials.Tables, "test");
             var lib = LibraryFile.Read(path);
             t.Eq(J(lib.Tables), J(BuiltInMaterials.Tables.OrderBy(x => x.Key, StringComparer.Ordinal).ToList()));
             t.Eq(lib.RevisionId == Guid.Empty, false);
-            var oak = Materials.Of(lib.Tables.Single(x => x.Key == "Materials-wood"), lib.Tables.Single(x => x.Key == "Materials-wood").Row("Red oak")!)!;
+            var oak = Materials.Of(lib.Tables.Single(x => x.Key == "Wood"), lib.Tables.Single(x => x.Key == "Wood").Row("Red oak")!)!;
             t.True(oak.Poisson == null && oak.Modulus is > 1e10, "a value not known stays not known");
             var thread = new LibraryTable { Key = "T", Kind = TableKinds.Thread, Columns = { "major", "pitch" }, Rows = { new LibraryRow("M8", 8, double.NaN) } };
-            t.True(Throws(() => LibraryFile.Publish(Path.Combine(dir, "bad.sprlib"), Guid.NewGuid(), "Bad", LibraryLayer.Company, new[] { thread }, null, "test")), "a thread with no pitch refused");
+            t.True(Throws(() => LibraryFile.Publish(Path.Combine(dir, "bad.sprlib"), Guid.NewGuid(), "Bad", LibraryDomain.Standards, new[] { thread }, "test")), "a thread with no pitch refused");
             var noDensity = new LibraryTable { Key = "M", Kind = TableKinds.Material, Columns = Materials.Columns.ToList(), Rows = { new LibraryRow("X", Materials.Columns.Select(_ => double.NaN).ToArray()) } };
-            t.True(Throws(() => LibraryFile.Publish(Path.Combine(dir, "bad2.sprlib"), Guid.NewGuid(), "Bad", LibraryLayer.Company, new[] { noDensity }, null, "test")), "a material with no density refused");
+            t.True(Throws(() => LibraryFile.Publish(Path.Combine(dir, "bad2.sprlib"), Guid.NewGuid(), "Bad", LibraryDomain.Materials, new[] { noDensity }, "test")), "a material with no density refused");
         });
 
-        t.Test("Materials: a company library overrides a built-in material, adds its own and restricts what is offered; a snapshot reads as the company's", () =>
+        t.Test("Materials: a company materials library (its own aluminums only) is the one offered; a snapshot reads as the company's", () =>
         {
-            var builtIn = BuiltInMaterials.Tables.Single(x => x.Key == "Materials-aluminum");
+            var builtIn = BuiltInMaterials.Tables.Single(x => x.Key == "Aluminum");
             var mine = builtIn.Row("Aluminum 6061")!;
             var values = mine.Values.ToArray();
-            values[builtIn.Column("density")] = 2710;
+            values[builtIn.Column("density")] = 2.71; // (g/cm³, as the table gives it)
             var plate = (double[])values.Clone();
-            plate[builtIn.Column("yield")] = 240e6;
-            var company = new LoadedLibrary(Guid.NewGuid(), "Acme", LibraryLayer.Company, Guid.NewGuid(), null,
+            plate[builtIn.Column("yield")] = 240; // (MPa)
+            var company = new LoadedLibrary(Guid.NewGuid(), "Acme", LibraryDomain.Materials, Guid.NewGuid(), null,
                 new[]
                 {
                     new LibraryTable
                     {
-                        Key = "Materials-aluminum", Title = "Aluminum", Kind = TableKinds.Material, Columns = Materials.Columns.ToList(),
+                        Key = "Aluminum", Title = "Aluminum", Kind = TableKinds.Material, Columns = Materials.Columns.ToList(),
                         Rows =
                         {
                             new LibraryRow("Aluminum 6061", values) { Text = mine.Text },
                             new LibraryRow("Acme 6061-T651 plate", plate) { Text = new(StringComparer.Ordinal) { [Materials.TypeKey] = "Aluminum", ["partNumber"] = "AL-6061-PL" } },
                         },
                     },
-                },
-                new[]
-                {
-                    new LibraryRestriction { Table = "Materials-aluminum", Allow = new() { "Aluminum 6061", "Acme 6061-T651 plate" } },
-                    new LibraryRestriction { Table = "Materials-wood", Hidden = true },
                 });
             var set = new LibrarySet(new[] { company });
             var offered = set.Offered(TableKinds.Material).ToList();
-            t.Eq(string.Join(",", offered.Single(x => x.Key == "Materials-aluminum").Rows.Select(r => r.Key)), "Aluminum 6061,Acme 6061-T651 plate");
-            t.True(offered.All(x => x.Key != "Materials-wood"), "a hidden family not offered");
-            t.True(offered.Any(x => x.Key == "Materials-steel"), "the other families still offered");
-            var s = set.Snapshot("Materials-aluminum/Aluminum 6061")!;
+            t.Eq(string.Join(",", offered.Single(x => x.Key == "Aluminum").Rows.Select(r => r.Key)), "Aluminum 6061,Acme 6061-T651 plate");
+            t.True(offered.All(x => x.Key != "Wood" && x.Key != "Steel"), "only the company's families");
+            t.True(set.Table("ISO-holes") != null, "the standards still SpryCAD's defaults");
+            var s = set.Snapshot("Aluminum:Aluminum 6061")!;
             t.Eq(s.LibraryName, "Acme");
             t.Near(Materials.Of(s)!.Density, 2710, 1e-9);
-            t.True(set.Snapshot("Materials-aluminum/Aluminum 7075-T6") != null, "a restricted material still resolves (parts that use it)");
-            var p = Materials.Of(set.Snapshot("Materials-aluminum/Acme 6061-T651 plate")!)!;
+            t.True(set.Snapshot("Aluminum:Aluminum 7075-T6") == null, "a material the company left out is not offered (parts that use it keep their snapshot)");
+            var p = Materials.Of(set.Snapshot("Aluminum:Acme 6061-T651 plate")!)!;
             t.Eq(p.Type, MaterialType.Aluminum);
             t.Eq(p.Text("partNumber"), "AL-6061-PL");
             // the change described as Library Updates lists it (a value not known on both sides is no change)
             var update = new LibraryUpdate(s.Item, LibrarySet.BuiltIn.Snapshot(s.Item)!, s);
-            t.Eq(update.Describe(), "Aluminum 6061 (Materials-aluminum): density 2700 → 2710");
+            t.Eq(update.Describe(), "Aluminum 6061 (Aluminum): density 2.7 → 2.71");
         });
 
         t.Test("Materials: units (MMGS and IPS), shear from E and ν, an unknown type, CSV with values not known", () =>
@@ -120,19 +115,21 @@ static class MaterialTests
             t.Near(200e9 / Materials.Unit("modulus", UnitSystem.IPS).scale, 29.0, 0.01);
             t.Near(12e-6 / Materials.Unit("expansion", UnitSystem.IPS).scale, 6.667, 0.001);
             t.Eq(Materials.Unit("poisson", UnitSystem.IPS), (1.0, ""));
-            // a material table shown metric or inch-pound (the library editor and CSV files), as a size table in mm or inches
-            var steelTable = BuiltInMaterials.Tables.Single(x => x.Key == "Materials-steel");
-            t.Eq(steelTable.Scale("yield"), 1e6); t.Eq(steelTable.UnitLabel("density"), "g/cm³");
-            var inch = new LibraryTable { Kind = TableKinds.Material, Units = LibraryTable.Inch };
-            t.Eq(inch.UnitLabel("yield"), "ksi"); t.Near(inch.Scale("density"), 27679.9, 0.1); t.Eq(inch.UnitLabel("r"), "");
-            t.Eq(BuiltInStandards.Tables.Single(x => x.Key == "ASME-B18.6.3-csink").UnitLabel("diameter"), "in");
-            var steel = Materials.Of(LibrarySet.BuiltIn.Snapshot("Materials-steel/Steel (plain carbon)")!)!;
+            // a material table in metric or inch-pound units, its values as given there (as a size table in mm or inches)
+            var steelTable = BuiltInMaterials.Tables.Single(x => x.Key == "Steel");
+            t.Eq(steelTable.Label("yield"), "MPa"); t.Eq(steelTable.Label("density"), "g/cm³");
+            t.Eq(steelTable.Rows[0].Values[0], 7.85);
+            t.Eq(steelTable.Base(steelTable.Rows[0], "density"), 7850.0);
+            var inch = new LibraryTable { Kind = TableKinds.Material, Units = TableUnits.Inch };
+            t.Eq(inch.Label("yield"), "ksi"); t.Near(inch.Unit("density").ToBase(1, TableUnits.Inch), 27679.9, 0.1); t.Eq(inch.Label("r"), "");
+            t.Eq(BuiltInStandards.Tables.Single(x => x.Key == "ASME-holes").Label("head.diameter"), "in");
+            var steel = Materials.Of(LibrarySet.BuiltIn.Snapshot("Steel:Steel (plain carbon)")!)!;
             t.Near(steel.Shear!.Value, 200e9 / (2 * 1.29), 1);
             t.Eq(steel.Appearance!.Metallic, 1.0);
             t.Eq(Materials.TypeOf("Unobtainium"), MaterialType.Other);
-            var wood = BuiltInMaterials.Tables.Single(x => x.Key == "Materials-wood");
+            var wood = BuiltInMaterials.Tables.Single(x => x.Key == "Wood");
             var csv = LibraryCsv.Write(wood);
-            t.True(csv.Contains("Red oak,660,12500000000,,"), "a value not known written empty");
+            t.True(csv.Contains("Red oak,0.66,12.5,,"), "a value not known written empty");
             var (cols, rows) = LibraryCsv.Read(csv);
             t.True(cols.SequenceEqual(wood.Columns), "columns read back");
             t.True(double.IsNaN(rows.Single(r => r.Key == "Red oak").Values[wood.Column("poisson")]), "an empty cell read as not known");
@@ -143,7 +140,7 @@ static class MaterialTests
     /// <summary>The part's material and appearance (plan phase 2): set, kept, saved, upgraded from older parts, updated from a library.</summary>
     public static void RunPart(TestRunner t)
     {
-        const string Al = "Materials-aluminum/Aluminum 6061";
+        const string Al = "Aluminum:Aluminum 6061";
 
         t.Test("Part material: a library material copied in (name, density, look); a color of its own keeps the finish; cleared, its row goes", () =>
         {
@@ -157,15 +154,15 @@ static class MaterialTests
             t.Eq(doc.MaterialName, "Aluminum 6061");
             t.Near(doc.EffectiveDensity, 2700, 1e-9);
             t.Eq(doc.EffectiveAppearance.Metallic, 1.0);
-            t.True(doc.Color.SequenceEqual(new[] { 0.78, 0.79, 0.80 }), "the color shown is the material's");
+            t.True(doc.Color.Zip(new[] { 0.78, 0.79, 0.80 }).All(x => Math.Abs(x.First - x.Second) < 0.5 / 255), "the color shown is the material's (to 1/255: the workbook gives it as hex)");
             doc.Color = new[] { 0.1, 0.2, 0.6 };
             t.True(doc.Appearance != null && doc.Appearance.Metallic == 1 && doc.Appearance.Roughness == 0.4, "its own color, the material's finish kept");
-            PartMaterial.Set(doc, "Materials-copper/Brass", LibrarySet.BuiltIn);
+            PartMaterial.Set(doc, "Copper:Brass", LibrarySet.BuiltIn);
             t.True(doc.Color.SequenceEqual(new[] { 0.1, 0.2, 0.6 }), "its own appearance kept through a change of material");
-            t.True(doc.Library!.Keys.SequenceEqual(new[] { "Materials-copper/Brass" }), "the old material's row dropped");
+            t.True(doc.Library!.Keys.SequenceEqual(new[] { "Copper:Brass" }), "the old material's row dropped");
             PartMaterial.Set(doc, null);
             t.True(doc.MaterialItem == null && doc.Library == null, "cleared");
-            t.True(Throws(() => PartMaterial.Set(doc, "ISO273/M8", LibrarySet.BuiltIn)), "a size is not a material");
+            t.True(Throws(() => PartMaterial.Set(doc, "ISO-holes:Socket head cap screw:M8", LibrarySet.BuiltIn)), "a size is not a material");
         });
 
         t.Test("Part material: kept through a copy (undo) and a part file's objects, its row with it; the older readers' color, name and density written", () =>
@@ -212,7 +209,7 @@ static class MaterialTests
             objects[SpryCad.Core.Storage.PartObjects.Single(SpryCad.Core.Storage.ObjectKind.Material)] =
                 System.Text.Encoding.UTF8.GetBytes("""{"kind":4,"v":1,"data":{"color":[0.5,0.5,0.5],"material":"Copper","density":8940}}""");
             var e = SpryCad.Core.Storage.PartObjects.ToDocument(objects);
-            t.Eq(e.MaterialItem, "Materials-copper/Copper");
+            t.Eq(e.MaterialItem, "Copper:Copper");
             t.True(e.Color.SequenceEqual(new[] { 0.5, 0.5, 0.5 }), "its color kept");
         });
 
@@ -220,12 +217,11 @@ static class MaterialTests
         {
             var doc = new CadDocument();
             PartMaterial.Set(doc, Al, LibrarySet.BuiltIn);
-            var table = BuiltInMaterials.Tables.Single(x => x.Key == "Materials-aluminum");
+            var table = BuiltInMaterials.Tables.Single(x => x.Key == "Aluminum");
             var values = table.Row("Aluminum 6061")!.Values.ToArray();
-            values[table.Column("density")] = 2710;
-            var company = new LoadedLibrary(Guid.NewGuid(), "Acme", LibraryLayer.Company, Guid.NewGuid(), null,
-                new[] { new LibraryTable { Key = table.Key, Kind = TableKinds.Material, Columns = table.Columns, Rows = { new LibraryRow("Aluminum 6061", values) { Text = table.Row("Aluminum 6061")!.Text } } } },
-                Array.Empty<LibraryRestriction>());
+            values[table.Column("density")] = 2.71;
+            var company = new LoadedLibrary(Guid.NewGuid(), "Acme", LibraryDomain.Materials, Guid.NewGuid(), null,
+                new[] { new LibraryTable { Key = table.Key, Kind = TableKinds.Material, Columns = table.Columns, Rows = { new LibraryRow("Aluminum 6061", values) { Text = table.Row("Aluminum 6061")!.Text } } } });
             var set = new LibrarySet(new[] { company });
             t.True(!LibraryLink.Sync(doc, set), "nothing to add or drop");
             var updates = LibraryLink.Updates(doc, set);
@@ -234,23 +230,23 @@ static class MaterialTests
             LibraryLink.Accept(doc, updates);
             t.Near(doc.EffectiveDensity, 2710, 1e-9);
             PartMaterial.SetCustom(doc, "Aluminum 6061, custom density", 2650, doc.Library![Al]);
-            t.True(doc.Library.Keys.SequenceEqual(new[] { "Part/Aluminum 6061, custom density" }), "the custom row only");
+            t.True(doc.Library.Keys.SequenceEqual(new[] { "Part:Aluminum 6061, custom density" }), "the custom row only");
             t.True(!LibraryLink.Sync(doc, set), "Sync keeps it");
             t.Eq(LibraryLink.Updates(doc, set).Count, 0);
             t.True(doc.EffectiveAppearance.Metallic == 1, "the material's look kept");
-            t.True(Throws(() => LibraryFile.Publish(Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".sprlib"), Guid.NewGuid(), "Bad", LibraryLayer.Company,
-                new[] { new LibraryTable { Key = PartMaterial.CustomTable, Kind = TableKinds.Material, Columns = Materials.Columns.ToList() } }, null, "test")), "no library may key a table as parts' own");
+            t.True(Throws(() => LibraryFile.Publish(Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".sprlib"), Guid.NewGuid(), "Bad", LibraryDomain.Materials,
+                new[] { new LibraryTable { Key = PartMaterial.CustomTable, Kind = TableKinds.Material, Columns = Materials.Columns.ToList() } }, "test")), "no library may key a table as parts' own");
         });
 
         t.Test("Part material: a fastener weighs and looks as its grade (class 8.8 steel, a washer plain steel; a row naming its own)", () =>
         {
             var set = LibrarySet.BuiltIn;
-            var screw = Fasteners.Part(set.Snapshot("ISO4762/M8x30")!, set);
+            var screw = Fasteners.Part(set.Snapshot("ISO4762:M8x30")!, set);
             t.Eq(screw.MaterialName, "Steel, property class 8.8");
             t.True(screw.EffectiveAppearance.Color[0] < 0.3, "black oxide");
-            t.Eq(Fasteners.Part(set.Snapshot("ISO7089/M8")!, set).MaterialName, "Steel (plain carbon)");
-            var a2 = set.Snapshot("ISO4762/M8x30")!;
-            a2.Text![Fasteners.MaterialKey] = "Materials-stainless/Stainless steel, A2-70";
+            t.Eq(Fasteners.Part(set.Snapshot("ISO7089:M8")!, set).MaterialName, "Steel (plain carbon)");
+            var a2 = set.Snapshot("ISO4762:M8x30")!;
+            a2.Text![Fasteners.MaterialKey] = "Stainless:Stainless steel, A2-70";
             t.Eq(Fasteners.Part(a2, set).MaterialName, "Stainless steel, A2-70");
             t.True(screw.Library!.Count == 2 && !LibraryLink.Sync(screw, set), "its row and its material's");
         });
@@ -265,12 +261,12 @@ static class MaterialTests
             while (dir != null && !Directory.Exists(Path.Combine(dir, "samples"))) dir = Path.GetDirectoryName(dir);
             var doc = CadDocument.Load(Path.Combine(dir!, "samples", "bracket.sprt"));
             var r = new SpryCad.Core.Regen.Regenerator().Rebuild(doc);
-            PartMaterial.Set(doc, "Materials-copper/Brass", LibrarySet.BuiltIn);
+            PartMaterial.Set(doc, "Copper:Brass", LibrarySet.BuiltIn);
             doc.Appearance = doc.EffectiveAppearance with { Opacity = 0.5 };
             var bytes = SpryCad.Core.Assembly.MeshCache.Of(r, doc.EffectiveAppearance);
             var e = SpryCad.Core.Assembly.MeshCache.Read(bytes);
             t.Near(e.Appearance.Metallic, 1, 1e-6); t.Near(e.Appearance.Roughness, 0.3, 1e-6); t.Near(e.Appearance.Opacity, 0.5, 1e-6);
-            t.Near(e.Color[0], 0.78, 1e-6);
+            t.Near(e.Color[0], 0.78, 0.5 / 255); // (the workbook gives colors as hex: to 1/255)
             // what an older SpryCAD wrote: the same bytes but the finish
             var old = SpryCad.Core.Assembly.MeshCache.Read(bytes[..^16]);
             t.True(old.Appearance.Metallic == 0 && old.Appearance.Roughness == 0.5 && old.Appearance.Opacity == 1, "plastic");

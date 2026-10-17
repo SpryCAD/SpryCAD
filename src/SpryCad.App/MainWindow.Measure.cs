@@ -238,14 +238,19 @@ public partial class MainWindow
         else if (items.Count == 1)
         {
             Single(items[0]!, rows, L);
+            // a hole's or a thread's face: its callout, and its thread's data
+            var noted = NoteOf(items[0]!.Item, st);
+            var note = noted?.note;
+            if (noted is { } nd) NoteRows(nd.note, nd.doc, rows);
             // a circle, arc, cylinder or sphere: its radius drawn from the center to where it was picked
             if (RadiusLine(items[0]!) is { } rl)
             {
                 lines.Add((rl.center, rl.onIt, ViewportControl.MeasureStyle.Radius));
                 _measureLabelAt = (rl.center + rl.onIt) * 0.5;
                 var it = items[0]!;
-                labelText = "R " + L(it.Radius!.Value) + (it.Kind is "Circle" or "Cylinder" ? $"  (Ø {F(2 * it.Radius.Value * k)})" : "");
+                labelText = note?.Callout ?? "R " + L(it.Radius!.Value) + (it.Kind is "Circle" or "Cylinder" ? $"  (Ø {F(2 * it.Radius.Value * k)})" : "");
             }
+            else if (note != null) { _measureLabelAt = items[0]!.Item.Point; labelText = note.Callout; }
             else if (items[0] is { Kind: "Torus", Radius: { } R, TubeRadius: { } r })
             {
                 _measureLabelAt = items[0]!.Item.Point;
@@ -352,6 +357,72 @@ public partial class MainWindow
     }
 
     static string F(double v) => v.ToString("0.###", CultureInfo.InvariantCulture);
+
+    // an assembly's parts' holes and threads, as their rebuilds note them (worked out when a face of one is first measured)
+    readonly System.Runtime.CompilerServices.ConditionalWeakTable<Core.Assembly.PartDisplay, Dictionary<string, FeatureNote>> _partNotes = new();
+
+    /// <summary>
+    /// The hole or thread a face is of (a Thread feature's face, else the face its feature named), as the rebuild
+    /// noted it, with the part it is in (in an assembly, the component's part as configured); null for any other face.
+    /// </summary>
+    (FeatureNote note, Core.Model.CadDocument doc)? NoteOf(SelItem s, ModelState? st)
+    {
+        if (s.Kind != SelKind.Face || string.IsNullOrEmpty(s.Name)) return null;
+        Dictionary<string, FeatureNote> notes;
+        Core.Model.CadDocument doc;
+        if (Asm is { } asm)
+        {
+            if (s.BodyId == null || asm.Model.Find(s.BodyId) is not { Display: { } pd } || (pd.Doc ?? pd.Part) is not { } part) return null;
+            // (only a part with holes or threads is built for it)
+            if (!part.Features.Any(f => f is Core.Model.HoleFeature or Core.Model.ThreadFeature)) return null;
+            doc = part;
+            notes = _partNotes.GetValue(pd, _ => new Core.Regen.Regenerator().Rebuild(part).State.Notes);
+        }
+        else
+        {
+            if (st == null) return null;
+            notes = st.Notes; doc = Session.Doc;
+        }
+        var note = notes.Values.FirstOrDefault(n => n.Face == s.Name) ?? notes.GetValueOrDefault(s.Name.Split('.')[0]);
+        return note == null ? null : (note, doc);
+    }
+
+    /// <summary>A hole's or a thread's callout, then its thread's data in the thread table's units: its class, pitch, limits and tap drill.</summary>
+    void NoteRows(FeatureNote note, Core.Model.CadDocument doc, List<(string, string)> rows)
+    {
+        rows.Add(("Callout", note.Callout));
+        if (note.ThreadItem == null || Core.Library.LibraryLink.Resolve(doc, note.ThreadItem) is not { } t) return;
+        var unit = t.Units == Core.Library.TableUnits.Inch ? "in" : "mm";
+        static string G(double v) => v.ToString("0.####", CultureInfo.InvariantCulture);
+        // min - max where the row gives both, else the one it gives
+        string? Range(string min, string max) => (t.Value(min), t.Value(max)) switch
+        {
+            ({ } a, { } b) => $"{G(a)} – {G(b)} {unit}",
+            ({ } a, null) => $"min {G(a)} {unit}",
+            (null, { } b) => $"max {G(b)} {unit}",
+            _ => null,
+        };
+        void Row(string label, string? value) { if (value != null) rows.Add((label, value)); }
+        var keys = Core.Library.LibraryRow.SplitKeys(t.Row);
+        var ic = t.Text?.GetValueOrDefault("internal.class") ?? "";
+        Row("Thread", $"{keys[0]} ({t.Table})");
+        if (keys.Count > 1) Row("Class", note.External ? keys[1] + (ic.Length > 0 ? $" (with {ic})" : "") : ic.Length > 0 ? $"{ic} (with {keys[1]})" : keys[1]);
+        if (t.Value("pitch") is { } pitch) Row("Pitch", $"{G(pitch)} {unit}" + (t.Units == Core.Library.TableUnits.Inch && pitch > 0 ? $"  ({G(1 / pitch)} TPI)" : ""));
+        if (note.External)
+        {
+            Row("Major dia.", Range("external.major.min", "external.major.max"));
+            Row("Pitch dia.", Range("external.pitch.min", "external.pitch.max"));
+            Row("Minor dia.", Range("external.minor.min", "external.minor.max"));
+        }
+        else
+        {
+            Row("Minor dia.", Range("internal.minor.min", "internal.minor.max"));
+            Row("Pitch dia.", Range("internal.pitch.min", "internal.pitch.max"));
+            Row("Major dia.", Range("internal.major.min", "internal.major.max"));
+            if (t.Value("tap.diameter") is { } tap)
+                Row("Tap drill", (t.Text?.GetValueOrDefault("tap.size") is { Length: > 0 } size ? size + "  " : "") + $"{G(tap)} {unit}");
+        }
+    }
 
     void Single(MeasureItem it, List<(string, string)> rows, Func<double, string> L)
     {

@@ -81,10 +81,10 @@ public partial class MainWindow
                 var hold = p.End == FastenerEnd.Nut ? "a nut" : p.Tapped != null ? a.Model.NameAt(p.Tapped) : "a tapped part";
                 holeLbl.Text = $"{p.Size} hole in {a.Model.NameAt(p.Component)}: {Expr.Format(Math.Round(p.Clamped, 2))} mm clamped, held by {hold}; "
                     + $"the screw needs {Expr.Format(Math.Round(p.Needed, 2))} mm.";
-                var lcol = Fasteners.ScrewColumns.ToList().IndexOf("l");
+                var screwTable = p.ScrewTable != null ? LibraryLink.Current.Table(p.ScrewTable) : null;
                 foreach (var r in p.Screws)
                 {
-                    var tooShort = r.Values[lcol] < p.Needed - 1e-6;
+                    var tooShort = (screwTable?.Base(r, "l") ?? 0) < p.Needed - 1e-6;
                     screwBox.Items.Add(new ComboBoxItem { Content = $"{r.Key}{(r.Key == p.Screw?.Key ? "  (recommended)" : tooShort ? "  (too short)" : "")}" });
                 }
                 screwBox.SelectedIndex = st.Screw != null ? p.Screws.FindIndex(r => r.Key == st.Screw) : -1;

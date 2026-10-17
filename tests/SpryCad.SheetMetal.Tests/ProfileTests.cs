@@ -149,7 +149,7 @@ static class ProfileTests
             var mats = tables.Single(x => x.Key == ProfileTables.Materials);
             mats.Rows.RemoveAll(r => r.Keys[0] != "Steel CRS");
             var id = Guid.NewGuid();
-            LibraryFile.Publish(path, id, "Acme Shop", LibraryLayer.Company, Array.Empty<LibraryTable>(), null, "admin", profileTables: tables);
+            LibraryFile.Publish(path, id, "Acme Shop", LibraryDomain.Standards, Array.Empty<LibraryTable>(), "admin", profileTables: tables);
             var read = LibraryFile.Read(path);
             t.Eq(read.ProfileTables!.Count, tables.Count);
             t.Eq(ProfileCsv.Write(read.ProfileTables.Single(x => x.Key == ProfileTables.Gauges)), ProfileCsv.Write(tables.Single(x => x.Key == ProfileTables.Gauges)));
@@ -162,13 +162,13 @@ static class ProfileTests
             t.Throws<ProfileMissException>(() => Features.SheetMetalModule.RulesFor(set, "Stainless 304", "16 ga"), "Acme Shop");
 
             // a library without a profile above it does not hide it
-            var other = new LoadedLibrary(Guid.NewGuid(), "Fixtures", LibraryLayer.Company, Guid.NewGuid(), null, Array.Empty<LibraryTable>(), Array.Empty<LibraryRestriction>());
+            var other = new LoadedLibrary(Guid.NewGuid(), "Fixtures", LibraryDomain.Standards, Guid.NewGuid(), null, Array.Empty<LibraryTable>());
             t.Eq(new LibrarySet(new[] { read, other }).Profile.Name, "Acme Shop");
 
             // a table with problems is not published
             var bad = tables.Select(x => x.Clone()).ToList();
             bad.Single(x => x.Key == ProfileTables.Gauges).Rows[0].Cells[0] = "max(";
-            t.Throws<ArgumentException>(() => LibraryFile.Publish(path, id, "Acme Shop", LibraryLayer.Company, Array.Empty<LibraryTable>(), null, "admin", profileTables: bad), "thickness");
+            t.Throws<ArgumentException>(() => LibraryFile.Publish(path, id, "Acme Shop", LibraryDomain.Standards, Array.Empty<LibraryTable>(), "admin", profileTables: bad), "thickness");
             try { Directory.Delete(dir, true); } catch { }
         });
     }

@@ -391,7 +391,7 @@ public sealed class FeatureTree : UserControl
         Color? swatchOf = Swatches != null && Swatches.TryGetValue(id, out var sw) ? sw : swatchColor;
         var swatchKey = swatchOf?.ToString() ?? "";
         var sig = string.Join("|", text, icon, indent, isHeader, suppressed, hasChildren, hasChildren && _expanded.Contains(id), sketchShown, condition,
-            swatchKey, Flyout, status?.Ok, status?.Error, status == null ? null : string.Join("\n", status.Warnings),
+            swatchKey, Flyout, status?.Ok, status?.Error, status == null ? null : string.Join("\n", status.Warnings), status?.Callout,
             status is { Milliseconds: > 200 } ? status.Milliseconds.ToString("0") : "");
         if (_rowCache.TryGetValue(id, out var kept) && kept.sig == sig && !_rowById.ContainsKey(id))
         {
@@ -421,6 +421,8 @@ public sealed class FeatureTree : UserControl
         if (suppressed) tb.Foreground = Palette.TextDisabled;
         if (status is { Ok: false }) { tb.Foreground = Palette.Danger; ToolTip.SetTip(tb, status.Error); }
         else if (status is { Warnings.Count: > 0 }) { ToolTip.SetTip(tb, string.Join("\n", status.Warnings)); }
+        // (a hole or a thread: its callout)
+        else if (status?.Callout is { } callout) ToolTip.SetTip(tb, callout);
         sp.Children.Add(tb);
         // a feature with a Suppress When condition, or suppressed with another: the reason as a tip on a small marker
         if (condition != null)
@@ -437,6 +439,7 @@ public sealed class FeatureTree : UserControl
         var row = new Border { Classes = { "treerow" }, Child = sp, Tag = id };
         if (status is { Ok: false }) ToolTip.SetTip(row, status.Error);
         else if (status is { Warnings.Count: > 0 }) ToolTip.SetTip(row, string.Join("\n", status.Warnings));
+        else if (status?.Callout is { } rowCallout) ToolTip.SetTip(row, rowCallout);
         row.PointerPressed += (_, e) =>
         {
             var pt = e.GetCurrentPoint(row);

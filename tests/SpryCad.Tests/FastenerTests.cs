@@ -40,8 +40,7 @@ static class FastenerTests
         var s2 = doc.AddFeature(new SketchFeature { Plane = new PlaneRef { Face = top }, Sketch = hs });
         var hole = doc.AddFeature(drill is { } dd
             ? new HoleFeature { SketchId = s2.Id, Diameter = S(dd), ThroughAll = true }
-            : new HoleFeature { SketchId = s2.Id, Standard = "ISO273", Size = "M8", ThroughAll = true });
-        HoleSizes.Apply(hole, i => LibraryLink.Resolve(doc, i));
+            : new HoleFeature { SketchId = s2.Id, Standard = "ISO-holes", Fastener = "Socket head cap screw", Size = "M8", Diameter = "9mm", ThroughAll = true });
         LibraryLink.Sync(doc);
         doc.Save(path);
         return (doc, hole);
@@ -52,11 +51,19 @@ static class FastenerTests
         m.DisplayOf(c)!.Mesh.Faces.Where(f => f.Name.StartsWith(h.Id + ".", StringComparison.Ordinal) && f.Surface.Kind == SurfaceKind.Cylinder)
             .Select(f => f.Name).Distinct().ToList();
 
+    /// <summary>A company standards library: SpryCAD's defaults with one table cut to some sizes (by the rows' size).</summary>
+    static LoadedLibrary Only(string table, List<string> sizes) => new(Guid.NewGuid(), "Acme", LibraryDomain.Standards, Guid.NewGuid(), null,
+        LibraryFile.Defaults(LibraryDomain.Standards).Select(x => x.Key != table ? x : new LibraryTable
+        {
+            Key = x.Key, Title = x.Title, Kind = x.Kind, Standard = x.Standard, Units = x.Units, Columns = x.Columns,
+            Rows = x.Rows.Where(r => sizes.Contains(r.Text?.GetValueOrDefault(Schemas.SizeColumn) ?? r.Key)).ToList(),
+        }).ToList());
+
     public static void Run(TestRunner t)
     {
         t.Test("Fasteners: family tables well formed (a value per column, each row its size), not marked verified", () =>
         {
-            foreach (var tb in FastenerFamilies.Tables)
+            foreach (var tb in BuiltInStandards.Tables.Where(x => x.Kind is TableKinds.Screw or TableKinds.Nut or TableKinds.Washer))
             {
                 t.True(!tb.Verified, $"{tb.Key}: not verified");
                 t.True(Fasteners.KindOf(tb.Kind) != null, $"{tb.Key}: a fastener kind");
@@ -64,47 +71,45 @@ static class FastenerTests
                 t.True(tb.Rows.Select(r => r.Key).Distinct().Count() == tb.Rows.Count, $"{tb.Key}: unique designations");
             }
             var set = LibrarySet.BuiltIn;
-            var m8 = set.Snapshot("ISO4762/M8x30")!;
-            t.Eq(m8.LibraryName, FastenerFamilies.Name);
+            var m8 = set.Snapshot("ISO4762:M8x30")!;
+            t.Eq(m8.LibraryName, BuiltInStandards.Name);
             t.Near(m8.Value("d")!.Value, 8, 1e-12); t.Near(m8.Value("l")!.Value, 30, 1e-12); t.Near(m8.Value("b")!.Value, 28, 1e-12);
             t.Eq(Fasteners.SizeOf(m8), "M8");
             t.Eq(Fasteners.Designation(m8), "ISO 4762 M8x30");
-            var inch = set.Snapshot("ASME-B18.3-SHCS/1/4-20 x 1")!;
-            t.Near(inch.Value("l")!.Value, 25.4, 1e-12); t.Near(inch.Value("p")!.Value, 1.27, 1e-12);
+            var inch = set.Snapshot("ASME-B18.3-SHCS:1/4-20 x 1")!;
+            t.Near(inch.Value("l")!.Value, 1, 1e-12); t.Near(inch.Base("l")!.Value, 25.4, 1e-12); t.Near(inch.Base("p")!.Value, 1.27, 1e-12); // (in inches, read in mm)
             t.Eq(Fasteners.SizeOf(inch), "1/4");
-            // every clearance hole size has screws (metric: nuts and washers too)
-            foreach (var (clearance, tables) in new[] { ("ISO273", Fasteners.TablesFor("ISO273")!.Value), ("ASME-B18.2.8", Fasteners.TablesFor("ASME-B18.2.8")!.Value) })
-                foreach (var size in set.Table(clearance)!.Rows.Select(r => r.Key).Where(k => Fasteners.OfferedSizes(set, tables.screws).Contains(k)))
+            // the families a fastener holes row names exist, with screws of its size where the family has the size (metric: nuts too)
+            foreach (var holes in set.Offered(TableKinds.FastenerHoles))
+                foreach (var r in holes.Rows.Where(r => r.Text?.GetValueOrDefault("screws") != null))
                 {
-                    t.True(Fasteners.Offered(set, tables.screws, size).Count > 0, $"{size} screws");
-                    if (tables.nuts != null) t.True(Fasteners.Offered(set, tables.nuts, size).Count == 1, $"{size} nut");
+                    var screws = r.Text!["screws"]; var nuts = r.Text.GetValueOrDefault("nuts"); var size = r.Keys[1];
+                    t.True(set.Table(screws) != null && (nuts == null || set.Table(nuts) != null), $"{holes.Key} {r.Key}: its families");
+                    if (!Fasteners.OfferedSizes(set, screws).Contains(size)) continue;
+                    t.True(Fasteners.Offered(set, screws, size).Count > 0, $"{size} screws");
+                    if (nuts != null) t.True(Fasteners.Offered(set, nuts, size).Count == 1, $"{size} nut");
                 }
             var lengths = Fasteners.Offered(set, "ISO4762", "M8").Select(r => r.Values[7]).ToList();
             t.True(lengths.SequenceEqual(lengths.OrderBy(x => x)) && lengths[0] == 12 && lengths[^1] == 80, string.Join(",", lengths));
         });
 
-        t.Test("Fasteners: a company restriction to M3-M12 hides the other sizes from the picker, not from parts", () =>
+        t.Test("Fasteners: a company library with the M3-M12 screws only offers those sizes; SpryCAD's defaults offer them all", () =>
         {
             var sizes = new List<string> { "M3", "M4", "M5", "M6", "M8", "M10", "M12" };
-            var company = new LoadedLibrary(Guid.NewGuid(), "Acme", LibraryLayer.Company, Guid.NewGuid(), null, Array.Empty<LibraryTable>(),
-                new[] { new LibraryRestriction { Table = "ISO4762", Allow = sizes }, new LibraryRestriction { Table = "ISO4032", Allow = sizes, Deny = new() { "M5" } } });
-            var set = new LibrarySet(new[] { company });
+            var set = new LibrarySet(new[] { Only("ISO4762", sizes) });
             t.Eq(string.Join(",", Fasteners.OfferedSizes(set, "ISO4762")), string.Join(",", sizes));
             t.Eq(Fasteners.Offered(set, "ISO4762", "M16").Count, 0);
             t.Eq(Fasteners.Offered(set, "ISO4762", "M2").Count, 0);
             t.True(Fasteners.Offered(set, "ISO4762", "M8").Any(r => r.Key == "M8x30"), "M8x30 offered");
-            t.True(!set.Allowed("ISO4762", "M16x50") && set.Allowed("ISO4762", "M8x30"), "by the row's size");
-            t.True(!set.Allowed("ISO4032", "M5") && set.Allowed("ISO4032", "M6"), "a size denied");
-            t.True(set.Snapshot("ISO4762/M16x50") != null, "parts still resolve restricted rows");
-            // the built-in set offers them all
-            t.True(Fasteners.OfferedSizes(LibrarySet.BuiltIn, "ISO4762").Contains("M16"), "M16 without the restriction");
+            t.True(set.Snapshot("ISO4762:M16x50") == null, "the sizes left out not offered (parts that use one keep its snapshot)");
+            t.True(Fasteners.OfferedSizes(LibrarySet.BuiltIn, "ISO4762").Contains("M16"), "M16 in SpryCAD's defaults");
         });
 
         t.Test("Fasteners: generated bodies the right size, cached by family, values and kernel version", () =>
         {
             Fasteners.ClearCache();
             var set = LibrarySet.BuiltIn;
-            var m8 = set.Snapshot("ISO4762/M8x30")!;
+            var m8 = set.Snapshot("ISO4762:M8x30")!;
             var built = Fasteners.BodiesBuilt;
             var screw = Fasteners.Body(m8);
             t.True(ReferenceEquals(Fasteners.Body(m8), screw), "the same body again");
@@ -116,25 +121,24 @@ static class FastenerTests
             t.True(vol < shank + head && vol > 0.9 * shank + 0.8 * head, $"volume {vol}");
             var names = screw.FaceNames().ToList();
             t.True(names.Contains(Fasteners.ScrewShank) && names.Contains(Fasteners.ScrewSeat), string.Join(",", names));
-            var nut = Fasteners.Body(set.Snapshot("ISO4032/M8")!);
+            var nut = Fasteners.Body(set.Snapshot("ISO4032:M8")!);
             t.Near(nut.Bounds.Max.Z, 6.8, 0.01); t.Near(nut.Bounds.Min.Z, 0, 0.01);
             t.True(nut.FaceNames().Contains(Fasteners.NutBore) && nut.FaceNames().Contains(Fasteners.NutBearing), string.Join(",", nut.FaceNames()));
-            var washer = Fasteners.Body(set.Snapshot("ISO7089/M8")!);
+            var washer = Fasteners.Body(set.Snapshot("ISO7089:M8")!);
             t.Near(washer.Volume(), Math.PI * (64 - 8.4 * 8.4 / 4) * 1.6, 0.03 * washer.Volume());
             // the same values from another library: the same body; other values: another
-            var copy = new LoadedLibrary(Guid.NewGuid(), "Acme", LibraryLayer.Company, Guid.NewGuid(), null,
+            var copy = new LoadedLibrary(Guid.NewGuid(), "Acme", LibraryDomain.Standards, Guid.NewGuid(), null,
                 new[] { new LibraryTable { Key = "ACME-SHCS", Kind = TableKinds.Screw, Standard = "Acme 100", Columns = Fasteners.ScrewColumns.ToList(),
-                    Rows = { new LibraryRow("A8-30", m8.Values.ToArray()), new LibraryRow("A8-31", m8.Values.Take(7).Append(31).ToArray()) } } },
-                Array.Empty<LibraryRestriction>());
+                    Rows = { new LibraryRow("A8-30", m8.Values.ToArray()), new LibraryRow("A8-31", m8.Values.Take(7).Append(31).ToArray()) } } });
             var acme = new LibrarySet(new[] { copy });
-            t.Eq(Fasteners.BodyKey(acme.Snapshot("ACME-SHCS/A8-30")!), Fasteners.BodyKey(m8));
-            t.True(ReferenceEquals(Fasteners.Body(acme.Snapshot("ACME-SHCS/A8-30")!), screw), "shared");
-            t.True(Fasteners.BodyKey(acme.Snapshot("ACME-SHCS/A8-31")!) != Fasteners.BodyKey(m8), "another length, another body");
+            t.Eq(Fasteners.BodyKey(acme.Snapshot("ACME-SHCS:A8-30")!), Fasteners.BodyKey(m8));
+            t.True(ReferenceEquals(Fasteners.Body(acme.Snapshot("ACME-SHCS:A8-30")!), screw), "shared");
+            t.True(Fasteners.BodyKey(acme.Snapshot("ACME-SHCS:A8-31")!) != Fasteners.BodyKey(m8), "another length, another body");
         });
 
         t.Test("Fasteners: a fastener part rebuilds from its snapshot, saved and read back", () =>
         {
-            var m8 = LibrarySet.BuiltIn.Snapshot("ISO4762/M8x30")!;
+            var m8 = LibrarySet.BuiltIn.Snapshot("ISO4762:M8x30")!;
             var part = Fasteners.Part(m8);
             t.Eq(part.Id, Fasteners.Part(m8).Id);
             t.True(!LibraryLink.Sync(part), "its snapshot is the one its feature uses");
@@ -145,7 +149,7 @@ static class FastenerTests
             part.Save(path);
             var loaded = CadDocument.Load(path);
             t.Eq(Fasteners.Of(loaded)!.Designation, "ISO 4762 M8x30");
-            t.Eq(string.Join(",", loaded.Library!.Keys), "ISO4762/M8x30,Materials-steel/Steel, property class 8.8"); // (its row and its grade's)
+            t.Eq(string.Join(",", loaded.Library!.Keys), "ISO4762:M8x30,Steel:Steel, property class 8.8"); // (its row and its grade's)
         });
 
         t.Test("Insert Fastener: a bolt through two plates, length rounded up to a standard one, nut and washer mated; BOM by designation", () =>
@@ -189,7 +193,21 @@ static class FastenerTests
                 t.True(bom.Single(r => r.Name.StartsWith("ISO 4762")).File == null, "no file name");
                 // the embedded screw keeps its row
                 var screwPart = m.PartDocument(ins.Screw)!;
-                t.Eq(screwPart.Library!["ISO4762/M8x30"].LibraryId, FastenerFamilies.LibraryId);
+                t.Eq(screwPart.Library!["ISO4762:M8x30"].LibraryId, BuiltInStandards.LibraryId);
+                t.True(bom.All(r => r.PartNumber == null), "SpryCAD's rows give no part numbers");
+                // a company's screws with its part numbers: listed beside the designation
+                var acme = LibraryFile.Defaults(LibraryDomain.Standards).ToList();
+                foreach (var r in acme.Single(x => x.Key == "ISO4762").Rows) (r.Text ??= new(StringComparer.Ordinal))[Schemas.PartNumberColumn] = "ACME-" + r.Key;
+                LibraryLink.Current = new LibrarySet(new[] { new LoadedLibrary(Guid.NewGuid(), "Acme", LibraryDomain.Standards, Guid.NewGuid(), null, acme) });
+                var m3 = AssemblyModel.New();
+                m3.Insert(Path.Combine(dir, "bottom.sprt"), Transform.Identity);
+                var top3 = m3.Insert(Path.Combine(dir, "top.sprt"), Transform.Translation(new Vec3(0, 0, 5)));
+                top3.Fixed = true;
+                m3.InsertFastener(m3.PlanFastener(top3.Id, HoleWalls(m3, top3, topHole).Single()));
+                var bom3 = Bom.Build(m3, BomKind.PartsOnly);
+                t.Eq(bom3.Single(r => r.Name == "ISO 4762 M8x30").PartNumber, "ACME-M8x30");
+                t.True(bom3.Single(r => r.Name == "ISO 4032 M8").PartNumber == null, "a nut without one: none");
+                LibraryLink.Current = LibrarySet.BuiltIn;
 
                 // into a tapped plate instead: clamped is the top plate, plus 1.5 d of thread
                 var (tapDoc, _) = Plate(Path.Combine(dir, "tapped.sprt"), 15, new[] { new Vec2(20, 20) }, drill: 6.8);
@@ -206,11 +224,9 @@ static class FastenerTests
                 t.True(ins2.Nut == null && ins2.Washers.Count == 0, "no nut");
                 t.Eq(ins2.Mates.Count, 2);
 
-                // restricted to M3-M6: the M8 hole has no screw to offer
-                var company = new LoadedLibrary(Guid.NewGuid(), "Acme", LibraryLayer.Company, Guid.NewGuid(), null, Array.Empty<LibraryTable>(),
-                    new[] { new LibraryRestriction { Table = "ISO4762", Allow = new() { "M3", "M4", "M5", "M6" } } });
+                // a company library with the M3-M6 screws only: the M8 hole has no screw to offer
                 bool refused = false;
-                try { m2.PlanFastener(top2.Id, HoleWalls(m2, top2, topHole).Single(), new FastenerOptions { Set = new LibrarySet(new[] { company }) }); }
+                try { m2.PlanFastener(top2.Id, HoleWalls(m2, top2, topHole).Single(), new FastenerOptions { Set = new LibrarySet(new[] { Only("ISO4762", new() { "M3", "M4", "M5", "M6" }) }) }); }
                 catch (InvalidOperationException) { refused = true; }
                 t.True(refused, "no M8 screws offered");
             }
@@ -254,7 +270,7 @@ static class FastenerTests
                 var path = Path.Combine(dir, "frame.sasm");
                 m.Save(path);
                 using var db = PartDatabase.Open(path);
-                var oid = PartObjects.IdOf(ObjectKind.LibrarySnapshot, "ISO4762/M8x30");
+                var oid = PartObjects.IdOf(ObjectKind.LibrarySnapshot, "ISO4762:M8x30");
                 var rows = db.Query("SELECT Hash FROM RevisionObjects WHERE ObjectId = $o", r => Convert.ToHexString((byte[])r[0]), ("$o", oid.ToArray()));
                 t.Eq(rows.Count, 1);
                 t.Eq(db.Query("SELECT COUNT(*) FROM Blobs WHERE Hash = $h", r => r.GetInt64(0), ("$h", Convert.FromHexString(rows[0])))[0], 1L);

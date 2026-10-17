@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The standards library's data: its tables and their schemas, and reading and writing them as workbooks
+       (docs/library-v2.md). Depends on nothing else of SpryCAD, so the build-time generator of the built-in
+       library (tools/SpryCad.LibraryGen) can use it before SpryCad.Core is compiled. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="ClosedXML" Version="0.104.2" />
+  </ItemGroup>
+
+</Project>

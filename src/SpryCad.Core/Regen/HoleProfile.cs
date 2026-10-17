@@ -62,7 +62,7 @@ public static class HoleProfile
     {
         Quantity? Len(string text) { try { return Quantity.Mm(Expr.Length(text, equations, mmPer)); } catch (Expr.ExprException) { return null; } }
         Quantity? Ang(string text) { try { return Quantity.Deg(Expr.Angle(text, equations)); } catch (Expr.ExprException) { return null; } }
-        return name => name switch
+        return name => h.TypeValues != null && h.TypeValues.TryGetValue(name, out var tv) ? (IsAngle(name) ? Quantity.Deg(tv) : Quantity.Mm(tv)) : name switch
         {
             "D" => Len(h.Diameter),
             "Depth" => Quantity.Mm(depthMm),
@@ -72,6 +72,40 @@ public static class HoleProfile
             "CsAngle" => Ang(h.CsAngle),
             _ => equations(name),
         };
+    }
+
+    /// <summary>A profile as a library hole type holds it (<see cref="Library.LibraryTable.Profile"/>: its JSON).</summary>
+    public static string ToJson(Sketch profile) => System.Text.Json.JsonSerializer.Serialize(profile, Serialization.Compact);
+
+    /// <summary>A library hole type's profile read (null for none).</summary>
+    public static Sketch? FromJson(string? json) => json == null ? null : System.Text.Json.JsonSerializer.Deserialize<Sketch>(json, Serialization.Options);
+
+    /// <summary>A library hole type's column holding an angle (degrees): named with "angle", as library tables have it.</summary>
+    public static bool IsAngle(string column) => column.Contains("angle", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// A hole's profile as a library hole type (<paramref name="key"/>): each name its dimensions use but Depth (from the
+    /// end condition) a column, in the order first used, and a first row (<paramref name="row"/>) of their values now;
+    /// null with what is wrong when a name has no value.
+    /// </summary>
+    public static (Library.LibraryTable? table, string? problem) ToLibraryType(Sketch profile, string key, string row, Func<string, Quantity?> lookup)
+    {
+        var columns = new List<string>();
+        foreach (var c in profile.Constraints.Where(c => c.IsDimension && !c.Driven && !string.IsNullOrWhiteSpace(c.Expr)))
+            foreach (var id in Expr.Identifiers(c.Expr!))
+                if (id != "Depth" && !columns.Contains(id)) columns.Add(id);
+        if (columns.Count == 0) return (null, "The profile's dimensions use no names (D, CbD...): every size would be the same.");
+        var values = new List<double>();
+        foreach (var name in columns)
+        {
+            if (lookup(name) is not { } q) return (null, $"{name} has no value here: give it one (an equation) first.");
+            values.Add(q.Value);
+        }
+        return (new Library.LibraryTable
+        {
+            Key = key, Title = key, Kind = Library.TableKinds.HoleType, Columns = columns, Profile = ToJson(profile),
+            Rows = { new Library.LibraryRow { Key = row, Values = values } },
+        }, null);
     }
 
     /// <summary>

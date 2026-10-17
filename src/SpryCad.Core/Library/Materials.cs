@@ -41,8 +41,6 @@ public static class Materials
         "expansion", "conductivity", "specificHeat",
     }.Concat(AppearanceColumns).ToArray();
 
-    const double Psi = 6894.757293168, LbPerIn3 = 27679.9047102, BtuPerHFtF = 1.730734666, BtuPerLbF = 4186.8;
-
     /// <summary>
     /// How a column is shown in <paramref name="units"/>: the stored (SI) amount one shown unit is, and the unit's
     /// label ("" for a plain number). A shown value is the stored one divided by <c>scale</c>, as for
@@ -50,18 +48,9 @@ public static class Materials
     /// </summary>
     public static (double scale, string label) Unit(string column, UnitSystem units)
     {
-        bool ips = units == UnitSystem.IPS;
-        return column switch
-        {
-            "density" => ips ? (LbPerIn3, "lb/in³") : (1000, "g/cm³"),
-            "modulus" or "shear" => ips ? (1e6 * Psi, "Msi") : (1e9, "GPa"),
-            "yield" or "tensile" => ips ? (1e3 * Psi, "ksi") : (1e6, "MPa"),
-            "elongation" => (0.01, "%"),
-            "expansion" => ips ? (1.8e-6, "µin/(in·°F)") : (1e-6, "µm/(m·K)"),
-            "conductivity" => ips ? (BtuPerHFtF, "BTU/(h·ft·°F)") : (1, "W/(m·K)"),
-            "specificHeat" => ips ? (BtuPerLbF, "BTU/(lb·°F)") : (1, "J/(kg·K)"),
-            _ => (1, ""),
-        };
+        var u = units == UnitSystem.IPS ? TableUnits.Inch : TableUnits.Metric;
+        var q = Schemas.UnitOf(TableKinds.Material, column);
+        return (q.ToBase(1, u), q.Label(u));
     }
 
     /// <summary>The type a "type" text names (<see cref="MaterialType.Other"/> when none, or one from a newer SpryCAD).</summary>
@@ -83,11 +72,11 @@ public static class Materials
 
     /// <summary>A material row read (null if the table is not a material table).</summary>
     public static MaterialInfo? Of(LibraryTable t, LibraryRow r) =>
-        t.Kind == TableKinds.Material ? new MaterialInfo(r.Key, t.Columns, r.Values, r.Text) : null;
+        t.Kind == TableKinds.Material ? new MaterialInfo(r.Key, t.Units, t.Columns, r.Values, r.Text) : null;
 
     /// <summary>A part's snapshot of a material row read (null if it is not one: no density column).</summary>
     public static MaterialInfo? Of(LibrarySnapshot s) =>
-        s.Columns.Contains("density") ? new MaterialInfo(s.Row, s.Columns, s.Values, s.Text) : null;
+        s.Kind == TableKinds.Material ? new MaterialInfo(s.Row, s.Units, s.Columns, s.Values, s.Text) : null;
 
     /// <summary>An appearance row (or a material row's appearance columns) as an <see cref="Appearance"/>; null when it has no color.</summary>
     public static Appearance? AppearanceOf(string name, IReadOnlyList<string> columns, IReadOnlyList<double> values)
@@ -101,16 +90,19 @@ public static class Materials
     static int IndexOf(this IReadOnlyList<string> list, string s) { for (int i = 0; i < list.Count; i++) if (list[i] == s) return i; return -1; }
 }
 
-/// <summary>A material row (or a part's snapshot of one) by property: SI values, null where the row does not give one.</summary>
-public sealed class MaterialInfo(string name, IReadOnlyList<string> columns, IReadOnlyList<double> values, IReadOnlyDictionary<string, string>? text)
+/// <summary>
+/// A material row (or a part's snapshot of one) by property: SI values (the row's, in its table's units, converted),
+/// null where the row does not give one.
+/// </summary>
+public sealed class MaterialInfo(string name, TableUnits units, IReadOnlyList<string> columns, IReadOnlyList<double> values, IReadOnlyDictionary<string, string>? text)
 {
     public string Name { get; } = name;
 
-    /// <summary>The column's value (null: no such column, or not known).</summary>
+    /// <summary>The column's value in SI (null: no such column, or not known).</summary>
     public double? Value(string column)
     {
         for (int i = 0; i < columns.Count && i < values.Count; i++)
-            if (columns[i] == column) return double.IsFinite(values[i]) ? values[i] : null;
+            if (columns[i] == column) return double.IsFinite(values[i]) ? Schemas.UnitOf(TableKinds.Material, column).ToBase(values[i], units) : null;
         return null;
     }
 

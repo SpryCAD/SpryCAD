@@ -76,8 +76,13 @@ public sealed partial class AssemblyModel
         var doc = pd.Part ?? pd.Doc ?? throw new InvalidOperationException($"{occ.Component.Name} is shown from its cache; resolve it to fasten its holes.");
         var hole = doc.Features.OfType<HoleFeature>().FirstOrDefault(h => holeFace.StartsWith(h.Id + ".", StringComparison.Ordinal))
             ?? throw new InvalidOperationException("Select the wall of a hole made with the Hole Wizard.");
-        if (string.IsNullOrEmpty(hole.Standard) || string.IsNullOrEmpty(hole.Size) || Fasteners.TablesFor(hole.Standard) is not { } tables)
-            throw new InvalidOperationException($"{(string.IsNullOrEmpty(hole.Name) ? "The hole" : hole.Name)} was not sized from a clearance hole table, so its screw is not known.");
+        // the families that go in the hole: its fastener holes row's
+        if (HoleSizes.ItemOf(hole) is not { } item || LibraryLink.Resolve(doc, item) is not { } row)
+            throw new InvalidOperationException($"{(string.IsNullOrEmpty(hole.Name) ? "The hole" : hole.Name)} was not sized from a fastener holes table, so its screw is not known.");
+        string? Family(string col) => row.Text?.GetValueOrDefault(col) is { Length: > 0 } k ? k : null;
+        if (Family("screws") is not { } screwKey)
+            throw new InvalidOperationException($"No screws go in {hole.Fastener} holes in {hole.Standard}: the library names none for them.");
+        var tables = (screws: screwKey, nuts: Family("nuts"), washers: Family("washers"));
         if (FaceGeom(componentId, holeFace) is not { Kind: MateGeomKind.Axis } axis) throw new InvalidOperationException("Select the round wall of the hole.");
         var size = hole.Size;
         var screws = Fasteners.Offered(set, tables.screws, size);
@@ -85,7 +90,7 @@ public sealed partial class AssemblyModel
         var nutRow = tables.nuts != null ? Fasteners.Offered(set, tables.nuts, size).FirstOrDefault() : null;
         var washerRow = tables.washers != null ? Fasteners.Offered(set, tables.washers, size).FirstOrDefault() : null;
         var screwTable = set.Table(tables.screws)!;
-        double Col(LibraryRow r, LibraryTable t, string c) => t.Column(c) is var i and >= 0 ? r.Values[i] : 0;
+        double Col(LibraryRow r, LibraryTable t, string c) => t.Base(r, c) ?? 0;
         double d = Col(screws[0], screwTable, "d"), dk = Col(screws[0], screwTable, "dk"), pitch = Col(screws[0], screwTable, "p");
 
         // the hole's axis in the world, from the chosen end inward
@@ -150,9 +155,8 @@ public sealed partial class AssemblyModel
             else if (s.threadDepth < options.Engagement * d - 1e-6)
                 notes.Add($"{Find(s.tapped)?.Component.Name} has only {Expr.Format(Math.Round(s.threadDepth, 2))} mm of thread for {Expr.Format(Math.Round(options.Engagement * d, 2))} mm of engagement.");
         }
-        var lCol = screwTable.Column("l");
-        var screw = screws.FirstOrDefault(r => r.Values[lCol] >= needed - 1e-6);
-        if (screw == null) notes.Add($"No {size} screw offered is long enough: {Expr.Format(Math.Round(needed, 2))} mm needed, {Expr.Format(screws[^1].Values[lCol])} mm the longest.");
+        var screw = screws.FirstOrDefault(r => (screwTable.Base(r, "l") ?? 0) >= needed - 1e-6);
+        if (screw == null) notes.Add($"No {size} screw offered is long enough: {Expr.Format(Math.Round(needed, 2))} mm needed, {Expr.Format(Math.Round(screwTable.Base(screws[^1], "l") ?? 0, 2))} mm the longest.");
         var plan = new FastenerPlan
         {
             Component = componentId, HoleFace = holeFace, Hole = hole, Size = size,
@@ -183,7 +187,7 @@ public sealed partial class AssemblyModel
         var washer = washerRow != null ? Snap(plan.WasherTable!, washerRow.Key) : null;
         var nutRow = plan.End == FastenerEnd.Nut && plan.NutTable != null ? Fasteners.Offered(set, plan.NutTable, plan.Size).FirstOrDefault() : null;
         var nut = nutRow != null ? Snap(plan.NutTable!, nutRow.Key) : null;
-        double hw = washer?.Value("h") ?? 0;
+        double hw = washer?.Base("h") ?? 0;
 
         // placements: a fastener's axis is its Z; a screw's head is up (out of the hole), a nut's and a washer's bearing face down
         var outward = -plan.Inward;

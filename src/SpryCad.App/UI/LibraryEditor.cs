@@ -31,14 +31,13 @@ public static class LibraryEditor
 {
     static readonly FilePickerFileType LibraryType = new("SpryCAD Library") { Patterns = new[] { "*" + LibraryFile.Extension } };
     static readonly FilePickerFileType CsvType = new("CSV") { Patterns = new[] { "*.csv" } };
+    static readonly FilePickerFileType ExcelType = new("Excel Workbook") { Patterns = new[] { "*.xlsx" } };
 
     /// <summary>The columns a new table of each kind starts with (what the Thread and Hole Wizard commands read).</summary>
     static readonly (string kind, string label, string[] columns)[] Kinds =
     {
         (TableKinds.Thread, "Thread sizes", new[] { "major", "pitch" }),
-        (TableKinds.Clearance, "Clearance holes", new[] { "close", "normal", "loose" }),
-        (TableKinds.Counterbore, "Counterbores", new[] { "diameter", "depth" }),
-        (TableKinds.Countersink, "Countersinks", new[] { "diameter", "angle" }),
+        (TableKinds.FastenerHoles, "Holes for fasteners", new[] { "close", "normal", "loose", "head.diameter", "head.depth", "head.angle" }),
         (TableKinds.Material, "Materials", Materials.Columns.ToArray()),
         (TableKinds.Appearance, "Appearances", Materials.AppearanceColumns.ToArray()),
     };
@@ -49,9 +48,9 @@ public static class LibraryEditor
     sealed class RowEdit
     {
         public string Key = "";
-        /// <summary>As shown, in the table's units.</summary>
+        /// <summary>As shown: in the table's units, as stored.</summary>
         public List<string> Values = new();
-        /// <summary>Each value in millimetres while its text is as shown (null once typed over): unchanged values publish exactly as read.</summary>
+        /// <summary>Each value as stored while its text is as shown (null once typed over): unchanged values publish exactly as read.</summary>
         public List<double?> Exact = new();
         public Dictionary<string, string> Text = new(StringComparer.Ordinal);
 
@@ -65,41 +64,40 @@ public static class LibraryEditor
 
         public void RemoveAt(int c) { Pad(c + 1); Values.RemoveAt(c); Exact.RemoveAt(c); }
 
-        /// <summary>The value in millimetres (null: not a number).</summary>
-        public double? Mm(int c, double scale) => c < Exact.Count && Exact[c] is { } e ? e : c < Values.Count && TryNumber(Values[c].Trim(), out var v) ? v * scale : null;
+        /// <summary>The value, in the table's units (null: not a number).</summary>
+        public double? Number(int c) => c < Exact.Count && Exact[c] is { } e ? e : c < Values.Count && TryNumber(Values[c].Trim(), out var v) ? v : null;
     }
 
     sealed class TableEdit
     {
         public string Key = "", Title = "", Kind = "", Standard = "";
-        /// <summary>The units lengths are shown in (<see cref="LibraryTable.Units"/>): null millimetres, else inches.</summary>
-        public string? Units;
+        /// <summary>The units the values are in (<see cref="LibraryTable.Units"/>).</summary>
+        public TableUnits Units;
         public bool Verified;
 
-        public double Scale(string column) => new LibraryTable { Units = Units, Kind = Kind }.Scale(column);
         public bool Material => Kind == TableKinds.Material;
 
-        /// <summary>Shows the values in other units: each the same length.</summary>
-        public void Convert(string? units)
+        /// <summary>The values converted to other units: each the same amount (rounded to 6 decimals in inches, 4 in metric).</summary>
+        public void Convert(TableUnits units)
         {
-            var before = Columns.Select(Scale).ToList();
+            var old = Units;
             Units = units;
             foreach (var r in Rows)
                 for (int c = 0; c < Columns.Count; c++)
-                    if (r.Mm(c, before[c]) is { } mm) { r.Pad(c + 1); r.Values[c] = Shown(mm, Scale(Columns[c])); r.Exact[c] = mm; }
+                {
+                    var q = Schemas.UnitOf(Kind, Columns[c]);
+                    if (r.Number(c) is not { } v) continue;
+                    var nv = Math.Round(q.FromBase(q.ToBase(v, old), units), units == TableUnits.Inch ? 6 : 4);
+                    r.Pad(c + 1); r.Values[c] = Shown(nv); r.Exact[c] = nv;
+                }
         }
         /// <summary>In the revision read: parts may name it by its key, so the key cannot change.</summary>
         public bool Published;
         public List<string> Columns = new();
         public List<string> TextColumns = new();
         public List<RowEdit> Rows = new();
-    }
-
-    sealed class RestrictionEdit
-    {
-        public bool Hidden;
-        public List<string> Allow = new(), Deny = new();
-        public bool Any => Hidden || Allow.Count > 0 || Deny.Count > 0;
+        /// <summary>A hole type's profile (<see cref="LibraryTable.Profile"/>, its JSON): kept as read, made from a hole's.</summary>
+        public string? Profile;
     }
 
     sealed class State
@@ -107,50 +105,47 @@ public static class LibraryEditor
         public string Path = "";
         public Guid Id;
         public string Name = "";
-        public LibraryLayer Layer;
+        /// <summary>What the library holds: standards or materials (the table kinds it may have).</summary>
+        public LibraryDomain Domain;
         /// <summary>The revision read (null: a new library, not yet published).</summary>
         public Guid? ReadRevision;
         public List<TableEdit> Tables = new();
-        public Dictionary<string, RestrictionEdit> Restrictions = new(StringComparer.Ordinal);
         /// <summary>The library's shop profile tables (sheet metal): kept as read, published again unchanged.</summary>
         public List<SpryCad.SheetMetal.ShopProfileTable> ProfileTables = new();
         public bool Dirty;
-        /// <summary>SpryCAD's built-in standards (no file): published to a folder the user chooses.</summary>
+        /// <summary>SpryCAD's defaults (no file): published to a folder the user chooses, as a company's own library.</summary>
         public bool BuiltIn => Path.Length == 0;
 
         public TableEdit? Table(string key) => Tables.FirstOrDefault(t => t.Key == key);
 
-        public RestrictionEdit Restriction(string key) =>
-            Restrictions.TryGetValue(key, out var r) ? r : Restrictions[key] = new RestrictionEdit();
-
-        /// <summary>The tables and restrictions to publish, or the first problem.</summary>
-        public (List<LibraryTable> tables, List<LibraryRestriction> restrictions, string? problem) Build()
+        /// <summary>The tables to publish, or the first problem.</summary>
+        public (List<LibraryTable> tables, string? problem) Build()
         {
             var tables = new List<LibraryTable>();
             var keys = new HashSet<string>(StringComparer.Ordinal);
             foreach (var t in Tables)
             {
                 var key = t.Key.Trim();
-                if (key.Length == 0 || key.Contains('/')) return (tables, new(), $"A table needs a key without '/' (\"{t.Key}\").");
-                if (!keys.Add(key)) return (tables, new(), $"Two tables have the key {key}.");
+                if (key.Length == 0 || key.IndexOfAny(new[] { ':', '/' }) >= 0) return (tables, $"A table needs a key without ':' or '/' (\"{t.Key}\").");
+                if (!keys.Add(key)) return (tables, $"Two tables have the key {key}.");
                 var cols = t.Columns.Select(c => c.Trim()).ToList();
-                if (cols.Any(c => c.Length == 0)) return (tables, new(), $"{key}: every column needs a name.");
-                if (cols.Distinct().Count() != cols.Count) return (tables, new(), $"{key}: two columns have the same name.");
+                if (cols.Any(c => c.Length == 0)) return (tables, $"{key}: every column needs a name.");
+                if (cols.Distinct().Count() != cols.Count) return (tables, $"{key}: two columns have the same name.");
                 var rowKeys = new HashSet<string>(StringComparer.Ordinal);
-                var lt = new LibraryTable { Key = key, Title = t.Title.Trim(), Kind = t.Kind.Trim(), Standard = t.Standard.Trim(), Units = t.Units, Verified = t.Verified, Columns = cols };
+                var lt = new LibraryTable { Key = key, Title = t.Title.Trim(), Kind = t.Kind.Trim(), Standard = t.Standard.Trim(), Units = t.Units, Verified = t.Verified, Columns = cols, Profile = t.Profile };
                 foreach (var r in t.Rows)
                 {
                     var rk = r.Key.Trim();
-                    if (rk.Length == 0) return (tables, new(), $"{key}: every row needs a designation.");
-                    if (!rowKeys.Add(rk)) return (tables, new(), $"{key}: {rk} is listed twice.");
+                    if (rk.Length == 0) return (tables, $"{key}: every row needs a designation.");
+                    if (!rowKeys.Add(rk)) return (tables, $"{key}: {rk} is listed twice.");
                     var row = new LibraryRow { Key = rk };
                     for (int c = 0; c < cols.Count; c++)
                     {
-                        if (r.Mm(c, t.Scale(cols[c])) is not { } v)
+                        if (r.Number(c) is not { } v)
                         {
                             // (a material's value left blank: not known)
                             if (MayBeBlank(t, c) && (c >= r.Values.Count || r.Values[c].Trim().Length == 0)) { row.Values.Add(double.NaN); continue; }
-                            return (tables, new(), $"{key}: {rk}'s {cols[c]} is not a number (\"{(c < r.Values.Count ? r.Values[c].Trim() : "")}\").");
+                            return (tables, $"{key}: {rk}'s {cols[c]} is not a number (\"{(c < r.Values.Count ? r.Values[c].Trim() : "")}\").");
                         }
                         row.Values.Add(v);
                     }
@@ -158,80 +153,77 @@ public static class LibraryEditor
                         if (r.Text.TryGetValue(n, out var s) && s.Trim().Length > 0) (row.Text ??= new(StringComparer.Ordinal))[n] = s.Trim();
                     lt.Rows.Add(row);
                 }
+                // (a column of the kind's that every row leaves blank: not the table's, as it was read)
+                var blank = Enumerable.Range(0, cols.Count).Where(c => MayBeBlank(t, c) && lt.Rows.All(r => !double.IsFinite(r.Values[c]))).ToHashSet();
+                if (blank.Count > 0 && Schemas.Of(lt.Kind) is { Open: false })
+                {
+                    lt.Columns = cols.Where((_, c) => !blank.Contains(c)).ToList();
+                    foreach (var r in lt.Rows) r.Values = r.Values.Where((_, c) => !blank.Contains(c)).ToList();
+                }
+                if (LibraryFile.Problem(lt) is { } problem) return (tables, problem);
+                if (LibraryDomains.Of(lt.Kind) != Domain) return (tables, $"{key} ({lt.Kind}) belongs in a {LibraryDomains.Name(LibraryDomains.Of(lt.Kind))} library, not this {LibraryDomains.Name(Domain)} one.");
                 tables.Add(lt);
             }
-            var restrictions = Restrictions.Where(kv => kv.Value.Any).OrderBy(kv => kv.Key, StringComparer.Ordinal)
-                .Select(kv => new LibraryRestriction
-                {
-                    Table = kv.Key, Hidden = kv.Value.Hidden,
-                    Allow = kv.Value.Allow.Count > 0 ? kv.Value.Allow.ToList() : null,
-                    Deny = kv.Value.Deny.Count > 0 ? kv.Value.Deny.ToList() : null,
-                }).ToList();
-            return (tables, restrictions, null);
+            return (tables, null);
         }
     }
 
     /// <summary>
-    /// A row as the table's grid binds it: whether the pickers offer it (<see cref="Enabled"/>), its
-    /// <see cref="Key"/>, then a cell per value column and per text column, by index (the table's columns vary, so the
-    /// grid's columns are made in code and bound to <c>[i]</c>). Either this library's own row (<see cref="Row"/>), or
-    /// one of an earlier library's (<see cref="From"/>), shown greyed and copied into this library (overridden) when
-    /// edited. A value that is not a number is refused (the cell keeps its value) and said through <c>problem</c>.
+    /// A row as the table's grid binds it: its <see cref="Key"/>, then a cell per value column and per text column, by
+    /// index (the table's columns vary, so the grid's columns are made in code and bound to <c>[i]</c>). A value that is
+    /// not a number is refused (the cell keeps its value) and said through <c>problem</c>.
     /// </summary>
     sealed class GridRow : INotifyPropertyChanged
     {
-        public RowEdit? Row;
-        /// <summary>The earlier library the row is from (null: this library's own).</summary>
-        public string? From;
-        /// <summary>The earlier library's row as shown (its key, then its cells), kept to show again when this library's override is deleted.</summary>
-        public readonly string InheritedKey;
-        public readonly string[] Inherited;
-        readonly Func<TableEdit?> _table;
-        readonly Func<RestrictionEdit> _restriction;
+        public readonly RowEdit Row;
+        readonly Func<TableEdit> _table;
         readonly Action _changed;
         readonly Action<string> _problem;
 
-        public GridRow(RowEdit? row, string? from, string inheritedKey, string[] inherited, Func<TableEdit?> table, Func<RestrictionEdit> restriction, Action changed, Action<string> problem)
+        public GridRow(RowEdit row, Func<TableEdit> table, Action changed, Action<string> problem)
         {
-            Row = row; From = from; InheritedKey = inheritedKey; Inherited = inherited;
-            _table = table; _restriction = restriction; _changed = changed; _problem = problem;
+            Row = row; _table = table; _changed = changed; _problem = problem;
         }
 
         public event PropertyChangedEventHandler? PropertyChanged;
 
-        public bool Own => Row != null;
-        public IBrush Foreground => Own ? Palette.Text : Palette.TextMuted;
-        public FontStyle Style => Own ? FontStyle.Normal : FontStyle.Italic;
-
         public string Key
         {
-            get => Row?.Key ?? InheritedKey;
+            get => Row.Key;
             set
             {
                 value = (value ?? "").Trim();
-                if (Row == null || value == Row.Key) return;
-                // the restriction follows the row
-                var r = _restriction();
-                foreach (var list in new[] { r.Allow, r.Deny }) { var i = list.IndexOf(Row.Key); if (i >= 0) list[i] = value; }
+                if (value == Row.Key) return;
                 Row.Key = value;
                 _changed(); Notify();
             }
+        }
+
+        /// <summary>A two-part key's parts (a thread's designation and class, a fastener hole's fastener and size).</summary>
+        public string Key0 { get => Part(0); set => SetPart(0, value); }
+        public string Key1 { get => Part(1); set => SetPart(1, value); }
+        string Part(int i) => LibraryRow.SplitKeys(Row.Key) is var k && i < k.Count ? k[i] : "";
+        void SetPart(int i, string? value)
+        {
+            var k = LibraryRow.SplitKeys(Row.Key);
+            while (k.Count < 2) k.Add("");
+            k[i] = (value ?? "").Trim();
+            Key = k.All(x => x.Length == 0) ? "" : LibraryRow.JoinKeys(k);
         }
 
         public string this[int c]
         {
             get
             {
-                if (Row == null) return c < Inherited.Length ? Inherited[c] : "";
-                var t = _table()!;
+                var t = _table();
                 return c < t.Columns.Count ? (c < Row.Values.Count ? Row.Values[c] : "0")
                     : c - t.Columns.Count < t.TextColumns.Count ? Row.Text.GetValueOrDefault(t.TextColumns[c - t.Columns.Count], "") : "";
             }
             set
             {
                 value = (value ?? "").Trim();
-                if (Row == null || value == this[c]) return;
-                var t = _table()!;
+                if (value == this[c]) return;
+                var t = _table();
                 if (c < t.Columns.Count)
                 {
                     if (!TryNumber(value, out _) && !(value.Length == 0 && MayBeBlank(t, c)))
@@ -258,33 +250,15 @@ public static class LibraryEditor
             }
         }
 
-        /// <summary>Whether the pickers offer the row (as <see cref="LibraryRestriction.Allows(string)"/>): on unless denied, or left out of an allow list a file has.</summary>
-        public bool Enabled
-        {
-            get { var r = _restriction(); return !r.Deny.Contains(Key) && (r.Allow.Count == 0 || r.Allow.Contains(Key)); }
-            set => Enable(value);
-        }
-
-        /// <summary>
-        /// Offers the row, or stops offering it. Turned off, it is denied (rows other libraries add later are still offered);
-        /// turned on, no longer denied, and listed in the allow list if the restriction has one.
-        /// </summary>
-        public void Enable(bool on)
-        {
-            if (Enabled == on) return;
-            var r = _restriction();
-            if (on) { r.Deny.Remove(Key); if (r.Allow.Count > 0 && !r.Allow.Contains(Key)) r.Allow.Add(Key); }
-            else r.Deny.Add(Key);
-            _changed(); Notify();
-        }
-
         /// <summary>The row's color (an appearance's or a material's r, g, b columns) as a swatch; null when it has none.</summary>
         public Func<GridRow, IBrush?>? SwatchOf;
         public IBrush? Swatch => SwatchOf?.Invoke(this);
+        /// <summary>The swatch's color as hex ("#C0C0C0"; "" with none).</summary>
+        public string Hex => Swatch is ISolidColorBrush b ? $"#{b.Color.R:X2}{b.Color.G:X2}{b.Color.B:X2}" : "";
 
         public void Notify()
         {
-            foreach (var p in new[] { nameof(Key), "Item[]", nameof(Enabled), nameof(Foreground), nameof(Style), nameof(Swatch) })
+            foreach (var p in new[] { nameof(Key), nameof(Key0), nameof(Key1), "Item[]", nameof(Swatch), nameof(Hex) })
                 PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(p));
         }
     }
@@ -330,56 +304,54 @@ public static class LibraryEditor
         double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out v) && double.IsFinite(v);
 
     /// <summary>
-    /// A value in millimetres as shown in units of <paramref name="scale"/> mm: millimetres (and degrees) to 4 decimals,
-    /// inches to 5 (a material's in its units alike); a value not known (a material's) blank.
+    /// A value as shown: as stored, in full (so it publishes back unchanged); a value not known blank.
     /// </summary>
-    static string Shown(double mm, double scale) =>
-        double.IsFinite(mm) ? Math.Round(mm / scale, scale == 1 ? 4 : 5).ToString("R", CultureInfo.InvariantCulture) : "";
+    static string Shown(double v) => double.IsFinite(v) ? v.ToString("R", CultureInfo.InvariantCulture) : "";
 
-    /// <summary>Whether a material table's column may be left blank: not known (any but its density).</summary>
-    static bool MayBeBlank(TableEdit t, int c) => t.Material && c < t.Columns.Count && t.Columns[c] != "density";
+    /// <summary>Whether a column may be left blank (not known): one its kind's schema does not require.</summary>
+    static bool MayBeBlank(TableEdit t, int c) => c < t.Columns.Count && Schemas.Of(t.Kind)?.Column(t.Columns[c]) is { Required: false };
 
-    static TableEdit Edit(LibraryTable t, bool published) => new()
+    static TableEdit Edit(LibraryTable t, bool published) => WithSchema(new()
     {
-        Key = t.Key, Title = t.Title, Kind = t.Kind, Standard = t.Standard, Units = t.Units, Verified = t.Verified, Published = published,
+        Key = t.Key, Title = t.Title, Kind = t.Kind, Standard = t.Standard, Units = t.Units, Verified = t.Verified, Published = published, Profile = t.Profile,
         Columns = t.Columns.ToList(), TextColumns = LibraryCsv.TextColumns(t.Rows),
         Rows = t.Rows.Select(r => Edit(r, t)).ToList(),
-    };
+    });
+
+    /// <summary>
+    /// A table of a kind with fixed columns shown with all of its schema's, in the schema's order (blank where the table
+    /// has none; left out again when published while every row leaves them blank), then any of its own; a hole type's
+    /// (its columns its own) as it is.
+    /// </summary>
+    static TableEdit WithSchema(TableEdit e)
+    {
+        if (Schemas.Of(e.Kind) is not { Open: false } schema) return e;
+        var values = schema.Columns.Where(c => !c.IsText).Select(c => c.Path).ToList();
+        var order = values.Concat(e.Columns.Where(c => !values.Contains(c))).ToList();
+        foreach (var r in e.Rows)
+        {
+            var at = order.Select(c => e.Columns.IndexOf(c)).ToList();
+            r.Values = at.Select(i => i >= 0 && i < r.Values.Count ? r.Values[i] : "").ToList();
+            r.Exact = at.Select(i => i >= 0 && i < r.Exact.Count ? r.Exact[i] : null).ToList();
+        }
+        e.Columns = order;
+        var texts = schema.Columns.Where(c => c.IsText).Select(c => c.Path).ToList();
+        e.TextColumns = texts.Concat(e.TextColumns.Where(n => !texts.Contains(n))).ToList();
+        return e;
+    }
 
     static RowEdit Edit(LibraryRow r, LibraryTable t) => new()
     {
-        Key = r.Key, Values = r.Values.Select((v, c) => Shown(v, c < t.Columns.Count ? t.Scale(t.Columns[c]) : 1)).ToList(),
+        Key = r.Key, Values = r.Values.Select(Shown).ToList(),
         Exact = r.Values.Select(v => (double?)v).ToList(),
         Text = r.Text == null ? new(StringComparer.Ordinal) : new Dictionary<string, string>(r.Text, StringComparer.Ordinal),
     };
 
-    /// <summary>The table with its lengths in its own units (millimetres stored, inches shown), as CSV files have them.</summary>
-    static LibraryTable InUnits(LibraryTable t, bool toShown) => new()
-    {
-        Key = t.Key, Title = t.Title, Kind = t.Kind, Standard = t.Standard, Units = t.Units, Verified = t.Verified, Columns = t.Columns,
-        Rows = t.Rows.Select(r => new LibraryRow
-        {
-            Key = r.Key, Text = r.Text,
-            Values = r.Values.Select((v, c) => t.Scale(t.Columns[c]) is var k && k == 1 ? v : toShown ? v / k : Math.Round(v * k, 9)).ToList(),
-        }).ToList(),
-    };
-
     static State FromLibrary(LoadedLibrary lib, string path)
     {
-        var s = new State { Path = path, Id = lib.LibraryId, Name = lib.Name, Layer = lib.Layer, ReadRevision = lib.RevisionId };
+        var s = new State { Path = path, Id = lib.LibraryId, Name = lib.Name, Domain = lib.Domain, ReadRevision = lib.RevisionId };
         s.Tables.AddRange(lib.Tables.Select(t => Edit(t, true)));
         s.ProfileTables.AddRange(lib.ProfileTables ?? Array.Empty<SpryCad.SheetMetal.ShopProfileTable>());
-        // a table restricted more than once: one restriction doing the same (rows allowed by all, denied by any)
-        foreach (var g in lib.Restrictions.GroupBy(r => r.Table))
-        {
-            var e = s.Restriction(g.Key);
-            e.Hidden = g.Any(r => r.Hidden);
-            List<string>? allow = null;
-            foreach (var r in g.Where(r => r.Allow != null)) allow = allow == null ? r.Allow!.ToList() : allow.Where(r.Allow!.Contains).ToList();
-            if (allow is { Count: 0 }) e.Hidden = true; // nothing allowed: the table is never offered
-            else if (allow != null) e.Allow = allow;
-            e.Deny = g.Where(r => r.Deny != null).SelectMany(r => r.Deny!).Distinct().ToList();
-        }
         return s;
     }
 
@@ -407,21 +379,33 @@ public static class LibraryEditor
     // the commands
 
     /// <summary>Tools > Libraries > Edit Library: picks a library file and edits it (at <paramref name="table"/>, when it has it).</summary>
-    public static async Task Open(MainWindow owner, string? table = null)
+    /// <param name="add">
+    /// A table to add to the library opened (a hole type made from a hole's profile), not yet published; selected.
+    /// </param>
+    /// <param name="domain">Which library: the standards or the materials in use.</param>
+    public static async Task Open(MainWindow owner, string? table = null, LibraryTable? add = null, LibraryDomain domain = LibraryDomain.Standards)
     {
-        // no library set yet: SpryCAD's own standards, published as the start of one
-        if (Libraries.Location.path == null)
+        State With(State s)
         {
-            var b = FromLibrary(BuiltInStandards.AsLibrary() with { Tables = LibraryFile.BuiltInTables.ToList() }, "");
+            if (add == null) return s;
+            var key = add.Key;
+            for (int i = 2; s.Table(key) != null; i++) key = $"{add.Key}-{i}";
+            var e = Edit(add, false);
+            e.Key = key;
+            s.Tables.Add(e);
+            s.Dirty = true;
+            table = key;
+            return s;
+        }
+        // SpryCAD's defaults in use: a copy of them, published as a company's own library
+        var inUse = domain == LibraryDomain.Materials ? LibraryLink.Current.Materials : LibraryLink.Current.Standards;
+        if (inUse.Path is not { } path)
+        {
+            var b = FromLibrary(inUse, "");
             b.ReadRevision = null;
-            await Show(owner, b, table);
+            await Show(owner, With(b), table);
             return;
         }
-        var files = await owner.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
-        {
-            Title = "Edit Library", AllowMultiple = false, FileTypeFilter = new[] { LibraryType }, SuggestedStartLocation = await StartFolder(owner),
-        });
-        if (files.FirstOrDefault()?.TryGetLocalPath() is not { } path) return;
         State s;
         try { s = FromLibrary((await Task.Run(() => ReadCopy(path))).lib, path); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or Microsoft.Data.Sqlite.SqliteException)
@@ -429,15 +413,21 @@ public static class LibraryEditor
             await Dialogs.Message(owner, "Edit Library Failed", $"Could not read {System.IO.Path.GetFileName(path)}: {ex.Message}");
             return;
         }
-        await Show(owner, s, table);
+        await Show(owner, With(s), table);
     }
 
-    /// <summary>Tools > Libraries > New Company Library: a new, empty company library at a path chosen (written when first published).</summary>
+    /// <summary>
+    /// Tools > Libraries > New Company Library: a company's own standards or materials library at a path chosen,
+    /// starting as a copy of SpryCAD's defaults (written when first published).
+    /// </summary>
     public static async Task New(MainWindow owner)
     {
+        var materials = !await Dialogs.YesNo(owner, "New Company Library",
+            "Make a company standards library (threads, holes, fasteners) or materials library? It starts as a copy of SpryCAD's defaults.", "Standards", "Materials");
+        var domain = materials ? LibraryDomain.Materials : LibraryDomain.Standards;
         var f = await owner.StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
         {
-            Title = "New Company Library", SuggestedFileName = "company" + LibraryFile.Extension, DefaultExtension = LibraryFile.Extension,
+            Title = "New Company Library", SuggestedFileName = LibraryDomains.Name(domain) + LibraryFile.Extension, DefaultExtension = LibraryFile.Extension,
             FileTypeChoices = new[] { LibraryType }, SuggestedStartLocation = await StartFolder(owner),
         });
         if (f?.TryGetLocalPath() is not { } path) return;
@@ -448,7 +438,10 @@ public static class LibraryEditor
         }
         var name = await Dialogs.Input(owner, "New Company Library", "Library name (shown in Options):", System.IO.Path.GetFileNameWithoutExtension(path));
         if (string.IsNullOrWhiteSpace(name)) return;
-        await Show(owner, new State { Path = path, Id = Guid.NewGuid(), Name = name.Trim(), Layer = LibraryLayer.Company, Dirty = true });
+        var s = FromLibrary(new LoadedLibrary(Guid.NewGuid(), name.Trim(), domain, Guid.Empty, path, LibraryFile.Defaults(domain)), path);
+        s.ReadRevision = null; s.Dirty = true;
+        foreach (var t in s.Tables) t.Published = false;
+        await Show(owner, s);
     }
 
     // ------------------------------------------------------------------------------------------
@@ -477,29 +470,28 @@ public static class LibraryEditor
         void Header()
         {
             nameBox.Text = s.Name;
+            var what = LibraryDomains.Name(s.Domain);
             pathText.Text = s.BuiltIn
-                ? "SpryCAD built-in standards and materials (no library set in use; see Options > Libraries). Publish saves this copy as standards.sprlib "
-                    + "with a libraries.json, creating a shareable library set."
-                : $"{s.Layer} library · {s.Path}";
-            info.Text = s.BuiltIn ? "Built-in; publishing writes it to a folder." : s.ReadRevision == null ? "New; saved when first published." : $"Editing revision {s.ReadRevision.Value.ToString()[..8]}.";
+                ? $"SpryCAD's default {what} (no company {what} library in use; see Options > Libraries). Publish saves this copy as your company's own "
+                    + $"{what}{LibraryFile.Extension}, with a libraries.json, to use in place of the defaults."
+                : $"{char.ToUpperInvariant(what[0])}{what[1..]} library · {s.Path}";
+            info.Text = s.BuiltIn ? "SpryCAD's defaults; publishing writes your own copy to a folder." : s.ReadRevision == null ? "New; saved when first published." : $"Editing revision {s.ReadRevision.Value.ToString()[..8]}.";
         }
 
-        // the left list: the library's tables, then tables it only restricts (another library's)
-        List<string> Keys() => s.Tables.Select(t => t.Key).Concat(s.Restrictions.Where(kv => kv.Value.Any && s.Table(kv.Key) == null).Select(kv => kv.Key).OrderBy(k => k, StringComparer.Ordinal)).ToList();
+        // the left list: the library's tables
+        List<string> Keys() => s.Tables.Select(t => t.Key).ToList();
         void Relist(string? select = null, bool body = true)
         {
             listing = true;
             list.Items.Clear();
             var keys = Keys();
-            if (select != null && !keys.Contains(select)) keys.Add(select); // just added to restrict: listed while it is shown
             foreach (var k in keys)
             {
-                var t = s.Table(k);
+                var t = s.Table(k)!;
                 var sp = new StackPanel { Margin = new Thickness(2, 1) };
                 var keyText = Labels.Trimmed(k); keyText.FontWeight = FontWeight.SemiBold;
                 sp.Children.Add(keyText);
-                var sub = t != null ? $"{(t.Title.Length > 0 ? t.Title + " · " : "")}{t.Rows.Count} rows" : "Restrictions only";
-                if (s.Restrictions.TryGetValue(k, out var r) && r.Any && t != null) sub += " · restricted";
+                var sub = $"{(t.Title.Length > 0 ? t.Title + " · " : "")}{t.Rows.Count} rows";
                 var subText = Labels.Trimmed(sub, TypeScale.Small); subText.Foreground = Palette.TextMuted;
                 sp.Children.Add(subText);
                 list.Items.Add(new ListBoxItem { Content = sp, Tag = k, Padding = new Thickness(8, 4) });
@@ -517,7 +509,7 @@ public static class LibraryEditor
             Body();
         };
 
-        // ---- the right side: the chosen table's settings, then one grid of its rows and what the pickers offer of them
+        // ---- the right side: the chosen table's settings, then one grid of its rows
         void Body()
         {
             body.Children.Clear();
@@ -525,74 +517,22 @@ public static class LibraryEditor
             heading.IsVisible = selected != null;
             if (selected == null)
             {
-                Top(Muted("No tables. Click + Table to add in-house sizes or part numbers, "
-                    + "or Restrict a Table to limit the sizes another library offers."));
+                Top(Muted("No tables. Click + Table to add one, or Import from Excel."));
                 return;
             }
             Section(selected);
         }
 
-        // the table as the other libraries in use have it (this one left out), and the library each row is from
-        (LibraryTable table, string[] from)? Inherited(string key)
-        {
-            LibraryTable? acc = null;
-            var from = new List<string>();
-            foreach (var lib in LibraryLink.Current.Libraries.Where(l => l.LibraryId != s.Id))
-                foreach (var tb in lib.Tables.Where(x => x.Key == key))
-                {
-                    if (acc == null || !acc.Columns.SequenceEqual(tb.Columns))
-                    {
-                        acc = new LibraryTable { Key = key, Columns = tb.Columns.ToList(), Rows = tb.Rows.ToList() };
-                        from = tb.Rows.Select(_ => lib.Name).ToList();
-                    }
-                    else
-                        foreach (var r in tb.Rows)
-                        {
-                            var i = acc.Rows.FindIndex(x => x.Key == r.Key);
-                            if (i >= 0) { acc.Rows[i] = r; from[i] = lib.Name; } else { acc.Rows.Add(r); from.Add(lib.Name); }
-                        }
-                    acc.Title = tb.Title; acc.Kind = tb.Kind; acc.Standard = tb.Standard; acc.Units = tb.Units;
-                }
-            return acc == null ? null : (acc, from.ToArray());
-        }
-
         void Section(string key)
         {
-            var t = s.Table(key);
-            // another library's rows are shown when this library adds to its table (the same columns) or has none of its own
-            var inh = Inherited(key) is { } i0 && (t == null || t.Columns.SequenceEqual(i0.table.Columns)) ? i0 : ((LibraryTable table, string[] from)?)null;
-            if (t != null) TableProps(t);
-            var hidden = new CheckBox { Content = "Hide table in Thread and Hole Wizard", IsChecked = s.Restrictions.TryGetValue(key, out var r0) && r0.Hidden };
-            hidden.IsCheckedChanged += (_, _) => { s.Restriction(key).Hidden = hidden.IsChecked == true; Changed(); Relist(key, body: false); };
-            Top(hidden);
-            Top(Muted((t == null ? $"This library has no rows of its own for {key}. " : "")
-                + (inh != null ? $"Gray rows come from {string.Join(", ", inh.Value.from.Distinct())}; edit one to override it here. " : "")
-                + "Enabled rows are offered in Thread and Hole Wizard; existing parts keep disabled sizes. "
-                + "Right-click rows to enable or disable them. Rows are saved in the order shown; click a header to sort."));
+            var t = s.Table(key)!;
+            TableProps(t);
+            Top(Muted("Rows are offered in the order shown; click a header to sort. Type a new row into the blank one at the end. Parts that already use a size keep it when it is deleted here."));
 
-            var cols = t?.Columns.ToList() ?? inh?.table.Columns.ToList() ?? new List<string>();
-            var texts = t?.TextColumns.ToList() ?? (inh != null ? LibraryCsv.TextColumns(inh.Value.table.Rows) : new List<string>());
-            var units = t != null ? t.Units : inh?.table.Units;
-            var unitsTable = new LibraryTable { Units = units, Kind = t?.Kind ?? inh?.table.Kind ?? "" };
-            double Scale(string col) => unitsTable.Scale(col);
+            var cols = t.Columns.ToList();
+            var texts = t.TextColumns.ToList();
+            var unitsTable = new LibraryTable { Units = t.Units, Kind = t.Kind };
 
-            // this library's own table, made (from the other libraries') when a row is first added or overridden
-            TableEdit Own()
-            {
-                if (t != null) return t;
-                var src = inh?.table ?? LibraryLink.Current.Table(key);
-                t = new TableEdit
-                {
-                    Key = key, Title = src?.Title ?? "", Kind = src?.Kind ?? "", Standard = src?.Standard ?? "", Units = src?.Units,
-                    Columns = cols.ToList(), TextColumns = texts.ToList(),
-                };
-                s.Tables.Add(t);
-                Relist(key, body: false);
-                return t;
-            }
-
-            // the rows: the other libraries' in their order (this library's override in place of one), then this library's new ones,
-            // then any the restriction names that no table has
             void RowChanged() { Changed(); Relist(key, body: false); }
             // a color (r, g, b columns, 0-1) shown as a swatch beside the designation
             int ri = cols.IndexOf("r"), gi = cols.IndexOf("g"), bi = cols.IndexOf("b");
@@ -602,63 +542,31 @@ public static class LibraryEditor
                 byte C(int c) => TryNumber(g[c], out var v) ? (byte)Math.Round(Math.Clamp(v, 0, 1) * 255) : (byte)0;
                 return TryNumber(g[ri], out _) && TryNumber(g[gi], out _) && TryNumber(g[bi], out _) ? new SolidColorBrush(Color.FromRgb(C(ri), C(gi), C(bi))) : null;
             }
-            GridRow Make(RowEdit? own, string? from, string inheritedKey, string[] cells) =>
-                new(own, from, inheritedKey, cells, () => t, () => s.Restriction(key), RowChanged, p => error.Text = p) { SwatchOf = colored ? SwatchOf : null };
+            GridRow Make(RowEdit row) => new(row, () => t, RowChanged, p => error.Text = p) { SwatchOf = colored ? SwatchOf : null };
             var items = new ObservableCollection<GridRow>();
-            var inhRows = new Dictionary<string, (LibraryRow row, string from)>(StringComparer.Ordinal);
-            var used = new HashSet<RowEdit>();
-            if (inh is { } ih)
-                for (int i = 0; i < ih.table.Rows.Count; i++)
-                {
-                    var row = ih.table.Rows[i];
-                    if (!inhRows.TryAdd(row.Key, (row, ih.from[i]))) continue;
-                    var cells = cols.Select((c, j) => j < row.Values.Count ? Shown(row.Values[j], Scale(c)) : "")
-                        .Concat(texts.Select(n => row.Text?.GetValueOrDefault(n) ?? "")).ToArray();
-                    var own = t?.Rows.FirstOrDefault(x => x.Key == row.Key && !used.Contains(x));
-                    if (own != null) used.Add(own);
-                    items.Add(Make(own, own == null ? ih.from[i] : null, row.Key, cells));
-                }
-            foreach (var own in t?.Rows ?? new()) if (!used.Contains(own)) { own.Pad(cols.Count); items.Add(Make(own, null, own.Key, Array.Empty<string>())); }
-            if (s.Restrictions.TryGetValue(key, out var rk))
-                foreach (var n in rk.Allow.Concat(rk.Deny).Distinct().Where(n => items.All(g => g.Key != n)).ToList())
-                    items.Add(Make(null, "no table", n, Array.Empty<string>()));
-
-            // an other library's row edited: copied into this library, which then overrides it
-            void Override(GridRow g)
+            foreach (var row in t.Rows) { row.Pad(cols.Count); items.Add(Make(row)); }
+            // a blank row at the end: typed into, it is the table's (and another blank one follows)
+            GridRow pending = null!;
+            void AddPending()
             {
-                if (g.Own) return;
-                var own = Own();
-                var re = new RowEdit { Key = g.InheritedKey };
-                var src = inhRows.TryGetValue(g.InheritedKey, out var ir) ? ir.row : null;
-                for (int c = 0; c < own.Columns.Count; c++)
+                var re = new RowEdit { Values = cols.Select(_ => "").ToList(), Exact = cols.Select(_ => (double?)null).ToList() };
+                pending = new GridRow(re, () => t, () =>
                 {
-                    re.Values.Add(c < g.Inherited.Length && g.Inherited[c].Length > 0 ? g.Inherited[c] : "0");
-                    re.Exact.Add(src != null && c < src.Values.Count ? src.Values[c] : null);
-                }
-                for (int c = 0; c < own.TextColumns.Count; c++)
-                    if (own.Columns.Count + c < g.Inherited.Length && g.Inherited[own.Columns.Count + c].Length > 0) re.Text[own.TextColumns[c]] = g.Inherited[own.Columns.Count + c];
-                own.Rows.Add(re);
-                g.Row = re; g.From = null;
-                g.Notify();
-                RowChanged();
+                    if (!t.Rows.Contains(re)) { t.Rows.Add(re); AddPending(); }
+                    RowChanged();
+                }, p => error.Text = p) { SwatchOf = colored ? SwatchOf : null };
+                items.Add(pending);
             }
+            bool Real(GridRow g) => t.Rows.Contains(g.Row);
 
             var cv = new DataGridCollectionView(items);
             var dg = new DataGrid
             {
                 ItemsSource = cv, AutoGenerateColumns = false, CanUserSortColumns = true, CanUserReorderColumns = false, CanUserResizeColumns = true,
                 SelectionMode = DataGridSelectionMode.Extended, GridLinesVisibility = DataGridGridLinesVisibility.All, HeadersVisibility = DataGridHeadersVisibility.All,
-                FrozenColumnCount = 2, BorderBrush = Palette.Border, BorderThickness = new Thickness(1),
+                FrozenColumnCount = 1, BorderBrush = Palette.Border, BorderThickness = new Thickness(1),
             };
-            // another library's rows greyed and in italics; a cell's text centred up and down while it is edited, where it was shown
-            dg.Styles.Add(new Style(x => x.OfType<DataGridCell>())
-            {
-                Setters =
-                {
-                    new Setter(TemplatedControl.ForegroundProperty, new Binding(nameof(GridRow.Foreground))),
-                    new Setter(TemplatedControl.FontStyleProperty, new Binding(nameof(GridRow.Style))),
-                },
-            });
+            // a cell's text centered up and down while it is edited, where it was shown
             dg.Styles.Add(new Style(x => x.OfType<DataGridCell>().Descendant().OfType<TextBox>())
             {
                 Setters =
@@ -670,9 +578,9 @@ public static class LibraryEditor
                 },
             });
 
-            // the columns, each as wide as its heading: Enabled, Designation (frozen), a column per value, a column per text.
-            // fields[i]: what dg.Columns[i] shows: -1 a check box, 0 the designation, 1 + c cell c
-            var fields = new List<int>();
+            // the columns, each as wide as its heading: the key (frozen: Designation, or its two parts), a color swatch where
+            // there is one, a column per value, a column per text. access[i]: what dg.Columns[i] shows, to copy and paste
+            var access = new List<(Func<GridRow, string> get, Action<GridRow, string>? set)>();
             Control Header(string text, string tip, bool italic, Action? rename, Action? delete)
             {
                 var tb = new TextBlock { Text = text, FontWeight = FontWeight.SemiBold, FontStyle = italic ? FontStyle.Italic : FontStyle.Normal, Background = Brushes.Transparent };
@@ -686,58 +594,69 @@ public static class LibraryEditor
                 return tb;
             }
             DataGridLength ToHeader = new(1, DataGridLengthUnitType.SizeToHeader);
-            void Check(string header, string tip, string property, Func<GridRow, bool> get)
+            if (Schemas.Of(t.Kind)?.Key is { Length: 2 } keyDefs)
             {
-                dg.Columns.Add(new DataGridTemplateColumn
+                dg.Columns.Add(new DataGridTextColumn
                 {
-                    Header = Header(header, tip, false, null, null), Width = ToHeader,
-                    CustomSortComparer = new Comparer((a, b) => get(a).CompareTo(get(b))),
-                    CellTemplate = new FuncDataTemplate<GridRow>((_, _) => new CheckBox
-                    {
-                        HorizontalAlignment = HorizontalAlignment.Center, MinHeight = 0, Padding = new Thickness(0),
-                        [!ToggleButton.IsCheckedProperty] = new Binding(property) { Mode = BindingMode.TwoWay },
-                    }),
+                    Header = Header(keyDefs[0].Heading[^1], "With the next column, what parts reference the row by.", false, null, null),
+                    Binding = new Binding(nameof(GridRow.Key0)) { Mode = BindingMode.TwoWay }, Width = DataGridLength.Auto, MinWidth = 90,
+                    CustomSortComparer = new Comparer((a, b) => Natural(a.Key0, b.Key0) is var c && c != 0 ? c : Natural(a.Key1, b.Key1)),
                 });
-                fields.Add(-1);
+                access.Add((g => g.Key0, (g, v) => g.Key0 = v));
+                dg.Columns.Add(new DataGridTextColumn
+                {
+                    Header = Header(keyDefs[1].Heading[^1], "With the previous column, what parts reference the row by.", false, null, null),
+                    Binding = new Binding(nameof(GridRow.Key1)) { Mode = BindingMode.TwoWay }, Width = DataGridLength.Auto, MinWidth = 60,
+                    CustomSortComparer = new Comparer((a, b) => Natural(a.Key1, b.Key1)),
+                });
+                access.Add((g => g.Key1, (g, v) => g.Key1 = v));
+                dg.FrozenColumnCount = 2;
             }
-            Check("Enabled", "Offered by the Thread and Hole Wizard pickers. Uncheck the sizes your company does not use; parts that already use one keep it.", nameof(GridRow.Enabled), g => g.Enabled);
-            dg.Columns.Add(new DataGridTextColumn
+            else
             {
-                Header = Header("Designation", "Designation parts reference the row by, e.g. M8 or 1/4-20 UNC.", false, null, null),
-                Binding = new Binding(nameof(GridRow.Key)) { Mode = BindingMode.TwoWay }, Width = DataGridLength.Auto, MinWidth = 90,
-                CustomSortComparer = new Comparer((a, b) => Natural(a.Key, b.Key)),
-            });
-            fields.Add(0);
+                dg.Columns.Add(new DataGridTextColumn
+                {
+                    Header = Header("Designation", "Designation parts reference the row by, e.g. M8 or 1/4-20 UNC.", false, null, null),
+                    Binding = new Binding(nameof(GridRow.Key)) { Mode = BindingMode.TwoWay }, Width = DataGridLength.Auto, MinWidth = 90,
+                    CustomSortComparer = new Comparer((a, b) => Natural(a.Key, b.Key)),
+                });
+                access.Add((g => g.Key, (g, v) => g.Key = v));
+            }
             if (colored)
             {
                 // clicked: a color typed as #RRGGBB, into the r, g and b columns
                 dg.Columns.Add(new DataGridTemplateColumn
                 {
-                    Header = Header("Color", "The row's r, g, b values. Click a swatch to pick a color.", false, null, null), Width = ToHeader,
+                    Header = Header("Color", "The row's color (its r, g and b), as hex. Click it to type another.", false, null, null), Width = DataGridLength.Auto, MinWidth = 110,
                     CellTemplate = new FuncDataTemplate<GridRow>((_, _) =>
                     {
                         var sw = new Border
                         {
                             Width = 28, Height = 14, CornerRadius = new CornerRadius(2), BorderBrush = Palette.TextMuted, BorderThickness = new Thickness(0.5),
-                            HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, Cursor = new Cursor(StandardCursorType.Hand),
+                            VerticalAlignment = VerticalAlignment.Center,
                             [!Border.BackgroundProperty] = new Binding(nameof(GridRow.Swatch)),
                         };
-                        sw.PointerPressed += async (_, e) =>
+                        var hex = new TextBlock { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0, 0, 0), [!TextBlock.TextProperty] = new Binding(nameof(GridRow.Hex)) };
+                        var cell = new StackPanel
                         {
-                            if (sw.DataContext is not GridRow g || !e.GetCurrentPoint(sw).Properties.IsLeftButtonPressed) return;
+                            Orientation = Orientation.Horizontal, Margin = new Thickness(11, 0), Background = Brushes.Transparent,
+                            VerticalAlignment = VerticalAlignment.Center, Cursor = new Cursor(StandardCursorType.Hand), Children = { sw, hex },
+                        };
+                        cell.PointerPressed += async (_, e) =>
+                        {
+                            if (cell.DataContext is not GridRow g || !e.GetCurrentPoint(cell).Properties.IsLeftButtonPressed) return;
                             e.Handled = true;
                             string Hex(int c) => TryNumber(g[c], out var v) ? ((int)Math.Round(Math.Clamp(v, 0, 1) * 255)).ToString("X2") : "00";
                             var typed = (await Dialogs.Input(w, "Color", $"{g.Key}'s color, as #RRGGBB:", $"#{Hex(ri)}{Hex(gi)}{Hex(bi)}"))?.Trim().TrimStart('#');
                             if (typed == null) return;
                             if (typed.Length != 6 || !int.TryParse(typed, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var rgb)) { error.Text = $"\"{typed}\" is not a color (#RRGGBB)."; return; }
-                            Override(g);
-                            string Part(int shift) => Math.Round(((rgb >> shift) & 0xFF) / 255.0, 4).ToString("R", CultureInfo.InvariantCulture);
+                            string Part(int shift) => (((rgb >> shift) & 0xFF) / 255.0).ToString("R", CultureInfo.InvariantCulture);
                             g[ri] = Part(16); g[gi] = Part(8); g[bi] = Part(0);
                         };
-                        return sw;
+                        return cell;
                     }),
                 });
-                fields.Add(-1);
+                access.Add((g => g.Hex, null));
             }
             async Task<string?> ColumnName(string title, string label, string value)
             {
@@ -746,25 +665,35 @@ public static class LibraryEditor
                 if (cols.Contains(n) || texts.Contains(n)) { error.Text = $"{key} already has a column {n}."; return null; }
                 return n;
             }
+            // (a column of the kind's schema named by its headings, "External Major Dia Max (in)", and fixed: it is not
+            // renamed or deleted; a hole type's and a table's own columns are)
+            var schema = Schemas.Of(t.Kind);
+            string Name(string path) => schema?.Column(path) is { } def ? string.Join(" ", def.Heading.Distinct()) : path;
+            bool Fixed(string path) => schema is { Open: false } && schema.Column(path) != null;
             for (int c = 0; c < cols.Count; c++)
             {
                 int cc = c;
-                var unit = unitsTable.UnitLabel(cols[c]);
+                if (colored && cols[c] is "r" or "g" or "b") continue; // (the Color column shows them)
+                var unit = unitsTable.Label(cols[c]);
+                var name = Name(cols[c]);
+                var req = schema?.Column(cols[c])?.Required == true;
                 dg.Columns.Add(new DataGridTextColumn
                 {
-                    Header = Header(unit.Length > 0 ? $"{cols[c]} ({unit})" : cols[c], "A column of numbers: the commands read values by its name (major, pitch; close, normal, loose).", false,
-                        t == null ? null : async () =>
+                    Header = Fixed(cols[c])
+                        ? Header(unit.Length > 0 ? $"{name} ({unit})" : name, $"{cols[c]}: {(req ? "required" : "may be left blank")}.", false, null, null)
+                        : Header(unit.Length > 0 ? $"{cols[c]} ({unit})" : cols[c], "A column of numbers: the commands read values by its name (a hole type's profile by its dimensions' names).", false,
+                        async () =>
                         {
                             if (await ColumnName("Rename Column", "New column name (commands read values by name):", cols[cc]) is not { } n) return;
                             t.Columns[cc] = n;
                             foreach (var r in t.Rows) if (cc < r.Exact.Count) r.Exact[cc] = null; // (an angle column now a length, or the other way: as shown)
                             Changed(); Body();
                         },
-                        t == null ? null : () => { t.Columns.RemoveAt(cc); foreach (var r in t.Rows) r.RemoveAt(cc); Changed(); Body(); }),
+                        () => { t.Columns.RemoveAt(cc); foreach (var r in t.Rows) r.RemoveAt(cc); Changed(); Body(); }),
                     Binding = new Binding($"[{c}]") { Mode = BindingMode.TwoWay }, Width = ToHeader, MinWidth = 72,
                     CustomSortComparer = new Comparer((a, b) => Numeric(a[cc], b[cc])),
                 });
-                fields.Add(1 + c);
+                access.Add((g => g[cc], (g, v) => g[cc] = v));
             }
             for (int c = 0; c < texts.Count; c++)
             {
@@ -772,60 +701,48 @@ public static class LibraryEditor
                 var n = texts[c];
                 dg.Columns.Add(new DataGridTextColumn
                 {
-                    Header = Header(n, "Text column, e.g. part number or supplier.", true,
-                        t == null ? null : async () =>
+                    Header = Fixed(n) ? Header(Name(n), $"{n}: text.", false, null, null) : Header(n, "A column of this library's own, e.g. a supplier.", true,
+                        async () =>
                         {
                             if (await ColumnName("Rename Text Column", "New column name:", n) is not { } nn) return;
                             t.TextColumns[t.TextColumns.IndexOf(n)] = nn;
                             foreach (var r in t.Rows) if (r.Text.Remove(n, out var v)) r.Text[nn] = v;
                             Changed(); Body();
                         },
-                        t == null ? null : () => { t.TextColumns.Remove(n); foreach (var r in t.Rows) r.Text.Remove(n); Changed(); Body(); }),
+                        () => { t.TextColumns.Remove(n); foreach (var r in t.Rows) r.Text.Remove(n); Changed(); Body(); }),
                     Binding = new Binding($"[{cc}]") { Mode = BindingMode.TwoWay }, Width = DataGridLength.Auto, MinWidth = 90,
                     CustomSortComparer = new Comparer((a, b) => Natural(a[cc], b[cc])),
                 });
-                fields.Add(1 + cc);
+                access.Add((g => g[cc], (g, v) => g[cc] = v));
             }
 
-            // editing another library's row overrides it; a sort is the rows' order
+            // a sort is the rows' order
             bool editing = false;
-            dg.BeginningEdit += (_, e) =>
-            {
-                if (e.Row.DataContext is GridRow { Own: false } g) Override(g);
-                editing = true;
-            };
+            dg.BeginningEdit += (_, _) => editing = true;
             dg.CellEditEnded += (_, _) => editing = false;
             dg.Sorting += (_, _) => Dispatcher.UIThread.Post(() =>
             {
-                if (t == null) return;
-                var order = cv.Cast<GridRow>().Where(g => g.Row != null).Select(g => g.Row!).ToList();
+                var order = cv.Cast<GridRow>().Where(Real).Select(g => g.Row).ToList();
                 if (!order.SequenceEqual(t.Rows)) { t.Rows = order; Changed(); }
             });
 
-            List<GridRow> Selected() => cv.Cast<GridRow>().Where(dg.SelectedItems.Contains).ToList(); // in the order shown
-            string NewKey() { int n = (t?.Rows.Count ?? 0) + 1; while (items.Any(x => x.Key == "Row" + n)) n++; return "Row" + n; }
+            List<GridRow> Selected() => cv.Cast<GridRow>().Where(g => dg.SelectedItems.Contains(g) && Real(g)).ToList(); // in the order shown
+            string NewKey() { int n = t.Rows.Count + 1; while (items.Any(x => x.Key == "Row" + n)) n++; return "Row" + n; }
 
             void DeleteRows()
             {
                 var sel = Selected();
                 if (sel.Count == 0) return;
-                if (sel.All(g => !g.Own)) { error.Text = "These rows belong to another library and cannot be deleted. Clear Enabled to hide them."; return; }
-                foreach (var g in sel.Where(g => g.Own))
-                {
-                    t!.Rows.Remove(g.Row!);
-                    if (inhRows.TryGetValue(g.InheritedKey, out var ir) && g.Inherited.Length > 0) { g.Row = null; g.From = ir.from; g.Notify(); } // the other library's row again
-                    else items.Remove(g);
-                }
+                foreach (var g in sel) { t.Rows.Remove(g.Row); items.Remove(g); }
                 RowChanged();
             }
 
-            // copied as tab-separated text (designation, values, text), as spreadsheets paste it
+            // copied as tab-separated text, the columns as shown, as spreadsheets paste it
             async Task Copy()
             {
                 var sel = Selected();
                 if (sel.Count == 0 || TopLevel.GetTopLevel(dg)?.Clipboard is not { } clip) return;
-                var n = cols.Count + texts.Count;
-                await clip.SetTextAsync(string.Join("\n", sel.Select(g => string.Join("\t", new[] { g.Key }.Concat(Enumerable.Range(0, n).Select(c => g[c]))))));
+                await clip.SetTextAsync(string.Join("\n", sel.Select(g => string.Join("\t", access.Select(a => a.get(g))))));
                 owner.Status($"Copied {sel.Count} row{(sel.Count == 1 ? "" : "s")}.");
             }
 
@@ -835,8 +752,8 @@ public static class LibraryEditor
                 if (TopLevel.GetTopLevel(dg)?.Clipboard is not { } clip || await clip.GetTextAsync() is not { Length: > 0 } text) return;
                 var lines = text.Replace("\r", "").TrimEnd('\n').Split('\n');
                 var sel = Selected();
-                int row0 = sel.Count > 0 ? cv.IndexOf(sel[0]) : cv.Count;
-                int field0 = Math.Max(0, dg.CurrentColumn is { } cc && dg.Columns.IndexOf(cc) is var ci && ci >= 0 ? fields[ci] : 0);
+                int row0 = sel.Count > 0 ? cv.IndexOf(sel[0]) : dg.SelectedItem is GridRow cur ? cv.IndexOf(cur) : cv.IndexOf(pending);
+                int col0 = Math.Max(0, dg.CurrentColumn is { } cc ? dg.Columns.IndexOf(cc) : 0);
                 for (int i = 0; i < lines.Length; i++)
                 {
                     var cells = lines[i].Split('\t');
@@ -844,24 +761,16 @@ public static class LibraryEditor
                     if (row0 + i < cv.Count) g = (GridRow)cv[row0 + i]!;
                     else
                     {
-                        var own = Own();
-                        var re = new RowEdit { Key = field0 == 0 ? cells[0].Trim() : NewKey() };
-                        re.Pad(own.Columns.Count);
-                        own.Rows.Add(re);
-                        items.Add(g = Make(re, null, re.Key, Array.Empty<string>()));
+                        var re = new RowEdit { Key = col0 == 0 ? "" : NewKey() };
+                        re.Pad(t.Columns.Count);
+                        t.Rows.Add(re);
+                        items.Insert(items.IndexOf(pending), g = Make(re));
                     }
-                    Override(g);
-                    for (int j = 0; j < cells.Length; j++)
-                    {
-                        int field = field0 + j;
-                        if (field == 0) g.Key = cells[j];
-                        else if (field - 1 < cols.Count + texts.Count) g[field - 1] = cells[j];
-                    }
+                    for (int j = 0; j < cells.Length && col0 + j < access.Count; j++)
+                        access[col0 + j].set?.Invoke(g, cells[j]);
                 }
                 RowChanged();
             }
-
-            void EnableSelected(bool on) { foreach (var g in Selected()) g.Enable(on); }
 
             dg.AddHandler(InputElement.KeyDownEvent, async (_, e) =>
             {
@@ -884,37 +793,16 @@ public static class LibraryEditor
                     Item("Copy", "Ctrl+C", () => _ = Copy()),
                     Item("Paste", "Ctrl+V", () => _ = Paste()),
                     Item("Delete Rows", "Delete", DeleteRows),
-                    new Separator(),
-                    Item("Enable", null, () => EnableSelected(true)),
-                    Item("Disable", null, () => EnableSelected(false)),
-                    new Separator(),
-                    Item("Enable All Rows", null, () => { s.Restrictions.Remove(key); Changed(); Relist(key); }),
                 },
             };
 
-            var addRow = new Button { Content = "+ Row" };
-            addRow.Click += (_, _) =>
-            {
-                var own = Own();
-                var last = own.Rows.LastOrDefault();
-                var re = new RowEdit { Key = NewKey(), Values = last?.Values.ToList() ?? own.Columns.Select(_ => "0").ToList(), Exact = last?.Exact.ToList() ?? new() };
-                re.Pad(own.Columns.Count);
-                own.Rows.Add(re);
-                var g = Make(re, null, re.Key, Array.Empty<string>());
-                items.Add(g);
-                RowChanged();
-                dg.SelectedItem = g;
-                dg.ScrollIntoView(g, dg.Columns[1]);
-                dg.CurrentColumn = dg.Columns[1];
-                dg.Focus();
-                dg.BeginEdit();
-            };
+            AddPending();
             var delRows = new Button { Content = "Delete Rows" };
-            ToolTip.SetTip(delRows, "Deletes the selected rows (Delete). Rows from another library can only be disabled.");
+            ToolTip.SetTip(delRows, "Deletes the selected rows (Delete).");
             delRows.Click += (_, _) => DeleteRows();
-            Bottom(t != null ? Bar(new Control[] { addRow, delRows }.Concat(TableButtons(t)).ToArray()) : Bar(addRow));
-            Fill(cols.Count == 0 && items.Count == 0
-                ? Muted("No columns. Choose the table type to add its standard columns, click + Column, or import a CSV file.")
+            Bottom(Bar(new Control[] { delRows }.Concat(TableButtons(t)).ToArray()));
+            Fill(cols.Count == 0 && t.Rows.Count == 0
+                ? Muted(t.Kind.Length == 0 ? "Choose what the table is for: its columns are that kind's." : "No columns. Click + Column to add the profile's dimensions.")
                 : dg);
         }
 
@@ -924,31 +812,30 @@ public static class LibraryEditor
             void Cell(Control c, int row, int col) { Grid.SetRow(c, row); Grid.SetColumn(c, col); props.Children.Add(c); }
             TextBlock Label(string text) => new() { Text = text, VerticalAlignment = VerticalAlignment.Center };
             var key = new TextBox { Text = t.Key, IsEnabled = !t.Published };
-            ToolTip.SetTip(key, t.Published ? "Parts reference the table by key; a published table's key cannot change." : "Stable key that parts reference. Using another library's key adds rows to that table.");
+            ToolTip.SetTip(key, t.Published ? "Parts reference the table by key; a published table's key cannot change." : "Stable key that parts reference.");
             key.LostFocus += (_, _) =>
             {
                 var k = (key.Text ?? "").Trim();
                 if (k == t.Key) return;
-                if (s.Restrictions.Remove(t.Key, out var r) && !s.Restrictions.ContainsKey(k)) s.Restrictions[k] = r;
                 t.Key = k; Changed(); Relist(k);
             };
             var title = new TextBox { Text = t.Title };
             title.TextChanged += (_, _) => { if (title.Text != t.Title) { t.Title = title.Text ?? ""; Changed(); } };
             var standard = new TextBox { Text = t.Standard, Watermark = "e.g. ISO 273, or in-house" };
             standard.TextChanged += (_, _) => { if (standard.Text != t.Standard) { t.Standard = standard.Text ?? ""; Changed(); } };
-            var kinds = Kinds.Select(k => k.label).ToList();
-            if (t.Kind.Length > 0 && Kinds.All(k => k.kind != t.Kind)) kinds.Add(t.Kind);
+            // (the kinds this library may hold: a standards library's, or a materials library's)
+            var mine = Kinds.Where(k => LibraryDomains.Of(k.kind) == s.Domain).ToArray();
+            var kinds = mine.Select(k => k.label).ToList();
+            if (t.Kind.Length > 0 && mine.All(k => k.kind != t.Kind)) kinds.Add(Schemas.Of(t.Kind)?.Title ?? t.Kind);
             var kind = new ComboBox { ItemsSource = kinds, HorizontalAlignment = HorizontalAlignment.Stretch, PlaceholderText = "Table type" };
-            kind.SelectedIndex = Kinds.ToList().FindIndex(k => k.kind == t.Kind) is var ki && ki >= 0 ? ki : t.Kind.Length > 0 ? kinds.Count - 1 : -1;
+            kind.SelectedIndex = mine.ToList().FindIndex(k => k.kind == t.Kind) is var ki && ki >= 0 ? ki : t.Kind.Length > 0 ? kinds.Count - 1 : -1;
             ToolTip.SetTip(kind, "Which command offers the rows: Thread for thread sizes, Hole Wizard for the rest.");
             kind.SelectionChanged += (_, _) =>
             {
-                if (kind.SelectedIndex < 0 || kind.SelectedIndex >= Kinds.Length || Kinds[kind.SelectedIndex].kind == t.Kind) return;
-                t.Kind = Kinds[kind.SelectedIndex].kind;
-                // a table with no columns yet takes the ones its kind is read by
-                if (t.Columns.Count == 0) { t.Columns = Kinds[kind.SelectedIndex].columns.ToList(); foreach (var r in t.Rows) { r.Values = t.Columns.Select(_ => "0").ToList(); r.Exact.Clear(); r.Pad(t.Columns.Count); } }
-                // (a material says what it is: its type)
-                if (t.Material && !t.TextColumns.Contains(Materials.TypeKey)) t.TextColumns.Insert(0, Materials.TypeKey);
+                if (kind.SelectedIndex < 0 || kind.SelectedIndex >= mine.Length || mine[kind.SelectedIndex].kind == t.Kind) return;
+                t.Kind = mine[kind.SelectedIndex].kind;
+                // (its kind's columns, those it has kept)
+                WithSchema(t);
                 Changed(); Body();
             };
             var verified = new CheckBox { Content = "Verified against the published standard", IsChecked = t.Verified };
@@ -958,14 +845,12 @@ public static class LibraryEditor
             var units = new ComboBox
             {
                 ItemsSource = t.Material ? new[] { "Metric (g/cm³, GPa, MPa)", "Inch-pound (lb/in³, Msi, ksi)" } : new[] { "Millimeters (mm)", "Inches (in)" },
-                SelectedIndex = t.Units == LibraryTable.Inch ? 1 : 0, HorizontalAlignment = HorizontalAlignment.Stretch,
+                SelectedIndex = t.Units == TableUnits.Inch ? 1 : 0, HorizontalAlignment = HorizontalAlignment.Stretch,
             };
-            ToolTip.SetTip(units, t.Material
-                ? "Display, entry and CSV units for properties. Values are stored in SI."
-                : "Display, entry and CSV units for lengths. Values are stored in millimeters.");
+            ToolTip.SetTip(units, "The units the values are given in, as the standard publishes them. Changing them converts the values.");
             units.SelectionChanged += (_, _) =>
             {
-                var u = units.SelectedIndex == 1 ? LibraryTable.Inch : null;
+                var u = units.SelectedIndex == 1 ? TableUnits.Inch : TableUnits.Metric;
                 if (u == t.Units) return;
                 t.Convert(u);
                 Changed(); Body();
@@ -973,11 +858,10 @@ public static class LibraryEditor
             Cell(Label("Units"), 4, 0); Cell(units, 4, 1); Cell(verified, 4, 3); Grid.SetColumnSpan(verified, 2);
             Top(props);
             Top(Muted((t.Material
-                    ? $"Properties in {(t.Units == LibraryTable.Inch ? "inch-pound" : "metric")} units, as each column header shows. Leave unknown values blank (density is required). "
+                    ? $"Properties in {(t.Units == TableUnits.Inch ? "inch-pound" : "metric")} units, as each column header shows. Leave unknown values blank (density is required). "
                         + $"Type is one of {string.Join(", ", Enum.GetNames<MaterialType>())}; r, g, b, metallic, roughness and opacity (0 to 1) set the appearance. "
-                    : $"Lengths in {(t.Units == LibraryTable.Inch ? "inches" : "millimeters")}; angle columns in degrees. ")
-                + "A table keyed as one in an earlier library adds rows to it and overrides rows of the same designation, "
-                + "as long as its columns are the same (otherwise it replaces the table). Text columns carry part numbers, suppliers and the like."));
+                    : $"Lengths in {(t.Units == TableUnits.Inch ? "inches" : "millimeters")}; angle columns in degrees. ")
+                + "Text columns carry part numbers, suppliers and the like."));
         }
 
         // the buttons for this library's own table
@@ -995,53 +879,14 @@ public static class LibraryEditor
                 Changed(); Body();
             };
             var addText = new Button { Content = "+ Text Column" };
-            ToolTip.SetTip(addText, "A column of text: a part number, a supplier");
+            ToolTip.SetTip(addText, "A column of text of this library's own: a supplier, a note");
             addText.Click += async (_, _) =>
             {
-                var n = (await Dialogs.Input(w, "Add Text Column", "Column name (text, e.g. part number):", ""))?.Trim();
+                var n = (await Dialogs.Input(w, "Add Text Column", "Column name (text, e.g. supplier):", ""))?.Trim();
                 if (string.IsNullOrEmpty(n)) return;
                 if (t.Columns.Contains(n) || t.TextColumns.Contains(n)) { error.Text = $"{t.Key} already has a column {n}."; return; }
                 t.TextColumns.Add(n);
                 Changed(); Body();
-            };
-            var import = new Button { Content = "Import CSV…" };
-            ToolTip.SetTip(import, $"Replaces the table's columns and rows with a CSV file's: a header row (row, the columns, {LibraryCsv.TextPrefix}name for text), then a row per designation");
-            import.Click += async (_, _) =>
-            {
-                var files = await w.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions { Title = $"Import {t.Key}", AllowMultiple = false, FileTypeFilter = new[] { CsvType } });
-                if (files.FirstOrDefault()?.TryGetLocalPath() is not { } p) return;
-                try
-                {
-                    var (cols, rows) = LibraryCsv.Read(await File.ReadAllTextAsync(p));
-                    if (t.Published && !cols.SequenceEqual(t.Columns)
-                        && !await Dialogs.YesNo(w, "Import CSV", $"The file's columns ({string.Join(", ", cols)}) are not the table's ({string.Join(", ", t.Columns)}). Parts read values by column name. Import anyway?", "Import", "Cancel"))
-                        return;
-                    var imported = Edit(InUnits(new LibraryTable { Units = t.Units, Kind = t.Kind, Columns = cols, Rows = rows }, toShown: false), false);
-                    t.Columns = imported.Columns; t.TextColumns = imported.TextColumns; t.Rows = imported.Rows;
-                    Changed(); Relist();
-                    owner.Status($"Imported {rows.Count} rows into {t.Key} (not yet published).");
-                }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or FormatException)
-                {
-                    error.Text = $"{System.IO.Path.GetFileName(p)} could not be imported: {ex.Message}";
-                }
-            };
-            var export = new Button { Content = "Export CSV…" };
-            export.Click += async (_, _) =>
-            {
-                var (tables, _, problem) = s.Build();
-                if (problem != null) { error.Text = problem; return; }
-                var f = await w.StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
-                {
-                    Title = $"Export {t.Key}", SuggestedFileName = t.Key + ".csv", DefaultExtension = ".csv", FileTypeChoices = new[] { CsvType },
-                });
-                if (f?.TryGetLocalPath() is not { } p) return;
-                try
-                {
-                    await File.WriteAllTextAsync(p, LibraryCsv.Write(InUnits(tables[s.Tables.IndexOf(t)], toShown: true)));
-                    owner.Status($"Exported {t.Key} to {p}.");
-                }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { error.Text = $"{System.IO.Path.GetFileName(p)} could not be written: {ex.Message}"; }
             };
             var delTable = new Button { Content = "Delete Table" };
             delTable.Click += async (_, _) =>
@@ -1051,41 +896,22 @@ public static class LibraryEditor
                     return;
                 s.Tables.Remove(t); Changed(); Relist();
             };
-            return new Control[] { addCol, addText, import, export, delTable };
+            // (a column of numbers: a hole type's, whose profile names its columns; a fixed kind's are its schema's)
+            addCol.IsVisible = Schemas.Of(t.Kind) is not { Open: false };
+            return new Control[] { addCol, addText, delTable };
         }
 
         // ---- the left side's buttons
         var addTable = new Button { Content = "+ Table" };
-        ToolTip.SetTip(addTable, "A table of rows of this library's own: new sizes, or rows added to (or overriding) another library's table of the same key");
+        ToolTip.SetTip(addTable, "A new table of this library: in-house sizes, another standard");
         addTable.Click += async (_, _) =>
         {
-            var k = (await Dialogs.Input(w, "Add Table", "Table key (e.g. ACME-screws; an existing key such as ISO273 adds rows to it):", ""))?.Trim();
+            var k = (await Dialogs.Input(w, "Add Table", "Table key (e.g. ACME-screws):", ""))?.Trim();
             if (string.IsNullOrEmpty(k)) return;
-            if (k.Contains('/')) { error.Text = "A table's key cannot hold '/'."; return; }
+            if (k.IndexOfAny(new[] { ':', '/' }) >= 0) { error.Text = "A table's key cannot hold ':' or '/'."; return; }
             if (s.Table(k) != null) { error.Text = $"The library already has a table {k}."; return; }
-            var src = LibraryLink.Current.Table(k);
-            s.Tables.Add(new TableEdit { Key = k, Title = src?.Title ?? "", Kind = src?.Kind ?? "", Standard = src?.Standard ?? "", Units = src?.Units, Columns = src?.Columns.ToList() ?? new() });
+            s.Tables.Add(new TableEdit { Key = k });
             Changed(); Relist(k);
-        };
-        var restrict = new Button { Content = "Restrict a Table" };
-        ToolTip.SetTip(restrict, "Limits which sizes of another library's table are offered.");
-        var menu = new MenuFlyout();
-        restrict.Flyout = menu;
-        menu.Opening += (_, _) =>
-        {
-            menu.Items.Clear();
-            var listed = Keys();
-            var kinds = Kinds.Select(k => k.kind).ToList();
-            foreach (var kind in kinds)
-                foreach (var tb in LibraryLink.Current.Libraries.SelectMany(l => l.Tables).Where(tb => tb.Kind == kind).Select(tb => tb.Key).Distinct())
-                {
-                    if (listed.Contains(tb)) continue;
-                    var mi = new MenuItem { Header = $"{tb}  ({LibraryLink.Current.Table(tb)?.Title})" };
-                    var key = tb;
-                    mi.Click += (_, _) => Relist(key);
-                    menu.Items.Add(mi);
-                }
-            if (menu.Items.Count == 0) menu.Items.Add(new MenuItem { Header = "All tables in use are listed", IsEnabled = false });
         };
 
         // ---- the shop profile (sheet metal): its tables from CSV, one per kind; the profile in use is the last library's that has one
@@ -1166,32 +992,38 @@ public static class LibraryEditor
 
         async Task<bool> Publish()
         {
-            var (tables, restrictions, problem) = s.Build();
+            var (tables, problem) = s.Build();
             if (s.Name.Length == 0) problem = "The library needs a name.";
             if (problem != null) { error.Text = problem; return false; }
-            // the built-in standards: written into a folder chosen, as a library set's first library
+            // SpryCAD's defaults: written into a folder chosen, as the company's own library (an id and name of its own)
             string? folder = null;
+            var fileName = LibraryDomains.Name(s.Domain) + LibraryFile.Extension;
             if (s.BuiltIn)
             {
                 var picked = await w.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = "Library Set Folder" });
                 if (picked.FirstOrDefault()?.TryGetLocalPath() is not { } f) return false;
-                if (File.Exists(System.IO.Path.Combine(f, "standards" + LibraryFile.Extension)))
+                if (File.Exists(System.IO.Path.Combine(f, fileName)))
                 {
-                    await Dialogs.Message(w, "Publish", $"{f} already has a standards{LibraryFile.Extension}: choose another folder, or use that library set (Options > Libraries) and edit it.");
+                    await Dialogs.Message(w, "Publish", $"{f} already has a {fileName}: choose another folder, or use that library set (Options > Libraries) and edit it.");
                     return false;
                 }
                 folder = f;
             }
-            var message = await Dialogs.Input(w, "Publish", "Change description (shown in history):", s.BuiltIn ? "SpryCAD built-in standards" : "");
+            var message = await Dialogs.Input(w, "Publish", "Change description (shown in history):", s.BuiltIn ? $"From SpryCAD's default {LibraryDomains.Name(s.Domain)}" : "");
             if (message == null) return false;
-            if (folder != null) s.Path = System.IO.Path.Combine(folder, "standards" + LibraryFile.Extension);
+            if (folder != null)
+            {
+                s.Path = System.IO.Path.Combine(folder, fileName);
+                s.Id = Guid.NewGuid();
+                if (s.Name is BuiltInStandards.Name or BuiltInMaterials.Name) s.Name = s.Domain == LibraryDomain.Materials ? "Company materials" : "Company standards";
+            }
             var file = System.IO.Path.GetFileName(s.Path);
             bool isNew = s.ReadRevision == null;
             Guid rev;
             try
             {
                 var st = s;
-                rev = await Task.Run(() => LibraryFile.Publish(st.Path, st.Id, st.Name, st.Layer, tables, restrictions, UserSettings.AuthorName, message.Trim(), st.ReadRevision, st.ProfileTables));
+                rev = await Task.Run(() => LibraryFile.Publish(st.Path, st.Id, st.Name, st.Domain, tables, UserSettings.AuthorName, message.Trim(), st.ReadRevision, st.ProfileTables));
                 if (folder != null)
                 {
                     var config = System.IO.Path.Combine(folder, LibraryConfig.FileName);
@@ -1208,7 +1040,7 @@ public static class LibraryEditor
             {
                 if (await Dialogs.YesNo(w, "Publish",
                         $"{file} was published by someone else after you opened it, so your changes were not published. "
-                        + "Reload their version? Your changes will be lost; export tables as CSV first to keep them.", "Reload", "Keep Editing"))
+                        + "Reload their version? Your changes will be lost; export them to Excel first to keep them.", "Reload", "Keep Editing"))
                     await ReloadFromFile();
                 return false;
             }
@@ -1224,7 +1056,7 @@ public static class LibraryEditor
                 await Dialogs.Message(w, "Publish Failed", $"Could not publish {file}: {ex.Message}");
                 return false;
             }
-            // the built-in standards not written after all: still the built-in ones, unsaved
+            // the defaults not written after all: still the defaults, unsaved
             void Unwritten() { if (folder != null && !File.Exists(s.Path)) s.Path = ""; }
             var same = rev == s.ReadRevision;
             s.ReadRevision = rev;
@@ -1293,8 +1125,136 @@ public static class LibraryEditor
         top.Children.Add(pathText);
         var topBar = new Border { Child = top, Background = Palette.Strip, BorderBrush = Palette.Border, BorderThickness = new Thickness(0, 0, 0, 1) };
 
-        var leftButtons = new StackPanel { Spacing = 6, Margin = new Thickness(8), Children = { addTable, restrict, profile } };
-        foreach (var b in new[] { addTable, restrict, profile }) b.HorizontalAlignment = HorizontalAlignment.Stretch;
+        // the tables read from a workbook taken into the library: what changes, table by table, shown first (with what
+        // the reader noted), and nothing changed unless confirmed
+        async Task Take(string p, List<LibraryTable> read, string title, List<string>? notes)
+        {
+            // what changes, table by table, before anything does
+            var lines = new List<string>();
+            var plan = new List<(TableEdit? old, TableEdit edit)>();
+            foreach (var t in read)
+            {
+                var old = s.Table(t.Key);
+                var e = Edit(t, old?.Published ?? false);
+                e.Profile = old?.Profile; // (a hole type's profile is not in the workbook: kept)
+                if (old == null) { lines.Add($"{t.Key}: new table, {t.Rows.Count} rows"); plan.Add((null, e)); continue; }
+                int added = 0, changed = 0;
+                foreach (var r in e.Rows)
+                {
+                    var o = old.Rows.FirstOrDefault(x => x.Key == r.Key);
+                    if (o == null) { added++; continue; }
+                    bool differs = false;
+                    for (int c = 0; c < e.Columns.Count; c++)
+                    {
+                        var oc = old.Columns.IndexOf(e.Columns[c]);
+                        var before = oc >= 0 ? o.Number(oc) : null;
+                        var now = r.Exact[c];
+                        // (within a spreadsheet's 15 digits, or a color the same to 1/255 as its hex gives it: unchanged,
+                        // the exact value kept)
+                        bool color = e.Columns[c] is "r" or "g" or "b";
+                        if (before is { } b0 && now is { } n0 && (b0.Equals(n0) || Math.Abs(b0 - n0) <= 1e-12 * Math.Max(1, Math.Abs(b0))
+                            || color && Math.Round(Math.Clamp(b0, 0, 1) * 255) == Math.Round(n0 * 255)))
+                        { r.Values[c] = o.Values[oc]; r.Exact[c] = b0; }
+                        else differs = true;
+                    }
+                    if (differs || !r.Text.OrderBy(x => x.Key).SequenceEqual(o.Text.OrderBy(x => x.Key))) changed++;
+                }
+                int removed = old.Rows.Count(o => e.Rows.All(r => r.Key != o.Key));
+                bool columns = !e.Columns.SequenceEqual(old.Columns);
+                if (added + changed + removed == 0 && !columns && e.Title == old.Title && e.Standard == old.Standard && e.Kind == old.Kind && e.Units == old.Units) continue;
+                var parts = new List<string>();
+                if (added > 0) parts.Add($"{added} added");
+                if (changed > 0) parts.Add($"{changed} changed");
+                if (removed > 0) parts.Add($"{removed} removed");
+                if (columns) parts.Add(old.Published ? $"columns now {string.Join(", ", e.Columns)} (parts read values by column name)" : $"columns now {string.Join(", ", e.Columns)}");
+                lines.Add($"{t.Key}: " + (parts.Count > 0 ? string.Join(", ", parts) : "title, standard or units changed"));
+                plan.Add((old, e));
+            }
+            if (plan.Count == 0) { owner.Status($"{System.IO.Path.GetFileName(p)} has no changes for this library."); return; }
+            var untouched = s.Tables.Count(x => read.All(t => t.Key != x.Key));
+            if (lines.Count > 20) lines = lines.Take(20).Append($"… {lines.Count - 20} more").ToList();
+            if (notes is { Count: > 0 }) lines.Add("\n" + string.Join("\n", notes.Take(10)) + (notes.Count > 10 ? $"\n… {notes.Count - 10} more" : ""));
+            if (!await Dialogs.YesNo(w, title, string.Join("\n", lines)
+                    + (untouched > 0 ? $"\n\n{untouched} table{(untouched == 1 ? " is" : "s are")} not in the workbook and stay as they are." : ""), "Import", "Cancel"))
+                return;
+            foreach (var (old, e) in plan)
+                if (old == null) s.Tables.Add(e);
+                else s.Tables[s.Tables.IndexOf(old)] = e;
+            Changed(); Relist();
+            owner.Status($"Imported {plan.Count} table{(plan.Count == 1 ? "" : "s")} from {System.IO.Path.GetFileName(p)} (not yet published).");
+        }
+
+        // ---- the whole library to Excel and back (as Inventor's hole and thread spreadsheets): a sheet per table
+        var toExcel = new Button { Content = "Export to Excel…" };
+        ToolTip.SetTip(toExcel, "Writes the library's tables to an Excel workbook, a sheet per table, to edit in a spreadsheet and import again");
+        toExcel.Click += async (_, _) =>
+        {
+            var (tables, problem) = s.Build();
+            if (problem != null) { error.Text = problem; return; }
+            var f = await w.StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+            {
+                Title = "Export to Excel", SuggestedFileName = (s.Name.Length > 0 ? s.Name : "library") + ".xlsx", DefaultExtension = ".xlsx", FileTypeChoices = new[] { ExcelType },
+            });
+            if (f?.TryGetLocalPath() is not { } p) return;
+            // (made in memory first: a workbook that fails leaves no empty file behind)
+            try
+            {
+                var ms = new MemoryStream();
+                LibraryWorkbook.Write(tables, ms);
+                await File.WriteAllBytesAsync(p, ms.ToArray());
+                owner.Status($"Exported {tables.Count} tables to {p}.");
+            }
+            catch (Exception ex)
+            {
+                App.Log(ex, $"Exporting the library to {p}");
+                await Dialogs.Message(w, "Export Failed", $"{System.IO.Path.GetFileName(p)} could not be written: {ex.Message}");
+            }
+        };
+        var fromExcel = new Button { Content = "Import from Excel…" };
+        ToolTip.SetTip(fromExcel, "Reads an Excel workbook's tables into the library (its sheets as Export to Excel writes them); shows what changes first. Publish to share them");
+        fromExcel.Click += async (_, _) =>
+        {
+            var files = await w.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions { Title = "Import from Excel", AllowMultiple = false, FileTypeFilter = new[] { ExcelType } });
+            if (files.FirstOrDefault()?.TryGetLocalPath() is not { } p) return;
+            List<LibraryTable> read; List<string> problems;
+            try { await using var fs = File.OpenRead(p); (read, problems) = LibraryWorkbook.Read(fs); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or FormatException or ArgumentException)
+            { error.Text = $"{System.IO.Path.GetFileName(p)} could not be read: {ex.Message}"; return; }
+            // (each table by its kind's schema, and of this library's domain)
+            foreach (var t in read)
+                if (LibraryFile.Problem(t) is { } tp) problems.Add(tp);
+                else if (LibraryDomains.Of(t.Kind) != s.Domain) problems.Add($"{t.Key} ({t.Kind}) belongs in a {LibraryDomains.Name(LibraryDomains.Of(t.Kind))} library, not this {LibraryDomains.Name(s.Domain)} one.");
+            // all or nothing: a workbook with problems changes nothing
+            if (problems.Count > 0)
+            {
+                await Dialogs.Message(w, "Import Failed", $"{System.IO.Path.GetFileName(p)} has {problems.Count} problem{(problems.Count == 1 ? "" : "s")}; nothing was imported. Correct them and import again:\n\n"
+                    + string.Join("\n", problems.Take(15)) + (problems.Count > 15 ? $"\n… {problems.Count - 15} more" : ""));
+                return;
+            }
+            await Take(p, read, "Import from Excel", null);
+        };
+
+        // Inventor's thread and clearance spreadsheets (Design Data\XLS: thread.xlsx, clearance.xlsx) as tables
+        var fromInventor = new Button { Content = "Import from Inventor…" };
+        ToolTip.SetTip(fromInventor, "Reads Autodesk Inventor's thread.xlsx or clearance.xlsx: thread sheets as thread tables (a table per extra class), taper sheets as taper thread tables, clearance sheets as fastener holes tables; shows what changes first");
+        fromInventor.Click += async (_, _) =>
+        {
+            var files = await w.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions { Title = "Import from Inventor", AllowMultiple = false, FileTypeFilter = new[] { ExcelType } });
+            if (files.FirstOrDefault()?.TryGetLocalPath() is not { } p) return;
+            InventorWorkbook.Result result;
+            // (read while Excel has it open too)
+            try { await using var fs = new FileStream(p, FileMode.Open, FileAccess.Read, FileShare.ReadWrite); result = InventorWorkbook.Read(fs); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or FormatException or ArgumentException)
+            { error.Text = $"{System.IO.Path.GetFileName(p)} could not be read: {ex.Message}"; return; }
+            if (result.Tables.Count == 0) { await Dialogs.Message(w, "Import from Inventor", $"{System.IO.Path.GetFileName(p)} has no thread or clearance sheets.\n\n" + string.Join("\n", result.Notes.Take(10))); return; }
+            await Take(p, result.Tables, "Import from Inventor", result.Notes);
+        };
+        fromInventor.IsVisible = s.Domain == LibraryDomain.Standards;
+
+        // (a shop profile belongs in a standards library)
+        profile.IsVisible = s.Domain == LibraryDomain.Standards;
+        var leftButtons = new StackPanel { Spacing = 6, Margin = new Thickness(8), Children = { addTable, profile, toExcel, fromExcel, fromInventor } };
+        foreach (var b in new[] { addTable, profile, toExcel, fromExcel, fromInventor }) b.HorizontalAlignment = HorizontalAlignment.Stretch;
         var leftDock = new DockPanel();
         DockPanel.SetDock(leftButtons, Dock.Bottom);
         leftDock.Children.Add(leftButtons);

@@ -5,29 +5,16 @@ using SpryCad.Kernel.Native;
 namespace SpryCad.Core.Regen;
 
 /// <summary>
-/// Modelled threads: ISO metric sizes (coarse pitch) and the cutting tool for an external thread (on a shaft) or an
-/// internal one (in a hole), ISO 60° basic profile, swept along a helix.
+/// Modeled threads: the cutting tool for an external thread (on a shaft) or an internal one (in a hole), ISO 60°
+/// basic profile, swept along a helix. (The sizes are the library's: <see cref="Library.ThreadSizes"/>.)
 /// </summary>
 public static class Threads
 {
-    /// <summary>ISO 261 metric threads, coarse pitch: (name, major diameter, pitch).</summary>
-    public static readonly (string name, double d, double p)[] MetricCoarse =
-    {
-        ("M1.6", 1.6, 0.35), ("M2", 2, 0.4), ("M2.5", 2.5, 0.45), ("M3", 3, 0.5), ("M4", 4, 0.7), ("M5", 5, 0.8),
-        ("M6", 6, 1.0), ("M8", 8, 1.25), ("M10", 10, 1.5), ("M12", 12, 1.75), ("M14", 14, 2), ("M16", 16, 2),
-        ("M18", 18, 2.5), ("M20", 20, 2.5), ("M22", 22, 2.5), ("M24", 24, 3), ("M27", 27, 3), ("M30", 30, 3.5),
-        ("M33", 33, 3.5), ("M36", 36, 4), ("M42", 42, 4.5), ("M48", 48, 5),
-    };
-
     /// <summary>Fundamental triangle height of a 60° thread of pitch p.</summary>
     public static double H(double p) => p * Math.Sqrt(3) / 2;
 
     /// <summary>Minor diameter of an internal thread (the hole to drill): D − 1.0825 P.</summary>
     public static double MinorDiameter(double d, double p) => d - 5 * H(p) / 4;
-
-    /// <summary>The standard size fitting a shaft (major diameter) or a hole (minor diameter) best.</summary>
-    public static (string name, double d, double p) Fit(double diameter, bool external)
-        => MetricCoarse.MinBy(s => Math.Abs((external ? s.d : MinorDiameter(s.d, s.p)) - diameter));
 
     /// <summary>
     /// The groove a thread cuts, in the (r, z) half plane (z along the thread's axis, centred on 0): the ISO basic

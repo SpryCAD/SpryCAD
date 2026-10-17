@@ -69,8 +69,15 @@ public static class Bom
         var file = r.Embedded == null ? o.Owner.Resolution.Parts.GetValueOrDefault(ComponentResolver.Key(r))?.Path ?? r.AbsolutePath ?? r.Path : null;
         var name = System.IO.Path.GetFileNameWithoutExtension(r.Path ?? r.AbsolutePath ?? r.Embedded ?? c.Name);
         if (string.IsNullOrEmpty(name)) name = c.Name.Split('<')[0];
-        // a fastener by its standard and designation, with its length ("ISO 4762 M8x30"), not by its file
-        if (Library.Fasteners.Of(o.Display?.Part ?? o.Display?.Doc) is { } fastener) name = fastener.Designation;
+        // a fastener by its standard and designation, with its length ("ISO 4762 M8x30"), not by its file; its part number
+        // its row's, where the library gives one
+        string? fastenerNumber = null;
+        var fastenerDoc = o.Display?.Part ?? o.Display?.Doc;
+        if (Library.Fasteners.Of(fastenerDoc) is { } fastener)
+        {
+            name = fastener.Designation;
+            fastenerNumber = fastenerDoc!.Library?.GetValueOrDefault(fastener.Item)?.Text?.GetValueOrDefault(Library.Schemas.PartNumberColumn) is { Length: > 0 } pn ? pn : null;
+        }
         string config, material = "";
         if (c.IsAssembly) config = c.Configuration ?? "";
         else
@@ -87,7 +94,7 @@ public static class Bom
         // its part number and description, as the design tables' rows in use give them (TableConfig)
         var props = c.IsAssembly ? null : TableConfig.PropertiesOf(o.Display?.Part ?? o.Display?.Doc);
         return new BomRow(item, level, name, config, qty, c.IsAssembly, file, material.Length > 0 ? material : PartMaterialLabel(o), mass,
-            props?.GetValueOrDefault(TableConfig.PartNumber), props?.GetValueOrDefault(TableConfig.Description));
+            props?.GetValueOrDefault(TableConfig.PartNumber) ?? fastenerNumber, props?.GetValueOrDefault(TableConfig.Description));
     }
 
     /// <summary>A part with no material: said so (steel's density is assumed for its mass); a sub-assembly: none.</summary>

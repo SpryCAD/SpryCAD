@@ -233,7 +233,7 @@ public partial class MainWindow
 
         inLibrary.Click += async (_, _) =>
         {
-            if (selected != null && rows.TryGetValue(selected, out var s)) await LibraryEditor.Open(this, s.Table);
+            if (selected != null && rows.TryGetValue(selected, out var s)) await LibraryEditor.Open(this, s.Table, domain: LibraryDomain.Materials);
         };
 
         var left = new DockPanel();

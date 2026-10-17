@@ -59,11 +59,7 @@ public partial class MainWindow
         if (_sketch == null) { OnTreeContext(id, pos, row); return; }
         var menu = new ContextMenu();
         var st = Session.Result?.State;
-        SpryCad.Kernel.Frame? frame = id is "Front" or "Top" or "Right" ? Core.Regen.Resolver.StdPlane(id)
-            : Session.Doc.Find(id) is Core.Model.PlaneFeature && st?.Planes.TryGetValue(id, out var pf) == true ? pf
-            : Session.Doc.Find(id) is Core.Model.SketchFeature && st?.Sketches.TryGetValue(id, out var sr) == true ? sr.Frame
-            : null;
-        if (frame is { } f) menu.Items.Add(Item("Normal To", () => Viewport.NormalTo(f, flip: true), null, "normalto"));
+        if (TreeFrame(id) is { } f) menu.Items.Add(Item("Normal To", () => Viewport.NormalTo(f, flip: true), null, "normalto"));
         if (id is "Front" or "Top" or "Right" || Session.Doc.Find(id) is Core.Model.SketchFeature or Core.Model.PlaneFeature or Core.Model.AxisFeature)
         {
             var consumed = id is "Front" or "Top" or "Right" ? st?.Bodies.Count > 0 : UsedByActive().Contains(id);
@@ -71,6 +67,16 @@ public partial class MainWindow
             menu.Items.Add(Item(shown ? "Hide" : "Show", () => SetSketchShown(id, !shown), null, shown ? "hide" : "show"));
         }
         if (menu.Items.Count > 0) menu.Open(row);
+    }
+
+    /// <summary>The plane a tree row is (an origin plane, a plane, a sketch's), to look at straight on; null for other rows.</summary>
+    SpryCad.Kernel.Frame? TreeFrame(string id)
+    {
+        var st = Session.Result?.State;
+        return id is "Front" or "Top" or "Right" ? Core.Regen.Resolver.StdPlane(id)
+            : Session.Doc.Find(id) is Core.Model.PlaneFeature && st?.Planes.TryGetValue(id, out var pf) == true ? pf
+            : Session.Doc.Find(id) is Core.Model.SketchFeature && st?.Sketches.TryGetValue(id, out var sr) == true ? sr.Frame
+            : null;
     }
 
     void RebuildFlyoutTree()

@@ -66,6 +66,12 @@ public sealed record BlendSpec(List<SpryCad.Core.Model.EdgeRef> Refs, double Siz
 /// </summary>
 public sealed record CosmeticThread(Vec3 Origin, Vec3 Axis, Vec3 RefDir, double Radius, double Lead, double Length, bool External);
 
+/// <summary>
+/// A hole's or a thread's callout as built ("⌀6.6 THRU ALL", "1/4-20 UNC-2A"), with the thread row it is of (its
+/// item), whether it is external, and the face a Thread feature is on (its name), for what the measure tool shows.
+/// </summary>
+public sealed record FeatureNote(string Callout, string? ThreadItem = null, bool External = false, string? Face = null);
+
 /// <summary>How threads are built: each as it is set, or all modeled / all cosmetic (a view setting, not saved).</summary>
 public enum ThreadDisplay { AsSet, Modeled, Cosmetic }
 
@@ -80,6 +86,8 @@ public sealed class ModelState
     public Dictionary<string, SketchResult> Sketches { get; init; } = new();
     /// <summary>Cosmetic threads by feature id.</summary>
     public Dictionary<string, CosmeticThread> Cosmetics { get; init; } = new();
+    /// <summary>Holes' and threads' callouts by feature id.</summary>
+    public Dictionary<string, FeatureNote> Notes { get; init; } = new();
     /// <summary>Sheet metal bodies by body id: their bend graphs and rules (sheet metal spec section 4).</summary>
     public Dictionary<string, SpryCad.SheetMetal.SheetState> Sheets { get; init; } = new();
 
@@ -93,6 +101,7 @@ public sealed class ModelState
         Tools = Tools,
         Sketches = Sketches,
         Cosmetics = Cosmetics,
+        Notes = Notes,
         Sheets = Sheets,
     };
 
@@ -105,7 +114,7 @@ public sealed class ModelState
         if (i >= 0) bodies[i] = body; else bodies.Add(body);
         return new()
         {
-            Bodies = bodies, Planes = Planes, Axes = Axes, Tools = Tools, Sketches = Sketches, Cosmetics = Cosmetics,
+            Bodies = bodies, Planes = Planes, Axes = Axes, Tools = Tools, Sketches = Sketches, Cosmetics = Cosmetics, Notes = Notes,
             Sheets = new Dictionary<string, SpryCad.SheetMetal.SheetState>(Sheets) { [sheet.BodyId] = sheet },
         };
     }
@@ -118,6 +127,7 @@ public sealed class ModelState
         Tools = new Dictionary<string, ToolInfo>(Tools),
         Sketches = new Dictionary<string, SketchResult>(Sketches),
         Cosmetics = new Dictionary<string, CosmeticThread>(Cosmetics),
+        Notes = new Dictionary<string, FeatureNote>(Notes),
         Sheets = new Dictionary<string, SpryCad.SheetMetal.SheetState>(Sheets),
     };
 
@@ -139,6 +149,8 @@ public sealed class FeatureStatus
     public string? Error { get; set; }
     public List<string> Warnings { get; } = new();
     public double Milliseconds { get; set; }
+    /// <summary>A hole's or a thread's callout ("⌀6.6 THRU ALL"); null for other features.</summary>
+    public string? Callout { get; set; }
     /// <summary>Model edges (polylines) the feature failed on, for highlighting.</summary>
     public List<Vec3[]> ProblemEdges { get; } = new();
     public bool Ok => Error == null;

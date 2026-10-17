@@ -3,3 +3,7 @@
 *.desktop text eol=lf
 installer/linux/*.xml text eol=lf
 *.py text eol=lf
+
+# Workbooks (the built-in library: data/library): binary, shown as their cells by git diff once a clone sets up the
+# xlsx driver (docs/library-v2.md, "The built-in library")
+*.xlsx binary diff=xlsx

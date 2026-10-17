@@ -42,8 +42,10 @@ public static class PartMaterial
         var s = new LibrarySnapshot
         {
             Table = CustomTable, Row = name.Trim().Length > 0 ? name.Trim() : CustomName, LibraryName = "",
-            Columns = Materials.Columns.ToList(),
-            Values = Materials.Columns.Select(c => c == "density" ? density : b?.Value(c) ?? double.NaN).ToList(),
+            Kind = TableKinds.Material, Units = TableUnits.Metric, Columns = Materials.Columns.ToList(),
+            // (in a metric material table's units, as the set's snapshots are)
+            Values = Materials.Columns.Select(c => (c == "density" ? density : b?.Value(c)) is { } si
+                ? Schemas.UnitOf(TableKinds.Material, c).FromBase(si, TableUnits.Metric) : double.NaN).ToList(),
             Text = basedOn?.Text != null ? new SortedDictionary<string, string>(basedOn.Text, StringComparer.Ordinal)
                 : new SortedDictionary<string, string>(StringComparer.Ordinal) { [Materials.TypeKey] = MaterialType.Other.ToString() },
         };

@@ -89,8 +89,13 @@ public abstract class Feature
     [JsonIgnore] public abstract string Kind { get; }
     /// <summary>Feature ids this feature consumes (e.g. the sketch of an extrude). Used for tree nesting.</summary>
     [JsonIgnore] public virtual IEnumerable<string> Consumes => Array.Empty<string>();
-    /// <summary>The library items ("ISO273/M8") the feature is sized from: the part keeps a snapshot of each (<see cref="Library.LibraryLink"/>).</summary>
+    /// <summary>The library items ("ISO261-coarse:M8") the feature is sized from: the part keeps a snapshot of each (<see cref="Library.LibraryLink"/>).</summary>
     public virtual IEnumerable<string> LibraryItems() => Array.Empty<string>();
+    /// <summary>
+    /// The library tables the feature picks a row of when built (an Auto thread: the size fitting its face): the part
+    /// keeps a snapshot of each of their rows, so it builds the same without the library.
+    /// </summary>
+    public virtual IEnumerable<string> LibraryTables() => Array.Empty<string>();
     public Feature Clone() => (Feature)Serialization.CloneObject(this, GetType());
 }
 
@@ -228,12 +233,14 @@ public sealed class ThreadFeature : Feature
     public override string Kind => "Thread";
     public FaceRef Face { get; set; } = new();
     /// <summary>
-    /// "Auto" (the ISO metric coarse size fitting the face), a size of <see cref="Standard"/>'s table such as "M10" or
-    /// "1/4-20 UNC", or "Custom" (Pitch, and the face as major/minor diameter).
+    /// "Auto" (the size of <see cref="Standard"/>'s table fitting the face: a shaft's major diameter, a hole's tap
+    /// drill), a size of its table such as "M10" or "1/4-20 UNC", or "Custom" (Pitch, and the face as major/minor diameter).
     /// </summary>
     public string Size { get; set; } = "Auto";
     /// <summary>The library table the size is from ("ASME-B1.1-UNC"); null: ISO metric coarse.</summary>
     public string? Standard { get; set; }
+    /// <summary>The size's class (its external class, the row's key: 6g, 2A, 3A); null: the table's first for the size (Auto: each size's first).</summary>
+    public string? Class { get; set; }
     /// <summary>Pitch for a custom thread.</summary>
     public string Pitch { get; set; } = "1.5";
     /// <summary>Blind (Length), up to the face's far end (stopping short of a shoulder), or through it (nuts, through holes).</summary>
@@ -255,6 +262,7 @@ public sealed class ThreadFeature : Feature
     /// <summary>Start from the other end of the face.</summary>
     public bool Reverse { get; set; }
     public override IEnumerable<string> LibraryItems() => Library.ThreadSizes.Items(this);
+    public override IEnumerable<string> LibraryTables() => Size == "Auto" ? new[] { Library.ThreadSizes.TableOf(this) } : Array.Empty<string>();
 }
 
 public sealed class FilletFeature : Feature
@@ -322,7 +330,8 @@ public sealed class ChamferFeature : Feature
     public bool FlatCorners { get; set; }
 }
 
-public enum HoleType { Simple, Counterbore, Countersink }
+/// <summary>A hole's shape: drilled, with a counterbore or a countersink for a screw's head, or tapped (drilled with the tap drill, threaded).</summary>
+public enum HoleType { Simple, Counterbore, Countersink, Tapped }
 
 public sealed class HoleFeature : Feature
 {
@@ -368,14 +377,45 @@ public sealed class HoleFeature : Feature
     /// </summary>
     public Sketching.Sketch? Profile { get; set; }
     /// <summary>
-    /// The clearance hole table the hole is sized from ("ISO273", "ASME-B18.2.8"), with <see cref="Size"/> (the screw:
-    /// "M8", "1/4") and <see cref="Fit"/> (its column: close, normal, loose); null: sized by hand. The diameters above
-    /// are what the hole is made with; these say where they came from, so a library update can size it again.
+    /// A hole type from the library (<see cref="Library.TableKinds.HoleType"/>: its key), <see cref="Size"/> its row; its
+    /// profile copied into <see cref="Profile"/>, its size's values read from the part's snapshot of the row when built.
+    /// Null for the built-in types.
+    /// </summary>
+    public string? LibraryType { get; set; }
+    /// <summary>The library hole type's values by column as resolved for building (mm; a column named with "angle" in degrees); not saved.</summary>
+    [System.Text.Json.Serialization.JsonIgnore] public Dictionary<string, double>? TypeValues { get; set; }
+    /// <summary>
+    /// The fastener holes table the hole is sized from ("ISO-holes", <see cref="Library.TableKinds.FastenerHoles"/>), with
+    /// the <see cref="Fastener"/> it is for ("Socket head cap screw"), its <see cref="Size"/> ("M8", "1/4") and its
+    /// <see cref="Fit"/> (close, normal, loose); null: sized by hand, its diameters as typed. Sized from the table, its
+    /// diameters are its row's, read from the part's snapshot of it when built (<see cref="Library.HoleSizes.Effective"/>),
+    /// but for those typed over (<see cref="Overrides"/>).
     /// </summary>
     public string? Standard { get; set; }
+    public string? Fastener { get; set; }
     public string? Size { get; set; }
-    /// <summary>(null: normal; null rather than a default, so holes saved before this keep their bytes)</summary>
+    /// <summary>(null: normal)</summary>
     public string? Fit { get; set; }
+    /// <summary>
+    /// A hole sized from the library: the values typed over its row's, by field (<see cref="Library.HoleSizes.Fields"/>:
+    /// Diameter, CbDiameter, CbDepth, CsDiameter, CsAngle); a library update leaves them as typed. Null: none.
+    /// </summary>
+    public Dictionary<string, string>? Overrides { get; set; }
+    /// <summary>
+    /// A tapped hole's thread: its table ("ASME-B1.1-UNC"; null: ISO metric coarse) and size ("M8"); the hole is
+    /// drilled with the size's tap drill (but a diameter typed over) and threaded (shown cosmetic) to <see cref="ThreadDepth"/>.
+    /// </summary>
+    public string? ThreadStandard { get; set; }
+    public string? ThreadSize { get; set; }
+    /// <summary>The thread's class (its row's key, the external class: 2A; the hole is its internal class, 2B); null: the table's first.</summary>
+    public string? ThreadClass { get; set; }
+    /// <summary>How deep a tapped hole is threaded (blank: as deep as it goes; through the part for Through All).</summary>
+    public string ThreadDepth { get; set; } = "";
+    /// <summary>
+    /// A tapped hole's thread shown as a helix on the wall (fast to rebuild and draw), not cut; off, cut as the Thread
+    /// feature cuts a hole's (ISO 60° basic profile). The View menu can show every thread modeled or cosmetic instead.
+    /// </summary>
+    public bool ThreadCosmetic { get; set; } = true;
     public override IEnumerable<string> Consumes => new[] { SketchId };
     public override IEnumerable<string> LibraryItems() => Library.HoleSizes.Items(this);
 }
@@ -581,7 +621,7 @@ public sealed class ImportFeature : Feature
 public sealed class FastenerFeature : Feature
 {
     public override string Kind => "Fastener";
-    /// <summary>The row ("ISO4762/M8x30").</summary>
+    /// <summary>The row ("ISO4762:M8x30").</summary>
     public string Item { get; set; } = "";
     /// <summary>How the fastener is named in a bill of materials ("ISO 4762 M8x30").</summary>
     public string Designation { get; set; } = "";

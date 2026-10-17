@@ -9,10 +9,12 @@ using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.Platform.Storage;
 using Avalonia.Styling;
 using SpryCad.Core;
 using SpryCad.Core.Model;
 using SpryCad.Core.Regen;
+using SpryCad.Core.Library;
 
 namespace SpryCad.App.UI;
 
@@ -41,9 +43,109 @@ static class ParametersDialog
         var body = Body(owner, (equations.view, equations.refresh), startTable);
         if (select != null && table == null) Avalonia.Threading.Dispatcher.UIThread.Post(() => equations.select(select), Avalonia.Threading.DispatcherPriority.Loaded);
         var close = new Button { Content = "Close", IsCancel = true };
-        var w = Dialogs.MakeWindow("Parameters", Dialogs.WithButtons(body, null, close), 1000);
+        // the equations and design tables to Excel and back, a sheet each
+        var toExcel = new Button { Content = "Export to Excel…" };
+        ToolTip.SetTip(toExcel, "Writes the equations and design tables to an Excel workbook, a sheet each, to edit in a spreadsheet and import again");
+        var fromExcel = new Button { Content = "Import from Excel…" };
+        ToolTip.SetTip(fromExcel, "Reads equations and design tables from an Excel workbook (as Export to Excel writes them); shows what changes first");
+        var left = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Children = { toExcel, fromExcel } };
+        var w = Dialogs.MakeWindow("Parameters", Dialogs.WithButtons(body, left, close), 1000);
         close.Click += (_, _) => w.Close();
+        toExcel.Click += async (_, _) => await ExportExcel(owner, w);
+        fromExcel.Click += async (_, _) =>
+        {
+            if (await ImportExcel(owner, w)) { w.Close(); await Show(owner, tables: true); }
+        };
         await w.ShowDialog(owner);
+    }
+
+    static readonly FilePickerFileType ExcelType = new("Excel Workbook") { Patterns = new[] { "*.xlsx" } };
+
+    /// <summary>The part's equations and design tables to an Excel workbook.</summary>
+    static async Task ExportExcel(MainWindow owner, Window w)
+    {
+        var doc = owner.Session.Doc;
+        var f = await w.StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+        {
+            Title = "Export to Excel", SuggestedFileName = "Parameters.xlsx", DefaultExtension = ".xlsx", FileTypeChoices = new[] { ExcelType },
+        });
+        if (f?.TryGetLocalPath() is not { } p) return;
+        // (made in memory first: a workbook that fails leaves no empty file behind)
+        try
+        {
+            var ms = new MemoryStream();
+            DesignTableWorkbook.Write(doc.Equations, doc.Tables ?? new(), ms);
+            await File.WriteAllBytesAsync(p, ms.ToArray());
+            owner.Status($"Exported the parameters to {p}.");
+        }
+        catch (Exception ex)
+        {
+            App.Log(ex, $"Exporting the parameters to {p}");
+            await Dialogs.Message(w, "Export Failed", $"{System.IO.Path.GetFileName(p)} could not be written: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Equations and design tables from an Excel workbook into the part (one undo step): equations by name changed or
+    /// added, tables by name replaced or added, nothing deleted; what changes shown first. True when imported.
+    /// </summary>
+    static async Task<bool> ImportExcel(MainWindow owner, Window w)
+    {
+        var files = await w.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions { Title = "Import from Excel", AllowMultiple = false, FileTypeFilter = new[] { ExcelType } });
+        if (files.FirstOrDefault()?.TryGetLocalPath() is not { } p) return false;
+        List<Equation> eqs; List<DesignTable> tables; List<string> problems;
+        try { await using var fs = File.OpenRead(p); (eqs, tables, problems) = DesignTableWorkbook.Read(fs); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or FormatException or ArgumentException)
+        {
+            await Dialogs.Message(w, "Import Failed", $"{System.IO.Path.GetFileName(p)} could not be read: {ex.Message}");
+            return false;
+        }
+        if (problems.Count > 0)
+        {
+            await Dialogs.Message(w, "Import Failed", $"{System.IO.Path.GetFileName(p)} has {problems.Count} problem{(problems.Count == 1 ? "" : "s")}; nothing was imported. Correct them and import again:\n\n"
+                + string.Join("\n", problems.Take(15)) + (problems.Count > 15 ? $"\n… {problems.Count - 15} more" : ""));
+            return false;
+        }
+        var doc = owner.Session.Doc;
+        Equation? Eq(string name) => doc.Equations.FirstOrDefault(e => e.Name.Trim().Equals(name, StringComparison.OrdinalIgnoreCase));
+        DesignTable? Table(string name) => doc.Tables?.FirstOrDefault(t => t.Name.Trim().Equals(name, StringComparison.OrdinalIgnoreCase));
+        var lines = new List<string>();
+        var newEqs = eqs.Count(e => Eq(e.Name) == null);
+        var changedEqs = eqs.Count(e => Eq(e.Name) is { } o && (o.Expr != e.Expr || o.Exposed != e.Exposed || o.Description != e.Description));
+        if (newEqs + changedEqs > 0) lines.Add($"Equations: {Count(changedEqs, "changed")}{(changedEqs > 0 && newEqs > 0 ? ", " : "")}{Count(newEqs, "added")}");
+        foreach (var t in tables)
+        {
+            if (Table(t.Name) is not { } o) { lines.Add($"{t.Name}: new table, {t.Rows.Count} rows"); continue; }
+            int added = t.Rows.Count(r => o.Row(r.Key) == null);
+            int removed = o.Rows.Count(r => t.Row(r.Key) == null);
+            int changed = t.Rows.Count(r => o.Row(r.Key) is { } or && t.Columns.Select((c, i) => (c, i)).Any(x => o.Columns.IndexOf(x.c) is var oc && (oc < 0 || or.ValueAt(oc) != r.ValueAt(x.i))));
+            bool columns = !t.Columns.SequenceEqual(o.Columns);
+            var parts = new List<string>();
+            if (added > 0) parts.Add($"{added} rows added");
+            if (changed > 0) parts.Add($"{changed} rows changed");
+            if (removed > 0) parts.Add($"{removed} rows removed");
+            if (columns) parts.Add($"columns now {string.Join(", ", t.Columns)}");
+            if (parts.Count > 0 || o.Selected != t.Selected || o.Description != t.Description || o.Exposed != t.Exposed) lines.Add($"{t.Name}: " + (parts.Count > 0 ? string.Join(", ", parts) : "row in use or description changed"));
+        }
+        if (lines.Count == 0) { owner.Status($"{System.IO.Path.GetFileName(p)} has no changes for this part."); return false; }
+        if (!await Dialogs.YesNo(w, "Import from Excel", string.Join("\n", lines) + "\n\nEquations and tables not in the workbook stay as they are.", "Import", "Cancel")) return false;
+        owner.Session.Change(() =>
+        {
+            foreach (var e in eqs)
+                if (Eq(e.Name) is { } o) { o.Expr = e.Expr; o.Exposed = e.Exposed; o.Description = e.Description; }
+                else doc.Equations.Add(e);
+            foreach (var t in tables)
+            {
+                doc.Tables ??= new();
+                if (Table(t.Name) is { } o) doc.Tables[doc.Tables.IndexOf(o)] = t;
+                else doc.Tables.Add(t);
+            }
+            TableConfig.ApplyMaterial(doc);
+        });
+        owner.Status($"Imported the parameters from {System.IO.Path.GetFileName(p)}.");
+        return true;
+
+        static string Count(int n, string what) => n == 0 ? "" : $"{n} {what}";
     }
 
     // ---- shared ----------------------------------------------------------------------------------------------------

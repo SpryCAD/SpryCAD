@@ -105,7 +105,7 @@ static class StorageTests
         doc.SketchVisibility = new() { [hole.Id] = false };
         doc.RollbackIndex = doc.Features.Count - 1;
         doc.DerivedFrom = CadDocument.NewGuid();
-        doc.Library = new(StringComparer.Ordinal) { ["ISO273/M8"] = SpryCad.Core.Library.LibrarySet.BuiltIn.Snapshot("ISO273/M8")! };
+        doc.Library = new(StringComparer.Ordinal) { ["ISO-holes:Socket head cap screw:M8"] = SpryCad.Core.Library.LibrarySet.BuiltIn.Snapshot("ISO-holes:Socket head cap screw:M8")! };
         // sheet metal: a body (no features: its objects alone), a bend override, the profile rows it can use
         doc.SheetBodies = new() { new SpryCad.SheetMetal.SheetMetalBody { Id = "Sheet1", Name = "Sheet1", Material = "Steel CRS", Gauge = "16 ga", Overrides = new(StringComparer.Ordinal) { ["sm.allowance/k"] = "0.4" } } };
         doc.SheetOverrides = new() { new SpryCad.SheetMetal.SheetMetalOverride { Target = "EdgeFlange1.0.B", Values = { ["sm.tooling/inside radius"] = "2" } } };
