@@ -105,23 +105,29 @@ public static class Bom
 
     /// <summary>
     /// The rows as CSV (Item, Part, Configuration, Quantity, Material, then Mass in <paramref name="units"/>' mass unit
-    /// when the rows have it, File), quoted where needed.
+    /// when the rows have it, File), quoted where needed. <paramref name="sep"/> '\t': tab-separated, as pasted into a
+    /// spreadsheet.
     /// </summary>
-    public static string ToCsv(IEnumerable<BomRow> rows, UnitSystem units = UnitSystem.MMGS)
+    public static string ToCsv(IEnumerable<BomRow> rows, UnitSystem units = UnitSystem.MMGS, char sep = ',')
     {
-        static string Q(string? s) => s == null ? "" : s.IndexOfAny(new[] { ',', '"', '\n' }) >= 0 ? "\"" + s.Replace("\"", "\"\"") + "\"" : s;
+        string Q(string? s) => s == null ? "" : s.IndexOfAny(new[] { sep, '"', '\n' }) >= 0 ? "\"" + s.Replace("\"", "\"\"") + "\"" : s;
         var list = rows.ToList();
         bool mass = list.Any(r => r.Mass != null);
         // (part numbers and descriptions when a part has them)
         bool props = list.Any(r => r.PartNumber != null || r.Description != null);
-        var sb = new StringBuilder("Item,Part," + (props ? "Part Number,Description," : "") + "Configuration,Quantity,Material," + (mass ? $"Mass ({MassUnits.Label(units)}),Total mass ({MassUnits.Label(units)})," : "") + "File\n");
+        var header = new List<string> { "Item", "Part" };
+        if (props) header.AddRange(new[] { "Part Number", "Description" });
+        header.AddRange(new[] { "Configuration", "Quantity", "Material" });
+        if (mass) header.AddRange(new[] { $"Mass ({MassUnits.Label(units)})", $"Total mass ({MassUnits.Label(units)})" });
+        header.Add("File");
+        var sb = new StringBuilder(string.Join(sep, header)).Append('\n');
         foreach (var r in list)
         {
-            sb.Append(Q(r.Item)).Append(',').Append(Q(new string(' ', 2 * r.Level) + r.Name)).Append(',');
-            if (props) sb.Append(Q(r.PartNumber)).Append(',').Append(Q(r.Description)).Append(',');
-            sb.Append(Q(r.Configuration)).Append(',')
-              .Append(r.Quantity.ToString(CultureInfo.InvariantCulture)).Append(',').Append(Q(r.Material)).Append(',');
-            if (mass) sb.Append(r.Mass is { } g ? MassUnits.Number(g, units) + "," + MassUnits.Number(g * r.Quantity, units) : ",").Append(',');
+            sb.Append(Q(r.Item)).Append(sep).Append(Q(new string(' ', 2 * r.Level) + r.Name)).Append(sep);
+            if (props) sb.Append(Q(r.PartNumber)).Append(sep).Append(Q(r.Description)).Append(sep);
+            sb.Append(Q(r.Configuration)).Append(sep)
+              .Append(r.Quantity.ToString(CultureInfo.InvariantCulture)).Append(sep).Append(Q(r.Material)).Append(sep);
+            if (mass) sb.Append(r.Mass is { } g ? MassUnits.Number(g, units) + sep + MassUnits.Number(g * r.Quantity, units) : sep.ToString()).Append(sep);
             sb.Append(Q(r.File)).Append('\n');
         }
         return sb.ToString();

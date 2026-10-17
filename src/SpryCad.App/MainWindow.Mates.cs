@@ -85,7 +85,7 @@ public partial class MainWindow
         if (_patterning != null) { PatternPick(component, face); return; }
         if (_fastening != null) { FastenerPick(component, face); return; }
         if (_mating is not { } st || Asm is not { } a) return;
-        PickRef(a.Model.RefTo(component, face), $"{a.Model.NameAt(component)}: only planar and cylindrical faces can be mated");
+        PickRef(a.Model.RefTo(component, face), $"{a.Model.NameAt(component)}: only planar, cylindrical, conical and spherical faces can be mated");
     }
 
     void PickRef(MateRef? r, string notMateable)
@@ -299,7 +299,7 @@ public partial class MainWindow
             planes.Children.Add(b);
         }
         sel.Children.Add(planes);
-        page.Info(sel, "Select two planar or cylindrical faces, or a face and an origin plane. Select a face again to remove it.");
+        page.Info(sel, "Select two planar, cylindrical, conical or spherical faces, or a face and an origin plane. Select a face again to remove it.");
 
         // the types: a row each, its icon and name (those that cannot relate the picks greyed)
         var typeButtons = new Dictionary<MateType, ToggleButton>();

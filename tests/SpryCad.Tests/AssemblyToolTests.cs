@@ -268,6 +268,9 @@ static class AssemblyToolTests
             var parts = Bom.Build(m, BomKind.PartsOnly);
             t.True(parts.Count == 3 && parts.Single(r => r.Name == "Pin").Quantity == 2, string.Join("; ", parts));
             t.True(Bom.ToCsv(ind).Split('\n')[0] == "Item,Part,Configuration,Quantity,Material,File" && Bom.ToCsv(ind).Contains("2.1,  Pin,"), Bom.ToCsv(ind));
+            // tab-separated (Copy): a comma in a value stays in its cell, a tab is quoted
+            var tsv = Bom.ToCsv(new[] { new BomRow("1", 0, "Plate, 3 mm", "Default", 2, false, null, "Steel\tAISI 1020", Description: "Cut, deburred") }, sep: '\t');
+            t.Eq(tsv, "Item\tPart\tPart Number\tDescription\tConfiguration\tQuantity\tMaterial\tFile\n1\tPlate, 3 mm\t\tCut, deburred\tDefault\t2\t\"Steel\tAISI 1020\"\t\n");
 
             var mp = AssemblyMass.Of(m);
             var vol = BaseVolume + 4 * PinVolume;

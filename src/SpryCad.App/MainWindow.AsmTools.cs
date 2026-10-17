@@ -537,19 +537,24 @@ public partial class MainWindow
         });
         if (kind != PatternKind.Mirror) page.Check(dirSec, "Reverse direction", () => p.Reverse, v => p.Reverse = v);
         var opts = page.Section(kind == PatternKind.Mirror ? "Copies" : "Spacing and Instances");
+        var countOk = true;
         if (kind != PatternKind.Mirror)
         {
             var vk = kind == PatternKind.Linear ? ValueKind.Length : ValueKind.Angle;
             page.Number(opts, kind == PatternKind.Linear ? "Spacing" : "Angle", () => Units.Entry(p.Spacing, vk),
                 v => { if (Core.Expr.TryEvaluate(v, null, out var x, out _)) p.Spacing = x.Value; }, null, kind == PatternKind.Linear ? null : "°");
-            page.Number(opts, "Instances", () => p.Count.ToString(CultureInfo.InvariantCulture),
-                v => { if (int.TryParse(v, out var n) && n >= 2 && n <= 500) p.Count = n; });
+            // a plain number (unit ""): a field without a unit is a length, "5" kept as "5mm"
+            page.Number(opts, "Instances", () => p.Count.ToString(CultureInfo.InvariantCulture), v =>
+            {
+                countOk = int.TryParse(v, NumberStyles.Integer, CultureInfo.InvariantCulture, out var n) && n >= 2 && n <= 500;
+                if (countOk) p.Count = n;
+            }, null, "");
         }
         else
         {
             page.Combo(opts, "Part symmetric about", new List<(int, string)> { (-1, "Automatic"), (0, "Its YZ plane"), (1, "Its ZX plane"), (2, "Its XY plane") },
                 () => p.Symmetry, v => p.Symmetry = v);
-            page.Info(opts, "Mirrored instances reuse the same part, flipped. Use for parts symmetric about one of their planes.");
+            page.Info(opts, "Mirrored instances are the same part turned, which matches its mirror image only if the part is symmetric about the plane set above. No opposite-hand part is made.");
         }
         var seeds = page.Section("Components to Pattern");
         var list = new StackPanel { Spacing = 2 };
@@ -575,9 +580,11 @@ public partial class MainWindow
         void Ok()
         {
             if (p.Seeds.Count == 0) { Status("Select the components to pattern."); return; }
+            if (!countOk) { Status("Instances must be a whole number from 2 to 500."); return; }
             if (kind == PatternKind.Mirror && p.Reference.Kind != MateGeomKind.Plane) { Status("Select a planar face or an origin plane to mirror across."); return; }
             if (kind == PatternKind.Circular && p.Reference.Kind == MateGeomKind.Point) { Status("Select a cylindrical face or an origin plane for the axis."); return; }
             Close();
+            var created = editing == null;
             a.BeginChange();
             try
             {
@@ -589,7 +596,7 @@ public partial class MainWindow
                 else editing = a.Model.AddPattern(kind, p.Seeds.Select(a.Model.Doc.Find).OfType<Component>(), p.Reference, p.Count, p.Spacing, p.Reverse, p.Symmetry);
                 if (a.Model.HasMates) a.Model.SolveMates();
                 a.EndChange();
-                Status($"{editing.Name} updated with {editing.Instances.Count} instance{(editing.Instances.Count == 1 ? "" : "s")}.");
+                Status($"{editing.Name} {(created ? "created" : "updated")} with {editing.Instances.Count} instance{(editing.Instances.Count == 1 ? "" : "s")}.");
             }
             catch (Exception ex) { App.Log(ex, "Pattern"); a.AbandonChange(); _ = Dialogs.Message(this, title, ex.Message); }
         }
@@ -604,7 +611,7 @@ public partial class MainWindow
     void PatternPick(string component, string face)
     {
         if (_patterning is not { } st || Asm is not { } a) return;
-        if (a.Model.RefTo(component, face) is not { } r || r.Kind == MateGeomKind.Point) { Status("Select a planar or cylindrical face."); return; }
+        if (a.Model.RefTo(component, face) is not { } r || r.Kind == MateGeomKind.Point) { Status("Select a planar, cylindrical or conical face."); return; }
         st.Pattern.Reference = r;
         st.Update?.Invoke();
     }
@@ -699,7 +706,7 @@ public partial class MainWindow
         RefreshAssemblyScene();
     }
 
-    /// <summary>Explode / Collapse on the Assembly tab: the exploded view shown or not (made first if there is none).</summary>
+    /// <summary>Explode / Collapse (Assembly tab, Display): the exploded view shown or not (made first if there is none).</summary>
     void ToggleExplode()
     {
         if (Asm is not { } a) return;
@@ -785,7 +792,7 @@ public partial class MainWindow
             });
             if (f?.TryGetLocalPath() is { } p) { await File.WriteAllTextAsync(p, Bom.ToCsv(rows, units)); Status("Saved " + p + "."); }
         };
-        copy.Click += (_, _) => _ = Clipboard?.SetTextAsync(Bom.ToCsv(rows, units).Replace(',', '\t'));
+        copy.Click += (_, _) => _ = Clipboard?.SetTextAsync(Bom.ToCsv(rows, units, '\t'));
         var cts = new CancellationTokenSource();
         close.Click += (_, _) => w.Close();
         w.Closed += (_, _) => cts.Cancel();
@@ -852,7 +859,7 @@ public partial class MainWindow
             var c = found[list.SelectedIndex];
             _clashes = new HashSet<string> { c.A, c.B };
             RefreshAssemblyScene();
-            Status($"{a.Model.NameAt(c.A)} and {a.Model.NameAt(c.B)} overlap by {c.Volume:0.###} mm³.");
+            Status($"{a.Model.NameAt(c.A)} and {a.Model.NameAt(c.B)} overlap by {Units.Volume(c.Volume)}.");
         };
         calc.Click += async (_, _) =>
         {
@@ -867,12 +874,12 @@ public partial class MainWindow
             {
                 found = await Task.Run(() => Interference.Find(items, notes, within,
                     (k, n) => Avalonia.Threading.Dispatcher.UIThread.Post(() => info.Text = $"Checking {k} of {n} pairs whose boxes overlap…"), token));
-                list.ItemsSource = found.Select(c => $"{a.Model.NameAt(c.A)}  ↔  {a.Model.NameAt(c.B)}:  {c.Volume:0.###} mm³").ToList();
+                list.ItemsSource = found.Select(c => $"{a.Model.NameAt(c.A)}  ↔  {a.Model.NameAt(c.B)}:  {Units.Volume(c.Volume)}").ToList();
                 info.Text = (found.Count == 0 ? $"No interference among {items.Count} parts." : $"{found.Count} interference{(found.Count == 1 ? "" : "s")} found. Select one to show it.") +
                             (notes.Count > 0 ? "\n" + string.Join("\n", notes.Take(6)) + (notes.Count > 6 ? $"\n… and {notes.Count - 6} more" : "") : "");
             }
             catch (OperationCanceledException) { }
-            catch (Exception ex) { App.Log(ex, "Interference"); info.Text = "Interference check failed: " + ex.Message; }
+            catch (Exception ex) { App.Log(ex, "Interference"); info.Text = $"Could not check interference: {ex.Message}"; }
             finally { calc.IsEnabled = true; }
         };
         var top = new StackPanel { Spacing = 6, Children = { new TextBlock { Text = "Finds parts whose volumes overlap. Touching faces are not reported.", TextWrapping = TextWrapping.Wrap }, withinBox, calc } };

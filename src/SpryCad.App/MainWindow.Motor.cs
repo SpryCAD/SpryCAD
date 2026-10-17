@@ -58,7 +58,7 @@ public partial class MainWindow
         var comp = page.Section("Component/Direction");
         var axisLbl = new TextBlock { TextWrapping = Avalonia.Media.TextWrapping.Wrap, FontSize = TypeScale.Body };
         comp.Children.Add(new Border { Classes = { "pmsection" }, Child = axisLbl, Padding = new Thickness(6, 4) });
-        page.Info(comp, "Select a cylindrical face of a floating component. The component rotates about the face's axis.");
+        page.Info(comp, "Select a cylindrical or conical face of a floating component. The component rotates about the face's axis.");
         page.Check(comp, "Reverse direction", () => st.Reverse, v => st.Reverse = v);
 
         var motion = page.Section("Motion");
@@ -91,7 +91,7 @@ public partial class MainWindow
 
         void Run(bool on)
         {
-            if (on && st.Axis == null) { Status("Select a cylindrical face first."); return; }
+            if (on && st.Axis == null) { Status("Select a cylindrical or conical face first."); return; }
             if (on)
             {
                 st.Timer ??= new DispatcherTimer(TimeSpan.FromMilliseconds(15), DispatcherPriority.Render, (_, _) => Tick());
@@ -177,7 +177,7 @@ public partial class MainWindow
         ShowPage(page);
         ShowConfirmCorner(Ok, Cancel, "OK (Enter)", "Cancel (Esc)");
         st.Update();
-        Status("Select a cylindrical face of the component to rotate, then click Play.");
+        Status("Select a cylindrical or conical face of the component to rotate, then click Play.");
     }
 
     /// <summary>A mate by its id (the assembly's, or a flexible sub-assembly's by its path: "C3/M1") as named in the tree.</summary>
@@ -195,7 +195,7 @@ public partial class MainWindow
     {
         if (_motor is not { } st || Asm is not { } a) return;
         var name = a.Model.NameAt(component);
-        if (a.Model.RefTo(component, face) is not { Kind: MateGeomKind.Axis } r) { Status($"{name}: select a cylindrical face for the motor axis."); return; }
+        if (a.Model.RefTo(component, face) is not { Kind: MateGeomKind.Axis } r) { Status($"{name}: select a cylindrical or conical face for the motor axis."); return; }
         if (a.Model.Movable(component) is not { } body) { Status($"{name} is fixed. Select a face of a floating component."); return; }
         st.Timer?.Stop();
         a.Model.EndMotion();

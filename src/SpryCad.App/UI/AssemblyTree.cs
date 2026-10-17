@@ -482,7 +482,7 @@ public sealed class AssemblyTree : DockPanel
         }
         Add(new Separator(), I("Re_place Component…", "replace", "replace"),
             embedded ? I("Make E_xternal…", "makeexternal", "save") : I("Make _Virtual…", "makevirtual", "import"),
-            I("_Form New Sub-assembly…", "form", "formsub", c.Pattern == null));
+            I("_Form New Sub-assembly…", "form", "formsub", c.Pattern == null && m.PatternOf(c) == null));
         var subs = m.Doc.Components.Where(x => x != c && x.IsAssembly && m.SubOf(x) is { Model: not null, Source: not SubSource.Cache }).ToList();
         if (subs.Count > 0 && c.Pattern == null)
         {

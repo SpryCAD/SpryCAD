@@ -472,7 +472,7 @@ public sealed class LinearPatternFeature : Feature
     public string Spacing2 { get; set; } = "20";
     public string Count2 { get; set; } = "1";
     public bool Reverse2 { get; set; }
-    /// <summary>Instances to skip, numbered from the seed (1) along direction 1, then row by row along direction 2.</summary>
+    /// <summary>Instances to skip, numbered from the seed (1) along direction 2, then row by row along direction 1 (as <see cref="Regen.Regenerator.PatternTransforms"/> lists them).</summary>
     public List<int> Skip { get; set; } = new();
 }
 

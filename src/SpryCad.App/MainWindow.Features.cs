@@ -1433,7 +1433,7 @@ public partial class MainWindow
         page.Number(d2, "Instances", () => f.Count2, v => f.Count2 = v, "lpattern", "");
         var sk = page.Section("Instances to Skip");
         var skipBox = page.IntList(sk, "Instances", () => f.Skip, v => f.Skip = v, 2,
-            "Instances to skip, e.g. 2, 5, 7-9, or click their numbers in the graphics area. The seed is 1; numbering runs along direction 1, then row by row along direction 2.");
+            "Instances to skip, e.g. 2, 5, 7-9, or click their numbers in the graphics area. The seed is 1; with two directions, numbering runs along direction 2, then row by row along direction 1.");
         var seeds = SeedBox(page, f.Seeds);
         page.Activate(f.Seeds.Count == 0 ? seeds : dirBox);
         BeginEdit(f, isNew, page, overlay: false, hint: f.Seeds.Count == 0 ? "Select the features to pattern." : null);

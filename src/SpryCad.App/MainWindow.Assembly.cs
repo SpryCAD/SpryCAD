@@ -512,7 +512,8 @@ public partial class MainWindow : IAssemblyHost
         Sep();
         Family("Display",
             new("hide", "Hide / Show", ToggleHidden),
-            new("isolate", "Isolate", () => Isolate()));
+            new("isolate", "Isolate", () => Isolate()),
+            new("explode", "Explode / Collapse", ToggleExplode));
         Cmd("explode", "Exploded View", ExplodeCommand);
         Family("Evaluate",
             new("interference", "Interference Detection", InterferenceCommand),
@@ -528,8 +529,8 @@ public partial class MainWindow : IAssemblyHost
     {
         ["Insert Components"] = "Inserts parts or sub-assemblies, linked to their files or embedded in the assembly.",
         ["Insert Fastener"] = "Inserts a library screw, sized and length-matched to a Hole Wizard hole, with optional nut and washers.",
-        ["Mate"] = "Positions two components relative to each other using faces, edges or planes.",
-        ["Motor"] = "Rotates a component about a cylindrical face's axis at a set speed to simulate motion through its mates.",
+        ["Mate"] = "Positions two components relative to each other using their faces or the origin planes.",
+        ["Motor"] = "Rotates a component about a cylindrical or conical face's axis at a set speed to simulate motion through its mates.",
         ["Linear Pattern"] = "Copies components along one direction; the instances follow their seed components.",
         ["Circular Pattern"] = "Copies components around an axis; the instances follow their seed components.",
         ["Mirror Components"] = "Mirrors components across a plane without creating opposite-hand parts.",
@@ -542,6 +543,7 @@ public partial class MainWindow : IAssemblyHost
         ["Open Part"] = "Opens the selected component's part or sub-assembly in its own tab; embedded files save back into the assembly.",
         ["Hide / Show"] = "Hides or shows the selected component; hidden components are still mated and solved.",
         ["Isolate"] = "Shows only the selected component; click again to show all components.",
+        ["Explode / Collapse"] = "Shows or hides the exploded view, creating one first if the assembly has none.",
         ["Exploded View"] = "Moves components apart in steps along set directions to show how the assembly fits together.",
         ["Interference Detection"] = "Finds components whose volumes overlap and highlights each pair in red.",
         ["Bill of Materials"] = "Lists parts and sub-assemblies with quantities, indented, top-level or parts-only, for copying or CSV export.",

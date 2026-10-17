@@ -4,6 +4,7 @@ using SpryCad.App.UI;
 using SpryCad.Core;
 using SpryCad.Core.Assembly;
 using SpryCad.Core.Library;
+using SpryCad.Core.Model;
 
 namespace SpryCad.App;
 
@@ -79,8 +80,8 @@ public partial class MainWindow
             if (st.Plan is { } p)
             {
                 var hold = p.End == FastenerEnd.Nut ? "a nut" : p.Tapped != null ? a.Model.NameAt(p.Tapped) : "a tapped part";
-                holeLbl.Text = $"{p.Size} hole in {a.Model.NameAt(p.Component)}: {Expr.Format(Math.Round(p.Clamped, 2))} mm clamped, held by {hold}; "
-                    + $"the screw needs {Expr.Format(Math.Round(p.Needed, 2))} mm.";
+                holeLbl.Text = $"{p.Size} hole in {a.Model.NameAt(p.Component)}: {Units.Length(p.Clamped)} clamped, held by {hold}; "
+                    + $"the screw needs {Units.Length(p.Needed)}.";
                 var screwTable = p.ScrewTable != null ? LibraryLink.Current.Table(p.ScrewTable) : null;
                 foreach (var r in p.Screws)
                 {

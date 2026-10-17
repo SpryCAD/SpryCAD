@@ -230,13 +230,13 @@ public partial class MainWindow
         StatusSketch.Text = _sketch.Status.Status switch
         {
             SketchStatus.FullyDefined => "Fully Defined",
-            SketchStatus.OverDefined => "Over Defined",
+            SketchStatus.OverDefined or SketchStatus.Failed => "Over Defined",
             _ => "Under Defined",
         };
         StatusSketch.Foreground = _sketch.Status.Status switch
         {
             SketchStatus.FullyDefined => Brushes.Black,
-            SketchStatus.OverDefined => Palette.Danger,
+            SketchStatus.OverDefined or SketchStatus.Failed => Palette.Danger,
             _ => Brushes.Blue,
         };
         _sketch.UpdateOverlay(Viewport);
@@ -358,7 +358,7 @@ public partial class MainWindow
                     // that rebuilds the panel from here would loop
                     if (UnitFormat.TryLength(v, Session.Lookup, out var r, out _) && r > 0) ed.FilletRadius = r;
                 }, "sketchfillet");
-                page.Info(fs, "Select corners where two lines meet, or both lines. The lines remain as construction geometry to keep dimensions to the sharp corner; delete the arc to restore it.");
+                page.Info(fs, "Select corners where two lines or arcs meet, or both entities. They remain as construction geometry to keep dimensions to the sharp corner; delete the fillet arc to restore it.");
             }
             if (ed.Tool == SketchTool.Polygon)
             {
@@ -367,7 +367,7 @@ public partial class MainWindow
                 page.Info(poly, "Click the center, then a corner.");
             }
             var t = page.Section("Tools");
-            page.Info(t, "L Line · R Rectangle · C Circle · A Arc · P Point · D Smart Dimension · T Trim · Esc Select. Drag points to move geometry. Double-click a dimension to change its value.");
+            page.Info(t, "L Line · R Rectangle · C Circle · A Arc · S Spline · P Point · D Smart Dimension · T Trim · Esc Select. Drag points to move geometry. Double-click a dimension to change its value.");
             page.ButtonRow(t, "Auto Arrange Dimensions", () => AutoArrange(ed), "dimension");
             page.Info(t, "Dimensions you place or drag stay where you put them; others are arranged automatically. Auto Arrange rearranges all dimensions, or only the selected ones.");
             var m = page.Section("Model Edges");

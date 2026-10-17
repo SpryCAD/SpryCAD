@@ -62,6 +62,7 @@ public partial class MainWindow
             C("hide", "Hide / Show", ToggleHidden);
             C("isolate", "Isolate", () => Isolate());
             C("explode", "Exploded View", ExplodeCommand);
+            C("explode", "Explode / Collapse", ToggleExplode);
             C("measure", "Measure", MeasureCommand);
             C("mass", "Mass Properties", MassPropertiesCommand);
         }

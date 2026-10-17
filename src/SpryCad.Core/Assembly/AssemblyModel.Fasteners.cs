@@ -153,10 +153,10 @@ public sealed partial class AssemblyModel
             needed = headW + clamped + options.Engagement * d;
             if (s.tapped == null) notes.Add("No tapped part found past the stack: the length allows for one there.");
             else if (s.threadDepth < options.Engagement * d - 1e-6)
-                notes.Add($"{Find(s.tapped)?.Component.Name} has only {Expr.Format(Math.Round(s.threadDepth, 2))} mm of thread for {Expr.Format(Math.Round(options.Engagement * d, 2))} mm of engagement.");
+                notes.Add($"{Find(s.tapped)?.Component.Name} has only {Doc.Units.Length(s.threadDepth)} of thread for {Doc.Units.Length(options.Engagement * d)} of engagement.");
         }
         var screw = screws.FirstOrDefault(r => (screwTable.Base(r, "l") ?? 0) >= needed - 1e-6);
-        if (screw == null) notes.Add($"No {size} screw offered is long enough: {Expr.Format(Math.Round(needed, 2))} mm needed, {Expr.Format(Math.Round(screwTable.Base(screws[^1], "l") ?? 0, 2))} mm the longest.");
+        if (screw == null) notes.Add($"No {size} screw offered is long enough: {Doc.Units.Length(needed)} needed, {Doc.Units.Length(screwTable.Base(screws[^1], "l") ?? 0)} the longest.");
         var plan = new FastenerPlan
         {
             Component = componentId, HoleFace = holeFace, Hole = hole, Size = size,

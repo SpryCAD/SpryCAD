@@ -58,7 +58,7 @@ public partial class MainWindow
         var page = new PmPage("Offset Entities", "offset");
         var what = page.Section("Entities to Offset");
         var ents = page.Selection(what, "Entities", SelFilter.SketchSegment,
-            "Select lines, arcs or circles; each adds its connected chain. Select one again, or press Delete in the box, to remove it.",
+            "Select lines, arcs, circles or splines; each adds its connected chain. Select one again, or press Delete in the box, to remove it.",
             accept: i => ed.Sk.Entity(i.SketchItem) is SkLine or SkArc or SkCircle or SkSpline);
         var prm = page.Section("Parameters");
         var distance = ed.OffsetDistance;

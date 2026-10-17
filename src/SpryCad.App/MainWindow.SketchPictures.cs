@@ -80,7 +80,7 @@ public partial class MainWindow
         });
         _pictureSeparateXY = false;
         OpenPicturePage(pic.Id);
-        Status("Picture inserted. Drag a corner to scale it, or click two points on it to scale it to a known distance.");
+        Status("Picture inserted. Drag a corner to scale it, or click Place Points to scale it from two points a known distance apart.");
     }
 
     /// <summary>Opens a picture's page (one of the sketch's: edited from here until OK or Cancel).</summary>
@@ -152,7 +152,7 @@ public partial class MainWindow
         {
             page.Info(scale, ed.PickingScalePoints
                 ? "Click two points on the picture a known distance apart."
-                : "Click two points on the picture a known distance apart, then enter the distance between them.");
+                : "Click Place Points, then click two points on the picture a known distance apart and enter the distance between them.");
             page.ButtonRow(scale, ed.PickingScalePoints ? "Placing Points…" : "Place Points", () => { ed.PickScalePoints(); OpenPicturePage(id); });
         }
         else
