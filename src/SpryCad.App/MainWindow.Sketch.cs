@@ -220,6 +220,17 @@ public partial class MainWindow
         HideConfirmCorner();
         ShowPage(null);
         StatusSketch.Text = "";
+        // a hole's profile (not in the document): kept with the hole when changed, the hole's page back
+        if (_profileHole is { } ph)
+        {
+            _profileHole = null;
+            if (save && ed.Modified) ph.hole.Profile = ed.Feature.Sketch;
+            ClearPendingEquations();
+            ShowTab("Features");
+            OpenHolePage(ph.hole, ph.isNew, ph.madeSketch);
+            RefreshScene();
+            return;
+        }
         var pending = _pendingAfterSketch; _pendingAfterSketch = null;
         var hole = _pendingHole; _pendingHole = null;
         var madeSketch = _sketchIsNew || _pendingHoleMadeSketch; _pendingHoleMadeSketch = false;

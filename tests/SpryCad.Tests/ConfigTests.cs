@@ -280,6 +280,54 @@ static class ConfigTests
             }, upper: false), Math.PI * 25 * 3 + Math.PI * 9 * 7 + Frustum(4, 3, 1));
         });
 
+        t.Test("Hole profiles: each type's as a sketch cuts what the type does; edited (a dimension, one an equation drives), the hole follows", () =>
+        {
+            // (a plate 10 thick both ways from the Front plane, the hole from its top face down)
+            double Removed(Action<HoleFeature> set, Func<HoleFeature, Sketch?>? profile = null, string? k = null)
+            {
+                var doc = new CadDocument();
+                if (k != null) doc.Equations.Add(new Equation { Name = "K", Expr = k });
+                var s1 = doc.AddFeature(new SketchFeature { Plane = PlaneRef.Front, Sketch = CoreTests.Rect(100, 60) });
+                doc.AddFeature(new ExtrudeFeature { SketchId = s1.Id, Depth = "10", End = EndCondition.MidPlane });
+                var top = doc.AddFeature(new PlaneFeature { Base = PlaneRef.Front, Offset = "5" });
+                var before = Volume(new Regenerator().Rebuild(doc));
+                var sk = new Sketch();
+                sk.Add(new SkPointEntity { P = sk.AddPoint(new Vec2(20, 10)).Id });
+                var s2 = doc.AddFeature(new SketchFeature { Plane = new PlaneRef { Feature = top.Id }, Sketch = sk });
+                var h = new HoleFeature { SketchId = s2.Id, Diameter = "6", Depth = "4", CbDiameter = "10", CbDepth = "3", CsDiameter = "10" };
+                set(h);
+                h.Profile = profile?.Invoke(h);
+                doc.AddFeature(h);
+                var r = new Regenerator().Rebuild(doc);
+                t.True(r.Status[h.Id].Ok, r.Status[h.Id].Error ?? "");
+                return before - Volume(r);
+            }
+            static Sketch Std(HoleFeature h) => HoleProfile.Default(h, HoleProfile.Lookup(h, _ => null, 1, 4), 1);
+            foreach (var (what, set) in new (string, Action<HoleFeature>)[]
+            {
+                ("simple, through", h => h.End = HoleEnd.ThroughAll),
+                ("simple, blind, drill point", h => { h.End = HoleEnd.Blind; h.DrillPoint = true; }),
+                ("counterbore", h => { h.End = HoleEnd.ThroughAll; h.Type = HoleType.Counterbore; }),
+                ("countersink, blind", h => { h.End = HoleEnd.Blind; h.DrillPoint = false; h.Type = HoleType.Countersink; }),
+            })
+            {
+                var builtIn = Removed(set);
+                t.Near(Removed(set, Std), builtIn, builtIn * 1e-6 + 1e-6);
+            }
+            // the counterbore 1 deeper, by its dimension: a ring of it more
+            Sketch Deeper(HoleFeature h, string expr)
+            {
+                var sk = Std(h);
+                sk.Constraints.First(c => c.Expr == "CbDepth").Expr = expr;
+                return sk;
+            }
+            Action<HoleFeature> cbore = h => { h.End = HoleEnd.ThroughAll; h.Type = HoleType.Counterbore; };
+            var plain = Removed(cbore);
+            var ring = Math.PI * (25 - 9) * 1;
+            t.Near(Removed(cbore, h => Deeper(h, "CbDepth + 1mm")) - plain, ring, ring * 0.02);
+            t.Near(Removed(cbore, h => Deeper(h, "CbDepth + K"), "1mm") - plain, ring, ring * 0.02);
+        });
+
         t.Test("Suppress When: a condition that cannot be evaluated is an error", () =>
         {
             var (doc, cut, lp) = Plate("Nope > 1");

@@ -922,7 +922,7 @@ public partial class MainWindow
         upTo.Changed += () => f.UpTo = upTo.Items.FirstOrDefault()?.ToPlaneRef();
         var drillPoint = page.Check(end, "Drill point (118°)", () => f.DrillPoint, v => f.DrillPoint = v);
         page.Check(end, "Reverse direction", () => f.Reverse, v => f.Reverse = v);
-        page.Check(end, "Clear material above", () => f.ClearAbove, v => f.ClearAbove = v);
+        var clearAbove = page.Check(end, "Clear material above", () => f.ClearAbove, v => f.ClearAbove = v);
 
         // the optional countersinks (as SolidWorks): each ticked shows its diameter (suggested a little over what it
         // widens) and angle
@@ -960,6 +960,22 @@ public partial class MainWindow
             headCs.IsVisible = f.Type == HoleType.Counterbore;
             farCs.IsVisible = f.EndKind is HoleEnd.ThroughAll or HoleEnd.UpToNext;
         };
+        // the profile: the type's, or the hole's own (as SolidWorks lets the hole's sketch be edited); with its own, the
+        // options and the clearance are what it draws
+        var profSec = page.Section("Profile");
+        page.Info(profSec, f.Profile == null ? "The hole type's standard profile."
+            : "A custom profile. Its dimensions can use " + string.Join(", ", HoleProfile.Names.Select(n => n.name)) + ", and the part's equations.");
+        page.ButtonRow(profSec, "Edit Profile…", () => EditHoleProfile(f, isNew, madeSketch), "sketch");
+        if (f.Profile != null)
+            page.ButtonRow(profSec, "Use Standard Profile", () =>
+            {
+                f.Profile = null;
+                if (_edit != null) _edit.OnCancelled = null;
+                CancelEdit();
+                OpenHolePage(f, isNew, madeSketch);
+            }, "cancel");
+        if (opts.Parent is Control optsSec) optsSec.IsVisible = f.Profile == null;
+        clearAbove.IsVisible = f.Profile == null;
         syncEnd = () =>
         {
             PmPage.RowOf(depth).IsVisible = f.EndKind == HoleEnd.Blind;
@@ -1025,6 +1041,39 @@ public partial class MainWindow
                 if (Session.Doc.Find(sketchId) is SketchFeature && !Session.Doc.ConsumersOf(sketchId).Any()) Session.Undo();
             };
         }
+    }
+
+    // the hole whose profile is being edited: its page back when the sketch closes
+    (HoleFeature hole, bool isNew, bool madeSketch)? _profileHole;
+
+    /// <summary>
+    /// The hole's profile opened in the sketch editor, in place at its first position (its type's to start from): half
+    /// the hole in section, its dimensions able to use the hole's values by name; closing the sketch comes back to the
+    /// hole's page, with the profile when it was changed.
+    /// </summary>
+    void EditHoleProfile(HoleFeature f, bool isNew, bool madeSketch)
+    {
+        var st = StateForEdit(f, isNew);
+        if (!st.Sketches.TryGetValue(f.SketchId, out var sr) || HoleProfile.Positions(sr.Sketch) is not { Count: > 0 } at)
+        { Status("Place a hole position first, then edit the profile."); return; }
+        var drill = HoleProfile.Drill(sr.Frame, st.Bounds, f.Reverse);
+        var x = sr.Frame.XDir;
+        var frame = new Frame(sr.Frame.ToWorld(at[0]), x, drill, Vec3.Cross(x, drill));
+        var mmPer = Units.MmPer();
+        double Shown(string e) => UnitFormat.TryLength(e, Session.Lookup, out var v, out _) ? v : 0;
+        // (a depth to draw it with where the end condition decides it per hole)
+        var depth = f.EndKind == HoleEnd.Blind ? Shown(f.Depth) : Math.Max(3 * Shown(f.Diameter), 10);
+        var lookup = HoleProfile.Lookup(f, EditLookup, mmPer, depth);
+        Sketch profile;
+        try { profile = f.Profile?.Clone() ?? HoleProfile.Default(f, lookup, mmPer); }
+        catch (Exception ex) when (ex is Core.Expr.ExprException or FeatureException) { Status("The hole's values do not make a profile: " + ex.Message); return; }
+        if (_edit != null) _edit.OnCancelled = null;
+        CancelEdit();
+        _profileHole = (f, isNew, madeSketch);
+        EnterSketch(new SketchFeature { Id = "hole-profile", Name = $"{f.Name} Profile", Sketch = profile }, frame, isNew: false);
+        if (_sketch != null) { _sketch.Lookup = lookup; _sketch.Resolve(); }
+        Status("Hole profile: half the hole in section, its axis the vertical through the origin. Dimensions can use "
+            + string.Join(", ", HoleProfile.Names.Select(n => n.name)) + ".");
     }
 
     // ------------------------------------------------------------------------------------------

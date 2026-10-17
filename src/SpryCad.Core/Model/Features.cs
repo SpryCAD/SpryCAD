@@ -363,6 +363,11 @@ public sealed class HoleFeature : Feature
     public string FarCsDiameter { get; set; } = "";
     public string FarCsAngle { get; set; } = "90";
     /// <summary>
+    /// The hole's own profile (<see cref="Regen.HoleProfile"/>), revolved at each position in place of its type's; null
+    /// for the type's. The options and Clear material above are its type's, so not used with it.
+    /// </summary>
+    public Sketching.Sketch? Profile { get; set; }
+    /// <summary>
     /// The clearance hole table the hole is sized from ("ISO273", "ASME-B18.2.8"), with <see cref="Size"/> (the screw:
     /// "M8", "1/4") and <see cref="Fit"/> (its column: close, normal, loose); null: sized by hand. The diameters above
     /// are what the hole is made with; these say where they came from, so a library update can size it again.

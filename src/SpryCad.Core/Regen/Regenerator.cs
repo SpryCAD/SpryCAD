@@ -1465,12 +1465,7 @@ public sealed class Regenerator
         void DoHole(HoleFeature h)
         {
             var sk = GetSketch(h.SketchId);
-            // the holes at the sketch's points; a sketch without points (one made for a cut, its circles) at its circles'
-            // centers, so a sketch can be used again for holes
-            var pts = sk.Sketch.Entities.OfType<SkPointEntity>().Where(p => !p.Construction).Select(p => sk.Sketch.P(p.P)).ToList();
-            if (pts.Count == 0)
-                foreach (var c in sk.Sketch.Entities.OfType<SkCircle>().Where(c => !c.Construction))
-                    if (sk.Sketch.P(c.Center) is var ctr && !pts.Any(q => Vec2.Distance(q, ctr) < 1e-9)) pts.Add(ctr);
+            var pts = HoleProfile.Positions(sk.Sketch);
             if (pts.Count == 0) throw new FeatureException("Place at least one hole position point (or circle: a hole at its center).");
             var d = PosLen(h.Diameter, "Diameter"); var r = d / 2;
             var endKind = h.EndKind;
@@ -1574,10 +1569,7 @@ public sealed class Regenerator
             }
             var tools = new List<Solid>();
             int k = 0;
-            // into the part: against the plane's normal (a sketch on a face: into it), unless the part is all on its
-            // normal's side (a sketch on the plane the part stands on: the Top plane under a flange; drilled away, it cut nothing)
-            var drill = Reach(sk.Frame, -1) < 1e-6 && Reach(sk.Frame, 1) > 1e-6 ? sk.Frame.Normal : -sk.Frame.Normal;
-            if (h.Reverse) drill = -drill;
+            var drill = HoleProfile.Drill(sk.Frame, State.Bounds, h.Reverse);
             // where the hole stops at a plane (Up To Surface)
             Plane? upTo = null;
             if (endKind == HoleEnd.UpToSurface)
@@ -1586,7 +1578,8 @@ public sealed class Regenerator
                 var uf = Resolver.ResolvePlane(h.UpTo, State);
                 upTo = Plane.FromPointNormal(uf.Origin, uf.Normal);
             }
-            var rays = h.ClearAbove || endKind == HoleEnd.UpToNext || far != null;
+            var customRegions = new Dictionary<double, List<ProfileRegion>>();
+            var rays = (h.Profile == null && (h.ClearAbove || far != null)) || endKind == HoleEnd.UpToNext;
             var casters = rays ? State.Bodies.Where(b => b.Solid.Native != null).Select(b => Kernel.NativeBlend.RayCaster(b.Solid.Native!)).ToList() : null;
             foreach (var p in pts)
             {
@@ -1617,9 +1610,20 @@ public sealed class Regenerator
                         depth = PosLen(h.Depth, "Depth");
                         break;
                 }
-                var up = casters != null && h.ClearAbove ? ClearHeight(casters, origin, -drill, x, y, Math.Max(r, ProfileTop())) : 0;
-                var prof = Profile(Math.Max(up, lift), depth, exit, out _);
-                var tool = Builders.Revolve(new[] { new ProfileRegion(prof) }, frame, Vec2.Zero, new Vec2(0, 1), 2 * Math.PI, $"{f.Id}.{k++}",
+                List<ProfileRegion> regions;
+                if (h.Profile != null)
+                {
+                    // the hole's own profile, solved for each depth the holes have (once for them all but Up To Next)
+                    var key = Math.Round(depth, 9);
+                    if (!customRegions.TryGetValue(key, out regions!))
+                        customRegions[key] = regions = HoleProfile.Regions(h.Profile, HoleProfile.Lookup(h, lookup, doc.Units.MmPer(), depth), doc.Units.MmPer());
+                }
+                else
+                {
+                    var up = casters != null && h.ClearAbove ? ClearHeight(casters, origin, -drill, x, y, Math.Max(r, ProfileTop())) : 0;
+                    regions = new List<ProfileRegion> { new(Profile(Math.Max(up, lift), depth, exit, out _)) };
+                }
+                var tool = Builders.Revolve(regions, frame, Vec2.Zero, new Vec2(0, 1), 2 * Math.PI, $"{f.Id}.{k++}",
                     SurfaceDef.SegmentsFor(r));
                 if (tool.Native == null && tool.Volume() < 0) tool = tool.Flipped(); // native revolves are oriented by construction
                 tools.Add(tool);
