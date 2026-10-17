@@ -370,8 +370,7 @@ public partial class MainWindow : Window
         // planes: the origin planes (tinted as the triad's axes) when planes are shown; reference planes shown or
         // hidden as sketches are (shown while nothing uses them, unless set in the tree), and those the feature or
         // sketch being edited refers to; any of them while hovered or selected
-        var b = state.Bounds;
-        var half = b.IsEmpty ? 50 : Math.Max(30, b.Diagonal * 0.55);
+        var half = PlaneHalf(baseResult?.State ?? state);
         var used = UsedByActive();
         var editRefs = RefersTo(_edit?.Feature ?? _sketch?.Feature);
         var planes = new List<PlaneDisplay>();
@@ -578,8 +577,7 @@ public partial class MainWindow : Window
     {
         var a = id.StartsWith("Axis") ? id[4..] : id;
         if (a is not ("X" or "Y" or "Z")) return null;
-        var b = Session.Result?.State.Bounds ?? default;
-        var half = b.IsEmpty ? 50 : Math.Max(30, b.Diagonal * 0.55);
+        var half = PlaneHalf(Session.Result?.State ?? ModelState.Initial());
         return new SelItem { Kind = SelKind.Axis, Name = a, Point = Vec3.Zero, Normal = a == "X" ? Vec3.UnitX : a == "Y" ? Vec3.UnitY : Vec3.UnitZ, AxisHalfLength = half };
     }
 

@@ -40,6 +40,8 @@ public partial class MainWindow
         /// request number, not a flag: an earlier, empty result can arrive first and must not use up the fit.
         /// </summary>
         public int? FitAfterLoad;
+        /// <summary>The empty part's plane size, scaled as its first sketch was by its first dimension (<see cref="PlaneHalf"/>).</summary>
+        public double PlaneScale = 1;
         /// <summary>Preview for the list of parts, and the rebuild it shows (re-rendered when the part rebuilds).</summary>
         public Avalonia.Media.Imaging.Bitmap? Thumb;
         public int ThumbRevision = -1;

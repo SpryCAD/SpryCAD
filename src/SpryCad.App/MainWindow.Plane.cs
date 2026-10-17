@@ -50,6 +50,21 @@ public partial class MainWindow
     }
 
     /// <summary>
+    /// The size the planes are drawn (half a side): a little past the part, its solids and its sketches, so a small
+    /// part has small planes and a large one large planes; the whole part, not rolled back, so they keep their size
+    /// while a sketch or feature is edited. In an empty part 50 mm (2 in), scaled as the first sketch was by its
+    /// first dimension, so they stay the size they were next to it.
+    /// </summary>
+    double PlaneHalf(ModelState state)
+    {
+        var b = state.Bounds;
+        foreach (var sr in state.Sketches.Values)
+            foreach (var (a, c) in SpryCad.App.Viewport.SketchDrawing.Segments(sr)) { b.Add(a); b.Add(c); }
+        if (!b.IsEmpty && b.Diagonal > 1e-6) return b.Diagonal * 0.55;
+        return FeatureDefaults.Mm(Units, 50, 2) * _tab.PlaneScale;
+    }
+
+    /// <summary>
     /// The size a reference plane is drawn: around what is sketched on it (a little past it), so a plane with a small
     /// sketch is small; with nothing on it, a square of <paramref name="half"/> about its origin.
     /// </summary>

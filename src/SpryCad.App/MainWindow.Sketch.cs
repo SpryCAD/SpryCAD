@@ -153,6 +153,8 @@ public partial class MainWindow
         _sketch.PictureOpened += EditPicture;
         _sketch.PictureChanged += () => { if (InPicturePage && _sketch?.EditingPicture is { } pic) OpenPicturePage(pic.Id); };
         _sketch.Message += Status;
+        // the empty part's planes scaled with its first sketch, so they stay the size they were next to it
+        _sketch.Rescaled += k => { _tab.PlaneScale *= k; RefreshScene(); };
         // the panel shows tool settings (e.g. polygon sides) for the tool in use
         _sketch.ToolChanged += () =>
         {

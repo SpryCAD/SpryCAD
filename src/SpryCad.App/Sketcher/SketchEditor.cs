@@ -72,6 +72,8 @@ public sealed partial class SketchEditor : IViewportMode
     public event Action? ToolChanged;
     /// <summary>The sketch's axes turned (<see cref="Realign"/>, or undoing it).</summary>
     public event Action? FrameChanged;
+    /// <summary>The first dimension scaled the sketch and the view by this factor (<see cref="ScaleOnFirstDimension"/>).</summary>
+    public event Action<double>? Rescaled;
 
     readonly ViewportControl _vp;
     readonly List<UndoStep> _undo = new();
@@ -1823,6 +1825,7 @@ public sealed partial class SketchEditor : IViewportMode
         var aw = Camera.F(Frame.ToWorld(a));
         cam.Target = aw + (cam.Target - aw) * (float)k;
         cam.HalfHeight *= (float)k;
+        Rescaled?.Invoke(k);
     }
 
     // ---------------------------------------------------------------------------------------
