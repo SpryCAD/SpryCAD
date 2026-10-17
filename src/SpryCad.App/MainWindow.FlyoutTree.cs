@@ -21,6 +21,7 @@ public partial class MainWindow
         _flyTree = new FeatureTree { Flyout = true, Width = 240, IsVisible = false };
         _flyTree.SelectedChanged += id => { Tree.Select(id); OnTreeSelected(id); };
         _flyTree.HoverChanged += OnTreeHover;
+        _flyTree.ContextRequested += OnFlyoutContext;
         // the assembly's: its rows pick and hover as the assembly tree's (an origin plane into the Mate page's box)
         _asmFlyTree = new AssemblyTree { Flyout = true, Width = 260, IsVisible = false };
         _asmFlyTree.Selected += id => SelectComponent(id, exact: true);
@@ -47,6 +48,29 @@ public partial class MainWindow
         if (show) RebuildFlyoutTree();
         FlyoutHost.IsVisible = show;
         want.IsVisible = show;
+    }
+
+    /// <summary>
+    /// The flyout's right-click menu: in a sketch, Normal To a plane or sketch (in place of the sketch's own plane;
+    /// again, from its other side) and Show or Hide for sketches, planes and axes; otherwise the tree's own menu.
+    /// </summary>
+    void OnFlyoutContext(string id, Avalonia.Point pos, Control row)
+    {
+        if (_sketch == null) { OnTreeContext(id, pos, row); return; }
+        var menu = new ContextMenu();
+        var st = Session.Result?.State;
+        SpryCad.Kernel.Frame? frame = id is "Front" or "Top" or "Right" ? Core.Regen.Resolver.StdPlane(id)
+            : Session.Doc.Find(id) is Core.Model.PlaneFeature && st?.Planes.TryGetValue(id, out var pf) == true ? pf
+            : Session.Doc.Find(id) is Core.Model.SketchFeature && st?.Sketches.TryGetValue(id, out var sr) == true ? sr.Frame
+            : null;
+        if (frame is { } f) menu.Items.Add(Item("Normal To", () => Viewport.NormalTo(f, flip: true), null, "normalto"));
+        if (id is "Front" or "Top" or "Right" || Session.Doc.Find(id) is Core.Model.SketchFeature or Core.Model.PlaneFeature or Core.Model.AxisFeature)
+        {
+            var consumed = id is "Front" or "Top" or "Right" ? st?.Bodies.Count > 0 : UsedByActive().Contains(id);
+            var shown = Session.Doc.SketchShown(id, consumed);
+            menu.Items.Add(Item(shown ? "Hide" : "Show", () => SetSketchShown(id, !shown), null, shown ? "hide" : "show"));
+        }
+        if (menu.Items.Count > 0) menu.Open(row);
     }
 
     void RebuildFlyoutTree()
