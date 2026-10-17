@@ -231,6 +231,55 @@ static class ConfigTests
             }
         });
 
+        t.Test("Hole Wizard end conditions: Up To Next through the first plate only, Through All both, Up To Surface to a plane; countersinks near side, far side and under the head", () =>
+        {
+            // (a plate 10 thick both ways from the Front plane, a second one 4 thick past a 3 gap above it, the hole from
+            // the second's top down; a frustum's volume less the hole's cylinder for a countersink)
+            static double Frustum(double R, double r, double h) => Math.PI * h / 3 * (R * R + R * r + r * r) - Math.PI * r * r * h;
+            double Removed(Action<HoleFeature> set, bool upper = true)
+            {
+                var doc = new CadDocument();
+                var s1 = doc.AddFeature(new SketchFeature { Plane = PlaneRef.Front, Sketch = CoreTests.Rect(100, 60) });
+                doc.AddFeature(new ExtrudeFeature { SketchId = s1.Id, Depth = "10", End = EndCondition.MidPlane });
+                var face = upper ? "12" : "5";
+                if (upper)
+                {
+                    var above = doc.AddFeature(new PlaneFeature { Base = PlaneRef.Front, Offset = "8" });
+                    var ps = doc.AddFeature(new SketchFeature { Plane = new PlaneRef { Feature = above.Id }, Sketch = CoreTests.Rect(100, 60) });
+                    doc.AddFeature(new ExtrudeFeature { SketchId = ps.Id, Depth = "4", Merge = false });
+                }
+                var top = doc.AddFeature(new PlaneFeature { Base = PlaneRef.Front, Offset = face });
+                var before = Volume(new Regenerator().Rebuild(doc));
+                var sk = new Sketch();
+                sk.Add(new SkPointEntity { P = sk.AddPoint(new Vec2(20, 10)).Id });
+                var s2 = doc.AddFeature(new SketchFeature { Plane = new PlaneRef { Feature = top.Id }, Sketch = sk });
+                var h = new HoleFeature { SketchId = s2.Id, Diameter = "6", DrillPoint = false };
+                set(h);
+                doc.AddFeature(h);
+                var r = new Regenerator().Rebuild(doc);
+                t.True(r.Status[h.Id].Ok, r.Status[h.Id].Error ?? "");
+                return before - Volume(r);
+            }
+            void Check(double got, double want) => t.Near(got, want, want * 0.02); // (the faceted cylinders and cones of the mesh)
+            Check(Removed(h => h.End = HoleEnd.UpToNext), Math.PI * 9 * 4);
+            Check(Removed(h => h.End = HoleEnd.ThroughAll), Math.PI * 9 * 14);
+            Check(Removed(h => { h.End = HoleEnd.UpToSurface; h.UpTo = PlaneRef.Front; }), Math.PI * 9 * 9);
+            Check(Removed(h => { h.End = HoleEnd.Blind; h.Depth = "2"; }), Math.PI * 9 * 2);
+            // a through hole in the plate alone, countersunk at both ends: 10 across at 90°, 2 deep each
+            Check(Removed(h =>
+            {
+                h.End = HoleEnd.ThroughAll;
+                h.NearCountersink = true; h.NearCsDiameter = "10";
+                h.FarCountersink = true; h.FarCsDiameter = "10";
+            }, upper: false), Math.PI * 9 * 10 + 2 * Frustum(5, 3, 2));
+            // a counterbore 10 across, 3 deep, countersunk under the head 8 across at 90° (1 deep)
+            Check(Removed(h =>
+            {
+                h.End = HoleEnd.ThroughAll; h.Type = HoleType.Counterbore; h.CbDiameter = "10"; h.CbDepth = "3";
+                h.HeadCountersink = true; h.HeadCsDiameter = "8";
+            }, upper: false), Math.PI * 25 * 3 + Math.PI * 9 * 7 + Frustum(4, 3, 1));
+        });
+
         t.Test("Suppress When: a condition that cannot be evaluated is an error", () =>
         {
             var (doc, cut, lp) = Plate("Nope > 1");

@@ -210,6 +210,9 @@ public sealed class HelicalSweepFeature : Feature
 /// <summary>Where a thread ends: a length from the start end, short of the face's far end, or out through it.</summary>
 public enum ThreadEnd { Blind, UpToNext, ThroughAll }
 
+/// <summary>How deep a Hole Wizard hole goes: to a depth, through the whole part, through the first material it meets, or to a plane.</summary>
+public enum HoleEnd { Blind, ThroughAll, UpToNext, UpToSurface }
+
 /// <summary>
 /// How a thread that stops in the material ends: abruptly, in a relief groove (an undercut for the threading tool,
 /// DIN 76 style), or running out of the side along the helix's tangent (a shaft only).
@@ -342,6 +345,23 @@ public sealed class HoleFeature : Feature
     /// above the sketch's plane (a hub fillet over a flange's bolt holes). On for holes made since; off for older ones.
     /// </summary>
     public bool ClearAbove { get; set; }
+    /// <summary>How deep the hole goes; null on holes made before end conditions, read from <see cref="ThroughAll"/>.</summary>
+    public HoleEnd? End { get; set; }
+    /// <summary>Up To Surface: the plane or planar face the hole stops at.</summary>
+    public PlaneRef? UpTo { get; set; }
+    [JsonIgnore] public HoleEnd EndKind => End ?? (ThroughAll ? HoleEnd.ThroughAll : HoleEnd.Blind);
+    /// <summary>A countersink where the hole meets the face (a simple hole's edge, a counterbore's rim).</summary>
+    public bool NearCountersink { get; set; }
+    public string NearCsDiameter { get; set; } = "";
+    public string NearCsAngle { get; set; } = "90";
+    /// <summary>A countersink where the hole leaves a counterbore's floor, under the screw's head.</summary>
+    public bool HeadCountersink { get; set; }
+    public string HeadCsDiameter { get; set; } = "";
+    public string HeadCsAngle { get; set; } = "90";
+    /// <summary>A countersink where the hole comes out on the far side (Through All, Up To Next).</summary>
+    public bool FarCountersink { get; set; }
+    public string FarCsDiameter { get; set; } = "";
+    public string FarCsAngle { get; set; } = "90";
     /// <summary>
     /// The clearance hole table the hole is sized from ("ISO273", "ASME-B18.2.8"), with <see cref="Size"/> (the screw:
     /// "M8", "1/4") and <see cref="Fit"/> (its column: close, normal, loose); null: sized by hand. The diameters above

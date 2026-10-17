@@ -1473,18 +1473,45 @@ public sealed class Regenerator
                     if (sk.Sketch.P(c.Center) is var ctr && !pts.Any(q => Vec2.Distance(q, ctr) < 1e-9)) pts.Add(ctr);
             if (pts.Count == 0) throw new FeatureException("Place at least one hole position point (or circle: a hole at its center).");
             var d = PosLen(h.Diameter, "Diameter"); var r = d / 2;
-            double depth = h.ThroughAll ? BigDepth(sk.Frame) : PosLen(h.Depth, "Depth");
+            var endKind = h.EndKind;
             // the tool starts on the sketch plane, as an extruded cut does: a start just above it (it was 1e-3) lay within the
             // boolean's tolerance of the face, so where the hole met other faces near it some points welded to the tool's edge and
             // some did not (a hole breaking out through a fillet: its wall left uncut, the result invalid)
             const double lift = 0;
-            // (or, clearing above, from as high as the material on the face over the hole reaches: see ClearHeight)
-            ProfileLoop Profile(double up, out double topR)
+            // the optional countersinks: (radius, angle in radians) each, null when off
+            (double r, double a)? Cs(bool on, string dia, string ang, string what)
+            {
+                if (!on) return null;
+                var cr = PosLen(dia, what + " countersink diameter") / 2;
+                var ca = PosAng(ang, what + " countersink angle") * Math.PI / 180;
+                return (cr, ca);
+            }
+            var near = h.Type == HoleType.Countersink ? null : Cs(h.NearCountersink, h.NearCsDiameter, h.NearCsAngle, "Near side");
+            var head = h.Type == HoleType.Counterbore ? Cs(h.HeadCountersink, h.HeadCsDiameter, h.HeadCsAngle, "Under head") : null;
+            var far = endKind is HoleEnd.ThroughAll or HoleEnd.UpToNext ? Cs(h.FarCountersink, h.FarCsDiameter, h.FarCsAngle, "Far side") : null;
+            // the profile, in (radius, depth) coordinates (loop orientation normalized by the builder): from up above the
+            // face (clearing above: as high as the material on the face over the hole reaches, see ClearHeight) down to
+            // depth; a far side countersink where the hole comes out, at exit
+            ProfileLoop Profile(double up, double depth, double? exit, out double topRadius)
             {
                 var prof = new ProfileLoop();
                 void V(double x, double y, string n) => prof.Verts.Add(new ProfileVertex(new Vec2(x, y), n));
-                topR = r;
+                double topR = r;
                 bool clear = up > lift;
+                // the top down to the face, then the wall of radius rad named wall; a near side countersink between
+                void TopAt(double rad, string wall)
+                {
+                    V(0, -up, "Top");
+                    if (near is { } ns)
+                    {
+                        if (ns.r <= rad) throw new FeatureException("Near side countersink diameter must be larger than the hole at the face.");
+                        if (clear) V(ns.r, -up, "Clear");
+                        V(ns.r, 0, "NearCS");
+                        V(rad, (ns.r - rad) / Math.Tan(ns.a / 2), wall);
+                        topR = Math.Max(topR, ns.r);
+                    }
+                    else V(rad, -up, wall);
+                }
                 switch (h.Type)
                 {
                     case HoleType.Counterbore:
@@ -1492,8 +1519,17 @@ public sealed class Regenerator
                             var cbr = PosLen(h.CbDiameter, "Counterbore diameter") / 2;
                             var cbd = PosLen(h.CbDepth, "Counterbore depth");
                             if (cbr <= r) throw new FeatureException("Counterbore diameter must be larger than the hole.");
-                            V(0, -up, "Top"); V(cbr, -up, "CB"); V(cbr, cbd, "CBF"); V(r, cbd, "Hole");
                             topR = cbr;
+                            if (near is { } ns && (ns.r - cbr) / Math.Tan(ns.a / 2) >= cbd) throw new FeatureException("Near side countersink is deeper than the counterbore.");
+                            TopAt(cbr, "CB");
+                            V(cbr, cbd, "CBF");
+                            if (head is { } hc)
+                            {
+                                if (hc.r <= r || hc.r >= cbr) throw new FeatureException("Under head countersink diameter must be between the hole's and the counterbore's.");
+                                V(hc.r, cbd, "HeadCS");
+                                V(r, cbd + (hc.r - r) / Math.Tan(hc.a / 2), "Hole");
+                            }
+                            else V(r, cbd, "Hole");
                             break;
                         }
                     case HoleType.Countersink:
@@ -1509,11 +1545,21 @@ public sealed class Regenerator
                             break;
                         }
                     default:
-                        V(0, -up, "Top"); V(r, -up, "Hole");
+                        TopAt(r, "Hole");
                         break;
                 }
-                // hole wall to the bottom (+ drill point for blind holes)
-                if (!h.ThroughAll && h.DrillPoint)
+                // a far side countersink: the wall widening to its diameter where the hole comes out, then out past it
+                if (far is { } fc && exit is { } x)
+                {
+                    if (fc.r <= r) throw new FeatureException("Far side countersink diameter must be larger than the hole.");
+                    V(r, x - (fc.r - r) / Math.Tan(fc.a / 2), "FarCS");
+                    V(fc.r, x, "FarClear");
+                    var bottom = Math.Max(depth, x + Math.Max(0.1 * r, 0.5));
+                    V(fc.r, bottom, "Bottom");
+                    V(0, bottom, "Axis");
+                }
+                // to the bottom (+ drill point for blind holes)
+                else if (endKind == HoleEnd.Blind && h.DrillPoint)
                 {
                     V(r, depth, "Tip");
                     V(0, depth + r / Math.Tan(59 * Math.PI / 180), "Axis");
@@ -1523,33 +1569,106 @@ public sealed class Regenerator
                     V(r, depth, "Bottom");
                     V(0, depth, "Axis");
                 }
+                topRadius = topR;
                 return prof;
             }
-            // the profile is in (radius, depth) coordinates; loop orientation is normalized by the builder
-            var flat = Profile(lift, out var topR);
             var tools = new List<Solid>();
             int k = 0;
             // into the part: against the plane's normal (a sketch on a face: into it), unless the part is all on its
             // normal's side (a sketch on the plane the part stands on: the Top plane under a flange; drilled away, it cut nothing)
             var drill = Reach(sk.Frame, -1) < 1e-6 && Reach(sk.Frame, 1) > 1e-6 ? sk.Frame.Normal : -sk.Frame.Normal;
             if (h.Reverse) drill = -drill;
-            var casters = h.ClearAbove ? State.Bodies.Where(b => b.Solid.Native != null).Select(b => Kernel.NativeBlend.RayCaster(b.Solid.Native!)).ToList() : null;
+            // where the hole stops at a plane (Up To Surface)
+            Plane? upTo = null;
+            if (endKind == HoleEnd.UpToSurface)
+            {
+                if (h.UpTo == null) throw new FeatureException("Select the plane or planar face the hole goes up to.");
+                var uf = Resolver.ResolvePlane(h.UpTo, State);
+                upTo = Plane.FromPointNormal(uf.Origin, uf.Normal);
+            }
+            var rays = h.ClearAbove || endKind == HoleEnd.UpToNext || far != null;
+            var casters = rays ? State.Bodies.Where(b => b.Solid.Native != null).Select(b => Kernel.NativeBlend.RayCaster(b.Solid.Native!)).ToList() : null;
             foreach (var p in pts)
             {
                 var origin = sk.Frame.ToWorld(p);
                 var x = sk.Frame.XDir;
-                var frame = new Frame(origin, x, drill, Vec3.Cross(x, drill));
-                var prof = flat;
-                if (casters != null && ClearHeight(casters, origin, -drill, x, Vec3.Cross(x, drill), topR) is var up and > 0) prof = Profile(up, out _);
+                var y = Vec3.Cross(x, drill);
+                var frame = new Frame(origin, x, drill, y);
+                double depth;
+                double? exit = null;
+                switch (endKind)
+                {
+                    case HoleEnd.ThroughAll:
+                        depth = BigDepth(sk.Frame);
+                        if (far != null) exit = LastExit(casters!, origin, drill);
+                        break;
+                    case HoleEnd.UpToNext:
+                        depth = NextExit(casters!, origin, drill, x, y, r) ?? throw new FeatureException("The hole meets no material to go through (Up To Next).");
+                        if (far != null) exit = NextExit(casters!, origin, drill, x, y, 0);
+                        break;
+                    case HoleEnd.UpToSurface:
+                        {
+                            var den = Vec3.Dot(drill, upTo!.Normal);
+                            depth = Math.Abs(den) < 1e-9 ? -1 : -upTo.Distance(origin) / den;
+                            if (depth <= 1e-9) throw new FeatureException("The hole does not reach the selected plane or face.");
+                            break;
+                        }
+                    default:
+                        depth = PosLen(h.Depth, "Depth");
+                        break;
+                }
+                var up = casters != null && h.ClearAbove ? ClearHeight(casters, origin, -drill, x, y, Math.Max(r, ProfileTop())) : 0;
+                var prof = Profile(Math.Max(up, lift), depth, exit, out _);
                 var tool = Builders.Revolve(new[] { new ProfileRegion(prof) }, frame, Vec2.Zero, new Vec2(0, 1), 2 * Math.PI, $"{f.Id}.{k++}",
                     SurfaceDef.SegmentsFor(r));
                 if (tool.Native == null && tool.Volume() < 0) tool = tool.Flipped(); // native revolves are oriented by construction
                 tools.Add(tool);
             }
+            // (the hole's top radius: the counterbore's, countersink's, near side countersink's, or its own)
+            double ProfileTop() { Profile(lift, 1, null, out var t); return t; }
             Solid all;
             using (Prof.Time("hole.toolunion")) all = Csg.UnionAll(tools);
             ApplyTool(all, cut: true, merge: true);
             State.Tools[f.Id] = new ToolInfo(all, true, true);
+        }
+
+        /// <summary>
+        /// Up To Next: how deep a hole of radius <paramref name="rad"/> goes to come out of the first material it meets
+        /// (sampled across its circle, the deepest; its axis alone for 0); null when it meets none.
+        /// </summary>
+        static double? NextExit(List<Func<Vec3, Vec3, List<double>?>> casters, Vec3 origin, Vec3 drill, Vec3 xd, Vec3 yd, double rad)
+        {
+            const double eps = 1e-4;
+            double? deepest = null;
+            var rings = rad <= 0 ? new[] { (0.0, 1) } : new[] { (0.0, 1), (0.5, 24), (0.995, 48) };
+            foreach (var (frac, n) in rings)
+                for (int j = 0; j < n; j++)
+                {
+                    var a = 2 * Math.PI * (j + 0.5) / n;
+                    // (from a little before the plane: a hole on a face meets that face first)
+                    var o = origin + xd * (rad * frac * Math.Cos(a)) + yd * (rad * frac * Math.Sin(a)) - drill * eps;
+                    // the material met first, of all the bodies: inside where it starts (the plane within the part), out at
+                    // its first crossing; else in at the first, out at the second
+                    (double inAt, double outAt)? first = null;
+                    foreach (var cast in casters)
+                    {
+                        if (cast(o, drill) is not { } hits || hits.Count == 0) continue;
+                        (double, double)? span = hits.Count % 2 == 1 ? (0, hits[0]) : hits.Count >= 2 ? (hits[0], hits[1]) : null;
+                        if (span is { } sp && (first == null || sp.Item1 < first.Value.inAt)) first = sp;
+                    }
+                    if (first is { } fm) deepest = Math.Max(deepest ?? 0, fm.outAt - eps);
+                }
+            return deepest;
+        }
+
+        /// <summary>Through All: how deep the hole's axis comes out of the part the last time (for a far side countersink); null if never.</summary>
+        static double? LastExit(List<Func<Vec3, Vec3, List<double>?>> casters, Vec3 origin, Vec3 drill)
+        {
+            const double eps = 1e-4;
+            double? last = null;
+            foreach (var cast in casters)
+                if (cast(origin - drill * eps, drill) is { Count: > 0 } hits) last = Math.Max(last ?? 0, hits[^1] - eps);
+            return last;
         }
 
         /// <summary>

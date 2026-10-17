@@ -904,14 +904,71 @@ public partial class MainWindow
             () => f.Fit ?? "normal", v => { f.Fit = v == "normal" ? null : v; Fill(); }));
         ListSizes(); refreshType();
         dia = page.Number(std, "Diameter", () => f.Diameter, v => f.Diameter = v, "hole");
+        // how deep: a row of pictures (as SolidWorks), the depth for Blind, the plane or face for Up To Surface
         var end = page.Section("End Condition");
-        TextBox? depth = null;
-        page.Check(end, "Through All", () => f.ThroughAll, v => { f.ThroughAll = v; if (depth != null) depth.IsEnabled = !v; });
-        depth = page.Number(end, "Depth", () => f.Depth, v => f.Depth = v, "dimension");
-        depth.IsEnabled = !f.ThroughAll;
-        page.Check(end, "Drill point (118°)", () => f.DrillPoint, v => f.DrillPoint = v);
+        Action syncEnd = () => { };
+        page.IconChoice(end, new List<(HoleEnd, string, string)>
+        {
+            (HoleEnd.Blind, "end-blind", "Blind: to a depth"),
+            (HoleEnd.ThroughAll, "end-throughall", "Through All: through the whole part"),
+            (HoleEnd.UpToNext, "end-uptonext", "Up To Next: through the first material it meets"),
+            (HoleEnd.UpToSurface, "end-uptosurface", "Up To Surface: to a plane or planar face"),
+        }, () => f.EndKind, v => { f.End = v; f.ThroughAll = v == HoleEnd.ThroughAll; syncEnd(); });
+        var depth = page.Number(end, "Depth", () => f.Depth, v => f.Depth = v, "dimension");
+        var upToPanel = new StackPanel();
+        end.Children.Add(upToPanel);
+        var upTo = page.Selection(upToPanel, "Up to", SelFilter.Plane | SelFilter.PlanarFace, "The plane or planar face the hole stops at.", 1);
+        if (PlaneItem(f.UpTo, StateForEdit(f, isNew)) is { } upItem) upTo.Items.Add(upItem);
+        upTo.Changed += () => f.UpTo = upTo.Items.FirstOrDefault()?.ToPlaneRef();
+        var drillPoint = page.Check(end, "Drill point (118°)", () => f.DrillPoint, v => f.DrillPoint = v);
         page.Check(end, "Reverse direction", () => f.Reverse, v => f.Reverse = v);
         page.Check(end, "Clear material above", () => f.ClearAbove, v => f.ClearAbove = v);
+
+        // the optional countersinks (as SolidWorks): each ticked shows its diameter (suggested a little over what it
+        // widens) and angle
+        var opts = page.Section("Options");
+        string Len(double mm) => Units == UnitSystem.IPS ? Core.Expr.Format(Math.Round(mm / 25.4, 4)) + "in" : Core.Expr.Format(Math.Round(mm, 3)) + "mm";
+        double Mm(string v) => UnitFormat.TryLength(v, Session.Lookup, out var x, out _) ? x : 0;
+        StackPanel Countersink(string label, Func<bool> get, Action<bool> set, Func<string> getD, Action<string> setD, Func<string> getA, Action<string> setA, Func<double> widens)
+        {
+            var group = new StackPanel();
+            opts.Children.Add(group);
+            var fields = new StackPanel { IsVisible = get() };
+            TextBox? dia = null;
+            page.Check(group, label, get, v =>
+            {
+                set(v);
+                fields.IsVisible = v;
+                if (v && string.IsNullOrWhiteSpace(getD())) { setD(Len(widens() + (Units == UnitSystem.IPS ? 1.27 : 1))); if (dia != null) dia.Text = getD(); }
+            });
+            group.Children.Add(fields);
+            dia = page.Number(fields, "Diameter", getD, setD, "hole");
+            page.Number(fields, "Angle", getA, setA, null, "°");
+            return group;
+        }
+        var nearCs = Countersink("Near side countersink", () => f.NearCountersink, v => f.NearCountersink = v, () => f.NearCsDiameter, v => f.NearCsDiameter = v,
+            () => f.NearCsAngle, v => f.NearCsAngle = v, () => Mm(f.Type == HoleType.Counterbore ? f.CbDiameter : f.Diameter));
+        var headCs = Countersink("Under head countersink", () => f.HeadCountersink, v => f.HeadCountersink = v, () => f.HeadCsDiameter, v => f.HeadCsDiameter = v,
+            () => f.HeadCsAngle, v => f.HeadCsAngle = v, () => Mm(f.Diameter));
+        var farCs = Countersink("Far side countersink", () => f.FarCountersink, v => f.FarCountersink = v, () => f.FarCsDiameter, v => f.FarCsDiameter = v,
+            () => f.FarCsAngle, v => f.FarCsAngle = v, () => Mm(f.Diameter));
+        // each shown where it applies: near side not on a countersink, under head on a counterbore, far side where the
+        // hole comes out (Through All, Up To Next)
+        Action syncOptions = () =>
+        {
+            nearCs.IsVisible = f.Type != HoleType.Countersink;
+            headCs.IsVisible = f.Type == HoleType.Counterbore;
+            farCs.IsVisible = f.EndKind is HoleEnd.ThroughAll or HoleEnd.UpToNext;
+        };
+        syncEnd = () =>
+        {
+            PmPage.RowOf(depth).IsVisible = f.EndKind == HoleEnd.Blind;
+            drillPoint.IsVisible = f.EndKind == HoleEnd.Blind;
+            upToPanel.IsVisible = f.EndKind == HoleEnd.UpToSurface;
+            if (f.EndKind == HoleEnd.UpToSurface) page.Activate(upTo);
+            syncOptions();
+        };
+        syncEnd();
         var cb = page.Section("Counterbore");
         cbd = page.Number(cb, "C'bore dia.", () => f.CbDiameter, v => f.CbDiameter = v);
         cbdp = page.Number(cb, "C'bore depth", () => f.CbDepth, v => f.CbDepth = v);
@@ -923,6 +980,7 @@ public partial class MainWindow
         {
             if (cb.Parent is Control cbs) cbs.IsVisible = f.Type == HoleType.Counterbore;
             if (cs.Parent is Control css) css.IsVisible = f.Type == HoleType.Countersink;
+            syncOptions();
         };
         syncSections();
         var pos = page.Section("Positions");
