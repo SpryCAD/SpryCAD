@@ -103,7 +103,24 @@ public sealed class SketchFeature : Feature
 {
     public override string Kind => "Sketch";
     public PlaneRef Plane { get; set; } = PlaneRef.Front;
+    /// <summary>The sketch's axes turned in its plane to follow a model direction (null: the plane's own axes).</summary>
+    public SketchAlign? Align { get; set; }
     public Sketch Sketch { get; set; } = new();
+}
+
+/// <summary>
+/// A sketch's axes aligned to the model (as Inventor's Edit Coordinate System): one of them along a direction's part in
+/// the sketch plane. Horizontal, Vertical and the horizontal and vertical dimensions follow them.
+/// </summary>
+public sealed class SketchAlign
+{
+    /// <summary>A straight edge, a planar face (its normal), an axis or a plane (its normal).</summary>
+    public DirRef Dir { get; set; } = new();
+    /// <summary>The sketch's Y axis along it (a face at the top), not its X axis.</summary>
+    public bool AlongY { get; set; }
+    /// <summary>The axis the other way.</summary>
+    public bool Flip { get; set; }
+    public SketchAlign Clone() => new() { Dir = Dir.Clone(), AlongY = AlongY, Flip = Flip };
 }
 
 public enum EndCondition { Blind, ThroughAll, MidPlane, ThroughAllBoth, UpToSurface, UpToBody }

@@ -89,6 +89,7 @@ public partial class MainWindow
             C("construction", "Construction Geometry", ToggleConstruction);
             C("relations", "Add Relations", AddRelationCommand);
             C("sketchpicture", "Sketch Picture", SketchPictureCommand);
+            C("axis", "Sketch Axes", SketchAxesCommand);
         }
         else
         {

@@ -39,7 +39,7 @@ natively on **Windows, Linux and macOS** with no browser, no Electron and no nat
 
 | Area | Commands |
 |---|---|
-| Sketch | Line, Centerline, Corner/Center Rectangle, Circle, Centerpoint/3-Point/Tangent Arc, Polygon, Straight Slot, Point, Trim, Convert Entities, Construction toggle |
+| Sketch | Line, Centerline, Corner/Center Rectangle, Circle, Centerpoint/3-Point/Tangent Arc, Polygon, Straight Slot, Point, Trim, Convert Entities, Construction toggle; Sketch Axes (as Inventor's Edit Coordinate System: the sketch's X axis along a straight edge, or a planar face at the top, the geometry staying in place and Horizontal / Vertical following the new axes; also set by selecting the edge or face with the plane when starting a sketch) |
 | Relations | Automatic while drawing (coincident, horizontal/vertical, midpoint, on-entity) — also to the **existing model**: model vertices (coincident), model edges (on edge), edge midpoints and hole/boss centers, all associative (they follow model changes); dashed inference lines to sketch points and model vertices. Plus Horizontal, Vertical, Parallel, Perpendicular, Collinear, Equal, Tangent, Concentric, Coincident, Midpoint, Symmetric, Fix |
 | Dimensions | Smart Dimension: length, horizontal/vertical/aligned distance, point–line, parallel lines, radius, diameter, angle; driven (reference) dims; expressions |
 | Solver | Numerical constraint solver with minimum-change dragging and degrees-of-freedom analysis (under / fully / over defined) |
@@ -48,7 +48,7 @@ natively on **Windows, Linux and macOS** with no browser, no Electron and no nat
 | Assemblies | `.sasm` assemblies in document tabs (as SolidWorks): components linked to part files or embedded (a small assembly in one file), fixed or floating, lightweight from the assembly's cache; opened from the cached displays when they are of the part's revision and made by the same geometry code (`GeometryVersion`), the rest built in the background and shown as each is done; **mates** (Coincident, Concentric, Parallel, Perpendicular, Tangent, Lock, Distance and Angle with optional limits; mechanical Gear, its ratio from the round faces' diameters, and Screw, its lead per turn; faces of components and the assembly's origin planes) solved together, components dragged only as their mates let them, conflicts shown in red. Parts are found by identity (a GUID each part keeps), wherever they went: renamed, moved, a folder moved; a missing part shows from the cache (its mates still solve) and is listed, never asked about; STEP assemblies open as assemblies (each part embedded once, each use placed as the file has it, locked to the first component) and assemblies export as STEP assemblies; mates on the axes of round faces and the centers of their circles (right-click > Select Axis / Select Center while mating) |
 | Tools | Equations / global variables (internal or user-facing, with limits), Design Tables (pasted from a spreadsheet), Configure, Mass Properties (volume, area, mass, center of mass, bounding box), Options (units MMGS/IPS, part color, wheel direction, perspective) |
 | Files | `.sprt` parts and `.sasm` assemblies, open/save, autosave + recovery, slow parts shown at once when opened (their display kept in the file, Options) while they rebuild, exact STEP (analytic surfaces) and STL export |
-| View | Standard views (animated), Normal To, zoom to fit, Shaded With Edges / Shaded / Hidden Lines Visible / Wireframe, perspective, planes toggle |
+| View | Standard views (animated), Normal To (the least turn: from the side the view is on, rolled to the nearest of the plane's axes; again: from the other side; a second planar face or plane Ctrl-selected goes at the top; a sketch being edited is shown with its X axis to the right), zoom to fit, Shaded With Edges / Shaded / Hidden Lines Visible / Wireframe, perspective, planes toggle |
 
 ## Controls (SolidWorks defaults)
 
@@ -59,7 +59,7 @@ natively on **Windows, Linux and macOS** with no browser, no Electron and no nat
 | Zoom | Mouse wheel (at cursor), Shift + middle drag |
 | Roll | Alt + middle drag |
 | Zoom to fit | `F` |
-| View orientation | `Spacebar`, `Ctrl+1..7` (Front, Back, Left, Right, Top, Bottom, Isometric), `Ctrl+8` Normal To |
+| View orientation | `Spacebar`, `Ctrl+1..7` (Front, Back, Left, Right, Top, Bottom, Isometric), `N` or `Ctrl+8` Normal To |
 | Rotate view | Arrow keys (15°), Shift + arrows (90°) |
 | Sketch tools | `L` Line, `R` Rectangle, `C` Circle, `A` Arc, `P` Point, `D` Smart Dimension, `T` Trim, `Esc` select/cancel |
 | PropertyManager | `Enter` = OK (from any field), `Esc` = Cancel |

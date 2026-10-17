@@ -1053,7 +1053,8 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
 
     /// <summary>
     /// Sketch pictures, under the lines: those of shown sketches where their plane is (behind the model where it is
-    /// behind), then the edited sketch's over the model, as its lines are. Nudged toward the eye so a picture on a face
+    /// behind), then the edited sketch's over the model, as its lines are (and those of shown sketches the view is normal
+    /// to). Nudged toward the eye so a picture on a face
     /// shows on it.
     /// </summary>
     void DrawPictures(Matrix4x4 vp)
@@ -1143,9 +1144,13 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         // each sketch's geometry kept while its result, color and the pixel size (zoom) stay: orbiting and panning
         // draw it again without tessellating its curves (a result is not changed once made)
         var px = Camera.PixelSize;
+        // a shown sketch's pictures over the model when the view is normal to its plane: tracing over a picture in an
+        // earlier sketch, the solids built from it would hide it
+        var back = Camera.V(Camera.Back);
         foreach (var s in Sketches)
         {
-            SketchDrawing.AddPictures(g, s.Result.Frame, s.Result.Sketch, top: false);
+            var normalTo = Math.Abs(Vec3.Dot(back, s.Result.Frame.Normal)) > 0.9998;
+            SketchDrawing.AddPictures(g, s.Result.Frame, s.Result.Sketch, top: normalTo);
             var key = new SelItem { Kind = SelKind.Sketch, FeatureId = s.FeatureId }.Key;
             var c = hl.Of(key) ?? new Rgba(0.15f, 0.2f, 0.45f);
             if (_sketchPieces.TryGetValue(s.Result, out var kept) && kept.color == c && kept.px == px) { g.Add(kept.piece); continue; }
@@ -1655,7 +1660,7 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         OrientTo(Camera.LookRotation(dir, up), fit);
     }
 
-    /// <summary>The camera Normal To a frame ends at, fitted to a box (nothing moves).</summary>
+    /// <summary>The camera a sketch is edited from (upright: its X axis to the right), fitted to a box (nothing moves).</summary>
     public Camera NormalToCamera(Frame f, Box3 box)
     {
         var cam = new Camera
@@ -1668,16 +1673,48 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
     }
 
     /// <summary>
+    /// The rotation Normal To turns to: the least turn from the view as it is (or is going to be) to straight on to
+    /// the plane, from the side it is seen from, its roll then snapped to the nearest of the plane's axes (up along
+    /// ±X or ±Y). With <paramref name="flip"/>, already straight on: from the other side, turned about the up axis.
+    /// With <paramref name="top"/> (a second face's normal, not along the plane's), that direction up instead, as
+    /// SolidWorks has the second face of two at the top.
+    /// </summary>
+    Quaternion NormalToRotation(Frame f, bool flip, Vec3? top = null)
+    {
+        var cur = _animating ? _animToQ : Camera.Rotation;
+        var curBack = Vector3.Transform(Vector3.UnitZ, cur);
+        var curUp = Vector3.Transform(Vector3.UnitY, cur);
+        var n = Vector3.Normalize(Camera.F(f.Normal));
+        var dot = Vector3.Dot(curBack, n);
+        var back = dot >= 0 ? n : -n;
+        Vector3 up;
+        if (flip && MathF.Abs(dot) > 0.9998f) { back = -back; up = curUp; }
+        else
+        {
+            var axis = Vector3.Cross(curBack, back);
+            var s = axis.Length();
+            up = s > 1e-6f ? Vector3.Transform(curUp, Quaternion.CreateFromAxisAngle(axis / s, MathF.Atan2(s, Vector3.Dot(curBack, back)))) : curUp;
+        }
+        if (top is { } t && Camera.F(t - f.Normal * Vec3.Dot(t, f.Normal)) is var inPlane && inPlane.Length() > 1e-4f * Camera.F(t).Length())
+            return Camera.LookRotation(back, inPlane);
+        var x = Vector3.Normalize(Camera.F(f.XDir)); var y = Vector3.Normalize(Camera.F(f.YDir));
+        var best = y; var bestDot = float.MinValue;
+        foreach (var a in new[] { x, -x, y, -y })
+            if (Vector3.Dot(a, up) is var d && d > bestDot) { bestDot = d; best = a; }
+        return Camera.LookRotation(back, best);
+    }
+
+    /// <summary>
     /// Look straight at a frame (Normal To). With <paramref name="fit"/>, also zoomed to fit that box as seen from
     /// there (e.g. the sketch being edited), in the same animation.
     /// </summary>
     /// <param name="flip">Already looking at the plane straight on (or turning to): from its other side instead (the
     /// Normal To command used again, as SolidWorks).</param>
-    public void NormalTo(Frame f, Box3? fit = null, bool flip = false)
+    /// <param name="top">A direction to have up on screen (its part along the plane), e.g. a second face's normal.</param>
+    /// <param name="upright">From the plane's front, its X axis to the right (a sketch being edited), not the least turn.</param>
+    public void NormalTo(Frame f, Box3? fit = null, bool flip = false, Vec3? top = null, bool upright = false)
     {
-        var back = Camera.F(f.Normal);
-        if (flip && Vector3.Dot(Vector3.Transform(Vector3.UnitZ, _animating ? _animToQ : Camera.Rotation), back) > 0.9998f) back = -back;
-        var q = Camera.LookRotation(back, Camera.F(f.YDir));
+        var q = upright ? Camera.LookRotation(Camera.F(f.Normal), Camera.F(f.YDir)) : NormalToRotation(f, flip, top);
         if (fit is { IsEmpty: false } box)
         {
             var tmp = NormalToCamera(f, box);

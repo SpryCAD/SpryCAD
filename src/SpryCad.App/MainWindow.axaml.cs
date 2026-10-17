@@ -681,6 +681,12 @@ public partial class MainWindow : Window
             if (e.Key == Key.Enter) _entityPage!.OnOk?.Invoke(); else EndEntityPage();
             e.Handled = true; return;
         }
+        // the Sketch Axes page: Enter is OK, Esc Cancel
+        if (InAxesPage && e.Key is Key.Enter or Key.Escape && !(e.Source is TextBox))
+        {
+            if (e.Key == Key.Enter) _axesPage!.OnOk?.Invoke(); else _axesPage!.OnCancel?.Invoke();
+            e.Handled = true; return;
+        }
         // a picture's page: Enter is OK, Esc Cancel (Esc while clicking its scale points stops that first)
         if (InPicturePage && e.Key is Key.Enter or Key.Escape && !(e.Source is TextBox) && !(e.Key == Key.Escape && _sketch!.PickingPoint))
         {

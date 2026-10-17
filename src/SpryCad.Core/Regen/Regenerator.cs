@@ -514,6 +514,10 @@ public sealed class Regenerator
         void DoSketch(SketchFeature s)
         {
             var frame = Resolver.ResolvePlane(s.Plane, State);
+            // (its alignment lost, as when its edge goes: the plane's own axes, with a warning)
+            if (s.Align is { } align)
+                try { frame = Resolver.Aligned(frame, Resolver.ResolveDir(align.Dir, State).dir, align.AlongY, align.Flip); }
+                catch (FeatureException ex) { status.Warnings.Add($"Could not align the sketch axes: {ex.Message} The plane's axes are used."); }
             var sk = s.Sketch.Clone();
             SketchReferences.Update(sk, frame, State, status.Warnings);
             SketchConvert.Update(sk, frame, State, status.Warnings); // converted entities follow their model edges

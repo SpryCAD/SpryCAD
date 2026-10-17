@@ -298,6 +298,7 @@ static class Program
             SketchVisibilityTests.Run(t);
             SketchConvertTests.Run(t);
             RevolveAxisTests.Run(t);
+            SketchAlignTests.Run(t);
             ConfigTests.Run(t);
             AxisCenterTests.Run(t);
             PlaneSectionTests.Run(t);

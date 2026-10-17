@@ -126,7 +126,13 @@ public sealed class CadDocument
         foreach (var f in Features.Take(ActiveCount))
         {
             if (f.Suppressed) continue;
-            if (f is SketchFeature s) { if (s.Plane.Feature is { } pf && refs.Contains(pf)) used.Add(pf); continue; } // (a sketch's own geometry refers to no plane)
+            if (f is SketchFeature s)
+            {
+                // (a sketch's own geometry refers to no plane; its plane and what its axes align to do)
+                if (s.Plane.Feature is { } pf && refs.Contains(pf)) used.Add(pf);
+                if (s.Align is { } al) { var aj = JsonSerializer.Serialize(al, Serialization.Compact); foreach (var id in refs) if (Refers(aj, id)) used.Add(id); }
+                continue;
+            }
             if (refs.All(used.Contains)) break;
             var json = JsonOf(f);
             foreach (var id in refs) if (id != f.Id && Refers(json, id)) used.Add(id);

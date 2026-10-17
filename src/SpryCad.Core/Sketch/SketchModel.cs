@@ -675,6 +675,26 @@ public sealed class Sketch
         Pictures = Pictures?.Select(p => p.Clone()).ToList(),
     };
 
+    /// <summary>
+    /// Turns everything in the sketch about its origin, counterclockwise by <paramref name="angle"/> (radians): its points,
+    /// spline handles, pictures and dimension label offsets. Turning its axes the other way leaves it where it was in
+    /// the model. References to its own horizontal and vertical axes stay on them.
+    /// </summary>
+    public void Rotate(double angle)
+    {
+        double c = Math.Cos(angle), s = Math.Sin(angle);
+        Vec2 R(Vec2 v) => new(c * v.X - s * v.Y, s * v.X + c * v.Y);
+        var onAxes = Entities.Where(e => e.External?.Axis != null).SelectMany(e => e.PointIds).ToHashSet();
+        foreach (var p in Points) if (!onAxes.Contains(p.Id)) p.P = R(p.P);
+        foreach (var sp in Entities.OfType<SkSpline>())
+        {
+            if (sp.StartDir is { } a) sp.StartDir = R(a);
+            if (sp.EndDir is { } b) sp.EndDir = R(b);
+        }
+        foreach (var k in Constraints) { var l = R(new Vec2(k.LabelX, k.LabelY)); k.LabelX = l.X; k.LabelY = l.Y; }
+        foreach (var pic in Pictures ?? new()) { pic.Center = R(pic.Center); pic.Angle += angle; }
+    }
+
     /// <summary>Entities that reference a point.</summary>
     public IEnumerable<SkEntity> EntitiesUsing(long pointId) => Entities.Where(e => e.PointIds.Contains(pointId));
 

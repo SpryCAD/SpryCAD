@@ -44,7 +44,7 @@ public sealed partial class SketchEditor : IViewportMode
 {
     public SketchFeature Feature { get; }
     public Sketch Sk => Feature.Sketch;
-    public Frame Frame { get; }
+    public Frame Frame { get; private set; }
     public Func<string, Quantity?> Lookup { get; set; }
     /// <summary>The part's units: what dimensions show in, and what a value typed without a unit is in.</summary>
     public UnitSystem Units { get; set; }
@@ -63,10 +63,12 @@ public sealed partial class SketchEditor : IViewportMode
     public event Action? SelectionChanged;
     public event Action<string>? Message;  // status bar hints
     public event Action? ToolChanged;
+    /// <summary>The sketch's axes turned (<see cref="Realign"/>, or undoing it).</summary>
+    public event Action? FrameChanged;
 
     readonly ViewportControl _vp;
-    readonly List<string> _undo = new();
-    readonly List<string> _redo = new();
+    readonly List<UndoStep> _undo = new();
+    readonly List<UndoStep> _redo = new();
 
     // pointer state
     Vec2 _mouse; Snap _snap; SkRef? _hover;
@@ -157,9 +159,14 @@ public sealed partial class SketchEditor : IViewportMode
         Changed?.Invoke();
     }
 
+    // an undo step: the sketch, and its axes (aligning them turns the sketch)
+    sealed record UndoStep(string Sketch, SketchAlign? Align, Frame Frame);
+
+    UndoStep Now() => new(System.Text.Json.JsonSerializer.Serialize(Sk, Serialization.Compact), Feature.Align?.Clone(), Frame);
+
     void Snapshot()
     {
-        _undo.Add(System.Text.Json.JsonSerializer.Serialize(Sk, Serialization.Compact));
+        _undo.Add(Now());
         if (_undo.Count > 100) _undo.RemoveAt(0);
         _redo.Clear();
         Modified = true;
@@ -169,7 +176,7 @@ public sealed partial class SketchEditor : IViewportMode
     {
         if (_pictureBefore != null) return false; // (a picture's page is open: its Cancel undoes it)
         if (_undo.Count == 0) return false;
-        _redo.Add(System.Text.Json.JsonSerializer.Serialize(Sk, Serialization.Compact));
+        _redo.Add(Now());
         Restore(_undo[^1]); _undo.RemoveAt(_undo.Count - 1);
         return true;
     }
@@ -178,18 +185,51 @@ public sealed partial class SketchEditor : IViewportMode
     {
         if (_pictureBefore != null) return false;
         if (_redo.Count == 0) return false;
-        _undo.Add(System.Text.Json.JsonSerializer.Serialize(Sk, Serialization.Compact));
+        _undo.Add(Now());
         Restore(_redo[^1]); _redo.RemoveAt(_redo.Count - 1);
         return true;
     }
 
-    void Restore(string json)
+    /// <summary>How many undo steps there are (a page's Cancel goes back to it with <see cref="UndoTo"/>).</summary>
+    public int UndoDepth => _undo.Count;
+
+    /// <summary>Undoes back to <paramref name="depth"/> steps, leaving nothing to redo.</summary>
+    public void UndoTo(int depth)
     {
-        var s = System.Text.Json.JsonSerializer.Deserialize<Sketch>(json, Serialization.Options)!;
+        while (_undo.Count > depth && Undo()) { }
+        _redo.Clear();
+    }
+
+    void Restore(UndoStep step)
+    {
+        var s = System.Text.Json.JsonSerializer.Deserialize<Sketch>(step.Sketch, Serialization.Options)!;
         Feature.Sketch = s;
+        var turned = step.Frame != Frame;
+        Feature.Align = step.Align?.Clone(); Frame = step.Frame;
         Selected.Clear();
         Resolve();
         SelectionChanged?.Invoke();
+        if (turned) FrameChanged?.Invoke();
+        _vp.Redraw();
+    }
+
+    /// <summary>
+    /// Turns the sketch's axes to <paramref name="frame"/> (its plane's, turned as <paramref name="align"/> has them),
+    /// the geometry staying where it is in the model; one undo step. Horizontal, Vertical and the horizontal and
+    /// vertical dimensions then hold along the new axes.
+    /// </summary>
+    public void Realign(SketchAlign? align, Frame frame)
+    {
+        // (the axes as they are: only what they follow changes)
+        if (frame == Frame) { Feature.Align = align; Modified = true; return; }
+        Snapshot();
+        // the sketch turned back by the axes' turn: the same place in the model in the new axes
+        var turn = Math.Atan2(Vec3.Dot(frame.XDir, Frame.YDir), Vec3.Dot(frame.XDir, Frame.XDir));
+        Sk.Rotate(-turn);
+        Feature.Align = align; Frame = frame;
+        CancelOperation();
+        Resolve();
+        FrameChanged?.Invoke();
         _vp.Redraw();
     }
 

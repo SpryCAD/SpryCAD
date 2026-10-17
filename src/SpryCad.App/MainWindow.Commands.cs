@@ -364,6 +364,7 @@ public partial class MainWindow
                 Cmd("construction", "Construction Geometry", ToggleConstruction);
                 Cmd("relations", "Add Relations", AddRelationCommand);
                 Cmd("sketchpicture", "Sketch Picture", SketchPictureCommand);
+                Cmd("axis", "Sketch Axes", SketchAxesCommand);
                 Cmd("normalto", "Normal To", NormalTo);
                 break;
             case "Sheet Metal":
@@ -415,6 +416,8 @@ public partial class MainWindow
         [SketchTool.SmartDimension] = "D", [SketchTool.Point] = "P", [SketchTool.Trim] = "T", [SketchTool.Spline] = "S",
     };
 
+    const string NormalToHelp = "Turns the view to face the selected plane or planar face; Ctrl-select a second face to put it at the top.";
+
     /// <summary>One-line descriptions shown under the command name in toolbar tooltips.</summary>
     static readonly Dictionary<string, string> CommandHelp = new()
     {
@@ -446,7 +449,9 @@ public partial class MainWindow
         ["Corners"] = "Lists the corners where flanges meet and sets each corner's treatment and gap.",
         ["Flatten"] = "Toggles the sheet metal between flat and folded.",
         ["Export Flat"] = "Exports the flat pattern as DXF or SVG with bend lines, notes and a bend table.",
-        ["Sketch"] = "Starts a sketch on the selected plane or planar face.",
+        ["Sketch"] = "Starts a sketch on the selected plane or planar face; a second edge or face selected aligns its axes.",
+        ["Normal To"] = NormalToHelp,
+        ["Sketch Axes"] = "Turns the sketch's axes to follow a straight edge or a planar face; the geometry stays in place.",
         ["Smart Dimension"] = "Dimensions sketch entities and model edges or vertices.",
         ["Line"] = "Sketches lines, adding relations when they snap to entities, model edges, midpoints and centers.",
         ["Convert Entities"] = "Projects the selected model edges into the sketch.",
@@ -568,7 +573,7 @@ public partial class MainWindow
         H("fit", "Zoom to Fit (F)", () => Viewport.ZoomToFit());
         var views = H("views", "View Orientation (Spacebar)", () => { });
         views.Flyout = OrientationFlyout();
-        H("normalto", "Normal To (N)", NormalTo);
+        H("normalto", "Normal To (N)\n" + NormalToHelp, NormalTo);
         var disp = H("display", "Display Style", () => { });
         var df = new MenuFlyout();
         df.Items.Add(StyleItem("Shaded With Edges", DisplayStyle.ShadedWithEdges));
@@ -640,13 +645,17 @@ public partial class MainWindow
 
     void NormalTo()
     {
-        Frame? f = null;
-        if (_sketch != null && Selection.First is not { Kind: SelKind.Face, Planar: true }) f = _sketch.Frame;
-        else if (Selection.First is { } s)
+        Frame? f = null; Vec3? top = null;
+        // two planar faces or planes: the first straight on, the second at the top (as SolidWorks)
+        var two = Selection.Items.Take(3).ToList();
+        if (two.Count == 2 && PlaneOf(two[0]) is { } first && PlaneOf(two[1]) is { } second)
         {
-            if (s.Kind == SelKind.Face && s.FacePlane != null) f = Frame.FromPlane(s.FacePlane);
-            else if (s.Frame != null) f = s.Frame;
+            if (Math.Abs(Vec3.Dot(first.Normal, second.Normal)) > 0.9998)
+            { Status("The two faces are parallel. Select a second face or plane at an angle to the first."); return; }
+            f = first; top = second.Normal;
         }
+        else if (_sketch != null && Selection.First is not { Kind: SelKind.Face, Planar: true }) f = _sketch.Frame;
+        else if (Selection.First is { } s) f = PlaneOf(s);
         // an assembly: an origin plane picked in the tree, else the next flat face of a component clicked
         if (f == null && Asm != null)
         {
@@ -660,8 +669,11 @@ public partial class MainWindow
             }
         }
         if (f == null) { Status("Select a planar face, plane or sketch for Normal To."); return; }
-        Viewport.NormalTo(f.Value, flip: true);
+        Viewport.NormalTo(f.Value, flip: true, top: top);
     }
+
+    /// <summary>The plane of a selected planar face, plane or sketch, or null.</summary>
+    static Frame? PlaneOf(SelItem s) => s.Kind == SelKind.Face && s.FacePlane is { } p ? Frame.FromPlane(p) : s.Frame;
 
     // Normal To in an assembly, waiting for the face to look at
     bool _normalToPick;

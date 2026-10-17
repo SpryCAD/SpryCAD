@@ -175,7 +175,7 @@ public partial class MainWindow
                     if (r != null && r.State.Sketches.TryGetValue(sf.Id, out var sr)) frame = sr.Frame;
                     else
                     {
-                        try { frame = Resolver.ResolvePlane(sf.Plane, r == null ? ModelState.Initial() : StateBefore(r, Session.Doc.IndexOf(sf.Id))); }
+                        try { frame = Resolver.SketchFrame(sf, r == null ? ModelState.Initial() : StateBefore(r, Session.Doc.IndexOf(sf.Id))); }
                         catch (Exception ex) { App.Log(ex, "Edit sketch"); Status("Could not edit sketch: " + ex.Message); return; }
                     }
                     var consumer = Session.Doc.ConsumersOf(sf.Id).FirstOrDefault();

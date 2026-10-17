@@ -40,8 +40,16 @@ public partial class MainWindow
         if (sel?.Kind == SelKind.Sketch && pendingAfter == null) { EditFeature(sel.FeatureId!); return; }
         if (TryPlaneOf(sel, out var pr, out var frame))
         {
+            // a second selection (a straight edge, a face): the sketch's axes aligned to it
+            SketchAlign? align = null;
+            if (Selection.Items.Skip(1).FirstOrDefault() is { } second && Session.Result is { } r)
+                try
+                {
+                    if (AlignTo(second, frame, frame, StateBefore(r, Session.Doc.ActiveCount)) is { } a) (align, frame) = a;
+                }
+                catch (FeatureException ex) { Status($"Sketch axes not aligned: {ex.Message}"); }
             _pendingAfterSketch = pendingAfter;
-            StartSketch(pr!, frame);
+            StartSketch(pr!, frame, align: align);
             return;
         }
         // ask for a plane
@@ -103,9 +111,23 @@ public partial class MainWindow
         return false;
     }
 
-    void StartSketch(PlaneRef pr, Frame frame, bool pointsOnly = false)
+    /// <summary>
+    /// The sketch axes aligned to a selection: a straight edge or an axis along X (the way nearest <paramref name="now"/>'s
+    /// X axis), a planar face or a plane at the top (Y along its normal). Null for a selection with no direction; throws
+    /// <see cref="FeatureException"/> for one normal to the plane.
+    /// </summary>
+    static (SketchAlign align, Frame frame)? AlignTo(SelItem s, Frame plane, Frame now, ModelState st)
     {
-        var sf = new SketchFeature { Id = Session.Doc.NewId(), Plane = pr, Sketch = new Sketch() };
+        if (s.Kind is not (SelKind.Edge or SelKind.Face or SelKind.Plane or SelKind.Axis) || s.ToDirRef() is not { } dr) return null;
+        var dir = Resolver.ResolveDir(dr, st).dir;
+        var a = new SketchAlign { Dir = dr, AlongY = s.Kind == SelKind.Plane || s.Kind == SelKind.Face && s.Planar };
+        if (!a.AlongY && Vec3.Dot(dir, now.XDir) < 0) a.Flip = true;
+        return (a, Resolver.Aligned(plane, dir, a.AlongY, a.Flip));
+    }
+
+    void StartSketch(PlaneRef pr, Frame frame, bool pointsOnly = false, SketchAlign? align = null)
+    {
+        var sf = new SketchFeature { Id = Session.Doc.NewId(), Plane = pr, Align = align, Sketch = new Sketch() };
         EnterSketch(sf, frame, isNew: true, pointsOnly);
     }
 
@@ -141,7 +163,9 @@ public partial class MainWindow
         ShowConfirmCorner(() => ExitSketch(true), DiscardSketch, "Exit Sketch", "Discard Changes", okIcon: "exitsketch");
         BuildSketchPage();
         // a new sketch turns to its plane; an existing one also zooms to fit its geometry and its dimensions
-        Viewport.NormalTo(frame, isNew ? null : SketchFit(sf.Sketch, frame));
+        Viewport.NormalTo(frame, isNew ? null : SketchFit(sf.Sketch, frame), upright: true);
+        // its axes turned: looked at upright again
+        _sketch.FrameChanged += () => { if (_sketch != null) Viewport.NormalTo(_sketch.Frame, upright: true); };
         if (pointsOnly) _sketch.SetTool(SketchTool.Point);
         else if (_pendingTool != null) { _sketch.SetTool(_pendingTool.Value); _pendingTool = null; }
         else _sketch.SetTool(SketchTool.Select);
@@ -248,7 +272,7 @@ public partial class MainWindow
             Session.Change(() =>
             {
                 if (_sketchIsNew) Session.Doc.AddFeature(ed.Feature);
-                else if (Session.Doc.Find(id) is SketchFeature existing) existing.Sketch = ed.Feature.Sketch;
+                else if (Session.Doc.Find(id) is SketchFeature existing) { existing.Sketch = ed.Feature.Sketch; existing.Align = ed.Feature.Align; }
                 ApplyPendingEquations(Session.Doc); // (the equations typed in its dimensions: one undo step with it)
             });
             Status($"{Session.Doc.Find(id)?.Name} saved.");
@@ -307,6 +331,8 @@ public partial class MainWindow
         if (InEntityPage) { TakeEntityPicks(); return; }
         // and a picture's page
         if (InPicturePage) return;
+        // and the Sketch Axes page
+        if (InAxesPage) { TakeAxesPick(); return; }
         var ed = _sketch;
         var page = new PmPage(ed.PointsOnly ? "Hole Positions" : "Sketch", "sketch") { OnOk = () => ExitSketch(true), OnCancel = DiscardSketch };
         if (ed.Selected.Count == 0)
@@ -342,6 +368,12 @@ public partial class MainWindow
             var m = page.Section("Model Edges");
             page.Info(m, "Convert Entities projects model edges and faces into the sketch as exact lines, arcs and circles.");
             page.ButtonRow(m, "Convert Entities", ConvertEntities, "convert");
+            if (_profileHole == null)
+            {
+                var ax = page.Section("Sketch Axes");
+                page.Info(ax, ed.Feature.Align == null ? "The sketch uses its plane's axes." : "The sketch's axes are aligned to the model.");
+                page.ButtonRow(ax, "Sketch Axes…", SketchAxesCommand, "axis");
+            }
             AddPictureSection(page, ed);
         }
         else

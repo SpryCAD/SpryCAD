@@ -368,6 +368,26 @@ public static class Resolver
         }
     }
 
+    /// <summary>A sketch's frame: its plane's, its axes turned as <see cref="SketchFeature.Align"/> has them.</summary>
+    public static Frame SketchFrame(SketchFeature s, ModelState st)
+    {
+        var f = ResolvePlane(s.Plane, st);
+        return s.Align is { } a ? Aligned(f, ResolveDir(a.Dir, st).dir, a.AlongY, a.Flip) : f;
+    }
+
+    /// <summary>
+    /// A frame turned in its plane: its X axis (or with <paramref name="alongY"/> its Y axis) along a direction's part
+    /// in the plane, reversed with <paramref name="flip"/>. The origin and normal stay.
+    /// </summary>
+    public static Frame Aligned(Frame f, Vec3 dir, bool alongY, bool flip)
+    {
+        var d = dir - f.Normal * Vec3.Dot(dir, f.Normal);
+        if (d.Length < 1e-6 * Math.Max(1, dir.Length)) throw new FeatureException("The direction is normal to the sketch plane.");
+        d = d.Normalized;
+        if (flip) d = -d;
+        return alongY ? new Frame(f.Origin, Vec3.Cross(d, f.Normal), d, f.Normal) : new Frame(f.Origin, d, Vec3.Cross(f.Normal, d), f.Normal);
+    }
+
     /// <summary>Resolves a direction/axis to (point on axis, unit direction).</summary>
     public static (Vec3 origin, Vec3 dir) ResolveDir(DirRef r, ModelState st)
     {
