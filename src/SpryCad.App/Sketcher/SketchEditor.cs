@@ -905,8 +905,11 @@ public sealed partial class SketchEditor : IViewportMode
             foreach (var b in _vp.Bodies)
                 foreach (var e in b.Solid.Topology.Edges)
                 {
+                    // (a closed edge's start is only its seam, somewhere on the rim: lining up with it means nothing,
+                    // and each boss or hole would offer a line of its own; a circle's center is offered instead)
+                    if (e.Closed) continue;
                     list.Add(Frame.ToLocal(e.Start));
-                    if (!e.Closed) list.Add(Frame.ToLocal(e.End));
+                    list.Add(Frame.ToLocal(e.End));
                 }
             foreach (var (_, _, c) in ModelCircles()) list.Add(c);
             _modelVertices = list.Distinct().ToList(); _modelVerticesKey = key;

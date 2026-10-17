@@ -2288,8 +2288,11 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         foreach (var b in Bodies)
             foreach (var e in b.Solid.Topology.Edges)
             {
+                // (not a closed edge's seam: it is only where the curve starts, somewhere on the rim, and can move
+                // when the part rebuilds; the circle's center or the edge itself is what is meant)
+                if (e.Closed) continue;
                 Try(b, e, e.Start);
-                if (!e.Closed) Try(b, e, e.End);
+                Try(b, e, e.End);
             }
         return best;
 
