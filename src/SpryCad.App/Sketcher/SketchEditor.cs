@@ -1455,15 +1455,16 @@ public sealed partial class SketchEditor : IViewportMode
             && !Sk.Constraints.Any(c => c.Refs.Contains(e.Id) || e.PointIds.Any(c.Refs.Contains))
             && !Sk.Entities.Any(o => o != e && o.PointIds.Any(e.PointIds.Contains));
         var unused = Sk.Entities.Where(e => (e is SkPointEntity { External.Vertex: true } || e.External?.Sketch != null) && Unused(e)).ToList();
-        foreach (var id in _midHelpers.ToList())
+        foreach (var (id, own) in _midHelpers.ToList())
         {
             if (Sk.Entity(id) is not SkPointEntity h) { _midHelpers.Remove(id); continue; }
             if (Selected.Contains(new SkRef(SkRefKind.Entity, id)) || Selected.Contains(new SkRef(SkRefKind.Point, h.P))) continue;
             _midHelpers.Remove(id);
             // merged into another point (made coincident with a line's end): that point keeps the Midpoint relation; used
-            // by nothing but its own Midpoint: gone with it; else (dimensioned to, related otherwise) kept
+            // by nothing but the relation holding it at the midpoint: gone with it; else (on another line, at another
+            // line's midpoint, dimensioned to) kept
             bool shared = Sk.Entities.Any(o => o != h && o.PointIds.Contains(h.P));
-            bool used = Sk.Constraints.Any(c => c.Refs.Contains(h.Id) || c.Refs.Contains(h.P) && c.Type != CType.Midpoint);
+            bool used = Sk.Constraints.Any(c => c.Id != own && (c.Refs.Contains(h.Id) || c.Refs.Contains(h.P)));
             if (shared || !used) unused.Add(h);
         }
         if (unused.Count == 0) return;
@@ -1524,8 +1525,9 @@ public sealed partial class SketchEditor : IViewportMode
 
     // ---- Select Midpoint (a line right-clicked, as SolidWorks) ----
 
-    // the construction points Select Midpoint made, taken out again once nothing uses them
-    readonly HashSet<long> _midHelpers = new();
+    // the construction points Select Midpoint made (with the relation holding each there), taken out again once nothing
+    // else uses them
+    readonly Dictionary<long, long> _midHelpers = new();
 
     /// <summary>The sketch geometry under the cursor (points winning), for the right-click menu.</summary>
     public SkRef? GeometryAt(double x, double y) => HitTest(x, y, includeDims: false);
@@ -1549,8 +1551,7 @@ public sealed partial class SketchEditor : IViewportMode
         Snapshot();
         var p = Sk.AddPoint((Sk.P(l.P1) + Sk.P(l.P2)) * 0.5);
         var pe = Sk.Add(new SkPointEntity { P = p.Id, Construction = true });
-        Sk.AddConstraint(CType.Midpoint, p.Id, l.Id);
-        _midHelpers.Add(pe.Id);
+        _midHelpers[pe.Id] = Sk.AddConstraint(CType.Midpoint, p.Id, l.Id).Id;
         Selected.Remove(new SkRef(SkRefKind.Entity, lineId));
         Selected.Add(new SkRef(SkRefKind.Entity, pe.Id));
         Resolve();
