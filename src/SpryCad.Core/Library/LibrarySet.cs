@@ -57,7 +57,7 @@ public sealed class LibrarySet
             if (i >= 0) { rows[i] = r; from[i] = lib; }
             else { rows.Add(r); from.Add(lib); }
         }
-        var merged = new LibraryTable { Key = t.Key, Title = t.Title, Kind = t.Kind, Standard = t.Standard, Units = t.Units, Verified = t.Verified && m.Table.Verified, Columns = t.Columns, Rows = rows, Profile = t.Profile ?? m.Table.Profile };
+        var merged = new LibraryTable { Key = t.Key, Title = t.Title, Kind = t.Kind, Standard = t.Standard, Units = t.Units, Verified = t.Verified && m.Table.Verified, Columns = t.Columns, Rows = rows };
         _tables[t.Key] = new Merged(merged, from.ToArray());
     }
 
@@ -82,7 +82,7 @@ public sealed class LibrarySet
         {
             var rows = m.Table.Rows.Where(r => Allowed(m.Table.Key, r.Key, r.Text?.GetValueOrDefault(Fasteners.SizeKey))).ToList();
             if (rows.Count == 0) continue;
-            yield return new LibraryTable { Key = m.Table.Key, Title = m.Table.Title, Kind = m.Table.Kind, Standard = m.Table.Standard, Units = m.Table.Units, Verified = m.Table.Verified, Columns = m.Table.Columns, Rows = rows, Profile = m.Table.Profile };
+            yield return new LibraryTable { Key = m.Table.Key, Title = m.Table.Title, Kind = m.Table.Kind, Standard = m.Table.Standard, Units = m.Table.Units, Verified = m.Table.Verified, Columns = m.Table.Columns, Rows = rows };
         }
     }
 

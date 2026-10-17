@@ -31,7 +31,6 @@ public static class LibraryEditor
 {
     static readonly FilePickerFileType LibraryType = new("SpryCAD Library") { Patterns = new[] { "*" + LibraryFile.Extension } };
     static readonly FilePickerFileType CsvType = new("CSV") { Patterns = new[] { "*.csv" } };
-    static readonly FilePickerFileType ExcelType = new("Excel Workbook") { Patterns = new[] { "*.xlsx" } };
 
     /// <summary>The columns a new table of each kind starts with (what the Thread and Hole Wizard commands read).</summary>
     static readonly (string kind, string label, string[] columns)[] Kinds =
@@ -94,8 +93,6 @@ public static class LibraryEditor
         public List<string> Columns = new();
         public List<string> TextColumns = new();
         public List<RowEdit> Rows = new();
-        /// <summary>A hole type's profile (<see cref="LibraryTable.Profile"/>): kept as read, made from a hole's.</summary>
-        public SpryCad.Core.Sketching.Sketch? Profile;
     }
 
     sealed class RestrictionEdit
@@ -140,7 +137,7 @@ public static class LibraryEditor
                 if (cols.Any(c => c.Length == 0)) return (tables, new(), $"{key}: every column needs a name.");
                 if (cols.Distinct().Count() != cols.Count) return (tables, new(), $"{key}: two columns have the same name.");
                 var rowKeys = new HashSet<string>(StringComparer.Ordinal);
-                var lt = new LibraryTable { Key = key, Title = t.Title.Trim(), Kind = t.Kind.Trim(), Standard = t.Standard.Trim(), Units = t.Units, Verified = t.Verified, Columns = cols, Profile = t.Profile };
+                var lt = new LibraryTable { Key = key, Title = t.Title.Trim(), Kind = t.Kind.Trim(), Standard = t.Standard.Trim(), Units = t.Units, Verified = t.Verified, Columns = cols };
                 foreach (var r in t.Rows)
                 {
                     var rk = r.Key.Trim();
@@ -344,7 +341,7 @@ public static class LibraryEditor
 
     static TableEdit Edit(LibraryTable t, bool published) => new()
     {
-        Key = t.Key, Title = t.Title, Kind = t.Kind, Standard = t.Standard, Units = t.Units, Verified = t.Verified, Published = published, Profile = t.Profile,
+        Key = t.Key, Title = t.Title, Kind = t.Kind, Standard = t.Standard, Units = t.Units, Verified = t.Verified, Published = published,
         Columns = t.Columns.ToList(), TextColumns = LibraryCsv.TextColumns(t.Rows),
         Rows = t.Rows.Select(r => Edit(r, t)).ToList(),
     };
@@ -410,29 +407,14 @@ public static class LibraryEditor
     // the commands
 
     /// <summary>Tools > Libraries > Edit Library: picks a library file and edits it (at <paramref name="table"/>, when it has it).</summary>
-    /// <param name="add">
-    /// A table to add to the library opened (a hole type made from a hole's profile), not yet published; selected.
-    /// </param>
-    public static async Task Open(MainWindow owner, string? table = null, LibraryTable? add = null)
+    public static async Task Open(MainWindow owner, string? table = null)
     {
-        State With(State s)
-        {
-            if (add == null) return s;
-            var key = add.Key;
-            for (int i = 2; s.Table(key) != null; i++) key = $"{add.Key}-{i}";
-            var e = Edit(add, false);
-            e.Key = key;
-            s.Tables.Add(e);
-            s.Dirty = true;
-            table = key;
-            return s;
-        }
         // no library set yet: SpryCAD's own standards, published as the start of one
         if (Libraries.Location.path == null)
         {
             var b = FromLibrary(BuiltInStandards.AsLibrary() with { Tables = LibraryFile.BuiltInTables.ToList() }, "");
             b.ReadRevision = null;
-            await Show(owner, With(b), table);
+            await Show(owner, b, table);
             return;
         }
         var files = await owner.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
@@ -447,7 +429,7 @@ public static class LibraryEditor
             await Dialogs.Message(owner, "Edit Library Failed", $"Could not read {System.IO.Path.GetFileName(path)}: {ex.Message}");
             return;
         }
-        await Show(owner, With(s), table);
+        await Show(owner, s, table);
     }
 
     /// <summary>Tools > Libraries > New Company Library: a new, empty company library at a path chosen (written when first published).</summary>
@@ -1311,96 +1293,8 @@ public static class LibraryEditor
         top.Children.Add(pathText);
         var topBar = new Border { Child = top, Background = Palette.Strip, BorderBrush = Palette.Border, BorderThickness = new Thickness(0, 0, 0, 1) };
 
-        // ---- the whole library to Excel and back (as Inventor's hole and thread spreadsheets): a sheet per table
-        var toExcel = new Button { Content = "Export to Excel…" };
-        ToolTip.SetTip(toExcel, "Writes the library's tables to an Excel workbook, a sheet per table, to edit in a spreadsheet and import again");
-        toExcel.Click += async (_, _) =>
-        {
-            var (tables, _, problem) = s.Build();
-            if (problem != null) { error.Text = problem; return; }
-            var f = await w.StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
-            {
-                Title = "Export to Excel", SuggestedFileName = (s.Name.Length > 0 ? s.Name : "library") + ".xlsx", DefaultExtension = ".xlsx", FileTypeChoices = new[] { ExcelType },
-            });
-            if (f?.TryGetLocalPath() is not { } p) return;
-            try
-            {
-                await using var fs = File.Create(p);
-                LibraryWorkbook.Write(tables.Select(t => InUnits(t, toShown: true)), fs);
-                owner.Status($"Exported {tables.Count} tables to {p}.");
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { error.Text = $"{System.IO.Path.GetFileName(p)} could not be written: {ex.Message}"; }
-        };
-        var fromExcel = new Button { Content = "Import from Excel…" };
-        ToolTip.SetTip(fromExcel, "Reads an Excel workbook's tables into the library (its sheets as Export to Excel writes them); shows what changes first. Publish to share them");
-        fromExcel.Click += async (_, _) =>
-        {
-            var files = await w.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions { Title = "Import from Excel", AllowMultiple = false, FileTypeFilter = new[] { ExcelType } });
-            if (files.FirstOrDefault()?.TryGetLocalPath() is not { } p) return;
-            List<LibraryTable> read; List<string> problems;
-            try { await using var fs = File.OpenRead(p); (read, problems) = LibraryWorkbook.Read(fs); }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or FormatException or ArgumentException)
-            { error.Text = $"{System.IO.Path.GetFileName(p)} could not be read: {ex.Message}"; return; }
-            // all or nothing: a workbook with problems changes nothing
-            if (problems.Count > 0)
-            {
-                await Dialogs.Message(w, "Import Failed", $"{System.IO.Path.GetFileName(p)} has {problems.Count} problem{(problems.Count == 1 ? "" : "s")}; nothing was imported. Correct them and import again:\n\n"
-                    + string.Join("\n", problems.Take(15)) + (problems.Count > 15 ? $"\n… {problems.Count - 15} more" : ""));
-                return;
-            }
-            // what changes, table by table, before anything does
-            var lines = new List<string>();
-            var plan = new List<(TableEdit? old, TableEdit edit)>();
-            foreach (var t in read)
-            {
-                var mm = InUnits(t, toShown: false);
-                var old = s.Table(t.Key);
-                var e = Edit(mm, old?.Published ?? false);
-                e.Profile = old?.Profile; // (a hole type's profile is not in the workbook: kept)
-                if (old == null) { lines.Add($"{t.Key}: new table, {t.Rows.Count} rows"); plan.Add((null, e)); continue; }
-                int added = 0, changed = 0;
-                foreach (var r in e.Rows)
-                {
-                    var o = old.Rows.FirstOrDefault(x => x.Key == r.Key);
-                    if (o == null) { added++; continue; }
-                    bool differs = false;
-                    for (int c = 0; c < e.Columns.Count; c++)
-                    {
-                        var oc = old.Columns.IndexOf(e.Columns[c]);
-                        var before = oc >= 0 ? o.Mm(oc, old.Scale(old.Columns[oc])) : null;
-                        var now = r.Exact[c];
-                        // (within a spreadsheet's 15 digits: unchanged, the exact value kept)
-                        if (before is { } b0 && now is { } n0 && (b0.Equals(n0) || Math.Abs(b0 - n0) <= 1e-12 * Math.Max(1, Math.Abs(b0))))
-                        { r.Values[c] = o.Values[oc]; r.Exact[c] = b0; }
-                        else differs = true;
-                    }
-                    if (differs || !r.Text.OrderBy(x => x.Key).SequenceEqual(o.Text.OrderBy(x => x.Key))) changed++;
-                }
-                int removed = old.Rows.Count(o => e.Rows.All(r => r.Key != o.Key));
-                bool columns = !e.Columns.SequenceEqual(old.Columns);
-                if (added + changed + removed == 0 && !columns && e.Title == old.Title && e.Standard == old.Standard && e.Kind == old.Kind && e.Units == old.Units) continue;
-                var parts = new List<string>();
-                if (added > 0) parts.Add($"{added} added");
-                if (changed > 0) parts.Add($"{changed} changed");
-                if (removed > 0) parts.Add($"{removed} removed");
-                if (columns) parts.Add(old.Published ? $"columns now {string.Join(", ", e.Columns)} (parts read values by column name)" : $"columns now {string.Join(", ", e.Columns)}");
-                lines.Add($"{t.Key}: " + (parts.Count > 0 ? string.Join(", ", parts) : "title, standard or units changed"));
-                plan.Add((old, e));
-            }
-            if (plan.Count == 0) { owner.Status($"{System.IO.Path.GetFileName(p)} has no changes for this library."); return; }
-            var untouched = s.Tables.Count(x => read.All(t => t.Key != x.Key));
-            if (!await Dialogs.YesNo(w, "Import from Excel", string.Join("\n", lines)
-                    + (untouched > 0 ? $"\n\n{untouched} table{(untouched == 1 ? " is" : "s are")} not in the workbook and stay as they are." : ""), "Import", "Cancel"))
-                return;
-            foreach (var (old, e) in plan)
-                if (old == null) s.Tables.Add(e);
-                else s.Tables[s.Tables.IndexOf(old)] = e;
-            Changed(); Relist();
-            owner.Status($"Imported {plan.Count} table{(plan.Count == 1 ? "" : "s")} from {System.IO.Path.GetFileName(p)} (not yet published).");
-        };
-
-        var leftButtons = new StackPanel { Spacing = 6, Margin = new Thickness(8), Children = { addTable, restrict, profile, toExcel, fromExcel } };
-        foreach (var b in new[] { addTable, restrict, profile, toExcel, fromExcel }) b.HorizontalAlignment = HorizontalAlignment.Stretch;
+        var leftButtons = new StackPanel { Spacing = 6, Margin = new Thickness(8), Children = { addTable, restrict, profile } };
+        foreach (var b in new[] { addTable, restrict, profile }) b.HorizontalAlignment = HorizontalAlignment.Stretch;
         var leftDock = new DockPanel();
         DockPanel.SetDock(leftButtons, Dock.Bottom);
         leftDock.Children.Add(leftButtons);

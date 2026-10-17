@@ -1,7 +1,6 @@
 using SpryCad.Core.Library;
 using SpryCad.Core.Model;
 using SpryCad.Core.Regen;
-using SpryCad.Core.Sketching;
 using SpryCad.Core.Storage;
 using SpryCad.Kernel;
 
@@ -330,109 +329,6 @@ static class LibraryTests
             t.Eq(lib.Tables.Single().Units, LibraryTable.Inch);
             t.Eq(new LibrarySet(new[] { lib }).Offered(TableKinds.Clearance).Single(x => x.Key == "ACME-inch").Units, LibraryTable.Inch);
             t.True(!J(Clearance(("M8", 8.4, 9, 10))).Contains("units", StringComparison.OrdinalIgnoreCase), "no units (mm): not written, so metric tables are unchanged");
-        });
-
-        t.Test("Library workbooks: the built-in standards to Excel and back unchanged (keys, columns, values, text, units); a wrong cell named by sheet and cell", () =>
-        {
-            var ms = new MemoryStream();
-            LibraryWorkbook.Write(BuiltInStandards.Tables, ms);
-            ms.Position = 0;
-            var (tables, problems) = LibraryWorkbook.Read(ms);
-            t.True(problems.Count == 0, string.Join("; ", problems));
-            t.Eq(tables.Count, BuiltInStandards.Tables.Count);
-            foreach (var (a, b) in BuiltInStandards.Tables.Zip(tables))
-            {
-                t.Eq(b.Key, a.Key); t.Eq(b.Title, a.Title); t.Eq(b.Kind, a.Kind); t.Eq(b.Standard, a.Standard); t.Eq(b.Units, a.Units); t.Eq(b.Verified, a.Verified);
-                t.Eq(string.Join(",", b.Columns), string.Join(",", a.Columns));
-                t.Eq(b.Rows.Count, a.Rows.Count);
-                foreach (var (ra, rb) in a.Rows.Zip(b.Rows))
-                {
-                    t.Eq(rb.Key, ra.Key);
-                    t.True(ra.Values.Zip(rb.Values).All(v => v.First.Equals(v.Second) || Math.Abs(v.First - v.Second) <= 1e-12 * Math.Max(1, Math.Abs(v.First))), // (a spreadsheet keeps 15 digits)
-                         $"{a.Key} {ra.Key}: {string.Join(",", ra.Values)} vs {string.Join(",", rb.Values)}");
-                    t.Eq(J(rb.Text), J(ra.Text));
-                }
-            }
-            // a value typed as words, and a size listed twice: each said with its sheet and cell; that table left out
-            ms.Position = 0;
-            using (var wb = new ClosedXML.Excel.XLWorkbook(ms))
-            {
-                var ws = wb.Worksheet("ISO273");
-                ws.Cell(3, 3).SetValue("about nine");
-                ws.Cell(4, 1).SetValue(ws.Cell(2, 1).GetString());
-                var edited = new MemoryStream();
-                wb.SaveAs(edited);
-                edited.Position = 0;
-                var (t2, p2) = LibraryWorkbook.Read(edited);
-                t.True(p2.Any(x => x.StartsWith("Sheet ISO273, cell C3") && x.Contains("not a number")), string.Join("; ", p2));
-                t.True(p2.Any(x => x.StartsWith("Sheet ISO273, cell A4") && x.Contains("twice")), string.Join("; ", p2));
-                t.True(t2.All(x => x.Key != "ISO273") && t2.Count == BuiltInStandards.Tables.Count - 1, "the table with problems left out, the others read");
-            }
-        });
-
-        t.Test("Library hole types: a counterbore's profile made a hole type (D, CbD, CbDepth its columns), M6 and M8 rows; an M8 hole of it cuts what the built-in M8 counterbore does, and follows a library update", () =>
-        {
-            // (a plate 10 thick both ways from the Front plane, the hole from its top face, through all)
-            (CadDocument doc, HoleFeature h) Part(Action<HoleFeature> set)
-            {
-                var doc = new CadDocument();
-                var s1 = doc.AddFeature(new SketchFeature { Plane = PlaneRef.Front, Sketch = CoreTests.Rect(100, 60) });
-                doc.AddFeature(new ExtrudeFeature { SketchId = s1.Id, Depth = "10", End = EndCondition.MidPlane });
-                var top = doc.AddFeature(new PlaneFeature { Base = PlaneRef.Front, Offset = "5" });
-                var sk = new Sketch();
-                sk.Add(new SkPointEntity { P = sk.AddPoint(new Vec2(20, 10)).Id });
-                var s2 = doc.AddFeature(new SketchFeature { Plane = new PlaneRef { Feature = top.Id }, Sketch = sk });
-                var h = new HoleFeature { SketchId = s2.Id, End = HoleEnd.ThroughAll, Type = HoleType.Counterbore };
-                set(h);
-                doc.AddFeature(h);
-                return (doc, h);
-            }
-            static double Vol(CadDocument d) => new Regenerator().Rebuild(d).State.Bodies.Sum(b => b.Mesh.Volume);
-            // the type, from a counterbore hole's profile: its names the columns, the hole's values its first row
-            var proto = new HoleFeature { Type = HoleType.Counterbore, Diameter = "6.6", CbDiameter = "11", CbDepth = "6.5" };
-            var look = HoleProfile.Lookup(proto, _ => null, 1, 10);
-            var (type, problem) = HoleProfile.ToLibraryType(HoleProfile.Default(proto, look, 1), "ACME-cbore", "M6", look);
-            t.True(type != null, problem ?? "");
-            t.Eq(string.Join(",", type!.Columns), "CbD,CbDepth,D");
-            type.Rows.Add(new LibraryRow { Key = "M8", Values = { 15, 8.6, 9 } });
-            var lib = new LoadedLibrary(Guid.NewGuid(), "ACME", LibraryLayer.Company, Guid.NewGuid(), null, new[] { type }, Array.Empty<LibraryRestriction>());
-            var set = new LibrarySet(new[] { lib });
-            t.Eq(set.Offered(TableKinds.HoleType).Single().Key, "ACME-cbore");
-            t.True(set.Table("ACME-cbore")!.Profile != null, "the profile kept with the table");
-            var (doc, h) = Part(x =>
-            {
-                x.LibraryType = "ACME-cbore"; x.Size = "M8"; x.Profile = set.Table("ACME-cbore")!.Profile!.Clone();
-                HoleProfile.ApplyType(x, set.Snapshot(LibrarySnapshot.ItemKey("ACME-cbore", "M8")));
-            });
-            t.Eq(h.Diameter, "9mm");
-            var (builtIn, _) = Part(x => { x.Diameter = "9"; x.CbDiameter = "15"; x.CbDepth = "8.6"; });
-            t.Near(Vol(doc), Vol(builtIn), 1e-6);
-            t.Eq(string.Join(",", h.LibraryItems()), "ACME-cbore/M8");
-            // the library's M8 counterbore made deeper, the update accepted: the hole follows
-            LibraryLink.Sync(doc, set);
-            var before = Vol(doc);
-            type.Rows[1].Values[1] = 9.6;
-            var set2 = new LibrarySet(new[] { lib with { RevisionId = Guid.NewGuid() } });
-            var updates = LibraryLink.Updates(doc, set2);
-            t.Eq(updates.Count, 1);
-            LibraryLink.Accept(doc, updates);
-            t.Near(h.TypeValues!["CbDepth"], 9.6, 1e-12);
-            var ring = Math.PI * (7.5 * 7.5 - 4.5 * 4.5) * 1;
-            t.Near(before - Vol(doc), ring, ring * 0.02);
-        });
-
-        t.Test("Design table workbooks: a part's equations and tables to Excel and back unchanged (numbers as numbers, expressions as text, the row in use)", () =>
-        {
-            var doc = Demos.SocketScrew();
-            var ms = new MemoryStream();
-            DesignTableWorkbook.Write(doc.Equations, doc.Tables ?? new(), ms);
-            ms.Position = 0;
-            var (eqs, tables, problems) = DesignTableWorkbook.Read(ms);
-            t.True(problems.Count == 0, string.Join("; ", problems));
-            t.Eq(J(eqs.Select(e => (e.Name, e.Expr, e.Exposed, e.Description))), J(doc.Equations.Select(e => (e.Name, e.Expr, e.Exposed, e.Description))));
-            t.Eq(J(tables.Select(x => (x.Name, x.Columns, x.Selected, x.Exposed, x.Description))), J((doc.Tables ?? new()).Select(x => (x.Name, x.Columns, x.Selected, x.Exposed, x.Description))));
-            t.Eq(J(tables.Select(x => x.Rows.Select(r => (r.Key, r.Values)))), J((doc.Tables ?? new()).Select(x => x.Rows.Select(r => (r.Key, r.Values)))));
-            t.True((doc.Tables?.Count ?? 0) > 0, "the demo has design tables");
         });
     }
 }

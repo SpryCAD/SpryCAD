@@ -81,11 +81,7 @@ public static class LibraryLink
             items.Add(u.Item);
         }
         foreach (var f in doc.Features.OfType<HoleFeature>())
-            if (f.LibraryItems().Any(items.Contains))
-            {
-                if (f.LibraryType != null) Regen.HoleProfile.ApplyType(f, Resolve(doc, LibrarySnapshot.ItemKey(f.LibraryType, f.Size ?? "")));
-                else HoleSizes.Apply(f, item => Resolve(doc, item));
-            }
+            if (f.LibraryItems().Any(items.Contains)) HoleSizes.Apply(f, item => Resolve(doc, item));
     }
 }
 
@@ -102,8 +98,6 @@ public static class HoleSizes
     /// <summary>The items a hole sized from the library uses.</summary>
     public static IEnumerable<string> Items(HoleFeature f)
     {
-        // (a library hole type: its size's row)
-        if (f.LibraryType != null) { if (!string.IsNullOrEmpty(f.Size)) yield return LibrarySnapshot.ItemKey(f.LibraryType, f.Size); yield break; }
         if (string.IsNullOrEmpty(f.Standard) || string.IsNullOrEmpty(f.Size)) yield break;
         yield return LibrarySnapshot.ItemKey(f.Standard, f.Size);
         var (cb, cs) = Companions(f.Standard);

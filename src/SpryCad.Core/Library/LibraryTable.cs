@@ -25,11 +25,6 @@ public sealed class LibraryTable
     public string? Units { get; set; }
     public List<string> Columns { get; set; } = new();
     public List<LibraryRow> Rows { get; set; } = new();
-    /// <summary>
-    /// A hole type's profile (<see cref="TableKinds.HoleType"/>): half the hole in section (<see cref="Regen.HoleProfile"/>),
-    /// its dimensions using the table's columns by name, a row per size. Null for other tables.
-    /// </summary>
-    public Sketching.Sketch? Profile { get; set; }
 
     public const string Inch = "in";
 
@@ -88,11 +83,6 @@ public static class TableKinds
     public const string Material = "material";
     /// <summary>Appearances, a row per finish ("Brushed aluminum"): <see cref="Materials.AppearanceColumns"/> (0-1).</summary>
     public const string Appearance = "appearance";
-    /// <summary>
-    /// Hole types of the Hole Wizard, as Inventor's spreadsheets: a profile (<see cref="LibraryTable.Profile"/>) whose
-    /// dimensions use the columns by name (lengths in mm; a column named with "angle" in degrees), a row per size.
-    /// </summary>
-    public const string HoleType = "hole-type";
 }
 
 /// <summary>
