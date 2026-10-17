@@ -41,7 +41,7 @@ public static class ShortcutsDialog
             new("Space", "Open the View Selector"),
             new("Ctrl+1 … 6", "Front, Back, Left, Right, Top, Bottom"),
             new("Ctrl+7", "Isometric"),
-            new("N or Ctrl+8", "Normal To (again: from the other side). With a second planar face or plane selected, that one at the top"),
+            new("N or Ctrl+8", "Normal To (again: from the other side). With a second planar face or plane selected, that one at the top; with nothing selected, the nearest standard plane"),
             new("Arrows", "Rotate 15° (Shift: 90°)"),
             new("Ctrl+Arrows", "Pan"),
         }),

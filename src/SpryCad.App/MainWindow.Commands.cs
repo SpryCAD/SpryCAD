@@ -416,7 +416,7 @@ public partial class MainWindow
         [SketchTool.SmartDimension] = "D", [SketchTool.Point] = "P", [SketchTool.Trim] = "T", [SketchTool.Spline] = "S",
     };
 
-    const string NormalToHelp = "Turns the view to face the selected plane or planar face; Ctrl-select a second face to put it at the top.";
+    const string NormalToHelp = "Turns the view to face the selected plane or planar face, else the nearest standard plane; a Ctrl-selected second face goes at the top.";
 
     /// <summary>One-line descriptions shown under the command name in toolbar tooltips.</summary>
     static readonly Dictionary<string, string> CommandHelp = new()
@@ -667,6 +667,12 @@ public partial class MainWindow
                 Status("Normal To: select a planar face of a component (Esc to cancel).");
                 return;
             }
+        }
+        // nothing selected: the standard plane nearest the view (as SolidWorks), turned to the least
+        if (f == null && Selection.First == null)
+        {
+            var back = Camera.V(Viewport.Camera.Back);
+            f = new[] { Frame.Front, Frame.Top, Frame.Right }.MaxBy(p => Math.Abs(Vec3.Dot(p.Normal, back)));
         }
         if (f == null) { Status("Select a planar face, plane or sketch for Normal To."); return; }
         Viewport.NormalTo(f.Value, flip: true, top: top);
