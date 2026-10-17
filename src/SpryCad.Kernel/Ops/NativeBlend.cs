@@ -2157,6 +2157,31 @@ public static class NativeBlend
     }
 
     /// <summary>Whether p lies inside the body (ray parity on the exact faces).</summary>
+    /// <summary>
+    /// A ray caster for the body: where a ray from p along the unit direction d crosses its faces (distances, in
+    /// order), or null where it grazes a face's boundary (ambiguous there). The faces' domains are worked out once.
+    /// </summary>
+    public static Func<Vec3, Vec3, List<double>?> RayCaster(NBody body)
+    {
+        body.Link();
+        var doms = new Dictionary<NFace, NDomain>(ReferenceEqualityComparer.Instance);
+        foreach (var f in body.Faces) doms[f] = NDomain.Of(f, 1e-3);
+        return (p, d) =>
+        {
+            var hits = new List<double>();
+            foreach (var f in body.Faces)
+                foreach (var t in f.Surface.RayHits(p, d))
+                {
+                    if (t <= 1e-9) continue;
+                    var c = doms[f].Classify(p + d * t, 1e-6);
+                    if (c == 0) return null;
+                    if (c > 0) hits.Add(t);
+                }
+            hits.Sort();
+            return hits;
+        };
+    }
+
     public static bool PointInside(NBody body, Vec3 p)
     {
         body.Link();

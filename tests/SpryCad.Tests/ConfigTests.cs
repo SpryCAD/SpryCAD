@@ -195,6 +195,42 @@ static class ConfigTests
             t.True(r.Status[s2.Id].Warnings.Any(w => w.Contains("another sketch")), "a warning");
         });
 
+        t.Test("Hole Wizard: Clear material above cuts only as high as the material on the face reaches over the hole (a block over half of it), not into a body past a gap above", () =>
+        {
+            // (a plate 10 thick extruded both ways from the Front plane, the hole drilled 2 deep from it, 5 of plate above;
+            // a block on the plate's top over half the hole's circle, 10 high; a second plate past a 3 gap above)
+            foreach (var (block, gapPlate, removed) in new[]
+            {
+                (true, false, Math.PI * 9 * 7 + Math.PI * 9 / 2 * 10),
+                (false, true, Math.PI * 9 * 7),
+            })
+            {
+                var doc = new CadDocument();
+                var s1 = doc.AddFeature(new SketchFeature { Plane = PlaneRef.Front, Sketch = CoreTests.Rect(100, 60) });
+                doc.AddFeature(new ExtrudeFeature { SketchId = s1.Id, Depth = "10", End = EndCondition.MidPlane });
+                if (block)
+                {
+                    var top = doc.AddFeature(new PlaneFeature { Base = PlaneRef.Front, Offset = "5" });
+                    var bs = doc.AddFeature(new SketchFeature { Plane = new PlaneRef { Feature = top.Id }, Sketch = CoreTests.Rect(20, 60) });
+                    doc.AddFeature(new ExtrudeFeature { SketchId = bs.Id, Depth = "10" });
+                }
+                if (gapPlate)
+                {
+                    var above = doc.AddFeature(new PlaneFeature { Base = PlaneRef.Front, Offset = "8" });
+                    var ps = doc.AddFeature(new SketchFeature { Plane = new PlaneRef { Feature = above.Id }, Sketch = CoreTests.Rect(100, 60) });
+                    doc.AddFeature(new ExtrudeFeature { SketchId = ps.Id, Depth = "4", Merge = false });
+                }
+                var before = Volume(new Regenerator().Rebuild(doc));
+                var sk = new Sketch();
+                sk.Add(new SkPointEntity { P = sk.AddPoint(new Vec2(20, 10)).Id });
+                var s2 = doc.AddFeature(new SketchFeature { Plane = PlaneRef.Front, Sketch = sk });
+                var h = doc.AddFeature(new HoleFeature { SketchId = s2.Id, Diameter = "6", ThroughAll = false, Depth = "2", DrillPoint = false, ClearAbove = true });
+                var r = new Regenerator().Rebuild(doc);
+                t.True(r.Status[h.Id].Ok, r.Status[h.Id].Error ?? "");
+                t.Near(before - Volume(r), removed, removed * 0.02); // (the faceted cylinders of the mesh)
+            }
+        });
+
         t.Test("Suppress When: a condition that cannot be evaluated is an error", () =>
         {
             var (doc, cut, lp) = Plate("Nope > 1");
