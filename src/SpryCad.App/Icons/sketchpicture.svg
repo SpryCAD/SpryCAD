@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Sketch picture: a picture (hills, the sun) in its frame, a sketch line (accent) traced over it, its end points (accent) -->
+  <path d="M3 5H29V27H3Z" fill="#D5DBE3" stroke="#24364F" stroke-width="2" stroke-linejoin="miter"/>
+  <path d="M4 24L11 15L16 20L20 16L28 24V26H4Z" fill="#AEB8C5"/>
+  <path d="M21 9a2.5 2.5 0 1 0 5 0a2.5 2.5 0 1 0-5 0z" fill="#AEB8C5"/>
+  <path d="M7 22L11 15L16 20L20 16L25 21" fill="none" stroke="#2F7BD6" stroke-width="2" stroke-linejoin="miter"/>
+  <path d="M5 20h4v4H5z M23 19h4v4h-4z" fill="#2F7BD6"/>
+</svg>

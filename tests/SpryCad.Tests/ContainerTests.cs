@@ -75,6 +75,35 @@ static class ContainerTests
             SpryCad.Core.Assembly.AssemblyContainer.Load(asmPath);
         });
 
+        t.Test("Container: a sketch picture and its image round-trip, and do not change the sketch's profiles", () =>
+        {
+            var doc = Demos.All.First(d => d.file == "l-bracket.sprt").build();
+            var sf = doc.Features.OfType<SketchFeature>().First();
+            var before = new Regenerator().Rebuild(doc).State.Sketches[sf.Id].Regions.Count;
+            var png = new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 9, 8, 7 };
+            doc.AddFile("pictures/0123456789abcdef.png", png);
+            sf.Sketch.Pictures = new() { new SpryCad.Core.Sketching.SkPicture
+            {
+                Id = 7, File = "pictures/0123456789abcdef.png", Name = "drawing.png", PixelWidth = 640, PixelHeight = 480,
+                X = 12.5, Y = -3, Width = 80, Height = 60, Angle = 0.25, Opacity = 0.5,
+                Background = "#F0F0EE", BackgroundTolerance = 0.2, Edges = SpryCad.Core.Sketching.PictureEdges.Over,
+            } };
+            var path = Temp("picture.sprt");
+            doc.Save(path);
+            var back = CadDocument.Load(path);
+            t.True(back.Files["pictures/0123456789abcdef.png"].SequenceEqual(png), "picture image changed");
+            var p = back.Features.OfType<SketchFeature>().First().Sketch.Pictures?.SingleOrDefault();
+            t.True(p != null, "picture lost");
+            t.Eq((p!.File, p.Name, p.PixelWidth, p.PixelHeight), ("pictures/0123456789abcdef.png", "drawing.png", 640, 480));
+            t.Eq((p.X, p.Y, p.Width, p.Height, p.Angle, p.Opacity), (12.5, -3.0, 80.0, 60.0, 0.25, 0.5));
+            t.Eq(p.Look, new SpryCad.Core.Sketching.PictureLook("#F0F0EE", 0.2, false, SpryCad.Core.Sketching.PictureEdges.Over, 0.5));
+            t.Eq(new Regenerator().Rebuild(back).State.Sketches[sf.Id].Regions.Count, before);
+            // the picture's corners: along its own axes from its center
+            var c = p.Corners();
+            t.Near((c[1] - c[0]).Length, 80, 1e-9); t.Near((c[3] - c[0]).Length, 60, 1e-9); t.Near((c[1] - c[0]).Angle, 0.25, 1e-9);
+            t.True(p.Contains(p.Center) && !p.Contains(p.Center + p.AxisY * 31), "Contains");
+        });
+
         t.Test("Container: a damaged or missing embedded file is reported, bad names are refused", () =>
         {
             var doc = new CadDocument();

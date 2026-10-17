@@ -5,6 +5,13 @@ using Silk.NET.OpenGL;
 
 namespace SpryCad.App.Viewport;
 
+/// <summary>
+/// A sketch picture to draw: the image of an embedded file on the quad from <paramref name="Origin"/> (its lower left)
+/// along <paramref name="U"/> (its width) and <paramref name="V"/> (its height). <paramref name="Top"/>: over the model
+/// (the sketch being edited), else hidden behind it as the sketch's plane is.
+/// </summary>
+public readonly record struct PictureQuad(string File, Core.Sketching.PictureLook Look, Vec3 Origin, Vec3 U, Vec3 V, float Opacity, bool Top);
+
 /// <summary>RGBA color in 0..1.</summary>
 public readonly record struct Rgba(float R, float G, float B, float A = 1)
 {
@@ -31,7 +38,10 @@ public sealed class DynamicGeometry
     public readonly List<float> TopTris = new();
     public readonly List<float> TransTris = new();  // transparent, depth tested, no depth write
 
-    public void Clear() { Lines.Clear(); Tris.Clear(); TopLines.Clear(); TopTris.Clear(); TransTris.Clear(); }
+    /// <summary>Sketch pictures: textured quads, drawn before the lines.</summary>
+    public readonly List<PictureQuad> Pictures = new();
+
+    public void Clear() { Lines.Clear(); Tris.Clear(); TopLines.Clear(); TopTris.Clear(); TransTris.Clear(); Pictures.Clear(); }
 
     static void V(List<float> l, Vec3 p, Rgba c)
     {
@@ -136,6 +146,9 @@ public sealed unsafe class GlRenderer : IDisposable
     readonly bool _es;
     uint _vcol;
     int _vcolVP;
+    // sketch pictures: textured quads
+    uint _tex, _texVao, _texVbo;
+    int _texVP, _texOpacity, _texSampler;
 
     // the shaded and flat programs, plain and cutting at the section plane: a fragment shader that may discard turns off
     // early depth rejection, so every hidden fragment of every triangle is shaded (slow with large models, and very slow
@@ -267,6 +280,32 @@ public sealed unsafe class GlRenderer : IDisposable
         _flatPlain = MakeFlat(""); _flatCut = MakeFlat(section);
         _vcol = Program(vcolVs, vcolFs, ("aPos", 0), ("aColor", 1));
         _vcolVP = _gl.GetUniformLocation(_vcol, "uViewProj");
+
+        const string texVs = """
+            in vec3 aPos; in vec2 aUv;
+            uniform mat4 uViewProj;
+            out vec2 vUv;
+            void main() { vUv = aUv; gl_Position = uViewProj * vec4(aPos, 1.0); }
+            """;
+        const string texFs = """
+            in vec2 vUv;
+            uniform sampler2D uTex; uniform float uOpacity;
+            out vec4 oColor;
+            void main() { vec4 c = texture(uTex, vUv); oColor = vec4(c.rgb, c.a * uOpacity); }
+            """;
+        _tex = Program(texVs, texFs, ("aPos", 0), ("aUv", 1));
+        _texVP = _gl.GetUniformLocation(_tex, "uViewProj");
+        _texOpacity = _gl.GetUniformLocation(_tex, "uOpacity");
+        _texSampler = _gl.GetUniformLocation(_tex, "uTex");
+        _texVao = _gl.GenVertexArray();
+        _gl.BindVertexArray(_texVao);
+        _texVbo = _gl.GenBuffer();
+        _gl.BindBuffer(BufferTargetARB.ArrayBuffer, _texVbo);
+        _gl.EnableVertexAttribArray(0);
+        _gl.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, 20, (void*)0);
+        _gl.EnableVertexAttribArray(1);
+        _gl.VertexAttribPointer(1, 2, VertexAttribPointerType.Float, false, 20, (void*)12);
+        _gl.BindVertexArray(0);
 
         _dynVao = _gl.GenVertexArray();
         _gl.BindVertexArray(_dynVao);
@@ -499,6 +538,52 @@ public sealed unsafe class GlRenderer : IDisposable
         _gl.BindVertexArray(0);
     }
 
+    /// <summary>A texture of straight-alpha RGBA rows (top row first), mipmapped; 0 when the card cannot take it.</summary>
+    public uint CreateTexture(int w, int h, byte[] rgba)
+    {
+        var t = _gl.GenTexture();
+        _gl.BindTexture(TextureTarget.Texture2D, t);
+        _gl.PixelStore(PixelStoreParameter.UnpackAlignment, 4);
+        fixed (byte* p = rgba)
+            _gl.TexImage2D(TextureTarget.Texture2D, 0, InternalFormat.Rgba8, (uint)w, (uint)h, 0, PixelFormat.Rgba, PixelType.UnsignedByte, p);
+        if (_gl.GetError() != GLEnum.NoError) { _gl.BindTexture(TextureTarget.Texture2D, 0); _gl.DeleteTexture(t); return 0; }
+        _gl.GenerateMipmap(TextureTarget.Texture2D);
+        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)GLEnum.LinearMipmapLinear);
+        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)GLEnum.Linear);
+        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)GLEnum.ClampToEdge);
+        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)GLEnum.ClampToEdge);
+        _gl.BindTexture(TextureTarget.Texture2D, 0);
+        return t;
+    }
+
+    public void DeleteTexture(uint t) { if (t != 0) _gl.DeleteTexture(t); }
+
+    /// <summary>
+    /// A texture on the quad from <paramref name="o"/> along <paramref name="u"/> and <paramref name="v"/>: its top row
+    /// at the <paramref name="v"/> end. Blending and depth as set by the caller.
+    /// </summary>
+    public void DrawTexturedQuad(uint texture, Vec3 o, Vec3 u, Vec3 v, float opacity, Matrix4x4 viewProj)
+    {
+        Vec3 b = o + u, c = o + u + v, d = o + v;
+        var q = new float[30];
+        int n = 0;
+        void P(Vec3 p, float s, float t) { q[n++] = (float)p.X; q[n++] = (float)p.Y; q[n++] = (float)p.Z; q[n++] = s; q[n++] = t; }
+        P(o, 0, 1); P(b, 1, 1); P(c, 1, 0);
+        P(o, 0, 1); P(c, 1, 0); P(d, 0, 0);
+        _gl.UseProgram(_tex);
+        SetMat(_texVP, viewProj);
+        _gl.Uniform1(_texOpacity, opacity);
+        _gl.Uniform1(_texSampler, 0);
+        _gl.ActiveTexture(TextureUnit.Texture0);
+        _gl.BindTexture(TextureTarget.Texture2D, texture);
+        _gl.BindVertexArray(_texVao);
+        _gl.BindBuffer(BufferTargetARB.ArrayBuffer, _texVbo);
+        fixed (float* pq = q) _gl.BufferData(BufferTargetARB.ArrayBuffer, (nuint)(30 * 4), pq, BufferUsageARB.StreamDraw);
+        _gl.DrawArrays(PrimitiveType.Triangles, 0, 6);
+        _gl.BindVertexArray(0);
+        _gl.BindTexture(TextureTarget.Texture2D, 0);
+    }
+
     public void Viewport(int x, int y, int w, int h) => _gl.Viewport(x, y, (uint)w, (uint)h);
 
     public void ClearDepth() { _gl.DepthMask(true); _gl.Clear(ClearBufferMask.DepthBufferBit); }
@@ -507,8 +592,9 @@ public sealed unsafe class GlRenderer : IDisposable
 
     public void Dispose()
     {
-        foreach (var p in new[] { _litPlain.P, _litCut.P, _flatPlain.P, _flatCut.P, _vcol }) _gl.DeleteProgram(p);
+        foreach (var p in new[] { _litPlain.P, _litCut.P, _flatPlain.P, _flatCut.P, _vcol, _tex }) _gl.DeleteProgram(p);
         _gl.DeleteVertexArray(_dynVao); _gl.DeleteBuffer(_dynVbo);
+        _gl.DeleteVertexArray(_texVao); _gl.DeleteBuffer(_texVbo);
         if (_fbo != 0) { _gl.DeleteFramebuffer(_fbo); _gl.DeleteRenderbuffer(_colorRb); _gl.DeleteRenderbuffer(_depthRb); }
     }
 }

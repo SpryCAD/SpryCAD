@@ -252,6 +252,81 @@ public sealed class SkFillet
     public SkFillet Clone() => (SkFillet)MemberwiseClone();
 }
 
+public enum PictureEdges { None, Over, Only }
+
+/// <summary>A sketch picture's processing: the background removed, its edges found (<see cref="PictureFilter"/>).</summary>
+public sealed record PictureLook(string? Background, double Tolerance, bool Connected, PictureEdges Edges, double Sensitivity)
+{
+    public const double DefaultTolerance = 0.15, DefaultSensitivity = 0.5;
+    /// <summary>The image as it is: nothing to process.</summary>
+    public bool Plain => Background == null && Edges == PictureEdges.None;
+}
+
+/// <summary>
+/// An image placed on the sketch plane to trace over (Sketch Picture). Its bytes are an embedded file of the part
+/// (<see cref="Model.CadDocument.Files"/>), named by <see cref="File"/>; the sketch only places it.
+/// </summary>
+public sealed class SkPicture
+{
+    public long Id { get; set; }
+    /// <summary>The embedded file holding the image ("pictures/….png").</summary>
+    public string File { get; set; } = "";
+    /// <summary>The image file's own name, as it was inserted ("drawing.png").</summary>
+    public string Name { get; set; } = "";
+    /// <summary>The image's size in pixels (its aspect ratio, without reading the image).</summary>
+    public int PixelWidth { get; set; }
+    public int PixelHeight { get; set; }
+    /// <summary>The center of the picture in sketch coordinates.</summary>
+    public double X { get; set; }
+    public double Y { get; set; }
+    /// <summary>Its size along its own axes, in model units (millimeters).</summary>
+    public double Width { get; set; }
+    public double Height { get; set; }
+    /// <summary>Counterclockwise from the sketch's X axis, in radians, about its center.</summary>
+    public double Angle { get; set; }
+    /// <summary>0 (invisible) to 1 (opaque).</summary>
+    public double Opacity { get; set; } = 1;
+    public bool Hidden { get; set; }
+    /// <summary>The background color removed ("#RRGGBB"; null: none removed).</summary>
+    public string? Background { get; set; }
+    /// <summary>How far a color may be from <see cref="Background"/> and still be removed, 0 to 1 (null: 0.15).</summary>
+    public double? BackgroundTolerance { get; set; }
+    /// <summary>Only background reached from the picture's border without crossing other colors is removed (null: false).</summary>
+    public bool? BackgroundConnected { get; set; }
+    /// <summary>Edges found in the image, drawn over it or alone (null: none).</summary>
+    public PictureEdges? Edges { get; set; }
+    /// <summary>How many edges are found, 0 (only the strongest) to 1 (fainter ones too) (null: 0.5).</summary>
+    public double? EdgeSensitivity { get; set; }
+
+    /// <summary>How the image is processed for display (equal values: the same image).</summary>
+    [JsonIgnore] public PictureLook Look => new(Background, BackgroundTolerance ?? PictureLook.DefaultTolerance, BackgroundConnected ?? false,
+        Edges ?? PictureEdges.None, EdgeSensitivity ?? PictureLook.DefaultSensitivity);
+
+    [JsonIgnore] public Vec2 Center { get => new(X, Y); set { X = value.X; Y = value.Y; } }
+    /// <summary>The picture's right (X) and up (Y) directions in the sketch, unit length.</summary>
+    [JsonIgnore] public Vec2 AxisX => new(Math.Cos(Angle), Math.Sin(Angle));
+    [JsonIgnore] public Vec2 AxisY => new(-Math.Sin(Angle), Math.Cos(Angle));
+
+    /// <summary>A sketch point in the picture's own coordinates (from its center, along its axes).</summary>
+    public Vec2 ToLocal(Vec2 p) { var d = p - Center; return new(Vec2.Dot(d, AxisX), Vec2.Dot(d, AxisY)); }
+    public Vec2 FromLocal(Vec2 q) => Center + AxisX * q.X + AxisY * q.Y;
+
+    /// <summary>The corners: lower left, lower right, upper right, upper left.</summary>
+    public Vec2[] Corners()
+    {
+        double w = Width / 2, h = Height / 2;
+        return new[] { FromLocal(new(-w, -h)), FromLocal(new(w, -h)), FromLocal(new(w, h)), FromLocal(new(-w, h)) };
+    }
+
+    public bool Contains(Vec2 p)
+    {
+        var q = ToLocal(p);
+        return Math.Abs(q.X) <= Width / 2 && Math.Abs(q.Y) <= Height / 2;
+    }
+
+    public SkPicture Clone() => (SkPicture)MemberwiseClone();
+}
+
 public sealed class Sketch
 {
     public const long OriginId = 0;
@@ -263,6 +338,9 @@ public sealed class Sketch
     public List<SkFillet>? Fillets { get; set; }
     /// <summary>What Convert Entities was given (a face, a chain), converted again as it changes (null when none).</summary>
     public List<SkConvertGroup>? ConvertGroups { get; set; }
+    /// <summary>Pictures to sketch over (null when none). Not geometry: the solver and profiles never see them.</summary>
+    public List<SkPicture>? Pictures { get; set; }
+    public SkPicture? Picture(long id) => Pictures?.Find(p => p.Id == id);
     /// <summary>A new id for a point, entity or relation (random: <see cref="Model.Ids"/>).</summary>
     public long NewId() => Model.Ids.NewSketchId();
 
@@ -594,6 +672,7 @@ public sealed class Sketch
         Constraints = Constraints.Select(c => c.Clone()).ToList(),
         Fillets = Fillets?.Select(f => f.Clone()).ToList(),
         ConvertGroups = ConvertGroups?.Select(g => g.Clone()).ToList(),
+        Pictures = Pictures?.Select(p => p.Clone()).ToList(),
     };
 
     /// <summary>Entities that reference a point.</summary>

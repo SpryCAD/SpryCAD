@@ -68,6 +68,18 @@ public static class SketchDrawing
                 yield return (r.Frame.ToWorld(a), r.Frame.ToWorld(b));
     }
 
+    /// <summary>The sketch's pictures (those not hidden), as quads to draw under its lines.</summary>
+    public static void AddPictures(DynamicGeometry g, Frame f, Sketch sk, bool top)
+    {
+        foreach (var p in sk.Pictures ?? new())
+        {
+            if (p.Hidden || p.Opacity <= 0 || p.Width <= 0 || p.Height <= 0) continue;
+            var c = p.Corners();
+            var o = f.ToWorld(c[0]);
+            g.Pictures.Add(new PictureQuad(p.File, p.Look, o, f.ToWorld(c[1]) - o, f.ToWorld(c[3]) - o, (float)Math.Clamp(p.Opacity, 0, 1), top));
+        }
+    }
+
     /// <summary>Draws a non-edited sketch (single color, construction dashed).</summary>
     public static void DrawStatic(DynamicGeometry g, SketchResult r, Rgba color, double pixelSize)
     {

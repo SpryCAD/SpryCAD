@@ -362,6 +362,7 @@ public partial class MainWindow
                     new("convert", "Convert Entities", ConvertEntities));
                 Cmd("construction", "Construction Geometry", ToggleConstruction);
                 Cmd("relations", "Add Relations", AddRelationCommand);
+                Cmd("sketchpicture", "Sketch Picture", SketchPictureCommand);
                 Cmd("normalto", "Normal To", NormalTo);
                 break;
             case "Sheet Metal":
@@ -454,6 +455,7 @@ public partial class MainWindow
         ["Mirror Entities"] = "Mirrors the selected entities about a centerline, keeping the copies linked.",
         ["Construction Geometry"] = "Toggles the selected sketch entities to construction.",
         ["Add Relations"] = "Adds relations such as coincident, horizontal or tangent between the selected entities.",
+        ["Sketch Picture"] = "Inserts an image on the sketch plane to trace over, scaled from two points a known distance apart.",
         ["Measure"] = "Measures distance, angle, radius, length and area of the selected faces, edges and vertices.",
         ["Mass Properties"] = "Calculates mass, volume, surface area, center of mass and moments of inertia from the part's material.",
         ["Edit Material"] = "Assigns a library material, which sets the part's density, properties and appearance.",
@@ -765,6 +767,7 @@ public partial class MainWindow
             menu.Items.Add(Item("Rectangle", () => SetSketchTool(SketchTool.Rectangle), "R", "rect"));
             menu.Items.Add(Item("Circle", () => SetSketchTool(SketchTool.Circle), "C", "circle"));
             menu.Items.Add(Item("Smart Dimension", () => SetSketchTool(SketchTool.SmartDimension), "D", "dimension"));
+            menu.Items.Add(Item("Paste Picture", () => _ = PastePicture(), "Ctrl+V", "sketchpicture"));
             menu.Items.Add(new Separator());
             menu.Items.Add(Item("Exit Sketch", () => ExitSketch(true), null, "exitsketch"));
             menu.Items.Add(Item("Discard Changes", DiscardSketch, null, "cancel"));

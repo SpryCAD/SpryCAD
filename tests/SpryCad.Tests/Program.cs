@@ -253,6 +253,7 @@ static class Program
             NativeTests.Run(t);
             RollingBallTool.Tests(t);
             ContainerTests.Run(t);
+            PictureTests.Run(t);
             StorageTests.Run(t);
             LibraryTests.Run(t);
             FastenerTests.Run(t);

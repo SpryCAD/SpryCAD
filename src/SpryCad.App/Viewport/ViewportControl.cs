@@ -8,6 +8,7 @@ using Avalonia.OpenGL.Controls;
 using Avalonia.Threading;
 using SpryCad.App.Session;
 using SpryCad.Core.Regen;
+using SpryCad.Core.Sketching;
 using SpryCad.Kernel;
 using Silk.NET.OpenGL;
 
@@ -215,8 +216,17 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
     }
     int _antiAliasing = 4;
 
+    /// <summary>The bytes of an embedded file of the part shown (a sketch picture's image), or null.</summary>
+    public Func<string, byte[]?>? PictureFile { get; set; }
+    // sketch pictures' textures by file (pictures are named by their content, so a name is always the same image; 0: unreadable)
+    readonly Dictionary<string, uint> _textures = new(StringComparer.Ordinal);
+
     protected override void OnOpenGlDeinit(GlInterface gl)
     {
+        foreach (var t in _textures.Values) _r?.DeleteTexture(t);
+        _textures.Clear();
+        foreach (var t in _looks.Values) _r?.DeleteTexture(t);
+        _looks.Clear(); _lastLook.Clear();
         foreach (var m in _gpu.Values) m.Dispose();
         _gpu.Clear();
         _r?.Dispose();
@@ -391,6 +401,7 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
             for (int i = 0; i + 1 < pl.Length; i++) _dyn.Line(pl[i], pl[i + 1], new Rgba(0.9f, 0.1f, 0.1f), top: true);
         if (RenderProfile) tDyn1 = Stopwatch.GetTimestamp();
 
+        DrawPictures(vp);
         _r.SetupDepth(true, true);
         _r.DrawDynamic(_dyn.Tris, PrimitiveType.Triangles, vp);
         _r.DrawDynamic(_dyn.Lines, PrimitiveType.Lines, vp);
@@ -1040,6 +1051,77 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         }
     }
 
+    /// <summary>
+    /// Sketch pictures, under the lines: those of shown sketches where their plane is (behind the model where it is
+    /// behind), then the edited sketch's over the model, as its lines are. Nudged toward the eye so a picture on a face
+    /// shows on it.
+    /// </summary>
+    void DrawPictures(Matrix4x4 vp)
+    {
+        if (_dyn.Pictures.Count == 0) { if (_looks.Count > 0) DropUnusedLooks(); return; }
+        _r!.Blend(true);
+        _r.PolygonOffset(true, -1, -4);
+        foreach (var top in new[] { false, true })
+        {
+            _r.SetupDepth(!top, false);
+            foreach (var q in _dyn.Pictures)
+                if (q.Top == top && Texture(q.File, q.Look) is var t && t != 0) _r.DrawTexturedQuad(t, q.Origin, q.U, q.V, q.Opacity, vp);
+        }
+        _r.PolygonOffset(false);
+        _r.Blend(false);
+        _r.SetupDepth(true, true);
+        DropUnusedLooks();
+    }
+
+    uint Texture(string file)
+    {
+        if (_textures.TryGetValue(file, out var t)) return t;
+        if (PictureFile?.Invoke(file) is not { } bytes) return 0; // (not in the part yet: tried again once it is)
+        var img = Sketcher.PictureProcessor.Original(file, bytes);
+        t = img != null ? _r!.CreateTexture(img.Width, img.Height, img.Rgba) : 0;
+        _textures[file] = t;
+        return t;
+    }
+
+    /// <summary>
+    /// A picture's texture as its look has it: processed off the UI thread, the one shown before (else the image as it
+    /// is) drawn until it is ready.
+    /// </summary>
+    uint Texture(string file, PictureLook look)
+    {
+        if (look.Plain) return Texture(file);
+        _looksUsed.Add((file, look));
+        if (_looks.TryGetValue((file, look), out var t)) return _lastLook[file] = t;
+        if (PictureFile?.Invoke(file) is not { } bytes) return 0;
+        var img = Sketcher.PictureProcessor.Processed(file, bytes, look, Redraw, out var failed);
+        if (img == null && !failed) return _lastLook.TryGetValue(file, out var last) && _looks.ContainsValue(last) ? last : Texture(file);
+        t = img != null ? _r!.CreateTexture(img.Width, img.Height, img.Rgba) : 0;
+        _looks[(file, look)] = t;
+        return _lastLook[file] = t;
+    }
+
+    // processed pictures' textures by file and look (those no picture drawn uses dropped after each frame), the one each
+    // file showed last, and those drawn this frame
+    readonly Dictionary<(string, PictureLook), uint> _looks = new();
+    readonly Dictionary<string, uint> _lastLook = new(StringComparer.Ordinal);
+    readonly HashSet<(string, PictureLook)> _looksUsed = new();
+
+    /// <summary>The processed textures no picture drawn this frame used, deleted (their pictures changed look, or went).</summary>
+    void DropUnusedLooks()
+    {
+        var drawn = _looksUsed.Select(u => u.Item1).ToHashSet(StringComparer.Ordinal);
+        foreach (var k in _looks.Keys.Where(k => !_looksUsed.Contains(k)).ToList())
+        {
+            // (kept while it is the one its file still shows, until the new look is ready)
+            var t = _looks[k];
+            if (drawn.Contains(k.Item1) && _lastLook.TryGetValue(k.Item1, out var last) && last == t) continue;
+            _r?.DeleteTexture(t);
+            _looks.Remove(k);
+            if (_lastLook.TryGetValue(k.Item1, out var l) && l == t) _lastLook.Remove(k.Item1);
+        }
+        _looksUsed.Clear();
+    }
+
     /// <summary>The reference axis under the cursor (drawn over the model, so picked through it).</summary>
     SelItem? PickRefAxis(double x, double y)
     {
@@ -1063,6 +1145,7 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
         var px = Camera.PixelSize;
         foreach (var s in Sketches)
         {
+            SketchDrawing.AddPictures(g, s.Result.Frame, s.Result.Sketch, top: false);
             var key = new SelItem { Kind = SelKind.Sketch, FeatureId = s.FeatureId }.Key;
             var c = hl.Of(key) ?? new Rgba(0.15f, 0.2f, 0.45f);
             if (_sketchPieces.TryGetValue(s.Result, out var kept) && kept.color == c && kept.px == px) { g.Add(kept.piece); continue; }

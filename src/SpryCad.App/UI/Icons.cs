@@ -116,6 +116,7 @@ public static class Icons
         ["sketchfillet"] = ("M4 20V12 M12 4h8", "M4 12a8 8 0 0 1 8-8"),
         ["convert"] = ("M3 3h12v12H3z", "M10 10l11 11 M21 15v6h-6"),
         ["construction"] = ("M3 21l2-2 M7 17l2-2 M11 13l2-2 M15 9l2-2 M19 5l2-2", "M12 12m-3 0a3 3 0 1 0 6 0a3 3 0 1 0-6 0"),
+        ["sketchpicture"] = ("M3 4h18v16H3z M3 17l5-6 4 4 3-3 6 6", "M16 8m-2 0a2 2 0 1 0 4 0a2 2 0 1 0-4 0"),
         ["relations"] = ("M4 20V4 M4 20h16", "M8 16l8-8"),
         // assembly mates: the Mates folder and the Mate command (a paper clip, as SolidWorks'), then one per mate type
         ["mates"] = ("M16 8v9a4 4 0 0 1-8 0V6a2.5 2.5 0 0 1 5 0v10a1 1 0 0 1-2 0V8", null),

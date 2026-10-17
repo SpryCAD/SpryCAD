@@ -167,6 +167,7 @@ public sealed partial class SketchEditor : IViewportMode
 
     public bool Undo()
     {
+        if (_pictureBefore != null) return false; // (a picture's page is open: its Cancel undoes it)
         if (_undo.Count == 0) return false;
         _redo.Add(System.Text.Json.JsonSerializer.Serialize(Sk, Serialization.Compact));
         Restore(_undo[^1]); _undo.RemoveAt(_undo.Count - 1);
@@ -175,6 +176,7 @@ public sealed partial class SketchEditor : IViewportMode
 
     public bool Redo()
     {
+        if (_pictureBefore != null) return false;
         if (_redo.Count == 0) return false;
         _undo.Add(System.Text.Json.JsonSerializer.Serialize(Sk, Serialization.Compact));
         Restore(_redo[^1]); _redo.RemoveAt(_redo.Count - 1);
@@ -458,6 +460,7 @@ public sealed partial class SketchEditor : IViewportMode
     {
         _lastScreen = new Point(p.X, p.Y);
         _mouse = SketchPos(p);
+        if (PicturePointerMove(p)) return;
         if (_down && _dragHandle is { } dh)
         {
             DragHandle(dh.spline, dh.start, _mouse);
@@ -513,6 +516,7 @@ public sealed partial class SketchEditor : IViewportMode
         _down = true; _dragging = false;
         _downScreen = new Point(p.X, p.Y); _downSketch = _mouse;
         CloseModifyBox(true);
+        if (PicturePointerDown(p)) { vp.Redraw(); return; }
         switch (Tool)
         {
             case SketchTool.Select:
@@ -541,6 +545,7 @@ public sealed partial class SketchEditor : IViewportMode
                     // dimension to; it follows that sketch
                     if (h == null && OtherSketchCandidate(p.X, p.Y) is { } osh && CreateSketchReference(osh) is { } osr) { Resolve(); h = HitTest(p.X, p.Y) ?? osr; }
                     LastClick = h;
+                    if (h == null && OpenPictureAt(p)) return;
                     if (p.ClickCount >= 2 && h is { Kind: SkRefKind.Constraint } hc && Sk.Constraint(hc.Id) is { IsDimension: true } dim)
                     {
                         _down = false;
@@ -589,6 +594,7 @@ public sealed partial class SketchEditor : IViewportMode
 
     public void PointerUp(ViewportControl vp, PointerInfo p)
     {
+        if (PicturePointerUp()) { _down = false; vp.Redraw(); return; }
         if (_dragHandle != null) { _dragHandle = null; _down = false; Resolve(); vp.Redraw(); return; }
         var wasDragging = _dragging;
         _down = false;
@@ -616,6 +622,7 @@ public sealed partial class SketchEditor : IViewportMode
         switch (key)
         {
             case Key.Escape:
+                if (PickingPoint) { CancelPick(); return true; }
                 if (Tool == SketchTool.Spline && _clicks.Count >= 2) { EndSpline(false); return true; }
                 if (_clicks.Count > 0 || _dimPicks.Count > 0) { CancelOperation(); return true; }
                 if (Tool != SketchTool.Select) { SetTool(SketchTool.Select); return true; }
@@ -1842,6 +1849,7 @@ public sealed partial class SketchEditor : IViewportMode
     public void Draw(ViewportControl vp, DynamicGeometry g)
     {
         var px = Px; var f = Frame;
+        DrawPictures(g);
         // sketch origin (red)
         var o = Sketch.OriginId;
         var oc = new Rgba(0.85f, 0.15f, 0.15f);

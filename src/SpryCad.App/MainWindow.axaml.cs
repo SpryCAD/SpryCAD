@@ -59,6 +59,10 @@ public partial class MainWindow : Window
         _modelMode.PickHandler = PickToPage;
 
         _tab = AddTab(Session);
+        // a value typed without a unit is in the part's units from the start, not only after the first change
+        PmPage.CurrentUnits = () => Units;
+        // sketch pictures' images: embedded files of the part shown
+        Viewport.PictureFile = name => Session.Doc.Files.TryGetValue(name, out var b) ? b : null;
         UpdateTabHeader(_tab);
         Selection.Changed += OnSelectionChanged;
         Viewport.PointerMoved += (_, e) => FadePalette(e.GetPosition(Viewport));
@@ -629,6 +633,8 @@ public partial class MainWindow : Window
                 case Key.W or Key.F4: _ = CloseTab(_tab); break;
                 case Key.Tab: _ = CycleTab(shift ? -1 : 1); break;
                 case Key.E: ShowPartsList(); break;
+                // (in a sketch, outside a field: an image on the clipboard as a sketch picture)
+                case Key.V: if (!inText && _sketch != null) _ = PastePicture(); else handled = false; break;
                 case Key.D1: Viewport.StandardView("Front"); break;
                 case Key.D2: Viewport.StandardView("Back"); break;
                 case Key.D3: Viewport.StandardView("Left"); break;
@@ -673,6 +679,12 @@ public partial class MainWindow : Window
         if (InEntityPage && e.Key is Key.Enter or Key.Escape && !(e.Source is TextBox))
         {
             if (e.Key == Key.Enter) _entityPage!.OnOk?.Invoke(); else EndEntityPage();
+            e.Handled = true; return;
+        }
+        // a picture's page: Enter is OK, Esc Cancel (Esc while clicking its scale points stops that first)
+        if (InPicturePage && e.Key is Key.Enter or Key.Escape && !(e.Source is TextBox) && !(e.Key == Key.Escape && _sketch!.PickingPoint))
+        {
+            if (e.Key == Key.Enter) _picturePage!.OnOk?.Invoke(); else _picturePage!.OnCancel?.Invoke();
             e.Handled = true; return;
         }
         if (inControl) return;
@@ -787,6 +799,8 @@ public partial class MainWindow : Window
         if (page != null) HideBreadcrumbs(); // (a command started)
         // the Measure tool's drawing belongs to its page
         if (_measurePage != null && page != _measurePage) EndMeasure();
+        // a sketch picture's page replaced by another (a sketch command): the picture kept as edited
+        if (_picturePage != null && page != _picturePage) { _picturePage = null; _sketch?.EndPictureEdit(true); }
         // the Section View page replaced by another: the section kept as it is, its arrow gone
         if (_sectionPage != null && page != _sectionPage) { _sectionPage = null; _sectionOffsetBox = null; Viewport.SectionArrow = false; }
         // the plane-pick page closed (cancelled, or replaced by another command): the planes go back to as set

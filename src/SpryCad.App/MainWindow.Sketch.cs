@@ -125,9 +125,16 @@ public partial class MainWindow
         _sketch.Overlay = Overlay;
         _sketch.Changed += OnSketchChanged;
         _sketch.SelectionChanged += BuildSketchPage;
+        _sketch.PictureOpened += EditPicture;
+        _sketch.PictureChanged += () => { if (InPicturePage && _sketch?.EditingPicture is { } pic) OpenPicturePage(pic.Id); };
         _sketch.Message += Status;
         // the panel shows tool settings (e.g. polygon sides) for the tool in use
-        _sketch.ToolChanged += () => { UpdateToolButtons(); if (_sketch?.Selected.Count == 0) BuildSketchPage(); };
+        _sketch.ToolChanged += () =>
+        {
+            // a drawing tool chosen while a picture's page is open: the picture kept as edited
+            if (InPicturePage && _sketch?.Tool != SketchTool.Select) EndPicturePage(true);
+            UpdateToolButtons(); if (_sketch?.Selected.Count == 0) BuildSketchPage();
+        };
         Viewport.Mode = _sketch;
         Viewport.Hover = null;
         ShowTab("Sketch");
@@ -213,6 +220,7 @@ public partial class MainWindow
     {
         if (_sketch == null) return;
         var ed = _sketch;
+        if (_picturePage != null) { _picturePage = null; ed.EndPictureEdit(save); }
         ed.DetachOverlay();
         _sketch = null;
         Viewport.Mode = _modelMode;
@@ -235,7 +243,7 @@ public partial class MainWindow
         var hole = _pendingHole; _pendingHole = null;
         var madeSketch = _sketchIsNew || _pendingHoleMadeSketch; _pendingHoleMadeSketch = false;
         var id = ed.Feature.Id;
-        if (save && (ed.Modified || _sketchIsNew) && ed.Sk.Entities.Count > 0)
+        if (save && (ed.Modified || _sketchIsNew) && (ed.Sk.Entities.Count > 0 || ed.Sk.Pictures is { Count: > 0 }))
         {
             Session.Change(() =>
             {
@@ -297,6 +305,8 @@ public partial class MainWindow
         if (Converting) { TakeConvertPicks(); return; }
         // so do the Mirror and Offset pages
         if (InEntityPage) { TakeEntityPicks(); return; }
+        // and a picture's page
+        if (InPicturePage) return;
         var ed = _sketch;
         var page = new PmPage(ed.PointsOnly ? "Hole Positions" : "Sketch", "sketch") { OnOk = () => ExitSketch(true), OnCancel = DiscardSketch };
         if (ed.Selected.Count == 0)
@@ -332,6 +342,7 @@ public partial class MainWindow
             var m = page.Section("Model Edges");
             page.Info(m, "Convert Entities projects model edges and faces into the sketch as exact lines, arcs and circles.");
             page.ButtonRow(m, "Convert Entities", ConvertEntities, "convert");
+            AddPictureSection(page, ed);
         }
         else
         {

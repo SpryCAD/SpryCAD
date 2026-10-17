@@ -88,6 +88,7 @@ public partial class MainWindow
             C("convert", "Convert Entities", ConvertEntities);
             C("construction", "Construction Geometry", ToggleConstruction);
             C("relations", "Add Relations", AddRelationCommand);
+            C("sketchpicture", "Sketch Picture", SketchPictureCommand);
         }
         else
         {
