@@ -116,6 +116,24 @@ static class ConfigTests
             }
         });
 
+        t.Test("Fillet whose foot just touches the bolt holes' rims (the pipe flange, 20 holes): joined as the exact boolean joins it (it came out wrong, the body open)", () =>
+        {
+            // (the hub fillet's foot at HubD/2 + Rfil = 49, the holes' rims reaching in to PCD/2 - BoltD/2 = 49)
+            static double Build(bool direct)
+            {
+                var old = SpryCad.Kernel.DirectBlend.Enabled;
+                SpryCad.Kernel.DirectBlend.Enabled = direct;
+                try
+                {
+                    var doc = Demos.Flange();
+                    doc.Equations.First(e => e.Name == "BoltD").Expr = "20";
+                    return Volume(new Regenerator().Rebuild(doc));
+                }
+                finally { SpryCad.Kernel.DirectBlend.Enabled = old; }
+            }
+            t.Near(Build(direct: true), Build(direct: false), 1e-3);
+        });
+
         t.Test("Suppress When: a condition that cannot be evaluated is an error", () =>
         {
             var (doc, cut, lp) = Plate("Nope > 1");

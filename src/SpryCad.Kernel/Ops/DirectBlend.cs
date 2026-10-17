@@ -331,6 +331,31 @@ public static class DirectBlend
             { why = $"its face {t.Tag.Name} lies on no face of the body"; return null; }
         var support = tb.Faces.Where(onBody.ContainsKey).ToList();
         var candidates = onBody.Values.SelectMany(x => x).Distinct(Ref).Cast<NFace>().ToList();
+        // (a contact circle touching one of the face's circles at a single point, a hub fillet's foot just reaching a
+        // counterbore's rim: the faces left meet there in a point, which the tracing below cannot split (it traced the
+        // wrong faces, the body open); the boolean joins it)
+        // (a face the tool lies on whose edges already meet at a point, loops sharing a vertex (a fillet's edge reaching a
+        // counterbore's rim, joined by the boolean): traced wrong the same way; the boolean)
+        foreach (var f in candidates)
+        {
+            var seen = new HashSet<NVertex>(Ref);
+            foreach (var l in f.Loops)
+                foreach (var v in l.Coedges.Select(c => c.Start))
+                    if (!seen.Add(v)) { why = $"its face {f.Tag.Name}'s edges meet at a point"; return null; }
+        }
+        // (at a vertex of either too: a rim's circle is split where the contact circle reaches it)
+        bool On(NEdge e, Vec3 p) => e.Closed || Inside(e, p, tol, out _) || Vec3.Distance(p, e.V0.P) <= tol || Vec3.Distance(p, e.V1.P) <= tol;
+        foreach (var t in support)
+        {
+            if (t.Surface.Kind != SurfaceKind.Plane) continue;
+            foreach (var te in t.Coedges.Select(c => c.Edge))
+                if (te.Curve is NCircle tc)
+                    foreach (var be in onBody[t].SelectMany(f => f.Coedges).Select(c => c.Edge))
+                    {
+                        if (be.Curve is NCircle bc && Touch(tc, bc, tol) is { } at && On(te, at) && On(be, at))
+                        { why = "it touches an edge of the face it lies on at a point"; return null; }
+                    }
+        }
 
         Lap("faces");
         // ---- the tool's vertices on the body's (its chain vertices are the edge's own points)
@@ -819,6 +844,17 @@ public static class DirectBlend
     }
 
     /// <summary>Whether p lies on e strictly between its ends (the curve parameter there in t).</summary>
+    /// <summary>Where two circles in one plane touch at a single point, outside or inside each other; null if they do not.</summary>
+    static Vec3? Touch(NCircle a, NCircle b, double tol)
+    {
+        var d = Vec3.Distance(a.C, b.C);
+        if (d <= tol) return null; // (concentric: the same circle, or none)
+        var dir = (b.C - a.C) / d;
+        if (Math.Abs(d - (a.R + b.R)) <= tol) return a.C + dir * a.R;
+        if (Math.Abs(d - Math.Abs(a.R - b.R)) <= tol) return a.R >= b.R ? a.C + dir * a.R : b.C - dir * b.R;
+        return null;
+    }
+
     static bool Inside(NEdge e, Vec3 p, double tol, out double t)
     {
         t = 0;

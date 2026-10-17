@@ -469,7 +469,7 @@ static partial class Demos
     // ------------------------------------------------------------------------------------------
     // 1. Pipe flange: revolved weld-neck flange, bolt holes on a pitch circle (count is a variable)
 
-    static CadDocument Flange()
+    internal static CadDocument Flange()
     {
         var d = Doc(("OD", "150"), ("ID", "60"), ("T", "18"), ("HubD", "88"), ("HubH", "32"),
                     ("PCD", "118"), ("BoltD", "14"), ("N", "8"), ("Rfil", "5"), ("C", "1.5"));
