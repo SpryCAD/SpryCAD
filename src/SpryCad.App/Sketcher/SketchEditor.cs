@@ -60,6 +60,11 @@ public sealed partial class SketchEditor : IViewportMode
     public bool Modified { get; private set; }
     /// <summary>Restricts drawing to points (Hole Wizard positions).</summary>
     public bool PointsOnly { get; init; }
+    /// <summary>
+    /// Nothing else in the part shows the scale (the part's first sketch): the first dimension set scales the sketch
+    /// and the view with it (<see cref="ScaleOnFirstDimension"/>).
+    /// </summary>
+    public bool NoScaleReference { get; init; }
 
     public event Action? Changed;          // geometry / status changed
     public event Action? SelectionChanged;
@@ -1791,11 +1796,13 @@ public sealed partial class SketchEditor : IViewportMode
     /// The sketch's first dimension set: everything drawn scaled with it (it was drawn roughly to size, at a scale not
     /// known till now), so the shape keeps its proportions rather than one length jumping; about the origin when the
     /// sketch is tied to it, else about its middle; the view zoomed alike, so the sketch stays the size it was on
-    /// screen. Not for a sketch with fixed points (references to the model): those cannot follow.
+    /// screen. Only for the part's first sketch (<see cref="NoScaleReference"/>): with other sketches or solids on
+    /// screen the drawing's scale is already known, and the model would seem to change size. Not for a sketch with
+    /// fixed points (references to the model): those cannot follow.
     /// </summary>
     void ScaleOnFirstDimension(SkConstraint c, double v)
     {
-        if (c.ValueKind != ValueKind.Length || c.Type == CType.Offset || c.Value <= 1e-9 || v <= 0) return;
+        if (!NoScaleReference || c.ValueKind != ValueKind.Length || c.Type == CType.Offset || c.Value <= 1e-9 || v <= 0) return;
         if (Sk.Constraints.Any(x => x != c && x.IsDimension && !x.Driven)) return;
         if (Sk.Points.Any(p => p.Fixed && p.Id != Sketch.OriginId)) return;
         var k = v / c.Value;

@@ -141,6 +141,9 @@ public partial class MainWindow
         _sketch = new SketchEditor(Viewport, sf, frame, EditLookup)
         {
             PointsOnly = pointsOnly, Units = u, PlainUnits = Session.Doc.PlainUnits,
+            // the part's first sketch: nothing before it but reference planes and axes to show the scale
+            NoScaleReference = !Session.Doc.Features.Take(Session.Doc.ActiveCount).TakeWhile(f => f.Id != sf.Id)
+                .Any(f => !f.Suppressed && f is not (PlaneFeature or AxisFeature)),
             // (round in the part's units)
             FilletRadius = FeatureDefaults.Mm(u, 5, 0.125), OffsetDistance = FeatureDefaults.Mm(u, 5, 0.125),
         };
