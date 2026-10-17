@@ -1588,9 +1588,13 @@ public sealed class ViewportControl : OpenGlControlBase, Avalonia.Rendering.ICus
     /// Look straight at a frame (Normal To). With <paramref name="fit"/>, also zoomed to fit that box as seen from
     /// there (e.g. the sketch being edited), in the same animation.
     /// </summary>
-    public void NormalTo(Frame f, Box3? fit = null)
+    /// <param name="flip">Already looking at the plane straight on (or turning to): from its other side instead (the
+    /// Normal To command used again, as SolidWorks).</param>
+    public void NormalTo(Frame f, Box3? fit = null, bool flip = false)
     {
-        var q = Camera.LookRotation(Camera.F(f.Normal), Camera.F(f.YDir));
+        var back = Camera.F(f.Normal);
+        if (flip && Vector3.Dot(Vector3.Transform(Vector3.UnitZ, _animating ? _animToQ : Camera.Rotation), back) > 0.9998f) back = -back;
+        var q = Camera.LookRotation(back, Camera.F(f.YDir));
         if (fit is { IsEmpty: false } box)
         {
             var tmp = NormalToCamera(f, box);

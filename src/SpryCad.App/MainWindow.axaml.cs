@@ -716,6 +716,9 @@ public partial class MainWindow : Window
             case Key.F:
                 Viewport.ZoomToFit(); e.Handled = true;
                 break;
+            case Key.N when !ctrl:
+                NormalTo(); e.Handled = true;
+                break;
             case Key.Space:
                 _viewSelector.Toggle(); e.Handled = true;
                 break;

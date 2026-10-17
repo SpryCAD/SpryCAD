@@ -565,7 +565,7 @@ public partial class MainWindow
         H("fit", "Zoom to Fit (F)", () => Viewport.ZoomToFit());
         var views = H("views", "View Orientation (Spacebar)", () => { });
         views.Flyout = OrientationFlyout();
-        H("normalto", "Normal To (Ctrl+8)", NormalTo);
+        H("normalto", "Normal To (N)", NormalTo);
         var disp = H("display", "Display Style", () => { });
         var df = new MenuFlyout();
         df.Items.Add(StyleItem("Shaded With Edges", DisplayStyle.ShadedWithEdges));
@@ -657,7 +657,7 @@ public partial class MainWindow
             }
         }
         if (f == null) { Status("Select a planar face, plane or sketch for Normal To."); return; }
-        Viewport.NormalTo(f.Value);
+        Viewport.NormalTo(f.Value, flip: true);
     }
 
     // Normal To in an assembly, waiting for the face to look at
@@ -671,7 +671,7 @@ public partial class MainWindow
         { Status($"The selected face of {a.Model.NameAt(component)} is not planar. Select a planar face (Esc to cancel)."); return; }
         _normalToPick = false;
         RefreshAssemblyScene();
-        Viewport.NormalTo(Frame.FromPlane(Plane.FromPointNormal(g.P, g.D)));
+        Viewport.NormalTo(Frame.FromPlane(Plane.FromPointNormal(g.P, g.D)), flip: true);
         Status($"Normal to a face of {a.Model.NameAt(component)}.");
     }
 
