@@ -11,6 +11,7 @@
        Linux builds leave it out: SpryCad.App.csproj). The bundled build is pinned
        past 2.1.11, which has a high-severity advisory (GHSA-2m69-gcr7-jv3q). -->
   <ItemGroup>
+    <PackageReference Include="ClosedXML" Version="0.104.2" />
     <PackageReference Include="Microsoft.Data.Sqlite.Core" Version="10.0.10" />
     <PackageReference Include="SQLitePCLRaw.provider.sqlite3" Version="2.1.12" />
     <PackageReference Include="SQLitePCLRaw.provider.e_sqlite3" Version="2.1.12" />

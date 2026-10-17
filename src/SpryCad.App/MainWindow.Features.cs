@@ -823,6 +823,46 @@ public partial class MainWindow
     {
         var page = new PmPage("Hole Specification", "hole");
         var t = page.Section("Hole Type");
+        // the page made again (a library type picked or dropped: other sections), the hole as set
+        void Reopen()
+        {
+            if (_edit != null) _edit.OnCancelled = null;
+            CancelEdit();
+            OpenHolePage(f, isNew, madeSketch);
+        }
+        // a hole type from the library (its profile and a table of sizes, as Inventor's spreadsheets), else the built-in
+        // types below; one with no profile is not offered
+        var libTypes = Core.Library.LibraryLink.Current.Offered(Core.Library.TableKinds.HoleType).Where(x => x.Profile != null).ToList();
+        bool lib = f.LibraryType != null;
+        if (libTypes.Count > 0 || lib)
+        {
+            var choices = new List<(string, string)> { ("", "None (built-in types)") };
+            choices.AddRange(libTypes.Select(x => (x.Key, x.Title.Length > 0 && x.Title != x.Key ? $"{x.Title} ({x.Key})" : x.Key)));
+            if (lib && libTypes.All(x => x.Key != f.LibraryType)) choices.Add((f.LibraryType!, $"{f.LibraryType} (not offered by the libraries)"));
+            page.Combo(t, "Library type", choices, () => f.LibraryType ?? "", v =>
+            {
+                if (v == "") { f.LibraryType = null; f.TypeValues = null; f.Profile = null; f.Size = null; }
+                else if (libTypes.FirstOrDefault(x => x.Key == v) is { } lt)
+                {
+                    f.LibraryType = v; f.Profile = lt.Profile!.Clone(); f.Standard = null; f.Fit = null;
+                    f.Size = lt.Rows.FirstOrDefault()?.Key;
+                    HoleProfile.ApplyType(f, Core.Library.LibraryLink.Resolve(Session.Doc, Core.Library.LibrarySnapshot.ItemKey(v, f.Size ?? "")));
+                }
+                Reopen();
+            });
+        }
+        if (lib)
+        {
+            // its sizes (the table's rows); the size picked sets the profile's values
+            var rows = libTypes.FirstOrDefault(x => x.Key == f.LibraryType)?.Rows.Select(r => r.Key).ToList() ?? new List<string>();
+            if (f.Size != null && !rows.Contains(f.Size)) rows.Add(f.Size);
+            page.Combo(t, "Size", rows.Select(r => (r, r)).ToList(), () => f.Size ?? "", v =>
+            {
+                f.Size = v;
+                HoleProfile.ApplyType(f, Core.Library.LibraryLink.Resolve(Session.Doc, Core.Library.LibrarySnapshot.ItemKey(f.LibraryType!, v)));
+            });
+        }
+        int builtInFrom = t.Children.Count;
         Action syncSections = () => { };
         TextBox? dia = null, cbd = null, cbdp = null, csd = null, csa = null;
         // sizes from the libraries (section 34): the diameters set from the standard, size and fit picked
@@ -897,6 +937,8 @@ public partial class MainWindow
             ListSizes(); refreshType(); Fill();
         });
         page.Field(t, "Type", typeBox);
+        // (a library type: its own profile and sizes in place of the built-in types' rows)
+        if (lib) foreach (var c in t.Children.Skip(builtInFrom)) c.IsVisible = false;
         var std = page.Section("Hole Specifications");
         sizeRow = PmPage.RowOf(page.Field(std, "Size", sizeBox));
         sizeBox.SelectionChanged += (_, _) => { if (!listing && sizeBox.SelectedItem is string sz) { f.Size = sz; Fill(); page.RaiseChanged(); } };
@@ -963,10 +1005,27 @@ public partial class MainWindow
         // the profile: the type's, or the hole's own (as SolidWorks lets the hole's sketch be edited); with its own, the
         // options and the clearance are what it draws
         var profSec = page.Section("Profile");
-        page.Info(profSec, f.Profile == null ? "The hole type's standard profile."
+        page.Info(profSec, lib ? $"The profile of {f.LibraryType} from the library; its dimensions use its columns. Edit Profile changes this hole's copy only."
+            : f.Profile == null ? "The hole type's standard profile."
             : "A custom profile. Its dimensions can use " + string.Join(", ", HoleProfile.Names.Select(n => n.name)) + ", and the part's equations.");
         page.ButtonRow(profSec, "Edit Profile…", () => EditHoleProfile(f, isNew, madeSketch), "sketch");
-        if (f.Profile != null)
+        // a custom profile made a library hole type: its names its table's columns, this hole's values the first size;
+        // the Library Editor opened with it to add sizes (or export it to Excel) and publish
+        if (f.Profile != null && !lib)
+            page.ButtonRow(profSec, "Save Profile to Library…", async () =>
+            {
+                var key = (await Dialogs.Input(this, "Save Profile to Library", "Hole type key (e.g. ACME-cbore):", ""))?.Trim();
+                if (string.IsNullOrEmpty(key)) return;
+                if (key.Contains('/')) { Status("A hole type's key cannot hold '/'."); return; }
+                var size = (await Dialogs.Input(this, "Save Profile to Library", "This hole's size (its first row, e.g. M8):", f.Size ?? "Default"))?.Trim();
+                if (string.IsNullOrEmpty(size)) return;
+                double Shown(string e) => UnitFormat.TryLength(e, Session.Lookup, out var v, out _) ? v : 0;
+                var lookup = HoleProfile.Lookup(f, Session.Lookup, Units.MmPer(), Shown(f.Depth));
+                var (table, problem) = HoleProfile.ToLibraryType(f.Profile!, key, size, lookup);
+                if (table == null) { Status(problem!); return; }
+                await LibraryEditor.Open(this, add: table);
+            }, "table");
+        if (f.Profile != null && !lib)
             page.ButtonRow(profSec, "Use Standard Profile", () =>
             {
                 f.Profile = null;
@@ -994,8 +1053,9 @@ public partial class MainWindow
         // only the section of the chosen hole type is shown
         syncSections = () =>
         {
-            if (cb.Parent is Control cbs) cbs.IsVisible = f.Type == HoleType.Counterbore;
-            if (cs.Parent is Control css) css.IsVisible = f.Type == HoleType.Countersink;
+            if (cb.Parent is Control cbs) cbs.IsVisible = !lib && f.Type == HoleType.Counterbore;
+            if (cs.Parent is Control css) css.IsVisible = !lib && f.Type == HoleType.Countersink;
+            if (std.Parent is Control stds) stds.IsVisible = !lib;
             syncOptions();
         };
         syncSections();

@@ -368,6 +368,14 @@ public sealed class HoleFeature : Feature
     /// </summary>
     public Sketching.Sketch? Profile { get; set; }
     /// <summary>
+    /// A hole type from the library (<see cref="Library.TableKinds.HoleType"/>: its key), <see cref="Size"/> its row; its
+    /// profile copied into <see cref="Profile"/> and the row's values into <see cref="TypeValues"/>, so the part builds
+    /// without the library. Null for the built-in types.
+    /// </summary>
+    public string? LibraryType { get; set; }
+    /// <summary>The library hole type's values by column (mm; a column named with "angle" in degrees).</summary>
+    public Dictionary<string, double>? TypeValues { get; set; }
+    /// <summary>
     /// The clearance hole table the hole is sized from ("ISO273", "ASME-B18.2.8"), with <see cref="Size"/> (the screw:
     /// "M8", "1/4") and <see cref="Fit"/> (its column: close, normal, loose); null: sized by hand. The diameters above
     /// are what the hole is made with; these say where they came from, so a library update can size it again.
