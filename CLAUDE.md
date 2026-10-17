@@ -41,8 +41,9 @@ Several people and agent sessions work in this repository at the same time, ofte
 
 - **Feature work goes in a worktree.** Use a git worktree under `.claude/worktrees/<name>` (git ignores it) on
   its own branch, not the main checkout.
-- **Features land with a squash merge:** `git merge --squash <branch>` on master, then one commit describing the
-  feature. Don't push merge commits or the branch's intermediate commits onto master.
+- **Features land with a squash merge into the local master**, when the user has reviewed them and asks: one
+  commit describing the feature, ending with its `Changelog:` lines (see `.claude/CLAUDE.md`). No pull request,
+  and don't push: the user pushes master. Don't put merge commits or the branch's intermediate commits on master.
 - Small fixes and copy changes can be committed directly on master, following the rules above.
 - Commit messages follow the existing style: a plain description of what now happens and why, with
   before/after numbers for performance work.
