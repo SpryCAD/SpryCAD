@@ -1,0 +1,356 @@
+# Hit and miss engine demo: what it needed
+
+Notes made while modeling the hit and miss engine demo (`tests/SpryCad.Tests/Demos.Engine.cs`): things SpryCAD
+could not do, did not do well, or that a designer would reach for. Each says what was done instead.
+
+Commands (from the repository root):
+
+- `dotnet run --project tests/SpryCad.Tests -c Release -- verify-engine [outDir|-] [part]`: rebuilds each part (or
+  the ones whose name contains `part`), reports failures, warnings and sketches not fully defined; with `outDir`, saves
+  each part and a picture of it there.
+- `... -- engine-steps <part>`: one part rebuilt a feature at a time, each step's time.
+- `... -- engine-asm [outDir]`: assembles the engine, checks the mates hold as placed, turns the crankshaft two turns
+  and checks the piston, cam gear and exhaust valve follow; with `outDir`, also checks interference (as placed and at
+  8 points through the turns), prints the mass, and writes `hit-and-miss.sasm`, the indented bill of materials
+  (`bom.csv`) and pictures.
+
+## To fix (open)
+
+1. ~~Mirror of a fillet makes the body faceted, silently.~~ **FIXED (#29)**: the pedestal ribs' fillets are mirrored
+   with them now, exact at every step (`engine-steps Casting`), the mirror 98 ms.
+2. ~~No warning when a feature leaves the body faceted.~~ **FIXED (#29)**: a feature that turns an exact body
+   faceted now warns why.
+3. ~~Holes through the base: 20 s of B-spline tracing.~~ **FIXED (#31)**: the casting rebuilds in 2.2 s on master
+   7913d0c (with the ribs' fillets). The cause:
+   the trace on the swept foot chamfer's B-spline missed the curve near its edge, and the retrace on the hole's face
+   snapped some 12,650 points with the B-spline's slow closest-point search; with it, the hole feature 28 s → 94 ms,
+   the casting about 1.5 s. The 203 mm³ the volume moved is not this bug but the blend changes since 55eba57 (chamfer
+   ends cut back to their faces #20, mitred hole corners #22, cut-back fillets #24). Was: with the distance-distance chamfer
+   round the body's foot, the casting went from about 1.3 s to 3.6-6.6 s; on master b1c89a4 (with #20 and #24) it
+   takes 33 s. Every feature is under 1.3 s except the last, "Hold-down holes" (four Ø11 through-holes in the 5°
+   drafted base plate at (x, z) = (-207, ±70), (52, ±70)): 19.8 s, all in the hole's boolean, `sec.trace` /
+   `trace.project` (40 s of CPU over 22 traces); two holes cross a B-spline face (`tr.BSplinexCylinder` x2): the
+   base's drafted corner fillets or the swept foot chamfer. The volume moved slightly too (3,644,484 to 3,644,687
+   mm³). Repro: `verify-engine <dir> Casting`, then `featprof <dir>/Casting.sprt "Hold-down holes" 1`. Reported to
+   the session that did the chamfer work.
+4. ~~The cam gear's boss into the body.~~ **FIXED (#53)**, at R3 now: with the saddle (which covers the boss's top
+   half) R5 says "the fillet does not fit: it runs past the faces it blends" (fair: there is little room between the
+   saddle's cheek and the hopper). Was: the result has an open edge. On master 98dfc3b (#45, #46) the
+   message is now the boolean's reason: "the fillet cannot be joined to the body (result invalid: edge used 1 times
+   (NLine (-95.099, 0, 53.46)->(-90.1, 0, 53.46) on F31.Start))", R3 the same (the line then -93.1 to -90.1). F31
+   is the hopper: its underside (y = 0) overhangs the body's drafted side by about 4 mm, and the boss's back (x = -90)
+   lies under it, so the blend's run-out reaches that ledge and the boolean leaves the blend's edge along it unused.
+   Was (before #45): "Corner blends where tangent fillets meet" (the "run into each other" message), seen again on the
+   cam gear's boss. "Cam boss into the body" (`HmCasting`, suppressed): R5, one edge picked, the boss's cylinder (Ø36 along Z
+   at x = -72.1, y = 0, from z = 40 out to 72) with the body's 2° drafted +Z side, tangent edges following. The boss
+   pokes out through the body's side, above its top (y 0..18, past the "Wall tops" R4 round), and its back runs into
+   the hopper's side and the barrel's end, so the loop round it crosses several faces and two fillets: "the fillets
+   that run into neighbouring geometry also run into each other where both are tangent to the same face; that corner
+   cannot be blended yet". Repro: unsuppress it, `verify-engine - Casting`. The same R5 on the hopper's faces into
+   the barrel (front and back) and on the head's flange into the barrel works.
+4b. ~~A boss through a drafted face that carries on another: the exact boolean fails.~~ **FIXED (#49)**: the hopper
+   is flush with the body now (no ledge). The small notch in the barrel below the hopper's front corners was modeling,
+   not the kernel (the "Hit-and-miss engine documentation review" session): the corners' vertical edges came within
+   1.5 mm of the barrel's side, so the R12 corner fillet, on the merged body, had to cut into it. The corners are now
+   arcs in the hopper's sketch (no fillet), so the drafted hopper is round-cornered before it meets the barrel; no
+   notch, and the casting rebuilds faster. Was: to remove the hopper's
+   4 mm ledge (and with it item 4's trouble), the hopper was made as wide at y = 0 as the body's top
+   (`HopW = BodyW-2*(BaseY-BaseT)*tan(BodyDraft)`, 106.9), with the same 2° draft, so its sides carry straight on
+   from the body's (they merge: the body's side face `F7.S.L5` then runs up to the hopper's top, and the hopper's
+   corner rounds must be picked between it and the hopper's front and back). Then the cam gear's boss, a plain
+   extrude (Ø36 along Z at x = -72.1, y = 0, z 40 to 72), fails exactly: "The result is no longer exact (an exact
+   boolean failed: face split: open cycle on F31.S.L6 near (-85.423, 12.104, 50.572))". F31.S.L6 is the hopper's
+   drafted back face, which the boss's back now cuts through just where it meets the merged side face. The casting
+   goes faceted and rebuilds in 230 s. Repro: set `HopW` to that expression, repoint "Hopper corners" to `YF(0)`/`YF(2)`
+   with `HF(1)`/`HF(3)`, `verify-engine - Casting`. *Instead:* the hopper 116 wide again (the ledge kept).
+4c. ~~A placed body's bounds throw: "face F13.S.C1 wraps around its surface".~~ **FIXED (#72)**: the interference
+   check runs through all 72 steps again. Was: in
+   `engine-asm <dir>`'s interference check through the motion, at step 63 (the crank at 307.5°), `NBody.Bounds` of the
+   connecting rod's body transformed to where it is (translated to (18.263, -23.801, 0), turned about Z by about
+   -10.55°) throws from `NDomain`'s constructor (via `NFace.ComputeBounds`). F13.S.C1 is the rod's half-round bore for
+   the crank pin (the cap holds the other half). Every other step bounds it fine, so it depends on the transform.
+   Unhandled, it took the whole interference check down (`Interference.Find`); the demo's check now catches it and
+   names the part. It did not happen before this rebase (the same check ran through all 72 steps on master 7913d0c).
+   Still open on master e58d3fb, now at step 18 (the rod placed at (-23.801, -18.263, 0)): "face
+   Fpqpp7x46qy25.S.C3dqjax78450 wraps around its surface" (the same bore, under its random id).
+4d. ~~Fillets on a loft's B-spline face are slow.~~ **FIXED (#72)**: "Pit edges" at R4 now (0.5 s), "Saddle edges"
+   0.3 s, the whole casting 2.6 s (with the hopper's corners in its sketch, 4b). Was: the casting rebuilds in about 10-13 s with the saddle (2.3 s
+   before): "Pit edges" (R2, two edges where the crank pit's walls cut the saddle's top) 3.6 s, "Saddle edges" (R4,
+   the cheeks' outer top edges) 2.8 s, the loft itself 1.5 s. And the pit edges at R4 fail: "the fillet, cut back
+   where it runs into neighbouring geometry, cannot be joined to the body (classification failed)" (they run into the
+   barrel's end and the pedestals); R2 works.
+4f. **An old part's loft loses its sections when it is opened (OPEN, master e58d3fb).** Opening a part saved before
+   the random ids (#52), its ids are rewritten (`LegacyIds`), but a loft's `SectionSketchIds` and `GuideSketchIds`
+   keep the old ones (fixed in #68): `IsFeatureRef` takes properties named "...SketchId", not "...SketchIds". The casting saved by
+   ff33d37 then says "Saddle: The sketch for this feature is missing or failed", and every fillet on the saddle loses
+   its edges (found by the "Chamfers around filleted corners" session). Fix: add the two list names to that test.
+   The casting built fresh is fine, and the demo file is regenerated, so the engine does not hit it. Fix in #68
+   (open).
+4h. ~~A loft's rounded section cannot be blended into a flat face.~~ **FIXED (#79)**: "Shank into the ends", by scope,
+   blends both ends at R3, the rod in under 1 s (the shank's big end made 20 deep, not 24, so the blend clears the
+   cap's nuts). Was: the connecting rod's
+   shank is now a loft (`HmConRod`): from a 16 x 11 rounded rectangle (R5 corners, so 1 mm flats on its narrow
+   sides) inside the small end to a 24 x 15 one (R7) on the big end block's face (x = -16). Blended into the small
+   end's round boss, R3, picked or by scope: fine (but 5.7 s for that one fillet). Into the block's flat face it
+   fails at R3: "the fillet, cut back where it runs into neighbouring geometry, cannot be joined to the body (result
+   invalid: edge used 1 times (NLine (-18.943, 4.944, 7.444)->(-16, 5, 7.5) on Shank.S.A...))", at (y 5, z 7.5) where
+   a corner arc's face meets the top flat's face (a tangent seam between two of the loft's faces), and the same with
+   the section 2 mm inside the block. At R2 both ends fail ("edge used 1 times (NEllipse (-117, 0, 5.576)->... on
+   Shank.S.L...)"). Repro: in `HmConRod`, replace "Shank into the small end" with
+   `new FilletFeature { Radius = "Rf", Features = { shank.Id } }`, `verify-engine - Connecting`. *Instead:* only the
+   small end blended, the big end's joint left sharp. Cause (the documentation review session): the loft split each
+   corner arc into two patches at different fractions on the two sections, so their seam kinked (up to 0.37°) and
+   the rolling ball cannot cross it. Fixed by #79 (first on `loft-warmup`, pushed
+   after #65 was merged): with it both ends blend by scope at R3 (2.1 s) and R2, and the small
+   end alone takes 1.1 s, not 5.7.
+4i. ~~The base ribs' scoped blend slow since #75.~~ **FIXED (#80)**: "Base ribs blended" 0.57 s, the casting 4.6 s.
+   Was: "Base ribs blended" (R3 by scope on the
+   rib seed) went from about 1 s to 5.5-13 s: at one rib, which stands half on the body's corner round, the new
+   corner pivots fail and the feature is built again mitred, so both builds are paid for (the "Chamfers around
+   filleted corners" session, fixing it on `corner-pivot-2`). With #75 the pedestal rib is filleted all round as
+   well: its sloping back into the body's side is one more edge of "Pedestal rib fillets" (its foot found by
+   bisection), the rib's lower corners rounded off.
+4j. **Breaking every outside edge of the casting in one fillet leaves most of them out (OPEN, master a7fedc9).**
+   Tried as the casting's last feature: `new FilletFeature { Radius = "1", WholeBody = true, ScopeKind =
+   BlendScopeKind.Convex }` (cast parts have no sharp edges; one feature for all of them is what the scope is for).
+   It builds (exact, 6.2 s) but leaves out about 190 edges in 30 groups, with a warning each, so `verify-engine`
+   fails. By kind:
+   - **Edges that are not edges** (should not be in the scope at all, ~60): seams between tangent faces of earlier
+     blends ("Edge Pedestal into the body.1.C.Blend / Pedestal into the body.2.Blend: the faces are tangent along the
+     edge: there is nothing to fillet", 18 each side; "Hopper into the barrel.0.Blend / .End0" and "/ .End1": "the
+     fillet does not fit"; the lugs' blend faces "Lugs into the body.3.S.F / .3.End", ".5.Start / .5.S.F" ...: "the
+     ball does not fit at an end of the edge"). A convex scope should skip edges whose faces meet tangent.
+   - **The biggest group, 43 edges, fails as one**: "cannot be joined to the body (result invalid: edge used 1 times
+     (NEllipse (35.453, 0, 34)->(32.696, 0, 43.617) on Body.End))", the main bearing bore's edge on the body's top
+     beside a pedestal. One bad edge takes 42 good ones with it; trying each group's edges alone would keep those.
+   - **Edges running into another blend's end** (each rib's sloped top at its foot, the base's corner by the foot
+     chamfer, the crank pit's R4 ends, the bore at the barrel's end): "edge used 1 times", "run into each other".
+   - **The hold-down holes' top edges**: "Edge Base.End / Hold-down holes.0.R.Hole: the fillet does not fit: it runs
+     past the faces it blends" at R1 (an 11 mm hole through a 20 mm plate, no reason not to fit).
+   Repro: add that fillet after "Oil boss into the barrel" in `HmCasting`, `verify-engine - Casting`. *Instead:*
+   not added; the casting keeps its picked and per-feature blends.
+   Related, a gap in the scope rather than a failure: "between features" with one feature takes its edges with the
+   rest of the body, never the feature's own. The nameplate's rivets (an extrude of four circles) cannot have their
+   heads rounded over by scope ("There are no convex edges between Rivets and the rest of the body"); each top edge
+   is picked instead. A "this feature's own edges" choice would cover bosses, ribs' tops and rivets.
+4g. **Mate face order (not kernel, the demo's helper).** `HmAsm.Any` (a face for a Lock mate) took the display
+   mesh's first face; since the display caches are laid out anew (#59) that can be a face a mate cannot hold (the
+   crankshaft's first is a surface of revolution), and `RefTo` gives null. It now takes the first face that gives a
+   reference. Worth knowing for anyone scripting mates: face order in a display mesh is not stable.
+5. ~~A mirror with a suppressed seed silently mirrors nothing.~~ **FIXED (#37)**: it mirrors the rest and warns.
+   Was: "Bearing pedestal, back" mirrored the pedestal, its
+   corner rounds and "Pedestal into the body" (suppressed): no error, no warning, and the back pedestal was simply
+   missing (the casting 36,000 mm³ light), so later fillets ("Wall tops") failed with "run into each other" and
+   pointed the wrong way. Expected: mirror the seeds that are built and warn about the suppressed one, or fail with
+   "<seed> is suppressed". *Instead:* the suppressed fillet left out of the seeds.
+6. ~~A mirror whose seed fillet failed still says "Only extrude, ... can be patterned".~~ **FIXED (#37)**: a failed
+   seed reports its own error. Was: (on "Bearing
+   pedestal, back" when "Pedestal into the body" failed), not "<seed> failed: <its error>" as the fix in
+   `blend-quick-fixes` gives elsewhere.
+7. ~~A plane into a drafted corner round: "unsupported edge geometry".~~ **FIXED (#45: edges found on a tangent
+   round)**: "Pedestal into the body" builds and mirrors with the pedestal, the body at its original length, and
+   "Wall tops" (sides included) still works beside it. Items 5 and 6 are untested since (nothing suppressed or failing
+   is mirrored now). Was: "Pedestal into the body" (`HmCasting`, suppressed): R5 on the pedestal's two sides and underside where they stand out of the body's 2° drafted side. The
+   pedestal's back side (x = 32) lands where the body's R20 corner round begins near the top (it starts at x ≈ 31.9
+   at y = 0, the draft moving it in), so that edge runs from the flat side onto the round: "Edge F12.S.L5 / F8.0.S.F:
+   unsupported edge geometry", and the edge with the flat side alone "could not be found". With the body lengthened
+   behind the crank (its back at 65 instead of 40, clear of the round) the pedestal's blend built and mirrored, but
+   then "Wall tops" failed ("run into each other") where its side segments meet the pedestal's blend: the corner case
+   (4). The body is kept at 40 and the blend suppressed. Repro: unsuppress it and add it to the mirror's seeds.
+8. Not kernel: the open items under Messages, Assembly (cam and one-sided
+   contact, governor, flexible springs, smart fasteners, tapped holes in interference, STEP structure, materials in
+   Core, an embedded sub-assembly from a model) and Appearance (colour per face, transparency).
+
+## Kernel
+
+- **Mirroring a filleted rib makes the whole body faceted, silently. FIXED (#29: one-at-a-time fillets solved per
+  instance; faceting warned).** The fillets are back in the part and in the mirror's seeds. Was: Casting: a
+  triangular rib under the bearing pedestal (Right plane, extruded mid-plane 12), then "Pedestal rib fillets" R3 (four
+  edges: the rib's two faces with the body's drafted side, and with the pedestal's underside): exact, 134 ms. Then
+  "Pedestal rib, back", a Mirror of the rib and its fillet across Front: the body comes out faceted (not native), with
+  no error or warning on the feature; every later boolean then runs on facets (the casting's rebuild 57 s instead of
+  about 5 s, and `verify-engine` reports only FAIL). Mirroring the rib alone has always been fine. `engine-steps
+  Casting` prints, per step, whether the body is exact and closed and stops at the first that is not. Repro: in
+  `HmCasting`, take `Suppressed = true` off "Pedestal rib fillets" and add it (`pedRibR`) to the mirror's seeds, then
+  `engine-steps Casting` (step 18). To fix: the mirror of a blend (the copied blend tool, or the mirrored fillet
+  applied to the other rib), and the silent fall to facets (a warning at least). *Instead:* the fillets suppressed,
+  the rib mirrored alone.
+- **The body's foot: a chamfer now (WORKS, slow).** The distance-distance chamfer (16 up the side, 8 out over the
+  base) round the foot, one edge picked, the rest following round the R20 corners: exact, the same volume as the
+  drafted plinth it replaced. The casting's rebuild went from about 1.3 s to 3.6-6.6 s with it. A fillet there instead
+  (R6) is untried since the fixes.
+
+- **Intermittent hang rebuilding the flywheel with wider spokes. FIXED (branch `blend-quick-fixes`).** `HmFlywheel`
+  with `SpW = 32`, `SpT = 18` (instead of 26 / 14), saved as `repro/flywheel-wide-spokes.sprt`; reproduced 2 runs in 6
+  with the saved file (`determinism <file> 1`, timeout 90 s). Cause: the spoke-to-hub fillet's exact boolean failed
+  (next item), and `NativeBlend.Apply` (tools not trimmed) then took the faceted fallback, which stops at a 4 s
+  wall-clock deadline. Mostly it timed out and the fillet failed; sometimes it finished just inside 4 s and left a
+  faceted body, and every later boolean on a faceted body runs `Csg.RunFacets` with no deadline (minutes). Fix: that
+  branch of `Apply` is exact or fails with a message, like the trimmed branch and the pattern code already were. The
+  file now rebuilds in about 2.2 s every time (12 of 12), every run the same.
+- **The same wide-spoke flywheel: the spoke-to-hub fillet fails. FIXED (same branch).** "result invalid: edge used 3
+  times (NContact ... on F4.R.L7,F4.R.L7,F9.0.Blend)". Not the hub's seam: `RollingBall.BuildComposite` gave an open
+  chain's far end the chain's start vertex (`VV[k]` built from `ChainVertex(k % n)`, and `n % n` is 0), so the tool's
+  end cap and last chain edge ran back across the spoke foot to the start. Only open chains whose B face changes (an
+  oval spoke's side and arcs) go that way. The seed fillet now builds. The pattern's other instances still fail on
+  these wide spokes, rightly: each spoke's foot spans ±31° of the hub, 62° for spokes 60° apart, so neighbouring feet
+  overlap and no fillet fits between them. *Instead:* spokes 26 x 14 (or a larger hub, or fewer spokes).
+- **Patterned spoke-to-hub fillet fails on some instances. NOT A BUG.** Flywheel (26 x 14 spokes): filleted R5 into the
+  hub's cylinder, then patterned 6 times: instances 2 and 6 (60° and 300°) fail with "the fillet does not fit". The
+  feet are only about 4.6° (2.2 mm) apart on the hub, and the seed's R5 fillet reaches about 40° round the hub, past
+  where instance 2's foot starts (32°): instance 2's edge chain is cut by the seed's fillet (`NativeBlend.Debug`
+  shows 6 edges instead of 4). Instances 3 to 5 are copies of the seed's tool, applied without the fit check, which is
+  why they "work". *Instead:* R3. To fix (messages): say "runs into the fillet of instance 1" instead of "does not
+  fit"; and check the copied instances against each other too, or the pattern quietly overlaps them.
+- **Undrafted spoke variant fails differently.** The same spoke with no draft: "the fillets that run into neighbouring
+  geometry also run into each other where both are tangent to the same face; that corner cannot be blended yet"
+  (raised for "Spoke to rim"). *Instead:* drafted spokes. To fix: as for the casting below.
+- **A fillet round the foot of a box whose corners are filleted.** Casting: the body (a drafted rectangle, its four
+  vertical edges filleted R20) blended R6 into the base plate's top, one edge picked, tangent edges following: with
+  draft, "the fillets that run into neighbouring geometry also run into each other ... cannot be blended yet";
+  without draft, "the edges are not all between the same two faces" on each corner fillet's edge. A very common
+  casting operation. *Instead:* no blend. The convex case fails the same way: the hopper (a rectangle extruded 82 up
+  with 2° draft, its four vertical edges filleted R12) with its top edge rounded R4 all round (one edge picked,
+  tangent edges following) gives "the fillets that run into neighbouring geometry also run into each other where both
+  are tangent to the same face". (`HmCasting`, feature "Hopper top edge", left out.) **Hopper top edge: FIXED after
+  #12** (exact, in the part now). The foot is a chamfer now (above); the R6 fillet there is untried. The plans, for
+  the general case:
+  - "Run into each other" (`NativeBlend.Apply`, the trimmed branch) is a catch-all for a failed boolean, not a corner
+    step that gives up. Each tool is trimmed against the body alone (`TrimToEdge`), then applied one at a time; two
+    blends tangent to the same face meet tangentially and the second boolean fails. Cheaper: where neighbouring
+    blends meet tangentially, build them as one rolling-ball chain (`RollingBall.BuildComposite`) instead. Proper:
+    after building the tools, find pairs on the same support face whose lumps overlap, cut each along the curve where
+    the two blend surfaces cross (`RollingBall.March` can follow it), and join the pair into one tool (~300-500
+    lines); a smooth corner patch (setback vertex blend) is 1000+ lines and a new surface.
+  - "Not all between the same two faces" (`RollingBall.BuildComposite`): it needs one surface (A) that every piece of
+    the chain lies on, taken from `pieces[0]` only, and `LineTool`/`ArcTools` claim line and arc edges before the
+    chain reaches it, so a mixed loop gets split. To fix: with tangent propagation, build the whole chain as one tool;
+    choose A by vote across the pieces, either side; where B changes at an angle (not tangentially), the same corner
+    join as above (~150-300 lines). Not yet clear why the undrafted R20 corners skip `ArcTools`: the
+    `NativeBlend.Debug` line in `Apply` prints the surface kinds and would show it.
+- **A single convex edge fails with "run into each other". FIXED after #12:** the front segments now fillet (with the
+  pit's edges, one feature "Wall tops"). The "back" segments and the pit's two short back segments were my mistake,
+  not the kernel's: behind the pedestals the body's side is its R20 corner round, so there is no such edge. Was: Casting: the body's top edge along its side (the drafted
+  side face, 2°, and the flat top at y = 0), R4, each segment a fillet of its own with one edge: the four segments
+  (either side, before and behind the bearing pedestal; they run into the hopper or the cam gear's boss at one end and
+  the pedestal at the other, or into the body's R20 corner fillet at the back) each fail with "the fillets that run
+  into neighbouring geometry also run into each other where both are tangent to the same face; that corner cannot be
+  blended yet", though there is one fillet. The same R4 on the pit's inner top edges (vertical wall, flat top, ending
+  at the barrel and the pedestal) works. So the message is the trimmed branch's catch-all (above); the difference may
+  be the draft (the side face is not perpendicular to the top) or the ends running out over curved faces (the corner
+  fillet, the cam boss's cylinder). Repro: `HmCasting`, features "Side top edge, ..." (suppressed): unsuppress one and
+  `verify-engine - Casting`. Also: two short segments of the pit's top edge (x 32..40, behind the pedestals) are not
+  found as an edge between the pit's wall and the body's top (`F48.S.L5` / `F7.End`): the top there may carry the
+  pedestal's name after the union. *Instead:* only the pit's front edges rounded.
+- **A sketch of overlapping closed loops extrudes to a broken body, silently. FIXED (#13: extruded as their union).**
+  The rocker is still three sketches (as a designer might model it anyway). Was: Rocker: a rectangle with circles
+  overlapping its ends and middle, in one sketch, extruded: no error or warning, but the body is open (not a valid
+  solid). Either union the regions or say why. *Instead:* three sketches, three extrudes. To fix:
+  `ProfileExtractor.Extract` only joins curves at shared sketch points (crossing curves are never split), and
+  `ProfileRegion.FromLoops` (`Profile.cs`) tests nesting with one vertex, so the loops become overlapping regions;
+  `Builders.Extrude` then falls back to facets without a word when `Validate()` fails. Smallest: detect overlapping
+  regions and throw "The sketch's closed contours overlap" (~40 lines), and warn on the facet fallback. Expected
+  result: extrude each region and `Csg.UnionAll` them (~15 lines). Full: split the curves at their crossings into
+  planar regions in the extractor (~200 lines; also lets a user pick regions).
+
+## Messages
+
+- **A failed seed hidden by the pattern. FIXED (branch `blend-quick-fixes`).** When a seed fillet failed, the pattern
+  said "Only extrude, revolve, ... can be patterned". The rebuild's feature statuses now reach the feature context
+  (`Ctx.Earlier`), and a pattern or mirror whose seed was not built says "<seed> failed: <its error>" (or "<seed> is
+  suppressed").
+
+## Modeling features
+
+- **Loft. DONE (#50), used:** the casting's saddle is a loft from a section up the hopper's back (as high as the
+  barrel's top) down to the body's top short of the bearing pedestals, arriving square to its end so its top curves
+  down and lands tangent on the body's top; the crank pit, cut later, leaves a cheek of it either side. The connecting
+  rod's shank is a loft too: rounded sections growing from the small end to the big end, as such rods are forged
+  (it was a tapered extrude with an I-section recess; blended into both ends by scope). (The muffler's
+  bulb stays a revolve: it is round.) Was: casting transitions (hopper to barrel, body to bearing towers) and the muffler's bulb would be lofts.
+  *Instead:* drafted extrudes, revolves. To add: a `LoftFeature` beside `SweepFeature` (`Features.cs`), regenerated
+  like `DoSweep` (regions from each section sketch, the kernel tool, `Validate`, `ApplyTool`, `State.Tools` so it can
+  be patterned); the kernel skinning between sections next to `NSweep.Sweep`, with the sections' `ProfileLoop`s
+  matched vertex for vertex or resampled.
+- **Fillet/blend of a whole cast body in one go. DONE (#64), used:** three of the casting's blends are scoped to a
+  feature instead of picked edge by edge: "Base ribs blended" (the rib seed, so all four ribs, pattern and mirror
+  copies included, into the body and the base, RibR), "Lugs into the body" (R3) and "Oil boss into the barrel"
+  (R1.5). What it took: the lugs moved off the body's R20 back corner round, where the blend could not be joined
+  ("edge used 1 times ... on Body corners"), and made thinner and closer (8 thick, 14 apart, at x -145 and -131)
+  to stay clear of the cam gear's teeth as well. The oil boss at R3 ran past the barrel's open end beside it ("the
+  fillet does not fit"); R1.5 fits. The scope's "left out with a warning" is handy while modeling: the warning names
+  the edges and why, and the rest is blended.
+
+## Assembly
+
+- **Subassemblies. DONE (master `757f12e`), used.** The engine is now 21 top level components over 9 embedded
+  sub-assemblies (`Demos.Engine.Assembly.cs`): the crankshaft assembly (rigid: crankshaft, crank gear, and the two
+  flywheel sub-assemblies nested in it), the connecting rod, piston, two bearing caps, drip oiler (rigid), and the
+  cylinder head (flexible: the rocker and exhaust valve move in it, mated to the push rod at the top). Screws repeat
+  by component patterns (head 6 round its axis, hub caps 4, rod cap and bearing caps 2, feet 2 x 2). It all worked
+  the first time: the same mates held, the motion was the same to the last digit. Built in code, a sub-assembly has to
+  be saved to a file and inserted (`InsertAssembly(path, ..., embed: true)`), then its paths cleared by hand; an
+  `InsertEmbedded(AssemblyModel)` like the parts' would be simpler.
+- **Interference detection, used: it found five real mistakes.** The rod's small end inside the piston's pin
+  bosses (5341 mm³: no room was left for it), the bearing caps' screw heads on the cap's hump, the valves standing
+  1 mm proud of their seats (the countersink 20 across, not 22), the spark plug's boot solid over the plug, the oiler
+  clipping the hopper; and, checked at 8 points through two turns, the rod grazing the bore's mouth (a relief added).
+  What remains is 22 screws in their tapped holes (each the thread's minor diameter, so the shank overlaps it): a
+  screw's thread in a tapped hole of the same thread is not interference and should not be reported (or be listed
+  apart as "threaded"). The valve springs also collide with their retainers as the valve opens (they cannot
+  compress, below), so the demo's motion check leaves them out.
+- **STEP export flattens sub-assemblies.** `StepWriter.WriteAssembly` takes one level, so the app (and the demo's
+  `AssemblyStep`, changed to match) writes every part where it is, named by its path ("Crankshaft assembly<1>-Flywheel,
+  governor side<1>-Hub cap<1>"): the structure is lost in other CAD systems. With threads modeled the engine's STEP is
+  27 MB.
+- **File size: an option not to store meshes.** `hit-and-miss.sasm` is 5.9 MB (the linkage 0.2 MB). Counted through
+  the nested containers: mesh caches 6.35 MB, thumbnails 0.11 MB, the documents themselves (features, sketches, mates)
+  0.09 MB, so 97% is cache and the file would be about 0.2 MB without. The caches are written by
+  `AssemblyModel.RefreshCaches` (`cache/{id}-{revision}[-config].mesh`), once per embedded part per assembly level, so
+  a part used in several sub-assemblies (the socket screw: five) is cached in each, and the casting's alone is 0.45 MB.
+  An option (per assembly, or at Save As / Pack and Go: "Store display meshes") that skips them would suit demos,
+  version control and mailing; the cost is a rebuild of every part on open (the engine: about 5 s). Possibly also a
+  per-part threshold (cache only parts that are slow to rebuild), or one cache shared down the nesting.
+- **Materials.** The list of materials and densities lives in the app (`MainWindow.MassProps.cs`), so code (and the
+  demos) set `Material` and `Density` by hand (`HmMaterial`); a list in Core would let the bill of materials and mass
+  properties share it, and add rubber and glass. With them: the engine weighs 48.9 kg, its centre of mass about 71 mm
+  ahead of the crank and 31 mm below it.
+- **Cam / one-sided contact.** The exhaust valve should be worked by a cam (a lobe with a dwell) and close on its seat
+  while the follower lifts off. Mates have no cam (a tangent to a non-round profile) and contact is always two-sided.
+  *Instead:* a round eccentric on the cam gear and tangents all the way to the valve: the valve lifts as a sine over
+  two crank turns (0 to 6 mm), never closed for long. To add:
+  - One-sided contact (~30 lines): distance limits already work as penalties in `Residuals.Range` (`Mates.cs`); allow
+    no upper limit, and a one-sided tangent whose residual is `max(0, -gap)`. Something must still hold the follower
+    on (a spring, gravity, a drag), or it floats.
+  - Cam mate (~400-800 lines): `MateGeomKind.Profile` (the extrude's sketch profile, or a section of the face, kept on
+    the `MateRef` so it survives lightweight mode) and `MateType.Cam`, whose residual is the follower's distance to the
+    profile's closest point (Newton on the profile's parameter, seeded from the last solve) minus its radius, plus a
+    row keeping the axes parallel. `MateSolver`'s Jacobians are finite differences, so no derivatives to write; the
+    profile must be smooth (lines and arcs tangent) to converge. `MateGeom.Of` today takes planes, cylinders, cones
+    and spheres only.
+- **Hit and miss governor.** The flyweights should swing out with speed and latch the exhaust valve open: no mate
+  can express it. *Instead:* the weights locked to the flywheel. Needs one-sided contact (above), something driven by
+  speed, and a latch: beyond a mate.
+- **Flexible parts.** The valve springs should shorten as the valve opens. *Instead:* locked to the head. To add
+  (~200-400 lines): `Component.Drivers` (a part parameter set from an expression over mate values), evaluated with
+  `Expr` after `MateSolver.Solve`, the part rebuilt through `Configure`/`LoadPart`. Turning the flywheel would make a
+  configuration per position, so quantise or skip the cache; or, for looks only, stretch the mesh along its axis in
+  `PlacedMesh`.
+- **Many fasteners.** 24 screws (6 head, 4 bearing caps, 2 rod cap with nuts, 8 hub caps, 4 hold-downs), each mated by
+  hand (concentric + under the head on the face): a "smart fastener" (pick a hole, get a screw of the right size and
+  length, mated) would save most of the mating. To add (~300-600 lines): `HoleFeature` and `ThreadFeature` know the
+  diameter, depth, counterbore and thread, but the assembly only sees display faces. Hole records (axis, entry point,
+  diameter, depth, thread, seat face) in the rebuild's state, kept on `PartDisplay` and in the mesh cache; then an
+  "Insert fastener" command doing what the demo's `Screw`/`Seat` do.
+
+## Appearance
+
+- **Colour per face or per body.** The flywheels' rims are turned bright steel, the spokes red; the cylinder's barrel
+  band is turned; the oiler is brass and glass. A part has one colour. *Instead:* one colour per part (the oiler's
+  glass a part of its own).
+- **Transparency** for the oiler's sight glass.
+- To add both (~150 lines plus file formats): the renderer already takes alpha (`GlRenderer.DrawMesh`, `uColor` is a
+  vec4), overdraws faces by name (`DrawInstances`, used for mate highlights) and has a blended pass. Missing: colours
+  with alpha by feature id (face names change with topology) and by body, saved in the part, the assembly and the mesh
+  cache; faces batched by colour, opaque first, then the transparent ones back to front with depth writes off;
+  `Thumbnail.Render` taking per-face colours.

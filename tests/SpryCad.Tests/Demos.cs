@@ -38,6 +38,7 @@ static partial class Demos
         ("gears.sasm", GearPair),
         ("screw-sizes.sasm", ScrewSizes),
         ("linkage.sasm", Linkage),
+        ("hit-and-miss.sasm", HitAndMiss),
     };
 
     /// <summary>
@@ -50,16 +51,18 @@ static partial class Demos
     /// <summary>An assembly written as a STEP assembly (each part's solids once, each component placed).</summary>
     public static byte[] AssemblyStep(SpryCad.Core.Assembly.AssemblyModel m, string name)
     {
-        // (each configuration of a part as a part of its own)
-        var keys = m.Doc.Components.Select(SpryCad.Core.Assembly.AssemblyModel.DisplayKey).Distinct().ToList();
-        var parts = keys.Select(k =>
+        // (each configuration of a part as a part of its own; the parts of sub-assemblies placed where they are in
+        // this one, as the app exports them)
+        var placed = m.PlacedParts().ToList();
+        var displays = placed.Select(x => x.pd).Distinct().ToList();
+        var parts = displays.Select(pd =>
         {
-            var bodies = new Regenerator { ThreadOverride = ThreadDisplay.Modeled }.Rebuild(m.Parts[k].Doc!).State.Bodies.Select(b => (b.Id, b.Solid)).ToList();
-            var first = m.ComponentsShowing(k).First();
-            var config = m.ConfigLabel(first);
-            return (first.Name.Split('<')[0] + (config.Length > 0 ? $" ({config})" : ""), (IReadOnlyList<(string, Solid)>)bodies);
+            var bodies = new Regenerator { ThreadOverride = ThreadDisplay.Modeled }.Rebuild(pd.Doc!).State.Bodies.Select(b => (b.Id, b.Solid)).ToList();
+            var first = placed.First(x => x.pd == pd).o;
+            var config = first.Owner.ConfigLabel(first.Component);
+            return (first.Component.Name.Split('<')[0] + (config.Length > 0 ? $" ({config})" : ""), (IReadOnlyList<(string, Solid)>)bodies);
         }).ToList();
-        var comps = m.Doc.Components.Select(c => (keys.IndexOf(SpryCad.Core.Assembly.AssemblyModel.DisplayKey(c)), c.Name, c.Placement.ToTransform())).ToList();
+        var comps = placed.Select(x => (displays.IndexOf(x.pd), m.NameAt(x.o.Path).Replace('/', '-'), x.o.World)).ToList();
         using var ms = new MemoryStream();
         StepWriter.WriteAssembly(ms, name, parts, comps);
         return ms.ToArray();
@@ -1150,6 +1153,20 @@ static partial class Demos
                 return L;
             }
             return Poly(P(x0, y0), P(x1, y0), P(x1, y1), P(x0, y1));
+        }
+
+        /// <summary>Point drawn at (x, y) whose position comes from relations (tangency, radii), no coordinate dimensions.</summary>
+        public long Q(string x, string y) => Free(Eval(x), Eval(y));
+
+        /// <summary>A relation (its orientation taken from the sketch as drawn).</summary>
+        public void Rel(CType type, params long[] refs) => SketchSolver.CaptureSign(_s, _s.AddConstraint(type, refs));
+
+        /// <summary>A dimension by an expression (its orientation taken from the sketch as drawn).</summary>
+        public void Dim(CType type, string expr, params long[] refs)
+        {
+            var c = _s.AddConstraint(type, refs);
+            c.Expr = expr; c.Value = Math.Abs(Eval(expr));
+            SketchSolver.CaptureSign(_s, c);
         }
 
         /// <summary>Point whose position comes from relations only (no coordinate dimensions).</summary>
