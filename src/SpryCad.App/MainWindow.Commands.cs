@@ -1004,6 +1004,8 @@ public partial class MainWindow
     {
         if (!HasPendingEdit) return true;
         var what = _sketch != null ? _sketch.Feature.Name : _edit!.Feature.Name;
+        // (a new one has no name until it is added)
+        if (string.IsNullOrEmpty(what)) what = _sketch != null ? "The new sketch" : "The new feature";
         var r = await Dialogs.YesNoCancel(this, "Keep Changes", $"{what} is still being edited. Keep the changes?", "Keep", "Discard");
         if (r == null) return false;
         if (_sketch != null) ExitSketch(r == true);
