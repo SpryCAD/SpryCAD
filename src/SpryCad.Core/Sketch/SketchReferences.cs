@@ -68,12 +68,51 @@ public static class SketchReferences
         return (SkLine)sk.Add(new SkLine { P1 = pa.Id, P2 = pb.Id, External = new SkExternal { Axis = axis } });
     }
 
+    /// <summary>
+    /// Creates (or reuses) a reference entity for another sketch's point (<paramref name="point"/>) or its line or circle
+    /// <paramref name="id"/>, as that sketch is solved in <paramref name="other"/> (a circle only in a plane parallel to
+    /// this sketch's). Null if unsupported.
+    /// </summary>
+    public static SkEntity? CreateFromSketch(Sketch sk, Frame frame, string otherId, SketchResult other, bool point, long id)
+    {
+        var ext = new SkExternal { Sketch = otherId, SketchItem = id, Vertex = point };
+        var existing = sk.Entities.FirstOrDefault(e => e.External != null && e.External.SameAs(ext));
+        if (existing != null) return existing;
+        SkEntity? made = null;
+        if (point)
+        {
+            if (other.Sketch.Point(id) is not { } op) return null;
+            var p = sk.AddPoint(frame.ToLocal(other.Frame.ToWorld(op.P)), fix: true);
+            made = sk.Add(new SkPointEntity { P = p.Id, External = ext });
+        }
+        else switch (other.Sketch.Entity(id))
+        {
+            case SkLine ol:
+                {
+                    var a = frame.ToLocal(other.Frame.ToWorld(other.Sketch.P(ol.P1)));
+                    var b = frame.ToLocal(other.Frame.ToWorld(other.Sketch.P(ol.P2)));
+                    if (Vec2.Distance(a, b) < 1e-9) return null; // (seen end-on)
+                    var pa = sk.AddPoint(a, fix: true); var pb = sk.AddPoint(b, fix: true);
+                    made = sk.Add(new SkLine { P1 = pa.Id, P2 = pb.Id, External = ext });
+                    break;
+                }
+            case SkCircle oc when Math.Abs(Vec3.Dot(other.Frame.Normal, frame.Normal)) > 0.9999:
+                {
+                    var c = sk.AddPoint(frame.ToLocal(other.Frame.ToWorld(other.Sketch.P(oc.Center))), fix: true);
+                    made = sk.Add(new SkCircle { Center = c.Id, R = oc.R, External = ext });
+                    break;
+                }
+        }
+        return made;
+    }
+
     /// <summary>Re-projects all reference entities from the model. Missing references produce warnings.</summary>
     public static void Update(Sketch sk, Frame frame, ModelState state, List<string> warnings)
     {
         foreach (var e in sk.Entities)
         {
             if (e.External is not { } ext || ext.Axis != null) continue;
+            if (ext.Sketch != null) { UpdateFromSketch(sk, frame, state, e, ext, warnings); continue; }
             TopoEdge te;
             try { (_, te) = Resolver.ResolveEdge(ext.Edge, state); }
             catch (FeatureException) { warnings.Add("A dimension references a model edge that no longer exists."); continue; }
@@ -93,6 +132,30 @@ public static class SketchReferences
                     if (CircleOf(te, frame) is { } circ) { Set(sk, c.Center, frame.ToLocal(circ.center)); c.R = circ.r; }
                     break;
             }
+        }
+    }
+
+    // another sketch's point, line or circle where that sketch now has it
+    static void UpdateFromSketch(Sketch sk, Frame frame, ModelState state, SkEntity e, SkExternal ext, List<string> warnings)
+    {
+        const string gone = "A relation or dimension references geometry of another sketch that no longer exists.";
+        if (!state.Sketches.TryGetValue(ext.Sketch!, out var o)) { warnings.Add(gone); return; }
+        Vec2 L(long p) => frame.ToLocal(o.Frame.ToWorld(o.Sketch.P(p)));
+        switch (e)
+        {
+            case SkPointEntity pe when ext.Vertex:
+                if (o.Sketch.Point(ext.SketchItem) == null) { warnings.Add(gone); return; }
+                Set(sk, pe.P, L(ext.SketchItem));
+                break;
+            case SkLine l when o.Sketch.Entity(ext.SketchItem) is SkLine ol:
+                Set(sk, l.P1, L(ol.P1)); Set(sk, l.P2, L(ol.P2));
+                break;
+            case SkCircle c when o.Sketch.Entity(ext.SketchItem) is SkCircle oc:
+                Set(sk, c.Center, L(oc.Center)); c.R = oc.R;
+                break;
+            default:
+                warnings.Add(gone);
+                break;
         }
     }
 

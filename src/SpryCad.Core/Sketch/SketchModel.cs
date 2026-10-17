@@ -26,10 +26,18 @@ public sealed class SkExternal
     public Vec3 Hint { get; set; }
     /// <summary>"H" or "V": the sketch's own horizontal or vertical axis through its origin (no model edge).</summary>
     public string? Axis { get; set; }
+    /// <summary>
+    /// Another sketch (earlier in the tree) whose geometry this is, in place of a model edge: its point
+    /// <see cref="SketchItem"/> when <see cref="Vertex"/>, else its line or circle <see cref="SketchItem"/>.
+    /// </summary>
+    public string? Sketch { get; set; }
+    public long SketchItem { get; set; }
 
     public bool SameAs(SkExternal o) =>
-        Axis == o.Axis && Vertex == o.Vertex && Vec3.Distance(Hint, o.Hint) < 1e-6 &&
-        ((Edge.A == o.Edge.A && Edge.B == o.Edge.B) || (Edge.A == o.Edge.B && Edge.B == o.Edge.A));
+        Sketch != null || o.Sketch != null
+            ? Sketch == o.Sketch && SketchItem == o.SketchItem && Vertex == o.Vertex
+            : Axis == o.Axis && Vertex == o.Vertex && Vec3.Distance(Hint, o.Hint) < 1e-6 &&
+              ((Edge.A == o.Edge.A && Edge.B == o.Edge.B) || (Edge.A == o.Edge.B && Edge.B == o.Edge.A));
 }
 
 /// <summary>

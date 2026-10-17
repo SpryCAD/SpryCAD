@@ -161,6 +161,40 @@ static class ConfigTests
             }
         });
 
+        t.Test("Sketch references to another sketch: a point on the first sketch's corner and a line along its edge follow it when it changes; gone, said", () =>
+        {
+            var doc = new CadDocument();
+            doc.Equations.Add(new Equation { Name = "W", Expr = "100" });
+            var s1 = doc.AddFeature(new SketchFeature { Plane = PlaneRef.Front, Sketch = CoreTests.Rect(100, 60, "W") });
+            var r = new Regenerator().Rebuild(doc);
+            var first = r.State.Sketches[s1.Id];
+            // (its corner farthest along x and up, and the line on its right side)
+            var corner = first.Sketch.Points.OrderByDescending(q => q.P.X + q.P.Y).First();
+            var side = first.Sketch.Entities.OfType<SkLine>().First(l => Math.Abs(first.Sketch.P(l.P1).X - first.Sketch.P(l.P2).X) < 1e-9 && first.Sketch.P(l.P1).X > 1);
+            var sk = new Sketch();
+            var rp = (SkPointEntity)SketchReferences.CreateFromSketch(sk, first.Frame, s1.Id, first, true, corner.Id)!;
+            var rl = (SkLine)SketchReferences.CreateFromSketch(sk, first.Frame, s1.Id, first, false, side.Id)!;
+            t.Eq(SketchReferences.CreateFromSketch(sk, first.Frame, s1.Id, first, true, corner.Id), rp); // (made once)
+            var mine = sk.AddPoint(new Vec2(0, 0));
+            sk.Add(new SkPointEntity { P = mine.Id });
+            sk.AddConstraint(CType.Coincident, mine.Id, rp.P);
+            var s2 = doc.AddFeature(new SketchFeature { Plane = PlaneRef.Front, Sketch = sk });
+            doc.Equations.First(e => e.Name == "W").Expr = "140";
+            r = new Regenerator().Rebuild(doc);
+            var second = r.State.Sketches[s2.Id].Sketch;
+            var x = r.State.Sketches[s1.Id].Sketch.Points.Max(q => q.P.X);
+            t.Near(second.P(mine.Id).X, x, 1e-6);
+            t.Near(second.P(rl.P1).X, x, 1e-6);
+            t.True(r.Status[s2.Id].Warnings.Count == 0, string.Join("; ", r.Status[s2.Id].Warnings));
+            // saved and read again
+            var back = CadDocument.FromJson(doc.ToJson());
+            t.Eq(((SketchFeature)back.Find(s2.Id)!).Sketch.Entity(rp.Id)!.External!.Sketch, s1.Id);
+            // the first sketch gone: said
+            doc.Features.Remove(s1);
+            r = new Regenerator().Rebuild(doc);
+            t.True(r.Status[s2.Id].Warnings.Any(w => w.Contains("another sketch")), "a warning");
+        });
+
         t.Test("Suppress When: a condition that cannot be evaluated is an error", () =>
         {
             var (doc, cut, lp) = Plate("Nope > 1");

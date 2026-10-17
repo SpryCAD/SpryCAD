@@ -24,13 +24,16 @@ public enum SkRefKind { Point, Entity, Constraint }
 
 public readonly record struct SkRef(SkRefKind Kind, long Id);
 
-enum SnapKind { None, Point, Origin, Midpoint, OnLine, OnCircle, Center, ModelVertex, ModelEdge, ModelMidpoint, ModelCenter }
+enum SnapKind { None, Point, Origin, Midpoint, OnLine, OnCircle, Center, ModelVertex, ModelEdge, ModelMidpoint, ModelCenter, SketchPoint }
 
 /// <summary>Model edge a snap refers to (projected into the sketch as reference geometry on click).</summary>
 sealed record ModelHit(Body Body, TopoEdge Edge, Vec3 Point);
 
+/// <summary>A point (<see cref="Point"/>), line or circle of another sketch shown, at <see cref="World"/>.</summary>
+sealed record SketchHit(string Sketch, SketchResult Result, bool Point, long Id, Vec3 World);
+
 readonly record struct Snap(SnapKind Kind, Vec2 P, long Id = -1, bool H = false, bool V = false, long AlignId = -1, ModelHit? Model = null,
-    Vec2? AlignX = null, Vec2? AlignY = null);
+    Vec2? AlignX = null, Vec2? AlignY = null, SketchHit? Other = null);
 
 /// <summary>
 /// Interactive 2D sketch editing on a plane: drawing tools with automatic relations (coincident,
@@ -534,6 +537,9 @@ public sealed partial class SketchEditor : IViewportMode
                     // so it can be related to (coincident, on a line...) and follows the model
                     // (hit again once made: as the sketch's other point entities, it is picked as the entity)
                     if (h == null && _vp.PickVertex(p.X, p.Y) != null && CreateModelReference(p.X, p.Y) is { Kind: SkRefKind.Point }) h = HitTest(p.X, p.Y);
+                    // another sketch's point, line or circle (one shown): reference geometry of it, picked, to relate or
+                    // dimension to; it follows that sketch
+                    if (h == null && OtherSketchCandidate(p.X, p.Y) is { } osh && CreateSketchReference(osh) is { } osr) { Resolve(); h = HitTest(p.X, p.Y) ?? osr; }
                     LastClick = h;
                     if (p.ClickCount >= 2 && h is { Kind: SkRefKind.Constraint } hc && Sk.Constraint(hc.Id) is { IsDimension: true } dim)
                     {
@@ -727,6 +733,9 @@ public sealed partial class SketchEditor : IViewportMode
             if (d < bestD) { bestD = d; bestP = p; }
         }
         if (bestP != null) return Aligned(new Snap(bestP.Id == Sketch.OriginId ? SnapKind.Origin : SnapKind.Point, bestP.P, bestP.Id));
+        // points of other sketches shown (their ends and centers): the point drawn tied to that one
+        if (_lastScreen is { } oscr && OtherSketchCandidate(oscr.X, oscr.Y, pointsOnly: true) is { } osp)
+            return Aligned(new Snap(SnapKind.SketchPoint, Frame.ToLocal(osp.World), Other: osp));
         // model vertices (part corners, arc ends) under the cursor; the hit is kept so the point can be tied to
         // this vertex later (a line's start is only resolved when its end is clicked, elsewhere on screen)
         if (_lastScreen is { } scr && _vp.PickVertex(scr.X, scr.Y) is { } mv)
@@ -880,6 +889,9 @@ public sealed partial class SketchEditor : IViewportMode
                 // not the origin itself
                 return Coincident(Sketch.OriginId, s.P);
         }
+        if (s.Kind == SnapKind.SketchPoint && s.Other is { } oh &&
+            SketchReferences.CreateFromSketch(Sk, Frame, oh.Sketch, oh.Result, true, oh.Id) is SkPointEntity op)
+            return Coincident(op.P, s.P); // Coincident with the other sketch's (fixed) reference point
         if (s.Kind == SnapKind.ModelVertex && s.Model is { } vh &&
             SketchReferences.Create(Sk, Frame, vh.Edge, vh.Body.Id, true, vh.Point) is SkPointEntity rp)
             return Coincident(rp.P, s.P); // Coincident with the model vertex's (fixed) reference point, not that point itself
@@ -1378,7 +1390,7 @@ public sealed partial class SketchEditor : IViewportMode
         var h = HitTest(p.X, p.Y, includeDims: false);
         if (h != null && h.Value.Kind == SkRefKind.Entity && Sk.Entity(h.Value.Id) is SkPointEntity pe) h = new SkRef(SkRefKind.Point, pe.P);
         // model edges / vertices act as references when no sketch geometry is under the cursor
-        bool modelHit = h == null && _dimPicks.Count < 2 && ModelCandidate(p.X, p.Y) != null;
+        bool modelHit = h == null && _dimPicks.Count < 2 && (OtherSketchCandidate(p.X, p.Y) != null || ModelCandidate(p.X, p.Y) != null);
         if (_dimPreview != null && ((h == null && !modelHit) || _dimPicks.Count >= 2))
         {
             PlaceDimension(SketchPos(p));
@@ -1438,18 +1450,118 @@ public sealed partial class SketchEditor : IViewportMode
     /// </summary>
     void PruneReferencePoints()
     {
-        var unused = Sk.Entities.OfType<SkPointEntity>().Where(e => e.External is { Vertex: true }
-            && !Selected.Contains(new SkRef(SkRefKind.Point, e.P)) && !Selected.Contains(new SkRef(SkRefKind.Entity, e.Id))
-            && !Sk.Constraints.Any(c => c.Refs.Contains(e.P) || c.Refs.Contains(e.Id))
-            && !Sk.Entities.Any(o => o != e && o.PointIds.Contains(e.P))).ToList();
+        // (and other sketches' lines and circles picked the same way; and the points Select Midpoint made)
+        bool Unused(SkEntity e) => !Selected.Contains(new SkRef(SkRefKind.Entity, e.Id)) && !e.PointIds.Any(p => Selected.Contains(new SkRef(SkRefKind.Point, p)))
+            && !Sk.Constraints.Any(c => c.Refs.Contains(e.Id) || e.PointIds.Any(c.Refs.Contains))
+            && !Sk.Entities.Any(o => o != e && o.PointIds.Any(e.PointIds.Contains));
+        var unused = Sk.Entities.Where(e => (e is SkPointEntity { External.Vertex: true } || e.External?.Sketch != null) && Unused(e)).ToList();
+        foreach (var id in _midHelpers.ToList())
+        {
+            if (Sk.Entity(id) is not SkPointEntity h) { _midHelpers.Remove(id); continue; }
+            if (Selected.Contains(new SkRef(SkRefKind.Entity, id)) || Selected.Contains(new SkRef(SkRefKind.Point, h.P))) continue;
+            _midHelpers.Remove(id);
+            // merged into another point (made coincident with a line's end): that point keeps the Midpoint relation; used
+            // by nothing but its own Midpoint: gone with it; else (dimensioned to, related otherwise) kept
+            bool shared = Sk.Entities.Any(o => o != h && o.PointIds.Contains(h.P));
+            bool used = Sk.Constraints.Any(c => c.Refs.Contains(h.Id) || c.Refs.Contains(h.P) && c.Type != CType.Midpoint);
+            if (shared || !used) unused.Add(h);
+        }
         if (unused.Count == 0) return;
         foreach (var e in unused) Sk.Entities.Remove(e);
         Sk.Cleanup();
     }
 
+    /// <summary>
+    /// A point, line or circle of another sketch shown (one earlier in the tree) under the cursor, points winning;
+    /// null for none.
+    /// </summary>
+    SketchHit? OtherSketchCandidate(double x, double y, bool pointsOnly = false)
+    {
+        double Px(Vec3 w) { var s = _vp.Camera.Project(w); return Math.Sqrt((s.X - x) * (s.X - x) + (s.Y - y) * (s.Y - y)); }
+        SketchHit? best = null; double bestD = 7;
+        foreach (var s in _vp.Sketches)
+        {
+            if (s.FeatureId == Feature.Id) continue;
+            foreach (var p in s.Result.Sketch.Points)
+            {
+                if (p.Id == Sketch.OriginId) continue;
+                var w = s.Result.Frame.ToWorld(p.P);
+                var d = Px(w);
+                if (d < bestD) { bestD = d; best = new SketchHit(s.FeatureId, s.Result, true, p.Id, w); }
+            }
+        }
+        if (best != null || pointsOnly) return best;
+        bestD = 6;
+        foreach (var s in _vp.Sketches)
+        {
+            if (s.FeatureId == Feature.Id) continue;
+            var r = s.Result;
+            foreach (var e in r.Sketch.Entities)
+            {
+                if (e is not (SkLine or SkCircle) || e.IsReference) continue;
+                foreach (var (a, b) in SketchDrawing.Segments2D(r.Sketch, e))
+                {
+                    var wa = r.Frame.ToWorld(a); var wb = r.Frame.ToWorld(b);
+                    var sa = _vp.Camera.Project(wa); var sb = _vp.Camera.Project(wb);
+                    double dx = sb.X - sa.X, dy = sb.Y - sa.Y, l2 = dx * dx + dy * dy;
+                    var t = l2 > 1e-12 ? Math.Clamp(((x - sa.X) * dx + (y - sa.Y) * dy) / l2, 0, 1) : 0;
+                    double ex = sa.X + dx * t - x, ey = sa.Y + dy * t - y;
+                    var d = Math.Sqrt(ex * ex + ey * ey);
+                    if (d < bestD) { bestD = d; best = new SketchHit(s.FeatureId, r, false, e.Id, wa + (wb - wa) * t); }
+                }
+            }
+        }
+        return best;
+    }
+
+    /// <summary>Another sketch's point, line or circle as reference geometry in this one (made, or the one made before).</summary>
+    SkRef? CreateSketchReference(SketchHit h)
+    {
+        var ent = SketchReferences.CreateFromSketch(Sk, Frame, h.Sketch, h.Result, h.Point, h.Id);
+        if (ent == null) { Message?.Invoke("That circle is not parallel to the sketch plane and cannot be referenced."); return null; }
+        return ent is SkPointEntity rp ? new SkRef(SkRefKind.Point, rp.P) : new SkRef(SkRefKind.Entity, ent.Id);
+    }
+
+    // ---- Select Midpoint (a line right-clicked, as SolidWorks) ----
+
+    // the construction points Select Midpoint made, taken out again once nothing uses them
+    readonly HashSet<long> _midHelpers = new();
+
+    /// <summary>The sketch geometry under the cursor (points winning), for the right-click menu.</summary>
+    public SkRef? GeometryAt(double x, double y) => HitTest(x, y, includeDims: false);
+
+    /// <summary>Adds to the selection (the geometry right-clicked, joining what was selected, as a Ctrl+click would).</summary>
+    public void AddToSelection(SkRef r)
+    {
+        if (Selected.Contains(r)) return;
+        Selected.Add(r);
+        SelectionChanged?.Invoke();
+        _vp.Redraw();
+    }
+
+    /// <summary>
+    /// A point at the line's midpoint (construction, held there by a Midpoint relation) selected in the line's place:
+    /// made coincident with another point (a line's end), that point is at the midpoint; or dimensioned to.
+    /// </summary>
+    public void SelectMidpoint(long lineId)
+    {
+        if (Sk.Entity(lineId) is not SkLine l) return;
+        Snapshot();
+        var p = Sk.AddPoint((Sk.P(l.P1) + Sk.P(l.P2)) * 0.5);
+        var pe = Sk.Add(new SkPointEntity { P = p.Id, Construction = true });
+        Sk.AddConstraint(CType.Midpoint, p.Id, l.Id);
+        _midHelpers.Add(pe.Id);
+        Selected.Remove(new SkRef(SkRefKind.Entity, lineId));
+        Selected.Add(new SkRef(SkRefKind.Entity, pe.Id));
+        Resolve();
+        SelectionChanged?.Invoke();
+        _vp.Redraw();
+    }
+
     /// <summary>Projects the model edge/vertex under the cursor into the sketch as reference geometry.</summary>
     SkRef? CreateModelReference(double x, double y)
     {
+        if (OtherSketchCandidate(x, y) is { } oh) return CreateSketchReference(oh);
         if (ModelCandidate(x, y) is not { } m) return null;
         var ent = SketchReferences.Create(Sk, Frame, m.edge, m.body.Id, m.vertex, m.point);
         if (ent == null) { Message?.Invoke("That edge is perpendicular to the sketch plane and cannot be referenced."); return null; }
@@ -1818,7 +1930,7 @@ public sealed partial class SketchEditor : IViewportMode
         // snap marker
         if (_snap.Kind != SnapKind.None)
         {
-            bool model = _snap.Kind is SnapKind.ModelVertex or SnapKind.ModelEdge or SnapKind.ModelMidpoint or SnapKind.ModelCenter;
+            bool model = _snap.Kind is SnapKind.ModelVertex or SnapKind.ModelEdge or SnapKind.ModelMidpoint or SnapKind.ModelCenter or SnapKind.SketchPoint;
             SketchDrawing.PointMark(g, f, m, model ? new Rgba(0.65f, 0.25f, 0.85f) : new Rgba(1f, 0.6f, 0f), px, 4);
             // highlight the model edge the relation will refer to
             if (_snap.Model is { } mh)
@@ -2207,6 +2319,7 @@ public sealed partial class SketchEditor : IViewportMode
     {
         SnapKind.Point or SnapKind.Origin => "Coincident",
         SnapKind.ModelVertex => "Coincident (model)",
+        SnapKind.SketchPoint => "Coincident (other sketch)",
         SnapKind.Midpoint => "Midpoint",
         SnapKind.ModelMidpoint => "Midpoint (model edge)",
         SnapKind.OnLine => "On line",

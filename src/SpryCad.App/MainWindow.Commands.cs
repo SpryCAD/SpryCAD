@@ -738,6 +738,26 @@ public partial class MainWindow
         var menu = new ContextMenu();
         if (_sketch != null)
         {
+            // the geometry right-clicked joins the selection (a point selected, then a line right-clicked: Midpoint
+            // offered); a line's midpoint can be picked (as SolidWorks); the relations the selection takes
+            var ed = _sketch;
+            if (ed.Tool == SketchTool.Select && ed.GeometryAt(p.X, p.Y) is { } at)
+            {
+                ed.AddToSelection(at);
+                if (at.Kind == SkRefKind.Entity && ed.Sk.Entity(at.Id) is Core.Sketching.SkLine)
+                    menu.Items.Add(Item("Select Midpoint", () => ed.SelectMidpoint(at.Id)));
+            }
+            foreach (var rel in ed.ApplicableRelations())
+            {
+                var rr = rel;
+                menu.Items.Add(Item($"{SketchEditor.Glyph(rr)}  {SketchEditor.RelationName(rr)}", () =>
+                {
+                    var err = ed.AddRelation(rr);
+                    Status(err ?? $"{SketchEditor.RelationName(rr)} relation added.");
+                    BuildSketchPage();
+                }));
+            }
+            if (menu.Items.Count > 0) menu.Items.Add(new Separator());
             menu.Items.Add(Item("Select", () => SetSketchTool(SketchTool.Select), null, "select"));
             menu.Items.Add(Item("End Chain / Cancel", () => _sketch.CancelOperation(), null, "cancel"));
             menu.Items.Add(new Separator());
