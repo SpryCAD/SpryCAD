@@ -48,6 +48,8 @@ public sealed partial class SketchEditor : IViewportMode
     public Func<string, Quantity?> Lookup { get; set; }
     /// <summary>The part's units: what dimensions show in, and what a value typed without a unit is in.</summary>
     public UnitSystem Units { get; set; }
+    /// <summary>The units a dimension worked out from variables without units is in (the part's value units: docs/units.md).</summary>
+    public UnitSystem PlainUnits { get; set; }
     public SolveResult Status { get; private set; } = new();
     public SketchTool Tool { get; private set; } = SketchTool.Select;
     public List<SkRef> Selected { get; } = new();
@@ -2618,7 +2620,7 @@ public sealed partial class SketchEditor : IViewportMode
     /// <summary>A dimension's value from its expression (millimetres or degrees), null when it does not evaluate.</summary>
     double? Evaluate(SkConstraint c, string expr)
     {
-        try { return c.ValueKind == ValueKind.Angle ? Expr.Angle(expr, Lookup) : Expr.Length(expr, Lookup, Units.MmPer()); }
+        try { return c.ValueKind == ValueKind.Angle ? Expr.Angle(expr, Lookup) : Expr.Length(expr, Lookup, PlainUnits.MmPer()); }
         catch (Expr.ExprException) { return null; }
     }
 

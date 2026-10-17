@@ -223,6 +223,21 @@ public sealed class PmPage
 
     // the page's value fields, the one typed in last, and the one shown as the failure's (its tooltip before)
     readonly List<TextBox> _numbers = new();
+    // the values shown converted to the part's units ("10mm" as "0.3937in"): what was shown, what is kept
+    readonly Dictionary<TextBox, (string shown, string kept)> _exact = new();
+    readonly Dictionary<TextBox, ValueKind> _kinds = new();
+
+    /// <summary>
+    /// Puts a kept value in a Number field as the part's units show it ("10mm" as "0.3937in" in an inch part), the value
+    /// kept exactly while the field shows it unchanged.
+    /// </summary>
+    public void ShowValue(TextBox tb, string kept)
+    {
+        var kind = _kinds.GetValueOrDefault(tb, ValueKind.Length);
+        var shown = Units.Show(kept, kind);
+        _exact[tb] = (shown, kept);
+        tb.Text = shown;
+    }
     TextBox? _lastEdited, _failed;
     object? _failedTip;
 
@@ -289,7 +304,9 @@ public sealed class PmPage
     public TextBox Number(StackPanel s, string label, Func<string> get, Action<string> set, string? icon = null, string? unit = null, bool optional = false)
     {
         var kind = unit == null ? ValueKind.Length : unit == "°" ? ValueKind.Angle : ValueKind.Number;
-        var tb = new TextBox { Text = UnitFormat.Show(get(), kind), MinWidth = 90, HorizontalAlignment = HorizontalAlignment.Stretch };
+        var tb = new TextBox { MinWidth = 90, HorizontalAlignment = HorizontalAlignment.Stretch };
+        _kinds[tb] = kind;
+        ShowValue(tb, get());
         void MarkInvalid(bool bad) { if (bad) _invalid[tb] = label; else _invalid.Remove(tb); }
         Control field = tb;
         if (kind == ValueKind.Number && !string.IsNullOrEmpty(unit))
@@ -338,7 +355,8 @@ public sealed class PmPage
                     ToolTip.SetTip(tb, shown + (OpenParameters != null ? "\nDouble-click to open it in Parameters." : ""));
                 }
                 else ToolTip.SetTip(tb, plain ? null : $"= {Units.Show(v)}");
-                set(kept);
+                // (a value shown in the part's units as it was: kept exactly as it was)
+                set(_exact.TryGetValue(tb, out var ex) && ex.shown == t ? ex.kept : kept);
                 Changed?.Invoke();
             }
             else

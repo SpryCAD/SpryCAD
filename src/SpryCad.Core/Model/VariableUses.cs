@@ -22,6 +22,8 @@ public static class VariableUses
         "Face", "Edge", "Type", "Mode", "End", "End2",
     };
     static bool IsValueProperty(string p) => !NotValues.Contains(p) && !p.EndsWith("Id", StringComparison.Ordinal) && !p.EndsWith("Ids", StringComparison.Ordinal);
+    /// <summary>Whether a feature's property (by its JSON name) holds a value, not a name, an id or a reference.</summary>
+    public static bool IsValue(string property) => IsValueProperty(property);
 
     /// <summary>Every variable used in the part, with its uses.</summary>
     public static Dictionary<string, List<Use>> Map(CadDocument doc)

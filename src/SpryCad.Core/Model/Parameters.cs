@@ -151,12 +151,19 @@ public static class Configurations
             if (d.Tables?.FirstOrDefault(t => string.Equals(t.Name.Trim(), name, StringComparison.OrdinalIgnoreCase)) is { } table)
                 table.Selected = table.Row(v)!.Key;
             else if (d.Equations.FirstOrDefault(e => string.Equals(e.Name.Trim(), name, StringComparison.OrdinalIgnoreCase)) is { } eq)
-                eq.Expr = v;
+                eq.Expr = Valued(eq.Expr, v);
         }
         // (made of the material its rows in use say, when they say one)
         TableConfig.ApplyMaterial(d);
         return d;
     }
+
+    /// <summary>
+    /// A configuration's value for an equation: a number alone, for an equation written with a unit (a length given
+    /// units: docs/units.md), in that unit ("12" for "10mm" is "12mm"), so its formulas keep working; else as given.
+    /// </summary>
+    public static string Valued(string current, string value) =>
+        Expr.IsPlainNumber(value) && Expr.IsLiteral(current, out var unit) && unit is not ("" or "deg" or "°" or "rad") ? value.Trim() + unit : value;
 
     /// <summary>
     /// Sets the part's own values (its defaults) from a configuration, as <see cref="Configured"/> would on a copy.

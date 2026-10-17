@@ -234,9 +234,11 @@ public static class Dialogs
     /// parameter's value by name, or null when cancelled; with <paramref name="allText"/>, a checkbox (whether to set
     /// them for all of the part's instances).
     /// </summary>
+    /// <param name="shownIn">The units a length parameter is shown and typed in (an assembly's); null: the part's.</param>
     public static async Task<(Dictionary<string, string> values, bool all)?> Configure(Window owner, CadDocument part, IReadOnlyDictionary<string, string>? current,
-        string title, string? note = null, string? allText = null)
+        string title, string? note = null, string? allText = null, UnitSystem? shownIn = null)
     {
+        var units = shownIn ?? part.Units;
         var ps = part.UserParameters();
         var values = part.Defaults();
         if (current != null) foreach (var (k, v) in current) if (values.ContainsKey(k)) values[k] = v;
@@ -247,7 +249,7 @@ public static class Dialogs
         {
             // what the choices give: the internal values too, so a size can be checked before OK
             var (vals, _) = Regenerator.EvaluateEquations(part.Configured(values));
-            var shown = vals.Where(kv => !ps.Any(p => p.Name.Equals(kv.Key, StringComparison.OrdinalIgnoreCase))).Take(12).Select(kv => $"{kv.Key} {part.Units.Show(kv.Value)}");
+            var shown = vals.Where(kv => !ps.Any(p => p.Name.Equals(kv.Key, StringComparison.OrdinalIgnoreCase))).Take(12).Select(kv => $"{kv.Key} {units.Show(kv.Value)}");
             summary.Text = string.Join(", ", shown);
         }
         for (int i = 0; i < ps.Count; i++)
@@ -272,13 +274,20 @@ public static class Dialogs
             }
             else
             {
-                var tb = new TextBox { Text = values[p.Name] };
+                // a length (its value written with a unit: docs/units.md): shown in the units given, kept exactly unless
+                // edited; a number typed alone is in them ("6" in an inch assembly is 6in)
+                bool length = Expr.IsLiteral(part.Equations.FirstOrDefault(e => e.Name.Trim().Equals(p.Name, StringComparison.OrdinalIgnoreCase))?.Expr, out var unit)
+                    && unit is not ("" or "deg" or "°" or "rad");
+                var first = values[p.Name];
+                var firstShown = length ? units.Show(first, ValueKind.Length) : first;
+                var tb = new TextBox { Text = firstShown };
                 if (p.Min != null || p.Max != null) tb.Watermark = $"{(p.Min is { } lo ? Expr.Format(lo) : "")} to {(p.Max is { } hi ? Expr.Format(hi) : "")}";
                 var err = new TextBlock { FontSize = TypeScale.Small, Foreground = Palette.Danger, TextWrapping = TextWrapping.Wrap };
                 errors[p.Name] = err;
                 tb.TextChanged += (_, _) =>
                 {
-                    values[p.Name] = tb.Text?.Trim() ?? "";
+                    var typed = tb.Text?.Trim() ?? "";
+                    values[p.Name] = typed == firstShown ? first : length && Expr.IsPlainNumber(typed) ? typed + units.Symbol() : typed;
                     err.Text = part.Check(p.Name, values[p.Name]) ?? "";
                     if (err.Text.Length == 0) Summary();
                 };

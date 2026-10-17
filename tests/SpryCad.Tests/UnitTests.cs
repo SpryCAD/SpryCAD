@@ -108,13 +108,20 @@ static class UnitTests
             t.True(!UnitSystem.IPS.TryEnter("6mm", ValueKind.Number, null, out _, out _, out _), "a count with units");
             t.True(!UnitSystem.IPS.TryEnter("2in * 3in", ValueKind.Length, null, out _, out _, out _), "an area for a length");
             t.True(!UnitSystem.IPS.TryEnter("2in", ValueKind.Angle, null, out _, out _, out _), "a length for an angle");
-            // shown: worked-out values in the part's units, typed ones as typed
+            // shown in the part's units (docs/units.md): worked-out values, dimensions whatever they were typed in, and a
+            // field's value that is a number alone; a formula as written
             t.Eq(UnitSystem.IPS.Length(12.7), "0.5 in");
             t.Eq(UnitSystem.IPS.Entry(12.7), "0.5in");
-            t.Eq(UnitSystem.MMGS.Label(254, "10in"), "10in");
+            t.Eq(UnitSystem.MMGS.Label(254, "10in"), "254");
             t.Eq(UnitSystem.IPS.Label(254, "10in"), "10");
-            t.Eq(UnitSystem.IPS.Label(10, "10mm"), "10mm");
+            t.Eq(UnitSystem.IPS.Label(10, "10mm"), "0.3937");
             t.Eq(UnitFormat.Show("10", ValueKind.Length), "10mm");
+            t.Eq(UnitSystem.IPS.Show("12.7mm", ValueKind.Length), "0.5in");
+            t.Eq(UnitSystem.IPS.Show("12.7", ValueKind.Length), "0.5in");
+            t.Eq(UnitSystem.MMGS.Show("0.5in", ValueKind.Length), "12.7mm");
+            t.Eq(UnitSystem.IPS.Show("0.5in", ValueKind.Length), "0.5in");
+            t.Eq(UnitSystem.IPS.Show("(W/2)mm", ValueKind.Length), "(W/2)mm");
+            t.Eq(UnitSystem.IPS.Show("30deg", ValueKind.Angle), "30deg");
         });
 
         t.Test("Units: an inch part's values typed in inches build it to size, in millimetres", () =>

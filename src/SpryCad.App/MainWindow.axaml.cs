@@ -258,7 +258,8 @@ public partial class MainWindow : Window
     {
         if (Units == u) return;
         if (Asm is { } a) { a.BeginChange(); a.Model.Doc.Units = u; a.EndChange(); }
-        else Session.Change(() => Session.Doc.Units = u);
+        // (a part's values without units kept in the units they were written in: shown in others, never resized)
+        else Session.Change(() => Session.Doc.ShowIn(u));
         // (new parts start in them too)
         UserSettings.Units = u;
         UserSettings.Save();

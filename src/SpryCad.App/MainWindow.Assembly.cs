@@ -734,7 +734,7 @@ public partial class MainWindow : IAssemblyHost
         }
         var instances = a.Model.ComponentsOf(ComponentResolver.Key(c.Part)).ToList();
         var chosen = await Dialogs.Configure(this, part, c.Parameters, $"Configure {c.Name}",
-            $"Parameters of {partName} for this instance. Values left at the part's defaults follow the part.", instances.Count > 1 ? $"All {instances.Count} instances of {partName}" : null);
+            $"Parameters of {partName} for this instance. Values left at the part's defaults follow the part.", instances.Count > 1 ? $"All {instances.Count} instances of {partName}" : null, a.Model.Doc.Units);
         if (chosen is not { } ch) return;
         var comps = ch.all ? instances : new List<Component> { c };
         var config = Configurations.KeyOf(part.Normalize(ch.values));

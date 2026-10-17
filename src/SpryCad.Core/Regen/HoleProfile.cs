@@ -179,6 +179,7 @@ public static class HoleProfile
         foreach (var c in sk.Constraints)
         {
             if (!c.IsDimension || c.Driven || string.IsNullOrWhiteSpace(c.Expr)) continue;
+            Regenerator.Reading.Value?.Invoke(c.Expr!, c.Type == CType.Angle ? ValueKind.Angle : ValueKind.Length);
             try { c.Value = c.Type == CType.Angle ? Expr.Angle(c.Expr, lookup) : Expr.Length(c.Expr, lookup, mmPer); }
             catch (Expr.ExprException ex) { throw new FeatureException($"Hole profile: {ex.Message}"); }
         }

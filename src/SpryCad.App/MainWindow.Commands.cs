@@ -1121,7 +1121,7 @@ public partial class MainWindow
             tab.Session.Load(opened);
             BeginLoading(tab, "Opening " + Path.GetFileName(path)); // (read: now rebuilding)
             if (!IsAutosave(path) && !IsEmbeddedCopy(path)) RecentFiles.Add(path);
-            Status("Opened " + path);
+            Status(tab.Session.LoadNote is { } note ? $"Opened {path}. {note}" : "Opened " + path);
             NoteLibraryUpdates();
             TakeProfileUpdates();
             tab.FitAfterLoad = tab.Session.RequestedRevision;

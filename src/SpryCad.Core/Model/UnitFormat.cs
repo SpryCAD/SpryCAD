@@ -57,6 +57,19 @@ public static class UnitFormat
     };
 
     /// <summary>
+    /// A kept value as a field in a part in <paramref name="u"/> shows it: a length that is a number alone ("10mm", a
+    /// bare "10" being millimeters) in the part's units ("0.3937in"); anything else as <see cref="Show(string?, ValueKind)"/>.
+    /// </summary>
+    public static string Show(this UnitSystem u, string? kept, ValueKind kind)
+    {
+        kept = kept?.Trim() ?? "";
+        if (kind != ValueKind.Length || !Expr.IsLiteral(kept, out var unit) || unit is "deg" or "°" or "rad") return Show(kept, kind);
+        var written = unit == "" ? "mm" : unit == "\"" ? "in" : unit;
+        if (written == u.Symbol()) return Show(kept, kind);
+        return u.Entry(Expr.Length(kept, null));
+    }
+
+    /// <summary>
     /// A kept value as a field shows it: as it is, but a bare number for a length or an angle (kept in millimetres or
     /// degrees, as files written by programs may hold) with its unit added.
     /// </summary>
@@ -120,15 +133,9 @@ public static class UnitFormat
         catch (Exception ex) { error = ex.Message; return false; }
     }
 
-    /// <summary>
-    /// A dimension's value as a label shows it: a number in the part's units, or (when typed so) the number in its own
-    /// units ("10in" in a millimetre part).
-    /// </summary>
+    /// <summary>A dimension's value as a label shows it: a number in the part's units, whatever units it was typed in (docs/units.md).</summary>
     public static string Label(this UnitSystem u, double mm, string? kept)
     {
-        if (Expr.IsLiteral(kept, out var unit) && unit is not ("" or "deg" or "°" or "rad")
-            && unit != u.Symbol() && !(unit == "\"" && u == UnitSystem.IPS))
-            return Fmt(mm / Expr.UnitFactor(unit), 5) + unit;
         return u.Number(mm);
     }
 }

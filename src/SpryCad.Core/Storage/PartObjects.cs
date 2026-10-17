@@ -97,6 +97,7 @@ public static class PartObjects
         objects.Add(Single(ObjectKind.Settings), Envelope(ObjectKind.Settings, Json(new SettingsData
         {
             Units = doc.Units,
+            ValueUnits = doc.ValueUnits,
             Files = files.Count > 0 ? files : null,
         })));
         objects.Add(Single(ObjectKind.NameCounters), Envelope(ObjectKind.NameCounters, Json(new SortedDictionary<string, int>(doc.NameCounters, StringComparer.Ordinal))));
@@ -130,6 +131,7 @@ public static class PartObjects
         if (m.MaterialItem == null && m.Appearance == null) { doc.LegacyColor = m.Color; doc.LegacyMaterial = m.Material; doc.LegacyDensity = m.Density; }
         var s = Data<SettingsData>(ObjectKind.Settings);
         doc.Units = s.Units;
+        doc.ValueUnits = s.ValueUnits;
         // (in the settings in files saved before they had an object of their own)
         doc.NameCounters = new Dictionary<string, int>(objects.TryGetValue(Single(ObjectKind.NameCounters), out var nc)
             ? Open<SortedDictionary<string, int>>(nc, ObjectKind.NameCounters) : s.NameCounters ?? new());
@@ -246,6 +248,8 @@ public static class PartObjects
     sealed class SettingsData
     {
         public UnitSystem Units { get; set; }
+        /// <summary>The units its values without units are in (<see cref="CadDocument.ValueUnits"/>); null: <see cref="Units"/>.</summary>
+        public UnitSystem? ValueUnits { get; set; }
         /// <summary>Only in files saved before <see cref="ObjectKind.NameCounters"/> (read, never written).</summary>
         public SortedDictionary<string, int>? NameCounters { get; set; }
         public List<string>? Files { get; set; }

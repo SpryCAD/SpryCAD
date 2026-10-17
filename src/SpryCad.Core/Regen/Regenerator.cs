@@ -282,6 +282,7 @@ public sealed class Regenerator
     static double Value(string? expr, string what, ValueKind kind, Func<string, Quantity?> lookup, double namedPlainMm = 1)
     {
         if (string.IsNullOrWhiteSpace(expr)) throw new FeatureException($"{what}: Empty value");
+        Reading.Value?.Invoke(expr, kind);
         try
         {
             return kind switch
@@ -292,6 +293,32 @@ public sealed class Regenerator
             };
         }
         catch (Expr.ExprException ex) { throw new FeatureException($"{what}: {ex.Message}"); }
+    }
+
+    /// <summary>Told each value a rebuild reads and what it reads it as, while set (<see cref="ReadValues"/>).</summary>
+    internal static readonly AsyncLocal<Action<string, ValueKind>?> Reading = new();
+
+    /// <summary>The values a rebuild of the part reads, each with what it was read as (a length, an angle, a number): for <see cref="UnitInference"/>.</summary>
+    public static List<UnitInference.ValueUse> ReadValues(CadDocument doc)
+    {
+        var uses = new HashSet<UnitInference.ValueUse>();
+        var lk = new object();
+        Reading.Value = (t, k) => { lock (lk) uses.Add(new UnitInference.ValueUse(t, k)); };
+        try { new Regenerator().Rebuild(doc); }
+        finally { Reading.Value = null; }
+        return uses.ToList();
+    }
+
+    /// <summary>A value as the rebuild reads it (millimeters, degrees, a number), from the part's equations; null when it does not evaluate.</summary>
+    public static double? ValueOf(CadDocument doc, string text, ValueKind kind)
+    {
+        try
+        {
+            var lookup = EquationLookup(doc);
+            // (a number: as it is, a condition's truth too)
+            return kind == ValueKind.Number ? Expr.Evaluate(text, lookup).Value : Value(text, "value", kind, lookup, doc.PlainUnits.MmPer());
+        }
+        catch (Exception) { return null; }
     }
 
     static ulong Hash(ulong h, string s)
@@ -413,7 +440,7 @@ public sealed class Regenerator
         MixedCorners _blendCorners;
 
         // a value: a length in millimetres, an angle in degrees, a plain number (a count, a ratio)
-        double Len(string? expr, string what) => Value(expr, what, ValueKind.Length, lookup, doc.Units.MmPer());
+        double Len(string? expr, string what) => Value(expr, what, ValueKind.Length, lookup, doc.PlainUnits.MmPer());
         double Ang(string? expr, string what) => Value(expr, what, ValueKind.Angle, lookup);
         double Num(string? expr, string what) => Value(expr, what, ValueKind.Number, lookup);
 
@@ -1653,7 +1680,7 @@ public sealed class Regenerator
                     // the hole's own profile, solved for each depth the holes have (once for them all but Up To Next)
                     var key = Math.Round(depth, 9);
                     if (!customRegions.TryGetValue(key, out regions!))
-                        customRegions[key] = regions = HoleProfile.Regions(h.Profile, HoleProfile.Lookup(h, lookup, doc.Units.MmPer(), depth), doc.Units.MmPer());
+                        customRegions[key] = regions = HoleProfile.Regions(h.Profile, HoleProfile.Lookup(h, lookup, doc.PlainUnits.MmPer(), depth), doc.PlainUnits.MmPer());
                 }
                 else
                 {
@@ -2333,9 +2360,9 @@ public sealed class Regenerator
 
         string Describe(string featureId) => doc.Features.FirstOrDefault(x => x.Id == featureId)?.Name ?? featureId;
 
-        void DoLinearPattern(LinearPatternFeature lp) => ApplyInstances(lp.Seeds, PatternTransforms(lp, State, lookup, doc.Units)!, lp.Skip);
+        void DoLinearPattern(LinearPatternFeature lp) => ApplyInstances(lp.Seeds, PatternTransforms(lp, State, lookup, doc.PlainUnits)!, lp.Skip);
 
-        void DoCircularPattern(CircularPatternFeature cp) => ApplyInstances(cp.Seeds, PatternTransforms(cp, State, lookup, doc.Units)!, cp.Skip);
+        void DoCircularPattern(CircularPatternFeature cp) => ApplyInstances(cp.Seeds, PatternTransforms(cp, State, lookup, doc.PlainUnits)!, cp.Skip);
 
         void DoMirror(MirrorFeature m)
         {

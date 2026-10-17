@@ -309,6 +309,27 @@ static class ParametersDialog
         var session = owner.Session;
         var units = session.Doc.Units;
         var items = new ObservableCollection<EqRow>();
+        // each variable's kind, worked out from where the part uses it (docs/units.md), in the background
+        var kinds = new Dictionary<string, UnitInference.VarKind>(StringComparer.OrdinalIgnoreCase);
+        int inferring = 0;
+        void Infer()
+        {
+            var doc = session.Doc.Clone();
+            var mine = ++inferring;
+            Task.Run(() => { try { return UnitInference.Infer(doc, Regenerator.ReadValues(doc)); } catch { return null; } })
+                .ContinueWith(t => Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                {
+                    if (mine != inferring || t.Result is not { } r) return;
+                    kinds.Clear();
+                    foreach (var (k, v) in r.Kinds) kinds[k] = v;
+                    Recompute();
+                }));
+        }
+        static string KindText(UnitInference.VarKind k) => k switch
+        {
+            UnitInference.VarKind.Length => "length", UnitInference.VarKind.Angle => "angle", UnitInference.VarKind.Number => "number",
+            UnitInference.VarKind.Area => "area", UnitInference.VarKind.Conflict => "conflict", _ => "",
+        };
         // a count of the rows with a problem, clicked: the first selected
         var problems = new TextBlock { Foreground = Palette.Danger, FontWeight = FontWeight.SemiBold, Cursor = new Cursor(StandardCursorType.Hand), IsVisible = false };
         bool loading = true;
@@ -316,17 +337,29 @@ static class ParametersDialog
 
         static string KeyOf(IEnumerable<Equation> eqs) => string.Join("\n", eqs.Select(e => $"{e.Name}\t{e.Expr}\t{e.Exposed}\t{e.Description}\t{e.Min}\t{e.Max}"));
         // into the part as made, when it differs from what the part has (one undo step)
+        bool applying = false;
         void Apply()
         {
-            if (loading) return;
-            var result = Own().Where(r => r.Name.Trim().Length > 0).Select(r => r.ToEquation()).ToList();
-            if (KeyOf(result) != KeyOf(session.Doc.Equations)) session.Change(() => session.Doc.Equations = result);
+            if (loading || applying) return;
+            applying = true;
+            try
+            {
+                // a length's value typed as a number alone: in the part's units ("6" in an inch part is "6in"), as fields keep it
+                foreach (var r in Own())
+                    if (kinds.GetValueOrDefault(r.Name.Trim()) == UnitInference.VarKind.Length && Expr.IsPlainNumber(r.Equation)
+                        && session.Doc.Equations.FirstOrDefault(e => e.Name.Trim().Equals(r.Name.Trim(), StringComparison.OrdinalIgnoreCase))?.Expr.Trim() != r.Equation.Trim())
+                        r.Equation = r.Equation.Trim() + units.Symbol();
+                var result = Own().Where(r => r.Name.Trim().Length > 0).Select(r => r.ToEquation()).ToList();
+                if (KeyOf(result) != KeyOf(session.Doc.Equations)) { session.Change(() => session.Doc.Equations = result); Infer(); }
+            }
+            finally { applying = false; }
         }
         void Recompute()
         {
             var tables = session.Doc.Tables;
             var eqs = Own().Select(r => new Equation { Name = r.Name, Expr = r.Equation }).ToList();
             var (vals, errs) = Regenerator.EvaluateEquations(new CadDocument { Equations = eqs, Tables = tables, Units = units });
+            var plainMm = session.Doc.PlainUnits.MmPer();
             var fromTables = items.Where(r => r.FromTable != null).Select(r => r.Name.Trim()).ToList();
             foreach (var r in items)
             {
@@ -338,7 +371,10 @@ static class ParametersDialog
                         : EquationEntry.NameProblem(name)
                         ?? (Own().Count(x => x.Name.Trim().Equals(name, StringComparison.OrdinalIgnoreCase)) > 1 || fromTables.Contains(name, StringComparer.OrdinalIgnoreCase)
                             ? $"{name} is set twice (an equation and a design table, or two equations)" : errs.GetValueOrDefault(r.Name));
-                r.Show(vals.TryGetValue(name, out var v) ? units.Show(v) : "", problem, vals.TryGetValue(name, out var q) ? KindOf(q) : "");
+                // (a length written without a unit: in the part's value units, shown in its units)
+                var kind = kinds.GetValueOrDefault(name);
+                string Shown(Quantity v) => kind == UnitInference.VarKind.Length && v.IsNumber ? units.Show(Quantity.Mm(v.Value * plainMm)) : units.Show(v);
+                r.Show(vals.TryGetValue(name, out var v) ? Shown(v) : "", problem, KindText(kind) is { Length: > 0 } kt ? kt : vals.TryGetValue(name, out var q) ? KindOf(q) : "");
             }
             var bad = items.Count(r => r.Problem != null);
             problems.Text = bad == 0 ? "" : $"\u26A0 {bad} problem{(bad == 1 ? "" : "s")}: click to show {(bad == 1 ? "it" : "the first")}";
@@ -391,7 +427,7 @@ static class ParametersDialog
         });
         dg.Columns.Add(new DataGridTemplateColumn
         {
-            Header = Header("Kind", "Length, angle or number (count, ratio, 1/0). A plain number used as a length is in the part's units."),
+            Header = Header("Kind", "Length, angle or number (count, ratio, 1/0), from where the part uses it. A length typed as a number alone is in the part's units; \"conflict\": used as different kinds."),
             Width = new DataGridLength(70), IsReadOnly = true,
             CellTemplate = new FuncDataTemplate<EqRow>((_, _) => new TextBlock
             {
@@ -518,6 +554,7 @@ static class ParametersDialog
             loading = false;
         }
         Refresh();
+        Infer();
 
         var add = new Button { Content = "+ Variable" };
         add.Click += (_, _) =>
@@ -541,6 +578,19 @@ static class ParametersDialog
             Recompute();
             owner.Status($"Deleted {gone.Count} unused equation{(gone.Count == 1 ? "" : "s")}: {string.Join(", ", gone.Select(r => r.Name))}.");
         };
+        // the part's lengths written without units given them (docs/units.md; one undo step), checked against what they were
+        var addUnits = new Button { Content = "Add Units" };
+        ToolTip.SetTip(addUnits, "Writes the unit into each length that has none (150 → 150mm), from where the part uses it, so the part keeps its size in any units.");
+        addUnits.Click += (_, _) =>
+        {
+            var probe = session.Doc.Clone();
+            var (n, why) = UnitInference.AddUnits(probe, Regenerator.ReadValues(probe), Regenerator.ValueOf);
+            if (n == 0) { owner.Status(why ?? "Every length has its unit."); return; }
+            session.Change(() => { session.Doc.Equations = probe.Equations; session.Doc.Tables = probe.Tables; session.Doc.Features = probe.Features; });
+            Refresh();
+            Infer();
+            owner.Status($"Gave {n} value{(n == 1 ? "" : "s")} units ({session.Doc.PlainUnits.Symbol()}).");
+        };
         void Select(string name)
         {
             if (items.FirstOrDefault(r => r.Name.Trim().Equals(name, StringComparison.OrdinalIgnoreCase)) is not { } r) return;
@@ -555,7 +605,7 @@ static class ParametersDialog
                 Note("Variables for dimensions and feature values; typing L = 10 in a value field adds one. Variables set by a design table are gray. "
                     + "Changes apply immediately (Ctrl+Z undoes). Ctrl+C/Ctrl+V copy and paste rows with a spreadsheet; Alt+Up/Down moves a row."),
                 problems, host,
-                new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Children = { add, unused } },
+                new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Children = { add, unused, addUnits } },
             },
         };
         return (view, Refresh, Select);

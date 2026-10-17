@@ -249,7 +249,10 @@ public sealed class DocumentSession
     }
 
     /// <summary>A part's file read (<see cref="Read"/>) and not yet the session's (<see cref="Load(Opened)"/>).</summary>
-    public sealed record Opened(string Path, WorkingCopy Copy, CadDocument Doc, SupersededBy? Superseded, MeshCache.Entry? Saved);
+    public sealed record Opened(string Path, WorkingCopy Copy, CadDocument Doc, SupersededBy? Superseded, MeshCache.Entry? Saved, int UnitsGiven = 0, string? UnitsWhy = null);
+
+    /// <summary>What opening the part did to it that the user should hear (its values given units), or null.</summary>
+    public string? LoadNote { get; private set; }
 
     /// <summary>Reads a part's file (its local copy, the document, a display saved with it), touching no session state: can run off the UI thread.</summary>
     public static Opened Read(string path)
@@ -261,7 +264,10 @@ public sealed class DocumentSession
             // a display saved with it: shown until the rebuild is done
             MeshCache.Entry? saved = null;
             if (d.Display != null) { try { saved = MeshCache.Read(d.Display); } catch { } d.Display = null; }
-            return new Opened(path, wc, d, Supersede.Read(path), saved);
+            // a part from before values kept their units: given them (docs/units.md)
+            var (given, why) = UnitInference.Upgrade(d, Regenerator.ReadValues, Regenerator.ValueOf);
+            if (given > 0) saved = null; // (its display: rebuilt, its values' texts having changed)
+            return new Opened(path, wc, d, Supersede.Read(path), saved, given, why);
         }
         catch { wc.Close(); throw; }
     }
@@ -276,8 +282,11 @@ public sealed class DocumentSession
         _readOnly = Superseded != null;
         Doc = o.Doc; FilePath = o.Path; Dirty = false;
         _saved = o.Saved;
+        LoadNote = o.UnitsGiven > 0 ? $"{o.UnitsGiven} value{(o.UnitsGiven == 1 ? "" : "s")} given units ({o.Doc.PlainUnits.Symbol()}), so the part keeps its size in any units. Save to keep them."
+            : o.UnitsWhy != null ? $"Values without units are read in {o.Doc.PlainUnits.Symbol()} ({o.UnitsWhy})." : null;
         PartsIndexStore.Record(o.Doc, o.Path);
         _undo.Clear(); _redo.Clear();
+        if (o.UnitsGiven > 0) Dirty = true;
         _regen.Invalidate();
         _exportRegen.Invalidate();
         DocumentChanged?.Invoke();

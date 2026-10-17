@@ -562,6 +562,7 @@ public partial class MainWindow
         try
         {
             s.Load(path);
+            if (s.LoadNote is { } note) Status(note);
             if (!IsAutosave(path)) RecentFiles.Add(path);
             t.FitAfterLoad = s.RequestedRevision;
             return null;

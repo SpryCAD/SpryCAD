@@ -38,6 +38,23 @@ public sealed class CadDocument
     /// the model is in millimetres (and degrees) whatever they are, so changing them changes nothing in it.
     /// </summary>
     public UnitSystem Units { get; set; } = UnitSystem.MMGS;
+    /// <summary>
+    /// The units a value without a unit worked out from variables is in (an equation "OD = 150" used as a length):
+    /// the part's own (docs/units.md), set to <see cref="Units"/> before they are first changed, so changing the
+    /// units the part is shown in never changes its size. Null: <see cref="Units"/> (parts that have kept theirs, and
+    /// files written before).
+    /// </summary>
+    public UnitSystem? ValueUnits { get; set; }
+    /// <summary>The units values without a unit are read in: <see cref="ValueUnits"/>, else <see cref="Units"/>.</summary>
+    [System.Text.Json.Serialization.JsonIgnore] public UnitSystem PlainUnits => ValueUnits ?? Units;
+
+    /// <summary>The part shown in other units: its values without units kept in the ones they were written in.</summary>
+    public void ShowIn(UnitSystem u)
+    {
+        if (u == Units) return;
+        ValueUnits ??= Units;
+        Units = u;
+    }
     public List<Equation> Equations { get; set; } = new();
     /// <summary>Design tables: rows of values for sets of variables, one row in use (<see cref="DesignTable"/>). Null when none.</summary>
     public List<DesignTable>? Tables { get; set; }

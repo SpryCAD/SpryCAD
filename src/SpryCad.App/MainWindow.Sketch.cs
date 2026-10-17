@@ -140,7 +140,7 @@ public partial class MainWindow
         ClearPendingEquations(); // (equations typed in the sketch's dimensions wait with it)
         _sketch = new SketchEditor(Viewport, sf, frame, EditLookup)
         {
-            PointsOnly = pointsOnly, Units = u,
+            PointsOnly = pointsOnly, Units = u, PlainUnits = Session.Doc.PlainUnits,
             // (round in the part's units)
             FilletRadius = FeatureDefaults.Mm(u, 5, 0.125), OffsetDistance = FeatureDefaults.Mm(u, 5, 0.125),
         };

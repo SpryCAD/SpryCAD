@@ -932,7 +932,7 @@ public partial class MainWindow
             foreach (var field in dropped.Length == 0 ? Core.Library.HoleSizes.Fields : dropped) f.Overrides?.Remove(field);
             if (f.Overrides?.Count == 0) f.Overrides = null;
             foreach (var field in Core.Library.HoleSizes.Fields) Core.Library.HoleSizes.Set(f, field, Shown(field));
-            if (dia != null) { dia.Text = f.Diameter; cbd!.Text = f.CbDiameter; cbdp!.Text = f.CbDepth; csd!.Text = f.CsDiameter; csa!.Text = f.CsAngle; }
+            if (dia != null) { page.ShowValue(dia, f.Diameter); page.ShowValue(cbd!, f.CbDiameter); page.ShowValue(cbdp!, f.CbDepth); page.ShowValue(csd!, f.CsDiameter); page.ShowValue(csa!, f.CsAngle); }
             syncOverridden();
         }
         var fastenerBox = new ComboBox { HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Stretch, FontSize = TypeScale.Body };
@@ -1160,7 +1160,7 @@ public partial class MainWindow
                 var size = (await Dialogs.Input(this, "Save Profile to Library", "This hole's size (its first row, e.g. M8):", f.Size ?? "Default"))?.Trim();
                 if (string.IsNullOrEmpty(size)) return;
                 double Shown(string e) => UnitFormat.TryLength(e, Session.Lookup, out var v, out _) ? v : 0;
-                var lookup = HoleProfile.Lookup(f, Session.Lookup, Units.MmPer(), Shown(f.Depth));
+                var lookup = HoleProfile.Lookup(f, Session.Lookup, Session.Doc.PlainUnits.MmPer(), Shown(f.Depth));
                 var (table, problem) = HoleProfile.ToLibraryType(f.Profile!, key, size, lookup);
                 if (table == null) { Status(problem!); return; }
                 await LibraryEditor.Open(this, add: table);
@@ -1244,7 +1244,7 @@ public partial class MainWindow
         var drill = HoleProfile.Drill(sr.Frame, st.Bounds, f.Reverse);
         var x = sr.Frame.XDir;
         var frame = new Frame(sr.Frame.ToWorld(at[0]), x, drill, Vec3.Cross(x, drill));
-        var mmPer = Units.MmPer();
+        var mmPer = Session.Doc.PlainUnits.MmPer();
         double Shown(string e) => UnitFormat.TryLength(e, Session.Lookup, out var v, out _) ? v : 0;
         // (a depth to draw it with where the end condition decides it per hole)
         var depth = f.EndKind == HoleEnd.Blind ? Shown(f.Depth) : Math.Max(3 * Shown(f.Diameter), 10);
@@ -1530,7 +1530,7 @@ public partial class MainWindow
                     front = c + ax * (lo - dc); back = c + ax * (hi - dc);
                 }
             }
-            var ts = Regenerator.PatternTransforms(f, st, Session.Lookup, Session.Doc.Units) ?? new();
+            var ts = Regenerator.PatternTransforms(f, st, Session.Lookup, Session.Doc.PlainUnits) ?? new();
             var res = new List<(int, Vec3, Vec3)> { (1, front, back) };
             for (int i = 0; i < ts.Count; i++) res.Add((i + 2, ts[i].Point(front), ts[i].Point(back)));
             return res;

@@ -456,7 +456,7 @@ public static class OptionsDialog
         {
             var u = units.SelectedIndex == 1 ? UnitSystem.IPS : UnitSystem.MMGS;
             // (new parts start in them too)
-            return u == doc.Units ? null : () => { doc.Units = u; UserSettings.Units = u; };
+            return u == doc.Units ? null : () => { doc.ShowIn(u); UserSettings.Units = u; };
         });
     }
 
