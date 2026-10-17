@@ -890,7 +890,7 @@ public partial class MainWindow
             if (sizeRow != null) sizeRow.IsVisible = f.Standard != null;
             if (fitRow != null) fitRow.IsVisible = f.Standard != null;
         }
-        page.Combo(t, "Standard", standards, () => f.Standard ?? "custom", v =>
+        var standardBox = page.Combo(t, "Standard", standards, () => f.Standard ?? "custom", v =>
         {
             if (v == "custom") { f.Standard = null; f.Size = null; f.Fit = null; }
             else f.Standard = v;
@@ -946,9 +946,16 @@ public partial class MainWindow
             if (f.Standard == null) return;
             var sized = (HoleFeature)f.Clone();
             Core.Library.HoleSizes.Apply(sized, Resolve);
-            bool same = sized.Diameter == f.Diameter && (f.Type != HoleType.Counterbore || (sized.CbDiameter == f.CbDiameter && sized.CbDepth == f.CbDepth))
-                && (f.Type != HoleType.Countersink || (sized.CsDiameter == f.CsDiameter && sized.CsAngle == f.CsAngle));
-            if (!same) { f.Standard = null; f.Size = null; f.Fit = null; }
+            // (by value: a field keeps "11mm" as it shows it, "11" in a millimeter part; compared as text, every library
+            // hole turned custom at its first preview, and a counterbore picked after kept the diameter it had)
+            bool Same(string a, string b) => a == b || (UnitFormat.TryLength(a, Session.Lookup, out var x, out _)
+                && UnitFormat.TryLength(b, Session.Lookup, out var y, out _) && Math.Abs(x - y) < 1e-9);
+            bool same = Same(sized.Diameter, f.Diameter) && (f.Type != HoleType.Counterbore || (Same(sized.CbDiameter, f.CbDiameter) && Same(sized.CbDepth, f.CbDepth)))
+                && (f.Type != HoleType.Countersink || (Same(sized.CsDiameter, f.CsDiameter) && Same(sized.CsAngle, f.CsAngle)));
+            if (same) return;
+            // a diameter typed over the standard's: the page says Custom too
+            f.Standard = null; f.Size = null; f.Fit = null;
+            Avalonia.Threading.Dispatcher.UIThread.Post(() => { standardBox.SelectedIndex = 0; ListSizes(); refreshType(); });
         };
         if (isNew && madeSketch && _edit != null)
         {
