@@ -480,57 +480,73 @@ public partial class MainWindow : IAssemblyHost
     // ------------------------------------------------------------------------------------------
     // the Assembly tab of the CommandManager
 
+    /// <summary>
+    /// The Assembly tab's commands, as the part tabs' are: related ones on one split button (it shows the one used
+    /// last; its arrow or a hover drops the rest), the others alone. Their tooltips are <see cref="AsmCommandHelp"/>'s.
+    /// </summary>
     void AssemblyCommands()
     {
-        void Tip(string tip) => ToolTip.SetTip(CommandBar.Children[^1], tip);
-        Cmd("insertcomp", "Insert\nComponents", InsertComponentCommand);
-        Tip("Insert Components\nInserts parts or sub-assemblies, linked to their files or embedded in the assembly.");
-        Cmd("mates", "Mate", MateCommand);
-        Tip("Mate\nPositions two components relative to each other using faces, edges or planes.");
-        Cmd("motor", "Motor", MotorCommand);
-        Tip("Motor\nRotates a component about a cylindrical face's axis at a set speed to simulate motion through its mates.");
-        Cmd("thread", "Insert\nFastener", InsertFastenerCommand);
-        Tip("Insert Fastener\nInserts a library screw, sized and length-matched to a Hole Wizard hole, with optional nut and washers.");
-        Cmd("lpattern", "Linear\nPattern", () => PatternPage(PatternKind.Linear));
-        Tip("Linear Component Pattern\nCopies components along one direction; the instances follow their seed components.");
-        Cmd("cpattern", "Circular\nPattern", () => PatternPage(PatternKind.Circular));
-        Tip("Circular Component Pattern\nCopies components around an axis; the instances follow their seed components.");
-        Cmd("mirror", "Mirror\nComponents", () => PatternPage(PatternKind.Mirror));
-        Tip("Mirror Components\nMirrors components across a plane without creating opposite-hand parts.");
+        Family("Insert",
+            new("insertcomp", "Insert Components", InsertComponentCommand),
+            new("thread", "Insert Fastener", InsertFastenerCommand));
+        Family("Mates",
+            new("mates", "Mate", MateCommand),
+            new("motor", "Motor", MotorCommand));
+        Family("Component Pattern",
+            new("lpattern", "Linear Pattern", () => PatternPage(PatternKind.Linear)),
+            new("cpattern", "Circular Pattern", () => PatternPage(PatternKind.Circular)),
+            new("mirror", "Mirror Components", () => PatternPage(PatternKind.Mirror)));
         Sep();
-        Cmd("formsub", "Form\nSub-assembly", () => FormSubAssemblyPage());
-        Tip("Form New Sub-assembly\nMoves the selected components and the mates between them into a new sub-assembly.");
-        Cmd("replace", "Replace\nComponent", () => _ = ReplaceComponent());
-        Tip("Replace Component\nReplaces the selected component with another file, keeping its position and any mates that still resolve.");
-        Sep();
-        Cmd("fix", "Fix", () => SetFixed(true));
-        Tip("Fix\nFixes the selected component where it is.");
-        Cmd("float", "Float", () => SetFixed(false));
-        Tip("Float\nFrees the selected component so it can be dragged; Shift+drag rotates it.");
+        Family("Structure",
+            new("formsub", "Form Sub-assembly", () => FormSubAssemblyPage()),
+            new("replace", "Replace Component", () => _ = ReplaceComponent()));
+        Family("Fix / Float",
+            new("fix", "Fix", () => SetFixed(true)),
+            new("float", "Float", () => SetFixed(false)));
         Cmd("lightweight", "Lightweight", ToggleLightweight);
-        Tip("Lightweight / Resolve\nLoads the selected part's components from the assembly's cached copy for speed, or resolves them from the part.");
         Cmd("configure", "Configure", () => _ = ConfigureComponent());
-        Tip("Configure\nSets the selected component's design table row or user parameters for this instance.");
         _configureButton = (Button)CommandBar.Children[^1];
         ToolTip.SetShowOnDisabled(_configureButton, true); // greyed out: still says what it is for
         UpdateConfigureButton(force: true);
+        Cmd("open", "Open Part", () => { if (Asm?.Selected is { } id) OpenComponent(id); });
         Sep();
-        Cmd("open", "Open\nPart", () => { if (Asm?.Selected is { } id) OpenComponent(id); });
-        Tip("Open Part\nOpens the selected component's part or sub-assembly in its own tab; embedded files save back into the assembly.");
-        Sep();
-        Cmd("hide", "Hide /\nShow", ToggleHidden);
-        Tip("Hide / Show\nHides or shows the selected component; hidden components are still mated and solved.");
-        Cmd("isolate", "Isolate", () => Isolate());
-        Tip("Isolate\nShows only the selected component; click again to show all components.");
-        Cmd("explode", "Exploded\nView", ExplodeCommand);
-        Tip("Exploded View\nMoves components apart in steps along set directions to show how the assembly fits together.");
-        Cmd("interference", "Interference\nDetection", InterferenceCommand);
-        Tip("Interference Detection\nFinds components whose volumes overlap and highlights each pair in red.");
-        Cmd("bom", "Bill of\nMaterials", BomCommand);
-        Tip("Bill of Materials\nLists parts and sub-assemblies with quantities, indented, top-level or parts-only, for copying or CSV export.");
-        Cmd("packgo", "Pack\nand Go", () => _ = PackAndGoCommand());
-        Tip("Pack and Go\nCopies the assembly and all referenced files to a folder or zip, optionally renaming them.");
+        Family("Display",
+            new("hide", "Hide / Show", ToggleHidden),
+            new("isolate", "Isolate", () => Isolate()));
+        Cmd("explode", "Exploded View", ExplodeCommand);
+        Family("Evaluate",
+            new("interference", "Interference Detection", InterferenceCommand),
+            new("bom", "Bill of Materials", BomCommand));
+        Cmd("packgo", "Pack and Go", () => _ = PackAndGoCommand());
     }
+
+    /// <summary>
+    /// The Assembly tab's tooltips, under each command's name (its own table: "Linear Pattern" or "Configure" here
+    /// work on components, not on a part's features).
+    /// </summary>
+    static readonly Dictionary<string, string> AsmCommandHelp = new()
+    {
+        ["Insert Components"] = "Inserts parts or sub-assemblies, linked to their files or embedded in the assembly.",
+        ["Insert Fastener"] = "Inserts a library screw, sized and length-matched to a Hole Wizard hole, with optional nut and washers.",
+        ["Mate"] = "Positions two components relative to each other using faces, edges or planes.",
+        ["Motor"] = "Rotates a component about a cylindrical face's axis at a set speed to simulate motion through its mates.",
+        ["Linear Pattern"] = "Copies components along one direction; the instances follow their seed components.",
+        ["Circular Pattern"] = "Copies components around an axis; the instances follow their seed components.",
+        ["Mirror Components"] = "Mirrors components across a plane without creating opposite-hand parts.",
+        ["Form Sub-assembly"] = "Moves the selected components and the mates between them into a new sub-assembly.",
+        ["Replace Component"] = "Replaces the selected component with another file, keeping its position and any mates that still resolve.",
+        ["Fix"] = "Fixes the selected component where it is.",
+        ["Float"] = "Frees the selected component so it can be dragged; Shift+drag rotates it.",
+        ["Lightweight"] = "Loads the selected part's components from the assembly's cached copy for speed, or resolves them from the part.",
+        ["Configure"] = "Sets the selected component's design table row or user parameters for this instance.",
+        ["Open Part"] = "Opens the selected component's part or sub-assembly in its own tab; embedded files save back into the assembly.",
+        ["Hide / Show"] = "Hides or shows the selected component; hidden components are still mated and solved.",
+        ["Isolate"] = "Shows only the selected component; click again to show all components.",
+        ["Exploded View"] = "Moves components apart in steps along set directions to show how the assembly fits together.",
+        ["Interference Detection"] = "Finds components whose volumes overlap and highlights each pair in red.",
+        ["Bill of Materials"] = "Lists parts and sub-assemblies with quantities, indented, top-level or parts-only, for copying or CSV export.",
+        ["Pack and Go"] = "Copies the assembly and all referenced files to a folder or zip, optionally renaming them.",
+    };
 
     Button? _configureButton;
     string? _configureFor;

@@ -401,7 +401,7 @@ public partial class MainWindow
         var name = label.Replace('\n', ' ');
         var b = new Button { Classes = { "cmd", LargeBar ? "big" : "compact" }, Content = RowContent(icon, name) };
         var key = tool is { } st && SketchToolKeys.TryGetValue(st, out var k) ? $" ({k})" : "";
-        ToolTip.SetTip(b, CommandHelp.TryGetValue(name, out var help) ? $"{name}{key}\n{help}" : name + key);
+        ToolTip.SetTip(b, HelpFor(name) is { } help ? $"{name}{key}\n{help}" : name + key);
         b.Click += (_, _) => { NoteCommand(name, icon, click); click(); };
         if (tool != null) _toolButtons[tool.Value] = b;
         _barCommands[b] = new[] { new Command(icon, name, click, tool) };

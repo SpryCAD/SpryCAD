@@ -40,8 +40,13 @@ public partial class MainWindow
     string TipOf(Command c)
     {
         var key = c.Tool is { } st && SketchToolKeys.TryGetValue(st, out var k) ? $" ({k})" : "";
-        return CommandHelp.TryGetValue(c.Name, out var help) ? $"{c.Name}{key}\n{help}" : c.Name + key;
+        return HelpFor(c.Name) is { } help ? $"{c.Name}{key}\n{help}" : c.Name + key;
     }
+
+    /// <summary>A command's one-line description for its tooltip: the Assembly tab's own, else the part tabs'.</summary>
+    string? HelpFor(string name) =>
+        _activeTab == "Assembly" && AsmCommandHelp.TryGetValue(name, out var a) ? a
+        : CommandHelp.TryGetValue(name, out var p) ? p : null;
 
     /// <summary>The bar's layout (<see cref="UserSettings.CommandBar"/>): large buttons, else compact.</summary>
     static bool LargeBar => UserSettings.CommandBar == CommandBarLayout.Large;
@@ -64,7 +69,8 @@ public partial class MainWindow
     static string BarLabel(string name, bool large = false)
     {
         if (!(large || LargeBar)) return name;
-        var words = name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        // ("Hide / Show" is one: no line starts or ends at the slash)
+        var words = name.Replace(" / ", $"{(char)0xA0}/{(char)0xA0}").Split(' ', StringSplitOptions.RemoveEmptyEntries);
         if (words.Length < 2) return name;
         var best = Enumerable.Range(1, words.Length - 1)
             .MinBy(k => Math.Max(string.Join(' ', words[..k]).Length, string.Join(' ', words[k..]).Length));
