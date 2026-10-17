@@ -30,10 +30,11 @@
     <EmbeddedResource Include="@(LibraryData->'$(LibraryDataOut)%(Filename).json')" LogicalName="LibraryDefaults/%(Filename).json" />
   </ItemGroup>
   <!-- (the generator built as a step of its own, not referenced, so nothing of it lands beside what references Core;
-       without the app's runtime, so its output is where LibraryGenDll says) -->
+       without the app's runtime, so its output is where LibraryGenDll says; nor the publish settings, as a ReadyToRun
+       publish would pick a runtime for it again) -->
   <Target Name="BuildLibraryGen" BeforeTargets="PrepareResources">
     <MSBuild Projects="..\..\tools\SpryCad.LibraryGen\SpryCad.LibraryGen.csproj" Targets="Restore;Build" Properties="Configuration=$(Configuration)"
-             RemoveProperties="RuntimeIdentifier;SelfContained;TargetFramework;OutDir;OutputPath" />
+             RemoveProperties="RuntimeIdentifier;SelfContained;TargetFramework;OutDir;OutputPath;_IsPublishing;PublishReadyToRun;PublishSingleFile;PublishTrimmed;PublishAot" />
   </Target>
   <Target Name="GenerateLibraryDefaults" DependsOnTargets="BuildLibraryGen" BeforeTargets="PrepareResources"
           Inputs="@(LibraryData);$(LibraryGenDll)" Outputs="@(LibraryData->'$(LibraryDataOut)%(Filename).json')">
