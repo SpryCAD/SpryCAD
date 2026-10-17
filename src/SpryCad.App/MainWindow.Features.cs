@@ -769,6 +769,9 @@ public partial class MainWindow
     PmPage? _holePickPage;
     bool ShowAllSketches => _page != null && _page == _holePickPage;
 
+    /// <summary>A sketch shown whatever uses it: every one on the Hole Position page, the one whose plane is being changed.</summary>
+    bool ShowsSketch(string id) => ShowAllSketches || _edit?.Feature is SketchFeature es && es.Id == id;
+
     void HoleCommand()
     {
         if (PartOnly("Hole Wizard")) return;
@@ -956,6 +959,28 @@ public partial class MainWindow
                 if (Session.Doc.Find(sketchId) is SketchFeature && !Session.Doc.ConsumersOf(sketchId).Any()) Session.Undo();
             };
         }
+    }
+
+    // ------------------------------------------------------------------------------------------
+    // Change Sketch Plane
+
+    /// <summary>
+    /// A sketch moved to another plane or planar face (one made before it), its geometry where it was in the sketch's
+    /// own coordinates; the features made from it follow (as SolidWorks's Edit Sketch Plane).
+    /// </summary>
+    void ChangeSketchPlane(string id)
+    {
+        if (Session.Doc.Find(id) is not SketchFeature sk) return;
+        if (_sketch != null) ExitSketch(true);
+        var f = (SketchFeature)sk.Clone();
+        var page = new PmPage("Change Sketch Plane", "plane");
+        var s = page.Section("Sketch Plane");
+        page.Info(s, "Select the plane or planar face to move the sketch to. Its geometry keeps its place in the sketch.");
+        var box = page.Selection(s, "Plane", SelFilter.Plane | SelFilter.PlanarFace, "Plane or planar face", 1);
+        if (PlaneItem(f.Plane, StateForEdit(f, false)) is { } cur) box.Items.Add(cur);
+        box.Changed += () => { if (box.Items.FirstOrDefault()?.ToPlaneRef() is { } pr) f.Plane = pr; };
+        page.Activate(box);
+        BeginEdit(f, false, page, overlay: false, hint: "Select the new plane or planar face.");
     }
 
     // ------------------------------------------------------------------------------------------

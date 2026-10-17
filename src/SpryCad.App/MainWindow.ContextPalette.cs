@@ -104,6 +104,7 @@ public partial class MainWindow
                 break;
             case SelKind.Sketch when s.FeatureId is { } sk:
                 Add("sketch", "Edit Sketch", () => EditFeature(sk));
+                Add("plane", "Change Sketch Plane", () => ChangeSketchPlane(sk));
                 Add("extrude", "Extruded Boss/Base", () => ExtrudeCommand(false));
                 Add("cut", "Extruded Cut", () => ExtrudeCommand(true));
                 Add("revolve", "Revolved Boss/Base", () => RevolveCommand(false));

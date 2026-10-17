@@ -793,6 +793,7 @@ public partial class MainWindow
             if (hit?.Kind == SelKind.Sketch)
             {
                 menu.Items.Add(Item("Edit Sketch", () => EditFeature(hit.FeatureId!), null, "sketch"));
+                menu.Items.Add(Item("Change Sketch Plane", () => ChangeSketchPlane(hit.FeatureId!), null, "plane"));
                 menu.Items.Add(Item("Extruded Boss/Base", () => ExtrudeCommand(false), null, "extrude"));
                 menu.Items.Add(Item("Extruded Cut", () => ExtrudeCommand(true), null, "cut"));
                 menu.Items.Add(Item("Revolve", () => RevolveCommand(false), null, "revolve"));
@@ -870,6 +871,7 @@ public partial class MainWindow
         if (f != null)
         {
             menu.Items.Add(Item(f is SketchFeature ? "Edit Sketch" : "Edit Feature", () => EditFeature(id), null, FeatureTree.IconFor(f)));
+            if (f is SketchFeature) menu.Items.Add(Item("Change Sketch Plane", () => ChangeSketchPlane(id), null, "plane"));
             var sk = f.Consumes.FirstOrDefault(c => Session.Doc.Find(c) is SketchFeature);
             if (sk != null && f is not HoleFeature) menu.Items.Add(Item("Edit Sketch", () => EditFeature(sk), null, "sketch"));
             if (f is HoleFeature hf) menu.Items.Add(Item("Edit Hole Positions", () => EditFeature(hf.SketchId), null, "sketch"));

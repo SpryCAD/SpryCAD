@@ -421,7 +421,7 @@ public partial class MainWindow : Window
         {
             if (_sketch != null && id == _sketch.Feature.Id) continue;
             if (doc.Find(id) is HoleFeature) continue;
-            if (!ShowAllSketches && !doc.SketchShown(id, consumed.Contains(id)) && !selectedSketches.Contains(id) && !editing.Contains(id)) continue;
+            if (!ShowsSketch(id) && !doc.SketchShown(id, consumed.Contains(id)) && !selectedSketches.Contains(id) && !editing.Contains(id)) continue;
             sk.Add(new SketchDisplay(id, sr));
         }
         Viewport.Sketches = sk;
