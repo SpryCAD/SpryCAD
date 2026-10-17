@@ -776,7 +776,7 @@ public partial class MainWindow
     {
         if (PartOnly("Hole Wizard")) return;
         if (_sketch != null) ExitSketch(true);
-        var hole = new HoleFeature().Sized(Units);
+        var hole = new HoleFeature { ClearAbove = true }.Sized(Units);
         var sel = Selection.First;
         // a sketch picked (or, nothing picked, the last one not used yet): the holes at its points, or its circles'
         // centers (a sketch made for a cut used again for holes)
@@ -911,6 +911,7 @@ public partial class MainWindow
         depth.IsEnabled = !f.ThroughAll;
         page.Check(end, "Drill point (118°)", () => f.DrillPoint, v => f.DrillPoint = v);
         page.Check(end, "Reverse direction", () => f.Reverse, v => f.Reverse = v);
+        page.Check(end, "Clear material above", () => f.ClearAbove, v => f.ClearAbove = v);
         var cb = page.Section("Counterbore");
         cbd = page.Number(cb, "C'bore dia.", () => f.CbDiameter, v => f.CbDiameter = v);
         cbdp = page.Number(cb, "C'bore depth", () => f.CbDepth, v => f.CbDepth = v);

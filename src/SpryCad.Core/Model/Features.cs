@@ -338,6 +338,11 @@ public sealed class HoleFeature : Feature
     /// <summary>Drilled the other way: away from the side of the sketch's plane the part is on.</summary>
     public bool Reverse { get; set; }
     /// <summary>
+    /// The hole's top diameter (its counterbore's, countersink's, or its own) continued back out through any material
+    /// above the sketch's plane (a hub fillet over a flange's bolt holes). On for holes made since; off for older ones.
+    /// </summary>
+    public bool ClearAbove { get; set; }
+    /// <summary>
     /// The clearance hole table the hole is sized from ("ISO273", "ASME-B18.2.8"), with <see cref="Size"/> (the screw:
     /// "M8", "1/4") and <see cref="Fit"/> (its column: close, normal, loose); null: sized by hand. The diameters above
     /// are what the hole is made with; these say where they came from, so a library update can size it again.

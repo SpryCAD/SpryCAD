@@ -1478,6 +1478,8 @@ public sealed class Regenerator
             // boolean's tolerance of the face, so where the hole met other faces near it some points welded to the tool's edge and
             // some did not (a hole breaking out through a fillet: its wall left uncut, the result invalid)
             const double lift = 0;
+            // (or, clearing above, from as far out as the part reaches back from the plane)
+            double up = h.ClearAbove ? BigDepth(sk.Frame) : lift;
             var prof = new ProfileLoop();
             void V(double x, double y, string n) => prof.Verts.Add(new ProfileVertex(new Vec2(x, y), n));
             double topR = r;
@@ -1488,7 +1490,7 @@ public sealed class Regenerator
                         var cbr = PosLen(h.CbDiameter, "Counterbore diameter") / 2;
                         var cbd = PosLen(h.CbDepth, "Counterbore depth");
                         if (cbr <= r) throw new FeatureException("Counterbore diameter must be larger than the hole.");
-                        V(0, -lift, "Top"); V(cbr, -lift, "CB"); V(cbr, cbd, "CBF"); V(r, cbd, "Hole");
+                        V(0, -up, "Top"); V(cbr, -up, "CB"); V(cbr, cbd, "CBF"); V(r, cbd, "Hole");
                         topR = cbr;
                         break;
                     }
@@ -1499,12 +1501,13 @@ public sealed class Regenerator
                         if (csr <= r) throw new FeatureException("Countersink diameter must be larger than the hole.");
                         var csDepth = (csr - r) / Math.Tan(ang / 2);
                         var liftR = csr + lift * Math.Tan(ang / 2);
-                        V(0, -lift, "Top"); V(liftR, -lift, "CS"); V(r, csDepth, "Hole");
+                        if (h.ClearAbove) { V(0, -up, "Top"); V(csr, -up, "Clear"); V(csr, 0, "CS"); V(r, csDepth, "Hole"); }
+                        else { V(0, -lift, "Top"); V(liftR, -lift, "CS"); V(r, csDepth, "Hole"); }
                         topR = csr;
                         break;
                     }
                 default:
-                    V(0, -lift, "Top"); V(r, -lift, "Hole");
+                    V(0, -up, "Top"); V(r, -up, "Hole");
                     break;
             }
             // hole wall to the bottom (+ drill point for blind holes)

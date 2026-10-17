@@ -134,6 +134,33 @@ static class ConfigTests
             t.Near(Build(direct: true), Build(direct: false), 1e-3);
         });
 
+        t.Test("Hole Wizard: Clear material above cuts the hole's top diameter back out through the part above the sketch's plane (a fillet over the holes)", () =>
+        {
+            // (a plate 10 thick extruded both ways from the Front plane, the hole drilled 2 deep from it: 5 of plate above)
+            foreach (var (type, clear, removed) in new[]
+            {
+                (HoleType.Simple, false, Math.PI * 9 * 2), (HoleType.Simple, true, Math.PI * 9 * 7),
+                (HoleType.Counterbore, false, Math.PI * 25 * 1 + Math.PI * 9 * 1), (HoleType.Counterbore, true, Math.PI * 25 * 6 + Math.PI * 9 * 1),
+            })
+            {
+                var doc = new CadDocument();
+                var s1 = doc.AddFeature(new SketchFeature { Plane = PlaneRef.Front, Sketch = CoreTests.Rect(100, 60) });
+                doc.AddFeature(new ExtrudeFeature { SketchId = s1.Id, Depth = "10", End = EndCondition.MidPlane });
+                var before = Volume(new Regenerator().Rebuild(doc));
+                var sk = new Sketch();
+                sk.Add(new SkPointEntity { P = sk.AddPoint(new Vec2(20, 10)).Id });
+                var s2 = doc.AddFeature(new SketchFeature { Plane = PlaneRef.Front, Sketch = sk });
+                var h = doc.AddFeature(new HoleFeature
+                {
+                    SketchId = s2.Id, Type = type, Diameter = "6", ThroughAll = false, Depth = "2", DrillPoint = false,
+                    CbDiameter = "10", CbDepth = "1", ClearAbove = clear,
+                });
+                var r = new Regenerator().Rebuild(doc);
+                t.True(r.Status[h.Id].Ok, r.Status[h.Id].Error ?? "");
+                t.Near(before - Volume(r), removed, removed * 0.02); // (the faceted cylinders of the mesh)
+            }
+        });
+
         t.Test("Suppress When: a condition that cannot be evaluated is an error", () =>
         {
             var (doc, cut, lp) = Plate("Nope > 1");
