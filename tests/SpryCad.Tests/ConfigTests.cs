@@ -97,6 +97,25 @@ static class ConfigTests
             t.True(r.Status[cut.Id] is { Suppressed: true, SuppressedBy: null }, "suppressed by the user");
         });
 
+        t.Test("Hole Wizard: a hole on the plane the part stands on drills into the part (it drilled away, cutting nothing); Reverse turns it", () =>
+        {
+            // (the plate extruded from the Front plane along its normal, the holes' sketch on that plane, as a flange on the Top plane)
+            foreach (var reverse in new[] { false, true })
+            {
+                var (doc, cut, lp) = Plate(null);
+                var before = Volume(new Regenerator().Rebuild(doc));
+                var sk = new Sketch();
+                sk.Add(new SkPointEntity { P = sk.AddPoint(new Vec2(60, 30)).Id });
+                var s3 = doc.AddFeature(new SketchFeature { Plane = PlaneRef.Front, Sketch = sk });
+                var h = doc.AddFeature(new HoleFeature { SketchId = s3.Id, ThroughAll = true, Diameter = "6", Reverse = reverse });
+                var r = new Regenerator().Rebuild(doc);
+                t.True(r.Status[h.Id].Ok, r.Status[h.Id].Error ?? "");
+                var cutAway = before - Volume(r);
+                if (reverse) t.Near(cutAway, 0, 3);
+                else t.Near(cutAway, Math.PI * 3 * 3 * 10, 3); // (the faceted cylinder of the mesh)
+            }
+        });
+
         t.Test("Suppress When: a condition that cannot be evaluated is an error", () =>
         {
             var (doc, cut, lp) = Plate("Nope > 1");

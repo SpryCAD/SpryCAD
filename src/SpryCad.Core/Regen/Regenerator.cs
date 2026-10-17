@@ -1521,7 +1521,10 @@ public sealed class Regenerator
             // the profile is in (radius, depth) coordinates; loop orientation is normalized by the builder
             var tools = new List<Solid>();
             int k = 0;
-            var drill = -sk.Frame.Normal;
+            // into the part: against the plane's normal (a sketch on a face: into it), unless the part is all on its
+            // normal's side (a sketch on the plane the part stands on: the Top plane under a flange; drilled away, it cut nothing)
+            var drill = Reach(sk.Frame, -1) < 1e-6 && Reach(sk.Frame, 1) > 1e-6 ? sk.Frame.Normal : -sk.Frame.Normal;
+            if (h.Reverse) drill = -drill;
             foreach (var p in pts)
             {
                 var origin = sk.Frame.ToWorld(p);

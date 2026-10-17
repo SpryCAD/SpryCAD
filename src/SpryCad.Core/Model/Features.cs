@@ -335,6 +335,8 @@ public sealed class HoleFeature : Feature
     public string CsDiameter { get; set; } = "13";
     public string CsAngle { get; set; } = "90";
     public bool DrillPoint { get; set; } = true;
+    /// <summary>Drilled the other way: away from the side of the sketch's plane the part is on.</summary>
+    public bool Reverse { get; set; }
     /// <summary>
     /// The clearance hole table the hole is sized from ("ISO273", "ASME-B18.2.8"), with <see cref="Size"/> (the screw:
     /// "M8", "1/4") and <see cref="Fit"/> (its column: close, normal, loose); null: sized by hand. The diameters above

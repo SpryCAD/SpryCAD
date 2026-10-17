@@ -907,6 +907,7 @@ public partial class MainWindow
         depth = page.Number(end, "Depth", () => f.Depth, v => f.Depth = v, "dimension");
         depth.IsEnabled = !f.ThroughAll;
         page.Check(end, "Drill point (118°)", () => f.DrillPoint, v => f.DrillPoint = v);
+        page.Check(end, "Reverse direction", () => f.Reverse, v => f.Reverse = v);
         var cb = page.Section("Counterbore");
         cbd = page.Number(cb, "C'bore dia.", () => f.CbDiameter, v => f.CbDiameter = v);
         cbdp = page.Number(cb, "C'bore depth", () => f.CbDepth, v => f.CbDepth = v);
